@@ -148,7 +148,7 @@ fn read(form: &mut ConfigForm, cx: Ctx<'_>) -> Task<Message> {
     if form.target.unaskable().is_some() || form.in_flight.is_some() {
         return Task::none();
     }
-    let Some(session) = cx.dep.session.clone() else {
+    let Some(session) = cx.dep.raw.clone() else {
         return Task::none();
     };
     form.in_flight = Some(ConfigAct::Read);
@@ -164,7 +164,7 @@ fn send(form: &mut ConfigForm, cx: Ctx<'_>, group: String, dry_run: bool) -> Tas
     if form.target.unaskable().is_some() || form.in_flight.is_some() {
         return Task::none();
     }
-    let Some(session) = cx.dep.session.clone() else {
+    let Some(session) = cx.dep.raw.clone() else {
         return Task::none();
     };
     let Some(view) = form.view() else {
@@ -229,7 +229,7 @@ fn control(form: &mut ConfigForm, cx: Ctx<'_>, verb: Verb, token: String) -> Tas
     if form.target.unaskable().is_some() || form.in_flight.is_some() {
         return Task::none();
     }
-    let Some(session) = cx.dep.session.clone() else {
+    let Some(session) = cx.dep.raw.clone() else {
         return Task::none();
     };
     let mut request = ControlRequest::of(token);
@@ -400,7 +400,7 @@ fn call(
     services::write::call_then(
         services::write::Call {
             session,
-            base: cx.dep.base().to_string(),
+            base: cx.dep.namespace().to_string(),
             target: t.origin.trim().to_string(),
             producer: t.producer.trim().to_string(),
             procedure,

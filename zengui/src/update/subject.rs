@@ -104,14 +104,14 @@ pub(crate) fn update(
             // It runs with or without a registry: `slices: None` yields
             // `NotValidated(NoRegistry)` — "nobody looked" rendered as
             // itself rather than by omission (#164, #246).
-            let decode_task = match (&outcome, &dep.session, &dep.schema_store) {
+            let decode_task = match (&outcome, &dep.raw, &dep.schema_store) {
                 (Ok(out), Some(session), Some(store)) => {
                     if let zenkey_fleet_v1::FetchOutcome::Value(v) = out.as_ref() {
                         services::value::decode(services::value::Decode {
                             store: Arc::clone(store),
                             session: session.clone(),
-                            slices: dep.slices.clone(),
-                            base: dep.base().to_string(),
+                            slices: None,
+                            base: dep.namespace().to_string(),
                             fetched_key: key.clone(),
                             wire_key: v.key.clone(),
                             encoding: v.encoding.clone(),
@@ -189,7 +189,7 @@ fn select(
     sub.why.forget_subject();
     sub.refresh_series(dep);
 
-    let Some(session) = dep.session.clone() else {
+    let Some(session) = dep.raw.clone() else {
         return Task::none();
     };
     match &sub.current {
@@ -201,7 +201,7 @@ fn select(
             work.verdicts.node_detail = view::nodes::DetailState::Loading(origin.clone());
             services::sweep::node_info(
                 session,
-                dep.base().to_string(),
+                dep.namespace().to_string(),
                 origin.clone(),
                 dep.timeout(),
             )

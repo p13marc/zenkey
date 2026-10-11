@@ -373,10 +373,9 @@ fn the_projection_cache_discloses_its_bound() {
     let _ = Prefs::default();
     let link = zengui::message::LinkState::Pumping;
     let watched: Vec<String> = vec![];
-    let source = status::SliceSource::None;
     let mut ui = simulator::<Message, _, _>(status::strip(Status {
         link: &link,
-        base_label: "acme",
+        namespace_label: "acme",
         watched: &watched,
         skeleton: None,
         keys_unwatched: 0,
@@ -388,7 +387,7 @@ fn the_projection_cache_discloses_its_bound() {
         facts_cached: 118,
         facts_evicted: 312,
         totals: Default::default(),
-        slices: &source,
+        contracts: Default::default(),
         seeding: 0,
         seeded_watches: 0,
         seed_totals: Default::default(),
@@ -420,10 +419,9 @@ fn an_untripped_cache_bound_says_nothing() {
 
     let link = zengui::message::LinkState::Pumping;
     let watched: Vec<String> = vec![];
-    let source = status::SliceSource::None;
     let mut ui = simulator::<Message, _, _>(status::strip(Status {
         link: &link,
-        base_label: "acme",
+        namespace_label: "acme",
         watched: &watched,
         skeleton: None,
         keys_unwatched: 0,
@@ -435,7 +433,7 @@ fn an_untripped_cache_bound_says_nothing() {
         facts_cached: 12,
         facts_evicted: 0,
         totals: Default::default(),
-        slices: &source,
+        contracts: Default::default(),
         seeding: 0,
         seeded_watches: 0,
         seed_totals: Default::default(),

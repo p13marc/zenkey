@@ -24,15 +24,16 @@
 //! and its kind stay in the handler, because they are what the *app* does, and
 //! a service that flipped a pane's flag would be reaching backwards.
 //!
-//! ## The eight modules, split by what an answer *is*
+//! ## The nine modules, split by what an answer *is*
 //!
-//! Not by which pane asks: `link` (a session), `sweep` (a fleet), `value` (one
+//! Not by which pane asks: `link` (the sessions), `sweep` (a fleet), `value` (one
 //! key), `watch` (coverage), `write` (a change), `record` (a `.zrec`, either
-//! direction), `context` (the shared store), `prefs` (the window's memory).
+//! direction), `context` (the shared store), `prefs` (the window's memory),
+//! `contracts` (what the window holds offline, #614).
 //! Two panes reach into three of them, which is the honest shape — a pane is
 //! a question, not a transport.
 //!
-//! The last three are #255: the eight blocking filesystem calls that stayed
+//! `record`, `context` and `prefs` are #255: the eight blocking filesystem calls that stayed
 //! on the update thread through #175, because moving a synchronous call
 //! off-thread changes when its result lands — a behaviour change that had no
 //! business hiding inside a refactor claiming to make none. Each is now a
@@ -40,6 +41,7 @@
 //! filesystem calls back (`scripts/check-fs-seam.sh`).
 
 pub mod context;
+pub mod contracts;
 pub mod link;
 pub mod prefs;
 pub mod record;

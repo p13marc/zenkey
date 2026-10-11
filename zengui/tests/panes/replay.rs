@@ -60,10 +60,9 @@ fn the_strip_reports_replay_over_the_link() {
 
     let link = zengui::message::LinkState::Pumping;
     let watched: Vec<String> = vec!["v1/**".to_string()];
-    let source = status::SliceSource::None;
     let mut ui = simulator::<Message, _, _>(status::strip(Status {
         link: &link,
-        base_label: "acme",
+        namespace_label: "acme",
         watched: &watched,
         skeleton: None,
         keys_unwatched: 0,
@@ -75,7 +74,7 @@ fn the_strip_reports_replay_over_the_link() {
         facts_cached: 3,
         facts_evicted: 0,
         totals: Default::default(),
-        slices: &source,
+        contracts: Default::default(),
         seeding: 0,
         seeded_watches: 0,
         seed_totals: Default::default(),

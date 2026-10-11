@@ -21,23 +21,38 @@ use zengui::prefs::Prefs;
 use zenkey_fleet_v1::model::stats::StatsTable;
 use zenkey_fleet_v1::{KeyTreeSnapshot, SampleView, SliceSet};
 
-/// The ZenSight registry snapshot `fixture-tests/` compiles — the codegen
-/// corpus doubles as the GUI's declared world.
+/// The ZenSight registry snapshot `fixture-tests/` compiles — v1's declared
+/// world, still what the v1 panes' own tests render against until each
+/// moves (FL7–FL11). The window itself no longer loads it (#614, FL6a).
 pub fn slices() -> SliceSet {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
     SliceSet::from_dirs(&[dir]).expect("fixture registry")
 }
 
-/// Settings for a window with no bus behind it: nothing to dial, no
-/// registry dirs (slices arrive as a message instead), the default scope.
+/// The zk2 contracts the window's world is described by (#614, FL6a): the
+/// walkthrough and tcgui examples, loaded exactly as `--contracts` loads
+/// them — tcgui's bindings file beside its contracts included, said as a
+/// problem and skipped.
+pub fn contract_paths() -> Vec<PathBuf> {
+    let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2");
+    vec![examples.join("walkthrough"), examples.join("tcgui")]
+}
+
+/// [`contract_paths`], loaded.
+pub fn contracts() -> Arc<zengui::services::contracts::LoadedContracts> {
+    Arc::new(zengui::services::contracts::load_all(&contract_paths()))
+}
+
+/// Settings for a window with no bus behind it: nothing to dial, the
+/// contracts named (they arrive as a message instead), the default scope.
 pub fn settings() -> Settings {
     Settings {
-        base: String::new(),
+        namespace: String::new(),
         connect: vec!["tcp/10.0.4.2:7447".into()],
         listen: vec![],
         scouting: None,
         zenoh_config: None,
-        registry: vec![],
+        contracts: contract_paths(),
         timeout_secs: 5,
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],
@@ -180,13 +195,10 @@ impl World {
         }
     }
 
-    /// The window as the link leaves it once the session is up: registry
-    /// in hand, the pump running.
+    /// The window as the link leaves it once the sessions are up: the
+    /// contracts in hand (#614, FL6a), the pump running.
     pub fn connect(&self, app: &mut Zengui) {
-        send(
-            app,
-            Message::Bus(BusMsg::SlicesLoaded(Ok(Arc::new(slices())))),
-        );
+        send(app, Message::Bus(BusMsg::ContractsLoaded(contracts())));
         send(app, Message::Bus(BusMsg::Link(LinkState::Pumping)));
     }
 

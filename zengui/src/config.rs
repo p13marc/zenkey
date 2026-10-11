@@ -17,18 +17,25 @@ use crate::scope::ScopePreset;
 #[derive(Debug, Clone, Parser)]
 #[command(name = "zengui", about, version)]
 pub struct Cli {
-    /// The deployment base — the first chunk(s) of every key on the wire.
+    /// The deployment namespace — the prefix before `zk2/` on every key of
+    /// the deployment (core §1.6). `--base` is its v1 spelling, kept as an
+    /// alias.
     ///
-    /// Applications set this as their Zenoh session `namespace` and never spell
-    /// it. An explorer deliberately does not: it runs un-namespaced so it sees
-    /// the wire as it really is, including traffic from outside the deployment
-    /// (RFC 09 §5) — which is what lets it spot a leak. So it has to be told.
+    /// The deployment's services run *in* it as their Zenoh session
+    /// `namespace` and never spell it. zengui opens two sessions, as zenctl
+    /// and zenwatch do: one **in** the namespace, which reads presence,
+    /// descriptors and contracts the way the deployment's consumers do, and
+    /// one in **none**, which watches wire selectors and so sees traffic from
+    /// outside the deployment too (the tooling guide's O1) — which is what
+    /// lets it spot a leak.
     ///
-    /// Omitted, or `--base ""`, means the base-less bus root: the RFC v1.6
-    /// default, whose wire keys start at `v1/`. Bases actually in use are
-    /// discovered at runtime, so this flag is a shortcut, not a requirement.
-    #[arg(long, env = "ZENGUI_BASE")]
-    pub base: Option<String>,
+    /// Resolves `--namespace` > the namespace picked last (remembered) >
+    /// `ZENGUI_BASE` > the context's `base` > empty. Empty is the bus-root
+    /// deployment, whose keys start at `zk2/`. Namespaces actually in use are
+    /// listed at runtime (the location bar's picker), so this flag is a
+    /// shortcut, not a requirement.
+    #[arg(long, visible_alias = "base", value_name = "NAMESPACE")]
+    pub namespace: Option<String>,
 
     /// Use a named context from the shared explorer config
     /// (`~/.config/zenkey-explorer/config.toml`, with a read-fallback to the
@@ -61,10 +68,22 @@ pub struct Cli {
     #[arg(long)]
     pub scouting: bool,
 
-    /// Directory of registry files (`*.toml` or `*.kdl`, RFC 08 §5.1),
-    /// repeatable. When given, registry slices are read from disk instead of
-    /// from the bus (RFC 08 §6 introspection).
-    #[arg(long, value_name = "DIR")]
+    /// Contracts known offline, repeatable: an authoring file (`*.toml`), a
+    /// directory of them, or a `.history` root — loaded as zenctl's
+    /// `--contracts` loads them (spec §9.7, §8.5).
+    ///
+    /// They seed the contract store, so a revision held here is never
+    /// retrieved from the bus; every other revision a descriptor names is
+    /// retrieved from its holders (§8.4). Remembered when applied from the
+    /// Settings overlay, in zengui's own preferences and never in the shared
+    /// context; a flag wins for this launch without becoming the default.
+    #[arg(long = "contracts", value_name = "PATH")]
+    pub contracts: Vec<PathBuf>,
+
+    /// v1's registry directories. Refused by name: zk2 reads contracts
+    /// (`--contracts`), and a registry slice describes nothing a zk2 bus
+    /// carries.
+    #[arg(long, value_name = "DIR", hide = true)]
     pub registry: Vec<PathBuf>,
 
     /// Query timeout in seconds (default 5; a context may override the
@@ -76,14 +95,16 @@ pub struct Cli {
     /// secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base
     /// layer; --connect/--listen/--scouting apply on top when given
     /// (flag > env > context > file). A file that sets a session namespace
-    /// is refused — explorers run un-namespaced (RFC 09 §5). Only what the
-    /// file states counts: no `mode` means the explorer's client session, no
+    /// is refused — zengui sets the deployment's on the session that reads
+    /// it, and none on the one that watches the wire. Only what the file
+    /// states counts: no `mode` means the explorer's client session, no
     /// `scouting.multicast.enabled` means multicast off.
     #[arg(long, value_name = "FILE", env = "ZENGUI_ZENOH_CONFIG")]
     pub zenoh_config: Option<PathBuf>,
 
     /// What to watch. Defaults to the scope this window had last time, then
     /// to `everything` — a flag, when given, always wins (issue #189).
+    /// `telemetry` is v1's name for `streams`, and still accepted.
     #[arg(long, value_enum)]
     pub scope: Option<ScopePreset>,
 
@@ -115,7 +136,7 @@ pub struct Cli {
     pub history_entries: Option<usize>,
 
     /// How many distinct keys to keep statistics for (default
-    /// `zenkey_fleet_v1::DEFAULT_MAX_KEYS`; remembered since #188).
+    /// `zenkey_fleet::DEFAULT_MAX_KEYS`; remembered since #188).
     ///
     /// Least-recently-seen keys are retired past this, and the retirements are
     /// counted and displayed — a long-running observer is bounded, and says so
@@ -127,8 +148,9 @@ pub struct Cli {
 /// Resolved, owned settings. No `Option` gymnastics past this point.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Settings {
-    /// The deployment base. Empty is legal and is the default (RFC v1.6).
-    pub base: String,
+    /// The deployment namespace (core §1.6). Empty is legal and is the
+    /// default: the bus-root deployment, whose keys start at `zk2/`.
+    pub namespace: String,
     pub connect: Vec<String>,
     pub listen: Vec<String>,
     /// `None` = not stated by flag or context: the engine leaves a config
@@ -136,7 +158,9 @@ pub struct Settings {
     pub scouting: Option<bool>,
     /// The zenoh JSON5 passthrough file, when one is configured (#122).
     pub zenoh_config: Option<PathBuf>,
-    pub registry: Vec<PathBuf>,
+    /// Contracts known offline (`--contracts`, or the Settings overlay's
+    /// remembered list): files, directories or `.history` roots.
+    pub contracts: Vec<PathBuf>,
     pub timeout_secs: u64,
     pub scope: ScopePreset,
     pub selectors: Vec<String>,
@@ -146,11 +170,23 @@ pub struct Settings {
     pub max_keys: usize,
 }
 
+/// The words a `--registry` is refused with: the flag is v1's, and the zk2
+/// counterpart is named, so the refusal is a pointer rather than a wall.
+pub const REGISTRY_REFUSED: &str = "--registry is v1's registry slices, which describe nothing \
+     a zk2 bus carries — zk2 reads contracts: --contracts <PATH> (an authoring file, a \
+     directory of them, or a .history root)";
+
 impl Cli {
     /// Resolve into settings, or explain why not: loads the active shared
     /// context (issue #35) and layers flags over it, with `prefs` supplying
-    /// what the window remembered (issue #189).
+    /// what the window remembered (issue #189) and the environment its one
+    /// rung, `ZENGUI_BASE`.
     pub fn settings(self, prefs: &crate::prefs::Prefs) -> anyhow::Result<Settings> {
+        // v1's flag, refused before the context is read: the pointer to
+        // `--contracts` is never buried under another error.
+        if !self.registry.is_empty() {
+            anyhow::bail!("{REGISTRY_REFUSED}");
+        }
         let named = self.context.clone().or_else(|| prefs.context.clone());
         let context = match zenkey_explorer_config::active(named.as_deref()) {
             Ok(c) => c,
@@ -161,17 +197,22 @@ impl Cli {
             Err(e) if self.context.is_some() => return Err(e),
             Err(_) => zenkey_explorer_config::active(None)?,
         };
-        self.settings_with(context, prefs)
+        let env = std::env::var("ZENGUI_BASE").ok();
+        self.settings_with(context, prefs, env.as_deref())
     }
 
-    /// The pure half: `context` and `prefs` supply defaults, flags override.
-    /// Split from [`Cli::settings`] so tests never touch the user's real
-    /// config file.
+    /// The pure half: `context`, `prefs` and `env_namespace` (`ZENGUI_BASE`)
+    /// supply defaults, flags override. Split from [`Cli::settings`] so
+    /// tests never touch the user's real config file or environment.
     pub fn settings_with(
         self,
         context: Option<zenkey_explorer_config::StoredContext>,
         prefs: &crate::prefs::Prefs,
+        env_namespace: Option<&str>,
     ) -> anyhow::Result<Settings> {
+        if !self.registry.is_empty() {
+            anyhow::bail!("{REGISTRY_REFUSED}");
+        }
         let context = context.unwrap_or_default();
         // A typed `--selector` is validated hard: the user just wrote it, and
         // a bad one is an error, not a preference to shrug off.
@@ -224,7 +265,7 @@ impl Cli {
         let max_keys = self
             .max_keys
             .or(prefs.max_keys.filter(|n| *n > 0))
-            .unwrap_or(zenkey_fleet_v1::DEFAULT_MAX_KEYS);
+            .unwrap_or(zenkey_fleet::DEFAULT_MAX_KEYS);
         if echo_lines == 0 {
             anyhow::bail!("--echo-lines must be at least 1");
         }
@@ -234,10 +275,15 @@ impl Cli {
         if max_keys == 0 {
             anyhow::bail!("--max-keys must be at least 1");
         }
+        let namespace = namespace(
+            self.namespace.as_deref(),
+            prefs.namespace.as_deref(),
+            env_namespace,
+            context.base.as_deref(),
+        )?;
+        let contracts = contracts(self.contracts, &prefs.contracts)?;
         Ok(Settings {
-            // Flag/env > context > "" (the bus root). Unset and `--base ""`
-            // both resolve to the empty base — a real deployment, not a blank.
-            base: self.base.or(context.base).unwrap_or_default(),
+            namespace,
             connect: if self.connect.is_empty() {
                 context.connect
             } else {
@@ -254,11 +300,10 @@ impl Cli {
                 context.scouting
             },
             zenoh_config: self.zenoh_config.or(context.zenoh_config),
-            registry: if self.registry.is_empty() {
-                context.registry
-            } else {
-                self.registry
-            },
+            // A context's `registry` is parsed with the rest of the context
+            // and read by nothing here: zk2 reads contracts, and contracts
+            // are remembered by this window, never by the shared context.
+            contracts,
             timeout_secs: self.timeout.or(context.timeout).unwrap_or(5),
             scope,
             selectors,
@@ -272,48 +317,103 @@ impl Cli {
     }
 }
 
-/// How a base should be shown to a human.
+/// The deployment namespace: `--namespace` > the one picked last > the
+/// environment > the context's `base` > empty (the bus root).
 ///
-/// The empty base is a real, named deployment — the default one — not an
-/// unset field. RFC 09 §5: "an explorer that cannot see and name it is
-/// blind to the common case." One function, shared by [`Settings::base_label`]
-/// and [`BaseChoice`]'s `Display`, so the window title and the picker rows
-/// cannot drift into two spellings.
-pub fn base_label(base: &str) -> &str {
-    if base.is_empty() {
-        "(empty — keys start at v1/)"
+/// The same hard/soft split as the selectors. A namespace the session would
+/// refuse is an error when it was typed, set in the environment or stored
+/// in a context — someone named it for this launch — and dropped when it was
+/// only remembered: a stale preference must never refuse a launch. An
+/// explicitly empty namespace is a deployment, the bus root, and does not
+/// fall through to the next rung.
+pub fn namespace(
+    flag: Option<&str>,
+    remembered: Option<&str>,
+    env: Option<&str>,
+    stored: Option<&str>,
+) -> anyhow::Result<String> {
+    if let Some(ns) = flag {
+        check_namespace(ns)?;
+        return Ok(ns.to_string());
+    }
+    if let Some(ns) = remembered.filter(|ns| check_namespace(ns).is_ok()) {
+        return Ok(ns.to_string());
+    }
+    let ns = env.or(stored).unwrap_or_default();
+    check_namespace(ns)?;
+    Ok(ns.to_string())
+}
+
+/// Whether the session would take `namespace` (`zenkey_fleet::check_namespace`):
+/// a canonical, concrete key prefix. Empty is the bus root, and always fine.
+pub fn check_namespace(namespace: &str) -> anyhow::Result<()> {
+    if namespace.is_empty() {
+        return Ok(());
+    }
+    zenkey_fleet::check_namespace(namespace).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// The contracts: `--contracts` > the list the Settings overlay applied
+/// last > none. A typed path that is not there is refused, as zenctl
+/// refuses it; a remembered one is dropped from this launch (stale, not
+/// fatal) and stays in the preferences for when it comes back.
+pub fn contracts(typed: Vec<PathBuf>, remembered: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
+    if typed.is_empty() {
+        return Ok(remembered.iter().filter(|p| p.exists()).cloned().collect());
+    }
+    for p in &typed {
+        if !p.exists() {
+            anyhow::bail!("--contracts {}: no such file or directory", p.display());
+        }
+    }
+    Ok(typed)
+}
+
+/// How a namespace should be shown to a human.
+///
+/// The empty namespace is a real, named deployment — the default one — not
+/// an unset field: an explorer that cannot see and name it is blind to the
+/// common case (RFC 09 §5). One function, shared by
+/// [`Settings::namespace_label`] and [`NamespaceChoice`]'s `Display`, so the
+/// window title and the picker rows cannot drift into two spellings.
+pub fn namespace_label(namespace: &str) -> &str {
+    if namespace.is_empty() {
+        "(empty — keys start at zk2/)"
     } else {
-        base
+        namespace
     }
 }
 
-/// One row of the base picker: a deployment base, displayed by its label.
+/// One row of the namespace picker: a deployment namespace, displayed by its
+/// label.
 ///
 /// The wrapper exists because a `pick_list` renders a `String` verbatim, which
-/// is how the empty base — the RFC v1.6 bus-root deployment, a first-class
-/// value — came to render as a literally blank row (#185).
+/// is how the empty one — the bus-root deployment, a first-class value —
+/// came to render as a literally blank row (#185).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BaseChoice {
-    /// The base as the wire spells it; `""` is the bus root.
-    pub base: String,
+pub struct NamespaceChoice {
+    /// The namespace as the wire spells it; `""` is the bus root.
+    pub namespace: String,
 }
 
-impl BaseChoice {
-    pub fn new(base: impl Into<String>) -> BaseChoice {
-        BaseChoice { base: base.into() }
+impl NamespaceChoice {
+    pub fn new(namespace: impl Into<String>) -> NamespaceChoice {
+        NamespaceChoice {
+            namespace: namespace.into(),
+        }
     }
 
-    /// The base-less bus-root deployment (RFC v1.6's default).
-    pub fn bus_root() -> BaseChoice {
-        BaseChoice {
-            base: String::new(),
+    /// The bus-root deployment: no namespace.
+    pub fn bus_root() -> NamespaceChoice {
+        NamespaceChoice {
+            namespace: String::new(),
         }
     }
 }
 
-impl std::fmt::Display for BaseChoice {
+impl std::fmt::Display for NamespaceChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(base_label(&self.base))
+        f.write_str(namespace_label(&self.namespace))
     }
 }
 
@@ -322,9 +422,10 @@ impl Settings {
         Duration::from_secs(self.timeout_secs)
     }
 
-    /// How the base should be shown to a human — see [`base_label`].
-    pub fn base_label(&self) -> &str {
-        base_label(&self.base)
+    /// How the namespace should be shown to a human — see
+    /// [`namespace_label`].
+    pub fn namespace_label(&self) -> &str {
+        namespace_label(&self.namespace)
     }
 
     /// Whether this session can observe anything at all.
@@ -350,31 +451,142 @@ mod tests {
 
     fn parse(args: &[&str]) -> anyhow::Result<Settings> {
         // settings_with(None), not settings(): tests must never read the
-        // user's real config file.
-        Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied()))?
-            .settings_with(None, &crate::prefs::Prefs::default())
+        // user's real config file, nor its environment.
+        Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied()))?.settings_with(
+            None,
+            &crate::prefs::Prefs::default(),
+            None,
+        )
     }
 
     /// The same, over a remembered set of preferences.
     fn parse_remembering(args: &[&str], prefs: &crate::prefs::Prefs) -> anyhow::Result<Settings> {
         Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied()))?
-            .settings_with(None, prefs)
+            .settings_with(None, prefs, None)
     }
 
     #[test]
-    fn unset_base_and_explicit_empty_base_agree() {
-        assert_eq!(parse(&[]).unwrap().base, "");
-        assert_eq!(parse(&["--base", ""]).unwrap().base, "");
-        assert_eq!(parse(&["--base", "zensight"]).unwrap().base, "zensight");
-    }
-
-    /// The empty base is a deployment, not an unset field.
-    #[test]
-    fn the_empty_base_is_named_not_blank() {
-        let s = parse(&[]).unwrap();
-        assert!(s.base_label().contains("empty"));
+    fn unset_namespace_and_explicit_empty_namespace_agree() {
+        assert_eq!(parse(&[]).unwrap().namespace, "");
+        assert_eq!(parse(&["--namespace", ""]).unwrap().namespace, "");
         assert_eq!(
-            parse(&["--base", "zensight"]).unwrap().base_label(),
+            parse(&["--namespace", "zensight"]).unwrap().namespace,
+            "zensight"
+        );
+        // v1's spelling is an alias, not a second flag (#614, FL6a).
+        assert_eq!(parse(&["--base", "spray"]).unwrap().namespace, "spray");
+    }
+
+    /// A namespace the session would refuse is refused at the boundary when
+    /// it was typed — a wildcard is not a deployment.
+    #[test]
+    fn a_typed_namespace_the_session_would_refuse_is_an_error() {
+        let e = parse(&["--namespace", "acme/*"]).unwrap_err().to_string();
+        assert!(e.contains("acme/*"), "{e}");
+    }
+
+    /// The ladder (decided on #585): `--namespace` > the one picked last >
+    /// `ZENGUI_BASE` > the context's `base` > empty — each rung reachable,
+    /// an explicitly empty one standing, and a remembered one the session
+    /// would refuse dropped rather than refusing the launch.
+    #[test]
+    fn the_namespace_climbs_flag_remembered_env_context_empty() {
+        assert_eq!(
+            namespace(Some("flag"), Some("mem"), Some("env"), Some("ctx")).unwrap(),
+            "flag"
+        );
+        assert_eq!(
+            namespace(None, Some("mem"), Some("env"), Some("ctx")).unwrap(),
+            "mem"
+        );
+        assert_eq!(
+            namespace(None, None, Some("env"), Some("ctx")).unwrap(),
+            "env"
+        );
+        assert_eq!(namespace(None, None, None, Some("ctx")).unwrap(), "ctx");
+        assert_eq!(namespace(None, None, None, None).unwrap(), "");
+        assert_eq!(
+            namespace(None, Some(""), Some("env"), Some("ctx")).unwrap(),
+            "",
+            "an explicitly empty namespace is the bus root, not a gap"
+        );
+        assert_eq!(
+            namespace(None, Some("stale/*"), Some("env"), None).unwrap(),
+            "env",
+            "a remembered namespace the session would refuse is dropped"
+        );
+        assert!(namespace(None, None, Some("bad/$*"), None).is_err());
+
+        // Through the whole resolution: the environment is an argument.
+        let cli = |args: &[&str]| {
+            Cli::try_parse_from(std::iter::once("zengui").chain(args.iter().copied())).unwrap()
+        };
+        let remembered = Prefs {
+            namespace: Some("picked".into()),
+            ..Prefs::default()
+        };
+        let ctx = zenkey_explorer_config::StoredContext {
+            base: Some("ctx".into()),
+            ..Default::default()
+        };
+        let s = cli(&[])
+            .settings_with(Some(ctx.clone()), &remembered, Some("env"))
+            .unwrap();
+        assert_eq!(s.namespace, "picked");
+        let s = cli(&[])
+            .settings_with(Some(ctx.clone()), &Prefs::default(), Some("env"))
+            .unwrap();
+        assert_eq!(s.namespace, "env");
+        let s = cli(&[])
+            .settings_with(Some(ctx), &Prefs::default(), None)
+            .unwrap();
+        assert_eq!(s.namespace, "ctx");
+    }
+
+    /// v1's `--registry` is refused by name (#614, FL6a), and the refusal
+    /// names the flag that replaced it.
+    #[test]
+    fn registry_is_refused_by_name_and_points_at_contracts() {
+        let e = parse(&["--registry", "registry/"]).unwrap_err().to_string();
+        assert!(e.contains("--registry"), "{e}");
+        assert!(e.contains("--contracts"), "{e}");
+    }
+
+    /// `--contracts` is repeatable; a typed path that is not there is
+    /// refused, as zenctl refuses it, while a remembered one that went
+    /// stale is dropped from the launch — never a refusal.
+    #[test]
+    fn contracts_are_typed_hard_and_remembered_soft() {
+        let here = env!("CARGO_MANIFEST_DIR");
+        let s = parse(&["--contracts", here, "--contracts", here]).unwrap();
+        assert_eq!(s.contracts.len(), 2);
+        let e = parse(&["--contracts", "/definitely/not/here"])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("/definitely/not/here"), "{e}");
+
+        let remembered = Prefs {
+            contracts: vec![PathBuf::from(here), PathBuf::from("/definitely/not/here")],
+            ..Prefs::default()
+        };
+        let s = parse_remembering(&[], &remembered).expect("a stale entry never refuses");
+        assert_eq!(s.contracts, [PathBuf::from(here)]);
+        // A flag wins this launch, and does not merge with the memory.
+        let src = format!("{here}/src");
+        let s = parse_remembering(&["--contracts", &src], &remembered).unwrap();
+        assert_eq!(s.contracts, [PathBuf::from(&src)]);
+    }
+
+    /// The empty namespace is a deployment, not an unset field.
+    #[test]
+    fn the_empty_namespace_is_named_not_blank() {
+        let s = parse(&[]).unwrap();
+        assert!(s.namespace_label().contains("empty"));
+        assert!(s.namespace_label().contains("zk2/"));
+        assert_eq!(
+            parse(&["--namespace", "zensight"])
+                .unwrap()
+                .namespace_label(),
             "zensight"
         );
     }
@@ -383,14 +595,17 @@ mod tests {
     /// it displays through the same label (#185). Before this type, the picker
     /// rendered the empty base as a literally blank row.
     #[test]
-    fn a_base_picker_row_displays_the_label_not_the_raw_string() {
+    fn a_namespace_picker_row_displays_the_label_not_the_raw_string() {
         assert_eq!(
-            BaseChoice::bus_root().to_string(),
-            "(empty — keys start at v1/)"
+            NamespaceChoice::bus_root().to_string(),
+            "(empty — keys start at zk2/)"
         );
-        assert_eq!(BaseChoice::new("acme/fleet-a").to_string(), "acme/fleet-a");
-        // The picker's `selected` comparison is by base, not by label.
-        assert_eq!(BaseChoice::new(""), BaseChoice::bus_root());
+        assert_eq!(
+            NamespaceChoice::new("acme/fleet-a").to_string(),
+            "acme/fleet-a"
+        );
+        // The picker's `selected` comparison is by namespace, not by label.
+        assert_eq!(NamespaceChoice::new(""), NamespaceChoice::bus_root());
     }
 
     #[test]
@@ -402,9 +617,9 @@ mod tests {
         assert!(!s.eager, "lazy is the default (issue #85)");
         assert_eq!(s.echo_lines, 2000);
         assert_eq!(s.history_entries, 200);
-        assert_eq!(s.max_keys, zenkey_fleet_v1::DEFAULT_MAX_KEYS);
+        assert_eq!(s.max_keys, zenkey_fleet::DEFAULT_MAX_KEYS);
+        assert!(s.contracts.is_empty(), "contracts from the bus only");
     }
-
     /// History retains whole payloads, so its bound is the one most worth
     /// turning down — and, like every other bound here, zero is rejected at
     /// the boundary rather than clamped downstream.
@@ -492,7 +707,8 @@ mod tests {
             base: Some("zensight".into()),
             connect: vec!["tcp/10.0.0.1:7447".into()],
             listen: vec![],
-            registry: vec![],
+            // Parsed with the context, and read by nothing (#614, FL6a).
+            registry: vec!["/ctx/registry".into()],
             scouting: Some(true),
             timeout: Some(9),
             zenoh_config: None,
@@ -502,12 +718,16 @@ mod tests {
         };
         // No flags: the context wins everywhere.
         let s = cli(&[])
-            .settings_with(Some(ctx.clone()), &Prefs::default())
+            .settings_with(Some(ctx.clone()), &Prefs::default(), None)
             .unwrap();
-        assert_eq!(s.base, "zensight");
+        assert_eq!(s.namespace, "zensight");
         assert_eq!(s.connect, ["tcp/10.0.0.1:7447"]);
         assert_eq!(s.scouting, Some(true));
         assert_eq!(s.timeout_secs, 9);
+        assert!(
+            s.contracts.is_empty(),
+            "a context's registry is v1's slices, never read as contracts"
+        );
 
         // #122: the passthrough file resolves flag > context, and its
         // presence alone makes the session reachable (the file may carry
@@ -515,7 +735,7 @@ mod tests {
         let mut with_file = ctx.clone();
         with_file.zenoh_config = Some(PathBuf::from("/etc/zenoh/ctx.json5"));
         let mut s = cli(&[])
-            .settings_with(Some(with_file), &Prefs::default())
+            .settings_with(Some(with_file), &Prefs::default(), None)
             .unwrap();
         assert_eq!(
             s.zenoh_config.as_deref(),
@@ -524,7 +744,7 @@ mod tests {
         s.connect.clear();
         assert!(!s.is_unreachable(), "a config file may reach on its own");
         let s = cli(&["--zenoh-config", "/tmp/flag.json5"])
-            .settings_with(Some(ctx.clone()), &Prefs::default())
+            .settings_with(Some(ctx.clone()), &Prefs::default(), None)
             .unwrap();
         assert_eq!(
             s.zenoh_config.as_deref(),
@@ -532,9 +752,9 @@ mod tests {
         );
         // Flags override field-by-field, including an explicit empty base.
         let s = cli(&["--base", "", "-c", "tcp/127.0.0.1:7447", "--timeout", "2"])
-            .settings_with(Some(ctx), &Prefs::default())
+            .settings_with(Some(ctx), &Prefs::default(), None)
             .unwrap();
-        assert_eq!(s.base, "");
+        assert_eq!(s.namespace, "");
         assert_eq!(s.connect, ["tcp/127.0.0.1:7447"]);
         assert_eq!(s.timeout_secs, 2);
     }
@@ -557,7 +777,7 @@ mod tests {
             parse_remembering(&["--scope", "telemetry"], &remembered)
                 .unwrap()
                 .scope,
-            ScopePreset::Telemetry,
+            ScopePreset::Streams,
             "a typed flag beats a remembered value"
         );
         assert_eq!(

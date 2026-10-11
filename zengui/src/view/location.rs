@@ -1,9 +1,9 @@
-//! The location bar (#185): context ▸ base ▸ scope ▸ key.
+//! The location bar (#185): context ▸ namespace ▸ scope ▸ key.
 //!
 //! The toolbar it replaces was a strip of unrelated controls — pickers, tabs,
 //! zoom — with no sense of place: in a 40,000-row tree there was no answer to
 //! "where am I". Every segment of the bar is simultaneously **display and
-//! control**: the context chip opens the Connect overlay, the base picker is a
+//! control**: the context chip opens the Connect overlay, the namespace picker is a
 //! picker, the scope picker is a picker, and the key's ancestor chunks are
 //! buttons that select that subtree ([`Subject::Prefix`]) — never a second
 //! implementation, always the message the UI already sends.
@@ -20,7 +20,7 @@
 use iced::Element;
 use iced::widget::{column, row};
 
-use crate::config::BaseChoice;
+use crate::config::NamespaceChoice;
 use crate::message::{ChromeMsg, DeploymentMsg, Message, Subject, SubjectMsg, WorkspaceMsg};
 use crate::prefs::{DockRole, LayoutPreset};
 use crate::scope::ScopePreset;
@@ -35,10 +35,10 @@ pub struct LocationData<'a> {
     /// The active named context, when one is. `None` renders as "no context"
     /// — a state, not an omission — and the chip opens Connect either way.
     pub context: Option<&'a str>,
-    /// The deployment base in force; `""` is the bus root.
-    pub base: &'a str,
-    /// The picker's options (`crate::update::bus::rebuild_base_options`).
-    pub base_options: &'a [BaseChoice],
+    /// The deployment namespace in force; `""` is the bus root.
+    pub namespace: &'a str,
+    /// The picker's options (`Deployment::rebuild_namespace_options`).
+    pub namespace_options: &'a [NamespaceChoice],
     pub scope: ScopePreset,
     /// Whether the scope's watches are live (#85's opt-in observation).
     pub observing: bool,
@@ -60,11 +60,11 @@ pub struct Segment {
 /// A [`Subject::Origin`] has no display path of its own; it is placed through
 /// [`crate::scope::origin_display_path`] — the same #61 click-through path the
 /// tree uses — so its ancestors are real tree prefixes.
-pub fn segments(subject: &Subject, base: &str) -> Vec<Segment> {
+pub fn segments(subject: &Subject, namespace: &str) -> Vec<Segment> {
     let path = match subject {
         Subject::None => return Vec::new(),
         Subject::Key(p) | Subject::Prefix(p) => p.clone(),
-        Subject::Origin(o) => crate::scope::origin_display_path(base, o),
+        Subject::Origin(o) => crate::scope::origin_display_path(namespace, o),
     };
     let chunks: Vec<&str> = path.split('/').collect();
     let last = chunks.len() - 1;
@@ -85,7 +85,7 @@ pub fn segments(subject: &Subject, base: &str) -> Vec<Segment> {
     out
 }
 
-/// The breadcrumb itself: context ▸ base ▸ scope ▸ key.
+/// The breadcrumb itself: context ▸ namespace ▸ scope ▸ key.
 pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
     let context_chip = kit::secondary(kit::labelled(
         kit::Icon::Plug,
@@ -99,12 +99,14 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
     ))))
     .padding(space::XS);
 
-    // The picker displays each base by its label, so the empty base reads as
+    // The picker displays each namespace by its label, so the empty one reads as
     // the bus-root deployment it is, never as a blank row (#185).
-    let base_picker = kit::picker(d.base_options, Some(BaseChoice::new(d.base)), |c| {
-        Message::Deployment(DeploymentMsg::BaseSelected(c.base))
-    })
-    .placeholder("base")
+    let namespace_picker = kit::picker(
+        d.namespace_options,
+        Some(NamespaceChoice::new(d.namespace)),
+        |c| Message::Deployment(DeploymentMsg::NamespaceSelected(c.namespace)),
+    )
+    .placeholder("namespace")
     .text_size(tokens::font::CAPTION);
 
     // The whole scope vocabulary, custom included (#187): the picker's
@@ -131,13 +133,13 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
     .on_press(Message::Deployment(DeploymentMsg::ScopeWatchToggled))
     .padding(space::XS);
 
-    // Two lines (#536): where the window points — context, base, scope —
+    // Two lines (#536): where the window points — context, namespace, scope —
     // and, under it, what it is looking at. Each wraps on its own, so a
     // narrow window never splits a key across the stations.
     let stations = row![
         context_chip,
         kit::separator(),
-        base_picker,
+        namespace_picker,
         kit::separator(),
         scope_picker,
         selectors_chip,
@@ -150,7 +152,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
     .vertical_spacing(space::XS);
 
     let mut trail = row![].spacing(space::XS).align_y(iced::Alignment::Center);
-    let segs = segments(d.subject, d.base);
+    let segs = segments(d.subject, d.namespace);
     if segs.is_empty() {
         // An empty segment list is a state, and it says which one.
         trail = trail.push(kit::muted("nothing selected — pick a key in the tree"));
@@ -198,8 +200,8 @@ pub(crate) fn bar<'a>(
     let place = row![
         breadcrumb(LocationData {
             context: work.bench.context_form.active.as_deref(),
-            base: dep.base(),
-            base_options: &dep.base_options,
+            namespace: dep.namespace(),
+            namespace_options: &dep.namespace_options,
             scope: dep.settings.scope,
             observing: !obs.scope_watches.is_empty(),
             subject: &sub.follow.current,
@@ -529,9 +531,9 @@ mod tests {
     }
 
     /// An origin is placed through the tree's own click-through path (#61),
-    /// base included, so its ancestors are real tree prefixes.
+    /// namespace included, so its ancestors are real tree prefixes.
     #[test]
-    fn an_origin_subject_is_placed_under_its_base() {
+    fn an_origin_subject_is_placed_under_its_namespace() {
         let segs = segments(&Subject::Origin("h-a".into()), "acme");
         assert_eq!(
             segs.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(),

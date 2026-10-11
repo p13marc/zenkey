@@ -57,7 +57,7 @@ pub(crate) fn update(
                 return Task::none();
             };
             let key = match crate::scope::media_key(
-                cx.dep.base(),
+                cx.dep.namespace(),
                 media.origin.trim(),
                 media.producer.trim(),
                 media.subpath.trim(),

@@ -11,7 +11,8 @@
 //!
 //! One module per subject (#614, FL5), each a child of this one, so the
 //! chunks that port them in parallel do not meet in one file: `tree`,
-//! `subject`, `replay`, `windows`, `slots`, `tuning`, `link` and `config`.
+//! `subject`, `replay`, `windows`, `slots`, `tuning`, `link`, `config` and
+//! `send`.
 //! The fixtures more than one of them drives stay here.
 
 use std::sync::Arc;
@@ -24,6 +25,7 @@ use crate::update;
 mod config;
 mod link;
 mod replay;
+mod send;
 mod slots;
 mod subject;
 mod tree;
@@ -158,13 +160,13 @@ async fn drive(app: &mut Zengui, task: iced::Task<Message>) {
     }
 }
 
-/// The boot, with a dead router and `--registry` dirs, and nothing faked: the
-/// real open task, the real failure, the real dirs load.
+/// The boot, with a dead router and `--contracts`, and nothing faked: the
+/// real open task, the real failure, the real contracts load (#614, FL6a).
 async fn boot_against(connect: &str) -> Zengui {
     let mut settings = super::test_settings();
     settings.connect = vec![connect.to_string()];
-    settings.registry = vec![
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry"),
+    settings.contracts = vec![
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough"),
     ];
     let (mut app, open) = Zengui::with_prefs(settings, crate::prefs::Prefs::default(), None);
     tokio::time::timeout(std::time::Duration::from_secs(10), drive(&mut app, open))

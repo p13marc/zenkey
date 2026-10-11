@@ -5,8 +5,8 @@
 //! the window reaches a bus, never about the subject, so it stopped being a
 //! tab in the pane strip.
 //!
-//! The connect flow was command-line-only: endpoints, scouting and registry
-//! dirs were fixed at launch, and the only in-app control was the base picker.
+//! The connect flow was command-line-only: endpoints and scouting were fixed
+//! at launch, and the only in-app control was the base picker.
 //! With the context store in the engine (#35) both explorers read and write the
 //! **same** named contexts, so a context created in `zenctl` is one this pane
 //! can select, and vice versa — that reciprocity is the point, and it is what
@@ -42,17 +42,17 @@ pub struct ContextForm {
     /// Comma- or space-separated endpoints.
     pub connect: String,
     pub listen: String,
+    /// The deployment namespace — stored as the context's `base`, the name
+    /// both explorers' store has always used for it (#614, FL6a).
     pub base: String,
     pub scouting: bool,
     /// Path to a zenoh JSON5 config file; empty = none (#122). The file is
     /// the UI for everything past the three knobs — no TLS form grows here.
     pub zenoh_config: String,
-    /// Registry directories, comma- or space-separated; empty = none.
-    ///
-    /// Rendered because `zenctl context create --registry …` writes it and
-    /// this pane used to save over it (issue #194). A form that edits a
-    /// document it cannot see all of will eventually delete part of it.
-    pub registry: String,
+    // No registry field since #614 (FL6a): a stored context's `registry` is
+    // v1's, read by nothing here, and carried through a save untouched —
+    // the save is an `upsert` over the stored context, and `apply_to`
+    // never writes the field (#194's merge, doing its job).
     /// Query timeout in seconds; empty = the 5s default.
     pub timeout: String,
     /// The last action's outcome, rendered verbatim.
@@ -69,7 +69,6 @@ pub enum ContextMsg {
     BaseChanged(String),
     ScoutingToggled(bool),
     ZenohConfigChanged(String),
-    RegistryChanged(String),
     TimeoutChanged(String),
     /// Load the named context's values into the editor.
     Load,
@@ -86,7 +85,7 @@ pub enum ContextMsg {
     /// message lives where its *failure* is displayed: the `Err` is written
     /// into `ContextForm::status`, beside the picker that started it, and
     /// nowhere else. It is this pane's async result like any other.
-    Switched(Result<zenoh::Session, crate::services::ServiceError>),
+    Switched(Result<crate::services::link::Sessions, crate::services::ServiceError>),
     /// The session-open re-read of the shared config landed (#67, #255):
     /// the known names, and the store's own `current` pointer.
     Refreshed(Result<(Vec<String>, Option<String>), crate::services::ServiceError>),
@@ -158,8 +157,9 @@ impl ContextForm {
     /// and a form that builds a whole [`StoredContext`] deletes every field it
     /// has no widget for — which is how a context created with
     /// `--registry ../registry --timeout 10` lost both the first time anyone
-    /// opened this pane. The form now covers every field, so the guard is for
-    /// the *next* one somebody adds to the store.
+    /// opened this pane. Since #614 (FL6a) the form has no widget for the
+    /// registry, deliberately: zk2 reads contracts, so the field is v1's,
+    /// and this merge is what carries it back to the store untouched.
     ///
     /// Everything is validated before anything is written, so a rejected form
     /// never half-writes the context it was handed.
@@ -179,13 +179,12 @@ impl ContextForm {
             ),
         };
 
-        // An explicitly empty base is a real deployment (the bus root,
-        // RFC v1.6) — stored as `Some("")` rather than dropped, so it
-        // overrides a different default rather than falling through it.
+        // An explicitly empty namespace is a real deployment (the bus root)
+        // — stored as `Some("")` rather than dropped, so it overrides a
+        // different default rather than falling through it.
         ctx.base = Some(self.base.clone());
         ctx.connect = connect;
         ctx.listen = listen;
-        ctx.registry = words(&self.registry).into_iter().map(Into::into).collect();
         ctx.scouting = Some(self.scouting);
         ctx.timeout = timeout;
         ctx.zenoh_config = {
@@ -215,12 +214,6 @@ impl ContextForm {
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        self.registry = stored
-            .registry
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
         self.timeout = stored.timeout.map(|t| t.to_string()).unwrap_or_default();
     }
 }
@@ -269,11 +262,11 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         row![
             field("NAME", "lab", &form.name, ContextMsg::NameChanged, None),
             field(
-                "BASE",
+                "NAMESPACE",
                 "acme/fleet-a",
                 &form.base,
                 ContextMsg::BaseChanged,
-                Some("empty = the bus root: keys start at v1/".into()),
+                Some("empty = the bus root: keys start at zk2/".into()),
             ),
             field(
                 "TIMEOUT (S)",
@@ -305,13 +298,6 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         &form.zenoh_config,
         ContextMsg::ZenohConfigChanged,
         Some("a JSON5 file — reaches a secured bus; the fields above apply on top".into()),
-    ));
-    col = col.push(field(
-        "REGISTRY",
-        "registry/ ../other/registry",
-        &form.registry,
-        ContextMsg::RegistryChanged,
-        Some("dirs of registry/*.{toml,kdl}, space-separated — offline slices (RFC 08 §6)".into()),
     ));
     col = col.push(
         kit::check(form.scouting)
@@ -422,10 +408,10 @@ mod tests {
         assert!(validate_endpoints(&["tcp/127.0.0.1:7447".into()]).is_ok());
     }
 
-    /// The editor round-trips a stored context, including the empty base —
-    /// which is a real deployment, not an unset field (RFC v1.6).
+    /// The editor round-trips a stored context, including the empty
+    /// namespace — which is a real deployment, not an unset field.
     #[test]
-    fn the_editor_round_trips_a_context_including_the_empty_base() {
+    fn the_editor_round_trips_a_context_including_the_empty_namespace() {
         let stored = StoredContext {
             base: Some(String::new()),
             connect: vec!["tcp/127.0.0.1:7447".into()],
@@ -442,9 +428,37 @@ mod tests {
         assert!(form.scouting);
 
         let back = form.to_stored().unwrap();
-        assert_eq!(back.base, Some(String::new()), "an empty base is stored");
+        assert_eq!(
+            back.base,
+            Some(String::new()),
+            "an empty namespace is stored"
+        );
         assert_eq!(back.connect, stored.connect);
         assert_eq!(back.scouting, Some(true));
+    }
+
+    /// A stored context's v1 `registry` has no widget since #614 (FL6a), and
+    /// applying the editor over the stored context leaves it as it was —
+    /// the merge #194 introduced, carrying a field this pane no longer
+    /// reads.
+    #[test]
+    fn applying_the_editor_leaves_a_stored_registry_untouched() {
+        let mut stored = StoredContext {
+            base: Some("acme".into()),
+            connect: vec!["tcp/127.0.0.1:7447".into()],
+            registry: vec!["/abs/registry".into()],
+            ..StoredContext::default()
+        };
+        let mut form = ContextForm::default();
+        form.load_from("lab", &stored);
+        form.base = "spray".into();
+        form.apply_to(&mut stored).unwrap();
+        assert_eq!(stored.base.as_deref(), Some("spray"));
+        assert_eq!(
+            stored.registry,
+            [std::path::PathBuf::from("/abs/registry")],
+            "parsed, ignored, and carried through the save"
+        );
     }
 
     #[test]

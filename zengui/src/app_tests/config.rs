@@ -87,7 +87,7 @@ async fn the_config_tool_applies_a_hot_change_and_refuses_an_unsound_one_unsent(
     const ORIGIN: &str = "h-c0f1c0f1c0f1";
     let (client, double, _served, _live, _server) = config_producer(ORIGIN).await;
     let mut app = test_app();
-    app.dep.session = Some(client);
+    app.dep.raw = Some(client);
     config_open(&mut app, ORIGIN).await;
     assert_eq!(app.work.bench.config_form.view().unwrap().revision, 1);
 
@@ -152,7 +152,7 @@ async fn the_config_tool_arms_joins_confirms_and_persists_a_reach_change() {
     const ORIGIN: &str = "h-c0f1c0f1c0f2";
     let (client, double, _served, _live, _server) = config_producer(ORIGIN).await;
     let mut app = test_app();
-    app.dep.session = Some(client);
+    app.dep.raw = Some(client);
     config_open(&mut app, ORIGIN).await;
 
     let config = |m| Message::Pane(PaneMsg::Config(m));

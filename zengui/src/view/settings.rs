@@ -1,6 +1,7 @@
 //! The Settings overlay (#188) — the launch-only knobs, surfaced.
 //!
-//! Five settings were launch-only and invisible afterwards: `--registry`,
+//! Five settings were launch-only and invisible afterwards: `--contracts`
+//! (`--registry` until #614),
 //! `--max-keys`, `--echo-lines`, `--history-entries` and `--eager`. A user
 //! who tripped the key-table bound had no way to raise it and — worse — no
 //! way to *see* it, in an application whose whole moat is that every bound
@@ -38,9 +39,10 @@ pub struct SettingsForm {
     pub max_keys: String,
     pub timeout: String,
     pub eager: bool,
-    /// Registry directories, comma- or space-separated; empty = the bus's
-    /// own slices (RFC 08 §6 introspection).
-    pub registry: String,
+    /// Contract paths — authoring files, directories of them, `.history`
+    /// roots — comma- or space-separated; empty = contracts from the bus
+    /// alone (spec §8.4).
+    pub contracts: String,
     /// The last apply's outcome, rendered verbatim.
     pub status: Option<Result<String, String>>,
 }
@@ -54,8 +56,8 @@ impl SettingsForm {
         self.max_keys = s.max_keys.to_string();
         self.timeout = s.timeout_secs.to_string();
         self.eager = s.eager;
-        self.registry = s
-            .registry
+        self.contracts = s
+            .contracts
             .iter()
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
@@ -72,7 +74,7 @@ pub struct Tuning {
     pub max_keys: usize,
     pub timeout_secs: u64,
     pub eager: bool,
-    pub registry: Vec<PathBuf>,
+    pub contracts: Vec<PathBuf>,
 }
 
 /// Messages the overlay emits.
@@ -83,7 +85,7 @@ pub enum SettingsMsg {
     MaxKeysChanged(String),
     TimeoutChanged(String),
     EagerToggled(bool),
-    RegistryChanged(String),
+    ContractsChanged(String),
     /// Validate the whole form; a valid one becomes a [`Tuning`].
     Apply,
 }
@@ -117,12 +119,12 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     // below or documented below as owned elsewhere. A field added to the
     // struct fails to compile here until it is accounted for.
     let crate::config::Settings {
-        base,
+        namespace,
         connect,
         listen,
         scouting,
         zenoh_config,
-        registry: _,     // controlled below (the forget path)
+        contracts: _,    // controlled below (reloaded on apply)
         timeout_secs: _, // controlled below (live, next query)
         scope,
         selectors,
@@ -228,22 +230,23 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         .style(muted),
     );
 
-    // ── The registry, which is not a bound at all ──
-    col = col.push(group("registry"));
+    // ── The contracts, which are not a bound at all (#614, FL6a) ──
+    col = col.push(group("contracts"));
     col = col.push(input_row(
-        "REGISTRY DIRS",
-        "registry/ ../other/registry",
-        &d.form.registry,
-        SettingsMsg::RegistryChanged,
-        "a registry change re-runs the slice union and can change every \
-         registration badge in the tree — applying it takes the same \
-         forget path a base change does: every verdict about the old \
-         slices is dropped rather than left on screen (O4). To keep it \
-         across launches, save it into a context (Connect)."
+        "CONTRACTS",
+        "contracts/ nav.v2.toml .history",
+        &d.form.contracts,
+        SettingsMsg::ContractsChanged,
+        "contracts held offline seed the store, so a revision held here is \
+         never retrieved from the bus (spec §8.5) — applying a change \
+         reloads them, and every verdict and decode judged under the old \
+         ones is dropped rather than left on screen (O4). Remembered by this \
+         window, never written into a shared context."
             .to_string(),
     ));
     col = col.push(kit::muted(
-        "dirs of registry/*.{toml,kdl}, space-separated — empty = the bus's slices",
+        "authoring files, directories of them or .history roots, space-separated — \
+         empty = contracts from the bus alone (§8.4)",
     ));
 
     col = col.push(
@@ -269,8 +272,8 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     col = col.push(group("owned elsewhere"));
     col = col.push(
         kit::body(format!(
-            "base: {} — the location bar's base picker owns it",
-            crate::config::base_label(base),
+            "namespace: {} — the location bar's namespace picker owns it",
+            crate::config::namespace_label(namespace),
         ))
         .style(muted),
     );

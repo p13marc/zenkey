@@ -125,7 +125,7 @@ impl TreeState {
             Some(s) => s.as_ref(),
             None => {
                 empty_skeleton = Skeleton::build(
-                    dep.base(),
+                    dep.namespace(),
                     &SliceSet::default(),
                     &std::collections::BTreeMap::new(),
                     None,
@@ -154,14 +154,18 @@ impl TreeState {
         // stays registry-blind (issue #65).
         self.flat = match (self.pivot, self.tree_search.is_empty()) {
             (view::tree::Pivot::Chunks, true) => {
-                view::tree::flatten(&merged, dep.base(), &self.expanded, MAX_ROWS, now)
+                view::tree::flatten(&merged, dep.namespace(), &self.expanded, MAX_ROWS, now)
             }
-            (view::tree::Pivot::Chunks, false) => {
-                view::tree::search_flatten(&merged, dep.base(), &self.tree_search, MAX_ROWS, now)
-            }
+            (view::tree::Pivot::Chunks, false) => view::tree::search_flatten(
+                &merged,
+                dep.namespace(),
+                &self.tree_search,
+                MAX_ROWS,
+                now,
+            ),
             (pivot, _) => view::tree::pivot_flatten(
                 &merged,
-                dep.base(),
+                dep.namespace(),
                 pivot,
                 &self.expanded,
                 &self.tree_search,

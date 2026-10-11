@@ -59,10 +59,10 @@ fn the_selector_editor_seeds_forks_and_refuses_invalid_drafts() {
 /// The Settings apply (#188), driven through `update`: the echo ring
 /// re-bounds live — no reconnect, no monitor restart — and **no resize ever
 /// discards the counters that reported the old bound's cost**; the
-/// reconnect-gated knobs change only the settings; and a registry change
-/// takes the same forget path a base change does.
+/// reconnect-gated knobs change only the settings; and a contracts change
+/// reloads them, dropping what was judged under the old ones (#614, FL6a).
 #[test]
-fn a_tuning_apply_resizes_live_keeps_the_counters_and_forgets_on_registry() {
+fn a_tuning_apply_resizes_live_keeps_the_counters_and_reloads_contracts() {
     use crate::message::DeploymentMsg;
     use crate::view::settings::Tuning;
 
@@ -82,7 +82,7 @@ fn a_tuning_apply_resizes_live_keeps_the_counters_and_forgets_on_registry() {
         max_keys: 1000,
         timeout_secs: 5,
         eager: false,
-        registry: vec![],
+        contracts: vec![],
     };
 
     // Shrink, live: the ring re-bounds in place, the trim is counted, and
@@ -154,34 +154,59 @@ fn a_tuning_apply_resizes_live_keeps_the_counters_and_forgets_on_registry() {
         "{status:?}"
     );
 
-    // A registry change is a SliceSource change: it takes the same forget
-    // path a base change does, so verdicts about the old slices are dropped…
-    app.tree.expanded.open("v1/h-0123456789ab/state");
-    app.dep.slice_source = crate::view::status::SliceSource::Bus {
-        count: 3,
-        self_disagreements: 0,
-    };
+    // A contracts change reloads them (#614, FL6a): the settings and this
+    // window's own memory take the new list — never the shared context —
+    // and the load's landing drops every verdict judged under the old
+    // contracts rather than layering new ones under it…
+    let walkthrough =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+    app.work.verdicts.payloads.record(
+        "zk2/robot1/nav/nav.v2/stream/position",
+        zenkey_v1::schema::validate::Verdict::Valid,
+    );
     tune(
         &mut app,
         Tuning {
             echo_lines: 500,
             max_keys: 9000,
-            registry: vec![std::path::PathBuf::from("/tmp/registry")],
+            contracts: vec![walkthrough.clone()],
             ..base
         },
     );
     assert_eq!(
-        app.dep.settings.registry,
-        [std::path::PathBuf::from("/tmp/registry")]
+        app.dep.settings.contracts,
+        std::slice::from_ref(&walkthrough)
     );
-    assert!(app.tree.expanded.is_empty(), "the forget path ran");
     assert_eq!(
-        app.dep.slice_source,
-        crate::view::status::SliceSource::None,
-        "the old slices' verdicts are dropped, not layered under new ones"
+        app.chrome.prefs.contracts,
+        std::slice::from_ref(&walkthrough),
+        "remembered by this window"
+    );
+    let status = app
+        .work
+        .bench
+        .settings_form
+        .status
+        .clone()
+        .expect("a verdict");
+    assert!(status.unwrap().contains("contracts changed"));
+    let _ = app.update(Message::Bus(crate::message::BusMsg::ContractsLoaded(
+        Arc::new(crate::services::contracts::load_all(&[walkthrough])),
+    )));
+    assert_eq!(
+        app.work.verdicts.payloads.keys_checked(),
+        0,
+        "the old contracts' verdicts are dropped, not layered under new ones"
+    );
+    assert!(
+        app.dep
+            .contracts
+            .as_ref()
+            .is_some_and(|c| !c.set.is_empty()),
+        "the new contracts are held"
     );
     // …while the ring — session state, not fleet evidence — keeps both its
-    // three retained lines and its loss counters through the forget.
+    // three retained lines and its loss counters.
     assert_eq!(app.work.echo.echo.len(), 3);
     assert_eq!(app.work.echo.echo.evicted(), 6);
     assert_eq!(app.work.echo.echo.lagged(), 4);

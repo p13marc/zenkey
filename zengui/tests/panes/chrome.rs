@@ -26,10 +26,9 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
 
     let link = zengui::message::LinkState::Pumping;
     let watched: Vec<String> = vec![];
-    let source = status::SliceSource::None;
     let mut ui = simulator::<Message, _, _>(status::strip(Status {
         link: &link,
-        base_label: "acme",
+        namespace_label: "acme",
         watched: &watched,
         skeleton: None,
         keys_unwatched: 0,
@@ -41,7 +40,7 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         facts_cached: 0,
         facts_evicted: 0,
         totals: Default::default(),
-        slices: &source,
+        contracts: Default::default(),
         seeding: 0,
         seeded_watches: 0,
         seed_totals: Default::default(),
@@ -94,18 +93,22 @@ fn the_connect_pane_states_what_scouting_means() {
     // it anyway, which is how its words used to go unpinned.
     for label in [
         "NAME",
-        "BASE",
+        "NAMESPACE",
         "TIMEOUT (S)",
         "CONNECT",
         "LISTEN",
         "ZENOH CONFIG",
-        "REGISTRY",
     ] {
         assert!(
             ui.find(label).is_ok(),
             "the {label} field has lost its label"
         );
     }
+    // No registry row since #614 (FL6a): zk2 reads contracts, which this
+    // window remembers itself — a context's v1 `registry` is carried
+    // through a save untouched, and never shown as if it did something.
+    assert!(ui.find("REGISTRY").is_err(), "connect has no registry row");
+    assert!(ui.find("empty = the bus root: keys start at zk2/").is_ok());
 
     // A session that reaches nothing is called out where the fix is — as an
     // error, the mark beside the words (#559).
@@ -137,7 +140,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
     fn scope(form: &ScopeForm) -> ScopeEditorData<'_> {
         ScopeEditorData {
             scope: zengui::scope::ScopePreset::Everything,
-            base: "",
+            namespace: "",
             selectors: &[],
             form,
         }
@@ -305,17 +308,17 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
 
 // ── Location bar (#185) ──────────────────────────────────────────────────
 
-/// The location bar names the empty base — the RFC v1.6 bus-root deployment
+/// The location bar names the empty namespace — the bus-root deployment
 /// is a first-class value, not a missing one — and says when nothing is
 /// selected rather than rendering a gap.
 #[test]
-fn the_location_bar_names_the_empty_base_and_the_empty_selection() {
-    use zengui::config::BaseChoice;
+fn the_location_bar_names_the_empty_namespace_and_the_empty_selection() {
+    use zengui::config::NamespaceChoice;
     use zengui::message::Subject;
     use zengui::view::location::{self, LocationData};
 
-    let options = [BaseChoice::bus_root(), BaseChoice::new("acme")];
-    // The picker's closed face and its rows both draw `BaseChoice`'s
+    let options = [NamespaceChoice::bus_root(), NamespaceChoice::new("acme")];
+    // The picker's closed face and its rows both draw `NamespaceChoice`'s
     // `Display`, and a `pick_list` draws that text itself — it is not a
     // `Text` widget, so `iced_test`'s text selector cannot see inside it.
     // The label is pinned at the seam the picker draws from instead; that
@@ -323,13 +326,13 @@ fn the_location_bar_names_the_empty_base_and_the_empty_selection() {
     // signature enforces.
     assert_eq!(
         options[0].to_string(),
-        "(empty — keys start at v1/)",
-        "the empty base renders its label, never a blank row"
+        "(empty — keys start at zk2/)",
+        "the empty namespace renders its label, never a blank row"
     );
     let mut ui = simulator::<Message, _, _>(location::breadcrumb(LocationData {
         context: None,
-        base: "",
-        base_options: &options,
+        namespace: "",
+        namespace_options: &options,
         scope: zengui::scope::ScopePreset::Everything,
         observing: false,
         subject: &Subject::None,
@@ -348,17 +351,17 @@ fn the_location_bar_names_the_empty_base_and_the_empty_selection() {
 /// selects that subtree — the acceptance the bar exists for (#185).
 #[test]
 fn the_location_bar_renders_the_trail_and_an_ancestor_click_selects_its_subtree() {
-    use zengui::config::BaseChoice;
+    use zengui::config::NamespaceChoice;
     use zengui::message::{Subject, SubjectMsg};
     use zengui::view::location::{self, LocationData};
 
     let subject = Subject::Key("v1/h-a/telemetry/sysinfo/disk".into());
-    let options = [BaseChoice::bus_root()];
+    let options = [NamespaceChoice::bus_root()];
     let mut ui = simulator::<Message, _, _>(location::breadcrumb(LocationData {
         context: Some("lab"),
-        base: "",
-        base_options: &options,
-        scope: zengui::scope::ScopePreset::Telemetry,
+        namespace: "",
+        namespace_options: &options,
+        scope: zengui::scope::ScopePreset::Streams,
         observing: false,
         subject: &subject,
     }));
@@ -391,9 +394,9 @@ fn the_location_bar_renders_the_trail_and_an_ancestor_click_selects_its_subtree(
 // ── The key-expression editor (#187) ─────────────────────────────────────
 
 /// On a preset the editor is read-only truth: the selectors actually
-/// resolved by `scope::selectors` — the Deployment preset's explicit
-/// @catalog line included (RFC 03 §4 D4) — each with what it cannot see,
-/// under the D2 statement, with the fork as the only way to edit.
+/// resolved by `scope::selectors` — the Deployment preset's ambient
+/// selector in the namespace (#614, FL6a) — each with what it cannot see,
+/// under the verbatim rule, with the fork as the only way to edit.
 #[test]
 fn the_selector_editor_shows_the_resolved_truth_and_its_blind_spots() {
     use zengui::scope::ScopePreset;
@@ -402,39 +405,33 @@ fn the_selector_editor_shows_the_resolved_truth_and_its_blind_spots() {
     let form = ScopeForm::default();
     let mut ui = simulator::<Message, _, _>(scope_editor::pane(ScopeEditorData {
         scope: ScopePreset::Deployment,
-        base: "zensight",
+        namespace: "zensight",
         selectors: &[],
         form: &form,
     }));
 
-    // The D2 rule is stated inline — the exact wording, pinned.
+    // The verbatim rule is stated inline — the exact wording, pinned.
     assert!(
-        ui.find(scope_editor::D2_RULE).is_ok(),
-        "the D2 rule is on screen"
+        ui.find(scope_editor::VERBATIM_RULE).is_ok(),
+        "the verbatim rule is on screen"
     );
 
     // The resolved selectors are the ones `scope::selectors` builds — the
-    // catalog subtree spelled explicitly, never reachable by the fleet
-    // wildcards (D4).
+    // namespace's ambient selector (#614, FL6a).
     for sel in ScopePreset::Deployment.selectors("zensight", &[]) {
         assert!(
             ui.find(sel.as_str()).is_ok(),
             "resolved selector {sel:?} not shown"
         );
     }
-    assert!(
-        ui.find("zensight/v1/@catalog/state/**").is_ok(),
-        "the Deployment preset must keep naming the catalog subtree"
-    );
+    assert!(ui.find("zensight/zk2/**").is_ok());
 
-    // Every selector names what it cannot see.
+    // Every selector names what it cannot see — zk2's verbatim chunks.
+    let spot = zengui::scope::blind_spot("zensight/zk2/**");
+    assert!(spot.contains("@stream") && spot.contains("@zk"), "{spot}");
     assert!(
-        ui.find(format!(
-            "cannot see: {}",
-            zengui::scope::blind_spot("zensight/v1/*/telemetry/**")
-        ))
-        .is_ok(),
-        "a fleet selector's blind spot is on screen"
+        ui.find(format!("cannot see: {spot}")).is_ok(),
+        "the ambient selector's blind spot is on screen"
     );
     assert!(ui.find("fork into custom and edit").is_ok());
     assert!(
@@ -459,7 +456,7 @@ fn the_selector_editor_validates_each_row_as_typed() {
     let active = ["demo/**".to_string()];
     let mut ui = simulator::<Message, _, _>(scope_editor::pane(ScopeEditorData {
         scope: ScopePreset::Custom,
-        base: "",
+        namespace: "",
         selectors: &active,
         form: &form,
     }));
@@ -495,12 +492,12 @@ fn the_selector_editor_validates_each_row_as_typed() {
 /// `app.rs`'s `test_app` uses.
 fn launch_settings() -> zengui::config::Settings {
     zengui::config::Settings {
-        base: String::new(),
+        namespace: String::new(),
         connect: vec![],
         listen: vec![],
         scouting: None,
         zenoh_config: None,
-        registry: vec![],
+        contracts: vec![],
         timeout_secs: 5,
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],
@@ -574,23 +571,29 @@ fn the_settings_overlay_labels_live_against_reconnect_and_states_each_cost() {
         .is_ok()
     );
 
-    // The registry names its blast radius and its path.
+    // The contracts (#614, FL6a) name their blast radius and where they
+    // are remembered — never the shared context; no registry row survives.
+    assert!(ui.find("CONTRACTS").is_ok(), "settings has contracts");
     assert!(
         ui.find(
-            "a registry change re-runs the slice union and can change every \
-             registration badge in the tree — applying it takes the same \
-             forget path a base change does: every verdict about the old \
-             slices is dropped rather than left on screen (O4). To keep it \
-             across launches, save it into a context (Connect)."
+            "contracts held offline seed the store, so a revision held here is \
+             never retrieved from the bus (spec §8.5) — applying a change \
+             reloads them, and every verdict and decode judged under the old \
+             ones is dropped rather than left on screen (O4). Remembered by this \
+             window, never written into a shared context."
         )
         .is_ok()
     );
+    assert!(ui.find("REGISTRY DIRS").is_err(), "no registry row");
 
     // Every field the overlay does not control is documented as owned
-    // elsewhere — base, session setup, scope.
+    // elsewhere — namespace, session setup, scope.
     assert!(
-        ui.find("base: (empty — keys start at v1/) — the location bar's base picker owns it")
-            .is_ok()
+        ui.find(
+            "namespace: (empty — keys start at zk2/) — the location bar's \
+             namespace picker owns it"
+        )
+        .is_ok()
     );
     assert!(
         ui.find(

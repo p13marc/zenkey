@@ -36,7 +36,7 @@ pub(crate) fn update(slot: &mut SubjectSlot, dep: &Deployment, msg: FieldsMsg) -
             let Some(window) = slot.fields.window_secs() else {
                 return Task::none();
             };
-            let Some(session) = dep.session.clone() else {
+            let Some(session) = dep.raw.clone() else {
                 slot.fields.report = Some(Err("no session — connect first".into()));
                 return Task::none();
             };
@@ -49,8 +49,8 @@ pub(crate) fn update(slot: &mut SubjectSlot, dep: &Deployment, msg: FieldsMsg) -
             services::value::field(
                 slot.id,
                 session,
-                dep.base().to_string(),
-                dep.slices.clone(),
+                dep.namespace().to_string(),
+                None,
                 store,
                 key.to_string(),
                 std::time::Duration::from_secs(window),

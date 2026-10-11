@@ -29,7 +29,7 @@ pub(crate) fn update(slot: &mut SubjectSlot, dep: &Deployment, msg: WhyMsg) -> T
                 ));
                 return Task::none();
             };
-            let Some(session) = dep.session.clone() else {
+            let Some(session) = dep.raw.clone() else {
                 slot.why.report = Some(Err("no session — connect first".into()));
                 return Task::none();
             };
@@ -41,8 +41,8 @@ pub(crate) fn update(slot: &mut SubjectSlot, dep: &Deployment, msg: WhyMsg) -> T
             let run = services::value::why(
                 slot.id,
                 session,
-                dep.base().to_string(),
-                dep.slices.clone(),
+                dep.namespace().to_string(),
+                None,
                 key.to_string(),
                 dep.timeout(),
             );

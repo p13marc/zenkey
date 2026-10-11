@@ -23,7 +23,7 @@ pub(crate) fn update(form: &mut ScopeForm, msg: ScopeMsg, cx: Ctx) -> Task<Messa
                 .dep
                 .settings
                 .scope
-                .selectors(cx.dep.base(), &cx.dep.settings.selectors);
+                .selectors(cx.dep.namespace(), &cx.dep.settings.selectors);
             form.editing = true;
             form.status = None;
             Task::none()

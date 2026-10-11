@@ -43,19 +43,20 @@ pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message>
             if v.doctor.in_flight {
                 return Task::none();
             }
-            let Some(session) = cx.dep.session.clone() else {
+            let Some(session) = cx.dep.raw.clone() else {
                 v.doctor.error = Some("no session — connect first".into());
                 return Task::none();
             };
             v.doctor.in_flight = true;
             v.doctor.error = None;
-            let base = cx.dep.base().to_string();
+            let base = cx.dep.namespace().to_string();
             let timeout = cx.dep.timeout();
             let deep = v.doctor.deep;
             let listen = v.doctor.listen_window();
-            // Locals come from the registry DIRS only — never the union
-            // set, which would diff the bus against itself.
-            let dirs = cx.dep.settings.registry.clone();
+            // No registry dirs since #614 (FL6a): the v1 doctor runs with no
+            // locals ("no registry loaded", never "a registry that declares
+            // nothing") until FL9 runs zk2's against the contracts.
+            let dirs = Vec::new();
             services::sweep::doctor(
                 session,
                 base,
@@ -69,7 +70,7 @@ pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message>
             )
         }
         DoctorMsg::Done(outcome) => {
-            let base = cx.dep.base().to_string();
+            let base = cx.dep.namespace().to_string();
             v.doctor.finish(outcome, &base);
             Task::none()
         }
@@ -82,7 +83,7 @@ pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message>
             else {
                 return Task::none();
             };
-            match crate::doctor::finding_target(finding, cx.dep.base()) {
+            match crate::doctor::finding_target(finding, cx.dep.namespace()) {
                 // A concrete key: select in the tree (with the usual
                 // on-demand fetch); the right pane stays on Doctor so
                 // the finding list is not lost.

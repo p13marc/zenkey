@@ -14,12 +14,9 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::message::{BusMsg, BusTick, LinkState, Message};
-use crate::scope;
 use crate::services;
 use crate::state::tree::shape_held;
 use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
-use crate::view;
-use crate::view::status::SliceSource;
 
 pub(crate) fn apply_tick(
     dep: &mut Deployment,
@@ -127,10 +124,10 @@ pub(crate) fn apply_tick(
     let now = std::time::Instant::now();
     work.verdicts
         .roster
-        .apply_transitions(dep.base(), &tick.nodes, now);
+        .apply_transitions(dep.namespace(), &tick.nodes, now);
     work.verdicts
         .roster
-        .refresh(&tick.tree, dep.base(), &tick.watched, now);
+        .refresh(&tick.tree, dep.namespace(), &tick.watched, now);
     // The chart's inputs all advanced above — the history ring, the rate
     // sampler, the facts behind the unit. Rebuilt once per slot here rather
     // than once per frame (#178, #257).
@@ -156,9 +153,10 @@ pub(crate) fn apply_tick(
 
 pub(crate) fn ensure_facts(dep: &mut Deployment, key: &str) {
     // One line, and the bound lives in the engine with the counter that
-    // reports it (#107). This is still the single insert point.
-    let base = dep.base().to_string();
-    dep.facts.ensure(&base, key, dep.slices.as_deref());
+    // reports it (#107). This is still the single insert point. No slices
+    // since #614 (FL6a): the v1 projection reads "not asked" until FL7.
+    let namespace = dep.namespace().to_string();
+    dep.facts.ensure(&namespace, key, None);
 }
 
 /// Everything the world answered — a task landing or a `link.rs` yield.
@@ -171,9 +169,9 @@ pub(crate) fn update(
     msg: BusMsg,
 ) -> Task<Message> {
     match msg {
-        BusMsg::SessionOpened(Ok(session)) => {
-            // A new session is a new everything: the base may differ, so
-            // every projection, roster and verdict from the old one is
+        BusMsg::SessionsOpened(Ok(sessions)) => {
+            // New sessions are a new everything: the namespace may differ,
+            // so every projection, roster and verdict from the old ones is
             // evidence about a different deployment (O4).
             //
             // This variant has exactly two producers — the launch open and
@@ -182,7 +180,14 @@ pub(crate) fn update(
             // live here, which removes the worst cross-group reach in the
             // file: a pane resetting the app.
             super::deployment::forget(dep, obs, tree, work);
-            dep.session = Some(session.clone());
+            let services::link::Sessions {
+                raw,
+                session,
+                namespace: _,
+            } = sessions;
+            dep.raw = Some(raw.clone());
+            dep.session = Some(session);
+            dep.reseed_store();
             // The context list is read from the shared file, not cached at
             // launch: `zenctl context create` on the other side of the
             // screen should show up here without a restart (#67). As a task
@@ -191,26 +196,48 @@ pub(crate) fn update(
             // access on a frame. Its answer lands on `ContextMsg::Refreshed`.
             let contexts = services::context::refresh();
             dep.schema_store = Some(Arc::new(zenkey_fleet_v1::SchemaStore::new(
-                dep.base(),
+                dep.namespace(),
                 dep.timeout(),
             )));
-            let discover = services::link::discover_bases(&session, dep.timeout());
-            Task::batch([discover, contexts, start_monitor(dep), load_slices(dep)])
+            let listing = services::link::list_namespaces(&raw, dep.timeout());
+            Task::batch([
+                listing,
+                contexts,
+                start_monitor(dep),
+                build_skeleton(dep),
+                load_contracts(dep),
+            ])
         }
-        BusMsg::SessionOpened(Err(e)) => {
-            // A transport that would not come up leaves the `--registry` dirs
+        BusMsg::SessionsOpened(Err(e)) => {
+            // A transport that would not come up leaves the contracts
             // answerable (#196): they load alone, and the link still says it
             // failed. A config the user named stays their error — no
-            // answering past it. Before #501 a dead router opened a peer
-            // session onto nothing, and the union loaded the dirs by accident.
-            let dirs = &dep.settings.registry;
-            let load = if !dirs.is_empty() && services::link::never_opened(&e) {
-                services::sweep::slices_from_dirs(dirs.clone())
+            // answering past it.
+            let load = if services::link::never_opened(&e) {
+                load_contracts(dep)
             } else {
                 Task::none()
             };
             obs.link = LinkState::Failed(e);
             load
+        }
+        BusMsg::NamespacedOpened(namespace, Ok(session)) => {
+            // A landing for a namespace the picker has since left is
+            // dropped, and its session with it: it would read presence and
+            // contracts of a deployment the window no longer names.
+            if namespace != dep.namespace() {
+                return Task::none();
+            }
+            dep.session = Some(session);
+            dep.reseed_store();
+            Task::none()
+        }
+        BusMsg::NamespacedOpened(namespace, Err(e)) => {
+            if namespace != dep.namespace() {
+                return Task::none();
+            }
+            obs.link = LinkState::Failed(e);
+            Task::none()
         }
         BusMsg::MonitorStarted(Ok(monitor)) => {
             obs.monitor = Some(Arc::clone(&monitor));
@@ -227,7 +254,9 @@ pub(crate) fn update(
         BusMsg::SkeletonBuilt(Ok((skeleton, roster))) => {
             dep.skeleton = Some(skeleton);
             // The build task gathered the roster anyway — seed the node
-            // dashboard from it instead of throwing it away (#61).
+            // dashboard from it instead of throwing it away (#61). Empty
+            // since #614 (FL6a): presence is zk2's, and the nodes pane
+            // reads it from FL9.
             work.verdicts.roster.seed(&roster);
             tree.reflatten(dep, obs);
             Task::none()
@@ -236,47 +265,23 @@ pub(crate) fn update(
             tracing::warn!("skeleton build failed: {e}");
             Task::none()
         }
-        BusMsg::BasesDiscovered(Ok(bases)) => {
-            dep.bases = bases;
-            rebuild_base_options(dep);
+        BusMsg::NamespacesListed(Ok(listing)) => {
+            dep.namespaces = Some(listing);
+            dep.rebuild_namespace_options();
             Task::none()
         }
-        BusMsg::BasesDiscovered(Err(e)) => {
-            tracing::warn!("base discovery failed: {e}");
+        BusMsg::NamespacesListed(Err(e)) => {
+            tracing::warn!("namespace listing failed: {e}");
             Task::none()
         }
-        BusMsg::SlicesLoaded(Ok(slices)) => {
-            dep.slice_source = if dep.settings.registry.is_empty() {
-                SliceSource::Bus {
-                    count: slices.slices().len(),
-                    self_disagreements: crate::services::sweep::self_disagreements(&slices),
-                }
-            } else {
-                SliceSource::Dirs {
-                    count: slices.slices().len(),
-                }
-            };
-            dep.slices = Some(slices);
-            reresolve_registrations(dep);
-            refresh_blob_list(dep, work);
+        BusMsg::ContractsLoaded(loaded) => {
+            // A load replaces the last one whole: what it dropped must not
+            // linger in a store seeded from the old list, so the store is
+            // rebuilt from this one (§8.5), and everything judged under the
+            // old contracts goes with it.
+            dep.contracts = Some(loaded);
+            dep.reseed_store();
             forget_judgements(obs, work);
-            // The skeleton is built FROM the slices — (re)build it now.
-            build_skeleton(dep)
-        }
-        BusMsg::SlicesUnionLoaded(Ok((slices, counts))) => {
-            dep.slice_source = SliceSource::Union(counts);
-            dep.slices = Some(slices);
-            reresolve_registrations(dep);
-            refresh_blob_list(dep, work);
-            forget_judgements(obs, work);
-            build_skeleton(dep)
-        }
-        BusMsg::SlicesUnionLoaded(Err(e)) => {
-            dep.slice_source = SliceSource::Failed(e);
-            Task::none()
-        }
-        BusMsg::SlicesLoaded(Err(e)) => {
-            dep.slice_source = SliceSource::Failed(e);
             Task::none()
         }
         BusMsg::Link(state) => {
@@ -287,13 +292,9 @@ pub(crate) fn update(
             apply_tick(dep, obs, sub, tree, work, &tick);
             // Live ticks only, deliberately: replay feeds `apply_tick` from
             // a file (`update/pane/replay.rs`) and never reaches this arm —
-            // validating file data against a live bus, or re-judging a live
-            // budget under file keys, would put one world's verdicts under
-            // the other's data (O4 in miniature).
-            Task::batch([
-                schedule_validation(dep, work, &tick),
-                schedule_budget(dep, obs, work),
-            ])
+            // validating file data against a live bus would put one world's
+            // verdicts under the other's data (O4 in miniature).
+            schedule_validation(dep, work, &tick)
         }
         BusMsg::VerdictsChecked(batch) => {
             // The bounded validation batch lands (#164): render paths only
@@ -353,191 +354,94 @@ fn validation_batch(
 }
 
 fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Task<Message> {
-    let (Some(session), Some(store)) = (dep.session.clone(), dep.schema_store.clone()) else {
+    let (Some(raw), Some(store)) = (dep.raw.clone(), dep.schema_store.clone()) else {
         return Task::none();
     };
     let batch = validation_batch(&tick.samples, &work.verdicts.payloads);
     if batch.is_empty() {
         return Task::none();
     }
-    services::value::validate(
-        store,
-        session,
-        dep.slices.clone(),
-        dep.base().to_string(),
-        batch,
-    )
+    services::value::validate(store, raw, None, dep.namespace().to_string(), batch)
 }
 
-/// Every this-many ticks (~4 s), re-join the budget (#221). Throttled: the
-/// join is O(observed keys × refinement) and a population does not explode
-/// per frame. Only where a registry is loaded — with no declarations there
-/// is no budget, and `obs.budgets` stays `None`, which draws no badge.
-const BUDGET_EVERY_TICKS: u64 = 16;
-
-fn schedule_budget(dep: &Deployment, obs: &Observation, work: &Workspace) -> Task<Message> {
-    let Some(slices) = dep.slices.clone() else {
-        return Task::none();
-    };
-    // The verdict cache's logical clock is the tick count — one counter,
-    // advanced in `apply_tick`, shared by both throttles.
-    if work.verdicts.payloads.tick_count() % BUDGET_EVERY_TICKS != 1 {
-        return Task::none();
-    }
-    services::sweep::budget(dep.base().to_string(), slices, Arc::clone(&obs.observed))
-}
-
-/// (Re)build the skeleton: slices are already loaded; roster + admin are
-/// gathered inside the task (both metadata-only).
+/// (Re)build the skeleton (#614, FL6a: from no slices, the admin space's
+/// declared entities alone, until FL6b builds zk2's from the lens).
 pub(crate) fn build_skeleton(dep: &Deployment) -> Task<Message> {
-    let (Some(session), Some(slices)) = (dep.session.clone(), dep.slices.clone()) else {
+    let Some(raw) = dep.raw.clone() else {
         return Task::none();
     };
-    let base = dep.base().to_string();
-    let timeout = dep.timeout();
-    services::sweep::skeleton(session, base, slices, timeout)
+    services::sweep::skeleton(raw, dep.namespace().to_string(), dep.timeout())
 }
 
-pub(crate) fn load_slices(dep: &Deployment) -> Task<Message> {
-    let dirs = dep.settings.registry.clone();
-    let Some(session) = dep.session.clone() else {
-        return Task::none();
-    };
-    let base = dep.base().to_string();
-    let timeout = dep.timeout();
-    if !dirs.is_empty() {
-        // The §6.1 union (issue #43): served wins, dirs fill, and the
-        // disagreement count reaches the status strip as data.
-        return services::sweep::slices_union(session, base, dirs, timeout);
-    }
-    services::sweep::slices(session, base, timeout)
+/// Load the contracts the settings name (#614, FL6a) — off the update
+/// thread, landing on `ContractsLoaded`.
+pub(crate) fn load_contracts(dep: &Deployment) -> Task<Message> {
+    services::contracts::load(dep.settings.contracts.clone())
 }
 
 pub(crate) fn start_monitor(dep: &Deployment) -> Task<Message> {
-    let Some(session) = dep.session.clone() else {
+    let Some(raw) = dep.raw.clone() else {
         return Task::none();
     };
-    // Liveliness is always on — zero payload by construction (RFC 04 §5)
-    // — and needs both the fleet sweep and @catalog by name (D4).
-    let liveliness = if dep.base().is_empty() && dep.bases.is_empty() {
-        scope::liveliness_any_base()
-    } else {
-        scope::liveliness_selectors(dep.base())
-    };
-    services::watch::start_monitor(session, liveliness, dep.settings.max_keys)
+    // No liveliness on the data pump since #614 (FL6a): presence is zk2's
+    // instance and interface tokens, read on the session in the namespace,
+    // and v1's alive tokens describe nothing a zk2 bus carries.
+    services::watch::start_monitor(raw, Vec::new(), dep.settings.max_keys)
 }
 
-/// Reproject the registry's `[[blob]]` declarations after a slice load.
-///
-/// Costs nothing on the bus: it reads slices already in hand and joins them
-/// against the roster already observed. The laziness rule (#84/#85) governs
-/// *fetching*, not rendering what has arrived — and the roster's
-/// `live_map()` returns `None` while unseeded, so an unasked join renders
-/// as "not asked" rather than as "nobody serves it" (O4).
-pub(crate) fn refresh_blob_list(dep: &Deployment, work: &mut Workspace) {
-    let Some(slices) = dep.slices.as_deref() else {
-        work.verdicts.blob.list = None;
-        return;
-    };
-    let source = match dep.slice_source {
-        view::status::SliceSource::Union { .. } => zenkey_fleet_v1::report::BlobListSource::Union,
-        view::status::SliceSource::Dirs { .. } => {
-            zenkey_fleet_v1::report::BlobListSource::RegistryDirs
-        }
-        _ => zenkey_fleet_v1::report::BlobListSource::Bus,
-    };
-    work.verdicts.blob.list = Some(zenkey_fleet_v1::blob_list(
-        slices.slices(),
-        work.verdicts.roster.live_map().as_ref(),
-        source,
-    ));
-}
-
-/// A registry (re)load invalidates everything judged under the old one: the
-/// payload verdicts (#164 — the `(key, schema hash)` discipline, kept by
-/// clearing at every door a hash can change through) and the budget join
-/// (#221 — declared bounds are the registry's). Both refill on the ordinary
-/// cadences; until then "not yet checked" and no-badge are the honest reads.
+/// A contracts (re)load invalidates everything judged under the old ones:
+/// the payload verdicts (#164 — the `(key, schema)` discipline, kept by
+/// clearing at every door a contract can change through) and the budget
+/// join (#221). Both refill on the ordinary cadences; until then "not yet
+/// checked" and no-badge are the honest reads.
 pub(crate) fn forget_judgements(obs: &mut Observation, work: &mut Workspace) {
     work.verdicts.payloads.clear();
     obs.budgets = None;
 }
 
-pub(crate) fn reresolve_registrations(dep: &mut Deployment) {
-    let Some(slices) = dep.slices.clone() else {
-        return;
-    };
-    dep.facts.resolve_all(&slices);
-}
-
-/// The base picker's options, after a discovery sweep landed.
-///
-/// The bus root leads — a deployment, not a placeholder — and every option is
-/// a [`BaseChoice`](crate::config::BaseChoice), so the empty base renders as
-/// its label rather than as a blank row (#185). Dedup is set-semantics: this
-/// used `.dedup()`, which only removes *adjacent* duplicates, so a non-sorted
-/// discovery order left repeats in the list.
-pub(crate) fn rebuild_base_options(dep: &mut Deployment) {
-    let mut seen = std::collections::BTreeSet::new();
-    dep.base_options = std::iter::once(String::new())
-        .chain(dep.bases.iter().map(|b| b.base.clone()))
-        .filter(|b| seen.insert(b.clone()))
-        .map(crate::config::BaseChoice::new)
-        .collect();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::BaseChoice;
+    use crate::config::NamespaceChoice;
 
-    /// Both #185 defects, pinned: the empty base is a labelled first-class
-    /// option, and duplicates are removed whatever order discovery answered
-    /// in — `.dedup()` only ever removed adjacent ones.
+    /// Both #185 defects, pinned on the namespace picker (#614, FL6a): the
+    /// empty namespace is a labelled first-class option, duplicates are
+    /// removed whatever order the listing answered in, and the namespace in
+    /// force is offered even when the listing did not see it — a picker
+    /// whose selected value is not among its options is #187's defect.
     #[test]
-    fn base_options_are_set_deduped_and_lead_with_the_labelled_bus_root() {
-        let mut dep = Deployment::new(crate::config::Settings {
-            base: String::new(),
-            connect: vec![],
-            listen: vec![],
-            scouting: None,
-            zenoh_config: None,
-            registry: vec![],
-            timeout_secs: 5,
-            scope: crate::scope::ScopePreset::Everything,
-            selectors: vec![],
-            eager: false,
-            echo_lines: 100,
-            history_entries: 10,
-            max_keys: 1000,
-        });
-        let discovered = |base: &str| zenkey_fleet_v1::DiscoveredBase {
-            base: base.into(),
-            origins: Default::default(),
-            producers: Default::default(),
-            storages: Vec::new(),
-        };
-        // Non-adjacent duplicates, and the bus root discovered explicitly.
-        dep.bases = vec![
-            discovered("acme"),
-            discovered("zensight"),
-            discovered("acme"),
-            discovered(""),
-        ];
-        rebuild_base_options(&mut dep);
+    fn namespace_options_are_set_deduped_and_lead_with_the_labelled_bus_root() {
+        let mut settings = crate::app::test_settings();
+        settings.namespace = "quiet".into();
+        let mut dep = Deployment::new(settings);
+        let keys: Vec<String> = [
+            "acme/zk2/robot1/nav/@zk/instance/0123456789abcdef",
+            "spray/zk2/robot1/nav/@zk/instance/0123456789abcdef",
+            "acme/zk2/robot2/nav/@zk/instance/fedcba9876543210",
+            "zk2/host-a/tc/@zk/instance/0123456789abcdef",
+        ]
+        .map(String::from)
+        .to_vec();
+        dep.namespaces = Some(Arc::new(zenkey_fleet::namespaces(
+            zenkey_fleet::NAMESPACE_SELECTOR,
+            &keys,
+            true,
+        )));
+        dep.rebuild_namespace_options();
         assert_eq!(
-            dep.base_options,
+            dep.namespace_options,
             [
-                BaseChoice::bus_root(),
-                BaseChoice::new("acme"),
-                BaseChoice::new("zensight"),
+                NamespaceChoice::bus_root(),
+                NamespaceChoice::new("acme"),
+                NamespaceChoice::new("spray"),
+                NamespaceChoice::new("quiet"),
             ],
-            "one row per base, discovery order kept, the bus root first"
+            "one row per namespace, the bus root first, the one in force kept"
         );
         assert_eq!(
-            dep.base_options[0].to_string(),
-            "(empty — keys start at v1/)",
-            "the empty base is a labelled deployment, never a blank row"
+            dep.namespace_options[0].to_string(),
+            "(empty — keys start at zk2/)",
+            "the empty namespace is a labelled deployment, never a blank row"
         );
     }
 

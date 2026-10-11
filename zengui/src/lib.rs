@@ -12,9 +12,13 @@
 //! than `Result` because for an observer "does not parse" is an answer, not an
 //! error. The overlay lives in exactly one module, [`keyfacts`].
 //!
-//! Like every explorer, the session is **un-namespaced** (RFC 09 §5): zengui
-//! spells full wire keys and does its own base handling, which is what lets it
-//! see traffic a namespaced application is blind to.
+//! **Two sessions** since #614 (FL6a), as zenctl and zenwatch run: the data
+//! pump watches on a session in **no** namespace (RFC 09 §5) — zengui spells
+//! full wire keys, which is what lets it see traffic a namespaced application
+//! is blind to — and presence, descriptors and contracts are read on a
+//! session **in** the deployment's namespace, the way the deployment's own
+//! consumers read them. The namespace is `--namespace` (`--base` its alias),
+//! and a namespace switch reopens only the second session.
 //!
 //! # The Elm loop, in four places
 //!
