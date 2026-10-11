@@ -1,11 +1,12 @@
 //! Fleet engine for zk2 tooling (issue #15; zk2 since #612).
 //!
-//! The core of `zenctl`: everything a bus explorer needs that is not
-//! presentation, in five layers — see **The map** below. It reads a zk2
-//! deployment through the zk2 runtime (`zenkey` 0.20, by path) and its
-//! session-free model (`zenkey-model`): presence from instance and
-//! interface tokens, descriptors, contract bundles retrieved by fingerprint,
-//! and every payload rendered through the contract that declares it.
+//! The core of `zenctl`, `zengui` and `zenwatch`: everything a bus
+//! explorer needs that is not presentation, in five layers — see **The
+//! map** below. It reads a zk2 deployment through the zk2 runtime
+//! (`zenkey` 0.20, by path) and its session-free model (`zenkey-model`):
+//! presence from instance and interface tokens, descriptors, contract
+//! bundles retrieved by fingerprint, and every payload rendered through
+//! the contract that declares it.
 //!
 //! **Two sessions** (decided 2026-10-08). A resolved verb reads through a
 //! session opened **in** the deployment's namespace, as the deployment's
@@ -25,9 +26,9 @@
 //! judges (`why`, `cutover`, `retired`, `conform` and its registry checks)
 //! and the profile-backed features (configuration, blobs, the exporter,
 //! alerts, kinds and budgets) live on the `v1` branch, which releases
-//! 0.14.x. zengui builds against that engine from crates.io
-//! (`zenkey-fleet =0.18.0`) until #614 re-targets it, and zenwatch's write
-//! side does until FL3; zenwatch's read side runs on this crate since FL2.
+//! 0.14.x. Every frontend on `main` runs on this crate: zenctl since FJ9,
+//! zenwatch since FL3 and zengui since FL11b (#614), and none links the v1
+//! engine (`zenkey-fleet =0.18.0`) any more.
 //!
 //! # The map
 //!

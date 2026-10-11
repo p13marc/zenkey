@@ -126,7 +126,7 @@ jobs:
       - uses: https://github.com/Swatinem/rust-cache@v2.9.2
         with:
           cache-targets: false
-      - run: cargo check -p zenkey@0.20.0 --no-default-features --locked
+      - run: cargo check -p zenkey --no-default-features --locked
       # zenkey-model is session-free (#608): zenoh-keyexpr, and no other
       # zenoh crate.
       - run: ./scripts/check-model-zenoh-free.sh

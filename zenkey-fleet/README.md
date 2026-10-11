@@ -1,7 +1,8 @@
 # zenkey-fleet
 
 The fleet engine for [zk2](https://github.com/p13marc/zenkey) Zenoh tooling —
-the shared core of the zk2 explorers, `zenctl` first, in five layers:
+the shared core of the zk2 explorers (`zenctl`, `zengui` and the `zenwatch`
+notifier), in five layers:
 
 ```text
   bus/     holds a session      →  observations
@@ -24,9 +25,9 @@ payload rendered through the contract that declares it. **`main` is the zk2
 line**: v1's engine — the registry slice sets, RFC 08 §6 introspection, the
 v1 roster, the schema-aware decode seam and its codec features, the v1 judges
 and the profile-backed features — left at FJ9 (#612) and lives on the `v1`
-branch, released as `zenkey-fleet` 0.18.x, which zengui builds against
-until #614 ports it (and zenwatch's write side, until FL3; its read side
-runs on this crate since FL2).
+branch, released as `zenkey-fleet` 0.18.x. Every frontend on `main` runs on
+this crate since #614 (zenwatch at FL3, zengui at FL11b); none links the v1
+engine.
 
 ## `bus/` — everything holding a session
 

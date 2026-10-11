@@ -48,6 +48,7 @@ observability shape.
 - **Frozen.** The v1 convention is frozen at RFC v1.50: errata only.
 - **Maintained.** v1 is maintained on the `v1` branch, released as 0.14.x
   patches (#587).
-- **Pinned on `main`.** Until each tool is ported to zk2, `main` builds the v1
-  tools against the v1 libraries pinned from crates.io: the strangler layout
-  (#615).
+- **Gone from `main`.** The strangler layout (#615) built each v1 tool on
+  `main` against the v1 libraries pinned from crates.io until it was ported
+  to zk2. zengui was the last (#614): no member of `main` links the v1
+  libraries now.

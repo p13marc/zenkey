@@ -14,9 +14,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-# Not `workspace = true`: the workspace entry pins the crates.io 0.18.0 that
-# zengui and zenwatch build against (#614); these fixtures are the in-tree
-# engine's.
+# The in-tree engine, by path, as every member takes it.
 zenkey-fleet = { path = "../zenkey-fleet" }
 serde_json = { workspace = true }
 # The ACL plan's contract (#612, FJ7), loaded from its authoring text so the
