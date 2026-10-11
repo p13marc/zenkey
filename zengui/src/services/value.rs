@@ -130,6 +130,19 @@ pub fn validate(
     lens: LensInputs,
     batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
 ) -> Task<Message> {
+    validate_then(lens, batch, |out| {
+        Message::Bus(crate::message::BusMsg::VerdictsChecked(out))
+    })
+}
+
+/// [`validate`], landing wherever `land` says: a replay checks its ticks
+/// through its own offline lens and lands them on its own message, keyed by
+/// the replay (#614, FL10b), so neither world's verdicts land in the other.
+pub fn validate_then(
+    lens: LensInputs,
+    batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
+    land: impl FnOnce(Vec<(String, zenkey_fleet::report::Conformance)>) -> Message + Send + 'static,
+) -> Task<Message> {
     Task::perform(
         async move {
             let over = lens.lens();
@@ -143,7 +156,7 @@ pub fn validate(
             }
             out
         },
-        |out| Message::Bus(crate::message::BusMsg::VerdictsChecked(out)),
+        land,
     )
 }
 
@@ -213,33 +226,5 @@ pub fn why(
         },
         // The asking slot's id rides the landing (#257).
         move |out| Message::Pane(PaneMsg::Why(slot, crate::view::why::WhyMsg::Done(out))),
-    )
-}
-
-/// The declared request type's schema, flattened into the Send form's fields
-/// (§6.4 item 3).
-///
-/// "Not asked yet" is `None` and stays `None` until an answer lands; the pane
-/// renders that as "not asked", never as "no fields" (O4). A producer that
-/// declares no request type is answered here as an empty list, because that
-/// *is* an answer.
-pub fn request_schema(
-    session: zenoh::Session,
-    store: Arc<zenkey_fleet_v1::SchemaStore>,
-    producer: String,
-    request: String,
-) -> Task<Message> {
-    Task::perform(
-        async move {
-            store
-                .schema_for(&session, &producer, &request)
-                .await
-                .map(|schema| crate::view::send::schema_fields(&schema))
-        },
-        |fields| {
-            Message::Pane(PaneMsg::Send(crate::view::send::SendMsg::RequestSchema(
-                fields,
-            )))
-        },
     )
 }

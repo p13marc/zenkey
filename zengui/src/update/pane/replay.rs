@@ -135,23 +135,17 @@ pub(crate) fn update(
             work.replay.replay_loading = None;
             match result {
                 Ok(loaded) => {
-                    let Some(mut state) = loaded.take() else {
+                    let Some(state) = loaded.take() else {
                         // A landing can only be consumed once, and this one
                         // already was — nothing left to show.
                         return Task::none();
                     };
-                    // Mode honesty: the panes now show the file, from
-                    // its start — nothing live bleeds through. Every slot's
-                    // recorder was of the live world (#257): the pins' drop
-                    // with the follow slot's.
-                    work.echo.echo.clear();
-                    for slot in sub.all_mut() {
-                        slot.history = None;
-                        slot.refresh_series(dep);
-                    }
-                    let tick = state.scrub_to(0);
-                    work.replay.replay = Some(state);
-                    bus::apply_tick(dep, obs, sub, tree, work, &tick);
+                    // From its start: the panes show the file as it began.
+                    let checked = open(dep, obs, sub, tree, work, state, Edge::Start);
+                    // Replay writes nothing to the live bus (#74; #614,
+                    // FL10): a repeating publish stops as the mode begins.
+                    let stopped = super::send::stop_for_replay(&mut work.bench);
+                    return Task::batch([checked, stopped]);
                 }
                 Err(e) => {
                     // The open row comes back with the path that failed, so
@@ -178,6 +172,7 @@ pub(crate) fn update(
             if let Some(Some(tick)) = tick {
                 work.echo.echo.clear();
                 bus::apply_tick(dep, obs, sub, tree, work, &tick);
+                return validate(work, &tick);
             }
             Task::none()
         }
@@ -201,6 +196,7 @@ pub(crate) fn update(
                     work.echo.echo.clear();
                 }
                 bus::apply_tick(dep, obs, sub, tree, work, &tick);
+                return validate(work, &tick);
             }
             Task::none()
         }
@@ -213,13 +209,29 @@ pub(crate) fn update(
                 .map(|r| r.advance(std::time::Duration::from_millis(250)));
             if let Some(tick) = tick {
                 bus::apply_tick(dep, obs, sub, tree, work, &tick);
+                return validate(work, &tick);
+            }
+            Task::none()
+        }
+        ReplayMsg::VerdictsChecked(id, batch) => {
+            // Only the replay it was checked for records it (#614, FL10b):
+            // a batch outliving its replay is about a file no pane shows.
+            if work.replay.replay.as_ref().is_some_and(|r| r.id == id) {
+                for (key, verdict) in batch {
+                    work.verdicts.payloads.record(&key, verdict);
+                }
             }
             Task::none()
         }
         ReplayMsg::Exit => {
             work.replay.replay = None;
-            // The next live tick repaints the tree; the scrollback must
-            // not mix file lines into it.
+            // The tree merges against the deployment's skeleton again, and
+            // the capture's verdicts go with it: they were judged offline,
+            // about a file (#614, FL10b). The next live tick repaints the
+            // tree and refills the cache; the scrollback must not mix file
+            // lines into it.
+            tree.replay_skeleton = None;
+            work.verdicts.payloads.clear();
             work.echo.echo.clear();
             Task::none()
         }
@@ -274,8 +286,10 @@ pub(crate) fn update(
                     let Some(core) = obs.monitor.as_ref().map(|m| Arc::clone(m.core())) else {
                         return Task::none();
                     };
-                    enter_retained(dep, obs, sub, tree, work, &core);
-                    Task::none()
+                    let checked = enter_retained(dep, obs, sub, tree, work, &core);
+                    // Replay writes nothing to the live bus (#614, FL10).
+                    let stopped = super::send::stop_for_replay(&mut work.bench);
+                    Task::batch([checked, stopped])
                 }
             }
         }
@@ -315,6 +329,7 @@ pub(crate) fn update(
 /// Takes the core rather than the monitor so a headless test can drive it
 /// with a session-less [`zenkey_fleet::MonitorCore`] — the same posture as
 /// replay itself, and the seam #217's acceptance simulation enters through.
+/// The task it returns checks the window's first tick offline ([`validate`]).
 pub(crate) fn enter_retained(
     dep: &mut Deployment,
     obs: &mut Observation,
@@ -322,7 +337,7 @@ pub(crate) fn enter_retained(
     tree: &mut TreeState,
     work: &mut Workspace,
     core: &Arc<zenkey_fleet::MonitorCore>,
-) {
+) -> Task<Message> {
     let taken = core.retention();
     // Both reads are bounded work under the ingest mutex (#331): `retention`
     // is a `Copy` struct, `retained` hands back a shared `Arc<[_]>` snapshot
@@ -330,17 +345,72 @@ pub(crate) fn enter_retained(
     // `update()`, they used to stall zenoh's callback thread for a walk of
     // the whole window.
     let window = core.retained();
-    let mut state =
-        crate::replay::ReplayState::from_retained(&window, Arc::clone(&obs.watched), taken);
-    // Mode honesty, exactly as opening a file: the panes now show the
-    // window — nothing live bleeds through, and the scrollback restarts.
-    // Every slot's recorder was of the live world (#257).
+    let state = crate::replay::ReplayState::from_retained(&window, Arc::clone(&obs.watched), taken);
+    open(dep, obs, sub, tree, work, state, Edge::End)
+}
+
+/// Where on the capture clock a replay opens.
+enum Edge {
+    /// A file, from its start.
+    Start,
+    /// The retained window, at its newest edge.
+    End,
+}
+
+/// Open a replay: the panes show it from `edge`, resolved offline (#614,
+/// FL10b), and the task returned checks the first tick's payloads through
+/// the replay's own lens.
+///
+/// Mode honesty, for a file and the window alike: nothing live bleeds
+/// through. The scrollback restarts; every slot's recorder was of the live
+/// world (#257), the pins' with the follow slot's; the verdicts were judged
+/// under the live lens; and the tree merges against the replay's own
+/// skeleton — the live catalog describes another world (O4).
+fn open(
+    dep: &mut Deployment,
+    obs: &mut Observation,
+    sub: &mut SubjectState,
+    tree: &mut TreeState,
+    work: &mut Workspace,
+    mut state: crate::replay::ReplayState,
+    edge: Edge,
+) -> Task<Message> {
     work.echo.echo.clear();
     for slot in sub.all_mut() {
         slot.history = None;
         slot.refresh_series(dep);
     }
-    let tick = state.scrub_to(state.span_us);
+    state.resolve_offline(
+        dep.namespace(),
+        dep.contracts.as_ref().map(|c| Arc::clone(&c.set)),
+    );
+    tree.replay_skeleton = Some(Arc::clone(&state.lens.skeleton));
+    work.verdicts.payloads.clear();
+    let tick = match edge {
+        Edge::Start => state.scrub_to(0),
+        Edge::End => state.scrub_to(state.span_us),
+    };
     work.replay.replay = Some(state);
     bus::apply_tick(dep, obs, sub, tree, work, &tick);
+    validate(work, &tick)
+}
+
+/// Check a replayed tick's payloads through the replay's offline lens
+/// (#614, FL10b): the bounded batch the live pump would pick (#164), landing
+/// on the replay's own message under its id — never through the live
+/// catalog, and never into another replay's cache.
+fn validate(work: &Workspace, tick: &crate::message::BusTick) -> Task<Message> {
+    let Some(state) = work.replay.replay.as_ref() else {
+        return Task::none();
+    };
+    let batch = bus::validation_batch(&tick.samples, &work.verdicts.payloads);
+    if batch.is_empty() {
+        return Task::none();
+    }
+    let id = state.id;
+    services::value::validate_then(state.lens.inputs(), batch, move |out| {
+        Message::Workspace(crate::message::WorkspaceMsg::Replay(
+            ReplayMsg::VerdictsChecked(id, out),
+        ))
+    })
 }

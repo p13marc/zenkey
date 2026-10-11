@@ -192,7 +192,12 @@ impl<'a> Status<'a> {
             facts_evicted: dep.facts.evicted(),
             identity: (dep.identity.len(), dep.identity.evicted()),
             watched: &obs.watched,
-            skeleton: dep.skeleton.as_deref().map(|s| &s.coverage),
+            // A replay's own skeleton while one runs (#614, FL10b): the
+            // tree's declared half is the offline lens's then.
+            skeleton: match &work.replay.replay {
+                Some(r) => Some(&r.lens.skeleton.coverage),
+                None => dep.skeleton.as_deref().map(|s| &s.coverage),
+            },
             fetched: sub.follow.fetched.as_ref(),
             totals: obs.totals,
             contracts: ContractsStatus {

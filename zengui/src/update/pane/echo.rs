@@ -19,7 +19,14 @@ use crate::view::echo::EchoMsg;
 ///
 /// It stopped taking `&mut RightPane` when #180 made the Inspector a dock:
 /// the drill-through reveals it by *message* now, like the palette does.
-pub(crate) fn update(echo: &mut EchoPane, msg: EchoMsg, cx: Ctx) -> Task<Message> {
+/// `replay` is read for the export alone: a replayed line's identity comes
+/// from the replay's offline lens (#614, FL10b).
+pub(crate) fn update(
+    echo: &mut EchoPane,
+    replay: Option<&crate::replay::ReplayState>,
+    msg: EchoMsg,
+    cx: Ctx,
+) -> Task<Message> {
     match msg {
         EchoMsg::FilterChanged(f) => {
             echo.echo_view.filter = f;
@@ -62,12 +69,20 @@ pub(crate) fn update(echo: &mut EchoPane, msg: EchoMsg, cx: Ctx) -> Task<Message
             Task::none()
         }
         EchoMsg::Export => {
-            let text = view::echo::export(
-                &echo.echo,
-                &echo.echo_view,
-                cx.sub.follow.current.key(),
-                cx.dep.namespace(),
-            );
+            // Each key's identity through the lens of the world the lines
+            // came from (#614, FL10b): the deployment's live, a replay's
+            // offline lens while one runs — never the live catalog under a
+            // capture's keys (O4).
+            let selection = cx.sub.follow.current.key();
+            let text = match replay {
+                Some(r) => {
+                    view::echo::export(&echo.echo, &echo.echo_view, selection, &r.lens.lens())
+                }
+                None => {
+                    let inputs = cx.dep.lens_inputs();
+                    view::echo::export(&echo.echo, &echo.echo_view, selection, &inputs.lens())
+                }
+            };
             iced::clipboard::write(text)
         }
     }

@@ -158,6 +158,31 @@ pub const ALL: &[Scene] = &[
         build: explore,
         landmark: "Detail",
     },
+    // A zk2 call (#614, FL10): `nav.v2`'s `set_origin` at `robot1/nav`, its
+    // request form read from the contract, and the value it answered.
+    Scene {
+        name: "workbench-call",
+        size: DESKTOP,
+        build: workbench_call,
+        landmark: "nav.v2.SetOriginRequest fields: origin: nav.v2.Origin",
+    },
+    // The publish log in the Watch layout's dock (#614, FL10): a P3
+    // refusal, a foreign publish, a value and a silence, each its own line.
+    Scene {
+        name: "publish-log",
+        size: DESKTOP,
+        build: publish_log,
+        landmark: "send log — 4 entries",
+    },
+    // A version-2 capture replayed (#614, FL10b): its rows named v1 QoS
+    // profiles, which zk2 does not read — "QoS not recorded", in the banner
+    // and in the Inspector, where FL6b showed default axes.
+    Scene {
+        name: "replay-v2",
+        size: DESKTOP,
+        build: replay_v2,
+        landmark: "QoS not recorded — its rows name v1 profiles, which zk2 does not read",
+    },
 ];
 
 fn prefs(theme: ThemeChoice) -> Prefs {
@@ -400,8 +425,155 @@ fn workbench(theme: ThemeChoice, pane: RightPane) -> Zengui {
     app
 }
 
+/// The Send pane's publish form on a foreign key (#614, FL10): bytes as
+/// typed, zenoh's default axes said as such, and the one-shot publish it
+/// sent — what went on the wire, and its line in the log.
 fn workbench_send(theme: ThemeChoice) -> Zengui {
-    workbench(theme, RightPane::Send)
+    let mut app = workbench(theme, RightPane::Send);
+    publish_foreign(&mut app);
+    app
+}
+
+fn send_msg(app: &mut Zengui, msg: zengui::view::send::SendMsg) {
+    send(app, Message::Pane(PaneMsg::Send(msg)));
+}
+
+/// Type a foreign publish and land the one-shot it sends, as the write task
+/// would answer it.
+fn publish_foreign(app: &mut Zengui) {
+    use zengui::view::send::SendMsg;
+    send_msg(app, SendMsg::KeyChanged("demo/example/foo".into()));
+    send_msg(app, SendMsg::BodyChanged("hello from zengui".into()));
+    send_msg(app, SendMsg::EncodingChanged("text/plain".into()));
+    send_msg(
+        app,
+        SendMsg::Ready(Ok(Arc::new(zengui::message::PublishOutcome {
+            key: "demo/example/foo".into(),
+            bytes: Arc::new(b"hello from zengui".to_vec()),
+            qos: zenkey_fleet::WireQos::DEFAULT,
+            encoding: Some("text/plain".into()),
+            publication: None,
+            matching: Some(true),
+            attachment: None,
+        }))),
+    );
+}
+
+/// `nav.v2`'s `set_origin`, as the call answered it.
+fn set_origin_report(
+    answer: zenkey_fleet::report::OperationAnswer,
+) -> zenkey_fleet::report::OperationReport {
+    zenkey_fleet::report::OperationReport {
+        address: "robot1/nav".into(),
+        iface: "nav.v2".into(),
+        fingerprint: super::contracts()
+            .set
+            .of_iface(&"nav.v2".parse().expect("an interface"))
+            .next()
+            .expect("held")
+            .fingerprint()
+            .to_string(),
+        operation: "@op/set_origin".into(),
+        values: Default::default(),
+        selectors: vec!["zk2/robot1/nav/nav.v2/@op/set_origin".into()],
+        mode: zenkey_fleet::report::CallMode::Concrete,
+        timeout_s: 2.0,
+        answer,
+    }
+}
+
+/// The value `set_origin` answers: the origin now in use.
+fn origin_value() -> zenkey_fleet::report::OperationAnswer {
+    use zenkey_fleet::report::{OperationAnswer, PayloadRendering, Rendered};
+    OperationAnswer::Value {
+        reply: PayloadRendering {
+            key: "zk2/robot1/nav/nav.v2/@op/set_origin".into(),
+            size: 27,
+            resource: None,
+            rendered: Rendered::Value {
+                declared: "nav.v2.Origin".into(),
+                value: serde_json::json!({
+                    "latitudeDeg": 47.6062,
+                    "longitudeDeg": -122.3321,
+                    "altitudeM": 56.0
+                }),
+            },
+        },
+    }
+}
+
+/// The call mode on `nav.v2`'s `set_origin` (#614, FL10): the revision in
+/// hand picked, the declared shape and request form read from it, the
+/// address `robot1/nav`, and the value it answered.
+fn workbench_call(theme: ThemeChoice) -> Zengui {
+    use zengui::prefs::DockRole;
+    use zengui::view::send::{RevisionChoice, SendMode, SendMsg};
+    let mut app = workbench(theme, RightPane::Send);
+    // The tool given the window, as the traffic scene gives its tab: the
+    // answer sits under the form, and a third of the width would push it
+    // below the fold.
+    for role in [DockRole::Locator, DockRole::Inspector] {
+        send(
+            &mut app,
+            Message::Workspace(WorkspaceMsg::DockToggled(role)),
+        );
+    }
+    send_msg(&mut app, SendMsg::ModeSelected(SendMode::Call));
+    let nav = super::contracts()
+        .set
+        .of_iface(&"nav.v2".parse().expect("an interface"))
+        .next()
+        .expect("held")
+        .clone();
+    send_msg(&mut app, SendMsg::RevisionPicked(RevisionChoice(nav)));
+    send_msg(&mut app, SendMsg::OperationPicked("@op/set_origin".into()));
+    send_msg(&mut app, SendMsg::TargetChanged("robot1/nav".into()));
+    send_msg(
+        &mut app,
+        SendMsg::BodyChanged(
+            r#"{"origin": {"latitude_deg": 47.6062, "longitude_deg": -122.3321, "altitude_m": 56.0}}"#
+                .into(),
+        ),
+    );
+    send_msg(
+        &mut app,
+        SendMsg::Done(Ok(Arc::new(set_origin_report(origin_value())))),
+    );
+    app
+}
+
+/// The Watch layout with the dock on the publish log (#614, FL10): a key a
+/// zk2 service owns refused (P3), a foreign publish, a call's value and a
+/// call's silence — a non-verdict, not a failure.
+fn publish_log(theme: ThemeChoice) -> Zengui {
+    use zengui::view::send::SendMsg;
+    use zenkey_fleet::report::{OperationAnswer, PresenceAttribution, SilenceView};
+    let mut app = watching(prefs(theme));
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::ActivityTab(ActivityTab::Publish)),
+    );
+    send_msg(
+        &mut app,
+        SendMsg::KeyChanged("zk2/robot1/nav/nav.v2/state/status".into()),
+    );
+    send_msg(&mut app, SendMsg::Send);
+    publish_foreign(&mut app);
+    send_msg(
+        &mut app,
+        SendMsg::Done(Ok(Arc::new(set_origin_report(origin_value())))),
+    );
+    let mut silent = set_origin_report(OperationAnswer::Silent {
+        silence: SilenceView {
+            attempts: 1,
+            transport: Some("zenoh/string: Timeout".into()),
+            presence: PresenceAttribution::NoTokenVisible,
+        },
+    });
+    silent.address = "robot2/nav".into();
+    silent.selectors = vec!["zk2/robot2/nav/nav.v2/@op/set_origin".into()];
+    send_msg(&mut app, SendMsg::Done(Ok(Arc::new(silent))));
+    app
 }
 
 fn workbench_nodes(theme: ThemeChoice) -> Zengui {
@@ -605,4 +777,47 @@ fn settings(theme: ThemeChoice) -> Zengui {
 
 fn connect(theme: ThemeChoice) -> Zengui {
     overlay(theme, Overlay::Connect)
+}
+
+/// A version-2 capture of v1 traffic, replayed (#614, FL10b): its rows name
+/// v1 profiles (`qos`), which zk2 does not read, so the banner counts them
+/// "QoS not recorded" and the Inspector says so of the selected key, where
+/// FL6b showed default axes — and it states nothing about what was
+/// excluded, because a version-2 file never did.
+fn replay_v2(theme: ThemeChoice) -> Zengui {
+    use zengui::replay::{LoadedReplay, ReplayState};
+    use zengui::view::replay::ReplayMsg;
+    const LOAD: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load";
+    let file = [
+        r#"{"zrec":2,"selectors":["v1/**"],"base":"","captured_at":"2026-08-12T03:00:00Z"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load","t":0,"bytes":"eyJ2YWx1ZSI6MC40MiwidW5pdCI6ImxvYWQifQ==","encoding":"application/json","qos":"sampled"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","t":250000,"bytes":"eyJzdGF0ZSI6Im9rIn0=","encoding":"application/json","qos":"transition"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load","t":1000000,"bytes":"eyJ2YWx1ZSI6MC41NywidW5pdCI6ImxvYWQifQ==","encoding":"application/json","qos":"sampled"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load","t":2000000,"bytes":"eyJ2YWx1ZSI6MC42MSwidW5pdCI6ImxvYWQifQ==","encoding":"application/json","qos":"sampled"}"#,
+    ]
+    .join("\n");
+    let state = ReplayState::load("legacy.zrec", file.as_bytes()).expect("a valid capture");
+    let mut app = watching(prefs(theme));
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::ActivityTab(ActivityTab::Replay)),
+    );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::Loaded(
+            "legacy.zrec".into(),
+            Ok(LoadedReplay::new(state)),
+        ))),
+    );
+    // Selected inside the replay, then played to its end: the recorder
+    // keeps the rows that follow.
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(LOAD.into()))),
+    );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::Scrubbed(2_000_000))),
+    );
+    app
 }

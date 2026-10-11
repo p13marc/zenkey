@@ -402,7 +402,9 @@ fn workbench<'a>(
         |p| Message::Workspace(WorkspaceMsg::PaneSelected(p)),
     );
     let body: Element<'a, Message> = match work.right_pane {
-        RightPane::Send => view::send::pane(&work.bench.send_form, None, &work.verdicts.roster, sp),
+        RightPane::Send => {
+            view::send::pane(&work.bench.send_form, work.replay.replay.is_some(), sp)
+        }
         RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
             roster: &work.verdicts.roster,
             selected: sub.follow.current.origin(),

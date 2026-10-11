@@ -229,6 +229,14 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
         ),
     )];
     match observed {
+        // A replayed row that recorded no axes (#614, FL10b): its view's
+        // axes are defaults, never shown as observed.
+        Some(entry) if !entry.qos_recorded => {
+            fields.push(kit::field(
+                "OBSERVED",
+                mono(crate::replay::QOS_NOT_RECORDED.to_string()),
+            ));
+        }
         Some(entry) => {
             fields.push(kit::field("OBSERVED", mono(qos_token(entry))));
             if let Some(src) = &entry.source {
@@ -245,6 +253,13 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
         col = col.push(kit::muted("the registry names no profile for this key"));
     }
     match observed {
+        // Nothing observed to judge: said, and no verdict drawn.
+        Some(entry) if !entry.qos_recorded => {
+            col = col.push(kit::muted(
+                "this capture's row carries no wire axes — a version-1 or -2 .zrec named a \
+                 v1 profile, which zk2 does not read",
+            ));
+        }
         // The verdict, a badge whose glyph comes from its tone (#193) where
         // a hand-typed ⚠ stood.
         Some(entry) => match declared.as_ref().and_then(|d| qos_verdict(d, entry)) {
@@ -876,6 +891,7 @@ mod tests {
             congestion_control: profile.congestion_control(),
             reliability: profile.reliability(),
             express: profile.express(),
+            qos_recorded: true,
             source: None,
             value: None,
             preview: "{}".into(),

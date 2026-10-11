@@ -79,6 +79,10 @@ pub enum ReplayMsg {
     ),
     /// Forget the loaded snapshot.
     SnapshotClosed,
+    /// A replayed tick's verdict batch, checked through the replay's own
+    /// offline lens (#614, FL10b): the replay it was checked for (its id),
+    /// and each key's conformance. Recorded only while that replay runs.
+    VerdictsChecked(u64, Vec<(String, zenkey_fleet::report::Conformance)>),
 }
 
 /// What a finished capture wrote (#357).
@@ -206,6 +210,61 @@ fn header_pre_roll(state: &ReplayState) -> Option<&zenkey_fleet::PreRollInfo> {
     }
 }
 
+/// What a capture's header says it could not contain (#614, FL10b): `.zrec`
+/// v3's `excluded`, the verbatim chunks no watched selector names (the
+/// tooling guide's O5) — or that an older file did not say. `None` for the
+/// retained window, whose banner states its watches instead.
+pub fn excluded_note(state: &ReplayState) -> Option<String> {
+    let ReplaySource::File { header, .. } = &state.source else {
+        return None;
+    };
+    Some(match &header.excluded {
+        Some(list) if list.is_empty() => {
+            "excluded: nothing — the selectors name every verbatim chunk".to_string()
+        }
+        Some(list) => format!(
+            "excluded: {} — no selector names them, so no sample under them is in this file",
+            list.join(", ")
+        ),
+        None => format!(
+            "excluded: not stated — a version-{} file predates the statement",
+            header.zrec
+        ),
+    })
+}
+
+/// What the banner says of rows that recorded no wire axes (#614, FL10b): a
+/// version-1 or -2 file's rows named v1 profiles, which zk2 does not read.
+/// `None` when every row recorded its axes.
+pub fn qos_note(state: &ReplayState) -> Option<String> {
+    let unrecorded = state.qos_unrecorded as usize;
+    if unrecorded == 0 {
+        return None;
+    }
+    Some(if unrecorded == state.rows.len() {
+        format!(
+            "{} — its rows name v1 profiles, which zk2 does not read",
+            crate::replay::QOS_NOT_RECORDED
+        )
+    } else {
+        format!(
+            "{} on {unrecorded} of {} rows",
+            crate::replay::QOS_NOT_RECORDED,
+            state.rows.len()
+        )
+    })
+}
+
+/// How the replay resolves keys (#614, FL10b): offline, through the
+/// contracts held, with no presence read — the live catalog describes
+/// another world than the capture's (O4).
+pub fn lens_note(state: &ReplayState) -> String {
+    format!(
+        "resolved offline: {} held, no presence read — the live catalog describes another world",
+        kit::plural(state.lens.contracts.len(), "revision")
+    )
+}
+
 /// A trigger marker's label (#218): where on the capture clock a rule
 /// fired, which rule, and to what.
 pub fn trigger_label(t_us: u64, t: &zenkey_fleet::Transition) -> String {
@@ -282,9 +341,28 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
         .padding(space::XS),
     );
 
+    // The second line (#614, FL10b): what the capture says it could not
+    // contain, which rows recorded no wire axes, and that the replay
+    // resolves offline — three statements about the file, not the bus.
+    let mut notes = row![].spacing(space::SM);
+    if let Some(note) = excluded_note(state) {
+        notes = notes.push(kit::muted(note));
+    }
+    if let Some(note) = qos_note(state) {
+        notes = notes.push(kit::status_chip(Tone::Caution, note));
+    }
+    notes = notes.push(kit::muted(lens_note(state)));
+
     // A callout card in the mode's tone (#537, #544) — still in every
     // window, still the loudest claim on screen, and no longer an alarm.
-    kit::callout(Tone::Mode, meta.align_y(iced::Alignment::Center))
+    kit::callout(
+        Tone::Mode,
+        iced::widget::column![
+            meta.align_y(iced::Alignment::Center),
+            notes.align_y(iced::Alignment::Center).wrap()
+        ]
+        .spacing(space::XS),
+    )
 }
 
 /// The transport: play/pause, speed, and the scrubber.

@@ -79,6 +79,12 @@ sub_state! {
         /// allocations. `steady_state_ticks_reuse_the_tree_shape` reads these.
         pub(crate) shape_reused: u64,
         pub(crate) shape_rebuilt: u64,
+        /// The declared keyspace a replay merges against (#614, FL10b):
+        /// built from the replay's offline lens when it opens, gone when it
+        /// closes. `None` live, when the deployment's skeleton is the
+        /// tree's — the live catalog describes another world than a
+        /// capture's (O4).
+        pub(crate) replay_skeleton: Option<Arc<Skeleton>>,
     }
 }
 
@@ -93,11 +99,18 @@ impl Default for TreeState {
             merged_cache: None,
             shape_reused: 0,
             shape_rebuilt: 0,
+            replay_skeleton: None,
         }
     }
 }
 
 impl TreeState {
+    /// The skeleton the tree merges against: a replay's own while one runs
+    /// (#614, FL10b), else the deployment's.
+    pub(crate) fn skeleton<'a>(&'a self, dep: &'a Deployment) -> Option<&'a Arc<Skeleton>> {
+        self.replay_skeleton.as_ref().or(dep.skeleton.as_ref())
+    }
+
     /// Whether the last merge was made from `skeleton` — by identity, like
     /// the cache's own check (#614, FL6b). A tree that never merged was
     /// made from nothing, so it answers `false`.
@@ -114,7 +127,8 @@ impl TreeState {
     /// The merged declared-∪-observed tree, from cache when its inputs have
     /// not moved (#177).
     pub(crate) fn merged(&mut self, dep: &Deployment, obs: &Observation) -> Arc<MergedNode> {
-        let same_skeleton = |a: &Option<Arc<Skeleton>>| match (a, &dep.skeleton) {
+        let current = self.skeleton(dep).cloned();
+        let same_skeleton = |a: &Option<Arc<Skeleton>>| match (a, &current) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
             (None, None) => true,
             _ => false,
@@ -134,7 +148,7 @@ impl TreeState {
         // an empty tree to hand the merge; now it is built only when the merge
         // itself is.
         let empty_skeleton;
-        let skeleton = match &dep.skeleton {
+        let skeleton = match &current {
             Some(s) => s.as_ref(),
             None => {
                 let none = zenkey_fleet::ContractSet::new();
@@ -149,7 +163,7 @@ impl TreeState {
             &obs.watched,
         ));
         self.merged_cache = Some(MergedCache {
-            skeleton: dep.skeleton.clone(),
+            skeleton: current,
             observed: Arc::clone(&obs.observed),
             watched: Arc::clone(&obs.watched),
             merged: Arc::clone(&merged),

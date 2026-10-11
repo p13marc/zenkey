@@ -207,25 +207,33 @@ pub fn visible<'a>(
 }
 
 /// One line in the explorers' row dialect (#72), written through the engine's
-/// [`zenkey_fleet_v1::SampleRow`] so it cannot drift from the reader (#235).
+/// [`zenkey_fleet::SampleRow`] so it cannot drift from the reader (#235) —
+/// zk2's row since #614 (FL10b), with the key's `identity` beside it.
 ///
 /// This doc used to claim the shared fields were "byte-for-byte the CLI's".
 /// They were not: the row spelled a payload byte *count* as `bytes`, which
-/// [`zenkey_fleet_v1::parse_row`] reads as base64 of the wire payload
+/// [`zenkey_fleet::parse_row`] reads as base64 of the wire payload
 /// (RFC 09 §5.2) and rejects as malformed. Sharing the writer is what makes
 /// the claim true rather than restating it.
+///
+/// `identity` is the key as `lens` resolves it — the deployment's lens live,
+/// a replay's offline lens while one runs (O4) — rung by rung, as `zenctl
+/// echo --format ndjson` writes it: its address and resource, or the rung it
+/// stopped at (the tooling guide's O2). v1's `origin`/`subject` left with
+/// the v1 grammar.
 ///
 /// The two tools still differ, in exactly the places they differ, and
 /// neither difference is faked:
 ///
-/// - the CLI carries `type`/`typed` from its schema decode; that decode is
-///   async and must never run on a render path, so it is **absent** here
-///   rather than defaulted to `null`/`false`, which would claim the lookup
-///   happened and found nothing;
+/// - the CLI carries `type`/`typed`, a verdict and `qos_axes` from its
+///   per-sample check; the ring keeps a structural preview and no wire axes,
+///   so those are **absent** here rather than defaulted to `null`/`false`,
+///   which would claim the lookup happened and found nothing;
 /// - this row carries `payload_bytes`, which the ring knows and the CLI's
 ///   row spells from the same field.
-pub fn ndjson_line(line: &EchoLine, base: &str) -> String {
-    let mut row = zenkey_fleet_v1::SampleRow::of_key(&line.key, base);
+pub fn ndjson_line(line: &EchoLine, lens: &zenkey_fleet::Lens<'_>) -> String {
+    let mut row = zenkey_fleet::SampleRow::of_key(&line.key);
+    row.identity = Some(lens.identity(&line.key));
     row.encoding = Some(line.encoding.clone()).filter(|e| !e.is_empty());
     row.timestamp = line.timestamp.clone();
     row.delete = line.is_delete;
@@ -250,12 +258,18 @@ pub fn ndjson_line(line: &EchoLine, base: &str) -> String {
     row.to_line()
 }
 
-/// Every visible line as ndjson, newest first.
-pub fn export(ring: &EchoRing, view: &EchoView, selection: Option<&str>, base: &str) -> String {
+/// Every visible line as ndjson, newest first, each key resolved through
+/// `lens` ([`ndjson_line`]).
+pub fn export(
+    ring: &EchoRing,
+    view: &EchoView,
+    selection: Option<&str>,
+    lens: &zenkey_fleet::Lens<'_>,
+) -> String {
     let (lines, _) = visible(ring, view, selection);
     let mut out = String::new();
     for line in lines {
-        out.push_str(&ndjson_line(line, base));
+        out.push_str(&ndjson_line(line, lens));
         out.push('\n');
     }
     out
@@ -676,17 +690,25 @@ mod tests {
     /// the old test's name claimed and did not make: it compared fields by
     /// hand, and `"bytes": <a byte count>` passed every one of those
     /// comparisons while making the row unparseable.
+    /// The lens the export tests resolve through: the walkthrough's
+    /// contracts held offline, in the namespace `spray`, no presence read.
+    fn with_lens<R>(f: impl FnOnce(&zenkey_fleet::Lens<'_>) -> R) -> R {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+        let (set, _) = zenkey_fleet::ContractSet::load_path(&dir);
+        f(&zenkey_fleet::Lens::new("spray", None, &set).offline(&set))
+    }
+
+    const POSITION: &str = "spray/zk2/robot1/nav/nav.v2/stream/position";
+
     #[test]
     fn an_exported_row_reads_back_through_the_engines_reader() {
-        let mut l = line(
-            0,
-            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-            "{\"status\":\"ok\"}",
-        );
+        let mut l = line(0, "demo/state/health", "{\"status\":\"ok\"}");
         l.attachment = Some(r#"{"who":"me"}"#.to_string());
         l.attachment_len = Some(12);
-        let row = zenkey_fleet_v1::parse_row(&ndjson_line(&l, "")).expect("the export reads back");
-        assert_eq!(row.key, "v1/h-3fa9c2d41b7e/state/sysinfo/health");
+        let exported = with_lens(|lens| ndjson_line(&l, lens));
+        let row = zenkey_fleet::parse_row(&exported).expect("the export reads back");
+        assert_eq!(row.key, "demo/state/health");
         assert_eq!(row.payload, br#"{"status":"ok"}"#);
         assert_eq!(row.encoding.as_deref(), Some("application/json"));
         assert_eq!(row.attachment.as_deref(), Some(&br#"{"who":"me"}"#[..]));
@@ -694,50 +716,62 @@ mod tests {
 
         // A tombstone reads back as a tombstone, not as an empty put
         // (RFC 04 §1.2).
-        let mut dead = line(1, "v1/h-3fa9c2d41b7e/state/sysinfo/health", "");
+        let mut dead = line(1, "demo/state/health", "");
         dead.is_delete = true;
-        let row =
-            zenkey_fleet_v1::parse_row(&ndjson_line(&dead, "")).expect("a tombstone reads back");
+        let exported = with_lens(|lens| ndjson_line(&dead, lens));
+        let row = zenkey_fleet::parse_row(&exported).expect("a tombstone reads back");
         assert!(row.delete);
     }
 
-    /// The exported row is the CLI's row: one `jq` script for both.
+    /// The exported row is the CLI's row (#614, FL10b): zk2's `SampleRow`,
+    /// the key's `identity` beside it as `zenctl echo` writes it — its
+    /// address and resource, or the rung it stopped at — one `jq` script
+    /// for both.
     #[test]
     fn the_export_matches_the_cli_row_shape() {
-        let l = line(
-            0,
-            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-            "{\"status\":\"ok\"}",
+        let l = line(0, POSITION, "{\"latitudeDeg\":47.6}");
+        let json: serde_json::Value =
+            serde_json::from_str(&with_lens(|lens| ndjson_line(&l, lens))).unwrap();
+        assert_eq!(json["key"], POSITION);
+        assert_eq!(
+            json["identity"],
+            serde_json::json!({
+                "is": "resource",
+                "address": "robot1/nav",
+                "iface": "nav.v2",
+                "token": "stream",
+                "resource": "stream/position",
+            }),
+            "resolved through the one revision held offline"
         );
-        let json: serde_json::Value = serde_json::from_str(&ndjson_line(&l, "")).unwrap();
-        assert_eq!(json["key"], "v1/h-3fa9c2d41b7e/state/sysinfo/health");
-        assert_eq!(json["origin"], "h-3fa9c2d41b7e");
-        // The subject is the tail *after* the producer chunk (RFC 03 §1),
-        // which is exactly what the CLI row carries.
-        assert_eq!(json["subject"], "health");
         assert_eq!(json["encoding"], "application/json");
         // A JSON payload rides as JSON, not as a string containing JSON.
-        assert_eq!(json["value"]["status"], "ok");
+        assert_eq!(json["value"]["latitudeDeg"], 47.6);
 
-        // A non-JSON payload rides as a string rather than being dropped.
+        // A foreign key's identity is the rung it stopped at, and a non-JSON
+        // payload rides as a string rather than being dropped.
         let raw = line(1, "demo/text", "just words");
-        let json: serde_json::Value = serde_json::from_str(&ndjson_line(&raw, "")).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&with_lens(|lens| ndjson_line(&raw, lens))).unwrap();
         assert_eq!(json["value"], "just words");
-        // Absent, not null: `json["origin"]` yields `Null` for a missing key
-        // too, so asserting on the value cannot tell the two apart — which
-        // is the whole reason the engine's corpus compares whole documents
-        // (RFC 09 §5.1 O4).
-        assert!(
-            !json.as_object().unwrap().contains_key("origin"),
-            "a foreign key carries no origin — absent, never null"
-        );
+        assert_eq!(json["identity"]["is"], "not_in_namespace");
+        // Absent, not null: v1's `origin` and `subject` left with the v1
+        // grammar, and a missing key is absent — `json["origin"]` yields
+        // `Null` for that too, so only the object can tell (RFC 09 §5.1 O4).
+        for gone in ["origin", "subject"] {
+            assert!(
+                !json.as_object().unwrap().contains_key(gone),
+                "{gone} is v1's — absent, never null"
+            );
+        }
 
         // The shared field set is exactly the CLI's; the schema-decode fields
         // are absent rather than defaulted, so a consumer can tell "not
         // decoded here" from "decoded as nothing".
-        let json: serde_json::Value = serde_json::from_str(&ndjson_line(&l, "")).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&with_lens(|lens| ndjson_line(&l, lens))).unwrap();
         let obj = json.as_object().unwrap();
-        for shared in ["key", "origin", "subject", "encoding", "value"] {
+        for shared in ["key", "identity", "encoding", "value"] {
             assert!(obj.contains_key(shared), "missing shared field {shared}");
         }
         assert!(
@@ -745,10 +779,10 @@ mod tests {
             "an unstamped sample omits the HLC rather than nulling it: nothing \
              stamped it, which is not the same as it having been stamped null"
         );
-        for cli_only in ["type", "typed"] {
+        for cli_only in ["type", "typed", "verdict", "qos_axes"] {
             assert!(
                 !obj.contains_key(cli_only),
-                "{cli_only} must be absent, not null — the decode never ran"
+                "{cli_only} must be absent, not null — the check never ran here"
             );
         }
         assert!(
@@ -760,7 +794,8 @@ mod tests {
         let mut with_att = l.clone();
         with_att.attachment = Some(r#"{"who":"me"}"#.to_string());
         with_att.attachment_len = Some(12);
-        let json: serde_json::Value = serde_json::from_str(&ndjson_line(&with_att, "")).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&with_lens(|lens| ndjson_line(&with_att, lens))).unwrap();
         assert_eq!(json["attachment"]["who"], "me");
         assert_eq!(json["attachment_bytes"], 12);
     }

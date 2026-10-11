@@ -310,9 +310,10 @@ pub(crate) fn torn_settings(
 }
 
 /// What an armed repeating publication resends each tick: the declaration,
-/// the prepared bytes, and the attachment that rode the first send (#117).
+/// the bytes as typed, and the attachment that rode the first send (#117).
+/// zk2's publication since #614 (FL10), declared on the form's QoS axes.
 pub(crate) struct RepeatLoad {
-    pub(crate) publication: Arc<zenkey_fleet_v1::Publication>,
+    pub(crate) publication: Arc<zenkey_fleet::Publication>,
     pub(crate) bytes: Arc<Vec<u8>>,
     pub(crate) attachment: Option<Arc<Vec<u8>>>,
 }

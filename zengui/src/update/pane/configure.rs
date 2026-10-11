@@ -397,8 +397,10 @@ fn call(
         }
         _ => Vec::new(),
     };
-    services::write::call_then(
-        services::write::Call {
+    // The convention's own procedures carry their kind (RFC 05 §2.1,
+    // v1.48): no slice is needed to judge them.
+    services::write::v1_call_then(
+        services::write::V1Call {
             session,
             base: cx.dep.namespace().to_string(),
             target: t.origin.trim().to_string(),
@@ -406,11 +408,7 @@ fn call(
             procedure,
             params,
             body,
-            attachment: None,
             timeout: cx.dep.timeout(),
-            // The convention's own procedures carry their kind (RFC 05
-            // §2.1, v1.48): no slice is needed to judge them.
-            slices: None,
         },
         move |r| Message::Pane(PaneMsg::Config(ConfigMsg::Answered(act, r))),
     )

@@ -1,5 +1,5 @@
 //! The Send pane (#184): the only place in the app that writes, and the one
-//! that asks a producer to answer.
+//! that asks a service to answer — on zk2 since #614 (FL10).
 //!
 //! `&mut Workbench` rather than `&mut SendForm`, because an armed
 //! publication is not view state — a `Publication` is a live bus declaration
@@ -7,10 +7,13 @@
 //! and the handler moves both.
 //!
 //! Everything that touches the bus goes through [`crate::services::write`],
-//! which goes through the engine: `prepare_publish` for the body (#97's
-//! encode ladder), `declare_publication` for the write (P7 — a declared
-//! publisher, never an ad-hoc put), and `zenkey_fleet_v1::call` for the RPC. No
-//! codec logic on this side of the seam.
+//! which goes through the engine: `declare_publication` for a write (P7 — a
+//! declared publisher, never an ad-hoc put) and `call_operation` for a call.
+//! Every refusal of the form's input happens here, before a task exists: a
+//! key a zk2 service owns (P3), a wildcard, a body that is not hex, a
+//! tombstone without `--i-know`, an address that is not one, a fan-out to an
+//! operation that forbids one (O2), a request that does not encode. And
+//! while the panes replay a capture, nothing is written at all (#74).
 
 use std::sync::Arc;
 
@@ -18,26 +21,13 @@ use iced::Task;
 
 use crate::message::Message;
 use crate::services;
+use crate::services::ServiceError;
 use crate::state::workspace::{RepeatLoad, Workbench};
 use crate::update::Ctx;
-use crate::view;
-use crate::view::send::{SendForm, SendMsg};
-
-/// Why the pane will not write `key`, when a zk2 service owns it (P3, spec
-/// §6; #614, FL6a). The publish is still v1's until FL10 ports it, and P3
-/// holds from now: a key under `zk2/<system>/<service>/` is its owner's
-/// alone to write, wherever its namespace — the prefix before the `zk2`
-/// chunk is not read as one (the tooling guide's O3), and no checkbox moves
-/// the refusal. zenctl `pub` refuses with the same words.
-pub(crate) fn owned_refusal(key: &str) -> Option<String> {
-    zenkey_fleet::owned_key(key).map(|o| {
-        format!(
-            "refused: {key} is a key {} owns, and only the owner writes its keys \
-             (P3, spec §6) — act on the service through its operations",
-            o.owner
-        )
-    })
-}
+use crate::view::send::{
+    CallShape, REPLAY_LOCK, RevisionChoice, SendForm, SendMode, SendMsg, Sent, owned_refusal,
+    request_form,
+};
 
 /// Refuse `key` on the form when a zk2 service owns it: the refusal is
 /// logged and set as the form's error, and `true` says nothing may move.
@@ -45,9 +35,25 @@ fn refuse_owned(form: &mut SendForm, key: &str) -> bool {
     let Some(why) = owned_refusal(key) else {
         return false;
     };
-    form.log(false, why.clone());
-    form.error = Some(crate::services::ServiceError::msg(why));
+    refuse(form, why);
     true
+}
+
+/// A refusal of the form's input: logged as a line that did not happen, and
+/// set as the form's error. Nothing was sent.
+fn refuse(form: &mut SendForm, why: impl Into<String>) {
+    let why = why.into();
+    form.log(false, why.clone());
+    form.error = Some(ServiceError::msg(why));
+}
+
+/// A call refused before anything was sent: the outcome says why, the log
+/// keeps it, and nothing is in flight.
+fn refuse_call(form: &mut SendForm, e: impl std::fmt::Display) {
+    let why = format!("refused: {e}");
+    form.log(false, why.clone());
+    form.in_flight = false;
+    form.outcome = Some(Err(ServiceError::msg(why)));
 }
 
 /// What a stop says when another reference to the publication is still live.
@@ -88,10 +94,89 @@ fn disarm<P>(form: &mut SendForm, load: Option<Arc<P>>) -> Option<P> {
     }
 }
 
-pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Message> {
+/// Stop an armed publication because a replay began (#74; #614, FL10): the
+/// panes now show a capture, and a stream still writing to the live bus
+/// would be the live world leaking through the mode. Said, when it stopped
+/// something.
+pub(crate) fn stop_for_replay(bench: &mut Workbench) -> Task<Message> {
+    let Some(load) = bench.publication.take() else {
+        bench.send_form.armed = false;
+        return Task::none();
+    };
+    bench.send_form.log(
+        true,
+        "stopped — a replay began, and replay writes nothing to the live bus",
+    );
+    match disarm(&mut bench.send_form, Some(load.publication)) {
+        Some(p) => services::write::undeclare(p),
+        None => Task::none(),
+    }
+}
+
+/// The revisions in hand that declare an operation (#614, FL10): the
+/// store's, which holds what `--contracts` loaded and what was retrieved
+/// from the bus — the catalog's or the contracts', never a guess.
+fn revision_choices(cx: &Ctx) -> Vec<RevisionChoice> {
+    let mut choices: Vec<RevisionChoice> = cx
+        .dep
+        .store
+        .held()
+        .into_iter()
+        .map(RevisionChoice)
+        .filter(|c| !c.operations().is_empty())
+        .collect();
+    choices.sort_by(|a, b| {
+        (a.0.iface().to_string(), a.0.fingerprint().to_string())
+            .cmp(&(b.0.iface().to_string(), b.0.fingerprint().to_string()))
+    });
+    choices.dedup();
+    choices
+}
+
+/// The addresses presence says provide the picked interface, and whether a
+/// presence read stood behind the answer at all (O4).
+fn refresh_providers(form: &mut SendForm, cx: &Ctx) {
+    form.presence_read = cx.dep.catalog.is_some();
+    form.providers = match (&form.revision, &cx.dep.catalog) {
+        (Some(r), Some(catalog)) => catalog
+            .addresses()
+            .filter(|a| catalog.provides(a, r.0.iface()))
+            .map(ToString::to_string)
+            .collect(),
+        _ => Vec::new(),
+    };
+}
+
+/// `name=value;…` as the template's values: a name given twice is two
+/// values, which only a rest parameter takes (`check_values` judges).
+fn bindings(params: &str) -> Result<zenkey_model::template::Bindings, String> {
+    let mut out = zenkey_model::template::Bindings::new();
+    for token in params.split(';').map(str::trim).filter(|t| !t.is_empty()) {
+        let Some((name, value)) = token.split_once('=') else {
+            return Err(format!(
+                "the params are not name=value: {token:?} (spell each as name=value;…)"
+            ));
+        };
+        out.entry(name.trim().to_owned())
+            .or_default()
+            .push(value.trim().to_owned());
+    }
+    Ok(out)
+}
+
+pub(crate) fn update(
+    bench: &mut Workbench,
+    replaying: bool,
+    msg: SendMsg,
+    cx: Ctx,
+) -> Task<Message> {
     match msg {
         SendMsg::ModeSelected(mode) => {
             bench.send_form.mode = mode;
+            if mode == SendMode::Call {
+                bench.send_form.revisions = revision_choices(&cx);
+                refresh_providers(&mut bench.send_form, &cx);
+            }
             Task::none()
         }
 
@@ -105,20 +190,27 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             let form = &mut bench.send_form;
             form.in_flight = false;
             form.error = None;
-            form.source = Some(outcome.prepared.source.clone());
-            form.note = outcome.prepared.note.clone();
-            form.encoding_used = outcome.prepared.encoding.clone();
             form.matching = outcome.matching;
+            let qos = outcome.qos.token();
+            form.sent = Some(Sent {
+                bytes: outcome.bytes.len(),
+                encoding: outcome.encoding.clone(),
+                qos: qos.clone(),
+            });
             form.log(
                 true,
-                format!("sent {} bytes → {}", outcome.prepared.bytes.len(), form.key),
+                format!(
+                    "published {} ({}) · qos {qos}",
+                    outcome.key,
+                    crate::view::kit::plural(outcome.bytes.len(), "byte")
+                ),
             );
             match &outcome.publication {
                 Some(publication) => {
                     form.armed = true;
                     bench.publication = Some(RepeatLoad {
                         publication: publication.clone(),
-                        bytes: Arc::new(outcome.prepared.bytes.clone()),
+                        bytes: Arc::clone(&outcome.bytes),
                         attachment: outcome.attachment.clone(),
                     });
                 }
@@ -140,6 +232,12 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             Task::none()
         }
         SendMsg::Tick => {
+            // The repeat clock beats only while armed, and a replay stops
+            // the stream as it begins; a beat that still lands then writes
+            // nothing.
+            if replaying {
+                return Task::none();
+            }
             let Some(load) = bench.publication.as_ref() else {
                 return Task::none();
             };
@@ -150,7 +248,10 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
         }
         SendMsg::Sent(Ok(n)) => {
             let key = bench.send_form.key.clone();
-            bench.send_form.log(true, format!("sent {n} bytes → {key}"));
+            bench.send_form.log(
+                true,
+                format!("published {key} ({})", crate::view::kit::plural(n, "byte")),
+            );
             Task::none()
         }
         SendMsg::Sent(Err(e)) => {
@@ -166,18 +267,14 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             form.in_flight = false;
             match result {
                 Ok(matching) => {
-                    // A tombstone has no body provenance: a stale
-                    // encoded/as-typed/raw line claiming a body shipped
-                    // would be the pane's own O4 mistake.
-                    form.source = None;
-                    form.note = None;
+                    // A tombstone has no body: a stale "sent N bytes" line
+                    // claiming one shipped would be the pane's own O4
+                    // mistake.
+                    form.sent = None;
                     let key = form.key.clone();
                     form.log(
                         true,
-                        format!(
-                            "retired {key} — an authoritative delete (RFC 04 §1.2), \
-                             not an empty value"
-                        ),
+                        format!("retired {key} — a tombstone (RFC 04 §1.2), not an empty value"),
                     );
                     if matching == Some(false) {
                         form.log(
@@ -204,16 +301,6 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             Task::none()
         }
         SendMsg::KeyChanged(k) => {
-            // Classify as you type, through the same ladder the tree uses.
-            bench.send_form.facts = (!k.trim().is_empty())
-                .then(|| zenkey_fleet_v1::describe_key(cx.dep.namespace(), &k, None).facts);
-            // #158: the declared profile drives the picker until the user
-            // takes it over — and stops driving it the moment they do.
-            if !bench.send_form.qos_touched {
-                let declared = view::send::declared_qos(bench.send_form.facts.as_ref());
-                bench.send_form.qos =
-                    view::send::QosChoice(declared.unwrap_or(zenkey_v1::qos::QosProfile::Sampled));
-            }
             bench.send_form.key = k;
             Task::none()
         }
@@ -221,8 +308,27 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             bench.send_form.body = b;
             Task::none()
         }
-        SendMsg::QosPicked(q) => {
-            bench.send_form.qos = q;
+        SendMsg::HexToggled(b) => {
+            bench.send_form.hex = b;
+            Task::none()
+        }
+        SendMsg::PriorityPicked(p) => {
+            bench.send_form.qos.priority = p.0;
+            bench.send_form.qos_touched = true;
+            Task::none()
+        }
+        SendMsg::CongestionPicked(c) => {
+            bench.send_form.qos.congestion = c.0;
+            bench.send_form.qos_touched = true;
+            Task::none()
+        }
+        SendMsg::ReliabilityPicked(r) => {
+            bench.send_form.qos.reliability = r.0;
+            bench.send_form.qos_touched = true;
+            Task::none()
+        }
+        SendMsg::ExpressToggled(b) => {
+            bench.send_form.qos.express = b;
             bench.send_form.qos_touched = true;
             Task::none()
         }
@@ -234,16 +340,12 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             bench.send_form.attachment = a;
             Task::none()
         }
-        SendMsg::RawToggled(b) => {
-            bench.send_form.raw = b;
-            Task::none()
-        }
         SendMsg::RepeatToggled(b) => {
             bench.send_form.repeat = b;
             // Turning repeat off mid-stream stops it, rather than leaving
             // an armed publication with the checkbox saying otherwise.
             if !b && bench.publication.is_some() {
-                return update(bench, SendMsg::Stop, cx);
+                return update(bench, replaying, SendMsg::Stop, cx);
             }
             Task::none()
         }
@@ -267,6 +369,10 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             if key.is_empty() {
                 return Task::none();
             }
+            if replaying {
+                refuse(&mut bench.send_form, format!("refused: {REPLAY_LOCK}"));
+                return Task::none();
+            }
             // A tombstone is a write (P3): an owned key is refused before
             // anything moves — no session asked, no armed publication
             // stopped, and whatever `--i-know` says.
@@ -276,70 +382,69 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             let Some(session) = cx.dep.raw.clone() else {
                 return Task::none();
             };
+            // The engine is the judge (`check_retire`): a wildcard never,
+            // a concrete key only with `--i-know`.
+            if let Err(e) = zenkey_fleet::check_retire(&key, bench.send_form.retire_i_know) {
+                refuse(&mut bench.send_form, format!("refused: {e}"));
+                return Task::none();
+            }
             // Same stop-first discipline as Send: a retire must not race
             // an armed publication on the key.
-            let stop = update(bench, SendMsg::Stop, cx);
-            // The engine is the judge (check_retire, RFC 04 §1.2 v1.12);
-            // the pane's checkbox only arms the force.
-            if let Err(e) = zenkey_fleet_v1::check_retire(
-                cx.dep.namespace(),
-                &key,
-                None,
-                bench.send_form.retire_i_know,
-            ) {
-                let e = crate::services::ServiceError::of(e);
-                bench.send_form.log(false, format!("refused: {e}"));
-                bench.send_form.error = Some(e);
-                return stop;
-            }
+            let stop = update(bench, replaying, SendMsg::Stop, cx);
             bench.send_form.in_flight = true;
             bench.send_form.error = None;
-            let send = services::write::retire(session, key);
+            let send = services::write::retire(session, key, bench.send_form.qos);
             Task::batch([stop, send])
         }
         SendMsg::Send => {
-            // P3 first (#614, FL6a): a key a zk2 service owns is refused
-            // before anything moves.
             let key = bench.send_form.key.trim().to_string();
+            if key.is_empty() {
+                return Task::none();
+            }
+            // The replay lock (#74): the panes show a capture, and nothing
+            // is written to the live bus while they do.
+            if replaying {
+                refuse(&mut bench.send_form, format!("refused: {REPLAY_LOCK}"));
+                return Task::none();
+            }
+            // P3 first: a key a zk2 service owns is refused before anything
+            // moves — `zenctl pub`'s words, no flag that moves it.
             if refuse_owned(&mut bench.send_form, &key) {
                 return Task::none();
             }
-            let (Some(session), Some(store)) = (cx.dep.raw.clone(), cx.dep.schema_store.clone())
-            else {
+            // A wildcard is a blast radius, not a publication (#504).
+            if let Err(e) = zenkey_fleet::check_concrete(&key, zenkey_fleet::WriteAct::Put) {
+                refuse(&mut bench.send_form, format!("refused: {e}"));
+                return Task::none();
+            }
+            let body = match bench.send_form.body_bytes() {
+                Ok(b) => b,
+                Err(why) => {
+                    refuse(&mut bench.send_form, format!("refused: {why}"));
+                    return Task::none();
+                }
+            };
+            let Some(session) = cx.dep.raw.clone() else {
                 return Task::none();
             };
             // A new send replaces any armed publication: two publishers on
             // one key from one pane would double every sample.
-            let stop = update(bench, SendMsg::Stop, cx);
-            let form = &bench.send_form;
-            let body = form.body.clone().into_bytes();
-            let qos = form.qos.0;
-            let encoding = form.encoding.trim().to_string();
-            let mode = if form.raw {
-                zenkey_fleet_v1::PrepareMode::Raw
-            } else {
-                zenkey_fleet_v1::PrepareMode::Encode
-            };
-            let base = cx.dep.namespace().to_string();
-            let slices = None;
-            let repeat = form.repeat;
-            // Verbatim, never schema-encoded (#117); empty = none.
+            let stop = update(bench, replaying, SendMsg::Stop, cx);
+            let form = &mut bench.send_form;
+            let encoding = Some(form.encoding.trim().to_string()).filter(|e| !e.is_empty());
+            // Verbatim (#117); empty = none.
             let attachment: Option<Arc<Vec<u8>>> = (!form.attachment.is_empty())
                 .then(|| Arc::new(form.attachment.clone().into_bytes()));
-            bench.send_form.in_flight = true;
-            bench.send_form.error = None;
+            form.in_flight = true;
+            form.error = None;
             let send = services::write::publish(services::write::Publish {
                 session,
-                store,
-                slices,
-                base,
                 key,
                 encoding,
-                body,
-                mode,
-                qos,
+                body: Arc::new(body),
+                qos: form.qos,
                 attachment,
-                repeat,
+                repeat: form.repeat,
             });
             Task::batch([stop, send])
         }
@@ -348,32 +453,61 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
         SendMsg::Done(outcome) => {
             // No base guard needed (#109 audit): a call reply is the
             // answer to the exact question the user pressed the button
-            // for, addressed by a full wire key naming its base — user
-            // output, not projected deployment state.
+            // for, attributed by its key — user output, not projected
+            // deployment state.
             let form = &mut bench.send_form;
             form.in_flight = false;
+            match &outcome {
+                // Silence and an envelope are answers that landed (O5): a
+                // line that happened, never a failure.
+                Ok(report) => form.log(true, crate::view::send::call_summary(report)),
+                Err(e) => form.log(false, format!("call failed: {e}")),
+            }
             form.outcome = Some(outcome.map(|r| (*r).clone()));
             Task::none()
         }
-        SendMsg::ProducerPicked(p) => {
-            bench.send_form.producer = Some(p);
-            bench.send_form.procedure = None;
+        SendMsg::RevisionsOpened => {
+            bench.send_form.revisions = revision_choices(&cx);
+            refresh_providers(&mut bench.send_form, &cx);
             Task::none()
         }
-        SendMsg::ProcedurePicked(p) => {
+        SendMsg::RevisionPicked(choice) => {
             let form = &mut bench.send_form;
-            form.procedure = Some(p.clone());
-            // Scaffold from the served request schema (§6.4 item 3). Not
-            // asked yet is `None`, and stays `None` until an answer — the
-            // pane renders that as "not asked", never as "no fields". The
-            // declared request type came off a v1 slice's `service_info`
-            // (#234), and no slice is loaded since #614 (FL6a): the scaffold
-            // stays "not asked" until FL10 reads it from the contract.
-            form.request_fields = None;
+            form.operations = choice.operations();
+            form.revision = Some(choice);
+            form.operation = None;
+            form.shape = None;
+            form.request = None;
+            form.outcome = None;
+            refresh_providers(form, &cx);
+            // One operation is the only one to pick.
+            if let [only] = form.operations.as_slice() {
+                let only = only.clone();
+                return update(bench, replaying, SendMsg::OperationPicked(only), cx);
+            }
             Task::none()
         }
-        SendMsg::RequestSchema(fields) => {
-            bench.send_form.request_fields = fields;
+        SendMsg::OperationPicked(name) => {
+            let form = &mut bench.send_form;
+            let Some(revision) = form.revision.as_ref().map(|c| Arc::clone(&c.0)) else {
+                return Task::none();
+            };
+            // The declared shape and the request form, read from the
+            // revision in hand (§7.2): session-free, and an answer — the
+            // pane says "not asked" only until an operation is picked.
+            match CallShape::of(&revision, &name) {
+                Ok(shape) => {
+                    form.request = Some(request_form(&revision, &shape.name));
+                    form.shape = Some(shape);
+                }
+                Err(why) => {
+                    form.shape = None;
+                    form.request = None;
+                    refuse_call(form, why);
+                }
+            }
+            form.operation = Some(name);
+            form.outcome = None;
             Task::none()
         }
         SendMsg::ScaffoldBody => {
@@ -392,47 +526,80 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
         }
         SendMsg::Submit => {
             let form = &mut bench.send_form;
-            let (Some(session), Some(producer), Some(procedure)) = (
-                cx.dep.raw.clone(),
-                form.producer.clone(),
-                form.procedure.clone(),
-            ) else {
+            if form.in_flight {
+                return Task::none();
+            }
+            if replaying {
+                refuse_call(form, REPLAY_LOCK);
+                return Task::none();
+            }
+            let (Some(choice), Some(shape)) = (form.revision.clone(), form.shape.clone()) else {
                 return Task::none();
             };
-            let target = form.target.clone();
-            let params: Vec<String> = form
-                .params
-                .split(';')
-                .filter(|p| !p.trim().is_empty())
-                .map(str::to_string)
-                .collect();
-            let body = if form.body.trim().is_empty() {
-                None
-            } else {
-                Some(form.body.clone().into_bytes())
+            let revision = choice.0;
+            // Everything the call could be refused for is refused here,
+            // before a task exists — so a refusal provably sent nothing: the
+            // address, the parameters, a fan-out to an operation that
+            // forbids one (O2), a request that does not encode.
+            let target = match zenkey_fleet::ResolvedTarget::parse(form.target.trim()) {
+                Ok(t) => t,
+                Err(e) => {
+                    refuse_call(form, e);
+                    return Task::none();
+                }
             };
-            // Verbatim beside the body — never schema-encoded (#126).
-            let attachment = if form.attachment.trim().is_empty() {
-                None
-            } else {
-                Some(form.attachment.clone().into_bytes())
+            let values = match bindings(&form.params) {
+                Ok(v) => v,
+                Err(why) => {
+                    refuse_call(form, why);
+                    return Task::none();
+                }
             };
-            let base = cx.dep.namespace().to_string();
-            let timeout = cx.dep.timeout();
-            let slices = None;
+            let plan = match zenkey_fleet::plan_call(&revision, target, &shape.name, values) {
+                Ok(p) => p,
+                Err(e) => {
+                    refuse_call(form, e);
+                    return Task::none();
+                }
+            };
+            let input = if form.body.trim().is_empty() {
+                match plan.operation.request {
+                    zenkey_model::schema::TypeId::Raw { .. } => Vec::new(),
+                    _ => b"{}".to_vec(),
+                }
+            } else {
+                form.body.clone().into_bytes()
+            };
+            let request = match zenkey_fleet::encode_request(&revision, &plan, &input) {
+                Ok(r) => r,
+                Err(e) => {
+                    refuse_call(form, e);
+                    return Task::none();
+                }
+            };
+            // The session in the namespace: an operation's key is
+            // base-relative (spec §5.1). None before the sessions open.
+            let Some(session) = cx.dep.session.clone() else {
+                refuse_call(
+                    form,
+                    "no session in the deployment's namespace yet — nothing was sent",
+                );
+                return Task::none();
+            };
+            // The contract's recommended timeout, else the window's
+            // (spec §5.1, "The timeout").
+            let timeout = shape
+                .timeout_ms
+                .map(std::time::Duration::from_millis)
+                .unwrap_or_else(|| cx.dep.timeout());
             form.in_flight = true;
             form.outcome = None;
             services::write::call(services::write::Call {
                 session,
-                base,
-                target,
-                producer,
-                procedure,
-                params,
-                body,
-                attachment,
+                revision,
+                plan,
+                request,
                 timeout,
-                slices,
             })
         }
     }
@@ -442,11 +609,9 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
 mod tests {
     use super::*;
 
-    /// P3 in the (still v1) publish (#614, FL6a): a key a zk2 service owns
-    /// is refused — its data keys and its `@zk` control keys alike, under
-    /// any namespace and none — and the refusal names the owner and the
-    /// rule. A foreign key, a v1 key and a contract bundle's location-free
-    /// key are not anyone's, and pass.
+    /// P3 in the publish (#614, FL6a; FL10): a key a zk2 service owns is
+    /// refused — its data keys and its `@zk` control keys alike, under any
+    /// namespace and none — and the refusal names the owner and the rule.
     #[test]
     fn an_owned_zk2_key_is_refused_and_a_foreign_one_is_not() {
         for owned in [
@@ -457,13 +622,6 @@ mod tests {
             let why = owned_refusal(owned).unwrap_or_else(|| panic!("{owned} passed"));
             assert!(why.contains("robot1/nav"), "{why}");
             assert!(why.contains("P3"), "{why}");
-        }
-        for foreign in [
-            "demo/example/foo",
-            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-            "zk2/robot1",
-        ] {
-            assert!(owned_refusal(foreign).is_none(), "{foreign} refused");
         }
 
         // On the form: logged, set as the error, and nothing armed.
@@ -508,5 +666,19 @@ mod tests {
         assert!(disarm::<()>(&mut form, None).is_none());
         assert_eq!(form.log.len(), before);
         assert!(!form.armed);
+    }
+
+    /// The params are the template's values: a name given twice is two
+    /// values (a rest parameter's chunks), and a token with no `=` is
+    /// refused by name.
+    #[test]
+    fn params_read_as_bindings() {
+        let b = bindings(" ns=default ; iface = eth0;;path=a;path=b").unwrap();
+        assert_eq!(b["ns"], ["default"]);
+        assert_eq!(b["iface"], ["eth0"]);
+        assert_eq!(b["path"], ["a", "b"]);
+        assert!(bindings("").unwrap().is_empty());
+        let e = bindings("ns").unwrap_err();
+        assert!(e.contains("\"ns\""), "{e}");
     }
 }

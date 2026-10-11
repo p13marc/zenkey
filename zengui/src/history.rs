@@ -61,6 +61,11 @@ pub struct HistoryEntry {
     pub congestion_control: zenoh::qos::CongestionControl,
     pub reliability: zenoh::qos::Reliability,
     pub express: bool,
+    /// Whether the four axes above were observed. `false` for a replayed
+    /// row that recorded none — a version-1 or -2 `.zrec`, whose v1 profile
+    /// names zk2 does not read (#614, FL10b): the axes are then zenoh's
+    /// defaults, and the pane says "QoS not recorded" instead of them.
+    pub qos_recorded: bool,
     /// The publishing entity, when SourceInfo rode the sample.
     pub source: Option<zenkey_fleet::SampleSource>,
     /// The structural document, when the bytes carry one — the diff's
@@ -98,6 +103,9 @@ impl HistoryEntry {
             congestion_control: view.congestion_control,
             reliability: view.reliability,
             express: view.express,
+            // A live sample always carries its axes; a replay says when a
+            // row did not (`HistoryRing::push_qos`).
+            qos_recorded: true,
             source: view.source,
             value,
             preview,
@@ -200,7 +208,14 @@ impl HistoryRing {
     }
 
     pub fn push(&mut self, view: &SampleView) {
-        let entry = HistoryEntry::render(self.next_seq, view);
+        self.push_qos(view, true);
+    }
+
+    /// [`push`](Self::push), saying whether the sample's axes were observed:
+    /// `false` for a replayed row that recorded none (#614, FL10b).
+    pub fn push_qos(&mut self, view: &SampleView, qos_recorded: bool) {
+        let mut entry = HistoryEntry::render(self.next_seq, view);
+        entry.qos_recorded = qos_recorded;
         self.next_seq += 1;
         self.bytes += entry.weight();
         self.entries.push_back(entry);
@@ -291,8 +306,15 @@ impl HistoryRecorder {
 
     /// Retain a sample if it is this recorder's key.
     pub fn observe(&mut self, view: &SampleView) {
+        self.observe_qos(view, true);
+    }
+
+    /// [`observe`](Self::observe), saying whether the sample's axes were
+    /// observed: `false` for a replayed row that recorded none (#614,
+    /// FL10b).
+    pub fn observe_qos(&mut self, view: &SampleView, qos_recorded: bool) {
         if view.key == self.key {
-            self.ring.push(view);
+            self.ring.push_qos(view, qos_recorded);
         }
     }
 

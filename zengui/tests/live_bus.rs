@@ -639,3 +639,429 @@ async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
         "reappearance recovers the row"
     );
 }
+
+// ── the Send pane on zk2 (#614, FL10) ──────────────────────────────────────
+
+/// A window booted against `bus`, holding `contracts` (as `--contracts`
+/// loads them), its boot tasks run to quiescence. The shared context file it
+/// re-reads is a scratch one, never the user's — set once per process; run
+/// these with `--test-threads=1` beside the seed test, which sets its own.
+async fn booted(bus: &Bus, contracts: Vec<PathBuf>) -> zengui::app::Zengui {
+    static HOME: std::sync::Once = std::sync::Once::new();
+    HOME.call_once(|| {
+        let home = std::env::temp_dir().join(format!("zengui-live-fl10-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("scratch dir");
+        // SAFETY: set once, before this process's first window reads a store.
+        unsafe { std::env::set_var("ZENKEY_EXPLORER_CONFIG_DIR", &home) };
+    });
+    let settings = zengui::config::Settings {
+        namespace: bus.namespace.clone(),
+        connect: vec![bus.endpoint.clone()],
+        listen: vec![],
+        scouting: Some(false),
+        zenoh_config: None,
+        contracts,
+        timeout_secs: 2,
+        scope: ScopePreset::Everything,
+        selectors: vec![],
+        // The scope observed from the start (`**`, in no namespace): what a
+        // foreign publish needs to come back through the pump.
+        eager: true,
+        echo_lines: 500,
+        history_entries: 10,
+        max_keys: 5000,
+    };
+    let (mut app, boot) =
+        zengui::app::Zengui::with_prefs(settings, zengui::prefs::Prefs::default(), None);
+    tokio::time::timeout(Duration::from_secs(20), drive(&mut app, boot))
+        .await
+        .expect("the boot settles");
+    app
+}
+
+/// The example contracts, as `--contracts` names them.
+fn example_contracts() -> Vec<PathBuf> {
+    let examples = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/zk2"));
+    vec![examples.join("walkthrough"), examples.join("tcgui")]
+}
+
+/// The revision of `iface` the example contracts hold.
+fn held(iface: &str) -> std::sync::Arc<zenkey_fleet::Revision> {
+    let loaded = zengui::services::contracts::load_all(&example_contracts());
+    loaded
+        .set
+        .of_iface(&iface.parse().expect("an interface"))
+        .next()
+        .expect("held")
+        .clone()
+}
+
+fn send_msg(m: zengui::view::send::SendMsg) -> zengui::message::Message {
+    zengui::message::Message::Pane(zengui::message::PaneMsg::Send(m))
+}
+
+/// Whether the window's main view shows `text`, exactly.
+fn shows(app: &zengui::app::Zengui, text: &str) -> bool {
+    let mut ui = iced_test::simulator::<zengui::message::Message, _, _>(
+        app.view(iced::window::Id::unique()),
+    );
+    ui.find(text).is_ok()
+}
+
+/// A call through the window, against the spray (#614, FL10; spec §5.1):
+/// `nav.v2`'s `set_origin` at `robot1/nav`, which the spray serves, answers
+/// a value; at `robot3/nav`, where a mock owner (`zenctl serve`'s engine,
+/// brought up here because the spray refuses nothing) refuses with `busy`,
+/// an envelope; at `robot9/nav`, where nothing runs, silence — a non-verdict
+/// with what presence could see. Three answers, three renderings (O5).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn a_call_keeps_value_envelope_and_silence_apart() {
+    use zengui::message::{Message, RightPane, WorkspaceMsg};
+    use zengui::view::send::{RevisionChoice, SendMode, SendMsg};
+
+    let bus = Bus::up().await;
+    let nav = held("nav.v2");
+
+    // The refusing owner: one operation of nav.v2 at an address the spray
+    // does not run, on a session in the namespace, as `zenctl serve` runs.
+    let owner = zenkey_fleet::open_in_namespace(
+        &bus.namespace,
+        None,
+        std::slice::from_ref(&bus.endpoint),
+        &[],
+        Some(false),
+    )
+    .await
+    .expect("the mock owner's session");
+    let served = zenkey_fleet::serve_operation(
+        &owner,
+        zenkey_fleet::ServeSpec {
+            address: "robot3/nav".parse().unwrap(),
+            revision: std::sync::Arc::clone(&nav),
+            operation: "@op/set_origin".into(),
+            answer: zenkey_fleet::MockAnswer::refusal("busy", "the origin is being moved", None)
+                .unwrap(),
+            bindings: Default::default(),
+            tool: "zengui live test".into(),
+        },
+    )
+    .await
+    .expect("the mock owner comes up");
+
+    let mut app = booted(&bus, example_contracts()).await;
+    let _ = app.update(Message::Workspace(WorkspaceMsg::PaneSelected(
+        RightPane::Send,
+    )));
+    let _ = app.update(send_msg(SendMsg::ModeSelected(SendMode::Call)));
+    let _ = app.update(send_msg(SendMsg::RevisionPicked(RevisionChoice(nav))));
+    let _ = app.update(send_msg(SendMsg::OperationPicked("@op/set_origin".into())));
+    let _ = app.update(send_msg(SendMsg::BodyChanged(
+        r#"{"origin": {"latitude_deg": 47.6, "longitude_deg": -122.3, "altitude_m": 56.0}}"#.into(),
+    )));
+
+    for (address, want) in [
+        ("robot1/nav", "value"),
+        ("robot3/nav", "refused: busy"),
+        ("robot9/nav", "No answer"),
+    ] {
+        let _ = app.update(send_msg(SendMsg::TargetChanged(address.into())));
+        let task = app.update(send_msg(SendMsg::Submit));
+        tokio::time::timeout(Duration::from_secs(15), drive(&mut app, task))
+            .await
+            .expect("the call settles");
+        let selector = format!("→ zk2/{address}/nav.v2/@op/set_origin");
+        assert!(shows(&app, &selector), "{address}: the key it went out on");
+        assert!(shows(&app, want), "{address}: answered {want:?}");
+        // ("value" is the one word another surface could also show; the
+        // other two are the outcome's alone.)
+        for other in ["refused: busy", "No answer"]
+            .into_iter()
+            .filter(|o| *o != want)
+        {
+            assert!(!shows(&app, other), "{address}: not also {other:?}");
+        }
+        println!("{address}: {want}");
+    }
+
+    drop(served);
+    let _ = owner.close().await;
+    bus.down().await;
+}
+
+/// A refused fan-out sends nothing (#614, FL10; spec §5.1 O2): a queryable of
+/// this test's own, on every `tc.netif.v1` interface-set key in the
+/// namespace, counts the queries that reach it. The window's call to
+/// `*/tc`, and to `host-a/tc` with its parameters left wildcards, are
+/// refused in the form with no task at all — and the counter stays at zero,
+/// though a GET of the test's own on those keys reaches it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn a_refused_fan_out_sends_nothing() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use zengui::view::send::{RevisionChoice, SendMode, SendMsg};
+
+    let bus = Bus::up().await;
+    let raw = bus.raw().await;
+    let heard = std::sync::Arc::new(AtomicU64::new(0));
+    let counter = std::sync::Arc::clone(&heard);
+    let _queryable = raw
+        .declare_queryable(bus.wire("zk2/*/tc/tc.netif.v1/@op/interfaces/**"))
+        .callback(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })
+        .await
+        .expect("the counting queryable");
+
+    let mut app = booted(&bus, example_contracts()).await;
+    let _ = app.update(send_msg(SendMsg::ModeSelected(SendMode::Call)));
+    let _ = app.update(send_msg(SendMsg::RevisionPicked(RevisionChoice(held(
+        "tc.netif.v1",
+    )))));
+    let _ = app.update(send_msg(SendMsg::OperationPicked(
+        "@op/interfaces/{ns}/{iface}/set".into(),
+    )));
+    let _ = app.update(send_msg(SendMsg::BodyChanged(
+        r#"{"operation": "Enable"}"#.into(),
+    )));
+    for (address, params) in [("*/tc", "ns=default;iface=eth0"), ("host-a/tc", "")] {
+        let _ = app.update(send_msg(SendMsg::TargetChanged(address.into())));
+        let _ = app.update(send_msg(SendMsg::ParamsChanged(params.into())));
+        let task = app.update(send_msg(SendMsg::Submit));
+        assert_eq!(task.units(), 0, "{address}: no call was started");
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(
+        heard.load(Ordering::SeqCst),
+        0,
+        "a refused fan-out reached no queryable"
+    );
+
+    // The counter does count: a GET of this test's own on one of the keys.
+    let replies = raw
+        .get(bus.wire("zk2/host-a/tc/tc.netif.v1/@op/interfaces/default/eth0/set"))
+        .target(zenoh::query::QueryTarget::All)
+        .timeout(Duration::from_secs(2))
+        .await
+        .expect("a GET");
+    while replies.recv_async().await.is_ok() {}
+    assert!(
+        heard.load(Ordering::SeqCst) >= 1,
+        "the counting queryable hears a query on these keys"
+    );
+
+    let _ = raw.close().await;
+    bus.down().await;
+}
+
+/// A foreign publish reaches the echo (#614, FL10): the window publishes a
+/// foreign key as bytes on zenoh's default axes, its own pump carries the
+/// sample back, and the echo shows the key. A key a zk2 service owns, on
+/// the same form, is refused (P3) and starts nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn a_foreign_publish_reaches_the_echo() {
+    use iced::futures::StreamExt as _;
+    use zengui::message::{ActivityTab, BusMsg, Message, WorkspaceMsg};
+    use zengui::view::send::SendMsg;
+
+    let bus = Bus::up().await;
+    let mut app = booted(&bus, vec![]).await;
+    let key = format!("demo/fl10/probe-{}", std::process::id());
+
+    // P3 on the same form: refused, nothing started.
+    let _ = app.update(send_msg(SendMsg::KeyChanged(
+        bus.wire("zk2/robot1/nav/nav.v2/state/status"),
+    )));
+    let refused = app.update(send_msg(SendMsg::Send));
+    assert_eq!(refused.units(), 0, "an owned key starts nothing");
+
+    let link_key = app.data_link().expect("a data pump after the boot");
+    let mut link = Box::pin(zengui::link::stream(link_key));
+    let first = link.next().await.expect("the pump runs");
+    let _ = app.update(first);
+
+    let _ = app.update(send_msg(SendMsg::KeyChanged(key.clone())));
+    let _ = app.update(send_msg(SendMsg::BodyChanged("hello from FL10".into())));
+    let publish = app.update(send_msg(SendMsg::Send));
+    tokio::time::timeout(Duration::from_secs(10), drive(&mut app, publish))
+        .await
+        .expect("the publish settles");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let message = tokio::time::timeout_at(deadline, link.next())
+            .await
+            .expect("the sample comes back in time")
+            .expect("the pump runs");
+        let seen = match &message {
+            Message::Bus(BusMsg::Tick(tick)) => tick
+                .samples
+                .iter()
+                .any(|s| s.key == key && s.payload.to_bytes().as_ref() == b"hello from FL10"),
+            _ => false,
+        };
+        let _ = app.update(message);
+        if seen {
+            break;
+        }
+    }
+    let _ = app.update(Message::Workspace(WorkspaceMsg::ActivityTab(
+        ActivityTab::Echo,
+    )));
+    assert!(shows(&app, &key), "the echo shows the foreign key");
+    let _ = app.update(Message::Workspace(WorkspaceMsg::ActivityTab(
+        ActivityTab::Publish,
+    )));
+    assert!(
+        shows(
+            &app,
+            &format!("published {key} (15 bytes) · qos data/drop/reliable")
+        ),
+        "the publish log names what went out"
+    );
+
+    bus.down().await;
+}
+
+/// A recorded window replays through the offline lens (#614, FL10b; O4): a
+/// capture of the spray's traffic (`.zrec` v3, recorded as the window's own
+/// recorder does) opened in a window whose presence link has read the live
+/// deployment. While it replays, the tree merges against a skeleton with no
+/// presence read — the strip says so where it said the live addresses — the
+/// banner states the capture's exclusions and that it resolves offline.
+/// Leaving gives the live skeleton back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn a_recorded_window_replays_through_the_offline_lens() {
+    use iced::futures::StreamExt as _;
+    use zengui::message::{ActivityTab, Message, WorkspaceMsg};
+    use zengui::view::replay::ReplayMsg;
+
+    let bus = Bus::up().await;
+
+    // The capture: `**` in no namespace for a few seconds, through the
+    // fleet's recorder, into a scratch file.
+    let path = std::env::temp_dir().join(format!("zengui-fl10-{}.zrec", std::process::id()));
+    {
+        let session = bus.raw().await;
+        let selectors = ScopePreset::Everything.selectors("", &[]);
+        let monitor = Monitor::start(
+            &session,
+            MonitorSpec {
+                selectors: selectors.clone(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("start monitor");
+        let header = zenkey_fleet::ZrecHeader {
+            zrec: zenkey_fleet::ZREC_VERSION,
+            excluded: Some(zenkey_fleet::zrec_excluded(&selectors)),
+            selectors,
+            base: bus.namespace.clone(),
+            captured_at: zenkey_fleet::rfc3339_now(),
+            preamble: None,
+            pre_roll: None,
+        };
+        let file = std::fs::File::create(&path).expect("a scratch file");
+        let sink = zenkey_fleet::ZrecSink::spawn(std::io::BufWriter::new(file), &header)
+            .await
+            .expect("the sink");
+        let mut events = monitor.events();
+        zenkey_fleet::record(
+            &mut events,
+            &sink,
+            zenkey_fleet::RecordBounds {
+                max_samples: None,
+                max_duration: Some(SETTLE),
+            },
+            |_, _| {},
+        )
+        .await
+        .expect("the capture");
+        let counts = sink.finish().await.expect("the trailer");
+        assert!(counts.samples > 0, "the spray's traffic was captured");
+        println!("captured {} samples to {}", counts.samples, path.display());
+        let _ = monitor.shutdown().await;
+        let _ = session.close().await;
+    }
+
+    // What the replay's skeleton will say: every revision held, no presence.
+    let offline = zengui::view::status::skeleton_text(Some(
+        &zengui::replay::ReplayLens::offline(
+            &bus.namespace,
+            Some(zengui::services::contracts::load_all(&example_contracts()).set),
+        )
+        .skeleton
+        .coverage,
+    ));
+    assert!(offline.contains("no presence read"), "{offline}");
+
+    // The window, with the live deployment read through its presence link.
+    let mut app = booted(&bus, example_contracts()).await;
+    let presence = app.presence_link().expect("a presence link after the boot");
+    let mut presence = Box::pin(zengui::presence_link::stream(presence));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let message = tokio::time::timeout_at(deadline, presence.next())
+            .await
+            .expect("presence lands")
+            .expect("the link runs");
+        let landed = matches!(
+            &message,
+            Message::Bus(zengui::message::BusMsg::Presence(..))
+        );
+        let task = app.update(message);
+        drive(&mut app, task).await;
+        if landed {
+            break;
+        }
+    }
+    assert!(
+        !shows(&app, &offline),
+        "the live skeleton is placed by presence, not this: {offline}"
+    );
+
+    // Open the capture through the window's own load path.
+    let replay = |m| Message::Workspace(WorkspaceMsg::Replay(m));
+    let _ = app.update(replay(ReplayMsg::OpenToggled));
+    let _ = app.update(replay(ReplayMsg::PathChanged(path.display().to_string())));
+    let open = app.update(replay(ReplayMsg::Open));
+    tokio::time::timeout(Duration::from_secs(20), drive(&mut app, open))
+        .await
+        .expect("the load and its offline check settle");
+    let _ = app.update(Message::Workspace(WorkspaceMsg::ActivityTab(
+        ActivityTab::Replay,
+    )));
+    assert!(
+        shows(&app, &offline),
+        "the strip states the replay's own skeleton: {offline}"
+    );
+    assert!(
+        shows(
+            &app,
+            "excluded: @stream, @state, @op, @zk, @adv — no selector names them, so no sample \
+             under them is in this file"
+        ),
+        "the banner states what the capture could not contain"
+    );
+    assert!(
+        shows(
+            &app,
+            "resolved offline: 10 revisions held, no presence read — the live catalog \
+             describes another world"
+        ),
+        "the banner says the replay resolves offline"
+    );
+
+    let _ = app.update(replay(ReplayMsg::Exit));
+    assert!(
+        !shows(&app, &offline),
+        "leaving gives the tree back to the live skeleton"
+    );
+
+    let _ = std::fs::remove_file(&path);
+    bus.down().await;
+}

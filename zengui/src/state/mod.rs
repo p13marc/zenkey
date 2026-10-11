@@ -235,6 +235,10 @@ mod tests {
                     "merged_cache",
                     "shape_reused",
                     "shape_rebuilt",
+                    // FL10b: the declared keyspace a replay merges against,
+                    // from its offline lens — a merge input, invalidated by
+                    // the replay opening and closing, never by the bus.
+                    "replay_skeleton",
                 ],
             ),
             (
@@ -370,6 +374,7 @@ mod tests {
         // Then FL6a-ii: presence, the lens feed, its catalog and generation,
         // the identity cache, and the presence monitor with its epoch — 90.
         // Then FL6b: the skeleton's inputs and the admin space's answer — 92.
-        assert_eq!(leaves, 92, "the split must place every field exactly once");
+        // Then FL10b: the replay's skeleton — 93.
+        assert_eq!(leaves, 93, "the split must place every field exactly once");
     }
 }

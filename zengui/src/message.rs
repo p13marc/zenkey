@@ -591,15 +591,24 @@ pub enum PrefsMsg {
     ZoomReset,
 }
 
-/// What one prepare→declare→send round produced. The publication travels in
-/// the message because a *repeating* publish keeps it: `Publication` is not
-/// `Clone`, so the `Arc` is what lets the app hold the declared publisher
-/// between ticks. A one-shot send undeclares in the task and carries `None` —
-/// an explorer does not leave declarations lying around on the bus.
+/// What one declare→send round produced (zk2's since #614, FL10): the key
+/// written, the bytes as typed, the axes and the encoding it went out with.
+/// The publication travels in the message because a *repeating* publish
+/// keeps it: `Publication` is not `Clone`, so the `Arc` is what lets the app
+/// hold the declared publisher between ticks. A one-shot send undeclares in
+/// the task and carries `None` — an explorer does not leave declarations
+/// lying around on the bus.
 #[derive(Debug)]
 pub struct PublishOutcome {
-    pub prepared: zenkey_fleet_v1::PreparedBody,
-    pub publication: Option<Arc<zenkey_fleet_v1::Publication>>,
+    /// The full wire key written — the form's key may have moved since.
+    pub key: String,
+    /// The bytes that went out, as typed; a repeat resends exactly these.
+    pub bytes: Arc<Vec<u8>>,
+    /// The axes the publication was declared with.
+    pub qos: zenkey_fleet::WireQos,
+    /// The wire `Encoding` set, when the form named one.
+    pub encoding: Option<String>,
+    pub publication: Option<Arc<zenkey_fleet::Publication>>,
     /// `None` = the status could not be asked, which is not `false` (O4).
     pub matching: Option<bool>,
     /// The attachment that rode the send, kept so a repeating publish

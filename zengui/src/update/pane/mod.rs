@@ -44,7 +44,9 @@ pub(crate) fn update(
     // one. What differs between the arms is only what each pane may *move*.
     let cx = Ctx { dep, obs, sub };
     match msg {
-        PaneMsg::Send(msg) => send::update(&mut work.bench, msg, cx),
+        // The replay lock rides in (#74; #614, FL10): while the panes show
+        // a capture, the Send pane writes nothing to the live bus.
+        PaneMsg::Send(msg) => send::update(&mut work.bench, work.replay.replay.is_some(), msg, cx),
         PaneMsg::Nodes(msg) => nodes::update(&mut work.verdicts, msg, cx),
         PaneMsg::Doctor(msg) => doctor::update(&mut work.verdicts, msg, cx),
         PaneMsg::Blob(msg) => blob::update(&mut work.verdicts.blob, msg, cx),
@@ -81,7 +83,7 @@ pub(crate) fn update(
             Some(slot) => consumers::update(slot, dep, msg),
             None => Task::none(),
         },
-        PaneMsg::Echo(msg) => echo::update(&mut work.echo, msg, cx),
+        PaneMsg::Echo(msg) => echo::update(&mut work.echo, work.replay.replay.as_ref(), msg, cx),
         PaneMsg::Context(msg) => context::update(&mut work.bench.context_form, msg),
         PaneMsg::Scope(msg) => scope_editor::update(&mut work.bench.scope_form, msg, cx),
         PaneMsg::Settings(msg) => settings::update(&mut work.bench.settings_form, msg),
