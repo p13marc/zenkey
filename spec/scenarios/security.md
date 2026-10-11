@@ -21,8 +21,18 @@ contracts and bindings.
   holds them (core §11.1). *Added in 0.8, after S14; not yet run against a
   generator.*
 - A contract fetch works for any principal.
+- **Inspection** (0.27). A tool that inspects `*/tc`, binding and calling
+  nothing, reads every backend's tokens and descriptor on the wildcard
+  selectors a doctor sends (`zk2/*/tc/@zk/**`, `zk2/*/tc/@zk/instance/*`),
+  complete. It reads none of their data, and no presence it does not
+  inspect.
+- **One principal, both roles** (0.27). A principal that runs a service
+  and a tool holds Own on its service's prefix, and the tool's presence
+  and admin read beside it, and no write beyond its own prefix.
 
-*Spike S14: 13 of 13 checks.*
+*Spike S14: 13 of 13 checks. Inspection: run against the reference
+generator (`zenkey-fleet/tests/acl_live.rs`); both roles: the reference
+generator's plans (`acl.rs`, `tests/fixtures/acl/`).*
 
 ## §2 Grants under `allow`
 
@@ -39,7 +49,10 @@ complement.
 **Generator check.** Remove a consumer's wildcard selector from the
 provider's egress grant: the fan-in GET gets 0 replies. Restore it, and
 remove the matching ingress `reply` grant: a refusal never reaches the
-caller.
+caller. Remove a wildcard presence selector from a provider's egress
+grant (0.27): an inspecting tool's wildcard descriptor read gets nothing
+from it, while its liveliness read, which the router answers, still holds
+the provider's tokens.
 
 ## §3 Who answers the admin space (core §4.2, §11.1)
 

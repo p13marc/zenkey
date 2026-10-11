@@ -181,8 +181,11 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   and `record --on` run it too.
   FJ7's `acl gen` compiles spec §11's grants offline from `--contracts` and
   an enrollment (`examples/zk2/acl/`: principals by user or CN, never a
-  zid, running services, archives and tools with their bindings and calls)
-  in `zenkey_fleet::model::acl`; `--default-permission allow` compiles each
+  zid, running services, archives and tools with their bindings and calls,
+  and a tool's `inspects`, presence alone, since core 0.27; a principal
+  holds the union of what it runs) in `zenkey_fleet::model::acl`; a
+  wildcard presence selector joins each provider's egress, since the
+  descriptor read travels to it (0.27); `--default-permission allow` compiles each
   grant into denies of its complement, `--face constrained --attach
   client|south-region` guards a constrained face (router to router is
   refused). Its plans are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`) and
@@ -226,7 +229,12 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   and the resource is `reliable` with `block` (`budget::lossless`), the
   owner held its token until a lease after the window (`--lease`, zenoh's
   10 s by default), and the window counts from its declaration plus the
-  reply timeout; the run's subscription detects no misses. The runtime
+  reply timeout; the run's subscription detects no misses. Core 0.27
+  (#753) adds the reader's own stall: `bus::stall` watches the run's
+  session's transport events and a ticker on a thread of its own over the
+  window and the watch after it, and a closed transport or a gap past
+  `budget::stall_bound` (`--wait-before-close`, 5 s, or `--lease` less a
+  keep-alive) reads `reader_stalled`. The runtime
   keeps §2.7 (#741): `zenkey::budget` refuses a new member at the bound,
   an occurrence beyond the rate and a lowering below the live members
   (`Error::Budget`), so a test that needs an owner over its bound uses
@@ -371,8 +379,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   cannot see (`grammar::blind_spots`, #614 FL4), the authoring format
   (draft 1) and its lints with stable codes (`diag::CODES`), the canonical
   form, fingerprints,
-  bundles and `.history`, and the compatibility classifier (`compat`,
-  #618). It depends on `zenoh-keyexpr` and no other zenoh crate
+  bundles and `.history`, the compatibility classifier (`compat`,
+  #618), and a late joiner's merge (`seed`, core 0.27: zenoh's timestamp
+  order spelled out, an unstamped sample below every stamp), which the
+  fleet's seeded subscription decides by. It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
   as zenctl's). `tests/examples.rs` requires every contract in
@@ -479,7 +489,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.26 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.27 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

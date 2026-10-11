@@ -207,3 +207,52 @@ whose puts, replies and `reply_del` carry the stamps it mints (§4.3).
 *The reference (`zenkey-fleet/tests/seeding.rs`) runs it through the
 fleet's seeded subscription, the one zengui's tree seeds through, and the
 control on the bare session.*
+
+## §11 A late joiner's merge: unstamped samples, equal times, a key that is not concrete (§4.2, 0.27)
+
+**Setup.** No zk2 owner: foreign keys (§1.7), `foreign/*`, outside S4.
+Their writer W is a session with no HLC, so its puts and deletes arrive
+unstamped unless it sets a stamp, and it answers GETs on `foreign/**` as a
+storage would. A tool, the late joiner, wants them and every change after.
+The test holds W's answer to a GET until it releases it. The reference
+plays W from one peer session, the late joiner a client of it.
+
+**Steps.**
+1. The late joiner subscribes to `foreign/**`, then GETs it with `All` +
+   `Latest`. W takes the GET and holds it.
+2. W puts `foreign/a` unstamped, then `foreign/c` unstamped twice
+   (`c-1`, `c-2`).
+3. W answers: `foreign/a` stamped T1, `foreign/b` stamped T2, and
+   `foreign/c` unstamped (`c-0`, a value it held from before step 2). It
+   ends the GET.
+4. W puts `foreign/a` unstamped, deletes `foreign/b` unstamped, then puts
+   `foreign/b` stamped T3 > T2.
+5. **Equal times.** With one time t and two ids, `2` and `100` (hex), W
+   puts `foreign/e` at (t, `2`) then (t, `100`), and `foreign/f` at
+   (t, `100`) then (t, `2`).
+6. **A key that is not concrete.** W puts `foreign/g` stamped T1, then
+   on the wildcard key `foreign/*` stamped T3, then `foreign/g` stamped
+   T2.
+
+**Expected.**
+1. —
+2. Each is kept as it arrived: `a`, then `c-1`, then `c-2`.
+3. `a` is replaced by the stamped reply (T1); `b` is kept (T2); `c` is
+   replaced by `c-0`: two unstamped samples have no order but their
+   arrival, and the reply arrived last.
+4. Neither unstamped sample is kept, on `a` or `b`: each key holds a
+   stamp. The stamped put on `b` (T3) is kept.
+5. On `e`, only (t, `2`) is kept; on `f`, both are, the second replacing
+   the first. At one time, id `100` is below id `2`: zenoh compares the
+   ids' bytes from the least significant, `00` below `02`. By the ids'
+   values, the other way round, `e` would keep both and `f` one.
+6. A tool's seed keeps all three: the wildcard put under `foreign/*`,
+   never merged with the keys it covers, so `foreign/g` at T2 is kept
+   after it. R6 binds a consumer, which discards the wildcard put.
+
+*The reference (`zenkey-fleet/tests/seeding.rs`) runs steps 1–4 as
+`s11_an_unstamped_sample_ranks_below_every_stamp`, step 5 as
+`s11_equal_times_order_by_the_id_as_zenoh_does` and step 6 as
+`s11_a_tools_seed_keeps_a_key_that_is_not_concrete`, through the fleet's
+seeded subscription. `conformance/seed/merge.json` states the same order
+as a pure fixture.*

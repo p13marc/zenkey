@@ -3,6 +3,216 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.27 — 2026-10-11: a reader that stalls, a tool as a role, and the merge's open cases (#753, #748, #752)
+
+Three issues, one of them a premise a measurement falsified.
+
+- **#753.** 0.25 rested "lost no delivery" on a stalled reader seeing the
+  owner's token withdrawn. `zenkey/tests/budget.rs` §1, unchanged, failed
+  that premise about one run in four: six runs on 2026-10-11 lost 661–792
+  reliable, `block` samples, and two of them saw no withdrawal.
+- **#748.** §11.1 called a tool "a principal with no address of its
+  own", while the reference enrolls principals that run services and a
+  tool. Its input named "the services a tool inspects", which the
+  reference enrollment had no way to say.
+- **#752.** The spec-only implementation read 0.26 cold (PR #751) and
+  found three cases the late joiner's merge left open (F-106): an
+  unstamped sample, equal times under two ids, and R6 for a tool's seed.
+
+Reference behaviour is the rule, unless it is a bug. One was: the
+generator refused a wildcard descriptor read under `deny` (below).
+
+**Changed: rule 1 of "lost no delivery" narrowed (§2.7, #753).**
+- **The mechanism, measured.** The probe recorded what 0.25's test did not:
+  whether the token had reached the reader when it stalled, its own
+  session's transport events, and a ticker on a thread of its own.
+  - In 27 runs (a probe's 18, and 9 of the test as it now reports), the
+    reader's own transport closed every time.
+  - It saw the owner's token withdrawn in each of the 23 runs where the
+    token had reached it before it stalled, and never in the 4 where it
+    had not. A transport that closes withdraws only the tokens the reader
+    received through it. The reader then read everything its router had
+    sent before the close, and the token was not among it: it went with
+    the router's queue toward the reader. The reader saw the token only
+    after it reconnected, as a new token.
+  - A ticker on a thread of the reader's process saw no gap above 107 ms:
+    only zenoh's receive thread was held.
+  - A reader whose whole process was stopped (SIGSTOP) for 7 s instead,
+    in 13 runs: its ticker saw a 7.0–7.1 s gap on its first tick after,
+    its session read its transport's close (0.35–0.51 s later in the 4
+    runs that timed it), and it saw the token withdrawn.
+  - A run with more than one withdrawal had another transport close
+    beside the reader's: the owner's own push had waited
+    `wait_before_close` too, and its session closed its transport to its
+    router.
+- **The rule.** "Its reader lost none" also requires, over the window and
+  the watch after it:
+  - **no transport of its session closed**. A router that gives up on the
+    reader closes the reader's own transport, and what it held for the
+    reader goes with it;
+  - **its process did not stall longer than the bound**: the transport's
+    `wait_before_close`, or its lease less one keep-alive interval when
+    that is shorter (5 s and 7.5 s with zenoh's defaults). A shorter stall
+    is never given up on: the router waits on a full queue for
+    `wait_before_close`, and hears from the reader within its lease.
+- **How a tool establishes it.** It watches both, from before the window
+  until its watch of the owner ends:
+  - its transports, from zenoh's transport events. These saw every
+    measured stall, a stuck callback's and a stopped process's alike;
+  - a monotonic ticker on a thread of its own. It sees a stopped process
+    first, and does not see a blocked receive thread.
+
+  #753 asked for a ticker, and for transport events if a measurement
+  supported them. The measurement supports both, each for what the other
+  cannot see, so both are the rule.
+- **A tool without transport events.** They are unstable in zenoh 1.10.1
+  (§0). Such a tool says so, and rests that half on a premise of its own:
+  nothing in its process blocks zenoh's receive threads. That premise is
+  the tool's to know, as routers in processes of their own are the
+  deployment's.
+  - Rejected: reading no window lossless without them. A tool's own
+    callbacks are its own code, and the core already leaves one such
+    premise to the side that can know it.
+- **The reason** is `reader_stalled`, chosen second: after `reader_lost`,
+  the reader's counted loss, and before every reason about the path.
+  `lossless.json` states the order.
+
+**Changed: Appendix B corrected.**
+- "Each time the reader saw the owner's instance token withdrawn" is
+  replaced by the measured rate. It adds the transport events, the case
+  where only a token received is withdrawn, and the stopped process.
+- It spells out the timestamp order (below).
+
+**Changed: §11.1, the grant shapes per principal (#748).**
+- **"Tool" is a role a principal plays.** A principal holds the union of
+  the grants of what it runs. One that runs services may run a tool too,
+  and holds the tool's grants beside its Own, the admin read included.
+  This is safe because no shape writes beyond its writer's own prefix:
+  - Own stays scoped to the principal's services;
+  - Consume, Call, presence and the admin read write nothing;
+  - the `@/**` queryable deny stays in every policy.
+
+  The reference already compiled it: `ground`, and since FL3 `zenwatch`.
+- **Inspection without a binding**, option (a) of #748. A doctor reads
+  `zk2/*/*/@zk/**`, and access control works by inclusion, so a principal
+  granted presence only through its bindings is refused the whole read,
+  complete and empty.
+  - A tool's `inspects` is presence alone: the `…/@zk/**` subtree of each
+    service named, exact or wildcard, descriptors included, and no
+    Consume.
+  - The reference enrollment's `[[tool]]` takes
+    `inspects = ["<system>/<service>", …]`.
+  - The walkthrough's `ops` inspects `*/*`, for its doctor and
+    `zenctl service list`.
+  - Rejected: (b), presence through bindings and calls only. It would
+    leave a doctor without a grant short of binding every interface it
+    reads.
+
+**Changed: a generator bug fixed (§11.2, #748).**
+- **The bug.** Judging inspection on a live router found it: a tool's
+  wildcard descriptor read (`zk2/*/tc/@zk/instance/*`) got nothing under
+  `deny`, while its liveliness read answered.
+  - A liveliness read is answered by the routers. The descriptor's GET and
+    subscription, which have ridden the presence grant since 0.14, travel
+    to the provider.
+  - The generator left presence selectors out of the provider's egress
+    grant ("presence reads never travel toward the provider"), which was
+    true before 0.14.
+- **The fix.** A presence selector that intersects a provider's `@zk/**`,
+  and that its Own does not include, joins its egress grant as
+  `fan-in-presence:<address>`.
+  - It does not join the provider's ingress `reply`. No refusal answers a
+    descriptor read, and a reply grant on the selector would let the
+    provider answer under another provider's descriptor key.
+  - §11.2 says so. Every pinned plan with a wildcard binding or inspection
+    gains the rule.
+
+**Changed: the merge's open cases (§4.2, #752).**
+- **The order, spelled out.** Stamps compare as `Latest` compares replies:
+  by time, then by id. The id is compared as zenoh compares it, its
+  128-bit value written little-endian and the bytes compared from the
+  first. So the least significant byte that differs decides: at one time,
+  id `100` (hex) is below id `2`.
+  - The spec-only implementation ordered by the id as an integer, which
+    disagrees with zenoh's order whenever the low bytes and the high
+    bytes disagree. It follows the spelled-out order.
+  - The reference's order is zenoh's `Timestamp`; a fleet test checks the
+    model's against it for every pair of a set of ids.
+- **An unstamped sample** ranks below every stamped one, as `Latest` ranks
+  an unstamped reply lowest. It replaces only another unstamped sample:
+  two have no order but their arrival, and the later wins, a reply arriving
+  after a live sample included.
+  - That was the reference's merge already, and zk2py's guess.
+- **R6 and a tool's seed.** R6 binds a consumer, whose seed discards a
+  key that is not concrete on either path. A tool's seed keeps it, under
+  the key it arrived on, never merged with the keys it covers.
+  - That is the reference's behaviour, and zk2py's. 0.26 found it, and
+    left it out of the text.
+
+**Changed: evidence.**
+- **`conformance/budget/lossless.json`.** Each case gains `reader_stall`
+  (`gap_ms`, `bound_ms`, `transport_closed`), and seven cases pin
+  `reader_stalled`, its order and the bound's edge (a gap of exactly the
+  bound is no stall). A new `stall_bounds` array pins the bound from
+  `wait_before_close`, the lease and the keep-alive count. No expected
+  value of an existing case changes.
+- **New `conformance/seed/merge.json`.** It holds pairs of stamps with
+  their order, and one key's arrivals with which are kept.
+  - 0.26 had no fixture, since the order was only zenoh's. Now that the
+    order is spelled out and the unstamped rule added, a pure function
+    (`zenkey_model::seed`) decides it, and the fleet's merge calls it.
+- **`scenarios/budget.md` §1.**
+  - Step 3's expectation is corrected.
+  - Step 4 stops the reader's process.
+  - "A tool's window over a stalled reader": a run whose own transport
+    closes mid-window reads its population and rate unobservable.
+- **`zenkey/tests/budget.rs`.** It reports the withdrawals, the transport
+  closes and the ticker's gap. It asserts only the loss in step 3, and the
+  loss and the ticker's gap in step 4.
+- **New `scenarios/state.md` §11**: unstamped samples, equal times, and a
+  key that is not concrete, in `zenkey-fleet/tests/seeding.rs` (`s11_…`).
+- **`scenarios/security.md`.** §1 adds inspection and one principal with
+  both roles. §2's generator check adds the presence fan-in.
+- **Appendix C and E** name the new files and inputs.
+
+**The reference.**
+- **Stall detection.** `zenkey-fleet`'s `check conform` runs `bus::stall`:
+  the session's transport events and a ticker, over a window's watch.
+  `zenctl check conform` takes `--wait-before-close` (5 s).
+  `zenctl/tests/live_zk2.rs` closes the tool's own transport mid-window
+  and reads `budget-window` unobservable.
+- **The enrollment.** `zenkey_fleet::model::acl` compiles `inspects`.
+  `acl_live.rs` judges an inspecting principal on a router under `deny`,
+  and the presence fan-in by removing it.
+
+**Found while writing it.**
+- **§8.1 does not forbid a tool's callback from blocking.** It asks a
+  liveliness subscriber beside a GET to be callback-driven or drained,
+  which is another rule. The premise of a tool without transport events
+  is stated in §2.7 instead.
+- **The bound uses the reader's lease and keep-alive**, the ones the
+  router expires it by. A tool takes the deployment's `--lease` for both
+  the watch and the bound, and zenoh's default keep-alive.
+- **Two tokens' worth of noise.** A presence selector included in a wider
+  one of the same provider's egress grant is listed beside it
+  (`zk2/vehicle-01/*/@zk/**` beside `zk2/*/*/@zk/**`). That is harmless,
+  as it already was for data fan-in.
+
+**Deliberately not changed.**
+- **The presence premise.** A link that fails still withdraws the
+  owner's token at a reader that has it, and the owner present until one
+  lease after the window still reads it. A stalled reader is the case it
+  could not cover, and rule 1 now does.
+- **Routers in processes of their own** stay a deployment premise. A
+  reader sharing its process with routers lost deliveries with no
+  transport closed, which neither signal sees.
+- **No new state rule.** S1–S7, and the order of the subscription and
+  the GET, stand. A foreign key is still outside S4.
+- **The constrained face.** A far principal's presence never crosses
+  (§8.5), so `inspects` adds nothing there. Its plans gain only the
+  cite text and the vehicle's providers' presence fan-in, which the face's
+  `@zk` deny still stops.
+
 ## 0.26 — 2026-10-10: a late joiner's seed (#614)
 
 zengui's tree seeds a watched subtree with what is already there, then
