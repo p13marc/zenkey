@@ -1,0 +1,18 @@
+# scenarios/budget.md §1, "A tool's window over a stalled reader" (core §2.7,
+# 0.27): an event of two sources at most, reliable with block (an event's
+# default QoS), a 2 s retention, published on both sources every 200 ms, so
+# its rate allows 10 a second per member. It must load with no
+# finding at all.
+[interface]
+name    = "zk2py_stall"
+major   = 1
+minor   = 0
+summary = "an event for a tool's window over a stalled reader"
+
+[resources."alarms/{src}"]
+kind        = "event"
+type        = { raw = "text/plain" }
+params      = { src = "string" }
+cardinality = 2
+rate        = "burst(36000/h)"
+retention   = "2s"

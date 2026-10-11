@@ -14,6 +14,10 @@ The deployment (``deployment()``):
   removed, security.md §1's "with its liveliness reads removed";
 - ``tool``: the Tool shape, Consume ``state/health``, Call
   ``@op/diagnostics``, presence on ``*/tc``, and the admin read (0.15);
+- ``inspector`` (0.27): a tool that inspects ``*/tc``, binding and calling
+  nothing: presence alone;
+- ``both`` (0.27): one principal with both roles, the service ``ops/both``
+  and a tool that inspects ``*/tc`` with the admin read;
 - ``S-enrolled`` (user ``spoofer``): an enrolled principal holding nothing
   but the open contract grants, security.md §3 step 3's enrolled ``S``;
 - ``S`` (user ``stranger``): authenticated by R1, and no principal of the
@@ -31,7 +35,7 @@ from typing import Any
 
 PASSWORD = "pw-{}"
 USERS = {"own-h1": "h1tc", "own-h2": "h2tc", "consumer": "dash", "caller": "ctl", "caller-blind": "blind",
-         "tool": "tool", "S-enrolled": "spoofer"}
+         "tool": "tool", "S-enrolled": "spoofer", "inspector": "insp", "both": "both"}
 STRANGER = "stranger"
 
 
@@ -55,6 +59,11 @@ def deployment(repo) -> list:
         # security.md §3 step 3 (0.15): S as an enrolled principal, which
         # holds nothing but the open contract grants.
         Principal("S-enrolled", USERS["S-enrolled"]),
+        # security.md §1 (0.27): inspection, presence alone; and one
+        # principal with both roles, the shapes composed.
+        Principal("inspector", USERS["inspector"], inspects=["*/tc"]),
+        Principal("both", USERS["both"], service="ops/both", implements=contracts[:1], inspects=["*/tc"],
+                  admin_read=True),
     ]
 
 
@@ -86,7 +95,7 @@ class World:
         self.zid = str(self.router.zid())
         self.endpoint = f"tcp/127.0.0.1:{port}"
         self.sessions: dict[str, Any] = {}
-        for pid in ("consumer", "caller", "caller-blind", "tool", "S-enrolled"):
+        for pid in ("consumer", "caller", "caller-blind", "tool", "S-enrolled", "inspector", "both"):
             u = USERS[pid]
             self.sessions[pid] = live.open_client(self.endpoint, (u, PASSWORD.format(u)))
         self.sessions["S"] = live.open_client(self.endpoint, (STRANGER, PASSWORD.format(STRANGER)))
@@ -163,6 +172,7 @@ def run_python_acl(report, repo) -> None:
     _deny_full(report, repo, deny, workdir)
     _deny_variant(report, repo, acl.generate(principals, "deny", reply_selectors=False).block, workdir, "reply")
     _deny_variant(report, repo, acl.generate(principals, "deny", egress_selectors=False).block, workdir, "egress")
+    _deny_variant(report, repo, acl.generate(principals, "deny", presence_egress=False).block, workdir, "presence")
     _allow_full(report, repo, allow.block, workdir)
     _allow_rules_only(report, repo, acl.generate(principals, "allow", allow_rules_under_allow=True).block, workdir)
     _unauthenticated(report, repo, allow.block, workdir)
@@ -298,8 +308,97 @@ def _deny_full(report, repo, gen, workdir) -> None:
                      frozen.silent and h2_present and v_frozen[0] == "finding"
                      and v_frozen_untold[0] == "unobservable", f"{v_frozen}; not told {v_frozen_untold}")
         time.sleep(1.5)  # let own-h2's held call finish before the owners close
+        _inspection(report, run, w)
     finally:
         w.close()
+
+
+def _descriptor_read(session, selector: str) -> list[str]:
+    """A wildcard descriptor read, as a doctor sends it: the instance keys
+    that answered with a value."""
+    import queue
+
+    import zenoh
+
+    q: queue.Queue = queue.Queue()
+    session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(None)), target=zenoh.QueryTarget.ALL,
+                consolidation=zenoh.ConsolidationMode.NONE, timeout=1.0)
+    out = []
+    while True:
+        try:
+            r = q.get(timeout=6.0)
+        except queue.Empty:
+            break
+        if r is None:
+            break
+        if r.ok is not None:
+            out.append(str(r.ok.key_expr))
+    return sorted(out)
+
+
+def _inspection(report, run, w: World) -> None:
+    """security.md §1 (0.27): inspection, and one principal with both
+    roles."""
+    import zenoh
+
+    from . import live
+
+    h1, h2 = w.owners["own-h1"], w.owners["own-h2"]
+    ins, both = w.sessions["inspector"], w.sessions["both"]
+    # A token of a service the inspector does not inspect, under both's Own.
+    other = both.liveliness().declare_token("zk2/ops/both/@zk/instance/" + "b" * 16)
+    time.sleep(0.3)
+    try:
+        pres = live.list_presence(ins, "zk2/*/tc/@zk/**")
+        descs = _descriptor_read(ins, "zk2/*/tc/@zk/instance/*")
+        data = live.get_state(ins, "zk2/*/tc/zk2py_echo.v1/state/health")
+        not_inspected = live.list_presence(ins, "zk2/ops/both/@zk/**")
+        report.check(run, "§1 inspection (0.27): a tool that inspects */tc, binding and calling nothing, reads "
+                          "every backend's tokens and descriptor on the doctor's wildcard selectors, complete, none "
+                          "of their data, and no presence it does not inspect",
+                     sorted(i["instance"] for i in pres.instances) == sorted([h1.instance, h2.instance])
+                     and len(pres.alive) == 6 and pres.complete
+                     and descs == sorted([h1.instance_key, h2.instance_key])
+                     and not data.replies and not_inspected.count == 0 and not_inspected.complete,
+                     f"{pres.reading}; descriptors {len(descs)}; data {len(data.replies)}; ops/both "
+                     f"{not_inspected.count} tokens")
+        seen: list[str] = []
+        local = w.router.declare_subscriber("zk2/**", zenoh.handlers.Callback(lambda s: seen.append(str(s.key_expr))))
+        time.sleep(0.3)
+        both.put("zk2/ops/both/zk2py_echo.v1/state/health", b"mine")
+        both.put("zk2/h1/tc/zk2py_echo.v1/state/health", b"not-mine")
+        time.sleep(0.5)
+        local.undeclare()
+        bpres = live.list_presence(both, "zk2/*/tc/@zk/**")
+        admin = _admin_answers(both)
+        report.check(run, "§1 one principal, both roles (0.27): ops/both puts under its own prefix, never on h1's "
+                          "key, and as a tool reads */tc's presence and the admin space",
+                     "zk2/ops/both/zk2py_echo.v1/state/health" in seen
+                     and "zk2/h1/tc/zk2py_echo.v1/state/health" not in seen
+                     and len(bpres.instances) == 2 and bpres.complete and admin > 0,
+                     f"R1 heard {sorted(set(seen))}; presence {bpres.count}; admin answers {admin}")
+    finally:
+        other.undeclare()
+
+
+def _admin_answers(session) -> int:
+    import queue
+
+    import zenoh
+
+    q: queue.Queue = queue.Queue()
+    session.get("@/*/router", zenoh.handlers.Callback(q.put, lambda: q.put(None)), target=zenoh.QueryTarget.ALL,
+                consolidation=zenoh.ConsolidationMode.NONE, timeout=1.0)
+    n = 0
+    while True:
+        try:
+            r = q.get(timeout=6.0)
+        except queue.Empty:
+            break
+        if r is None:
+            break
+        n += int(r.ok is not None)
+    return n
 
 
 def _admin_spoof(report, run, w: World, posture: str) -> None:
@@ -358,11 +457,22 @@ def _deny_variant(report, repo, block, workdir, which: str) -> None:
     from . import live
 
     run = (f"acl: deny, security.md §2's generator check, without the consumer selectors in the providers' "
-           f"{'ingress reply' if which == 'reply' else 'egress'}")
+           f"{'ingress reply' if which == 'reply' else 'egress'}" if which != "presence" else
+           "acl: deny, security.md §2's generator check (0.27), without the presence selectors in the providers' "
+           "egress")
     w = World(repo, block, workdir)
     try:
         w.start_owners()
-        if which == "egress":
+        if which == "presence":
+            h1, h2 = w.owners["own-h1"], w.owners["own-h2"]
+            pres = live.list_presence(w.sessions["inspector"], "zk2/*/tc/@zk/**")
+            descs = _descriptor_read(w.sessions["inspector"], "zk2/*/tc/@zk/instance/*")
+            report.check(run, "an inspecting tool's wildcard descriptor read gets nothing from the providers, "
+                              "while its liveliness read, which the router answers, still holds their tokens",
+                         not descs and sorted(i["instance"] for i in pres.instances)
+                         == sorted([h1.instance, h2.instance]) and pres.complete,
+                         f"descriptors {descs}; tokens {pres.reading}")
+        elif which == "egress":
             fan = live.get_state(w.sessions["consumer"], "zk2/*/tc/zk2py_echo.v1/state/health")
             one = live.get_state(w.sessions["consumer"], "zk2/h1/tc/zk2py_echo.v1/state/health")
             report.check(run, "the fan-in GET over zk2/*/tc/… gets 0 replies; a concrete GET, inside the "

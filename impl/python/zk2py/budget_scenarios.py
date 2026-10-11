@@ -39,6 +39,7 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[3]
 BUDGET = REPO / "impl" / "python" / "interop" / "budget" / "budget.v1.toml"
+STALL = REPO / "impl" / "python" / "interop" / "budget" / "zk2py_stall.v1.toml"
 NS = 1_000_000_000
 
 
@@ -221,9 +222,12 @@ def section1(report: Report) -> None:
     results = []
     for step, (rel, cong, stuck) in enumerate((("reliable", "block", None), ("best_effort", "drop", None),
                                                 ("reliable", "block", 100)), 1):
+        from .budget import StallWatch
+
         r1, ep1 = router()
         r2, ep2 = router(connect=ep1)
         consumer = client(ep1)
+        watch = StallWatch(consumer)
         got: list[int] = []
         withdrawn: list[float] = []
         last = [time.monotonic()]
@@ -247,15 +251,16 @@ def section1(report: Report) -> None:
             owner.say("go")
             done = owner.line()
             _wait(lambda: len(got) >= 1000 or time.monotonic() - last[0] > 9.0, 60.0, 0.1)
-            results.append((step, rel, cong, stuck, list(got), list(withdrawn), done))
+            results.append((step, rel, cong, stuck, list(got), list(withdrawn), done, watch.reading()))
         finally:
+            watch.close()
             owner.close()
             sub.undeclare()
             lv.undeclare()
             consumer.close()
             r2.close()
             r1.close()
-    (_, _, _, _, g1, w1, d1), (_, _, _, _, g2, w2, d2), (_, _, _, _, g3, w3, d3) = results
+    (_, _, _, _, g1, w1, d1, s1), (_, _, _, _, g2, w2, d2, s2), (_, _, _, _, g3, w3, d3, s3) = results
     elapsed = float(d1.split()[1]) if d1.startswith("done ") else None
     report.check(sec, "step 1, reliable, block: all 1,000 arrive, in order, and the owner's token is never "
                       "withdrawn", g1 == list(range(1000)) and not w1,
@@ -269,9 +274,111 @@ def section1(report: Report) -> None:
     report.check(sec, "step 2, best effort, drop: some never arrive, and nothing the consumer receives says so (no "
                       "withdrawal)", len(g2) < 1000 and not w2,
                  f"{1000 - len(g2)} lost, {len(w2)} withdrawals ({d2})")
-    report.check(sec, "step 3, reliable, block, the consumer stuck for 7 s on the 100th: samples are lost, and the "
-                      "consumer sees the owner's token withdrawn",
-                 len(g3) < 1000 and bool(w3), f"{1000 - len(g3)} lost, {len(w3)} withdrawals ({d3})")
+    report.check(sec, "step 3, reliable, block, the consumer's callback stuck for 7 s on the 100th: samples are "
+                      "lost; its session sees its own transport close; it sees the owner's token withdrawn, the "
+                      "token having reached it before it stalled; its ticker sees no gap (0.27)",
+                 len(g3) < 1000 and s3[1] and bool(w3) and s3[0] < 5000,
+                 f"{1000 - len(g3)} lost, transport closed {s3[1]}, {len(w3)} withdrawals, ticker's gap {s3[0]} ms "
+                 f"({d3})")
+    # Step 4 (0.27): the consumer in a process of its own, stopped.
+    r1, ep1 = router()
+    r2, ep2 = router(connect=ep1)
+    owner = Proc("publish", "--connect", ep2, "--key", key, "--token", token)
+    consumer4 = Proc("consume", "--connect", ep1, "--key", key, "--token", token)
+    try:
+        import os
+        import signal
+
+        heard_token = consumer4.line() == "token"
+        owner.say("go")
+        stop_line = consumer4.line()
+        time.sleep(7.0)
+        os.kill(consumer4.p.pid, signal.SIGCONT)
+        res_line = consumer4.line()
+        res = json.loads(res_line.split(" ", 1)[1]) if res_line.startswith("result ") else {}
+        report.check(sec, "step 4, reliable, block, the consumer's process stopped (SIGSTOP) for 7 s at the 100th, "
+                          "the owner's token received first: samples are lost; its ticker sees a gap of at least "
+                          "7 s; its session sees its transport close; it sees the owner's token withdrawn (0.27)",
+                     heard_token and stop_line == "stop" and res.get("got", 1000) < 1000
+                     and res.get("gap_ms", 0) >= 7000 and res.get("closed") and res.get("withdrawn", 0) > 0,
+                     f"{res_line}")
+    finally:
+        consumer4.close()
+        owner.close()
+        r2.close()
+        r1.close()
+
+
+def section1b(report: Report) -> None:
+    """budget.md §1, "A tool's window over a stalled reader" (0.27): an
+    owner of an event of two sources at most, reliable and block, a 2 s
+    retention, publishing both every 200 ms; a tool reads its population
+    over a 4 s window, 1 s reply timeout and 1 s lease, through a relay it
+    connects by. Once the tool's subscription has reached the owner, the
+    relay closes the tool's connection, and the tool reconnects."""
+    from . import budget as bg
+    from .contract import load_contract
+    from .live_interop import _r1
+    from .owner import Owner
+
+    sec = "§1 a tool's window over a stalled reader"
+    contract = load_contract(STALL)
+    r1, ep, _ = _r1()
+    owner = Owner("lab", "stall", [contract], connect=ep)
+    stop = threading.Event()
+    try:
+        owner.start()
+        base = owner.prefix(contract)
+
+        def publish() -> None:
+            while not stop.wait(0.2):
+                for src in ("s0", "s1"):
+                    owner.occur(f"{base}/events/alarms/{src}", b"!")
+
+        threading.Thread(target=publish, daemon=True).start()
+        results = {}
+        for name, cut in (("closed", True), ("left alone", False)):
+            link = Link(ep)
+            tool = client(link.endpoint, lease_ms=1000)
+            try:
+                time.sleep(0.5)
+                w = bg.Window(tool, f"{base}/events/alarms/*/*", "lab/stall", event=True, qos=("reliable", "block"),
+                              reply_timeout_s=1.0, lease_s=1.0)
+                time.sleep(1.5)
+                if cut:
+                    link.cut()
+                    link.heal()
+                _sleep(w.start_ns + 4 * NS)
+                w.end()
+                r = w.reading()
+                results[name] = (r, w.lossless_reason(), bg.population("event", 2, 2 * NS, r),
+                                 bg.rate(contract.canonical["resources"][0]["rate"], w.rate_members(), r.listened_ns,
+                                         r.lossless, r.present))
+                w.close()
+            finally:
+                tool.close()
+                link.close()
+        r, why, pop, rate = results["closed"]
+        report.check(sec, "the relay closes the tool's connection mid-window: the window is not lossless, its reason "
+                          "the tool's own transport closing, and its population and its rate are unobservable",
+                     not r.lossless and why == "reader_stalled" and pop.verdict == "unobservable"
+                     and rate.verdict == "unobservable",
+                     f"lossless {r.lossless} ({why}); population {pop.pair()}; rate {rate.pair()}")
+        r, why, pop, rate = results["left alone"]
+        report.check(sec, "the same window with the connection left alone is clean: its population within, complete "
+                          "(its rate needs an hour's window)",
+                     r.lossless and why == "reliable_block" and pop.pair() == {"verdict": "within", "reason": "complete"},
+                     f"lossless {r.lossless} ({why}); population {pop.pair()}; rate {rate.pair()}")
+    finally:
+        stop.set()
+        owner.close()
+        r1.close()
+
+
+def _sleep(mono_ns: int) -> None:
+    d = (mono_ns - time.monotonic_ns()) / NS
+    if d > 0:
+        time.sleep(d)
 
 
 # -- §2 ------------------------------------------------------------------------------
@@ -593,12 +700,13 @@ def sections4to7(report: Report, exe: Path | None) -> None:
         r1.close()
 
 
-SECTIONS = {"1": section1, "2": section2, "3": section3}
+SECTIONS = {"1": section1, "1b": section1b, "2": section2, "3": section3}
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.budget_scenarios", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=["1", "2", "3", "4-7"], help="run only these sections")
+    ap.add_argument("--only", action="append", choices=["1", "1b", "2", "3", "4-7"],
+                    help="run only these sections")
     ap.add_argument("--owner", type=Path, default=REPO / "target" / "debug" / "examples" / "owner",
                     help="the Rust owner example, for §4-§7")
     args = ap.parse_args(argv)

@@ -182,17 +182,42 @@ def parse_rate(text: str) -> tuple[int, int]:
     return int(m.group(1)), HOUR_NS
 
 
+#: zenoh's defaults (core §2.7, 0.27): wait_before_close 5 s, a 10 s lease,
+#: a keep-alive every quarter of it.
+WAIT_BEFORE_CLOSE_MS, LEASE_MS, KEEP_ALIVE = 5000, 10000, 4
+
+
+def stall_bound(wait_before_close_ms: int = WAIT_BEFORE_CLOSE_MS, lease_ms: int = LEASE_MS,
+                keep_alive: int = KEEP_ALIVE) -> int:
+    """§2.7 (0.27), the longest stall tolerated, as lossless.json's
+    ``stall_bounds`` derive it: "the transport's wait_before_close, or its
+    lease less one keep-alive interval when that is shorter". The interval
+    is lease ÷ keep_alive rounded up to a whole millisecond, a keep-alive
+    count of 0 taken as 1."""
+    ka = max(1, keep_alive)
+    interval = -(-lease_ms // ka)
+    return min(wait_before_close_ms, lease_ms - interval)
+
+
 def lossless(reliability: str, congestion: str, reader_lost: int = 0,
-             miss_declared: bool = False, miss_used: bool = False, misses: int = 0) -> tuple[bool, str]:
-    """§2.7 (0.25): "Lost no delivery is established, never assumed". Both
-    must hold: the reader lost none, and the path could not drop one
-    silently, the resource declaring ``reliable`` with ``block``. A miss
-    detected (where the resource declares miss detection and the
-    subscription uses it) is a loss; none detected establishes nothing.
-    Reasons in lossless.json's order: reader_lost, misses_detected,
-    best_effort, congestion_drop, else reliable_block."""
+             miss_declared: bool = False, miss_used: bool = False, misses: int = 0,
+             stall_gap_ms: int = 0, stall_bound_ms: int | None = None,
+             transport_closed: bool = False) -> tuple[bool, str]:
+    """§2.7 (0.25, 0.27): "Lost no delivery is established, never assumed".
+    Both must hold: the reader lost none, and the path could not drop one
+    silently, the resource declaring ``reliable`` with ``block``. The reader
+    lost none only when, over the window and the watch after it, its queue
+    lost nothing, no transport of its session closed, and its ticker's
+    greatest gap is no longer than the bound (exactly the bound is no
+    stall). A miss detected (where the resource declares miss detection
+    and the subscription uses it) is a loss; none detected establishes
+    nothing. Reasons in lossless.json's order: reader_lost, reader_stalled,
+    misses_detected, best_effort, congestion_drop, else reliable_block."""
+    bound = stall_bound() if stall_bound_ms is None else stall_bound_ms
     if reader_lost > 0:
         return False, "reader_lost"
+    if transport_closed or stall_gap_ms > bound:
+        return False, "reader_stalled"
     if miss_declared and miss_used and misses > 0:
         return False, "misses_detected"
     if reliability != "reliable":
@@ -240,6 +265,60 @@ def get_population(session: Any, selector: str, timeout: float = 1.0) -> tuple[G
     return GetReading(len(members), not st.errors), members
 
 
+class StallWatch:
+    """§2.7 (0.27), "How a tool establishes it": a tool watches its own
+    receive path from before the window opens until the watch after it
+    ends:
+    - its transports, from zenoh's transport events. zenoh-python 1.10.1
+      exposes them (``Session.info.declare_transport_events_listener``,
+      unstable): a transport of its session that closed is a stall;
+    - a monotonic ticker on a thread of its own: the greatest gap between
+      two ticks, the one still open when it is read included, longer than
+      the bound is a stall."""
+
+    def __init__(self, session: Any, bound_ms: int | None = None, tick_s: float = 0.05):
+        import zenoh
+
+        self.bound_ms = stall_bound() if bound_ms is None else bound_ms
+        self.closes: list[int] = []
+        self.opens: list[int] = []
+        self.lock = threading.Lock()
+
+        def event(e: Any) -> None:
+            (self.closes if e.kind == zenoh.SampleKind.DELETE else self.opens).append(time.monotonic_ns())
+
+        info = session.info() if callable(getattr(session, "info", None)) else session.info
+        self.listener = info.declare_transport_events_listener(zenoh.handlers.Callback(event), history=False)
+        self.last = time.monotonic_ns()
+        self.gap_ns = 0
+        self._stop = threading.Event()
+        self.tick_s = tick_s
+        self.thread = threading.Thread(target=self._tick, daemon=True)
+        self.thread.start()
+
+    def _tick(self) -> None:
+        while not self._stop.wait(self.tick_s):
+            now = time.monotonic_ns()
+            with self.lock:
+                self.gap_ns = max(self.gap_ns, now - self.last)
+                self.last = now
+
+    def reading(self) -> tuple[int, bool]:
+        """(the greatest gap in ms, the one still open included; whether a
+        transport of the session closed)."""
+        now = time.monotonic_ns()
+        with self.lock:
+            gap = max(self.gap_ns, now - self.last)
+        return gap // 1_000_000, bool(self.closes)
+
+    def close(self) -> None:
+        self._stop.set()
+        try:
+            self.listener.undeclare()
+        except Exception:  # noqa: BLE001 - closing anyway
+            pass
+
+
 def event_member(key: str) -> str:
     """§2.7: an event's member is "its key without the ULID chunk"."""
     return key.rsplit("/", 1)[0]
@@ -254,7 +333,11 @@ class Window:
       :func:`lossless`: the resource's declared QoS, and the reader's own
       loss. zenoh-python's callback handler has no queue to overflow or
       fall behind, and this window keeps nothing out of its count, so its
-      reader loses none. It does not use miss detection.
+      reader loses no counted delivery. Its own receive path is watched
+      (0.27): a :class:`StallWatch` on its session from before the window
+      opens until the watch after it ends, the bound from ``lease_s``
+      (zenoh's 4 keep-alives per lease) and ``wait_before_close_s``. It does
+      not use miss detection.
     - **The owner's presence** is watched from before the window starts
       "until one lease after its end", plus the reply timeout for the
       withdrawal's transit: its instance token held at the start, none of
@@ -263,12 +346,15 @@ class Window:
     canonical form states it."""
 
     def __init__(self, session: Any, selector: str, owner_address: str, *, qos: tuple[str, str],
-                 event: bool = False, reply_timeout_s: float = 1.0):
+                 event: bool = False, reply_timeout_s: float = 1.0, lease_s: float = 10.0,
+                 wait_before_close_s: float = 5.0):
         import zenoh
 
         from . import live
 
         self.event, self.qos = event, qos
+        self.lease_s = lease_s
+        self.stall = StallWatch(session, stall_bound(int(wait_before_close_s * 1000), int(lease_s * 1000)))
         self.reply_timeout_ns = int(reply_timeout_s * NS)
         self.lock = threading.Lock()
         self.heard: dict[str, list[int]] = {}
@@ -305,12 +391,14 @@ class Window:
         """The window's end: what it heard after this does not count."""
         self.end_ns = time.monotonic_ns()
 
-    def reading(self, lease_s: float = 10.0) -> WindowReading:
-        """The window's reading, once its owner has been watched for one
-        lease after its end, and the reply timeout more. Ends the window
-        now if :meth:`end` was not called."""
+    def reading(self, lease_s: float | None = None) -> WindowReading:
+        """The window's reading, once its owner, and its own receive path,
+        have been watched for one lease after its end, and the reply timeout
+        more. Ends the window now if :meth:`end` was not called."""
         from . import live
 
+        if lease_s is None:
+            lease_s = self.lease_s
         if self.end_ns is None:
             self.end()
         assert self.end_ns is not None
@@ -323,11 +411,15 @@ class Window:
         with self.lock:
             heard = {m: [x for x in v if x <= cut] for m, v in self.heard.items()}
         heard = {m: v for m, v in heard.items() if v}
-        ok, _ = lossless(*self.qos)
+        ok, _ = self._lossless()
         return WindowReading(heard, max(0, cut), ok, self.present_at_start and bool(pres.instances) and not gone)
 
+    def _lossless(self) -> tuple[bool, str]:
+        gap, closed = self.stall.reading()
+        return lossless(*self.qos, stall_gap_ms=gap, stall_bound_ms=self.stall.bound_ms, transport_closed=closed)
+
     def lossless_reason(self) -> str:
-        return lossless(*self.qos)[1]
+        return self._lossless()[1]
 
     def rate_members(self) -> dict[str, list[int]]:
         """§2.7 "Spans": a rate's spans between the occurrences' stamps when
@@ -346,6 +438,7 @@ class Window:
         return out
 
     def close(self) -> None:
+        self.stall.close()
         for e in (self.sub, self.lv):
             try:
                 e.undeclare()

@@ -156,11 +156,15 @@ def resource_keys(service: str, contracts: list[Contract]) -> list[str]:
 
 
 def compile_grants(principals: list[Principal], *, egress_selectors: bool = True,
-                   reply_selectors: bool = True) -> dict[tuple[str, str, str], set[str]]:
+                   reply_selectors: bool = True,
+                   presence_egress: bool = True) -> dict[tuple[str, str, str], set[str]]:
     """The grants of §11.1–§11.2, as (principal, message, flow) -> keys.
+    The shapes compose per principal (0.27): a principal holds the union of
+    the grants of what it runs, Own for its service and a tool's beside it.
     ``egress_selectors``/``reply_selectors``: security.md §2's generator
     check removes the consumer selectors from providers' egress, or from
-    their ingress ``reply``."""
+    their ingress ``reply``; ``presence_egress`` (0.27) removes the
+    presence selectors from providers' egress."""
     g: dict[tuple[str, str, str], set[str]] = {}
 
     def add(pid: str, messages: tuple[str, ...], flow: str, keys: list[str]) -> None:
@@ -168,6 +172,7 @@ def compile_grants(principals: list[Principal], *, egress_selectors: bool = True
             g.setdefault((pid, m, flow), set()).update(keys)
 
     readers: list[tuple[str, str]] = []  # (principal, selector) a provider may be asked on
+    presence_readers: list[tuple[str, str]] = []  # (principal, presence selector)
     for p in principals:
         # Contract bundles are open.
         add(p.id, ("query", "declare_queryable", "reply"), INGRESS, [CONTRACTS])
@@ -190,24 +195,35 @@ def compile_grants(principals: list[Principal], *, egress_selectors: bool = True
             readers += [(p.id, s) for s in sels]
             providers += use.providers
         if p.presence and providers:
+            # Presence on the services a principal binds, calls or inspects:
+            # inspection is presence alone (0.27).
             sels = presence_selectors(sorted(set(providers)))
             add(p.id, ("liveliness_query", "declare_liveliness_subscriber", "query", "declare_subscriber"),
                 INGRESS, sels)
             add(p.id, ("liveliness_token", "reply", "put"), EGRESS, sels)
-            readers += [(p.id, s) for s in sels]
+            presence_readers += [(p.id, s) for s in sels]
         if p.admin_read:
             add(p.id, ("query",), INGRESS, ADMIN_READ)
             add(p.id, ("reply",), EGRESS, ADMIN_READ)
     # §11.2: a provider's egress, and its ingress reply, carry every reader
-    # selector that intersects what it serves.
+    # selector that intersects what it serves. A presence selector (0.27)
+    # joins its egress alone, as `fan-in-presence`: "No refusal answers a
+    # descriptor read", and a reply grant on it would let the provider
+    # answer under another provider's descriptor key.
     for p in principals:
         if not p.service:
             continue
         keys = own_keys(p.service)
-        mine = sorted({s for _, s in readers if any(_intersects(s, k) for k in keys)
-                       and not any(_includes(k, s) for k in keys)})
+
+        def foreign(selectors: list[tuple[str, str]]) -> list[str]:
+            return sorted({s for _, s in selectors if any(_intersects(s, k) for k in keys)
+                           and not any(_includes(k, s) for k in keys)})
+
+        mine, presence = foreign(readers), foreign(presence_readers)
         if egress_selectors:
             add(p.id, ("query", "declare_subscriber"), EGRESS, mine)
+        if presence_egress:
+            add(p.id, ("query", "declare_subscriber"), EGRESS, presence)
         if reply_selectors:
             add(p.id, ("reply",), INGRESS, mine)
     return g
@@ -239,12 +255,14 @@ def _rules_for(subject: str, grouped: dict[tuple[str, ...], set[tuple[str, str]]
 
 
 def generate(principals: list[Principal], posture: str, *, egress_selectors: bool = True,
-             reply_selectors: bool = True, allow_rules_under_allow: bool = False) -> Generated:
+             reply_selectors: bool = True, allow_rules_under_allow: bool = False,
+             presence_egress: bool = True) -> Generated:
     """The ``access_control`` block for ``posture`` (``deny`` or ``allow``).
     ``allow_rules_under_allow`` compiles the allow rules but sets
     ``default_permission: allow``: security.md §2's "Allow rules alone,
     under allow, block nothing"."""
-    grants = compile_grants(principals, egress_selectors=egress_selectors, reply_selectors=reply_selectors)
+    grants = compile_grants(principals, egress_selectors=egress_selectors, reply_selectors=reply_selectors,
+                            presence_egress=presence_egress)
     out = Generated({}, grants={k: sorted(v) for k, v in grants.items()})
     subjects = [{"id": p.id, "usernames": [p.user]} for p in principals]
     rules: list[dict] = []
