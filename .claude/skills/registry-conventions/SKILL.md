@@ -17,8 +17,8 @@ subject **drop it** — no string-parsing fallback.
 
 ## Conventions to preserve when editing registry TOMLs
 
-(Fixtures live here in `fixture-tests/registry`; the live files are in the
-application repos.)
+(The fixtures live in `fixture-tests/registry` on the `v1` branch, with the
+v1 sources; the live files are in the application repos.)
 
 - Telemetry is registered as **real subject families**, not a `{metric...}`
   catch-all. Exception: device-defined trees (snmp/modbus/gnmi/netflow style)

@@ -1,6 +1,7 @@
 # Performance baseline (issue #17)
 
-Criterion benches: `zenkey/benches/keys.rs`, `fixture-tests/benches/generated.rs`.
+Criterion benches: `zenkey/benches/keys.rs`, `fixture-tests/benches/generated.rs`,
+both on the `v1` branch since the strangler layout (#615).
 Run with `cargo bench --workspace`. Times are criterion's [low, point, high]
 estimates on the machine below; the point estimate is what we compare.
 

@@ -20,8 +20,8 @@ any of it — is left to every application to invent.
 | [`zenkey-model/`](zenkey-model/) *(zk2)* | *(unpublished until the zk2 spec, #606)* | The **session-free half of zk2**: the `zk2/` key grammar, resource templates (most-literal-first), the contract authoring format (draft 1) with stable-coded lints, the canonical form, fingerprints, and bundles. No zenoh dependency beyond `zenoh-keyexpr`. It validates every contract in [`examples/zk2/`](examples/zk2/) and seeds the conformance fixtures in [`spec/`](spec/README.md). |
 | [`zenkey-explorer-config/`](zenkey-explorer-config/) | *(unpublished)* | The **shared explorer config**: named connection contexts, the config path policy and the completion cache dir — one file, two explorers. A sibling of the frontends, not a layer of the engine: it touches no bus, and living in `zenkey-fleet` forced `dirs` and `toml` onto every library consumer. |
 
-(`fixture-tests/` holds the ZenSight v1 registry as test data for the v1
-tools. Its codegen-corpus crate lives on the `v1` branch.)
+(`fixture-tests/`, the ZenSight v1 registry that v1's tests read and its
+codegen-corpus crate, lives on the `v1` branch.)
 
 ## Why a convention and not just keys?
 
