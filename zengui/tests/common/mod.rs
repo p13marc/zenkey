@@ -1,7 +1,7 @@
 //! Fixtures shared by the integration suites (#532).
 //!
 //! `tests/panes/` renders surfaces one at a time; `shots.rs` renders the whole
-//! window. Both need the same registry, and the window needs a bus that is
+//! window. Both need the same contracts, and the window needs a bus that is
 //! not there — so the bus is a fixture too: [`World`] drives a bus-less
 //! [`Zengui`] through its public messages exactly as the link would, minus the
 //! link. Nothing here reaches past `zengui`'s public API.
@@ -20,15 +20,6 @@ use zengui::message::{BusMsg, BusTick, LinkState, Message, WatchedTotals};
 use zengui::prefs::Prefs;
 use zenkey_fleet::StatsTable;
 use zenkey_fleet::{KeyTreeSnapshot, SampleView};
-use zenkey_fleet_v1::SliceSet;
-
-/// The ZenSight registry snapshot `fixture-tests/` compiles — v1's declared
-/// world, still what the v1 panes' own tests render against until each
-/// moves (FL7–FL11). The window itself no longer loads it (#614, FL6a).
-pub fn slices() -> SliceSet {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
-    SliceSet::from_dirs(&[dir]).expect("fixture registry")
-}
 
 /// The zk2 contracts the window's world is described by (#614, FL6a): the
 /// walkthrough and tcgui examples, loaded exactly as `--contracts` loads
