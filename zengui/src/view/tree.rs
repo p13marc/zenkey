@@ -30,8 +30,8 @@ use std::time::Instant;
 
 use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet_v1::KeyTreeSnapshot;
-use zenkey_fleet_v1::model::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
+use zenkey_fleet::KeyTreeSnapshot;
+use zenkey_fleet::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
 use crate::keyfacts::Registration;
 use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
@@ -118,7 +118,7 @@ impl std::fmt::Display for Pivot {
 ///
 /// The claim this whole cache rests on is that a row's **shape does not depend
 /// on any live number**, and it is checkable rather than plausible.
-/// `zenkey_fleet_v1::merge_nodes` computes `status` from *set
+/// `zenkey_fleet::merge_skeleton` computes `status` from *set
 /// membership* — does an observed node exist, is it covered by a watch — never
 /// from a magnitude; and the child-name set it walks is the union of the
 /// skeleton's names and the observed ones. Depth, chunk, path, target, role and
@@ -171,6 +171,12 @@ pub struct RowShape {
     /// The registry-declared payload type, when the skeleton knows one.
     /// Interned like a chunk: type names repeat across every row of a slice.
     pub decl_type: Option<ChunkId>,
+    /// A declared operation's leaf (`…/@op/<name>`), or a row under an `@op`
+    /// chunk (#614, FL6b): a queryable carries no samples, and a watch's
+    /// seed would GET it — a GET on an operation's key is a call (spec §5)
+    /// — so the row offers no watch control. Structural: it comes off the
+    /// skeleton's `DeclRef` and the path's own chunks.
+    pub operation: bool,
 }
 
 /// Where a drawn row's numbers come from (#177).
@@ -231,6 +237,9 @@ pub struct TreeRow {
     pub role: Option<Role>,
     /// The registry-declared payload type, when the skeleton knows one.
     pub decl_type: Option<String>,
+    /// A declared operation's leaf: no watch control (see
+    /// [`RowShape::operation`]).
+    pub operation: bool,
 }
 
 /// The flattened tree, plus what was left out.
@@ -317,6 +326,7 @@ impl Flattened {
             age_s: age_of(stats.as_ref(), self.now),
             role: shape.role,
             decl_type: shape.decl_type.map(|t| self.arena.chunk_str(t).to_string()),
+            operation: shape.operation,
         }
     }
 
@@ -510,6 +520,7 @@ fn walk(
                 is_leaf: stats.map(|s| s.count > 0).unwrap_or(false),
                 role,
                 decl_type: child.decl.as_ref().map(|d| ctx.arena.chunk(&d.type_name)),
+                operation: is_operation(child.decl.as_ref(), ctx.arena, path),
             });
             ctx.stats.push(stats);
             if expanded {
@@ -524,6 +535,15 @@ fn walk(
         }
         ctx.probe.truncate(probe_len);
     }
+}
+
+/// Whether a row stands for an operation (#614, FL6b): a skeleton leaf
+/// that declares one (`zenkey_fleet::DeclRef::kind`), or any row whose real
+/// path crosses the `@op` chunk — verbatim (core §1.3), so nothing else
+/// lives under it. A frontend offers no watch on either.
+fn is_operation(decl: Option<&DeclRef>, arena: &PathArena, real: PathId) -> bool {
+    decl.is_some_and(|d| d.kind == zenkey_model::authoring::Kind::Operation)
+        || arena.contains_chunk(real, zenkey_model::grammar::KindToken::Op.as_str())
 }
 
 fn count_entries(node: &MergedNode, total: &mut usize) {
@@ -770,6 +790,7 @@ fn search_emit(
                 is_leaf: child.stats.map(|s| s.count > 0).unwrap_or(false),
                 role,
                 decl_type: child.decl.as_ref().map(|d| ctx.arena.chunk(&d.type_name)),
+                operation: is_operation(child.decl.as_ref(), ctx.arena, path),
             });
             ctx.stats.push(child.stats);
         }
@@ -1191,6 +1212,16 @@ fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, parent: Option<PathId>, d
                 .as_ref()
                 .and_then(|(_, _, d)| d.as_ref())
                 .map(|d| ctx.emit.arena.chunk(&d.type_name)),
+            operation: is_operation(
+                child.leaf.as_ref().and_then(|(_, _, d)| d.as_ref()),
+                ctx.emit.arena,
+                child
+                    .leaf
+                    .as_ref()
+                    .map(|(p, _, _)| *p)
+                    .or(child.target)
+                    .unwrap_or(child_path),
+            ),
         });
         // The row's own numbers are the group's *aggregates*, which is why
         // these can never be retargeted: `agg_*` sums a synthetic membership,
@@ -1805,9 +1836,11 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
 
     // Observation is opt-in, per subtree (issue #85). The toggle reflects
     // *this app's* watches, not global coverage — and only rows standing for
-    // a real wire subtree offer it (pivot groups are synthetic).
+    // a real wire subtree offer it (pivot groups are synthetic), and none
+    // standing for a declared operation (#614, FL6b): a queryable carries no
+    // samples, so a watch on it would observe nothing and say "quiet".
     let watch: Element<'a, Message> = match r.target {
-        Some(t) => {
+        Some(t) if !r.operation => {
             // Two shapes, not one shape in two colours (#193): the open eye
             // is a watch this app holds, the struck one is none — and the
             // struck one no longer shares a glyph with the Unregistered
@@ -1826,7 +1859,7 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(t)))
                 .into()
         }
-        None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
+        _ => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
     };
 
     // The hover wash is what makes a 40k-row list trackable with the mouse
@@ -1925,7 +1958,7 @@ pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet_v1::StatsTable;
+    use zenkey_fleet::StatsTable;
 
     fn snapshot(keys: &[&str]) -> MergedNode {
         let mut stats = StatsTable::new();
@@ -1933,15 +1966,13 @@ mod tests {
         for k in keys {
             stats.record(k, 8, None, now, None, None);
         }
-        let observed = zenkey_fleet_v1::KeyTreeSnapshot::build(&stats);
+        let observed = zenkey_fleet::KeyTreeSnapshot::build(&stats);
         // Tests watch everything: every observed node reads Observed.
-        let skel = zenkey_fleet_v1::Skeleton::build(
-            "",
-            &zenkey_fleet_v1::SliceSet::default(),
-            &std::collections::BTreeMap::new(),
+        let skel = zenkey_fleet::Skeleton::build(
+            &zenkey_fleet::Lens::new("", None, &zenkey_fleet::ContractSet::new()),
             None,
         );
-        zenkey_fleet_v1::merge(&skel, &observed, &["**".to_string()])
+        zenkey_fleet::merge_skeleton(&skel, &observed, &["**".to_string()])
     }
 
     fn expand(paths: &[&str]) -> BTreeSet<String> {

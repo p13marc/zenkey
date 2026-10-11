@@ -172,6 +172,16 @@ pub fn subtree_selector(display_path: &str) -> String {
     chunks.join("/")
 }
 
+/// Whether a key or selector names the `@op` chunk — an operation's key,
+/// whose only GET is a call (spec §5; #614, FL6b). The chunk is verbatim
+/// (core §1.3): no wildcard reaches it and no other key carries it, so
+/// naming it is the one way in, and this is the one test of it.
+pub fn names_operation(key_or_selector: &str) -> bool {
+    key_or_selector
+        .split(['/', '?'])
+        .any(|c| c == KindToken::Op.as_str())
+}
+
 /// What one selector **cannot** see — the per-selector honesty line the
 /// key-expression editor renders (#187), in zk2's verbatim chunks (#614,
 /// FL6a).
@@ -272,6 +282,20 @@ pub fn media_key(
 mod tests {
     use super::*;
     use zenoh::key_expr::KeyExpr;
+
+    /// #614 (FL6b): `@op` is named only by spelling it — a wildcard never
+    /// reaches a verbatim chunk — so a key or selector names an operation
+    /// exactly when one of its chunks is `@op`.
+    #[test]
+    fn only_a_spelled_op_chunk_names_an_operation() {
+        assert!(names_operation("zk2/robot1/nav/nav.v2/@op/reset"));
+        assert!(names_operation("spray/zk2/*/*/*/@op/**"));
+        assert!(names_operation("zk2/robot1/nav/nav.v2/@op"));
+        assert!(!names_operation("zk2/robot1/nav/nav.v2/**"));
+        assert!(!names_operation("**"));
+        assert!(!names_operation("demo/op/reset"));
+        assert!(!names_operation("demo/@operator"));
+    }
 
     fn intersects(a: &str, b: &str) -> bool {
         KeyExpr::new(a)

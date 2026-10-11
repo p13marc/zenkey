@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::Task;
-use zenkey_fleet_v1::{Monitor, MonitorCore, SampleView};
+use zenkey_fleet::{Monitor, MonitorCore, SampleView};
 
 use crate::message::{Message, WorkspaceMsg};
 use crate::services::{ServiceError, ServiceResult};
@@ -66,11 +66,15 @@ async fn capture(
     base: String,
     stop: tokio::sync::oneshot::Receiver<()>,
 ) -> ServiceResult<crate::view::replay::Recorded> {
-    let header = zenkey_fleet_v1::ZrecHeader {
-        zrec: zenkey_fleet_v1::ZREC_VERSION,
+    // Version 3 (#614, FL6b): the header states which of zk2's verbatim
+    // chunks no watched selector names, so a replay says what the capture
+    // could not contain (O5) instead of letting `**` read as everything.
+    let header = zenkey_fleet::ZrecHeader {
+        zrec: zenkey_fleet::ZREC_VERSION,
+        excluded: Some(zenkey_fleet::zrec_excluded(&selectors)),
         selectors,
         base,
-        captured_at: zenkey_fleet_v1::rfc3339_now(),
+        captured_at: zenkey_fleet::rfc3339_now(),
         preamble: None,
         pre_roll: None,
     };
@@ -82,14 +86,14 @@ async fn capture(
         .map_err(ServiceError::of)?
         .into_std()
         .await;
-    let sink = zenkey_fleet_v1::ZrecSink::spawn(std::io::BufWriter::new(file), &header)
+    let sink = zenkey_fleet::ZrecSink::spawn(std::io::BufWriter::new(file), &header)
         .await
         .map_err(ServiceError::of)?;
     let mut events = core.events();
-    let recording = zenkey_fleet_v1::record(
+    let recording = zenkey_fleet::record(
         &mut events,
         &sink,
-        zenkey_fleet_v1::RecordBounds::default(),
+        zenkey_fleet::RecordBounds::default(),
         |_, _| {},
     );
     tokio::select! {
@@ -150,7 +154,7 @@ pub fn load_snapshot(path: String) -> Task<Message> {
 /// Write a retained window through the ordinary `.zrec` writer (#217): the
 /// header names the watches the ring was fed under (O4/O5), and the epoch
 /// is the window's own start, so every row keeps the arrival offset the
-/// ring preserved ([`zenkey_fleet_v1::ZrecWriter::new_at`]). The result is
+/// ring preserved ([`zenkey_fleet::ZrecWriter::new_at`]). The result is
 /// indistinguishable from a file recorded deliberately at that moment.
 ///
 /// Split from [`save_window`] so the round trip — write a window, load it
@@ -162,16 +166,20 @@ pub(crate) fn write_window(
     base: String,
     out: impl std::io::Write,
 ) -> ServiceResult<u64> {
-    let header = zenkey_fleet_v1::ZrecHeader {
-        zrec: zenkey_fleet_v1::ZREC_VERSION,
+    // Version 3 (#614, FL6b): the header states which of zk2's verbatim
+    // chunks no watched selector names, so a replay says what the capture
+    // could not contain (O5) instead of letting `**` read as everything.
+    let header = zenkey_fleet::ZrecHeader {
+        zrec: zenkey_fleet::ZREC_VERSION,
+        excluded: Some(zenkey_fleet::zrec_excluded(&selectors)),
         selectors,
         base,
-        captured_at: zenkey_fleet_v1::rfc3339_now(),
+        captured_at: zenkey_fleet::rfc3339_now(),
         preamble: None,
         pre_roll: None,
     };
     let mut writer =
-        zenkey_fleet_v1::ZrecWriter::new_at(out, &header, epoch).map_err(ServiceError::of)?;
+        zenkey_fleet::ZrecWriter::new_at(out, &header, epoch).map_err(ServiceError::of)?;
     for view in rows {
         writer.write_sample(view).map_err(ServiceError::of)?;
     }
@@ -226,7 +234,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("stop-window.zrec");
 
-        let core = zenkey_fleet_v1::MonitorCore::new(64);
+        let core = zenkey_fleet::MonitorCore::new(64);
         let (stop, stopped) = tokio::sync::oneshot::channel();
         // Toggle off before the capture future exists, let alone runs.
         stop.send(()).unwrap();
@@ -269,7 +277,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("dropped-handle.zrec");
 
-        let core = zenkey_fleet_v1::MonitorCore::new(64);
+        let core = zenkey_fleet::MonitorCore::new(64);
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         drop(stop);
 
@@ -314,10 +322,17 @@ mod tests {
                 received: epoch + Duration::from_millis(t_ms),
             })
         };
-        let rows = vec![
-            view(0, "v1/h-0123456789ab/state/p/a", b"1"),
-            view(1500, "v1/h-0123456789ab/state/p/b", b"2"),
-        ];
+        // A row on non-default wire axes: `.zrec` v3 carries them as
+        // `qos_axes` (#614, FL6b), and the replay shows what was on the wire.
+        let mut fast = view(1500, "v1/h-0123456789ab/state/p/b", b"2");
+        {
+            let fast = Arc::get_mut(&mut fast).expect("one owner");
+            fast.priority = zenoh::qos::Priority::RealTime;
+            fast.congestion_control = zenoh::qos::CongestionControl::Drop;
+            fast.reliability = zenoh::qos::Reliability::BestEffort;
+            fast.express = true;
+        }
+        let rows = vec![view(0, "v1/h-0123456789ab/state/p/a", b"1"), fast];
         let mut bytes = Vec::new();
         let written = write_window(
             &rows,
@@ -339,9 +354,31 @@ mod tests {
         assert_eq!(state.rows[1].view.key, "v1/h-0123456789ab/state/p/b");
         assert_eq!(state.malformed, 0);
         assert_eq!(state.capture_dropped, 0);
+        let back = &state.rows[1].view;
+        assert_eq!(
+            (
+                back.priority,
+                back.congestion_control,
+                back.reliability,
+                back.express
+            ),
+            (
+                zenoh::qos::Priority::RealTime,
+                zenoh::qos::CongestionControl::Drop,
+                zenoh::qos::Reliability::BestEffort,
+                true
+            ),
+            "the row's wire axes survive the file"
+        );
         let crate::replay::ReplaySource::File { header, .. } = &state.source else {
             panic!("a loaded file is a file");
         };
         assert_eq!(header.selectors, vec!["v1/**".to_string()]);
+        assert_eq!(header.zrec, 3, "a window saves as `.zrec` version 3");
+        assert_eq!(
+            header.excluded.as_deref(),
+            Some(&zenkey_fleet::VERBATIM.map(String::from)[..]),
+            "`v1/**` names no verbatim chunk, and the file says it holds none (O5)"
+        );
     }
 }

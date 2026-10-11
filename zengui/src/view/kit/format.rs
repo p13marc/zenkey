@@ -16,10 +16,27 @@ pub fn human_bytes(n: u64) -> String {
     }
 }
 
-/// `n` of something, pluralised. "1 keys" reads as a bug in the tool.
+/// `n` of something, pluralised. "1 keys" reads as a bug in the tool, and so
+/// do "2 watchs" and "2 addresss": a noun ending in a sibilant takes `-es`,
+/// and one ending in a consonant and `y` takes `-ies` (#614, FL6b, whose
+/// strip counts addresses and watches).
 pub fn plural(n: usize, singular: &str) -> String {
     if n == 1 {
-        format!("{n} {singular}")
+        return format!("{n} {singular}");
+    }
+    let sibilant = ["s", "x", "z", "ch", "sh"]
+        .iter()
+        .any(|end| singular.ends_with(end));
+    let consonant_y = singular.ends_with('y')
+        && !singular
+            .chars()
+            .rev()
+            .nth(1)
+            .is_some_and(|c| "aeiou".contains(c));
+    if sibilant {
+        format!("{n} {singular}es")
+    } else if consonant_y {
+        format!("{n} {}ies", &singular[..singular.len() - 1])
     } else {
         format!("{n} {singular}s")
     }
@@ -50,5 +67,20 @@ pub fn age_word(secs: f32) -> String {
         format!("{}m", (s / 60.0) as u32)
     } else {
         format!("{}h", (s / 3600.0) as u32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plural;
+
+    #[test]
+    fn plurals_read_as_english() {
+        assert_eq!(plural(1, "watch"), "1 watch");
+        assert_eq!(plural(2, "watch"), "2 watches");
+        assert_eq!(plural(0, "address"), "0 addresses");
+        assert_eq!(plural(3, "reply"), "3 replies");
+        assert_eq!(plural(2, "key"), "2 keys");
+        assert_eq!(plural(2, "revision"), "2 revisions");
     }
 }

@@ -7,7 +7,7 @@
 //! **Key-agnostic by construction.** zengui is a useful explorer on *any* Zenoh
 //! bus; the keyspace-v2 convention is an enrichment overlay that lights up when
 //! a key parses, never a precondition. That is the grain of the engine already:
-//! [`zenkey_fleet_v1::KeyTreeSnapshot`] groups on a plain `split('/')` with no
+//! [`zenkey_fleet::KeyTreeSnapshot`] groups on a plain `split('/')` with no
 //! grammar knowledge, and `zenkey_v1::grammar::parse_full` returns `Option` rather
 //! than `Result` because for an observer "does not parse" is an answer, not an
 //! error. The overlay lives in exactly one module, [`keyfacts`].
@@ -18,7 +18,9 @@
 //! is blind to — and presence, descriptors and contracts are read on a
 //! session **in** the deployment's namespace, the way the deployment's own
 //! consumers read them. The namespace is `--namespace` (`--base` its alias),
-//! and a namespace switch reopens only the second session.
+//! and a namespace switch reopens only the second session. Since FL6b the
+//! pump is zk2's monitor, and the tree starts from zk2's contract skeleton,
+//! built from the same lens the window resolves keys through.
 //!
 //! # The Elm loop, in four places
 //!

@@ -9,28 +9,25 @@
 use std::sync::Arc;
 
 use iced::Task;
-use zenkey_fleet_v1::{Monitor, MonitorSpec, WatchId};
+use zenkey_fleet::{Monitor, MonitorSpec, WatchId};
 
 use crate::message::{BusMsg, DeploymentMsg, Message, SubjectMsg};
 use crate::services::ServiceError;
 
-/// Start the pump.
+/// Start the pump: zk2's monitor on the session in no namespace (#614,
+/// FL6b), so a wire selector reaches any key on the bus.
 ///
-/// No data-plane selectors: watches are lazy and opt-in (issue #85). Only
-/// liveliness rides from the start, because it is zero payload by construction
-/// (RFC 04 §5).
-pub fn start_monitor(
-    session: zenoh::Session,
-    liveliness: Vec<String>,
-    max_keys: usize,
-) -> Task<Message> {
+/// No data-plane selectors: watches are lazy and opt-in (issue #85). No
+/// liveliness either since #614 (FL6a): presence is zk2's instance and
+/// interface tokens, read by its own monitor on the session in the
+/// namespace ([`start_presence`]).
+pub fn start_monitor(session: zenoh::Session, max_keys: usize) -> Task<Message> {
     Task::perform(
         async move {
             Monitor::start(
                 &session,
                 MonitorSpec {
                     selectors: vec![],
-                    liveliness,
                     max_keys,
                     ..Default::default()
                 },
@@ -80,14 +77,14 @@ pub fn shutdown(monitor: Arc<Monitor>) -> Task<Message> {
 pub fn start_presence(session: zenoh::Session, namespace: String) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet::MonitorSpec {
+            let spec = MonitorSpec {
                 // Presence moves arrive as events; a stats tick on a monitor
                 // that watches no samples would be noise.
                 stats_tick: std::time::Duration::from_secs(3600),
-                ..zenkey_fleet::MonitorSpec::default()
+                ..MonitorSpec::default()
             }
             .with_presence("", &zenkey_fleet::PresenceScope::all());
-            let r = zenkey_fleet::Monitor::start(&session, spec)
+            let r = Monitor::start(&session, spec)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of);
@@ -95,22 +92,6 @@ pub fn start_presence(session: zenoh::Session, namespace: String) -> Task<Messag
         },
         |(namespace, r)| Message::Bus(BusMsg::PresenceStarted(namespace, r)),
     )
-}
-
-/// End the presence monitor, acknowledged when this handle is the last —
-/// [`shutdown`]'s shape, for the zk2 monitor the presence link drives.
-pub fn shutdown_presence(monitor: Arc<zenkey_fleet::Monitor>) -> Task<Message> {
-    Task::future(async move {
-        match Arc::try_unwrap(monitor) {
-            Ok(monitor) => {
-                if let Err(e) = monitor.shutdown().await {
-                    tracing::warn!("presence monitor shutdown: {e}");
-                }
-            }
-            Err(shared) => drop(shared),
-        }
-    })
-    .discard()
 }
 
 /// Watch one subtree, seeding it first (issue #92).
@@ -123,7 +104,7 @@ pub fn subtree(
     monitor: Arc<Monitor>,
     path: String,
     selector: String,
-    policy: zenkey_fleet_v1::SeedPolicy,
+    policy: zenkey_fleet::SeedPolicy,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -152,12 +133,24 @@ pub fn release(monitor: Arc<Monitor>, path: String, id: WatchId) -> Task<Message
 pub fn scope(
     monitor: Arc<Monitor>,
     selectors: Vec<String>,
-    policy: zenkey_fleet_v1::SeedPolicy,
+    policy: zenkey_fleet::SeedPolicy,
 ) -> Task<Message> {
     Task::perform(
         async move {
             let mut ids = Vec::new();
             for sel in &selectors {
+                // A selector that names `@op` (a custom scope can) is
+                // watched, and never seeded (#614, FL6b): both seed legs
+                // GET it, and a GET on an operation's key is a call.
+                let policy = if crate::scope::names_operation(sel) {
+                    zenkey_fleet::SeedPolicy {
+                        history: false,
+                        state: false,
+                        ..policy
+                    }
+                } else {
+                    policy
+                };
                 match monitor.watch_seeded(sel, policy).await {
                     Ok(id) => ids.push(id),
                     Err(e) => tracing::warn!("scope watch {sel}: {e}"),

@@ -18,7 +18,7 @@
 
 use iced::widget::{row, text};
 use iced::{Element, Length};
-use zenkey_fleet_v1::RetentionStats;
+use zenkey_fleet::RetentionStats;
 
 use super::kit;
 use super::theme::{Tone, colors};
@@ -136,7 +136,7 @@ fn age_label(d: std::time::Duration) -> String {
 /// A retention budget, spelled the one way every surface states it (#217):
 /// the banner, the dock and the status strip must not disagree about what
 /// the bound is.
-pub fn budget_label(b: zenkey_fleet_v1::RetentionBudget) -> String {
+pub fn budget_label(b: zenkey_fleet::RetentionBudget) -> String {
     format!(
         "{} / {}",
         kit::human_bytes(b.max_bytes as u64),
@@ -199,7 +199,7 @@ pub fn preamble_note(state: &ReplayState) -> Option<String> {
     Some(parts.join(" · "))
 }
 
-fn header_pre_roll(state: &ReplayState) -> Option<&zenkey_fleet_v1::PreRollInfo> {
+fn header_pre_roll(state: &ReplayState) -> Option<&zenkey_fleet::PreRollInfo> {
     match &state.source {
         ReplaySource::File { header, .. } => header.pre_roll.as_ref(),
         ReplaySource::Retained { .. } => None,
@@ -208,7 +208,7 @@ fn header_pre_roll(state: &ReplayState) -> Option<&zenkey_fleet_v1::PreRollInfo>
 
 /// A trigger marker's label (#218): where on the capture clock a rule
 /// fired, which rule, and to what.
-pub fn trigger_label(t_us: u64, t: &zenkey_fleet_v1::Transition) -> String {
+pub fn trigger_label(t_us: u64, t: &zenkey_fleet::Transition) -> String {
     format!(
         "▲ {:.1}s {} → {}",
         t_us as f64 / 1e6,
@@ -442,7 +442,7 @@ pub(crate) fn surfaces(replay: &ReplayMode) -> Vec<Element<'_, Message>> {
 mod tests {
     use super::*;
     use std::time::Duration;
-    use zenkey_fleet_v1::RetentionBudget;
+    use zenkey_fleet::RetentionBudget;
 
     fn stats(evicted: u64) -> RetentionStats {
         RetentionStats {

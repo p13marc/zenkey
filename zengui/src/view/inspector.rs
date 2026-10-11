@@ -38,9 +38,10 @@
 
 use iced::widget::{Column, column, scrollable};
 use iced::{Element, Length};
+use zenkey_fleet::{KeyTreeSnapshot, LatencyReport};
+use zenkey_fleet_v1::SliceSet;
 use zenkey_fleet_v1::model::facts::{ClassKind, KeyFacts, KeyShape, Registration};
 use zenkey_fleet_v1::report::TopicRow;
-use zenkey_fleet_v1::{KeyTreeSnapshot, LatencyReport, SliceSet};
 
 use super::detail::{DetailData, Fetched, SeriesData};
 use super::history::HistoryData;

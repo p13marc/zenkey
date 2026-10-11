@@ -332,7 +332,7 @@ mod tests {
     fn ring_of(samples: &[(&[u8], bool)]) -> HistoryRing {
         let mut ring = HistoryRing::new(64);
         for (payload, is_delete) in samples {
-            ring.push(&zenkey_fleet_v1::SampleView {
+            ring.push(&zenkey_fleet::SampleView {
                 key: "k".to_string(),
                 payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
                 encoding: String::new(),

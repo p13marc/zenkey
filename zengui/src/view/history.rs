@@ -18,7 +18,7 @@
 
 use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet_v1::model::diff::{Change, ValueDiff};
+use zenkey_fleet::{Change, ValueDiff};
 
 use crate::history::{HistoryEntry, HistoryRecorder};
 use crate::message::{Message, PaneMsg, SlotId, SubjectMsg};
@@ -387,7 +387,7 @@ fn pair_view<'a>(
 
     match (&prev.value, &entry.value) {
         (Some(old), Some(new)) => {
-            let d = zenkey_fleet_v1::value_diff(old, new, MAX_CHANGES);
+            let d = zenkey_fleet::value_diff(old, new, MAX_CHANGES);
             if d.is_empty() {
                 return col
                     .push(kit::muted(
@@ -444,7 +444,7 @@ enum Tone {
 fn bytes_view<'a>(prev: &HistoryEntry, entry: &HistoryEntry, sp: Spacing) -> Element<'a, Message> {
     let old = prev.payload.to_bytes();
     let new = entry.payload.to_bytes();
-    let d = zenkey_fleet_v1::byte_diff(&old, &new);
+    let d = zenkey_fleet::byte_diff(&old, &new);
     let which = match (prev.value.is_some(), entry.value.is_some()) {
         (false, false) => "neither sample has a structural form",
         (true, false) => "this sample has no structural form",

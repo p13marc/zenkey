@@ -43,7 +43,7 @@ fn the_traffic_tab_never_reports_a_number_it_did_not_take() {
             .is_ok()
     );
 
-    let mut stats = zenkey_fleet_v1::model::stats::StatsTable::new();
+    let mut stats = zenkey_fleet::StatsTable::new();
     stats.record(REGISTERED, 64, None, Instant::now(), None, None);
     let observed = KeyTreeSnapshot::build(&stats);
     let table = top(&observed, TrafficSort::Rate, 50);

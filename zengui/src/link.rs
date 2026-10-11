@@ -24,7 +24,7 @@
 use std::sync::Arc;
 
 use iced::Subscription;
-use zenkey_fleet_v1::{FleetEvent, Monitor, StreamItem};
+use zenkey_fleet::{FleetEvent, Monitor, StreamItem};
 
 use crate::message::{BusMsg, BusTick, LinkState, Message};
 
@@ -53,17 +53,22 @@ impl std::hash::Hash for LinkKey {
 /// Note `run_with`'s builder is a plain `fn` pointer, not a closure — nothing
 /// can be captured, so everything the stream needs rides in [`LinkKey`].
 pub fn subscribe(key: LinkKey) -> Subscription<Message> {
-    Subscription::run_with(key, |key| pump(key.clone()))
+    Subscription::run_with(key, |key| stream(key.clone()))
 }
 
-fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
+/// The pump itself: what [`subscribe`] runs, public — as
+/// `presence_link::stream` is — so a live test can drive the window's own
+/// pump against a real bus without a window (#614, FL6b).
+pub fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
     async_stream::stream! {
         let monitor = key.monitor;
+        // Subscribed before the pump says it is pumping (#614, FL6b): an
+        // event the monitor sends between that word and the next poll — a
+        // seed boundary, a watch change — is in this receiver, not lost.
+        let mut events = monitor.events();
         yield Message::Bus(BusMsg::Link(LinkState::Pumping));
 
-        let mut events = monitor.events();
         let mut samples = Vec::with_capacity(BATCH_CAP);
-        let mut nodes = Vec::new();
         let mut seeded = Vec::new();
         let (mut lagged, mut coalesced) = (0u64, 0u64);
         // Rebuilt only on a `WatchChanged`, and shared with every tick after
@@ -82,8 +87,10 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         coalesced += 1;
                     }
                 }
-                StreamItem::Event(FleetEvent::NodeUp(k)) => nodes.push((k, true)),
-                StreamItem::Event(FleetEvent::NodeDown(k)) => nodes.push((k, false)),
+                // The data pump declares no liveliness (#614, FL6a): presence
+                // is zk2's, on its own monitor (`presence_link.rs`), so a
+                // token event here would be one nobody asked this pump for.
+                StreamItem::Event(FleetEvent::NodeUp(_) | FleetEvent::NodeDown(_)) => {}
                 StreamItem::Event(FleetEvent::WatchChanged) => {
                     watched = monitor.watched().await.into_iter().map(|(_, s)| s).collect();
                 }
@@ -111,7 +118,6 @@ fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
                         samples: std::mem::take(&mut samples),
                         lagged: std::mem::take(&mut lagged),
                         coalesced: std::mem::take(&mut coalesced),
-                        nodes: std::mem::take(&mut nodes),
                         keys,
                         keys_evicted,
                         keys_unwatched,

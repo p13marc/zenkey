@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use zenkey_fleet_v1::KeyTreeSnapshot;
+use zenkey_fleet::KeyTreeSnapshot;
 use zenoh::key_expr::keyexpr;
 
 /// One producer's presence on one origin.
@@ -53,8 +53,10 @@ pub struct NodeRoster {
 }
 
 impl NodeRoster {
-    /// Seed from a one-shot liveliness roster (`build_skeleton`'s GET):
-    /// everything listed is alive; a re-seen origin recovers from suspect.
+    /// Seed from a one-shot v1 liveliness roster: everything listed is
+    /// alive; a re-seen origin recovers from suspect. The window itself no
+    /// longer seeds it — the skeleton build that read the roster is zk2's
+    /// since #614 (FL6b), and the nodes pane reads zk2 presence from FL9.
     pub fn seed(&mut self, roster: &BTreeMap<String, Vec<String>>) {
         self.seeded = true;
         for (origin, producers) in roster {
@@ -114,7 +116,7 @@ impl NodeRoster {
         // pair, and *borrowed*: `keyexpr::new(&str)` validates without
         // allocating, where `KeyExpr::new(String)` builds an `OwnedKeyExpr`
         // — an `Arc<str>` copy — per selector per producer per tick.
-        // `zenkey_fleet_v1::merge` was deliberately fixed this way
+        // `zenkey_fleet::merge_skeleton` was deliberately fixed this way
         // (`docs/zero-copy.md`) and this site was missed (#178).
         let watched: Vec<&keyexpr> = watched
             .iter()

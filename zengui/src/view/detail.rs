@@ -77,7 +77,7 @@ fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
         )));
         return col.into();
     }
-    let rendered = zenkey_fleet_v1::structural(bytes);
+    let rendered = zenkey_fleet::structural(bytes);
     let (shown, elided) = clamp_document(&rendered);
     col = col.push(kit::mono(shown.to_string()));
     if elided > 0 {
@@ -151,7 +151,7 @@ pub struct DetailData<'a> {
     /// The key's observed skewed-latency summary and unstamped count,
     /// refreshed per bus tick (#119). Absent = nothing stamped, which is
     /// not zero latency.
-    pub latency: Option<(zenkey_fleet_v1::LatencyReport, u64)>,
+    pub latency: Option<(zenkey_fleet::LatencyReport, u64)>,
     /// The dock's resolved spacing grid (#192).
     pub sp: Spacing,
 }
@@ -177,7 +177,7 @@ pub fn human_us(us: i64) -> String {
 /// frontends cannot describe one sample's QoS differently — which they
 /// previously guaranteed with a comment (#353).
 pub fn qos_token(entry: &crate::history::HistoryEntry) -> String {
-    zenkey_fleet_v1::report::qos_axes_token(
+    zenkey_fleet::report::qos_axes_token(
         entry.priority,
         entry.congestion_control,
         entry.reliability,

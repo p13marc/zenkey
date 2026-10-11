@@ -191,8 +191,12 @@ fn select(
     };
     match &sub.current {
         // Lazy value-on-demand: one fetch per subject, nothing ambient
-        // (issue #85). Symbolic skeleton paths have no concrete value.
-        Subject::Key(key) if !key.contains('{') => services::value::fetch(session, key.clone()),
+        // (issue #85). Symbolic skeleton paths have no concrete value, and
+        // an operation's key has none either (#614, FL6b): a GET on it is a
+        // call (spec §5), so selecting a declared `@op` leaf asks nothing.
+        Subject::Key(key) if !key.contains('{') && !scope::names_operation(key) => {
+            services::value::fetch(session, key.clone())
+        }
         // The nodes pane's one data-plane cost, paid on selection.
         Subject::Origin(origin) => {
             work.verdicts.node_detail = view::nodes::DetailState::Loading(origin.clone());
@@ -212,6 +216,12 @@ fn toggle_watch(dep: &Deployment, obs: &mut Observation, path: String) -> Task<M
     let Some(monitor) = obs.monitor.clone() else {
         return Task::none();
     };
+    // No watch under `@op` (#614, FL6b): a queryable carries no samples, and
+    // the seed's state GET on it would call every operation it reaches. The
+    // tree offers no control there; this refuses the message anyway.
+    if scope::names_operation(&path) && !obs.my_watches.contains_key(&path) {
+        return Task::none();
+    }
     if let Some(id) = obs.my_watches.remove(&path) {
         obs.my_watch_paths.remove(&path);
         // A watch released mid-seed never gets its boundary (the engine
@@ -223,7 +233,7 @@ fn toggle_watch(dep: &Deployment, obs: &mut Observation, path: String) -> Task<M
     // Watching seeds (issue #92): current state arrives before live
     // traffic, through the same merge discipline as everything else.
     let selector = scope::subtree_selector(&path);
-    let policy = zenkey_fleet_v1::SeedPolicy {
+    let policy = zenkey_fleet::SeedPolicy {
         timeout: dep.timeout(),
         ..Default::default()
     };

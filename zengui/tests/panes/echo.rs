@@ -13,8 +13,8 @@ fn the_echo_rows_badge_four_poles_and_admit_the_unchecked() {
     use zengui::echo::EchoRing;
     use zengui::verdict::VerdictCache;
     use zengui::view::echo::{EchoView, section};
+    use zenkey_fleet::SampleView;
     use zenkey_fleet::report::Conformance;
-    use zenkey_fleet_v1::SampleView;
 
     let sample = |key: &str| SampleView {
         key: key.to_string(),

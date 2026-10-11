@@ -29,8 +29,12 @@ pub(crate) fn apply_tick(
     // The verdict cache's logical clock (#164): one advance per tick —
     // replayed ticks included, harmlessly (revalidation staleness only).
     work.verdicts.payloads.advance();
-    // Decided *before* the fields below are overwritten (#177).
-    let held = shape_held((&*obs).into(), tick.into(), &obs.watched, &tick.watched);
+    // Decided *before* the fields below are overwritten (#177). A third
+    // rung beside `shape_held`'s two (#614, FL6b): the skeleton the shape
+    // was merged from — a declared-only node is shape, and a lens move
+    // rebuilds the skeleton without moving a single key.
+    let held = shape_held((&*obs).into(), tick.into(), &obs.watched, &tick.watched)
+        && tree.merged_from(dep.skeleton.as_ref());
     // Per tick, not per frame: one bounded lock per *slot* for its key's
     // latency summary (#119, #257 — the fan-out is bounded by the pin
     // count, not the bus). None when unselected, unobserved, or unstamped.
@@ -74,9 +78,7 @@ pub(crate) fn apply_tick(
             if let Some(path) = path {
                 obs.seeding_paths.remove(&path);
             }
-            obs.seed_totals.history += coverage.history_replies.unwrap_or(0);
-            obs.seed_totals.storage += coverage.storage_replies.unwrap_or(0);
-            obs.seed_totals.superseded += coverage.superseded;
+            obs.seed_totals.add(coverage);
             obs.seeded_watches += 1;
         }
     }
@@ -123,15 +125,10 @@ pub(crate) fn apply_tick(
             v.on_frame(sample);
         }
     }
-    for (key, _up) in &tick.nodes {
-        ensure_facts(dep, key);
-    }
-    // The node dashboard (#61): transitions in arrival order (flap-
-    // correct), then the zero-cost watched-freshness join.
+    // The node dashboard (#61): the zero-cost watched-freshness join. Its
+    // token transitions came off the data pump's liveliness, which carries
+    // none since #614 (FL6a): presence is zk2's, on its own monitor.
     let now = std::time::Instant::now();
-    work.verdicts
-        .roster
-        .apply_transitions(dep.namespace(), &tick.nodes, now);
     work.verdicts
         .roster
         .refresh(&tick.tree, dep.namespace(), &tick.watched, now);
@@ -212,7 +209,7 @@ pub(crate) fn update(
                 contexts,
                 start_monitor(dep),
                 start_presence(dep, obs),
-                build_skeleton(dep),
+                read_declared(dep),
                 load_contracts(dep),
             ])
         }
@@ -238,6 +235,7 @@ pub(crate) fn update(
             }
             dep.session = Some(session);
             dep.reseed_store();
+            tree.reflatten(dep, obs);
             start_presence(dep, obs)
         }
         BusMsg::NamespacedOpened(namespace, Err(e)) => {
@@ -251,12 +249,12 @@ pub(crate) fn update(
             // Started for a namespace the window has left, or a session that
             // has since gone: shut down, never driven.
             if namespace != dep.namespace() || dep.session.is_none() {
-                return services::watch::shutdown_presence(monitor);
+                return services::watch::shutdown(monitor);
             }
             let old = obs.presence_monitor.replace(monitor);
             // A new monitor is a new link: the epoch is its identity.
             obs.presence_epoch += 1;
-            old.map(services::watch::shutdown_presence)
+            old.map(services::watch::shutdown)
                 .unwrap_or_else(Task::none)
         }
         BusMsg::PresenceStarted(namespace, Err(e)) => {
@@ -274,8 +272,10 @@ pub(crate) fn update(
             let catalog = update.catalog.clone();
             let generation = update.generation;
             dep.presence = Some(update);
-            if generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog) {
-                adopt_lens(dep, work, catalog, generation);
+            if (generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog))
+                && adopt_lens(dep, work, catalog, generation)
+            {
+                tree.reflatten(dep, obs);
             }
             Task::none()
         }
@@ -297,18 +297,18 @@ pub(crate) fn update(
             obs.link = LinkState::Failed(e);
             Task::none()
         }
-        BusMsg::SkeletonBuilt(Ok((skeleton, roster))) => {
-            dep.skeleton = Some(skeleton);
-            // The build task gathered the roster anyway — seed the node
-            // dashboard from it instead of throwing it away (#61). Empty
-            // since #614 (FL6a): presence is zk2's, and the nodes pane
-            // reads it from FL9.
-            work.verdicts.roster.seed(&roster);
-            tree.reflatten(dep, obs);
+        BusMsg::DeclaredRead(Ok(declared)) => {
+            dep.admin_declared = declared;
+            if dep.refresh_skeleton() {
+                tree.reflatten(dep, obs);
+            }
             Task::none()
         }
-        BusMsg::SkeletonBuilt(Err(e)) => {
-            tracing::warn!("skeleton build failed: {e}");
+        BusMsg::DeclaredRead(Err(e)) => {
+            // Not an empty admin space: the skeleton keeps saying "admin
+            // n/a" (O4), and the tree is the lens's declared keyspace and
+            // what was observed.
+            tracing::warn!("admin space read failed: {e}");
             Task::none()
         }
         BusMsg::NamespacesListed(Ok(listing)) => {
@@ -339,6 +339,8 @@ pub(crate) fn update(
             }
             dep.reseed_store();
             forget_judgements(obs, work);
+            // The skeleton moved with the contracts (`reseed_store`).
+            tree.reflatten(dep, obs);
             // The lens feed retrieves into the store it was opened on: the
             // presence link restarts over the new one.
             restart_presence(obs);
@@ -390,12 +392,12 @@ pub(crate) fn update(
 /// any of it. The keys go in the order the bus delivered them, and only the
 /// payload each carries is the newest one the tick holds.
 fn validation_batch(
-    samples: &[Arc<zenkey_fleet_v1::SampleView>],
+    samples: &[Arc<zenkey_fleet::SampleView>],
     cache: &crate::verdict::VerdictCache,
 ) -> Vec<(String, String, zenoh::bytes::ZBytes)> {
     // Newest per key, in first-arrival key order: `newest` supersedes,
     // `order` remembers when the key first showed up.
-    let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet_v1::SampleView>> =
+    let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet::SampleView>> =
         std::collections::HashMap::new();
     let mut order: Vec<&str> = Vec::new();
     for sample in samples {
@@ -456,16 +458,20 @@ fn same_catalog(
 /// Every identity and every verdict judged before is due again — the
 /// identity cache sees the generation itself, and the verdict cache keeps
 /// each badge on screen as the last true reading until its recheck lands.
+/// The skeleton is rebuilt from the moved lens (FL6b) — the one door it is
+/// rebuilt through besides the contracts and the admin space — and `true`
+/// says it was, so a landing that no tick follows can redraw the tree.
 fn adopt_lens(
     dep: &mut Deployment,
     work: &mut Workspace,
     catalog: Option<Arc<zenkey_fleet::Catalog>>,
     generation: u64,
-) {
+) -> bool {
     dep.catalog = catalog;
     dep.lens_generation = generation;
     work.verdicts.payloads.invalidate();
     dep.recount_contracts();
+    dep.refresh_skeleton()
 }
 
 /// Each tick, ask the lens feed whether it moved without presence moving
@@ -478,6 +484,8 @@ fn poll_lens(dep: &mut Deployment, work: &mut Workspace) {
     let catalog = feed.0.catalog();
     let generation = feed.0.generation();
     if generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog) {
+        // The tree follows in this tick's `apply_tick`: the skeleton rung of
+        // its shape check sees the rebuilt skeleton.
         adopt_lens(dep, work, catalog, generation);
     }
 }
@@ -489,7 +497,7 @@ pub(crate) fn start_presence(dep: &Deployment, obs: &mut Observation) -> Task<Me
     let old = obs
         .presence_monitor
         .take()
-        .map(services::watch::shutdown_presence)
+        .map(services::watch::shutdown)
         .unwrap_or_else(Task::none);
     obs.presence_epoch += 1;
     let Some(session) = dep.session.clone() else {
@@ -511,13 +519,13 @@ pub(crate) fn restart_presence(obs: &mut Observation) {
     }
 }
 
-/// (Re)build the skeleton (#614, FL6a: from no slices, the admin space's
-/// declared entities alone, until FL6b builds zk2's from the lens).
-pub(crate) fn build_skeleton(dep: &Deployment) -> Task<Message> {
+/// Ask the admin space what sessions declared (#614, FL6b): the
+/// skeleton's one input that costs a query, on the session in no namespace.
+pub(crate) fn read_declared(dep: &Deployment) -> Task<Message> {
     let Some(raw) = dep.raw.clone() else {
         return Task::none();
     };
-    services::sweep::skeleton(raw, dep.namespace().to_string(), dep.timeout())
+    services::sweep::declared(raw, dep.timeout())
 }
 
 /// Load the contracts the settings name (#614, FL6a) — off the update
@@ -533,7 +541,7 @@ pub(crate) fn start_monitor(dep: &Deployment) -> Task<Message> {
     // No liveliness on the data pump since #614 (FL6a): presence is zk2's
     // instance and interface tokens, read on the session in the namespace,
     // and v1's alive tokens describe nothing a zk2 bus carries.
-    services::watch::start_monitor(raw, Vec::new(), dep.settings.max_keys)
+    services::watch::start_monitor(raw, dep.settings.max_keys)
 }
 
 /// A contracts (re)load invalidates everything judged under the old ones:
@@ -592,8 +600,8 @@ mod tests {
         );
     }
 
-    fn sample(key: &str, payload: &[u8]) -> Arc<zenkey_fleet_v1::SampleView> {
-        Arc::new(zenkey_fleet_v1::SampleView {
+    fn sample(key: &str, payload: &[u8]) -> Arc<zenkey_fleet::SampleView> {
+        Arc::new(zenkey_fleet::SampleView {
             key: key.to_string(),
             payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
             encoding: "application/json".to_string(),

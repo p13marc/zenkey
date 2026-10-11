@@ -120,6 +120,14 @@ pub const ALL: &[Scene] = &[
         build: keys,
         landmark: "fuzzy over keys observed so far — nothing here is a guess (O4)",
     },
+    // The contract skeleton in the tree (#614, FL6b): a templated chunk is
+    // one only the declared keyspace can draw.
+    Scene {
+        name: "skeleton",
+        size: DESKTOP,
+        build: skeleton,
+        landmark: "{iface}",
+    },
     Scene {
         name: "help",
         size: DESKTOP,
@@ -266,12 +274,14 @@ fn traffic(theme: ThemeChoice) -> Zengui {
 fn replay(theme: ThemeChoice) -> Zengui {
     use zengui::replay::{LoadedReplay, ReplayState};
     use zengui::view::replay::ReplayMsg;
+    // A version-3 capture (#614, FL6b): what `**` excluded stated in the
+    // header, each row's wire axes in `qos_axes`.
     let file = [
-        r#"{"zrec":1,"selectors":["v1/**"],"base":"","captured_at":"2026-10-05T03:00:00Z"}"#,
-        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used","t":0,"bytes":"NjQ="}"#,
-        r#"{"key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","t":500000,"bytes":"b2s="}"#,
+        r#"{"zrec":3,"selectors":["**"],"base":"","captured_at":"2026-10-05T03:00:00Z","excluded":["@stream","@state","@op","@zk","@adv"]}"#,
+        r#"{"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","t":0,"bytes":"eyJuYW1lIjoiZXRoMCIsImluZGV4IjoyLCJpc191cCI6dHJ1ZX0=","encoding":"application/json","qos_axes":"data/block/reliable"}"#,
+        r#"{"key":"demo/example/foo","t":500000,"bytes":"aGVsbG8gIzA=","encoding":"text/plain","qos_axes":"data/drop/best_effort"}"#,
         r#"{"dropped":4}"#,
-        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used","t":2000000,"bytes":"NjU="}"#,
+        r#"{"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","t":2000000,"bytes":"eyJuYW1lIjoiZXRoMCIsImluZGV4IjoyLCJpc191cCI6ZmFsc2V9","encoding":"application/json","qos_axes":"data/block/reliable"}"#,
     ]
     .join("\n");
     let state = ReplayState::load("incident.zrec", file.as_bytes()).expect("a valid capture");
@@ -286,6 +296,20 @@ fn replay(theme: ThemeChoice) -> Zengui {
             "incident.zrec".into(),
             Ok(LoadedReplay::new(state)),
         ))),
+    );
+    app
+}
+
+/// The tree found down to `host-a/tc`'s `tc.netif.v1` (#614, FL6b): every
+/// resource its contract declares, placed by presence before a byte of it
+/// arrives — the observed interfaces beside the quiet resources nobody
+/// published, with their templates symbolic, and the declared operation,
+/// which offers no watch.
+fn skeleton(theme: ThemeChoice) -> Zengui {
+    let mut app = live(prefs(theme));
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::TreeSearchChanged("host-a/tc/tc.netif".into())),
     );
     app
 }

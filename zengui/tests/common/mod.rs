@@ -18,8 +18,9 @@ use zengui::app::Zengui;
 use zengui::config::Settings;
 use zengui::message::{BusMsg, BusTick, LinkState, Message, WatchedTotals};
 use zengui::prefs::Prefs;
-use zenkey_fleet_v1::model::stats::StatsTable;
-use zenkey_fleet_v1::{KeyTreeSnapshot, SampleView, SliceSet};
+use zenkey_fleet::StatsTable;
+use zenkey_fleet::{KeyTreeSnapshot, SampleView};
+use zenkey_fleet_v1::SliceSet;
 
 /// The ZenSight registry snapshot `fixture-tests/` compiles — v1's declared
 /// world, still what the v1 panes' own tests render against until each
@@ -287,7 +288,7 @@ fn deployment(
 
     let mut keys = Vec::new();
     let mut descriptors = BTreeMap::new();
-    for (id, address, iface) in [(1, "robot1/nav", "nav.v2"), (2, "host-a/tc", "tc.netif.v1")] {
+    for (id, (address, iface)) in (1u64..).zip(World::ADDRESSES) {
         let addr: Addr = address.parse().expect("an address");
         let iface: IfaceId = iface.parse().expect("an interface");
         let revision = set.of_iface(&iface).next().expect("held");
@@ -415,6 +416,21 @@ impl World {
             )
     }
 
+    /// The declared keyspace the window builds once connected (#614, FL6b):
+    /// zk2's contract skeleton over the same lens [`World::check`] resolves
+    /// with, and no admin space — what `Deployment::refresh_skeleton` makes
+    /// of this world.
+    pub fn skeleton(&self) -> zenkey_fleet::Skeleton {
+        let lens = zenkey_fleet::Lens::new("", Some(&self.catalog), &*self.contracts.set)
+            .offline(&self.contracts.set);
+        zenkey_fleet::Skeleton::build(&lens, None)
+    }
+
+    /// The addresses this world's catalog places, with the interface each
+    /// provides: `robot1/nav` serving `nav.v2`, `host-a/tc` `tc.netif.v1`.
+    pub const ADDRESSES: [(&'static str, &'static str); 2] =
+        [("robot1/nav", "nav.v2"), ("host-a/tc", "tc.netif.v1")];
+
     /// What the bounded validation batch would have answered (#164) for
     /// every publisher's newest payload, through the lens: the four poles,
     /// each on the key that earns it.
@@ -461,9 +477,6 @@ impl World {
             samples,
             lagged: 0,
             coalesced: 0,
-            // No v1 alive tokens since #614 (FL6a): presence is zk2's, and
-            // arrives through the presence link (`connect`).
-            nodes: Vec::new(),
             keys: feeds,
             keys_evicted: 0,
             keys_unwatched: 0,

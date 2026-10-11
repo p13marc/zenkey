@@ -119,7 +119,13 @@ mod tests {
                     "raw",
                     "session",
                     "schema_store",
+                    // FL6b: zk2's contract skeleton, what it was built from
+                    // (the lens's inputs, by identity) and the admin space's
+                    // declared entities — the declared keyspace of the
+                    // deployment pointed at, rebuilt when its lens moves.
                     "skeleton",
+                    "skeleton_inputs",
+                    "admin_declared",
                     "contracts",
                     "store",
                     "contract_counts",
@@ -363,6 +369,7 @@ mod tests {
         // `contract_counts`, `namespaces` and `namespace_options` came — 83.
         // Then FL6a-ii: presence, the lens feed, its catalog and generation,
         // the identity cache, and the presence monitor with its epoch — 90.
-        assert_eq!(leaves, 90, "the split must place every field exactly once");
+        // Then FL6b: the skeleton's inputs and the admin space's answer — 92.
+        assert_eq!(leaves, 92, "the split must place every field exactly once");
     }
 }

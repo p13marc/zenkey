@@ -11,7 +11,7 @@
 
 use std::collections::VecDeque;
 
-use zenkey_fleet_v1::SampleView;
+use zenkey_fleet::SampleView;
 
 /// Payloads larger than this are not decoded at all — reported by size only.
 ///
@@ -19,7 +19,7 @@ use zenkey_fleet_v1::SampleView;
 /// one-line preview would burn the whole tick budget for a string nobody reads.
 ///
 /// The app's **one** preview-decode bound (#345) — and the engine's, since
-/// #346: `zenkey_fleet_v1::OBSERVE_LIMIT` bounds the field-intelligence drains
+/// #346: `zenkey_fleet::OBSERVE_LIMIT` bounds the field-intelligence drains
 /// for the same reason, and one limit answered twice is two answers waiting
 /// to diverge (the #353 lesson). The echo line here, the
 /// Inspector's attachment preview (`view::detail`) and the media viewer's
@@ -29,7 +29,7 @@ use zenkey_fleet_v1::SampleView;
 /// be three different answers to one question. Past it the size is reported
 /// and the decode is skipped — which is stated, never silently empty
 /// (RFC 13 §3 O6).
-pub const DECODE_LIMIT: usize = zenkey_fleet_v1::OBSERVE_LIMIT;
+pub const DECODE_LIMIT: usize = zenkey_fleet::OBSERVE_LIMIT;
 
 /// Maximum characters retained per preview.
 const PREVIEW_CHARS: usize = 512;
@@ -99,14 +99,14 @@ impl EchoLine {
         } else if len > DECODE_LIMIT {
             format!("<{len} bytes — too large to preview>")
         } else {
-            truncate(zenkey_fleet_v1::structural(&view.payload.to_bytes()))
+            truncate(zenkey_fleet::structural(&view.payload.to_bytes()))
         };
         let attachment = view.attachment.as_ref().map(|a| {
             let alen = a.len();
             if alen > DECODE_LIMIT {
                 format!("<{alen} bytes — too large to preview>")
             } else {
-                truncate(zenkey_fleet_v1::structural(&a.to_bytes()))
+                truncate(zenkey_fleet::structural(&a.to_bytes()))
             }
         });
         let spans = if view.kind == zenoh::sample::SampleKind::Delete {
@@ -284,7 +284,7 @@ mod tests {
     /// a bound.
     #[test]
     fn a_line_carries_its_syntax_and_pays_for_it() {
-        use zenkey_fleet_v1::SampleView;
+        use zenkey_fleet::SampleView;
         let view = |payload: &[u8], kind| SampleView {
             key: "v1/h-a/state/p/a".into(),
             payload: zenoh::bytes::ZBytes::from(payload.to_vec()),

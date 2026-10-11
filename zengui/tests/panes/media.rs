@@ -62,7 +62,7 @@ fn a_media_viewing_reports_what_it_cannot_render() {
     use zengui::view::media::{MediaState, Viewing, section};
 
     let mut viewing = Viewing::new("v1/h-0123456789ab/@media/parallax/cam0/video/h264/hi".into());
-    let sample = zenkey_fleet_v1::SampleView {
+    let sample = zenkey_fleet::SampleView {
         key: viewing.key.clone(),
         payload: zenoh::bytes::ZBytes::from(vec![0u8; 4096]),
         encoding: "video/h264".into(),

@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet_v1::{KeyTreeSnapshot, MergedNode, Skeleton, SliceSet};
+use zenkey_fleet::{KeyTreeSnapshot, MergedNode, Skeleton};
 
 use super::deployment::Deployment;
 use super::observation::Observation;
@@ -98,6 +98,19 @@ impl Default for TreeState {
 }
 
 impl TreeState {
+    /// Whether the last merge was made from `skeleton` — by identity, like
+    /// the cache's own check (#614, FL6b). A tree that never merged was
+    /// made from nothing, so it answers `false`.
+    pub(crate) fn merged_from(&self, skeleton: Option<&Arc<Skeleton>>) -> bool {
+        self.merged_cache
+            .as_ref()
+            .is_some_and(|c| match (&c.skeleton, skeleton) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            })
+    }
+
     /// The merged declared-∪-observed tree, from cache when its inputs have
     /// not moved (#177).
     pub(crate) fn merged(&mut self, dep: &Deployment, obs: &Observation) -> Arc<MergedNode> {
@@ -124,16 +137,13 @@ impl TreeState {
         let skeleton = match &dep.skeleton {
             Some(s) => s.as_ref(),
             None => {
-                empty_skeleton = Skeleton::build(
-                    dep.namespace(),
-                    &SliceSet::default(),
-                    &std::collections::BTreeMap::new(),
-                    None,
-                );
+                let none = zenkey_fleet::ContractSet::new();
+                empty_skeleton =
+                    Skeleton::build(&zenkey_fleet::Lens::new(dep.namespace(), None, &none), None);
                 &empty_skeleton
             }
         };
-        let merged = Arc::new(zenkey_fleet_v1::merge(
+        let merged = Arc::new(zenkey_fleet::merge_skeleton(
             skeleton,
             &obs.observed,
             &obs.watched,
