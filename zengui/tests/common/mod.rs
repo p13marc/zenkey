@@ -528,6 +528,7 @@ impl World {
                 value: StateValue::Value {
                     payload: Box::new(self.check(key, body, "").rendering),
                 },
+                bytes: Some(body.to_vec().into()),
                 timestamp: Some(zenkey_fleet::report::Stamp {
                     time: "2026-10-05T09:12:44.250000000Z".into(),
                     clock: "a1b2c3d4e5f60718".into(),

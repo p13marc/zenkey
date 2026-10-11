@@ -325,6 +325,7 @@ mod tests {
             encoding: None,
             attachment: None,
             timestamp: None,
+            kind: Some(zenoh::sample::SampleKind::Put),
             answer: Answer::Value(zenoh::bytes::ZBytes::from("1")),
         }
     }
@@ -335,6 +336,7 @@ mod tests {
             encoding: None,
             attachment: None,
             timestamp: None,
+            kind: None,
             answer: Answer::Error {
                 name: "error/unavailable".into(),
                 message: "busy".into(),

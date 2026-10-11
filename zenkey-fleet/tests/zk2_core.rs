@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 mod util;
-use util::zk2::{T, client, config, eventually, example, iface, router};
+use util::zk2::{T, addr, client, config, eventually, example, iface, router};
 
 use zenkey::{Implementation, Service, ServiceBuilder};
 use zenkey_fleet::bus::contracts::BundleStore;
@@ -789,4 +789,147 @@ async fn each_kind_decodes_or_renders_honestly() {
         r.rendered
     );
     drop(subs);
+}
+
+/// #765: a state read keeps the reply's bytes beside its rendering, the
+/// owner's (S4) and the archive's (S5) alike, and a raw GET within the
+/// owner's tombstone window reads its `reply_del` as a delete (core §4,
+/// S3), never as a put with an empty payload.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
+    use zenkey::archive::{Archive, ArchiveConfig, Recorded};
+    use zenkey_fleet::model::catalog::Revision;
+    use zenkey_fleet::report::{StateReport, StateValue};
+    use zenkey_fleet::{Answer, FleetAnswer, GetOpts, StateRead};
+    use zenoh::sample::SampleKind;
+
+    let (_router, ep) = router(None).await;
+    let (owners, tool, archiving) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let contract = example("tcgui/tc.netif.v1");
+    let netif = iface("tc.netif.v1");
+    let origin = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    let archive = Archive::start(
+        &archiving,
+        ArchiveConfig {
+            service: config("ground/archive"),
+            records: vec![Recorded {
+                owner: addr("host-a/tc"),
+                selector: "zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*".to_owned(),
+                implementation: Implementation::new(contract.clone()),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .expect("an archive");
+    let mut b = ServiceBuilder::new(&owners, config("host-a/tc"));
+    b.implement(Implementation::new(contract.clone()))
+        .expect("implement");
+    for r in &contract.resources {
+        let _ = b.expose(&netif, &zenkey::implementation::resource_name(r));
+    }
+    b.serve_state(&netif).expect("serve state");
+    let mut owner = b.start().await.expect("the owner");
+    let member: Bindings = [
+        ("ns".to_owned(), vec!["default".to_owned()]),
+        ("iface".to_owned(), vec!["eth0".to_owned()]),
+    ]
+    .into();
+    let writer = owner
+        .state_writer(&netif, "state/interfaces/{ns}/{iface}", &member)
+        .await
+        .expect("a state writer");
+    let body = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#;
+    writer.put(body.to_vec()).await.expect("a put");
+
+    let revision = Revision::from_contract(contract, ContractSource::File);
+    let resource = revision
+        .resource(
+            "state/interfaces/{ns}/{iface}",
+            &[zenkey_model::authoring::Kind::State],
+        )
+        .expect("the resource");
+    let owner_addr = addr("host-a/tc");
+    let read = || StateRead {
+        revision: &revision,
+        owner: &owner_addr,
+        resource,
+        values: &member,
+        timeout: T,
+    };
+    let bytes_of = |report: &StateReport| {
+        report
+            .rows
+            .first()
+            .and_then(|row| row.bytes.as_ref())
+            .map(|b| b.to_bytes().into_owned())
+    };
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    let settle = |what: &str| {
+        assert!(tokio::time::Instant::now() < deadline, "never: {what}");
+        tokio::time::sleep(std::time::Duration::from_millis(50))
+    };
+
+    // S4: the owner's reply, its bytes kept beside the rendering.
+    let current = loop {
+        let report = zenkey_fleet::get_state(&tool, read())
+            .await
+            .expect("a state read");
+        if !report.rows.is_empty() {
+            break report;
+        }
+        settle("the owner answers S4's GET").await;
+    };
+    assert!(
+        matches!(&current.rows[0].value, StateValue::Value { .. }),
+        "{current:?}"
+    );
+    assert_eq!(
+        bytes_of(&current).as_deref(),
+        Some(&body[..]),
+        "the owner's reply, as it arrived"
+    );
+
+    // S5: the archive's record, its bytes kept the same way.
+    eventually("the archive records it, confirmed", || async {
+        archive.confirmed(origin) == Some(true)
+    })
+    .await;
+    let last = zenkey_fleet::last_known_state(&tool, read(), &addr("ground/archive"))
+        .await
+        .expect("a last-known read");
+    assert_eq!(bytes_of(&last).as_deref(), Some(&body[..]), "{last:?}");
+
+    // The tombstone: a raw GET within the window reads the owner's
+    // `reply_del` as a delete, its kind kept, never a value.
+    writer.delete().await.expect("a delete");
+    let answers = loop {
+        let answers = zenkey_fleet::fleet_get(&tool, origin, &GetOpts::new(T))
+            .await
+            .expect("a GET");
+        if answers.iter().any(FleetAnswer::is_delete) {
+            break answers;
+        }
+        settle("the owner answers with its tombstone").await;
+    };
+    assert_eq!(answers.len(), 1, "one owner, one reply: {answers:?}");
+    let tombstone = &answers[0];
+    assert_eq!(tombstone.key, origin);
+    assert_eq!(tombstone.kind, Some(SampleKind::Delete));
+    assert!(tombstone.timestamp.is_some(), "the deletion's stamp (S2)");
+    let Answer::Value(payload) = &tombstone.answer else {
+        panic!("a delete is a sample, not an error reply: {tombstone:?}")
+    };
+    assert!(payload.is_empty(), "a delete carries nothing");
+
+    // S4 reads the same tombstone as a deletion, with no bytes beside it.
+    let deleted = zenkey_fleet::get_state(&tool, read())
+        .await
+        .expect("a state read");
+    assert!(
+        matches!(&deleted.rows[..], [row] if row.value == StateValue::Deleted && row.bytes.is_none()),
+        "{deleted:?}"
+    );
+    drop(writer);
 }

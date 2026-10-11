@@ -111,6 +111,8 @@ fn all_bound(r: &Resource, values: &Bindings) -> bool {
 /// The owner's current state (S4): a GET on its keys for the resource,
 /// target `All`, consolidation `Latest`, through the runtime's consumer.
 /// No reply within the timeout is no rows: silence, never "no value" (S6).
+/// A value row keeps the owner's reply bytes beside its rendering
+/// ([`StateRow::bytes`], #765).
 pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateReport> {
     get_state_answer(session, read).await.map(|(r, _)| r)
 }
@@ -168,6 +170,8 @@ pub async fn get_state_answer(
                 value: StateValue::Value {
                     payload: Box::new(payload(revision, &key, &sample, Member::Type)),
                 },
+                // The owner's reply as it arrived (#765): a refcount bump.
+                bytes: Some(sample.payload().clone()),
                 key,
                 confirmed: None,
                 identity: None,
@@ -175,6 +179,7 @@ pub async fn get_state_answer(
             zenkey::state::Current::Deleted { key, timestamp } => StateRow {
                 key,
                 value: StateValue::Deleted,
+                bytes: None,
                 timestamp: timestamp.as_ref().map(stamp),
                 confirmed: None,
                 identity: None,
@@ -312,26 +317,29 @@ async fn last_known_pattern(
 }
 
 /// One archive record as a state row: last-known, with whether alignment
-/// confirmed it and its type identity (§4.4).
+/// confirmed it, its type identity (§4.4), and the bytes it recorded
+/// (#765).
 fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateRow {
-    let value = match &lk.value {
+    let (value, bytes) = match lk.value {
         Some(bytes) => {
             let encoding = lk.encoding.as_ref().map(ToString::to_string);
-            StateValue::Value {
+            let value = StateValue::Value {
                 payload: Box::new(render_with(
                     revision,
                     &lk.origin,
                     Member::Type,
                     encoding.as_deref(),
-                    bytes,
+                    &bytes,
                 )),
-            }
+            };
+            (value, Some(zenoh::bytes::ZBytes::from(bytes)))
         }
-        None => StateValue::Deleted,
+        None => (StateValue::Deleted, None),
     };
     StateRow {
         key: lk.origin.clone(),
         value,
+        bytes,
         timestamp: lk.timestamp.as_ref().map(stamp),
         confirmed: Some(lk.confirmed),
         identity: Some(lk.identity),

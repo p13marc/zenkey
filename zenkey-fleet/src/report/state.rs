@@ -9,6 +9,10 @@
 //!
 //! [`Stamp`] is shared with `watch`'s samples: a time is shown with the id
 //! of the clock that issued it (§4.1), the owner's own under S1.
+//!
+//! A row keeps the reply's bytes beside its rendering (#765), and never
+//! serializes them: the shape is the rendering's, and a byte view (a hex
+//! dump, the sniff of bytes that did not decode) is a renderer's concern.
 
 use std::collections::BTreeMap;
 
@@ -66,6 +70,15 @@ pub struct StateRow {
     /// The value, or the key's deletion. Tagged `state`.
     #[serde(flatten)]
     pub value: StateValue,
+    /// The reply's payload as it arrived, refcounted, so a clone is a
+    /// refcount bump: the owner's sample (S4), or the bytes the archive
+    /// recorded (S5). `None` on a deletion, which carries none.
+    ///
+    /// Never serialized (#765): `get state --format json` and the pinned
+    /// shape are the rendering's. A byte view is a renderer's concern, not
+    /// this report's contract. Equality compares the bytes' content.
+    #[serde(skip)]
+    pub bytes: Option<zenoh::bytes::ZBytes>,
     /// The mutation's stamp; absent when the reply carried none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<Stamp>,
@@ -126,7 +139,9 @@ mod tests {
     }
 
     /// `reading` leads, so a script never mistakes an archive's answer for
-    /// the owner's; a deletion is a `state`, not an empty value.
+    /// the owner's; a deletion is a `state`, not an empty value. The bytes a
+    /// row keeps (#765) reach no serialized shape: the row below carries
+    /// them, and its JSON is the rendering's alone.
     #[test]
     fn state_report_json_shape_is_pinned() {
         let key = "zk2/host-a/tc/tc.netif.v1/state/namespaces";
@@ -148,6 +163,7 @@ mod tests {
                 value: StateValue::Value {
                     payload: Box::new(payload(key)),
                 },
+                bytes: Some(zenoh::bytes::ZBytes::from(&b"[]"[..])),
                 timestamp: Some(Stamp {
                     time: "2026-10-08T12:00:00.000000000Z".into(),
                     clock: "a1b2".into(),
@@ -171,9 +187,16 @@ mod tests {
             })
         );
 
+        assert_eq!(
+            r.rows[0].bytes.as_ref().map(|b| b.to_bytes().into_owned()),
+            Some(b"[]".to_vec()),
+            "kept beside the rendering, for a renderer to show"
+        );
+
         let current = StateRow {
             key: key.into(),
             value: StateValue::Deleted,
+            bytes: None,
             timestamp: None,
             confirmed: None,
             identity: None,

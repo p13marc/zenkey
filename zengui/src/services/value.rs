@@ -506,6 +506,7 @@ mod tests {
             encoding: Some("application/octet-stream".into()),
             attachment: None,
             timestamp: None,
+            kind: Some(zenoh::sample::SampleKind::Put),
             answer: zenkey_fleet::Answer::Value(zenoh::bytes::ZBytes::from(vec![1u8])),
         };
         let refused = zenkey_fleet::FleetAnswer {
@@ -513,6 +514,7 @@ mod tests {
             encoding: None,
             attachment: None,
             timestamp: None,
+            kind: None,
             answer: zenkey_fleet::Answer::Error {
                 name: "error/unavailable".into(),
                 message: String::new(),

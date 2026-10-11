@@ -59,7 +59,19 @@ pub struct FleetAnswer {
     /// passed, not necessarily the responder (RFC 09 §5.1 O7). `None` on an
     /// error reply, which is not a sample, and on a reply nothing stamped.
     pub timestamp: Option<zenoh::time::Timestamp>,
+    /// Whether the reply sample was a put or a delete (#765). A delete is a
+    /// tombstone: an owner's `reply_del` within its window (core §4, S3),
+    /// whose [`Answer::Value`] is the empty payload a delete carries, never
+    /// a value. `None` on an error reply, which is not a sample.
+    pub kind: Option<zenoh::sample::SampleKind>,
     pub answer: Answer,
+}
+
+impl FleetAnswer {
+    /// Whether this reply is a tombstone: a delete, never an empty put.
+    pub fn is_delete(&self) -> bool {
+        self.kind == Some(zenoh::sample::SampleKind::Delete)
+    }
 }
 
 /// What one GET may vary — everything RFC 05 §2.1 does **not** fix.
@@ -352,6 +364,7 @@ fn answer_of(reply: zenoh::query::Reply) -> FleetAnswer {
             encoding: Some(sample.encoding().to_string()),
             attachment: sample.attachment().cloned(),
             timestamp: sample.timestamp().copied(),
+            kind: Some(sample.kind()),
             answer: Answer::Value(sample.payload().clone()),
         },
         Err(err) => {
@@ -383,6 +396,7 @@ fn answer_of(reply: zenoh::query::Reply) -> FleetAnswer {
                 encoding: None,
                 attachment: None,
                 timestamp: None,
+                kind: None,
                 answer: Answer::Error { name, message },
             }
         }

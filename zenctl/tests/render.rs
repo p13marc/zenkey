@@ -2929,6 +2929,8 @@ mod actfx {
                         )
                     }),
                 },
+                // Kept beside the rendering, and drawn nowhere (#765).
+                bytes: Some(zenoh::bytes::ZBytes::from(&br#"{"is_up":true}"#[..])),
                 timestamp: Some(Stamp {
                     time: "2026-10-08T12:00:00.000000000Z".into(),
                     clock: "a1b2c3".into(),
@@ -2939,6 +2941,7 @@ mod actfx {
             StateRow {
                 key: gone.into(),
                 value: StateValue::Deleted,
+                bytes: None,
                 timestamp: None,
                 confirmed: last_known.then_some(true),
                 identity: None,
