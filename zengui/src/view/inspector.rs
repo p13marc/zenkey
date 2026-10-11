@@ -40,12 +40,10 @@
 use iced::widget::{Column, column, scrollable};
 use iced::{Element, Length};
 use zenkey_fleet::LatencyReport;
-use zenkey_fleet_v1::SliceSet;
-use zenkey_fleet_v1::model::facts::{KeyFacts, Registration};
 
 use crate::keyfacts::Resolution;
 
-use super::detail::{DetailData, Fetched, SeriesData};
+use super::detail::{DetailData, Fetched, LastKnown, SeriesData};
 use super::history::HistoryData;
 use super::{detail, history, kit, nodes};
 use crate::history::HistoryRecorder;
@@ -70,13 +68,17 @@ pub struct InspectorData<'a> {
     pub slot: SlotId,
     pub subject: &'a Subject,
     /// The key subject's zk2 identity (#614, FL7): the identity line the
-    /// Detail section renders.
+    /// Detail section renders, and the type section's one input (FL8a).
     pub identity: Option<&'a Resolution>,
-    /// The key subject's v1 facts, projected on demand
-    /// ([`crate::keyfacts::v1_facts`]): the registry's type vocabulary,
-    /// the type section's one input, until FL8 moves it.
-    pub v1: Option<KeyFacts>,
     pub fetched: Fetched<'a>,
+    /// Whether the panes show a replay (#614, FL8a): the value is the
+    /// capture's row, and nothing is asked of the bus.
+    pub replaying: bool,
+    /// The `archive.v1` providers presence shows (#614, FL8a); `None` =
+    /// presence not read.
+    pub archives: Option<Vec<zenkey_model::grammar::Addr>>,
+    /// An archive's last-known answer for the slot, when one was asked.
+    pub last_known: Option<&'a LastKnown>,
     pub decoded: Option<&'a crate::value::DecodedValue>,
     pub series: Option<&'a SeriesData>,
     pub history: Option<&'a HistoryRecorder>,
@@ -91,7 +93,6 @@ pub struct InspectorData<'a> {
     /// Whether that comparison is showing, on this slot.
     pub compare_snapshot: bool,
     pub latency: Option<(LatencyReport, u64)>,
-    pub slices: Option<&'a SliceSet>,
     /// The presence link's last landing (#614, FL9): an address subject's
     /// status, since when, and its instances. `None` = not read (O4).
     pub presence: Option<&'a PresenceUpdate>,
@@ -168,11 +169,14 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         history_entries: d.history.map(|r| r.ring.len()),
         observed: d.history.and_then(|r| r.ring.newest()),
         latency: d.latency.clone(),
+        replaying: d.replaying,
+        archives: d.archives.clone(),
+        last_known: d.last_known,
         sp: d.sp,
     });
 
-    // The declared type's place in the registry vocabulary (#234) — the
-    // type-subject arm the engine's interface projections answer.
+    // The declared type and its place in the revision (#234; zk2's since
+    // #614, FL8a) — the type-subject arm the contract answers.
     if let Some(section) = type_section(d) {
         col = col.push(section);
     }
@@ -216,50 +220,77 @@ fn address_sections<'a>(
     ]
 }
 
-/// The subject's payload type against the registry's type vocabulary (#234):
-/// [`SliceSet::interface_list`] for where it sits in the vocabulary,
-/// [`SliceSet::interface_show`] for every declaration that carries it — the
-/// engine's projections, consumed rather than re-derived from the slices.
+/// The key's declared type (#234; zk2's since #614, FL8a): the type its
+/// resource names, as the contract defines it — kind, name and the artifact
+/// it lives in ([`zenkey_fleet::type_view`]) — its attachment's when it
+/// declares one, and the members of the revision that carry the same type,
+/// from the revision's own schema view rather than a scan of the pane's.
 fn type_section<'a>(d: &InspectorData<'a>) -> Option<Column<'a, Message>> {
-    let slices = d.slices?;
-    let Registration::Registered(subject) = &d.v1.as_ref()?.registration else {
-        return None;
+    use zenkey_model::contract::Body;
+
+    let resolved = d.identity?.resolved.as_ref()?;
+    let (ty, attachment) = match &resolved.resource().body {
+        Body::Data(data) => (
+            zenkey_fleet::type_view(&data.type_),
+            data.attachment.as_ref().map(zenkey_fleet::type_view),
+        ),
+        Body::Operation(op) => (zenkey_fleet::type_view(&op.response), None),
     };
-    let type_name = subject.type_name.as_str();
     let mut col = column![kit::section_header("Type", None)].spacing(d.sp.xs);
-    let vocabulary = slices.interface_list();
-    let carriers = vocabulary
-        .types
-        .iter()
-        .find(|t| t.name == type_name)
-        .map(|t| t.carriers)
-        .unwrap_or(0);
-    col = col.push(kit::muted(format!(
-        "{type_name} — one of {} declared payload type(s), carried by \
-         {carriers} declaration(s)",
-        vocabulary.types.len(),
-    )));
-    match slices.interface_show(type_name) {
-        Ok(show) => {
-            // Bounded: TelemetryPoint alone has a three-digit carrier list,
-            // and the bound is disclosed rather than silent (O6).
+    col = col.push(kit::fields(vec![
+        kit::field("TYPE", kit::mono(ty.name.clone())),
+        kit::field("KIND", kit::mono(ty.kind.clone())),
+        kit::field(
+            "SCHEMA",
+            kit::mono(match &ty.schema {
+                Some(id) => short_id(id),
+                // A raw type names no artifact: its bytes are not a tool's
+                // to read (§7.1).
+                None => "— (a raw type names no artifact)".to_string(),
+            }),
+        ),
+    ]));
+    if let Some(att) = attachment {
+        col = col.push(kit::muted(format!("attachment: {} {}", att.kind, att.name)));
+    }
+    match resolved.revision.schema_view(None, false) {
+        Ok(view) => {
+            // Bounded, and the bound disclosed rather than silent (O6).
             const CARRIER_ROWS: usize = 12;
-            for c in show.carriers.iter().take(CARRIER_ROWS) {
-                col = col.push(kit::mono(format!(
-                    "{} · {} {}",
-                    c.producer, c.class, c.path
-                )));
+            let carriers: Vec<_> = view
+                .members
+                .iter()
+                .filter(|m| m.type_.name == ty.name)
+                .collect();
+            col = col.push(kit::muted(format!(
+                "{} — carried by {} of {}'s {}",
+                ty.name,
+                kit::plural(carriers.len(), "member"),
+                resolved.iface,
+                kit::plural(view.members.len(), "member"),
+            )));
+            for c in carriers.iter().take(CARRIER_ROWS) {
+                col = col.push(kit::mono(format!("{} · {}", c.resource, c.member)));
             }
-            if show.carriers.len() > CARRIER_ROWS {
+            if carriers.len() > CARRIER_ROWS {
                 col = col.push(kit::muted(format!(
-                    "+{} more carrier(s) not shown (display bound)",
-                    show.carriers.len() - CARRIER_ROWS
+                    "+{} more not shown (display bound)",
+                    carriers.len() - CARRIER_ROWS
                 )));
             }
         }
-        // Unreachable while the type came off a Registered rung of the same
-        // slices, but a projection that errors is rendered, not swallowed.
-        Err(e) => col = col.push(kit::muted(e.to_string())),
+        // Unreachable for the revision the key resolved through, but a
+        // projection that errors is rendered, not swallowed.
+        Err(e) => col = col.push(kit::muted(e)),
     }
     Some(col)
+}
+
+/// `sha256:` and sixteen hex digits — the engine's own short form.
+fn short_id(id: &str) -> String {
+    let hex = id.strip_prefix("sha256:").unwrap_or(id);
+    match hex.get(..16) {
+        Some(head) if hex.len() > 16 => format!("sha256:{head}…"),
+        _ => id.to_owned(),
+    }
 }

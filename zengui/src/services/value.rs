@@ -1,30 +1,264 @@
-//! One key's value: fetching it (v1 until FL8a), and checking what came back
-//! through the lens (#175; zk2's lens since #614, FL6a).
+//! One key's value: reading it by resolution (#614, FL8a), and checking
+//! what came back through the lens (#175; zk2's lens since #614, FL6a).
+//!
+//! Lazy value-on-demand: one read per selection, nothing ambient (issue
+//! #85), and which read is [`crate::value::plan`]'s — decided from the key's
+//! identity before a session is touched. Every function here is a task; the
+//! caller has already refused what the plan refuses (a symbolic skeleton
+//! path, anything under `@op`, a zk2 key the lens stopped short of).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use iced::Task;
 
 use crate::message::{Message, PaneMsg, SubjectMsg};
 use crate::services::ServiceError;
+use crate::value::{ReadKind, Replies, Reply, Retention, StateAnswer, ValueRead};
 
-/// Fetch the selected key's current value.
-///
-/// Lazy value-on-demand: one GET per selection, nothing ambient (issue #85).
-/// The caller refuses symbolic skeleton paths before reaching here — a `{var}`
-/// position names no concrete key, so asking would be a query nobody made.
-pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
+/// Land a read on the subject, keyed by the key the selection asked for.
+fn landed(key: String, out: Result<ValueRead, ServiceError>) -> Message {
+    Message::Subject(SubjectMsg::ValueFetched(key, out.map(Arc::new)))
+}
+
+/// S4's owner GET of one resolved state key (§4.2): target `All`,
+/// consolidation `Latest`, on the session **in** the namespace, through the
+/// runtime's consumer (`zenkey_fleet::get_state`). The answer's row is
+/// checked against the revision the key resolved through, and its stamp
+/// attributed to the owner's clock or another (O7). No row is silence —
+/// never "no value" (S6).
+pub fn owner_get(
+    session: zenoh::Session,
+    lens: LensInputs,
+    key: String,
+    resolution: zenkey_fleet::Resolution,
+    timeout: Duration,
+) -> Task<Message> {
     Task::perform(
         async move {
-            let out =
-                zenkey_fleet_v1::fetch_value(&session, &key, zenkey_fleet_v1::FetchSpec::default())
-                    .await
-                    .map(Arc::new)
-                    .map_err(ServiceError::of);
+            let out = state_read(&session, &lens, &resolution, timeout, None).await;
+            (key, out.map(ValueRead::Owner))
+        },
+        |(key, out)| landed(key, out),
+    )
+}
+
+/// An archive's last-known state of one resolved state key (§4.4, S5):
+/// asked only by the Detail section's explicit button, and landed beside the
+/// owner's answer, never in its place — an archive's answer is never shown
+/// as current (S6).
+pub fn last_known(
+    slot: crate::message::SlotId,
+    session: zenoh::Session,
+    lens: LensInputs,
+    key: String,
+    resolution: zenkey_fleet::Resolution,
+    archive: zenkey_model::grammar::Addr,
+    timeout: Duration,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let out = state_read(&session, &lens, &resolution, timeout, Some(&archive)).await;
+            (key, archive, out.map(Arc::new))
+        },
+        move |(key, archive, out)| {
+            Message::Pane(PaneMsg::Detail(
+                slot,
+                crate::view::detail::DetailMsg::LastKnownRead(key, archive, out),
+            ))
+        },
+    )
+}
+
+/// One state read of `resolution`'s member: the owner's (S4) when
+/// `archive` is `None`, that archive's last-known (S5) otherwise.
+async fn state_read(
+    session: &zenoh::Session,
+    lens: &LensInputs,
+    resolution: &zenkey_fleet::Resolution,
+    timeout: Duration,
+    archive: Option<&zenkey_model::grammar::Addr>,
+) -> Result<StateAnswer, ServiceError> {
+    let Some(resolved) = &resolution.resolved else {
+        return Err(ServiceError::msg(
+            "the key resolved short of its resource — a state read needs its revision",
+        ));
+    };
+    let read = zenkey_fleet::StateRead::from_resolved(resolved, timeout);
+    let report = match archive {
+        None => zenkey_fleet::get_state(session, read).await,
+        Some(archive) => zenkey_fleet::last_known_state(session, read, archive).await,
+    }
+    .map_err(ServiceError::of)?;
+    let owner = resolved.address.to_string();
+    let over = lens.lens();
+    Ok(StateAnswer::new(report, resolution, |clock| {
+        over.provenance(Some(&owner), clock)
+    }))
+}
+
+/// The owner's advanced-publisher history of a stream declaring `history`
+/// (§2.5): its `@adv` cache, under the key, on the session in no namespace.
+/// Replies arrive on the sample's own key, outside the `@adv`-suffixed
+/// selector, so they are accepted from anywhere.
+pub fn history(
+    raw: zenoh::Session,
+    lens: LensInputs,
+    key: String,
+    timeout: Duration,
+) -> Task<Message> {
+    let selector = format!("{key}/@adv/**");
+    let opts = zenkey_fleet::GetOpts::new(timeout).accept_any();
+    replies_task(raw, lens, key, selector, opts, ReadKind::History, None)
+}
+
+/// A foreign key's raw GET (RFC 05 §2.1): target `All`, consolidation
+/// `None`, every reply attributed by its own key — labelled raw, because no
+/// contract says who answers it.
+pub fn raw_get(
+    raw: zenoh::Session,
+    lens: LensInputs,
+    key: String,
+    timeout: Duration,
+) -> Task<Message> {
+    let opts = zenkey_fleet::GetOpts::new(timeout);
+    replies_task(raw, lens, key.clone(), key, opts, ReadKind::Raw, None)
+}
+
+/// An event member's occurrences, replayed on request (§2.6): a wildcard GET
+/// over the member's occurrence keys, bounded by the retention — asked of a
+/// time-series backend with `_time`, and filtered here as well, because a
+/// union storage prunes nothing by retention and the memory backend ignores
+/// `_time`.
+pub fn events(
+    raw: zenoh::Session,
+    lens: LensInputs,
+    key: String,
+    retention_s: u64,
+    timeout: Duration,
+) -> Task<Message> {
+    let member = key.rsplit_once('/').map_or(key.as_str(), |(m, _)| m);
+    let selector = format!("{member}/*?_time=[now(-{retention_s}s)..]");
+    let opts = zenkey_fleet::GetOpts::new(timeout);
+    replies_task(
+        raw,
+        lens,
+        key,
+        selector,
+        opts,
+        ReadKind::Events,
+        Some(retention_s),
+    )
+}
+
+/// The GET behind [`history`], [`raw_get`] and [`events`]: every reply
+/// through `fleet_get`, the chokepoint of RFC 05 §2.1, then sorted newest
+/// first and each stamp attributed (O7).
+fn replies_task(
+    raw: zenoh::Session,
+    lens: LensInputs,
+    key: String,
+    selector: String,
+    opts: zenkey_fleet::GetOpts,
+    kind: ReadKind,
+    retention_s: Option<u64>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let out = zenkey_fleet::fleet_get(&raw, &selector, &opts)
+                .await
+                .map_err(ServiceError::of)
+                .map(|answers| {
+                    let elided = opts.elided();
+                    ValueRead::Replies(replies(
+                        &lens,
+                        kind,
+                        selector,
+                        answers,
+                        elided,
+                        retention_s,
+                        std::time::SystemTime::now(),
+                    ))
+                });
             (key, out)
         },
-        |(key, out)| Message::Subject(SubjectMsg::ValueFetched(key, out)),
+        |(key, out)| landed(key, out),
     )
+}
+
+/// `answers` as the panes read them: the value replies newest first by
+/// stamp (the unstamped after them, in arrival order), each stamp attributed
+/// through the lens; error replies counted apart; an event replay's
+/// occurrences older than its retention filtered out and counted.
+pub(crate) fn replies(
+    lens: &LensInputs,
+    kind: ReadKind,
+    selector: String,
+    mut answers: Vec<zenkey_fleet::FleetAnswer>,
+    elided: u64,
+    retention_s: Option<u64>,
+    now: std::time::SystemTime,
+) -> Replies {
+    // Newest first; `None` sorts last and the sort is stable, so the
+    // unstamped keep their arrival order behind the stamped.
+    answers.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
+        (Some(a), Some(b)) => b.cmp(a),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    let over = lens.lens();
+    let horizon = retention_s.and_then(|s| now.checked_sub(Duration::from_secs(s)));
+    let mut errors = 0;
+    let mut older = 0;
+    let mut out = Vec::new();
+    for a in answers {
+        let zenkey_fleet::Answer::Value(payload) = a.answer else {
+            errors += 1;
+            continue;
+        };
+        if let Some(horizon) = horizon {
+            let at = crate::value::occurrence_time(&a.key)
+                .or_else(|| a.timestamp.map(|t| t.get_time().to_system_time()));
+            if at.is_some_and(|at| at < horizon) {
+                older += 1;
+                continue;
+            }
+        }
+        let stamp = a.timestamp.as_ref().map(zenkey_fleet::stamp);
+        let address = owner_of(&over, &a.key);
+        let provenance = stamp
+            .as_ref()
+            .map(|s| over.provenance(address.as_deref(), &s.clock));
+        out.push(Reply {
+            key: a.key,
+            payload,
+            encoding: a.encoding.unwrap_or_default(),
+            attachment: a.attachment,
+            delete: false,
+            stamp,
+            provenance,
+        });
+    }
+    Replies {
+        kind,
+        selector,
+        replies: out,
+        errors,
+        elided,
+        retention: retention_s.map(|seconds| Retention { seconds, older }),
+    }
+}
+
+/// The address a wire key names, when it names one: whose clock the owner's
+/// is (O7). A foreign key names none, and its stamps are unattributable.
+fn owner_of(lens: &zenkey_fleet::Lens<'_>, wire: &str) -> Option<String> {
+    use zenkey_fleet::report::KeyGroup;
+    match lens.identity(wire).group {
+        KeyGroup::Resource { address, .. } => Some(address),
+        KeyGroup::Control { address, .. } => address,
+        KeyGroup::NotInNamespace | KeyGroup::NotZk2 => None,
+    }
 }
 
 /// What a lens is built from, owned (#614, FL6a), so a task can build one
@@ -90,6 +324,16 @@ pub struct Decode {
 }
 
 pub fn decode(d: Decode) -> Task<Message> {
+    decode_then(d, |k, v| Message::Subject(SubjectMsg::ValueDecoded(k, v)))
+}
+
+/// [`decode`], landing wherever `land` says: a replay's recorded row is
+/// checked through its own offline lens and lands keyed by the replay
+/// (#614, FL8a), so neither world's check lands in the other.
+pub fn decode_then(
+    d: Decode,
+    land: impl FnOnce(String, Arc<crate::value::DecodedValue>) -> Message + Send + 'static,
+) -> Task<Message> {
     Task::perform(
         async move {
             let Decode {
@@ -114,7 +358,7 @@ pub fn decode(d: Decode) -> Task<Message> {
                 Arc::new(crate::value::DecodedValue::new(checked, &bytes)),
             )
         },
-        |(k, d)| Message::Subject(SubjectMsg::ValueDecoded(k, d)),
+        move |(k, d)| land(k, d),
     )
 }
 
@@ -227,4 +471,67 @@ pub fn why(
         // The asking slot's id rides the landing (#257).
         move |out| Message::Pane(PaneMsg::Why(slot, crate::view::why::WhyMsg::Done(out))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An event replay's answers as the panes read them (#614, FL8a; §2.6):
+    /// an occurrence older than the retention filtered out here and counted
+    /// — a union storage prunes nothing by retention — and an error reply
+    /// counted apart from the values.
+    #[test]
+    fn an_event_replay_is_bounded_by_its_retention_here() {
+        let set = Arc::new(crate::value::tests::probe());
+        let lens = LensInputs {
+            namespace: String::new(),
+            catalog: None,
+            store: zenkey_fleet::BundleStore::new(Duration::from_secs(1)),
+            contracts: Some(set),
+            generation: 0,
+            feed: None,
+        };
+        let now = std::time::SystemTime::now();
+        let day = Duration::from_secs(86_400);
+        let occurrence = |age: Duration| zenkey_fleet::FleetAnswer {
+            key: format!(
+                "zk2/lab/probe/probe.v1/events/alarm/{}",
+                zenkey::writer::ulid(now - age)
+            ),
+            encoding: Some("application/octet-stream".into()),
+            attachment: None,
+            timestamp: None,
+            answer: zenkey_fleet::Answer::Value(zenoh::bytes::ZBytes::from(vec![1u8])),
+        };
+        let refused = zenkey_fleet::FleetAnswer {
+            key: String::new(),
+            encoding: None,
+            attachment: None,
+            timestamp: None,
+            answer: zenkey_fleet::Answer::Error {
+                name: "error/unavailable".into(),
+                message: String::new(),
+            },
+        };
+        let got = replies(
+            &lens,
+            ReadKind::Events,
+            "zk2/lab/probe/probe.v1/events/alarm/*".into(),
+            vec![occurrence(day), occurrence(3 * day), refused],
+            0,
+            Some(2 * 86_400),
+            now,
+        );
+        assert_eq!(got.replies.len(), 1, "the occurrence within 2d");
+        assert_eq!(
+            got.retention,
+            Some(Retention {
+                seconds: 2 * 86_400,
+                older: 1
+            })
+        );
+        assert_eq!(got.errors, 1, "a refusal is counted, not a value");
+        assert!(got.replies[0].provenance.is_none(), "unstamped: no clock");
+    }
 }

@@ -56,7 +56,7 @@ pub(crate) fn update(
         // A message for a dropped slot lands nowhere: its window is gone,
         // and with it the only surface that could display the result.
         PaneMsg::Detail(id, msg) => match sub.slot_mut(id) {
-            Some(slot) => detail::update(slot, dep, msg),
+            Some(slot) => detail::update(slot, dep, work.replay.replay.is_some(), msg),
             None => Task::none(),
         },
         PaneMsg::History(id, msg) => match sub.slot_mut(id) {

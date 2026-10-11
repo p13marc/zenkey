@@ -27,7 +27,6 @@
 use std::sync::Arc;
 
 use zenkey_fleet::{KeyTreeSnapshot, Monitor, SampleView, WatchId};
-use zenkey_fleet_v1::FetchOutcome;
 
 use crate::scope::ScopePreset;
 
@@ -251,7 +250,7 @@ pub enum DeploymentMsg {
 /// ## Why `Prefix` is separate from `Key`, which the issue did not have
 ///
 /// A prefix is not a key. `Key` heads a causal chain that ends in a
-/// `fetch_value` GET; routing "show this address in the tree" through it would
+/// value read (#614, FL8a); routing "show this address in the tree" through it would
 /// query something no owner publishes — an unasked-for bus query, which is
 /// what #85's laziness rule forbids. The distinction is load-bearing, and the
 /// type is where it belongs.
@@ -322,16 +321,24 @@ pub enum SubjectMsg {
     WatchStarted(String, Result<WatchId, crate::services::ServiceError>),
     /// A watch was released for the given display path.
     WatchReleased(String, Result<(), crate::services::ServiceError>),
-    /// A value arrived for the selected key ([`zenkey_fleet_v1::fetch_value`]).
+    /// A read of the selected key's value landed (#614, FL8a): the key the
+    /// selection asked for, and the zk2 read — S4's owner GET, the owner's
+    /// `@adv` history, an event replay, a raw GET, or during a replay the
+    /// recorded row ([`crate::value::ValueRead`]).
     ValueFetched(
         String,
-        Result<Arc<FetchOutcome>, crate::services::ServiceError>,
+        Result<Arc<crate::value::ValueRead>, crate::services::ServiceError>,
     ),
     /// The fetched value's check through the lens finished (#614, FL6a):
     /// (key, the whole check — identity, rendering and the conformance, one
     /// of four poles, #164 — with the document text rendered from it in the
     /// same task rather than on every redraw, #345).
     ValueDecoded(String, Arc<crate::value::DecodedValue>),
+    /// A replay's recorded row for a key, checked through that replay's
+    /// offline lens (#614, FL8a): the replay it was checked for (its id),
+    /// the key, and the check. Taken only while that replay runs — a live
+    /// check never lands in a replay's panes, nor a replay's in live ones.
+    RecordedDecoded(u64, String, Arc<crate::value::DecodedValue>),
     /// Point the whole workspace at something (#181).
     ///
     /// One message where there were three — `SelectKey`, `SelectPath` and the
@@ -784,7 +791,7 @@ mod tests {
     /// The #85 rule, as a property of the type rather than of a comment.
     ///
     /// `key()` is what the fetch, the history recorder and the latency lookup
-    /// all go through. A prefix answering it would put a `fetch_value` GET on
+    /// all go through. A prefix answering it would put a value read on
     /// the wire against something no producer publishes — the exact bug the
     /// `SelectKey`/`SelectPath` split existed to prevent, now unrepresentable
     /// rather than merely avoided at each call site.

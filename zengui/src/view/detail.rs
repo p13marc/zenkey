@@ -6,11 +6,15 @@
 //! - **Identity** — where zk2's O2 ladder got for the key (#614, FL7): the
 //!   address, interface, kind and resource it resolved to, or the rung it
 //!   stopped at and why (fields absent are absent, never defaulted);
-//! - **Value** — the on-demand fetch (which rung answered), rendered **hex
-//!   beside decoded**: the decoded side is contract-decoded named fields when
-//!   the lens resolves the key (#614, FL6a), and the honest ladder otherwise — tagged with *how*
-//!   it was produced, because schema-decoded and sniffed must never look
-//!   alike.
+//! - **Value** — the read the key's identity asks (#614, FL8a): S4's owner
+//!   GET for state, an archive's last-known behind its own button and never
+//!   as current, the owner's `@adv` history for a stream declaring one, an
+//!   event replay on request, a raw GET for a foreign key — and during a
+//!   replay the capture's own row, the bus asked nothing. Rendered **hex
+//!   beside decoded** where the read kept bytes: the decoded side is
+//!   contract-decoded named fields when the lens resolves the key (#614,
+//!   FL6a), and the honest ladder otherwise — tagged with *how* it was
+//!   produced, because schema-decoded and sniffed must never look alike.
 //! - **Series** (issue #64) — sparklines for a numeric leaf and for the
 //!   observed rate, drawn from the same history the timeline reads, with gaps
 //!   drawn as gaps. Absent entirely when there is nothing numeric to plot: an
@@ -20,12 +24,14 @@
 use iced::widget::{Column, row};
 use iced::{Element, Length};
 
-use zenkey_fleet_v1::FetchOutcome;
+use zenkey_fleet::report::{Provenance, QosAxes, Stamp, StateValue};
 
 use crate::keyfacts::{KeyGroup, Resolution, Rung, Unresolved};
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::{NumericLeaves, Series};
-use crate::value::DecodedValue;
+use crate::value::{
+    DecodedValue, NotRead, ReadKind, ReadPlan, Replies, Reply, StateAnswer, ValueRead,
+};
 use crate::view::kit;
 use crate::view::spark;
 use crate::view::theme::{IdentityTone, SeriesTone};
@@ -89,25 +95,59 @@ fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
     kit::inset(col).width(Length::FillPortion(1)).into()
 }
 
-/// Which rung of the fetch ladder answered, as a word (#563) — never the
-/// enum's `Debug` name. The ladder's own spelling: storage → cache → window.
-pub(crate) fn source_word(source: zenkey_fleet_v1::ValueSource) -> &'static str {
-    match source {
-        zenkey_fleet_v1::ValueSource::Storage => "storage",
-        zenkey_fleet_v1::ValueSource::Cache => "@adv cache",
-        zenkey_fleet_v1::ValueSource::Window => "live window",
+/// One read, named for the status strip (#614, FL8a): which question was
+/// asked, and the answer's shape in a few words — "owner GET (S4)",
+/// "silent", "raw GET". Never the enum's `Debug` name (#563).
+pub(crate) fn read_summary(read: &ValueRead) -> String {
+    match read {
+        ValueRead::Owner(answer) => match answer.row().map(|r| &r.value) {
+            None => format!(
+                "silent — owner GET (S4) unanswered in {}s (not a verdict)",
+                answer.report.timeout_s
+            ),
+            Some(StateValue::Deleted) => "owner GET (S4): deleted".to_string(),
+            Some(StateValue::Value { payload }) => {
+                format!("{} bytes via owner GET (S4)", payload.size)
+            }
+        },
+        ValueRead::Replies(r) => match r.replies.first() {
+            None => format!("no reply to the {} (not a verdict)", r.kind.word()),
+            Some(reply) => format!("{} bytes via {}", reply.payload.len(), r.kind.word()),
+        },
+        ValueRead::Recorded { reply, t_us, .. } => format!(
+            "{} bytes, the recorded row at {:.3}s — nothing asked of the bus",
+            reply.payload.len(),
+            *t_us as f64 / 1e6
+        ),
     }
 }
 
+/// An archive's last-known answer, named for the status strip and the pane
+/// alike (#614, FL8a): it says whose, and that it is not current (S6).
+pub(crate) fn last_known_label(archive: &zenkey_model::grammar::Addr) -> String {
+    format!("last-known from {archive} — not current")
+}
+
 /// Messages the pane emits.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum DetailMsg {
     /// A numeric leaf was picked for the value sparkline.
     LeafSelected(String),
+    /// Ask this archive for the key's last-known state (S5) — the explicit
+    /// act a last-known read needs (#614, FL8a).
+    LastKnown(zenkey_model::grammar::Addr),
+    /// An archive's last-known answer landed: (key, archive, the answer).
+    LastKnownRead(
+        String,
+        zenkey_model::grammar::Addr,
+        Result<std::sync::Arc<StateAnswer>, crate::services::ServiceError>,
+    ),
+    /// Replay the event member's occurrences within its retention (§2.6):
+    /// an event is read on request, never on selection.
+    ReplayEvents,
 }
 
-/// What the app hands the pane.
-/// What the pane knows about the fetch for the key it is showing (#181).
+/// What the pane knows about the read for the key it is showing (#181).
 ///
 /// Three states, and the third is why this is an enum. An `Option` made
 /// "superseded" indistinguishable from "not asked", so a fetch that landed for
@@ -119,11 +159,14 @@ pub enum Fetched<'a> {
     /// No fetch has landed for anything.
     #[default]
     NotAsked,
+    /// A read is in flight for this key, and which question it asked
+    /// (#614, FL8a): "asking", never "not asked".
+    Asking(ReadKind),
     /// A fetch landed, but for a different subject. The answer is real; it is
     /// just not about what is on screen.
     Superseded,
     /// The answer to the question this pane is showing.
-    Landed(&'a Result<std::sync::Arc<FetchOutcome>, crate::services::ServiceError>),
+    Landed(&'a Result<std::sync::Arc<ValueRead>, crate::services::ServiceError>),
 }
 
 pub struct DetailData<'a> {
@@ -155,8 +198,27 @@ pub struct DetailData<'a> {
     /// refreshed per bus tick (#119). Absent = nothing stamped, which is
     /// not zero latency.
     pub latency: Option<(zenkey_fleet::LatencyReport, u64)>,
+    /// Whether the panes show a replay (#614, FL8a): the bus is asked
+    /// nothing, and the value is the capture's row.
+    pub replaying: bool,
+    /// The `archive.v1` providers presence shows (#614, FL8a): who may be
+    /// asked for last-known state. `None` = presence not read — no archive
+    /// is known, which is not "none exists".
+    pub archives: Option<Vec<zenkey_model::grammar::Addr>>,
+    /// An archive's last-known answer for this slot, when one was asked.
+    pub last_known: Option<&'a LastKnown>,
     /// The dock's resolved spacing grid (#192).
     pub sp: Spacing,
+}
+
+/// An archive's last-known state of one key (S5), asked by the Detail
+/// section's button (#614, FL8a): which archive, and its answer — `None`
+/// while the read is in flight.
+#[derive(Debug, Clone)]
+pub struct LastKnown {
+    pub key: String,
+    pub archive: zenkey_model::grammar::Addr,
+    pub answer: Option<Result<std::sync::Arc<StateAnswer>, crate::services::ServiceError>>,
 }
 
 /// Microseconds humanised with the sign kept — a negative latency is the
@@ -188,47 +250,64 @@ pub fn qos_token(entry: &crate::history::HistoryEntry) -> String {
     )
 }
 
-/// Declared-vs-observed (#120): the comparison nobody else in the field can
-/// render, because nobody else holds a registry that declares QoS.
-/// `None` = the declared name is not a profile, so there is nothing to
-/// judge (O4).
-pub fn qos_verdict(
-    declared: &zenkey_v1::Declared<zenkey_v1::QosProfile>,
-    entry: &crate::history::HistoryEntry,
-) -> Option<bool> {
-    // The slice recognised the token on parse; a profile this build cannot
-    // name is one it cannot judge against, which is `None` — not a mismatch.
-    let profile = *declared.known()?;
-    Some(
-        entry.priority == profile.priority()
-            && entry.congestion_control == profile.congestion_control()
-            && entry.reliability == profile.reliability()
-            && entry.express == profile.express(),
+/// The QoS a key's resource declares (§2.4), read off its identity (#614,
+/// FL8a) — `Lens::declared_qos`'s answer from the resolution the identity
+/// cache already holds, so the pane resolves nothing on a frame. `Err` is
+/// why nothing declares one, in words.
+pub fn declared_qos(identity: Option<&Resolution>) -> Result<QosAxes, String> {
+    let Some(r) = identity else {
+        return Err(
+            "no identity yet — the declared QoS is the contract's, read once \
+                    the key resolves"
+                .to_string(),
+        );
+    };
+    match (&r.resolved, &r.identity.unresolved) {
+        (Some(resolved), _) => zenkey_fleet::declared_qos(resolved.resource()).ok_or_else(|| {
+            "an operation declares no QoS — its replies ride the caller's".to_string()
+        }),
+        (None, Some(why)) => Err(format!("nothing declares it — {}", why.words())),
+        (None, None) => Err("a control key — no contract types it, so nothing declares \
+                             its QoS"
+            .to_string()),
+    }
+}
+
+/// The contract's spelling of three axes: `data/block`, `+express` when set.
+pub fn axes_token(axes: &QosAxes) -> String {
+    format!(
+        "{}/{}{}",
+        axes.priority,
+        axes.congestion,
+        if axes.express { "+express" } else { "" }
     )
 }
 
-/// The declared-vs-observed QoS lines, when there is anything to say.
+/// The axes an observed sample rode, in the contract's spelling (§2.4) —
+/// what [`zenkey_fleet::qos_mismatch`] compares against the declaration.
+pub fn observed_axes(entry: &crate::history::HistoryEntry) -> QosAxes {
+    zenkey_fleet::observed_qos(entry.priority, entry.congestion_control, entry.express)
+}
+
+/// The declared-vs-observed QoS lines (#120; zk2's since #614, FL8a), when
+/// there is anything to say: the resource's declared axes (§2.4) against
+/// the axes the newest observed sample rode, compared by
+/// [`zenkey_fleet::qos_mismatch`] and named axis by axis.
 fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
-    // Nothing declares a v1 profile since the registry went (#614, FL6a);
-    // FL8a reads the declared axes off the lens (`Lens::declared_qos`).
-    let declared: Option<zenkey_v1::Declared<zenkey_v1::QosProfile>> = None;
     let observed = data.observed;
-    if declared.is_none() && observed.is_none() {
+    if data.identity.is_none() && observed.is_none() {
         return None;
     }
+    let declared = declared_qos(data.identity);
     // Fields since #563: the claim, the fact and where the fact came from,
     // each under its eyebrow — "—" where there is none, said beneath.
     let sp = data.sp;
     let mut col = Column::new().spacing(sp.xs);
-    col = col.push(kit::eyebrow("QOS — DECLARED VS OBSERVED (RFC 04 §3)"));
+    col = col.push(kit::eyebrow("QOS — DECLARED VS OBSERVED (§2.4)"));
     let mono = |s: String| kit::caption(s).font(face::MONO);
     let mut fields = vec![kit::field(
         "DECLARED",
-        mono(
-            declared
-                .as_ref()
-                .map_or("—".to_string(), ToString::to_string),
-        ),
+        mono(declared.as_ref().map_or("—".to_string(), axes_token)),
     )];
     match observed {
         // A replayed row that recorded no axes (#614, FL10b): its view's
@@ -251,8 +330,8 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
         None => fields.push(kit::field("OBSERVED", mono("—".to_string()))),
     }
     col = col.push(kit::fields(fields));
-    if declared.is_none() {
-        col = col.push(kit::muted("the registry names no profile for this key"));
+    if let Err(why) = &declared {
+        col = col.push(kit::muted(why.clone()));
     }
     match observed {
         // Nothing observed to judge: said, and no verdict drawn.
@@ -262,24 +341,48 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
                  v1 profile, which zk2 does not read",
             ));
         }
-        // The verdict, a badge whose glyph comes from its tone (#193) where
-        // a hand-typed ⚠ stood.
-        Some(entry) => match declared.as_ref().and_then(|d| qos_verdict(d, entry)) {
-            Some(true) => {
-                col = col.push(kit::badge_verdict(
-                    crate::view::theme::VerdictTone::Valid,
-                    "observed axes match the declared profile",
-                ))
-            }
-            Some(false) => {
-                col = col.push(kit::badge_severity(
-                    crate::view::theme::SeverityTone::Warning,
-                    "observed axes differ from the declared profile — the wire is the \
-                     fact, the registry is the claim (RFC 04 §3)",
+        // The verdict, a badge whose glyph comes from its tone (#193): three
+        // axes compared, each that differs named with both sides.
+        Some(entry) => {
+            if let Ok(declared) = &declared {
+                match zenkey_fleet::qos_mismatch(declared, &observed_axes(entry)) {
+                    None => {
+                        col = col.push(kit::badge_verdict(
+                            crate::view::theme::VerdictTone::Valid,
+                            "observed axes match the declared QoS",
+                        ));
+                    }
+                    Some(mismatch) => {
+                        col = col.push(kit::badge_severity(
+                            crate::view::theme::SeverityTone::Warning,
+                            "observed axes differ from the declared QoS — the wire is the \
+                             fact, the contract the claim (§2.4)",
+                        ));
+                        for axis in &mismatch.differs {
+                            let (d, o) = match axis.as_str() {
+                                "priority" => (
+                                    mismatch.declared.priority.clone(),
+                                    mismatch.observed.priority.clone(),
+                                ),
+                                "congestion" => (
+                                    mismatch.declared.congestion.clone(),
+                                    mismatch.observed.congestion.clone(),
+                                ),
+                                _ => (
+                                    mismatch.declared.express.to_string(),
+                                    mismatch.observed.express.to_string(),
+                                ),
+                            };
+                            col =
+                                col.push(kit::muted(format!("{axis}: declared {d}, observed {o}")));
+                        }
+                    }
+                }
+                col = col.push(kit::muted(
+                    "reliability is the link's, as received — shown, not compared",
                 ));
             }
-            None => {}
-        },
+        }
         None => {
             col = col.push(kit::muted(
                 "nothing recorded yet — the axes appear once the key is observed (O4)",
@@ -300,7 +403,9 @@ pub struct SeriesData {
     pub value: Series,
     /// The observed rate, one point per stats tick.
     pub rate: Series,
-    /// The registry-declared unit, when the subject declares one.
+    /// The declared unit, when a contract declares one. A zk2 contract
+    /// declares none (#614, FL7, FL8a), so the axis is unitless and the
+    /// section says so rather than guess.
     pub unit: Option<String>,
     /// Retained geometry for the two charts (#178).
     ///
@@ -386,74 +491,9 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
         col = col.push(kit::muted(lat.caveat()));
     }
 
-    // — Value: the fetch outcome + hex-beside-decoded.
-    match data.fetched {
-        Fetched::NotAsked => {
-            col = col.push(kit::muted(
-                "no value fetched — selecting a concrete key fetches once \
-                 (storage → cache → window), nothing ambient",
-            ));
-        }
-        Fetched::Superseded => {
-            col = col.push(kit::muted(
-                "superseded — the last fetch answered a different subject, so \
-                 nothing here describes this key. Re-select it to ask again.",
-            ));
-        }
-        Fetched::Landed(Err(e)) => {
-            col = col.push(kit::error(format!("fetch failed: {e}")));
-        }
-        Fetched::Landed(Ok(outcome)) => match outcome.as_ref() {
-            FetchOutcome::None { attempted } => {
-                col = col.push(kit::muted(format!(
-                    "no value — asked {} — a non-verdict, not proof of absence \
-                     (RFC 05 §3.1)",
-                    attempted.join(", ")
-                )));
-            }
-            FetchOutcome::Value(v) => {
-                // The value's facts as chips (#563): its size, the ladder's
-                // rung that answered — in words, never a `Debug` name — and
-                // its encoding.
-                col = col.push(
-                    row![
-                        kit::eyebrow("VALUE"),
-                        kit::data_chip(kit::human_bytes(v.payload.len() as u64)),
-                        kit::data_chip(format!("via {}", source_word(v.source))),
-                        kit::data_chip(if v.encoding.is_empty() {
-                            "encoding unset".to_string()
-                        } else {
-                            v.encoding.clone()
-                        }),
-                    ]
-                    .spacing(sp.xs)
-                    .align_y(iced::Alignment::Center),
-                );
-                // Borrow through the Cow: `to_bytes()` is already free for a
-                // contiguous payload, and `.to_vec()` on top of it was the
-                // double copy the redesign flagged (`docs/zero-copy.md`).
-                let bytes = v.payload.to_bytes();
-                let len = bytes.len();
-                col = col.push(
-                    row![hex_pane(&bytes, sp), decoded_pane(data.decoded, len, sp)].spacing(sp.md),
-                );
-                // The attachment, when the value carried one (#117): rendered
-                // structurally beside its hex — the registry does not describe
-                // attachments, so structural is where the rendering stops.
-                if let Some(att) = &v.attachment {
-                    let abytes = att.to_bytes();
-                    col = col.push(kit::muted(format!(
-                        "attachment: {} bytes — rendered structurally; the registry \
-                         does not describe attachments",
-                        abytes.len()
-                    )));
-                    col = col.push(
-                        row![hex_pane(&abytes, sp), attachment_pane(&abytes, sp)].spacing(sp.md),
-                    );
-                }
-            }
-        },
-    }
+    // — Value: the read the key's identity asks (#614, FL8a), hex beside
+    // decoded where the read kept bytes.
+    col = col.push(value_section(&data));
 
     // — Series: sparklines over the recorded history (issue #64).
     if let Some(series) = data.series
@@ -523,6 +563,12 @@ fn series_section<'a>(
             )));
         }
         let label = data.leaf.as_deref().unwrap_or("value");
+        if data.unit.is_none() {
+            col = col.push(kit::muted(
+                "no unit — a zk2 contract declares none, so the axis is unitless \
+                 rather than guessed",
+            ));
+        }
         col = col.push(spark::chart(
             label,
             &data.value,
@@ -542,6 +588,424 @@ fn series_section<'a>(
         sp,
     ));
     Some(col.into())
+}
+
+/// The value section (#614, FL8a): what was asked of the key's value and
+/// what came back — or why nothing was asked — then, for a state key, the
+/// archives a last-known read may ask, behind their own buttons.
+fn value_section<'a>(data: &DetailData<'a>) -> Column<'a, Message> {
+    let sp = data.sp;
+    let mut col = Column::new().spacing(sp.sm);
+    match data.fetched {
+        Fetched::NotAsked => col = col.push(not_asked(data)),
+        Fetched::Asking(kind) => {
+            col = col.push(kit::muted(format!("asking — {} …", kind.word())));
+        }
+        Fetched::Superseded => {
+            col = col.push(kit::muted(
+                "superseded — the last fetch answered a different subject, so \
+                 nothing here describes this key. Re-select it to ask again.",
+            ));
+        }
+        Fetched::Landed(Err(e)) => {
+            col = col.push(kit::error(format!("read failed: {e}")));
+        }
+        Fetched::Landed(Ok(read)) => {
+            col = col.push(match read.as_ref() {
+                ValueRead::Owner(answer) => owner_value(answer, data),
+                ValueRead::Replies(r) => replies_value(r, data),
+                ValueRead::Recorded { reply, t_us, .. } => recorded_value(reply, *t_us, data),
+            });
+        }
+    }
+    // Last-known is a state key's, an archive's, and asked only by the
+    // button (S5); a replay asks the bus nothing at all.
+    if !data.replaying && crate::value::plan(data.key, data.identity) == ReadPlan::Owner {
+        col = col.push(last_known_section(data));
+    }
+    col
+}
+
+/// Why nothing was read for the key, in the plan's own terms (#614, FL8a) —
+/// and for an event, the button that replays it.
+fn not_asked<'a>(data: &DetailData<'a>) -> Element<'a, Message> {
+    if data.replaying {
+        return kit::muted(
+            "nothing recorded for this key up to the playhead — a replay asks the bus \
+             nothing, so this is the capture's silence, not the bus's",
+        );
+    }
+    let line = match crate::value::plan(data.key, data.identity) {
+        ReadPlan::Owner => {
+            "not asked — the owner GET (S4) goes out on the session in the namespace, \
+             and none is open"
+        }
+        ReadPlan::History | ReadPlan::Raw => {
+            "not asked — the read goes out on the session in no namespace, and none is \
+             open"
+        }
+        ReadPlan::NotRead(NotRead::Symbolic) => {
+            "a templated skeleton path names no key — there is no value to read; \
+             select a concrete key"
+        }
+        ReadPlan::NotRead(NotRead::Operation) => {
+            "an operation's key holds no value — a GET on it is a call (spec §5), so \
+             selecting it asks nothing"
+        }
+        ReadPlan::NotRead(NotRead::Stream) => {
+            "a stream that declares no history keeps no value to read (§2.5) — watch \
+             it to see its samples"
+        }
+        ReadPlan::NotRead(NotRead::Event { retention_s }) => {
+            let ask = kit::secondary(kit::caption(match retention_s {
+                Some(s) => format!("replay occurrences (last {})", human_span(s)),
+                None => "replay occurrences".to_string(),
+            }))
+            .padding(data.sp.xs);
+            let ask = match retention_s {
+                Some(_) => ask.on_press(msg(data.slot, DetailMsg::ReplayEvents)),
+                None => ask,
+            };
+            return Column::new()
+                .spacing(data.sp.xs)
+                .push(kit::muted(
+                    "an event is replayed on request, never on selection — a GET over \
+                     its member, bounded by the retention (§2.6)",
+                ))
+                .push(ask)
+                .into();
+        }
+        ReadPlan::NotRead(NotRead::Unresolved) if data.identity.is_none() => {
+            "no value read — selecting a concrete key reads it once, as its identity \
+             says (the owner's GET for state, a raw GET for a foreign key), nothing \
+             ambient"
+        }
+        ReadPlan::NotRead(NotRead::Unresolved) => {
+            "not read — the owner's GET needs the key's revision, and its identity \
+             stops short of it (above); why? explains the rung"
+        }
+    };
+    kit::muted(line)
+}
+
+/// `seconds` in the largest unit that divides it: `7d`, `90m`, `45s`.
+fn human_span(seconds: u64) -> String {
+    for (unit, n) in [("w", 604_800), ("d", 86_400), ("h", 3_600), ("m", 60)] {
+        if seconds >= n && seconds.is_multiple_of(n) {
+            return format!("{}{unit}", seconds / n);
+        }
+    }
+    format!("{seconds}s")
+}
+
+/// A stamp's chip: whose clock issued it (O7), in words.
+fn stamp_chip<'a>(stamp: Option<&Stamp>, provenance: Option<Provenance>) -> Element<'a, Message> {
+    kit::data_chip(match (stamp, provenance) {
+        (None, _) => "unstamped",
+        (Some(_), Some(Provenance::Owner)) => "stamped by the owner's clock (S1)",
+        (Some(_), Some(Provenance::Other)) => "stamped by another clock (O7)",
+        (Some(_), _) => "stamp unattributable (O7)",
+    })
+}
+
+/// The stamp itself, beside its chip: the time and the clock's id.
+fn stamp_line<'a>(stamp: Option<&Stamp>) -> Option<Element<'a, Message>> {
+    stamp.map(|s| kit::mono(format!("stamp {} · clock {}", s.time, s.clock)))
+}
+
+/// S4's answer (#614, FL8a): the owner's value decoded through its
+/// contract, its deletion, or its silence — never "no value" (S6).
+fn owner_value<'a>(answer: &'a StateAnswer, data: &DetailData<'a>) -> Element<'a, Message> {
+    let sp = data.sp;
+    let mut col = Column::new().spacing(sp.xs);
+    let Some(row) = answer.row() else {
+        return kit::muted(format!(
+            "silent — the owner did not answer S4's GET within {}s: not a verdict \
+             about the key (S6). An archive may still hold its last-known value.",
+            answer.report.timeout_s
+        ));
+    };
+    let size = match &row.value {
+        StateValue::Value { payload } => Some(payload.size),
+        StateValue::Deleted => None,
+    };
+    let mut chips = row![kit::eyebrow("VALUE")]
+        .spacing(sp.xs)
+        .align_y(iced::Alignment::Center);
+    if let Some(size) = size {
+        chips = chips.push(kit::data_chip(kit::human_bytes(size as u64)));
+    }
+    chips = chips
+        .push(kit::data_chip(format!("via {}", ReadKind::Owner.word())))
+        .push(stamp_chip(row.timestamp.as_ref(), answer.provenance));
+    col = col.push(chips);
+    if let Some(line) = stamp_line(row.timestamp.as_ref()) {
+        col = col.push(line);
+    }
+    match size {
+        None => {
+            col = col.push(kit::callout(
+                crate::view::theme::Tone::Info,
+                kit::caption(
+                    "deleted — the owner answered with a deletion within its tombstone \
+                     window (S3): retirement, not an empty value",
+                ),
+            ));
+        }
+        Some(size) => {
+            col = col.push(
+                row![
+                    no_bytes_pane(
+                        "no hex — S4's read hands back the owner's reply decoded through \
+                         its contract, as `zenctl get state` does; its wire bytes are not \
+                         kept",
+                        sp
+                    ),
+                    decoded_pane(answer.decoded.as_deref(), size, sp)
+                ]
+                .spacing(sp.md),
+            );
+        }
+    }
+    if answer.report.rows.len() > 1 {
+        col = col.push(kit::muted(format!(
+            "+{} more rows — showing the first; a resolved key names one member",
+            answer.report.rows.len() - 1
+        )));
+    }
+    col.into()
+}
+
+/// The left half of a value row when the read kept no bytes: said, never a
+/// blank well.
+fn no_bytes_pane<'a>(why: &'static str, sp: Spacing) -> Element<'a, Message> {
+    kit::inset(Column::new().spacing(sp.xs).push(kit::muted(why)))
+        .width(Length::FillPortion(1))
+        .into()
+}
+
+/// What a history, an event replay or a raw GET answered (#614, FL8a): the
+/// newest reply, hex beside decoded, and every reply that was not shown or
+/// not a value counted.
+fn replies_value<'a>(r: &'a Replies, data: &DetailData<'a>) -> Element<'a, Message> {
+    let sp = data.sp;
+    let mut col = Column::new().spacing(sp.xs);
+    match r.replies.first() {
+        None => {
+            col = col.push(kit::muted(match r.kind {
+                ReadKind::History => {
+                    "the owner's @adv cache answered nothing — no advanced publisher is \
+                     present, or its history is empty: silence, not absence (RFC 05 §3.1)"
+                }
+                ReadKind::Events => {
+                    "no occurrence answered within the retention — a union storage keeps \
+                     events (§2.6), and silence is not absence (RFC 05 §3.1)"
+                }
+                _ => "raw GET: no reply — a non-verdict, not proof of absence (RFC 05 §3.1)",
+            }));
+        }
+        Some(reply) => {
+            col = col.push(reply_chips(reply, format!("via {}", r.kind.word()), sp));
+            if r.replies.len() > 1 {
+                col = col.push(kit::muted(format!(
+                    "{} replies — showing the newest by stamp",
+                    r.replies.len()
+                )));
+            }
+            col = col.push(reply_body(reply, data));
+        }
+    }
+    if let Some(retention) = r.retention {
+        col = col.push(kit::muted(format!(
+            "bounded by the event's retention ({}) — {} filtered here as older (§2.6)",
+            human_span(retention.seconds),
+            kit::plural(retention.older, "occurrence"),
+        )));
+    }
+    if r.errors > 0 {
+        col = col.push(kit::muted(format!(
+            "{} — a refusal is not a value, and not silence",
+            kit::plural(r.errors, "error reply"),
+        )));
+    }
+    if r.elided > 0 {
+        col = col.push(kit::muted(format!(
+            "{} past the reply bound, not kept (O6)",
+            kit::plural(r.elided as usize, "reply"),
+        )));
+    }
+    col = col.push(kit::mono(format!("asked {}", r.selector)));
+    col.into()
+}
+
+/// A replay's recorded row (#614, FL8a): the capture's evidence at the
+/// playhead, checked through the replay's own lens; the bus asked nothing.
+fn recorded_value<'a>(reply: &'a Reply, t_us: u64, data: &DetailData<'a>) -> Element<'a, Message> {
+    let sp = data.sp;
+    Column::new()
+        .spacing(sp.xs)
+        .push(reply_chips(
+            reply,
+            format!("recorded at {:.3}s (capture clock)", t_us as f64 / 1e6),
+            sp,
+        ))
+        .push(reply_body(reply, data))
+        .push(kit::muted(
+            "a replay asks the bus nothing: this is the capture's latest row for the key \
+             at the playhead, checked through the replay's offline lens",
+        ))
+        .into()
+}
+
+/// A reply's facts as chips (#563): its size, where it came from, its
+/// encoding and whose clock stamped it.
+fn reply_chips<'a>(reply: &Reply, source: String, sp: Spacing) -> Element<'a, Message> {
+    row![
+        kit::eyebrow("VALUE"),
+        kit::data_chip(kit::human_bytes(reply.payload.len() as u64)),
+        kit::data_chip(source),
+        kit::data_chip(if reply.encoding.is_empty() {
+            "encoding unset".to_string()
+        } else {
+            reply.encoding.clone()
+        }),
+        stamp_chip(reply.stamp.as_ref(), reply.provenance),
+    ]
+    .spacing(sp.xs)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// A reply's bytes: a tombstone said, a value hex beside decoded, and its
+/// attachment beside its own hex (#117).
+fn reply_body<'a>(reply: &'a Reply, data: &DetailData<'a>) -> Element<'a, Message> {
+    let sp = data.sp;
+    if reply.delete {
+        return kit::callout(
+            crate::view::theme::Tone::Info,
+            kit::caption("a tombstone — retirement, not an empty value (RFC 04 §1.2)"),
+        );
+    }
+    let mut col = Column::new().spacing(sp.xs);
+    if let Some(line) = stamp_line(reply.stamp.as_ref()) {
+        col = col.push(line);
+    }
+    // Borrow through the Cow: `to_bytes()` is already free for a
+    // contiguous payload, and `.to_vec()` on top of it was the double copy
+    // the redesign flagged (`docs/zero-copy.md`).
+    let bytes = reply.payload.to_bytes();
+    let len = bytes.len();
+    col = col.push(row![hex_pane(&bytes, sp), decoded_pane(data.decoded, len, sp)].spacing(sp.md));
+    // The attachment, when the value carried one (#117): rendered
+    // structurally beside its hex — no contract types it here, so
+    // structural is where the rendering stops.
+    if let Some(att) = &reply.attachment {
+        let abytes = att.to_bytes();
+        col = col.push(kit::muted(format!(
+            "attachment: {} bytes — rendered structurally",
+            abytes.len()
+        )));
+        col = col.push(row![hex_pane(&abytes, sp), attachment_pane(&abytes, sp)].spacing(sp.md));
+    }
+    col.into()
+}
+
+/// The archives a last-known read may ask, and the answer of the one asked
+/// (#614, FL8a; §4.4): an archive's, behind an explicit button, and never
+/// worded as current (S5, S6).
+fn last_known_section<'a>(data: &DetailData<'a>) -> Element<'a, Message> {
+    let sp = data.sp;
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::eyebrow(
+        "LAST-KNOWN (S5) — AN ARCHIVE'S, NEVER CURRENT",
+    ));
+    let asked = data.last_known.filter(|l| l.key == data.key);
+    let in_flight = asked.is_some_and(|l| l.answer.is_none());
+    match &data.archives {
+        None => {
+            col = col.push(kit::muted(
+                "presence not read — no archive.v1 provider is known to ask",
+            ));
+        }
+        Some(archives) if archives.is_empty() => {
+            col = col.push(kit::muted(
+                "no archive.v1 provider in presence — no archive is there to hold this \
+                 key's last-known value",
+            ));
+        }
+        Some(archives) => {
+            let buttons = archives.iter().map(|a| {
+                let b = kit::secondary(kit::caption(format!("ask {a}"))).padding(sp.xs);
+                let b = if in_flight {
+                    b
+                } else {
+                    b.on_press(msg(data.slot, DetailMsg::LastKnown(a.clone())))
+                };
+                b.into()
+            });
+            col = col.push(
+                iced::widget::Row::from_iter(buttons)
+                    .spacing(sp.xs)
+                    .wrap()
+                    .vertical_spacing(sp.xs),
+            );
+        }
+    }
+    let Some(asked) = asked else {
+        return col.into();
+    };
+    match &asked.answer {
+        None => {
+            col = col.push(kit::muted(format!(
+                "asking {} for last-known …",
+                asked.archive
+            )));
+        }
+        Some(Err(e)) => {
+            col = col.push(kit::error(format!(
+                "last-known from {} failed: {e}",
+                asked.archive
+            )));
+        }
+        Some(Ok(answer)) => {
+            col = col.push(kit::callout(
+                crate::view::theme::Tone::Info,
+                kit::caption(format!("{} (S5, S6)", last_known_label(&asked.archive))),
+            ));
+            let Some(row) = answer.row() else {
+                return col
+                    .push(kit::muted(format!(
+                        "{} holds no last-known value of this key",
+                        asked.archive
+                    )))
+                    .into();
+            };
+            col = col.push(
+                row![
+                    kit::data_chip(match row.confirmed {
+                        Some(true) => "confirmed by alignment (§4.4)",
+                        Some(false) => "not confirmed by alignment (§4.4)",
+                        None => "alignment not stated",
+                    }),
+                    stamp_chip(row.timestamp.as_ref(), answer.provenance),
+                ]
+                .spacing(sp.xs)
+                .align_y(iced::Alignment::Center),
+            );
+            if let Some(line) = stamp_line(row.timestamp.as_ref()) {
+                col = col.push(line);
+            }
+            col = col.push(match &row.value {
+                StateValue::Deleted => {
+                    kit::muted("a tombstone the archive holds — the key was retired, not emptied")
+                }
+                StateValue::Value { payload } => {
+                    decoded_pane(answer.decoded.as_deref(), payload.size, sp)
+                }
+            });
+        }
+    }
+    col.into()
 }
 
 /// The key's identity (#614, FL7): where zk2's ladder got, worded per rung.
@@ -845,7 +1309,11 @@ mod tests {
         }
     }
 
-    fn entry(profile: zenkey_v1::qos::QosProfile) -> crate::history::HistoryEntry {
+    fn entry(
+        priority: zenoh::qos::Priority,
+        congestion: zenoh::qos::CongestionControl,
+        express: bool,
+    ) -> crate::history::HistoryEntry {
         crate::history::HistoryEntry {
             seq: 0,
             received: Instant::now(),
@@ -854,10 +1322,10 @@ mod tests {
             len: 2,
             encoding: "application/json".into(),
             payload: zenoh::bytes::ZBytes::from("{}"),
-            priority: profile.priority(),
-            congestion_control: profile.congestion_control(),
-            reliability: profile.reliability(),
-            express: profile.express(),
+            priority,
+            congestion_control: congestion,
+            reliability: zenoh::qos::Reliability::Reliable,
+            express,
             qos_recorded: true,
             source: None,
             value: None,
@@ -865,36 +1333,61 @@ mod tests {
         }
     }
 
-    /// #120: the verdict compares axes, not names — and an undeclarable
-    /// name judges nothing rather than judging falsely (O4).
+    /// #120 on zk2 (#614, FL8a): declared against observed compares the
+    /// three axes a sample carries, in the contract's spelling, and names
+    /// every one that differs — reliability is the link's and is not among
+    /// them.
     #[test]
-    fn declared_vs_observed_judges_axes_not_names() {
-        use zenkey_v1::qos::QosProfile;
-        let observed_alert = entry(QosProfile::Alert);
+    fn declared_vs_observed_compares_axes_and_names_each_that_differs() {
+        use zenoh::qos::{CongestionControl, Priority};
+        let declared = QosAxes {
+            priority: "data".into(),
+            congestion: "block".into(),
+            express: false,
+        };
+        let same = entry(Priority::Data, CongestionControl::Block, false);
         assert_eq!(
-            qos_verdict(&zenkey_v1::Declared::parse("alert"), &observed_alert),
-            Some(true)
-        );
-        assert_eq!(
-            qos_verdict(&zenkey_v1::Declared::parse("sampled"), &observed_alert),
-            Some(false)
-        );
-        assert_eq!(
-            qos_verdict(
-                &zenkey_v1::Declared::parse("not-a-profile"),
-                &observed_alert
-            ),
+            zenkey_fleet::qos_mismatch(&declared, &observed_axes(&same)),
             None
         );
+        let off = entry(Priority::RealTime, CongestionControl::Block, true);
+        let m =
+            zenkey_fleet::qos_mismatch(&declared, &observed_axes(&off)).expect("two axes differ");
+        assert_eq!(m.differs, ["priority", "express"]);
+        assert_eq!(axes_token(&declared), "data/block");
+        assert_eq!(axes_token(&m.observed), "real_time/block+express");
+    }
+
+    /// Nothing declares a QoS the lens could not reach, and the pane says
+    /// why in the rung's words — never a guess, never a mismatch (O4).
+    #[test]
+    fn an_unresolved_key_declares_no_qos_and_says_why() {
+        let set = zenkey_fleet::ContractSet::new();
+        let lens = zenkey_fleet::Lens::new("", None, &set);
+        let foreign = lens.resolve("demo/example/foo");
+        let why = declared_qos(Some(&foreign)).expect_err("a foreign key declares nothing");
+        assert!(
+            why.starts_with("nothing declares it — not a zk2 data key"),
+            "{why}"
+        );
+        assert!(declared_qos(None).is_err());
     }
 
     /// The token spelling is byte-for-byte the CLI's %q, so the two
     /// frontends agree on what the wire said.
     #[test]
     fn the_token_matches_the_cli_spelling() {
-        use zenkey_v1::qos::QosProfile;
-        let e = entry(QosProfile::Alert);
-        // alert = interactive_high / block / reliable / express (RFC 04 §3).
+        use zenoh::qos::{CongestionControl, Priority};
+        let e = entry(Priority::InteractiveHigh, CongestionControl::Block, true);
         assert_eq!(qos_token(&e), "interactive_high/block/reliable+express");
+    }
+
+    /// An event's retention reads in the largest unit that divides it.
+    #[test]
+    fn a_retention_reads_in_its_largest_whole_unit() {
+        assert_eq!(human_span(7 * 86_400), "1w");
+        assert_eq!(human_span(3 * 86_400), "3d");
+        assert_eq!(human_span(5_400), "90m");
+        assert_eq!(human_span(45), "45s");
     }
 }

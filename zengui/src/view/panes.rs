@@ -300,19 +300,25 @@ fn inspector<'a>(
                 .map_or(&dep.identity, |(cache, _)| cache)
                 .get(k)
         }),
-        // A key parse per frame, for the selected key alone: the type
-        // section's v1 classification, on demand (#614, FL7), until FL8.
-        v1: slot
-            .current
-            .key()
-            .map(|k| crate::keyfacts::v1_facts(dep.namespace(), k)),
-        fetched: match slot.fetched.as_ref() {
-            None => view::detail::Fetched::NotAsked,
-            Some((k, o)) if Some(k.as_str()) == slot.current.key() => {
+        fetched: match (slot.asked.as_ref(), slot.fetched.as_ref()) {
+            // A read in flight for the key on screen (#614, FL8a).
+            (Some((k, kind)), _) if Some(k.as_str()) == slot.current.key() => {
+                view::detail::Fetched::Asking(*kind)
+            }
+            (_, None) => view::detail::Fetched::NotAsked,
+            (_, Some((k, o))) if Some(k.as_str()) == slot.current.key() => {
                 view::detail::Fetched::Landed(o)
             }
-            Some(_) => view::detail::Fetched::Superseded,
+            (_, Some(_)) => view::detail::Fetched::Superseded,
         },
+        replaying: work.replay.replay.is_some(),
+        // The archives a last-known read may ask, from the presence read the
+        // lens holds (#614, FL8a): a short walk of the catalog's services.
+        archives: dep
+            .catalog
+            .as_deref()
+            .map(|c| c.providers_of(&crate::value::ARCHIVE)),
+        last_known: slot.last_known.as_ref(),
         decoded: slot.decoded.as_deref(),
         series: slot.series.as_ref(),
         history: slot.history.as_ref(),
@@ -324,7 +330,6 @@ fn inspector<'a>(
         snapshot: work.replay.snapshot.as_deref(),
         compare_snapshot: slot.compare_snapshot,
         latency: slot.selected_latency.clone(),
-        slices: None,
         presence: dep.presence.as_deref(),
         nodes: &work.verdicts.nodes,
         fields: &slot.fields,

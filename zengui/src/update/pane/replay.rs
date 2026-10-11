@@ -172,7 +172,7 @@ pub(crate) fn update(
             if let Some(Some(tick)) = tick {
                 work.echo.echo.clear();
                 bus::apply_tick(dep, obs, sub, tree, work, &tick);
-                return validate(work, &tick);
+                return after_tick(sub, work, &tick);
             }
             Task::none()
         }
@@ -196,7 +196,7 @@ pub(crate) fn update(
                     work.echo.echo.clear();
                 }
                 bus::apply_tick(dep, obs, sub, tree, work, &tick);
-                return validate(work, &tick);
+                return after_tick(sub, work, &tick);
             }
             Task::none()
         }
@@ -209,7 +209,7 @@ pub(crate) fn update(
                 .map(|r| r.advance(std::time::Duration::from_millis(250)));
             if let Some(tick) = tick {
                 bus::apply_tick(dep, obs, sub, tree, work, &tick);
-                return validate(work, &tick);
+                return after_tick(sub, work, &tick);
             }
             Task::none()
         }
@@ -234,7 +234,9 @@ pub(crate) fn update(
             tree.replay_namespace = None;
             work.verdicts.payloads.clear();
             work.echo.echo.clear();
-            Task::none()
+            // Every slot that showed a recorded row reads its key live
+            // again (#614, FL8a): the capture's value stays with the file.
+            crate::update::subject::live_values(dep, sub)
         }
         ReplayMsg::RecordToggled => {
             if let Some(handle) = work.replay.recording.take() {
@@ -394,7 +396,21 @@ fn open(
     };
     work.replay.replay = Some(state);
     bus::apply_tick(dep, obs, sub, tree, work, &tick);
-    validate(work, &tick)
+    after_tick(sub, work, &tick)
+}
+
+/// What a replayed tick asks once the panes have folded it: its verdict
+/// batch checked offline, and every slot's value re-read off the capture at
+/// the new playhead (#614, FL8a) — a replay never asks the bus.
+fn after_tick(
+    sub: &mut SubjectState,
+    work: &Workspace,
+    tick: &crate::message::BusTick,
+) -> Task<Message> {
+    Task::batch([
+        validate(work, tick),
+        crate::update::subject::recorded_values(sub, work),
+    ])
 }
 
 /// Check a replayed tick's payloads through the replay's offline lens

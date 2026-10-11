@@ -571,6 +571,25 @@ impl ReplayState {
         self.identity.ensure(&lens, key);
     }
 
+    /// This replay's id: what its checks carry home, so a check outliving
+    /// it lands nowhere (#614, FL8a, FL10b).
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// The latest row for `key` at the playhead (#614, FL8a): what the
+    /// Inspector shows as the key's value while the replay runs, since a
+    /// replay asks the bus nothing. `None` when no row up to the playhead
+    /// carries the key — the capture's silence about it, not the bus's.
+    /// A scan back over the rows fed so far, bounded by the capture's own
+    /// bound like every rebuild.
+    pub fn latest(&self, key: &str) -> Option<&ReplayRow> {
+        self.rows[..self.cursor]
+            .iter()
+            .rev()
+            .find(|r| r.view.key == key)
+    }
+
     /// Whether `view`'s row recorded its wire axes: `false` for a row a
     /// version-1 or -2 file wrote, whose axes the panes must not show as
     /// observed. Any view this replay did not load answers `true`.

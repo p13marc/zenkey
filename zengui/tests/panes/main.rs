@@ -19,8 +19,6 @@ mod common;
 use std::collections::BTreeSet;
 use std::time::Instant;
 
-use common::slices;
-
 use iced_test::simulator;
 use zengui::history::HistoryRecorder;
 use zengui::message::Message;
@@ -28,8 +26,6 @@ use zengui::view::tokens::Spacing;
 use zengui::view::tree::{self, IdentityIndex};
 use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::StatsTable;
-use zenkey_fleet_v1::SliceSet;
-use zenkey_fleet_v1::model::facts::KeyFacts;
 
 const REGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
 const FOREIGN: &str = "demo/example/foo";
