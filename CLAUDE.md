@@ -137,6 +137,20 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   alone would be the freeze the issue rejects). The torn set and each
   window's geometry ride the named layout (`WorkspaceLayout::torn`); the
   replay locks are per-application and hold across every window.
+  **The port's preparation (#614, FL5)**: v1 is spelled `zenkey_v1::` and
+  `zenkey_fleet_v1::` (renamed dependencies, pinned inline in
+  `zengui/Cargo.toml`), so the zk2 `zenkey_fleet` and `zenkey_model`, by
+  path, sit beside them while the panes move. The RFC 05 §5.1 config double
+  is `tests/util/config_server.rs` (v1, gone at FL11). `tests/panes/` is one
+  test binary with a module per surface, `src/app_tests/` a module per
+  subject, `services/sweep/` a module per question re-exported flat — so
+  the chunks porting them in parallel do not meet in one file. The demo
+  traffic is `examples/spray.rs`, a zk2 deployment (in-process `run_gen`
+  owners over `examples/zk2/walkthrough` and `tcgui`, a `health.v1`-only
+  service, and deliberately non-conforming raw traffic the doctor finds:
+  `token-missing`, `state-stamp-foreign`), smoked in process by
+  `tests/spray_smoke.rs`; `examples/spray_v1.rs` keeps the v1 demos and
+  the live tests until FL6b/FL11.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral, and zk2's since FJ9 (#612),
@@ -322,9 +336,11 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 **Strangler layout (#615).** The `zenkey/` and `zenkey-build/` sources
 described above, and the `fixture-tests` crate, now live on the **`v1`
 branch**. On `main` zengui, the v1 tool still there, builds against
-`zenkey =0.11.1` from crates.io (`[workspace.dependencies]`), and since
-FJ1 (#612) pins `zenkey-fleet =0.18.0` from crates.io too, until #614
-ports it. zenwatch no longer pins v1 (FL2 its read side, FL3 its write
+`zenkey =0.11.1` and (since FJ1, #612) `zenkey-fleet =0.18.0` from
+crates.io until #614 ports it — since FL5 under renamed dependencies
+(`zenkey-v1`, `zenkey-fleet-v1`) pinned inline in `zengui/Cargo.toml`,
+beside the zk2 crates by path; the workspace table pins neither any more.
+zenwatch no longer pins v1 (FL2 its read side, FL3 its write
 side): `cargo tree -p zenwatch -i zenkey@0.11.1` and `-i
 zenkey-fleet@0.18.0` match nothing, and no member uses v1's
 `zenkey-build`, so its pin left the workspace. With both fleets in the
@@ -510,7 +526,9 @@ cargo run -p zenctl -- schema show zs.catalog.v1 --contracts examples/zk2/zensig
 Plain cargo is still the build system; the `justfile` only covers what needs
 more than one command — chiefly running the GUI against traffic to look at.
 The demo is self-contained (no `zenohd`): `spray` listens and zengui connects
-straight to it (`just --list` for the recipes).
+straight to it (`just --list` for the recipes). `just spray` and `just
+gui-demo` run the zk2 spray, which today's v1 zengui shows as foreign keys;
+`just spray-v1`, `just gui-demo-v1` and the other v1 demos run `spray_v1`.
 `just shots` renders every zengui scene (`zengui/tests/common/scenes.rs`) to
 PNGs in both themes headlessly (#532) — the only way to *see* the GUI on a
 host with no display; `just shots-base main` draws the same scenes from `main`
