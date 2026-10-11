@@ -97,7 +97,20 @@ That is the whole thing: it builds, starts a traffic generator, and opens the
 GUI against it. No router and nothing else to install — `spray` listens and
 zengui connects straight to it. Ctrl-C stops both.
 
-What to look at:
+`spray` (`examples/spray.rs`, #614 FL5) is a zk2 deployment in namespace
+`spray` — nav, camera, perception, teleop, thrusters, a planner and a tc
+backend, real services serving their contracts from `examples/zk2/`, and a
+service implementing `health.v1` alone — beside the traffic no zk2 service
+would send: an interface token with no instance token, a second answerer on
+an owner's state, garbage on an owned key, an unowned key, a key in another
+namespace, and foreign keys. zengui still reads v1 while #614 ports it pane
+by pane, so today every one of those keys shows as a foreign key, with real
+counts, rates and structural payloads, unlabelled rather than mislabelled:
+the key-agnostic core keeping its promise. `just smoke-spray` reads the same
+deployment through zenctl's `service list` and `doctor`.
+
+The v1 demo traffic the panes were built for is `spray_v1` (`just
+gui-demo-v1`, `just spray-v1`; it goes at FL11). What to look at there:
 
 - Expand `v1` — chunks are labelled origin / class / producer / subject, and
   leaves carry a registration badge plus the registry-declared type.
@@ -119,8 +132,8 @@ What to look at:
   and the rows must match `zenctl storage list`.
 - `just gui-demo-no-registry` withholds the registry, so every badge reads `—`
   ("not asked") rather than "unregistered".
-- Select a key on spray's `@blob` plane and the Inspector grows a **Blobs**
-  section. `spray` serves a 1 MiB artifact *and* a second
+- Select a key on `spray_v1`'s `@blob` plane and the Inspector grows a
+  **Blobs** section. `spray_v1` serves a 1 MiB artifact *and* a second
   origin claiming the same id at a different content root, so probing
   `01jqz3demo0001` lists two holders and flags the disagreement. Fetching from
   the second one with the first one's root pinned aborts naming that origin,
@@ -129,21 +142,21 @@ What to look at:
   declaration is a capability, and the pane says so.
 
 - The **config** tool (the Workbench's "config", or "configure" on `probe`
-  in the nodes pane). Read `wlan0`: spray serves the RFC 05 §5.1 test double
-  — the same server zenctl's and the engine's live tests talk to — with a
-  group of each class. Change `queue` and it applies at once; change `link`
+  in the nodes pane). Read `wlan0`: `spray_v1` serves the RFC 05 §5.1 test
+  double — the same server zengui's app tests talk to — with a group of each
+  class. Change `queue` and it applies at once; change `link`
   and it asks for a window and a yes, then waits armed: confirm it, or let
   the window run out and watch the read-back roll it back.
 
-`examples/spray.rs` exists because neither zenkey nor zensight can emit
-non-conforming traffic — that is the point of them — so it is the only way to
-exercise the key-agnostic path for real.
+The sprays exist because no conforming service can emit non-conforming
+traffic — that is the point of one — so they are the only way to exercise
+the key-agnostic path for real.
 
 ## Development
 
 ```bash
-cargo test -p zengui        # unit, registry-overlay and pane-rendering tests
-just spray                  # traffic in one terminal…
+cargo test -p zengui        # unit, registry-overlay, pane-rendering and spray tests
+just spray-v1               # v1 traffic in one terminal…
 just test-live              # …live-bus tests in another
 just ci                     # everything CI runs
 just shots                  # a PNG of every scene, both themes → target/shots/current
