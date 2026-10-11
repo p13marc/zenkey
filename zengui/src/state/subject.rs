@@ -24,8 +24,6 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet_v1::FetchOutcome;
-
 use super::deployment::Deployment;
 use crate::message::{SlotId, Subject};
 use crate::view;
@@ -42,8 +40,18 @@ sub_state! {
         /// bus tick (#119) — never computed on the render path, and cleared
         /// with the selection.
         pub(crate) selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
-        /// The last on-demand fetch: (key, outcome-or-error).
-        pub(crate) fetched: Option<(String, Result<Arc<FetchOutcome>, crate::services::ServiceError>)>,
+        /// The last value read: (key, the zk2 read or why it failed) — S4's
+        /// owner GET, the owner's `@adv` history, an event replay, a raw
+        /// GET, or during a replay the recorded row (#614, FL8a).
+        pub(crate) fetched: Option<(String, Result<Arc<crate::value::ValueRead>, crate::services::ServiceError>)>,
+        /// The read in flight for this slot's key, and which question it
+        /// asked (#614, FL8a): the pane says "asking …" rather than "not
+        /// asked" between the selection and the landing.
+        pub(crate) asked: Option<(String, crate::value::ReadKind)>,
+        /// An archive's last-known state of the key (S5), asked only by the
+        /// Detail section's button and kept beside the owner's answer —
+        /// never in its place, never shown as current (S6).
+        pub(crate) last_known: Option<view::detail::LastKnown>,
         /// The decode of the last fetched value — the whole
         /// [`crate::value::DecodedValue`]: the decode, verdict included
         /// (#164), plus the document rendered from it once (#345).
@@ -80,11 +88,12 @@ sub_state! {
         /// demand, dropped with the subject — its report is evidence about
         /// one key's window.
         pub(crate) fields: view::fields::FieldsState,
-        /// The why ladder's state for the slot key (#214): run on demand
-        /// at the frugal default, dropped with the subject.
+        /// The why ladder's state for the slot's key or service (#214;
+        /// zk2's since #614, FL8b): run on demand, dropped with the subject.
         pub(crate) why: view::why::WhyState,
-        /// The declared readers of the slot's subject (#224): one admin
-        /// sweep per click, never ambient, dropped with the subject.
+        /// The roles bound to the slot's subject (#224; R3 edges from
+        /// descriptors since #614, FL8b): one press, read from the presence
+        /// read in hand, dropped with the subject.
         pub(crate) consumers: view::consumers::ConsumersState,
         /// Compare the key's newest sample against the loaded `.zsnap`'s
         /// row for it (#219), when one is loaded and carries the key.
@@ -99,6 +108,8 @@ impl SubjectSlot {
             current: Subject::None,
             selected_latency: None,
             fetched: None,
+            asked: None,
+            last_known: None,
             decoded: None,
             history_scroll: crate::view::kit::Viewport::default(),
             history: None,
@@ -117,9 +128,9 @@ impl SubjectSlot {
     /// The one rebuild point (#178): everything that can change the chart
     /// calls this, and nothing else writes `series`. It takes the deployment
     /// because a declared unit would be a *contract* fact about the key, not
-    /// something the history ring knows — none is declared since v1's
-    /// registry went (#614, FL7), and the parameter keeps the one call shape
-    /// for when a profile declares one.
+    /// something the history ring knows — a zk2 contract declares none
+    /// (#614, FL7, FL8a), so the chart says so, and the parameter keeps the
+    /// one call shape for when a profile declares one.
     pub(crate) fn refresh_series(&mut self, dep: &Deployment) {
         self.series = self.series_data(dep);
     }
@@ -156,9 +167,8 @@ impl SubjectSlot {
             Some(p) => crate::series::value_series(&rec.ring, p),
             None => crate::series::Series::new(),
         };
-        // No unit (#614, FL7): a zk2 contract declares none, so the axis
-        // says nothing rather than guess — v1's registry was the only
-        // source, and no slice has been loaded since FL6a.
+        // No unit (#614, FL7, FL8a): a zk2 contract declares none, so the
+        // axis says so rather than guess.
         let unit: Option<String> = None;
         Some(view::detail::SeriesData {
             leaves,
@@ -259,6 +269,12 @@ impl SubjectState {
             current: follow.current.clone(),
             selected_latency: follow.selected_latency.clone(),
             fetched: follow.fetched.clone(),
+            // A read in flight lands by key in every slot showing it, so
+            // the pin awaits it too. A last-known answer is evidence and
+            // carries over; one in flight lands by slot id, in the follow
+            // slot alone, so the pin does not wait for it.
+            asked: follow.asked.clone(),
+            last_known: follow.last_known.clone().filter(|l| l.answer.is_some()),
             decoded: follow.decoded.clone(),
             history_scroll: follow.history_scroll,
             history: follow.history.clone(),

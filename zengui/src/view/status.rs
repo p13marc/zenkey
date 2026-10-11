@@ -114,11 +114,15 @@ pub struct Status<'a> {
     pub skeleton: Option<&'a zenkey_fleet::SkeletonCoverage>,
     /// Keys retired because their watch was released (O6's third counter).
     pub keys_unwatched: u64,
-    /// The last on-demand value fetch, for the selection.
+    /// The last value read, for the selection (#614, FL8a): S4's owner
+    /// GET, a history, an event replay, a raw GET or a recorded row.
     pub fetched: Option<&'a (
         String,
-        Result<std::sync::Arc<zenkey_fleet_v1::FetchOutcome>, crate::services::ServiceError>,
+        Result<std::sync::Arc<crate::value::ValueRead>, crate::services::ServiceError>,
     )>,
+    /// An archive's last-known answer for the selection (S5), when one
+    /// landed: said beside the read, never as it.
+    pub last_known: Option<&'a crate::view::detail::LastKnown>,
     /// The scope's short name.
     pub scope_label: &'a str,
     /// What the scope covers, in words — "everything" is not everything
@@ -185,7 +189,12 @@ impl<'a> Status<'a> {
             keys: obs.keys,
             keys_evicted: obs.keys_evicted,
             keys_unwatched: obs.keys_unwatched,
-            identity: (dep.identity.len(), dep.identity.evicted()),
+            // The replay's own identity cache while one runs (#614, FL8a):
+            // its bound is the one costing something then, not the live one.
+            identity: match work.replay.identities() {
+                Some((cache, _)) => (cache.len(), cache.evicted()),
+                None => (dep.identity.len(), dep.identity.evicted()),
+            },
             watched: &obs.watched,
             // A replay's own skeleton while one runs (#614, FL10b): the
             // tree's declared half is the offline lens's then.
@@ -194,6 +203,11 @@ impl<'a> Status<'a> {
                 None => dep.skeleton.as_deref().map(|s| &s.coverage),
             },
             fetched: sub.follow.fetched.as_ref(),
+            last_known: sub
+                .follow
+                .last_known
+                .as_ref()
+                .filter(|l| matches!(l.answer, Some(Ok(_)))),
             totals: obs.totals,
             contracts: ContractsStatus {
                 loaded: dep.contracts.as_deref(),
@@ -434,22 +448,26 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         ));
     }
     if let Some((key, outcome)) = s.fetched {
-        let label = match outcome {
-            Ok(out) => match out.as_ref() {
-                zenkey_fleet_v1::FetchOutcome::Value(v) => {
-                    format!(
-                        "fetched {key}: {} bytes via {}",
-                        v.payload.len(),
-                        crate::view::detail::source_word(v.source)
-                    )
-                }
-                zenkey_fleet_v1::FetchOutcome::None { attempted } => format!(
-                    "no value for {key} — asked {} (not a verdict)",
-                    attempted.join(", ")
-                ),
-            },
+        // The zk2 read, in its own words (#614, FL8a): "owner GET (S4)",
+        // "silent", "raw GET" — and an archive's answer beside it, never
+        // as it (S6).
+        let mut label = match outcome {
+            // A replay's value is the capture's: replayed, not fetched.
+            Ok(read) if read.is_recorded() => {
+                format!(
+                    "replayed {key}: {}",
+                    crate::view::detail::read_summary(read)
+                )
+            }
+            Ok(read) => format!("fetched {key}: {}", crate::view::detail::read_summary(read)),
             Err(e) => format!("fetch {key} failed: {e}"),
         };
+        if let Some(lk) = s.last_known.filter(|l| l.key == *key) {
+            label.push_str(&format!(
+                " · {}",
+                crate::view::detail::last_known_label(&lk.archive)
+            ));
+        }
         r = r.push(kit::muted(label));
     }
 

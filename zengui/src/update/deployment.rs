@@ -10,8 +10,6 @@
 //! which two delegate, one is a struct replacement, and exactly one line
 //! reaches across a group boundary.
 
-use std::sync::Arc;
-
 use iced::Task;
 
 use crate::message::{DeploymentMsg, LinkState, Message};
@@ -226,9 +224,9 @@ pub(crate) fn update(
 }
 
 /// Point the window at another namespace: forget the old deployment's
-/// evidence, rebuild the v1 schema store, restart the data pump on the
-/// session in no namespace, and reopen the session in the namespace (#614,
-/// FL6a) — the one a namespace actually changes.
+/// evidence, restart the data pump on the session in no namespace, and
+/// reopen the session in the namespace (#614, FL6a) — the one a namespace
+/// actually changes.
 fn repoint(
     dep: &mut Deployment,
     obs: &mut Observation,
@@ -248,10 +246,6 @@ fn repoint(
         .unwrap_or_else(Task::none);
     obs.presence_epoch += 1;
     forget(dep, obs, tree, work);
-    dep.schema_store = Some(Arc::new(zenkey_fleet_v1::SchemaStore::new(
-        dep.namespace(),
-        dep.timeout(),
-    )));
     // Every slot's decode was judged under the departing deployment's
     // contracts (#257) — the pins' as much as the follow slot's.
     for slot in sub.all_mut() {

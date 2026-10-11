@@ -216,10 +216,6 @@ pub(crate) fn update(
             // every session open — launch and each reconnect — sat a disk
             // access on a frame. Its answer lands on `ContextMsg::Refreshed`.
             let contexts = services::context::refresh();
-            dep.schema_store = Some(Arc::new(zenkey_fleet_v1::SchemaStore::new(
-                dep.namespace(),
-                dep.timeout(),
-            )));
             let listing = services::link::list_namespaces(&raw, dep.timeout());
             Task::batch([
                 listing,

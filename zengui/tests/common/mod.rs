@@ -424,6 +424,39 @@ impl World {
         })
     }
 
+    /// A presence landing for this world with an archive beside it (#614,
+    /// FL8a): `ground/archive` holding its instance token and an
+    /// `archive.v1` interface token, so a last-known read has a provider to
+    /// ask. The lens moves with it (generation 2).
+    pub fn presence_update_with_archive(&self) -> Arc<zengui::presence_link::PresenceUpdate> {
+        use zenkey_model::grammar::{Addr, InstanceId, Sha256Hex, ZkKey};
+        let addr: Addr = "ground/archive".parse().expect("an address");
+        let instance = InstanceId::from_u64(9);
+        let fp = Sha256Hex::new(&"cd".repeat(32))
+            .expect("a fingerprint")
+            .fp16();
+        let mut observed = self.observed.clone();
+        observed.with_token(ZkKey::Instance {
+            addr: addr.clone(),
+            instance: instance.clone(),
+        });
+        observed.with_token(ZkKey::Alive {
+            addr,
+            iface: zengui::value::ARCHIVE.clone(),
+            instance,
+            fp,
+        });
+        let mut presence = zenkey_fleet::LivePresence::new(zenkey_fleet::PresenceScope::all());
+        let moved = presence.seed(&observed, std::time::SystemTime::now());
+        Arc::new(zengui::presence_link::PresenceUpdate {
+            presence: Arc::new(presence),
+            moved,
+            catalog: Some(Arc::new(zenkey_fleet::Catalog::new(&observed))),
+            generation: 2,
+            seed: zenkey_fleet::SeedOutcome::Complete,
+        })
+    }
+
     /// Every publisher's payload at tick `n`: `(key, bytes, encoding)`.
     fn payloads(&self, n: u32) -> Vec<(&'static str, Vec<u8>, &'static str)> {
         let mut out: Vec<_> = FEEDS
@@ -474,6 +507,57 @@ impl World {
             cache.ensure(&lens, key);
         }
         cache
+    }
+
+    /// A state read of `key` as the window's task lands it (#614, FL8a):
+    /// the S4 report the fleet hands back — its row rendered through the
+    /// world's contract, stamped — or an archive's last-known one, checked
+    /// and attributed through the world's lens. `body: None` is silence.
+    pub fn state_read(
+        &self,
+        key: &str,
+        body: Option<&[u8]>,
+        archive: Option<&str>,
+    ) -> zengui::value::StateAnswer {
+        use zenkey_fleet::report::{StateReading, StateReport, StateRow, StateValue};
+        let resolution = self.resolve(key);
+        let resolved = resolution.resolved.as_ref().expect("a state key resolves");
+        let rows = body
+            .map(|body| StateRow {
+                key: key.to_string(),
+                value: StateValue::Value {
+                    payload: Box::new(self.check(key, body, "").rendering),
+                },
+                timestamp: Some(zenkey_fleet::report::Stamp {
+                    time: "2026-10-05T09:12:44.250000000Z".into(),
+                    clock: "a1b2c3d4e5f60718".into(),
+                }),
+                confirmed: archive.map(|_| true),
+                identity: None,
+            })
+            .into_iter()
+            .collect();
+        let report = StateReport {
+            reading: match archive {
+                Some(_) => StateReading::LastKnown,
+                None => StateReading::Current,
+            },
+            address: resolved.address.to_string(),
+            iface: resolved.iface.to_string(),
+            fingerprint: resolved.revision.fingerprint().to_string(),
+            resource: resolved.resource_name(),
+            values: resolved.values.clone(),
+            selectors: vec![key.to_string()],
+            archive: archive.map(str::to_string),
+            timeout_s: 5.0,
+            rows,
+        };
+        let lens = zenkey_fleet::Lens::new("", Some(&self.catalog), &*self.contracts.set)
+            .offline(&self.contracts.set);
+        let owner = resolved.address.to_string();
+        zengui::value::StateAnswer::new(report, &resolution, |clock| {
+            lens.provenance(Some(&owner), clock)
+        })
     }
 
     /// The presence read the lens resolves addresses through.

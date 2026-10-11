@@ -130,18 +130,21 @@ pub fn load(path: String) -> Task<Message> {
     )
 }
 
-/// Load a `.zsnap` (#219), off the update thread like [`load`]: the parse
-/// is bounded only by the file. Lands on [`ReplayMsg::SnapshotLoaded`],
-/// whose handler clears the loading claim the `SnapshotOpen` handler
-/// raised.
+/// Load a `.zsnap` (#219; zk2's version 2 since #614, FL8b — owners'
+/// current state, each row's identity, conformance and holder), off the
+/// update thread like [`load`]: the parse is bounded only by the file. A
+/// version-1 file is v1's registry snapshot and is refused by its number,
+/// the reader naming the `v1` branch. Lands on
+/// [`ReplayMsg::SnapshotLoaded`], whose handler clears the loading claim the
+/// `SnapshotOpen` handler raised.
 pub fn load_snapshot(path: String) -> Task<Message> {
     Task::perform(
         async move {
             let parsed = std::fs::File::open(&path)
                 .map_err(ServiceError::of)
                 .and_then(|f| {
-                    zenkey_fleet_v1::ZsnapReader::new(std::io::BufReader::new(f))
-                        .and_then(zenkey_fleet_v1::ZsnapReader::read_all)
+                    zenkey_fleet::ZsnapReader::new(std::io::BufReader::new(f))
+                        .and_then(zenkey_fleet::ZsnapReader::read_all)
                         .map_err(ServiceError::of)
                 })
                 .map(Arc::new);

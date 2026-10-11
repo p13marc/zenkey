@@ -175,14 +175,3 @@ pub fn badge_verdict<'a, M: 'a>(
 ) -> Element<'a, M> {
     glyph_badge(tone.glyph(), label, tone.tone())
 }
-
-/// A why-ladder rung badge (#214) — theme-resolved like [`tone_badge`],
-/// glyph from the tone. `NotAsked` gets its own mark and swatch, because a
-/// rung that prints `No` where it means "not asked" is the failure the
-/// ladder was built to replace (RFC 09 §5.1 O4).
-pub fn badge_rung<'a, M: 'a>(
-    tone: crate::view::theme::RungTone,
-    label: impl Into<String>,
-) -> Element<'a, M> {
-    glyph_badge(tone.glyph(), label, tone.tone())
-}

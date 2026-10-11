@@ -354,6 +354,7 @@ fn strip(identity: (usize, u64), keys: (usize, u64)) -> iced::Element<'static, M
         skeleton: None,
         keys_unwatched: 0,
         fetched: None,
+        last_known: None,
         scope_label: "all",
         scope_coverage: "",
         keys: keys.0,

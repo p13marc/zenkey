@@ -481,12 +481,6 @@ impl ThemeColors<'_> {
     pub fn verdict(&self, kind: VerdictTone) -> Color {
         self.tone(kind.tone())
     }
-
-    /// The why-ladder rung scale (#214) — Established / NotEstablished /
-    /// NotAsked, the three answers a rung may give.
-    pub fn rung(&self, kind: RungTone) -> Color {
-        self.tone(kind.tone())
-    }
 }
 
 /// The swatch scale every badge resolves through (#193).
@@ -620,17 +614,6 @@ impl SeverityTone {
     /// each used to keep its own copy.
     pub fn of(severity: zenkey_fleet::report::DoctorSeverity) -> Self {
         use zenkey_fleet::report::DoctorSeverity;
-        match severity {
-            DoctorSeverity::Error => SeverityTone::Error,
-            DoctorSeverity::Warning => SeverityTone::Warning,
-            DoctorSeverity::Info => SeverityTone::Info,
-        }
-    }
-
-    /// [`Self::of`] for a v1 severity: the Fields section's findings are
-    /// v1's `run_field` until FL8 moves them.
-    pub fn of_v1(severity: zenkey_fleet_v1::report::DoctorSeverity) -> Self {
-        use zenkey_fleet_v1::report::DoctorSeverity;
         match severity {
             DoctorSeverity::Error => SeverityTone::Error,
             DoctorSeverity::Warning => SeverityTone::Warning,
@@ -811,44 +794,6 @@ impl VerdictTone {
     }
 }
 
-/// How one why-ladder rung's answer should read (#214).
-///
-/// `NotAsked` is [`Tone::Neutral`] and its own glyph: a rung whose input was
-/// never fetched must not look like "asked, and the answer was no" — printing
-/// `No` where it means `NotAsked` is the exact failure the ladder was built
-/// to replace (RFC 09 §5.1 O4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RungTone {
-    Established,
-    NotEstablished,
-    NotAsked,
-}
-
-impl RungTone {
-    /// Every state of the scale, for the uniqueness tests.
-    pub const ALL: [Self; 3] = [Self::Established, Self::NotEstablished, Self::NotAsked];
-
-    /// The swatch this state resolves through. `NotEstablished` is a verdict
-    /// *obtained* — caution, not danger: for five of the ten rungs it is the
-    /// explanation the user came for, not an error.
-    pub fn tone(self) -> Tone {
-        match self {
-            Self::Established => Tone::Positive,
-            Self::NotEstablished => Tone::Caution,
-            Self::NotAsked => Tone::Neutral,
-        }
-    }
-
-    /// The badge glyph, carried by the type (#193).
-    pub fn glyph(self) -> &'static str {
-        match self {
-            Self::Established => "✓",
-            Self::NotEstablished => "✗",
-            Self::NotAsked => "·",
-        }
-    }
-}
-
 /// How an address's presence should read (#61; zk2's three states since
 /// #614, FL9: spec §8.1, O5) — same discipline as [`IdentityTone`]:
 /// "unobservable" must not look like a verdict, and above all not like
@@ -952,7 +897,6 @@ mod tests {
         all_distinct("severity", &SeverityTone::ALL.map(SeverityTone::glyph));
         all_distinct("judgement", &JudgementTone::ALL.map(JudgementTone::glyph));
         all_distinct("verdict", &VerdictTone::ALL.map(VerdictTone::glyph));
-        all_distinct("rung", &RungTone::ALL.map(RungTone::glyph));
     }
 
     /// #164's and #214's shared honesty: the not-checked / not-asked state of
@@ -960,7 +904,14 @@ mod tests {
     #[test]
     fn not_checked_and_not_asked_resolve_neutral() {
         assert_eq!(VerdictTone::NotChecked.tone(), Tone::Neutral);
-        assert_eq!(RungTone::NotAsked.tone(), Tone::Neutral);
+        // The why ladder's rungs wear the judgement scale since #614
+        // (FL8b): its two non-verdicts are neutral, and never alike.
+        assert_eq!(JudgementTone::NotAsked.tone(), Tone::Neutral);
+        assert_eq!(JudgementTone::Unobservable.tone(), Tone::Neutral);
+        assert_ne!(
+            JudgementTone::NotAsked.glyph(),
+            JudgementTone::Unobservable.glyph()
+        );
         for theme in [iced::Theme::Light, iced::Theme::Dark] {
             let c = colors(&theme);
             assert_ne!(
@@ -975,11 +926,6 @@ mod tests {
                     assert_ne!(c.verdict(*a), c.verdict(*b), "{a:?} vs {b:?}");
                 }
             }
-            assert_ne!(
-                c.rung(RungTone::NotAsked),
-                c.rung(RungTone::NotEstablished),
-                "not asked must not read as answered-no"
-            );
         }
     }
 

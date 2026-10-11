@@ -112,12 +112,14 @@ impl HistoryEntry {
         }
     }
 
-    /// A synthetic entry from a `.zsnap` row (#219): the snapshot's value
-    /// for this key, shaped so the diff panel can compare it against a live
-    /// sample through the same code. `seq` is 0 and `received` is *now* —
-    /// neither is a fact about the snapshot, and the caption the panel
-    /// draws over this entry names the snapshot's moment and span instead.
-    pub fn from_snapshot_row(row: &zenkey_fleet_v1::SnapshotRow) -> HistoryEntry {
+    /// A synthetic entry from a `.zsnap` row (#219; v2's since #614, FL8b):
+    /// the snapshot's value for this key, shaped so the diff panel can
+    /// compare it against a live sample through the same code. `seq` is 0
+    /// and `received` is *now* — neither is a fact about the snapshot, and
+    /// the caption the panel draws over this entry names the snapshot's
+    /// moment and span instead. A state GET's reply records no wire axes,
+    /// so none are claimed (`qos_recorded: false`).
+    pub fn from_snapshot_row(row: &zenkey_fleet::SnapshotRow) -> HistoryEntry {
         let bytes = row.payload().unwrap_or_default();
         let view = SampleView {
             key: row.key.clone(),
@@ -142,6 +144,7 @@ impl HistoryEntry {
         // The HLC rides as the string the file carries; the view above
         // could not carry it typed, and the panel only ever prints it.
         entry.timestamp = row.timestamp.clone();
+        entry.qos_recorded = false;
         entry
     }
 
@@ -484,26 +487,36 @@ mod tests {
         assert_eq!(rec.focus(), Some(0));
     }
 
-    /// A `.zsnap` row becomes a diffable entry (#219): the payload is the
-    /// file's bytes, the structural form is there for a JSON body, the
-    /// stamp rides as the file's string, and a delete row is a tombstone.
+    /// A `.zsnap` v2 row becomes a diffable entry (#219; #614, FL8b): the
+    /// payload is the file's bytes, the structural form is there for a JSON
+    /// body, the stamp rides as the file's string, no wire axes are claimed
+    /// for a state GET's reply, and a delete row is a tombstone.
     #[test]
     fn a_snapshot_row_becomes_a_diffable_entry() {
-        let row = zenkey_fleet_v1::SnapshotRow {
-            key: "v1/h-0123456789ab/state/p/a".into(),
+        use zenkey_fleet::report::{Conformance, Holder, KeyGroup, KeyIdentity, StamperWire};
+        let row = zenkey_fleet::SnapshotRow {
+            key: "zk2/host-a/tc/tc.netif.v1/state/namespaces".into(),
+            identity: KeyIdentity {
+                group: KeyGroup::Resource {
+                    address: "host-a/tc".into(),
+                    iface: "tc.netif.v1".into(),
+                    token: "state".into(),
+                    resource: Some("state/namespaces".into()),
+                },
+                values: Default::default(),
+                unresolved: None,
+            },
             delete: false,
             bytes: Some("eyJ2YWx1ZSI6NDEuMH0=".into()),
             encoding: Some("application/json".into()),
             timestamp: Some("7f3b/ab12".into()),
-            stamper: None,
-            source: None,
+            stamper: Some(StamperWire::Unattributable { id: "ab12".into() }),
             source_zid: None,
-            registration: zenkey_fleet_v1::report::RegistrationWire::RegistryNotLoaded,
-            verdict: zenkey_fleet_v1::report::VerdictWire::NotValidated {
-                reason: "no_registry".into(),
+            conformance: Conformance::NotChecked {
+                reason: "no presence read".into(),
             },
-            holder: zenkey_fleet_v1::report::Holder::Unattributed {
-                reason: "roster not asked".into(),
+            holder: Holder::Unattributed {
+                reason: "presence not read".into(),
             },
         };
         let e = HistoryEntry::from_snapshot_row(&row);
@@ -511,8 +524,9 @@ mod tests {
         assert_eq!(e.timestamp.as_deref(), Some("7f3b/ab12"));
         assert_eq!(e.len, 14);
         assert!(!e.is_delete);
+        assert!(!e.qos_recorded, "a state GET's reply records no wire axes");
 
-        let gone = zenkey_fleet_v1::SnapshotRow {
+        let gone = zenkey_fleet::SnapshotRow {
             delete: true,
             bytes: None,
             ..row

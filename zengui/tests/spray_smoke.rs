@@ -153,9 +153,10 @@ async fn drive(app: &mut zengui::app::Zengui, task: iced::Task<zengui::message::
 /// the window boots for real — two sessions, the presence monitor on the
 /// one in the namespace — then its own presence link (the stream its
 /// subscription runs) seeds the projection and opens the lens, which
-/// retrieves the spray's bundles into the window's store (§8.4). A payload
-/// taken off the wire is checked through that lens, and the Inspector shows
-/// the contract decode. No window, no endpoint named: the spray on port 0.
+/// retrieves the spray's bundles into the window's store (§8.4). Selecting
+/// a state key reads it by its owner's GET (S4; #614, FL8a), and the
+/// Inspector shows the contract decode. No window, no endpoint named: the
+/// spray on port 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
     use iced::futures::StreamExt as _;
@@ -236,52 +237,39 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
         }
     }
 
-    // A payload off the wire, as the data pump would see it.
-    let raw = client(&endpoint, None).await;
-    let key = format!("{NAMESPACE}/zk2/robot1/nav/nav.v2/stream/position");
-    let sub = raw
-        .declare_subscriber(key.as_str())
-        .await
-        .expect("a subscriber");
-    let sample = tokio::time::timeout(SETTLE, sub.recv_async())
-        .await
-        .expect("the spray publishes its position")
-        .expect("a sample");
-    let payload = sample.payload().to_bytes().into_owned();
-
-    // The Inspector's chain: select, the (v1) fetch answered, the check
-    // through the lens run as the window's own task.
-    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
-        key.clone(),
-    ))));
-    let decode = app.update(Message::Subject(SubjectMsg::ValueFetched(
-        key.clone(),
-        Ok(std::sync::Arc::new(zenkey_fleet_v1::FetchOutcome::Value(
-            zenkey_fleet_v1::FetchedValue {
-                key: key.clone(),
-                payload: zenoh::bytes::ZBytes::from(payload),
-                encoding: sample.encoding().to_string(),
-                timestamp: None,
-                attachment: None,
-                source: zenkey_fleet_v1::ValueSource::Window,
-            },
-        ))),
-    )));
-    drive(&mut app, decode).await;
-
-    let mut ui = iced_test::simulator::<Message, _, _>(app.view(iced::window::Id::unique()));
+    // The Inspector's chain on a state key (#614, FL8a): the selection's
+    // own read — S4's owner GET on the session in the namespace — run as
+    // the window's task, its row rendered through the revision the lens
+    // retrieved from the spray's holders. A selection made before the lens
+    // reached that revision reads nothing, and is made again.
+    let key = format!("{NAMESPACE}/zk2/robot1/nav/nav.v2/state/status");
+    let shows = |app: &zengui::app::Zengui, text: &str| {
+        let mut ui = iced_test::simulator::<Message, _, _>(app.view(iced::window::Id::unique()));
+        ui.find(text).is_ok()
+    };
+    let deadline = tokio::time::Instant::now() + SETTLE;
+    while !shows(&app, "via owner GET (S4)") && tokio::time::Instant::now() < deadline {
+        let read = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+            key.clone(),
+        ))));
+        tokio::time::timeout(SETTLE, drive(&mut app, read))
+            .await
+            .expect("the owner GET settles");
+        if !shows(&app, "via owner GET (S4)") {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
     assert!(
-        ui.find("contract-decoded <nav.v2.Position>").is_ok(),
-        "the payload decodes through the lens the presence link opened, with \
-         a revision retrieved from the spray's holders"
+        shows(&app, "via owner GET (S4)"),
+        "a state key is read by its owner's GET"
     );
     assert!(
-        ui.find("valid").is_ok(),
-        "and conforms to its declared type"
+        shows(&app, "contract-decoded <nav.v2.Status>"),
+        "the owner's reply renders through the revision retrieved from the \
+         spray's holders"
     );
+    assert!(shows(&app, "valid"), "and conforms to its declared type");
 
-    drop(sub);
-    let _ = raw.close().await;
     up.stop().await;
     let _ = std::fs::remove_dir_all(&home);
 }

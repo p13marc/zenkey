@@ -177,6 +177,14 @@ pub const ALL: &[Scene] = &[
         build: replay_v2,
         landmark: "QoS not recorded — its rows name v1 profiles, which zk2 does not read",
     },
+    // The owner silent and an archive's answer beside it (#614, FL8a):
+    // last-known, by an explicit button, never shown as current (S5, S6).
+    Scene {
+        name: "inspector-last-known",
+        size: DESKTOP,
+        build: inspector_last_known,
+        landmark: "last-known from ground/archive — not current (S5, S6)",
+    },
 ];
 
 fn prefs(theme: ThemeChoice) -> Prefs {
@@ -218,38 +226,43 @@ fn live(prefs: Prefs) -> Zengui {
     app
 }
 
-/// Point the workspace at a key and answer the fetch it issues — and the
-/// check through the lens that follows it, as the window's own task would.
-fn select(app: &mut Zengui, world: &World, key: &str) {
-    use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
+/// The body `host-a/tc` answers for `eth0`: a valid `json:NetworkInterface`.
+const ETH0_BODY: &[u8] = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true,"is_oper_up":true,"has_tc_qdisc":false,"interface_type":"ether","addresses":["10.0.4.7/24"],"link_speed_mbps":1000}"#;
 
+/// Point the workspace at a state key and answer the read it issues (#614,
+/// FL8a): S4's owner GET, its row rendered through the contract and
+/// checked, as the window's own task lands it.
+fn select(app: &mut Zengui, world: &World, key: &str) {
     send(
         app,
         Message::Subject(SubjectMsg::Select(Subject::Key(key.into()))),
     );
-    let body = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true,"is_oper_up":true,"has_tc_qdisc":false,"interface_type":"ether","addresses":["10.0.4.7/24"],"link_speed_mbps":1000}"#;
+    let answer = world.state_read(key, Some(ETH0_BODY), None);
     send(
         app,
         Message::Subject(SubjectMsg::ValueFetched(
             key.into(),
-            Ok(Arc::new(FetchOutcome::Value(FetchedValue {
-                key: key.into(),
-                payload: zenoh::bytes::ZBytes::from(body.to_vec()),
-                encoding: "application/json".into(),
-                timestamp: None,
-                attachment: None,
-                source: ValueSource::Storage,
-            }))),
+            Ok(Arc::new(zengui::value::ValueRead::Owner(answer))),
         )),
+    );
+}
+
+/// A replay's recorded row for `key` checked through the replay's offline
+/// lens, as the window's own task lands it (#614, FL8a).
+fn recorded_check(app: &mut Zengui, replay: u64, key: &str, body: &[u8], encoding: &str) {
+    let lens = zengui::replay::ReplayLens::offline("", Some(Arc::clone(&super::contracts().set)));
+    let checked = lens.lens().check(
+        key,
+        zenkey_fleet::Member::Type,
+        (!encoding.is_empty()).then_some(encoding),
+        body,
     );
     send(
         app,
-        Message::Subject(SubjectMsg::ValueDecoded(
+        Message::Subject(SubjectMsg::RecordedDecoded(
+            replay,
             key.into(),
-            Arc::new(zengui::value::DecodedValue::new(
-                world.check(key, body, "application/json"),
-                body,
-            )),
+            Arc::new(zengui::value::DecodedValue::new(checked, body)),
         )),
     );
 }
@@ -304,6 +317,7 @@ fn replay(theme: ThemeChoice) -> Zengui {
     ]
     .join("\n");
     let state = ReplayState::load("incident.zrec", file.as_bytes()).expect("a valid capture");
+    let id = state.id();
     let mut app = watching(prefs(theme));
     send(
         &mut app,
@@ -315,6 +329,15 @@ fn replay(theme: ThemeChoice) -> Zengui {
             "incident.zrec".into(),
             Ok(LoadedReplay::new(state)),
         ))),
+    );
+    // The selected key's value is the capture's first row now (#614,
+    // FL8a), checked through the replay's own lens — the bus asked nothing.
+    recorded_check(
+        &mut app,
+        id,
+        ETH0,
+        br#"{"name":"eth0","index":2,"is_up":true}"#,
+        "application/json",
     );
     app
 }
@@ -818,6 +841,7 @@ fn replay_v2(theme: ThemeChoice) -> Zengui {
     ]
     .join("\n");
     let state = ReplayState::load("legacy.zrec", file.as_bytes()).expect("a valid capture");
+    let id = state.id();
     let mut app = watching(prefs(theme));
     send(
         &mut app,
@@ -839,6 +863,61 @@ fn replay_v2(theme: ThemeChoice) -> Zengui {
     send(
         &mut app,
         Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::Scrubbed(2_000_000))),
+    );
+    // The value at the playhead is the capture's last row for the key
+    // (#614, FL8a), checked offline — never a live read about another
+    // world, so no "superseded" line.
+    recorded_check(
+        &mut app,
+        id,
+        LOAD,
+        br#"{"value":0.61,"unit":"load"}"#,
+        "application/json",
+    );
+    app
+}
+
+/// An owner silent on S4's GET, and an archive's last-known answer beside
+/// it (#614, FL8a; S5, S6): `host-a/tc`'s `eth0` selected, presence showing
+/// `ground/archive` providing `archive.v1`, and its answer read by the
+/// button — labelled last-known, confirmed by alignment, never current.
+fn inspector_last_known(theme: ThemeChoice) -> Zengui {
+    use zengui::view::detail::DetailMsg;
+    let mut app = live(prefs(theme));
+    preset(&mut app, LayoutPreset::Explore);
+    let world = World::new();
+    send(
+        &mut app,
+        Message::Bus(zengui::message::BusMsg::Presence(
+            0,
+            world.presence_update_with_archive(),
+        )),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::ValueFetched(
+            ETH0.into(),
+            Ok(Arc::new(zengui::value::ValueRead::Owner(
+                world.state_read(ETH0, None, None),
+            ))),
+        )),
+    );
+    let archive: zenkey_model::grammar::Addr = "ground/archive".parse().expect("an address");
+    let detail = |m| Message::Pane(PaneMsg::Detail(zengui::message::SlotId::FOLLOW, m));
+    // Asked as the button asks — no session answers here, so the scene
+    // lands the archive's answer itself, as the task would have.
+    send(&mut app, detail(DetailMsg::LastKnown(archive.clone())));
+    send(
+        &mut app,
+        detail(DetailMsg::LastKnownRead(
+            ETH0.into(),
+            archive,
+            Ok(Arc::new(world.state_read(
+                ETH0,
+                Some(ETH0_BODY),
+                Some("ground/archive"),
+            ))),
+        )),
     );
     app
 }

@@ -75,7 +75,7 @@ pub enum ReplayMsg {
     /// snapshot or why not. Clears the loading claim either way.
     SnapshotLoaded(
         String,
-        Result<std::sync::Arc<zenkey_fleet_v1::Snapshot>, crate::services::ServiceError>,
+        Result<std::sync::Arc<zenkey_fleet::Snapshot>, crate::services::ServiceError>,
     ),
     /// Forget the loaded snapshot.
     SnapshotClosed,
@@ -481,19 +481,21 @@ pub fn snapshot_open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
     .into()
 }
 
-/// What the Replay tab says about a loaded snapshot (#219): its moment
-/// **and its span** — RFC 13 §4.4's one non-negotiable — and what it holds.
-pub fn snapshot_label(s: &zenkey_fleet_v1::Snapshot) -> String {
+/// What the Replay tab says about a loaded snapshot (#219; `.zsnap` v2
+/// since #614, FL8b): its moment **and its span** — RFC 13 §4.4's one
+/// non-negotiable — what it holds, and whether a presence read stood behind
+/// its holders and stamps.
+pub fn snapshot_label(s: &zenkey_fleet::Snapshot) -> String {
     format!(
         "snapshot {} (over {:.2}s) — {} key(s) from {}{}",
         s.header.collected_at,
         s.header.collection_span_s,
         s.rows.len(),
         s.header.selectors.join(" + "),
-        if s.header.roster.is_not_asked() {
-            " · roster not asked: every holder unattributed"
-        } else {
-            ""
+        match &s.header.presence {
+            None => " · presence not read: every holder unattributed".to_string(),
+            Some(p) if !p.complete => " · presence possibly incomplete".to_string(),
+            Some(_) => String::new(),
         },
     )
 }

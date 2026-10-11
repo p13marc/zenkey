@@ -1,59 +1,97 @@
-//! The Inspector's value: decode provenance, superseded against never asked,
-//! the subject it follows, numeric plotting (#64), and the engine's
-//! projections consumed (#234).
+//! The Inspector's value: the zk2 read and its source (#614, FL8a), decode
+//! provenance, superseded against never asked, declared against observed
+//! QoS, the subject it follows, numeric plotting (#64), and the declared
+//! type (#234).
 
 use super::*;
 
+use std::sync::Arc;
+use zengui::value::{ReadKind, Replies, Reply, ValueRead};
+use zengui::view::detail::{DetailData, Fetched, section};
+
+/// A Detail section's inputs with nothing asked, nothing observed and no
+/// replay — each test sets what it pins.
+fn data<'a>(key: &'a str) -> DetailData<'a> {
+    DetailData {
+        slot: zengui::message::SlotId::FOLLOW,
+        sp: sp(),
+        key,
+        identity: None,
+        fetched: Fetched::NotAsked,
+        decoded: None,
+        series: None,
+        history_entries: None,
+        observed: None,
+        latency: None,
+        replaying: false,
+        archives: None,
+        last_known: None,
+    }
+}
+
+/// A raw GET's answer: one reply carrying `body`, unstamped.
+fn raw(key: &str, body: &[u8], encoding: &str) -> ValueRead {
+    ValueRead::Replies(Replies {
+        kind: ReadKind::Raw,
+        selector: key.to_string(),
+        replies: vec![Reply {
+            key: key.to_string(),
+            payload: zenoh::bytes::ZBytes::from(body.to_vec()),
+            encoding: encoding.to_string(),
+            attachment: None,
+            delete: false,
+            stamp: None,
+            provenance: None,
+        }],
+        errors: 0,
+        elided: 0,
+        retention: None,
+    })
+}
+
+/// `x`, leaked so a simulator may outlive the block — a test-only cost,
+/// bounded by the calls in each test.
+fn leak<T>(x: T) -> &'static T {
+    Box::leak(Box::new(x))
+}
+
 /// The detail pane (§6.4 item 5 + #66): the decoded side is tagged with HOW
-/// it was produced — contract-decoded and sniffed must never look alike —
-/// and the empty fetch renders the non-verdict sentence. Since #614 (FL6a)
-/// the decode is the lens's: a zk2 key resolved to its resource decodes as
-/// its declared type, and a key the lens stops short of says at which rung.
+/// it was produced — contract-decoded and sniffed must never look alike.
+/// Since #614 (FL6a) the decode is the lens's: a zk2 key resolved to its
+/// resource decodes as its declared type, and a key the lens stops short of
+/// says at which rung.
 #[test]
 fn the_detail_pane_tags_decode_provenance() {
-    use std::sync::Arc;
-    use zengui::view::detail::{DetailData, Fetched, section};
-    use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
-
     let key = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
     let world = common::World::new();
     // The key's identity, as the window's identity cache holds it (#614,
     // FL7): a v1 key is foreign since the port.
-    let identity: &'static zenkey_fleet::Resolution = Box::leak(Box::new(world.resolve(key)));
-
-    let fetched: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
-        Ok(Arc::new(FetchOutcome::Value(FetchedValue {
-            key: key.to_string(),
-            payload: zenoh::bytes::ZBytes::from(br#"{"value":42.0}"#.to_vec()),
-            encoding: "application/json".into(),
-            timestamp: None,
-            attachment: None,
-            source: ValueSource::Storage,
-        })));
-    let render = |decoded: &'static zengui::value::DecodedValue| {
-        simulator::<Message, _, _>(section(DetailData {
-            slot: zengui::message::SlotId::FOLLOW,
-            sp: sp(),
-            key,
-            identity: Some(identity),
-            fetched: Fetched::Landed(Box::leak(Box::new(fetched.clone()))),
-            decoded: Some(decoded),
-            series: None,
-            history_entries: None,
-            observed: None,
-            latency: None,
-        }))
-    };
+    let identity = leak(world.resolve(key));
+    let render =
+        |key: &'static str, read: ValueRead, decoded: &'static zengui::value::DecodedValue| {
+            let fetched = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(read)));
+            simulator::<Message, _, _>(section(DetailData {
+                identity: Some(identity),
+                fetched: Fetched::Landed(fetched),
+                decoded: Some(decoded),
+                ..data(key)
+            }))
+        };
     let decode = |key: &str, body: &[u8], encoding: &str| -> &'static zengui::value::DecodedValue {
-        Box::leak(Box::new(zengui::value::DecodedValue::new(
+        leak(zengui::value::DecodedValue::new(
             world.check(key, body, encoding),
             body,
-        )))
+        ))
     };
 
-    // A v1 key is foreign to the lens: structural, with the rung it
-    // stopped at — never dressed as a decode.
-    let mut ui = render(decode(key, br#"{"value":42.0}"#, "application/json"));
+    // A v1 key is foreign to the lens: a raw GET's answer renders
+    // structurally, with the rung it stopped at — never dressed as a decode.
+    let body = br#"{"value":42.0}"#;
+    let mut ui = render(
+        key,
+        raw(key, body, "application/json"),
+        decode(key, body, "application/json"),
+    );
     assert!(
         ui.find("not zk2").is_ok(),
         "the identity section renders: a v1 key is foreign since the port"
@@ -62,7 +100,7 @@ fn the_detail_pane_tags_decode_provenance() {
         ui.find("contract-decoded <json:NetworkInterface>").is_err(),
         "a sniff never wears a decode's tag"
     );
-    let sniffed = world.check(key, br#"{"value":42.0}"#, "application/json");
+    let sniffed = world.check(key, body, "application/json");
     let zenkey_fleet::report::Rendered::Structural { why, .. } = &sniffed.rendering.rendered else {
         panic!("a v1 key renders structurally")
     };
@@ -70,11 +108,24 @@ fn the_detail_pane_tags_decode_provenance() {
         ui.find(format!("structural — {}", why.words())).is_ok(),
         "where the ladder stopped is said"
     );
+    assert!(ui.find("hex").is_ok(), "the hex side is present");
+    // #563: the value's facts as chips — the read in words, never the
+    // enum's `Debug` name.
+    assert!(ui.find("via raw GET").is_ok());
+    assert!(ui.find("application/json").is_ok());
+    assert!(
+        ui.find("unstamped").is_ok(),
+        "no stamp rode it, and it says so"
+    );
 
     // A zk2 key the lens resolves decodes as its declared type, and says
     // which resource of which revision it resolved to.
     let eth0 = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#;
-    let mut ui = render(decode(common::ETH0, eth0, "application/json"));
+    let mut ui = render(
+        common::ETH0,
+        raw(common::ETH0, eth0, "application/json"),
+        decode(common::ETH0, eth0, "application/json"),
+    );
     assert!(
         ui.find("contract-decoded <json:NetworkInterface>").is_ok(),
         "contract-decoded says so"
@@ -83,45 +134,206 @@ fn the_detail_pane_tags_decode_provenance() {
 
     // Bytes that are not their declared type: the undecodable pole, the
     // sniff beside it tagged as what it is.
-    let mut ui = render(decode(common::NAV_ORIGIN, &[0x0a, 0xff, 0xff, 0xff], ""));
+    let bad = [0x0a, 0xff, 0xff, 0xff];
+    let mut ui = render(
+        common::NAV_ORIGIN,
+        raw(common::NAV_ORIGIN, &bad, ""),
+        decode(common::NAV_ORIGIN, &bad, ""),
+    );
     assert!(
         ui.find("<nav.v2.Origin?> structural (the bytes did not decode as their declared type)")
             .is_ok(),
         "typed-but-undecoded must say so"
     );
-    let mut ui = render(decode(key, br#"{"value":42.0}"#, "application/json"));
-    assert!(ui.find("hex").is_ok(), "the hex side is present");
-    // #563: the value's facts as chips — the ladder's rung in words, never
-    // the enum's `Debug` name.
-    assert!(ui.find("via storage").is_ok());
-    assert!(ui.find("application/json").is_ok());
+}
+
+/// #614 (FL8a): the value names the zk2 read that produced it — S4's owner
+/// GET, its silence, an archive's last-known answer beside it and never as
+/// it, a raw GET — and none of them is ever "no value".
+#[test]
+fn the_value_names_the_zk2_read_that_produced_it() {
+    use zengui::view::detail::LastKnown;
+    let world = common::World::new();
+    let key = common::ETH0;
+    let identity = leak(world.resolve(key));
+    let body = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#;
+    let archive: zenkey_model::grammar::Addr = "ground/archive".parse().expect("an address");
+
+    // The owner answered: decoded through its contract, its stamp's clock
+    // named, and no hex — S4's read keeps none, and says so.
+    let answer = world.state_read(key, Some(body), None);
+    let decoded = answer.decoded.clone().expect("a value row is checked");
+    let fetched = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(
+        ValueRead::Owner(answer),
+    )));
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(identity),
+        fetched: Fetched::Landed(fetched),
+        decoded: Some(leak(decoded).as_ref()),
+        archives: Some(vec![archive.clone()]),
+        ..data(key)
+    }));
+    assert!(ui.find("via owner GET (S4)").is_ok());
+    assert!(ui.find("contract-decoded <json:NetworkInterface>").is_ok());
     assert!(
-        ui.find("value: 14 bytes via Storage · encoding application/json")
-            .is_err(),
-        "the Debug-named line is gone"
+        ui.find("stamp unattributable (O7)").is_ok(),
+        "no descriptor of this world states meta.zid: unattributable, never foreign"
+    );
+    assert!(
+        ui.find("stamp 2026-10-05T09:12:44.250000000Z · clock a1b2c3d4e5f60718")
+            .is_ok()
+    );
+    assert!(
+        ui.find(
+            "no hex — S4's read hands back the owner's reply decoded through its contract, \
+             as `zenctl get state` does; its wire bytes are not kept"
+        )
+        .is_ok()
+    );
+    assert!(
+        ui.find("ask ground/archive").is_ok(),
+        "last-known is a button, never ambient"
     );
 
-    // The attributed nothing.
-    let none: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
-        Ok(Arc::new(FetchOutcome::None {
-            attempted: ["get", "@adv cache", "subscribe window"],
-        }));
+    // The owner silent: silence, not "no value" (S6) — and the archives
+    // stated, or that none is known.
+    let silent = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(
+        ValueRead::Owner(world.state_read(key, None, None)),
+    )));
     let mut ui = simulator::<Message, _, _>(section(DetailData {
-        slot: zengui::message::SlotId::FOLLOW,
-        sp: sp(),
-        key,
         identity: Some(identity),
-        fetched: Fetched::Landed(&none),
-        decoded: None,
-        series: None,
-        history_entries: None,
-        observed: None,
-        latency: None,
+        fetched: Fetched::Landed(silent),
+        ..data(key)
     }));
     assert!(
-        ui.find("no value — asked get, @adv cache, subscribe window — a non-verdict, not proof of absence (RFC 05 §3.1)")
-            .is_ok(),
-        "silence stays attributed"
+        ui.find(
+            "silent — the owner did not answer S4's GET within 5s: not a verdict about the key \
+             (S6). An archive may still hold its last-known value."
+        )
+        .is_ok()
+    );
+    assert!(
+        ui.find("presence not read — no archive.v1 provider is known to ask")
+            .is_ok()
+    );
+    assert!(ui.find("no value").is_err(), "silence is never 'no value'");
+
+    // An archive's answer beside the silence: last-known, never current.
+    let last_known = leak(LastKnown {
+        key: key.to_string(),
+        archive: archive.clone(),
+        answer: Some(Ok(Arc::new(world.state_read(
+            key,
+            Some(body),
+            Some("ground/archive"),
+        )))),
+    });
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(identity),
+        fetched: Fetched::Landed(silent),
+        archives: Some(vec![archive.clone()]),
+        last_known: Some(last_known),
+        ..data(key)
+    }));
+    assert!(
+        ui.find("last-known from ground/archive — not current (S5, S6)")
+            .is_ok()
+    );
+    assert!(ui.find("confirmed by alignment (§4.4)").is_ok());
+    assert!(
+        ui.find("via owner GET (S4)").is_err(),
+        "an archive's answer never wears the owner's"
+    );
+
+    // A foreign key's raw GET, and a raw GET answered by nobody.
+    let foreign = leak(world.resolve(FOREIGN));
+    let read = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(raw(
+        FOREIGN,
+        b"hello",
+        "text/plain",
+    ))));
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(foreign),
+        fetched: Fetched::Landed(read),
+        ..data(FOREIGN)
+    }));
+    assert!(ui.find("via raw GET").is_ok());
+    let nobody = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(
+        ValueRead::Replies(Replies {
+            kind: ReadKind::Raw,
+            selector: FOREIGN.to_string(),
+            replies: Vec::new(),
+            errors: 1,
+            elided: 0,
+            retention: None,
+        }),
+    )));
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(foreign),
+        fetched: Fetched::Landed(nobody),
+        ..data(FOREIGN)
+    }));
+    assert!(
+        ui.find("raw GET: no reply — a non-verdict, not proof of absence (RFC 05 §3.1)")
+            .is_ok()
+    );
+    assert!(
+        ui.find("1 error reply — a refusal is not a value, and not silence")
+            .is_ok()
+    );
+
+    // In flight: asking, never "not asked".
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(identity),
+        fetched: Fetched::Asking(ReadKind::Owner),
+        ..data(key)
+    }));
+    assert!(ui.find("asking — owner GET (S4) …").is_ok());
+}
+
+/// #614 (FL8a): what is not read on selection says why, in the plan's own
+/// terms — an operation is a call, a stream without history keeps nothing,
+/// an event is replayed by button within its retention — and a replay's
+/// silence is the capture's, the bus never asked.
+#[test]
+fn what_is_not_read_says_why() {
+    let world = common::World::new();
+    let draw = |key: &'static str, replaying: bool| {
+        let identity = leak(world.resolve(key));
+        simulator::<Message, _, _>(section(DetailData {
+            identity: Some(identity),
+            replaying,
+            ..data(key)
+        }))
+    };
+    let mut ui = draw(common::POSITION, false);
+    assert!(
+        ui.find(
+            "a stream that declares no history keeps no value to read (§2.5) — watch it to see \
+             its samples"
+        )
+        .is_ok()
+    );
+    let mut ui = draw("zk2/robot1/nav/nav.v2/@op/set_origin", false);
+    assert!(
+        ui.find(
+            "an operation's key holds no value — a GET on it is a call (spec §5), so selecting \
+             it asks nothing"
+        )
+        .is_ok()
+    );
+    let mut ui = draw(common::ETH0, true);
+    assert!(
+        ui.find(
+            "nothing recorded for this key up to the playhead — a replay asks the bus nothing, \
+             so this is the capture's silence, not the bus's"
+        )
+        .is_ok()
+    );
+    assert!(
+        ui.find("LAST-KNOWN (S5) — AN ARCHIVE'S, NEVER CURRENT")
+            .is_err(),
+        "a replay asks no archive"
     );
 }
 
@@ -135,37 +347,26 @@ fn the_detail_pane_tags_decode_provenance() {
 /// was and was not asked.
 #[test]
 fn the_detail_pane_distinguishes_superseded_from_never_asked() {
-    use zengui::view::detail::{DetailData, Fetched, section};
-
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
-    let data = |fetched| DetailData {
-        slot: zengui::message::SlotId::FOLLOW,
-        sp: sp(),
-        key,
-        identity: None,
-        fetched,
-        decoded: None,
-        series: None,
-        history_entries: None,
-        observed: None,
-        latency: None,
-    };
 
-    const NOT_ASKED: &str = "no value fetched — selecting a concrete key \
-                             fetches once (storage → cache → window), nothing \
-                             ambient";
+    const NOT_ASKED: &str = "no value read — selecting a concrete key reads it once, as its \
+                             identity says (the owner's GET for state, a raw GET for a foreign \
+                             key), nothing ambient";
     const SUPERSEDED: &str = "superseded — the last fetch answered a different \
                               subject, so nothing here describes this key. \
                               Re-select it to ask again.";
 
-    let mut ui = simulator::<Message, _, _>(section(data(Fetched::NotAsked)));
+    let mut ui = simulator::<Message, _, _>(section(data(key)));
     assert!(
         ui.find(NOT_ASKED).is_ok(),
         "nothing was asked, and the pane says so"
     );
     assert!(ui.find(SUPERSEDED).is_err());
 
-    let mut ui = simulator::<Message, _, _>(section(data(Fetched::Superseded)));
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        fetched: Fetched::Superseded,
+        ..data(key)
+    }));
     assert!(
         ui.find(SUPERSEDED).is_ok(),
         "an answer that is real but about something else is its own state"
@@ -173,6 +374,94 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
     assert!(
         ui.find(NOT_ASKED).is_err(),
         "and must not be reported as an unasked question"
+    );
+}
+
+/// #120 on zk2 (#614, FL8a): the declared QoS is the resource's (§2.4),
+/// read off the key's identity, and a sample that rode other axes is named
+/// axis by axis with both sides — the wire the fact, the contract the
+/// claim. Reliability is the link's and is not compared.
+#[test]
+fn a_qos_mismatch_is_named_per_axis() {
+    use zengui::history::HistoryEntry;
+    let world = common::World::new();
+    let identity = leak(world.resolve(common::ETH0));
+    let declared =
+        zengui::view::detail::declared_qos(Some(identity)).expect("a state declares QoS");
+    let entry = |priority, qos_recorded| HistoryEntry {
+        seq: 0,
+        received: Instant::now(),
+        timestamp: None,
+        is_delete: false,
+        len: 2,
+        encoding: "application/json".into(),
+        payload: zenoh::bytes::ZBytes::from("{}"),
+        priority,
+        congestion_control: zenoh::qos::CongestionControl::Drop,
+        reliability: zenoh::qos::Reliability::BestEffort,
+        express: false,
+        qos_recorded,
+        source: None,
+        value: None,
+        preview: "{}".into(),
+    };
+    let off = leak(entry(zenoh::qos::Priority::RealTime, true));
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(identity),
+        observed: Some(off),
+        ..data(common::ETH0)
+    }));
+    assert!(
+        ui.find(zengui::view::detail::axes_token(&declared)).is_ok(),
+        "the claim"
+    );
+    assert!(
+        ui.find("real_time/drop/best_effort").is_ok(),
+        "the fact, as the recorder spells it"
+    );
+    assert!(
+        ui.find("observed axes differ from the declared QoS")
+            .is_ok()
+    );
+    assert!(
+        ui.find("the wire is the fact, the contract the claim (§2.4)")
+            .is_ok()
+    );
+    assert!(
+        ui.find(format!(
+            "priority: declared {}, observed real_time",
+            declared.priority
+        ))
+        .is_ok(),
+        "each axis that differs is named with both sides"
+    );
+    if declared.congestion != "drop" {
+        assert!(
+            ui.find(format!(
+                "congestion: declared {}, observed drop",
+                declared.congestion
+            ))
+            .is_ok()
+        );
+    }
+    assert!(
+        ui.find("reliability is the link's, as received — shown, not compared")
+            .is_ok()
+    );
+
+    // A replayed row that recorded no axes draws no verdict at all.
+    let unrecorded = leak(entry(zenoh::qos::Priority::RealTime, false));
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(identity),
+        observed: Some(unrecorded),
+        ..data(common::ETH0)
+    }));
+    assert!(ui.find("QoS not recorded").is_ok());
+    assert!(ui.find("observed axes match the declared QoS").is_err());
+    assert!(
+        ui.find("observed axes differ from the declared QoS")
+            .is_err(),
+        "no verdict from axes a row never recorded"
     );
 }
 
@@ -184,40 +473,26 @@ fn the_inspector_follows_the_subject() {
     use zengui::nodes::NodesState;
     use zengui::view::inspector::pane;
 
-    let slices = slices();
     let nodes = NodesState::default();
-
-    let facts_for = |key: &str| {
-        let mut f = KeyFacts::project("", key);
-        f.resolve(&slices);
-        f
-    };
 
     // Nothing selected: the Inspector holds nothing of its own and says so.
     let none = Subject::None;
-    let mut ui =
-        simulator::<Message, _, _>(pane(projection_inspector(&none, None, &slices, &nodes)));
+    let mut ui = simulator::<Message, _, _>(pane(inspector(&none, None, &nodes)));
     assert!(ui.find("Nothing selected").is_ok());
     assert!(ui.find("Detail").is_err(), "no subject, no sections");
 
     // A prefix is a subtree, and the pane says that rather than reporting
     // "no value fetched" about a key that was never a key (#85).
     let prefix = Subject::Prefix("zk2/robot1/nav".into());
-    let mut ui =
-        simulator::<Message, _, _>(pane(projection_inspector(&prefix, None, &slices, &nodes)));
+    let mut ui = simulator::<Message, _, _>(pane(inspector(&prefix, None, &nodes)));
     assert!(ui.find("A subtree, not a key").is_ok());
     assert!(ui.find("History").is_err(), "a subtree records nothing");
 
     // An ordinary state key: detail and history.
-    let state_key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
-    let state_facts = facts_for(state_key);
-    let key = Subject::Key(state_key.into());
-    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
-        &key,
-        Some(&state_facts),
-        &slices,
-        &nodes,
-    )));
+    let key = Subject::Key(common::ETH0.into());
+    let world = common::World::new();
+    let identity = leak(world.resolve(common::ETH0));
+    let mut ui = simulator::<Message, _, _>(pane(inspector(&key, Some(identity), &nodes)));
     assert!(ui.find("Detail").is_ok());
     assert!(
         ui.find("History").is_ok(),
@@ -227,8 +502,7 @@ fn the_inspector_follows_the_subject() {
     // An address subject (#614, FL9): presence and health, not a value —
     // and with no presence read, "not read", never "nobody there".
     let address = Subject::Address("robot1/nav".parse().expect("an address"));
-    let mut ui =
-        simulator::<Message, _, _>(pane(projection_inspector(&address, None, &slices, &nodes)));
+    let mut ui = simulator::<Message, _, _>(pane(inspector(&address, None, &nodes)));
     assert!(ui.find("robot1/nav").is_ok(), "the subject, restated");
     assert!(ui.find("presence not read").is_ok());
     assert!(
@@ -253,9 +527,8 @@ fn the_inspector_shows_an_address_from_presence_and_its_descriptor() {
     let update = world.presence_update();
     let mut nodes = zengui::nodes::NodesState::default();
     nodes.describe(Some(&world.catalog()));
-    let slices = slices();
     let subject = Subject::Address("robot1/nav".parse().expect("an address"));
-    let mut data = projection_inspector(&subject, None, &slices, &nodes);
+    let mut data = inspector(&subject, None, &nodes);
     data.presence = Some(&update);
     let mut ui = simulator::<Message, _, _>(pane(data));
     assert!(ui.find("robot1/nav: up").is_ok());
@@ -277,7 +550,7 @@ fn the_inspector_shows_an_address_from_presence_and_its_descriptor() {
 #[test]
 fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
     use zengui::series::{NumericLeaves, RateSampler, Series};
-    use zengui::view::detail::{DetailData, Fetched, SeriesData, section};
+    use zengui::view::detail::SeriesData;
 
     let series = SeriesData {
         leaves: NumericLeaves::default(),
@@ -288,16 +561,9 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
-        slot: zengui::message::SlotId::FOLLOW,
-        sp: sp(),
-        key: FOREIGN,
-        identity: None,
-        fetched: Fetched::NotAsked,
-        decoded: None,
         series: Some(&series),
         history_entries: Some(3),
-        observed: None,
-        latency: None,
+        ..data(FOREIGN)
     }));
     assert!(
         ui.find("Series").is_err(),
@@ -315,7 +581,7 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
 #[test]
 fn the_detail_pane_labels_the_series_it_plots() {
     use zengui::series::{Series, numeric_leaves};
-    use zengui::view::detail::{DetailData, Fetched, SeriesData, section};
+    use zengui::view::detail::SeriesData;
 
     let mut value = Series::new();
     value.push(41.0);
@@ -333,16 +599,9 @@ fn the_detail_pane_labels_the_series_it_plots() {
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
-        slot: zengui::message::SlotId::FOLLOW,
-        sp: sp(),
-        key: REGISTERED,
-        identity: None,
-        fetched: Fetched::NotAsked,
-        decoded: None,
         series: Some(&series),
         history_entries: Some(3),
-        observed: None,
-        latency: None,
+        ..data(REGISTERED)
     }));
     assert!(ui.find("Series").is_ok());
     assert!(
@@ -367,41 +626,41 @@ fn the_detail_pane_labels_the_series_it_plots() {
         .is_ok(),
         "the boundary of what can be plotted is stated, not left to be discovered"
     );
-}
 
-// ── The engine's projections, consumed (#234) ────────────────────────────
-
-/// A two-subject slice plus a ledger entry — v1's declared world, which the
-/// type section still reads until FL8 moves it.
-fn projection_fixture() -> SliceSet {
-    use zenkey_v1::slice::{DeprecationDecl, RegistrySlice, SubjectDecl};
-
-    let subject = |path: &str| {
-        let mut d = SubjectDecl::new(path, zenkey_v1::Class::State);
-        d.type_name = "Health".into();
-        d
+    // Without a declared unit — every zk2 contract — the axis says it has
+    // none rather than guess one (#614, FL8a).
+    drop(ui);
+    let unitless = SeriesData {
+        unit: None,
+        ..series
     };
-    let mut retired = DeprecationDecl::new("old/health");
-    retired.since = Some("0.9".into());
-    retired.replaced_by = Some("health".into());
-    let mut slice = RegistrySlice::new("1.0", "demo", "sysinfo");
-    slice.subjects = vec![subject("health"), subject("mode")];
-    slice.deprecated = vec![retired];
-    SliceSet::from_slices(vec![slice])
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        series: Some(&unitless),
+        ..data(REGISTERED)
+    }));
+    assert!(
+        ui.find(
+            "no unit — a zk2 contract declares none, so the axis is unitless rather than guessed"
+        )
+        .is_ok()
+    );
 }
 
-fn projection_inspector<'a>(
+// ── The declared type (#234; zk2's since #614, FL8a) ─────────────────────
+
+fn inspector<'a>(
     subject: &'a zengui::message::Subject,
-    facts: Option<&'a KeyFacts>,
-    slices: &'a SliceSet,
+    identity: Option<&'a zenkey_fleet::Resolution>,
     nodes: &'a zengui::nodes::NodesState,
 ) -> zengui::view::inspector::InspectorData<'a> {
     zengui::view::inspector::InspectorData {
         slot: zengui::message::SlotId::FOLLOW,
         subject,
-        identity: None,
-        v1: facts.cloned(),
+        identity,
         fetched: zengui::view::detail::Fetched::NotAsked,
+        replaying: false,
+        archives: None,
+        last_known: None,
         decoded: None,
         series: None,
         history: None,
@@ -410,7 +669,6 @@ fn projection_inspector<'a>(
         snapshot: None,
         compare_snapshot: false,
         latency: None,
-        slices: Some(slices),
         presence: None,
         nodes,
         fields: Box::leak(Box::default()),
@@ -420,38 +678,60 @@ fn projection_inspector<'a>(
     }
 }
 
-/// The type-subject arm (#234): a registered key's payload type is placed in
-/// the registry vocabulary (`interface_list`) and its carriers listed
-/// (`interface_show`) — who else speaks this type, without a slice scan of
-/// the pane's own.
+/// The type-subject arm (#234), on zk2: a resolved key's declared type as
+/// the contract names it — its kind, its name, the artifact it lives in —
+/// and the members of the revision that carry it, from the revision's own
+/// schema view.
 #[test]
-fn the_inspector_places_a_registered_type_in_the_vocabulary() {
+fn the_inspector_places_a_declared_type_in_its_revision() {
     use zengui::message::Subject;
 
-    let slices = projection_fixture();
+    let world = common::World::new();
     let nodes = zengui::nodes::NodesState::default();
+    let identity = leak(world.resolve(common::ETH0));
+    let subject = Subject::Key(common::ETH0.into());
 
-    let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
-    let mut facts = KeyFacts::project("", key);
-    facts.resolve(&slices);
-    let subject = Subject::Key(key.into());
-
-    let mut ui = simulator::<Message, _, _>(zengui::view::inspector::pane(projection_inspector(
+    let mut ui = simulator::<Message, _, _>(zengui::view::inspector::pane(inspector(
         &subject,
-        Some(&facts),
-        &slices,
+        Some(identity),
         &nodes,
     )));
     assert!(ui.find("Type").is_ok());
+    assert!(ui.find("jsonschema").is_ok(), "the type's kind");
+    let resolved = identity.resolved.as_ref().expect("resolved");
+    let name = zengui::keyfacts::type_name(resolved);
+    let view = resolved
+        .revision
+        .schema_view(None, false)
+        .expect("the revision's schema view");
+    let carriers = view.members.iter().filter(|m| m.type_.name == name).count();
     assert!(
-        ui.find("Health — one of 1 declared payload type(s), carried by 2 declaration(s)")
-            .is_ok(),
-        "the vocabulary placement is the engine's interface_list"
+        ui.find(format!(
+            "{name} — carried by {} of tc.netif.v1's {} members",
+            if carriers == 1 {
+                "1 member".to_string()
+            } else {
+                format!("{carriers} members")
+            },
+            view.members.len()
+        ))
+        .is_ok(),
+        "the type's place in its revision"
     );
     assert!(
-        ui.find("sysinfo · state mode").is_ok(),
-        "interface_show names the other carrier of the same type"
+        ui.find("state/interfaces/{ns}/{iface} · type").is_ok(),
+        "each carrier, by resource and member"
     );
+
+    // A foreign key has no declared type, and no section claims one.
+    let foreign = leak(world.resolve(FOREIGN));
+    let subject = Subject::Key(FOREIGN.into());
+    let mut ui = simulator::<Message, _, _>(zengui::view::inspector::pane(inspector(
+        &subject,
+        Some(foreign),
+        &nodes,
+    )));
+    assert!(ui.find("Type").is_err());
 }
 
 /// #164, on zk2's four poles (#614, FL6a): the decoded pane renders the
@@ -463,39 +743,21 @@ fn the_inspector_places_a_registered_type_in_the_vocabulary() {
 /// not "not a zk2 data key" (nothing to ask).
 #[test]
 fn the_decoded_pane_keeps_the_four_conformance_poles_apart() {
-    use std::sync::Arc;
-    use zengui::view::detail::{DetailData, Fetched, section};
-    use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
-
     let world = common::World::new();
     let render = |key: &'static str, body: &'static [u8], encoding: &str| {
-        let fetched: &'static Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
-            Box::leak(Box::new(Ok(Arc::new(FetchOutcome::Value(FetchedValue {
-                key: key.to_string(),
-                payload: zenoh::bytes::ZBytes::from(body.to_vec()),
-                encoding: encoding.into(),
-                timestamp: None,
-                attachment: None,
-                source: ValueSource::Storage,
-            })))));
-        // Leaked so the simulator may outlive the block — a test-only cost,
-        // bounded by the calls below.
-        let decoded: &'static zengui::value::DecodedValue = Box::leak(Box::new(
-            zengui::value::DecodedValue::new(world.check(key, body, encoding), body),
+        let fetched = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(raw(
+            key, body, encoding,
+        ))));
+        let decoded: &'static zengui::value::DecodedValue = leak(zengui::value::DecodedValue::new(
+            world.check(key, body, encoding),
+            body,
         ));
         (
             decoded,
             simulator::<Message, _, _>(section(DetailData {
-                slot: zengui::message::SlotId::FOLLOW,
-                key,
-                identity: None,
                 fetched: Fetched::Landed(fetched),
                 decoded: Some(decoded),
-                series: None,
-                history_entries: None,
-                observed: None,
-                latency: None,
-                sp: sp(),
+                ..data(key)
             })),
         )
     };
@@ -569,22 +831,12 @@ fn the_decoded_pane_keeps_the_four_conformance_poles_apart() {
 /// that it is no zk2 key — a fact, not an error (O1).
 #[test]
 fn the_detail_pane_states_a_keys_identity() {
-    use zengui::view::detail::{DetailData, Fetched, section};
-
     let world = common::World::new();
     let draw = |key: &'static str| {
-        let identity: &'static zenkey_fleet::Resolution = Box::leak(Box::new(world.resolve(key)));
+        let identity = leak(world.resolve(key));
         simulator::<Message, _, _>(section(DetailData {
-            slot: zengui::message::SlotId::FOLLOW,
-            sp: sp(),
-            key,
             identity: Some(identity),
-            fetched: Fetched::NotAsked,
-            decoded: None,
-            series: None,
-            history_entries: None,
-            observed: None,
-            latency: None,
+            ..data(key)
         }))
     };
 
@@ -625,4 +877,98 @@ fn the_detail_pane_states_a_keys_identity() {
             .is_ok(),
         "the rung's own words, and that it is no error"
     );
+}
+
+/// #614 (FL8a): the status strip's fetched cell names the zk2 read — "owner
+/// GET (S4)", "silent", "raw GET" — and an archive's answer beside it,
+/// "last-known from <archive> — not current", never in its place.
+#[test]
+fn the_strip_names_the_zk2_read_and_last_known_beside_it() {
+    use zengui::view::detail::LastKnown;
+    use zengui::view::status::{self, Status};
+
+    type Read = (
+        String,
+        Result<Arc<ValueRead>, zengui::services::ServiceError>,
+    );
+    fn shows(fetched: &Read, last_known: Option<&LastKnown>, text: &str) -> bool {
+        let link = zengui::message::LinkState::Pumping;
+        let watched: Vec<String> = vec![];
+        let mut ui = simulator::<Message, _, _>(status::strip(Status {
+            link: &link,
+            namespace_label: "(bus root)",
+            watched: &watched,
+            skeleton: None,
+            keys_unwatched: 0,
+            fetched: Some(fetched),
+            last_known,
+            scope_label: "all",
+            scope_coverage: "",
+            keys: 0,
+            keys_evicted: 0,
+            identity: (0, 0),
+            totals: Default::default(),
+            contracts: Default::default(),
+            presence: None,
+            seeding: 0,
+            seeded_watches: 0,
+            seed_totals: Default::default(),
+            unreachable: false,
+            prefs_note: None,
+            replaying: false,
+            retention: None,
+        }));
+        ui.find(text).is_ok()
+    }
+
+    let world = common::World::new();
+    let key = common::ETH0;
+    let body = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#;
+    let answered: Read = (
+        key.to_string(),
+        Ok(Arc::new(ValueRead::Owner(world.state_read(
+            key,
+            Some(body),
+            None,
+        )))),
+    );
+    assert!(shows(
+        &answered,
+        None,
+        &format!("fetched {key}: owner GET (S4): 60 B")
+    ));
+
+    let silent: Read = (
+        key.to_string(),
+        Ok(Arc::new(ValueRead::Owner(
+            world.state_read(key, None, None),
+        ))),
+    );
+    let lk = LastKnown {
+        key: key.to_string(),
+        archive: "ground/archive".parse().expect("an address"),
+        answer: Some(Ok(Arc::new(world.state_read(
+            key,
+            Some(body),
+            Some("ground/archive"),
+        )))),
+    };
+    assert!(shows(
+        &silent,
+        Some(&lk),
+        &format!(
+            "fetched {key}: silent — owner GET (S4) unanswered in 5s (not a verdict) · \
+             last-known from ground/archive — not current"
+        )
+    ));
+
+    let foreign: Read = (
+        FOREIGN.to_string(),
+        Ok(Arc::new(raw(FOREIGN, b"hello", "text/plain"))),
+    );
+    assert!(shows(
+        &foreign,
+        None,
+        &format!("fetched {FOREIGN}: raw GET: 5 B")
+    ));
 }

@@ -236,10 +236,11 @@ fn a_loaded_snapshot_is_held_beside_the_live_world_not_instead_of_it() {
     );
     assert!(app.work.replay.snapshot_note.is_some());
 
-    let snapshot = std::sync::Arc::new(zenkey_fleet_v1::Snapshot {
-        header: zenkey_fleet_v1::ZsnapHeader {
-            zsnap: zenkey_fleet_v1::ZSNAP_VERSION,
-            selectors: vec!["v1/**".into()],
+    // A `.zsnap` v2 (#614, FL8b): zk2's owners' state, no presence read.
+    let snapshot = std::sync::Arc::new(zenkey_fleet::Snapshot {
+        header: zenkey_fleet::ZsnapHeader {
+            zsnap: zenkey_fleet::ZSNAP_VERSION,
+            selectors: vec!["zk2/*/*/*/state/**".into()],
             base: String::new(),
             collected_at: "2026-09-06T00:00:00Z".into(),
             collection_span_s: 0.4,
@@ -247,8 +248,9 @@ fn a_loaded_snapshot_is_held_beside_the_live_world_not_instead_of_it() {
             answered: 0,
             elided: 0,
             errors: 0,
+            discarded: 0,
             superseded: 0,
-            roster: zenkey_fleet_v1::report::Asked::NotAsked,
+            presence: None,
         },
         rows: Vec::new(),
     });

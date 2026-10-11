@@ -248,3 +248,118 @@ fn the_history_pane_counts_what_it_evicted() {
         "what the bound cost is a fact on screen"
     );
 }
+
+/// The `.zsnap` v2 compare (#219; #614, FL8b): the newest sample against
+/// the snapshot's row for the key, captioned with the snapshot's moment and
+/// span, and with what the snapshot established of its row — the key's
+/// identity at collection, the payload against its declared type, whose
+/// clock stamped it, and who held it: evidence, not inference.
+#[test]
+fn the_history_pane_compares_against_a_v2_snapshot_row() {
+    use zengui::view::history::{HistoryData, section};
+    use zenkey_fleet::report::{
+        AnsweredBy, Conformance, Holder, KeyGroup, KeyIdentity, StamperWire,
+    };
+
+    let key = common::ETH0;
+    let rec = recording(
+        key,
+        8,
+        &[(br#"{"name":"eth0","index":2,"is_up":false}"#, false)],
+    );
+    let header = zenkey_fleet::ZsnapHeader {
+        zsnap: zenkey_fleet::ZSNAP_VERSION,
+        selectors: vec!["zk2/*/*/*/state/**".into()],
+        base: String::new(),
+        collected_at: "2026-10-05T03:00:00Z".into(),
+        collection_span_s: 0.42,
+        asked: 1,
+        answered: 1,
+        elided: 0,
+        errors: 0,
+        discarded: 0,
+        superseded: 0,
+        presence: None,
+    };
+    let row = zenkey_fleet::SnapshotRow {
+        key: key.into(),
+        identity: KeyIdentity {
+            group: KeyGroup::Resource {
+                address: "host-a/tc".into(),
+                iface: "tc.netif.v1".into(),
+                token: "state".into(),
+                resource: Some("state/interfaces/{ns}/{iface}".into()),
+            },
+            values: Default::default(),
+            unresolved: None,
+        },
+        delete: false,
+        // {"name":"eth0","index":2,"is_up":true}
+        bytes: Some("eyJuYW1lIjoiZXRoMCIsImluZGV4IjoyLCJpc191cCI6dHJ1ZX0=".into()),
+        encoding: Some("application/json".into()),
+        timestamp: Some("2026-10-05T02:59:59Z/a1b2".into()),
+        stamper: Some(StamperWire::Owner { id: "a1b2".into() }),
+        source_zid: Some("a1b2".into()),
+        conformance: Conformance::Valid,
+        holder: Holder::Live {
+            address: "host-a/tc".into(),
+            answered_by: AnsweredBy::Owner,
+        },
+    };
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
+        sp: sp(),
+        key: Some(key),
+        recorder: Some(&rec),
+        watched: true,
+        scroll: Default::default(),
+        snapshot: Some((&row, &header)),
+        compare_snapshot: true,
+    }));
+    assert!(
+        ui.find("snapshot 2026-10-05T03:00:00Z (over 0.42s) → newest sample")
+            .is_ok(),
+        "a snapshot is collected over a span, never at an instant"
+    );
+    assert!(
+        ui.find("resolved").is_ok(),
+        "the row's identity at collection"
+    );
+    assert!(ui.find("valid").is_ok(), "its payload against its type");
+    assert!(
+        ui.find(
+            "held by host-a/tc, alive at collection — answered by the owner's own session (S4)"
+        )
+        .is_ok()
+    );
+    assert!(ui.find("stamped by the owner's clock (a1b2, S1)").is_ok());
+    assert!(
+        ui.find("~ is_up  true → false").is_ok(),
+        "the snapshot's value against the newest sample, field by field"
+    );
+
+    // A value no instance held at collection: said, never attributed.
+    let gone = zenkey_fleet::SnapshotRow {
+        holder: Holder::NoInstance {
+            address: "host-a/tc".into(),
+        },
+        ..row.clone()
+    };
+    let mut ui = simulator::<Message, _, _>(section(HistoryData {
+        slot: zengui::message::SlotId::FOLLOW,
+        sp: sp(),
+        key: Some(key),
+        recorder: Some(&rec),
+        watched: true,
+        scroll: Default::default(),
+        snapshot: Some((&gone, &header)),
+        compare_snapshot: true,
+    }));
+    assert!(
+        ui.find(
+            "a value answered and no instance of host-a/tc was present at collection — an \
+             owner gone, or a store answering on its keys, which S4 forbids"
+        )
+        .is_ok()
+    );
+}

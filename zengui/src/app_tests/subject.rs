@@ -1,4 +1,6 @@
-//! The subject: revealing, pointing, symbolic keys, and a stale fetch.
+//! The subject: revealing, pointing, symbolic keys, a stale fetch, and the
+//! read a selection makes — by resolution, never under `@op`, and never
+//! during a replay (#614, FL8a).
 
 use super::*;
 
@@ -175,7 +177,7 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
     use std::sync::Arc;
 
     use crate::message::RightPane;
-    use zenkey_fleet_v1::FetchOutcome;
+    use crate::value::{ReadKind, Replies, ValueRead};
 
     let mut app = test_app();
     let stale = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
@@ -191,9 +193,14 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
     app.sub.follow.decoded = None;
     app.work.right_pane = RightPane::Nodes;
 
-    let late = Arc::new(FetchOutcome::None {
-        attempted: ["storage", "cache", "window"],
-    });
+    let late = Arc::new(ValueRead::Replies(Replies {
+        kind: ReadKind::Raw,
+        selector: stale.to_string(),
+        replies: Vec::new(),
+        errors: 0,
+        elided: 0,
+        retention: None,
+    }));
     let _ = app.update(Message::Subject(SubjectMsg::ValueFetched(
         stale.to_string(),
         Ok(late),
@@ -221,4 +228,284 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
         Some(_) => "superseded",
     };
     assert_eq!(data(&app.sub), "superseded");
+}
+
+/// A window with both sessions open — peers listening on an ephemeral
+/// loopback port, nothing else on the bus — and the walkthrough's contracts
+/// held, so a `nav.v2` key resolves offline and a read has a session to go
+/// out on (#614, FL8a). Its reads wait `timeout_s`.
+async fn with_sessions(timeout_s: u64) -> Zengui {
+    use crate::message::BusMsg;
+    let raw = zenkey_fleet::open_reporting(None, &[], &["tcp/127.0.0.1:0".into()], Some(false))
+        .await
+        .expect("a raw session opens");
+    let session =
+        zenkey_fleet::open_in_namespace("", None, &[], &["tcp/127.0.0.1:0".into()], Some(false))
+            .await
+            .expect("a session in the namespace opens");
+    let mut settings = crate::app::test_settings();
+    settings.timeout_secs = timeout_s;
+    let mut app = Zengui::with_prefs(settings, crate::prefs::Prefs::default(), None).0;
+    let _ = app.update(Message::Bus(BusMsg::SessionsOpened(Ok(
+        crate::services::link::Sessions {
+            raw,
+            session,
+            namespace: String::new(),
+        },
+    ))));
+    let walkthrough =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+    let _ = app.update(Message::Bus(BusMsg::ContractsLoaded(Arc::new(
+        crate::services::contracts::load_all(&[walkthrough]),
+    ))));
+    app
+}
+
+/// #614 (FL8a): a state key's read is S4's owner GET — asked on the session
+/// in the namespace, at the key the identity names — and an owner nobody
+/// runs answers with silence: a read with no row, never "no value", and the
+/// question no longer pending.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_state_keys_read_is_the_owner_get_and_an_absent_owner_is_silent() {
+    use crate::value::{ReadKind, ValueRead};
+    let mut app = with_sessions(1).await;
+    let key = "zk2/robot1/nav/nav.v2/state/status";
+    let read = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        key.to_string(),
+    ))));
+    assert_eq!(
+        app.sub.follow.asked,
+        Some((key.to_string(), ReadKind::Owner)),
+        "the question is the owner's GET"
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        super::drive(&mut app, read),
+    )
+    .await
+    .expect("the GET ends at its timeout");
+    assert!(app.sub.follow.asked.is_none(), "answered, so not pending");
+    let Some((k, Ok(read))) = app.sub.follow.fetched.as_ref() else {
+        panic!("the read landed")
+    };
+    assert_eq!(k, key);
+    let ValueRead::Owner(answer) = read.as_ref() else {
+        panic!("a state key is read by its owner's GET")
+    };
+    assert_eq!(
+        answer.report.selectors,
+        [key],
+        "addressed to the key itself"
+    );
+    assert!(answer.row().is_none(), "nobody answered: silence");
+    assert!(
+        crate::view::detail::read_summary(read).starts_with("silent — owner GET (S4)"),
+        "and the strip says so"
+    );
+}
+
+/// #614 (FL6b, FL8a): nothing is read under `@op` — a GET there is a call
+/// (spec §5) — nor for a stream that declares no history, which keeps no
+/// value to read; with both sessions open, neither selection asks a thing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn no_read_under_op_or_for_a_stream_without_history() {
+    let mut app = with_sessions(1).await;
+    for key in [
+        "zk2/robot1/nav/nav.v2/@op/set_origin",
+        "zk2/robot1/nav/nav.v2/stream/position",
+    ] {
+        let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+            key.to_string(),
+        ))));
+        assert!(app.sub.follow.asked.is_none(), "{key}: nothing asked");
+        assert!(app.sub.follow.fetched.is_none(), "{key}: nothing landed");
+    }
+    assert_eq!(
+        crate::value::plan("zk2/robot1/nav/nav.v2/@op/set_origin", None),
+        crate::value::ReadPlan::NotRead(crate::value::NotRead::Operation),
+        "refused before the identity is even consulted"
+    );
+}
+
+/// #614 (FL8a; FL10 found the opposite): a selection during a replay asks
+/// the bus nothing, even with both sessions open — its value is the
+/// capture's latest row for the key at the playhead, checked through the
+/// replay's own lens and landing under the replay's id. A live read that
+/// lands meanwhile is about another world and is dropped; leaving the
+/// replay reads the key live again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_selection_during_a_replay_asks_the_bus_nothing() {
+    use crate::replay::{LoadedReplay, ReplayState};
+    use crate::value::{ReadKind, Replies, ValueRead};
+    use crate::view::replay::ReplayMsg;
+
+    let mut app = with_sessions(1).await;
+    let key = "demo/example/foo";
+    let file = [
+        r#"{"zrec":3,"selectors":["**"],"base":"","captured_at":"2026-10-05T03:00:00Z","excluded":["@stream","@state","@op","@zk","@adv"]}"#,
+        r#"{"key":"demo/example/foo","t":0,"bytes":"aGVsbG8gIzA=","encoding":"text/plain","qos_axes":"data/drop/best_effort"}"#,
+        r#"{"key":"demo/example/foo","t":1000000,"bytes":"aGVsbG8gIzE=","encoding":"text/plain","qos_axes":"data/drop/best_effort"}"#,
+    ]
+    .join("\n");
+    let state = ReplayState::load("capture.zrec", file.as_bytes()).expect("a capture");
+    let id = state.id();
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Loaded("capture.zrec".into(), Ok(LoadedReplay::new(state))),
+    )));
+
+    let check = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        key.to_string(),
+    ))));
+    assert!(
+        app.sub.follow.asked.is_none(),
+        "no read went out, though both sessions are open"
+    );
+    let recorded_at = |app: &Zengui| match app.sub.follow.fetched.as_ref() {
+        Some((_, Ok(read))) => match read.as_ref() {
+            ValueRead::Recorded { t_us, reply, .. } => {
+                Some((*t_us, reply.payload.to_bytes().to_vec()))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    assert_eq!(
+        recorded_at(&app),
+        Some((0, b"hello #0".to_vec())),
+        "the capture's row at the playhead"
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        super::drive(&mut app, check),
+    )
+    .await
+    .expect("the offline check settles");
+    assert!(
+        app.sub.follow.decoded.is_some(),
+        "checked through the replay's lens, landing under its id ({id})"
+    );
+
+    // The playhead moves: the value is the capture's row there.
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Scrubbed(1_000_000),
+    )));
+    assert_eq!(recorded_at(&app), Some((1_000_000, b"hello #1".to_vec())));
+
+    // A live answer landing now is about the bus, and dropped.
+    let live = Arc::new(ValueRead::Replies(Replies {
+        kind: ReadKind::Raw,
+        selector: key.to_string(),
+        replies: Vec::new(),
+        errors: 0,
+        elided: 0,
+        retention: None,
+    }));
+    let _ = app.update(Message::Subject(SubjectMsg::ValueFetched(
+        key.to_string(),
+        Ok(live),
+    )));
+    assert!(recorded_at(&app).is_some(), "the capture's value stays");
+    // Nor does an archive get asked: a replay asks the bus nothing.
+    let _ = app.update(Message::Pane(crate::message::PaneMsg::Detail(
+        crate::message::SlotId::FOLLOW,
+        crate::view::detail::DetailMsg::LastKnown("ground/archive".parse().expect("an address")),
+    )));
+    assert!(app.sub.follow.last_known.is_none());
+
+    // Leaving reads the key live again: a raw GET for a foreign key.
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Exit,
+    )));
+    assert!(
+        recorded_at(&app).is_none(),
+        "the file's value stays with the file"
+    );
+    assert_eq!(
+        app.sub.follow.asked,
+        Some((key.to_string(), ReadKind::Raw)),
+        "and the live read is a raw GET, labelled raw"
+    );
+
+    // A key the capture never carried: silence during the replay, a live
+    // read once it ends.
+    let state = ReplayState::load("capture.zrec", file.as_bytes()).expect("a capture");
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Loaded("capture.zrec".into(), Ok(LoadedReplay::new(state))),
+    )));
+    let quiet = "demo/example/bar";
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        quiet.to_string(),
+    ))));
+    assert!(app.sub.follow.fetched.is_none() && app.sub.follow.asked.is_none());
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Exit,
+    )));
+    assert_eq!(
+        app.sub.follow.asked,
+        Some((quiet.to_string(), ReadKind::Raw)),
+        "the capture's silence stays with the file too"
+    );
+}
+
+/// #614 (FL8a; S5, S6): last-known is asked by the button, of the archive
+/// named, and lands beside the owner's read — never in its place; an
+/// archive nobody runs holds nothing, said as such. (During a replay the
+/// button asks nothing: the replay test pins it.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_last_known_read_is_asked_by_button_and_never_during_a_replay() {
+    use crate::message::PaneMsg;
+    use crate::view::detail::DetailMsg;
+    let mut app = with_sessions(1).await;
+    let key = "zk2/robot1/nav/nav.v2/state/status";
+    let read = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        key.to_string(),
+    ))));
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        super::drive(&mut app, read),
+    )
+    .await
+    .expect("the owner GET settles");
+    let archive: zenkey_model::grammar::Addr = "ground/archive".parse().expect("an address");
+    let ask = app.update(Message::Pane(PaneMsg::Detail(
+        crate::message::SlotId::FOLLOW,
+        DetailMsg::LastKnown(archive.clone()),
+    )));
+    let asked = app.sub.follow.last_known.as_ref().expect("asked");
+    assert_eq!((asked.key.as_str(), &asked.archive), (key, &archive));
+    assert!(asked.answer.is_none(), "in flight");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        super::drive(&mut app, ask),
+    )
+    .await
+    .expect("the archive's GET settles");
+    let Some(Ok(answer)) = app
+        .sub
+        .follow
+        .last_known
+        .as_ref()
+        .and_then(|l| l.answer.as_ref())
+    else {
+        panic!("the archive's answer landed")
+    };
+    assert_eq!(
+        answer.report.reading,
+        zenkey_fleet::report::StateReading::LastKnown
+    );
+    assert_eq!(answer.report.archive.as_deref(), Some("ground/archive"));
+    assert!(answer.row().is_none(), "no archive runs: it holds nothing");
+    assert!(
+        matches!(
+            app.sub.follow.fetched.as_ref(),
+            Some((_, Ok(r))) if matches!(r.as_ref(), crate::value::ValueRead::Owner(_))
+        ),
+        "the owner's read stays the value"
+    );
+
+    // A new subject forgets the archive's answer about the old one.
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        "zk2/robot1/nav/nav.v2/state/origin".to_string(),
+    ))));
+    assert!(app.sub.follow.last_known.is_none());
 }

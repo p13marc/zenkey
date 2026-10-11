@@ -65,12 +65,9 @@ pub struct HistoryData<'a> {
     pub watched: bool,
     /// Scroll position + viewport height, driving the virtual window (#183).
     pub scroll: crate::view::kit::Viewport,
-    /// The loaded `.zsnap`'s row for this key and the file's header (#219),
-    /// when a snapshot is loaded and carries the key.
-    pub snapshot: Option<(
-        &'a zenkey_fleet_v1::SnapshotRow,
-        &'a zenkey_fleet_v1::ZsnapHeader,
-    )>,
+    /// The loaded `.zsnap`'s row for this key and the file's header (#219;
+    /// v2's since #614, FL8b), when a snapshot is loaded and carries the key.
+    pub snapshot: Option<(&'a zenkey_fleet::SnapshotRow, &'a zenkey_fleet::ZsnapHeader)>,
     /// Whether the panel compares against that row rather than the
     /// previous sample.
     pub compare_snapshot: bool,
@@ -235,11 +232,14 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
 
 /// The newest sample against the snapshot's row for the key (#219): the
 /// same pair renderer as the timeline diff, with the left column captioned
-/// by the snapshot's moment and span.
+/// by the snapshot's moment and span — and, since `.zsnap` v2 (#614,
+/// FL8b), what the snapshot established of its row: the key's identity at
+/// collection, the payload against its declared type, whose clock stamped
+/// it (O7), and who held it — evidence, not inference.
 fn snapshot_section<'a>(
     rec: &HistoryRecorder,
-    row: &zenkey_fleet_v1::SnapshotRow,
-    header: &zenkey_fleet_v1::ZsnapHeader,
+    row: &zenkey_fleet::SnapshotRow,
+    header: &zenkey_fleet::ZsnapHeader,
     sp: Spacing,
 ) -> Element<'a, Message> {
     let mut col = Column::new().spacing(sp.xs);
@@ -247,6 +247,24 @@ fn snapshot_section<'a>(
         "snapshot {} (over {:.2}s) → newest sample",
         header.collected_at, header.collection_span_s
     )));
+    col = col.push(
+        row![
+            kit::tone_badge(
+                crate::keyfacts::Rung::of(&row.identity).tone(),
+                crate::keyfacts::Rung::of(&row.identity).label(),
+            ),
+            kit::badge_verdict(
+                crate::verdict::tone(&row.conformance),
+                crate::verdict::label(&row.conformance),
+            ),
+        ]
+        .spacing(sp.xs)
+        .align_y(iced::Alignment::Center),
+    );
+    col = col.push(kit::muted(holder_line(&row.holder)));
+    if let Some(stamper) = &row.stamper {
+        col = col.push(kit::muted(stamper_line(stamper)));
+    }
     let Some(newest) = rec.ring.newest() else {
         return col
             .push(kit::muted(
@@ -262,6 +280,42 @@ fn snapshot_section<'a>(
         sp,
     ))
     .into()
+}
+
+/// Who held a snapshot row's value, in words (`.zsnap` v2): evidence from
+/// the presence read, never inferred from the reply alone.
+pub fn holder_line(holder: &zenkey_fleet::report::Holder) -> String {
+    use zenkey_fleet::report::{AnsweredBy, Holder};
+    match holder {
+        Holder::Live {
+            address,
+            answered_by,
+        } => format!(
+            "held by {address}, alive at collection — {}",
+            match answered_by {
+                AnsweredBy::Owner => "answered by the owner's own session (S4)",
+                AnsweredBy::Other => "answered by another session than the owner's",
+                AnsweredBy::Unknown => "the replier unattributable (O7)",
+            }
+        ),
+        Holder::NoInstance { address } => format!(
+            "a value answered and no instance of {address} was present at collection — an \
+             owner gone, or a store answering on its keys, which S4 forbids"
+        ),
+        Holder::Unattributed { reason } => format!("holder unattributed — {reason}"),
+    }
+}
+
+/// Whose clock stamped a snapshot row's value (O7), in words.
+pub fn stamper_line(stamper: &zenkey_fleet::report::StamperWire) -> String {
+    use zenkey_fleet::report::StamperWire;
+    match stamper {
+        StamperWire::Owner { id } => format!("stamped by the owner's clock ({id}, S1)"),
+        StamperWire::Other { id } => format!("stamped by another clock ({id}) — not the owner's"),
+        StamperWire::Unattributable { id } => {
+            format!("stamped by {id} — unattributable: nothing names the owner's clock (O7)")
+        }
+    }
 }
 
 /// One timeline row.

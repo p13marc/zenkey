@@ -118,7 +118,6 @@ mod tests {
                     "settings",
                     "raw",
                     "session",
-                    "schema_store",
                     // FL6b: zk2's contract skeleton, what it was built from
                     // (the lens's inputs, by identity) and the admin space's
                     // declared entities — the declared keyspace of the
@@ -208,6 +207,11 @@ mod tests {
                     "current",
                     "selected_latency",
                     "fetched",
+                    // FL8a: the read in flight and the question it asked,
+                    // and an archive's last-known answer beside the read —
+                    // both about one key, dropped when the subject moves.
+                    "asked",
+                    "last_known",
                     "decoded",
                     "history_scroll",
                     "history",
@@ -383,7 +387,9 @@ mod tests {
         // skeleton — 96. Then FL9: v1's roster and its `node_info` detail
         // became the one per-address `nodes` — 95. Then FL11: the blob
         // browser, the media viewer and the Config tool's form went with
-        // their surfaces — 92.
-        assert_eq!(leaves, 92, "the split must place every field exactly once");
+        // their surfaces — 92. Then FL8a: a slot's read in flight and its
+        // archive's last-known answer — 94. Then FL8b: v1's schema store
+        // went with the last v1 pane that read it, fields — 93.
+        assert_eq!(leaves, 93, "the split must place every field exactly once");
     }
 }

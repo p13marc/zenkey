@@ -33,6 +33,7 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         skeleton: None,
         keys_unwatched: 0,
         fetched: None,
+        last_known: None,
         scope_label: "all",
         scope_coverage: "",
         keys: 0,

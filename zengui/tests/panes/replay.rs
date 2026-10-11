@@ -125,6 +125,7 @@ fn the_strip_reports_replay_over_the_link() {
         skeleton: None,
         keys_unwatched: 0,
         fetched: None,
+        last_known: None,
         scope_label: "all",
         scope_coverage: "",
         keys: 3,
