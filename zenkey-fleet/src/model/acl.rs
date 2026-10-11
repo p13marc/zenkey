@@ -26,8 +26,14 @@
 //!    provider's egress grant ([`AclGrantKind::FanIn`]), and the same
 //!    selectors are granted for its ingress `reply`, a refusal included
 //!    ([`AclGrantKind::FanInReply`]). S14 measured both: 0 replies without
-//!    the first, no refusal without the second.
-//! 5. **Contract bundles are open** (`zk2/@zk/contract/**`): the hash is the
+//!    the first, no refusal without the second. A presence selector over a
+//!    provider's `@zk` subtree joins its egress too, without the reply
+//!    (0.27): a descriptor read travels to the provider, a liveliness read
+//!    does not.
+//! 5. **Tool** (0.14, 0.27). A role a principal plays, beside any service
+//!    it runs: Consume and Call on what it binds and calls, presence alone
+//!    on what it `inspects`, and the admin read when enrolled with `admin`.
+//! 6. **Contract bundles are open** (`zk2/@zk/contract/**`): the hash is the
 //!    check. There are no cross-principal write grants.
 //!
 //! **Two postures** (§11.2). Under `default_permission: deny`
@@ -242,6 +248,12 @@ const CITE_FAN_IN: &str = "§11.2: egress is checked by inclusion against the qu
      subscription's own key expression, so every consumer or caller selector that intersects \
      this provider's keys, and that its own patterns do not include, is granted here; without \
      it a fan-in GET gets 0 replies (spike S14)";
+const CITE_FAN_IN_PRESENCE: &str = "§11.2, §3.3 (0.27): the descriptor's GET and subscription \
+     ride the presence grant (0.14) and, unlike a liveliness read, travel toward the provider, \
+     which serves its descriptor: every presence selector that intersects this provider's `@zk` \
+     subtree, and that its own patterns do not include, is granted here. Without it a wildcard \
+     descriptor read, a doctor's or an inspecting tool's, is refused at the provider (measured, \
+     #748). No reply rule: a descriptor is a value reply, checked against its own key";
 const CITE_FAN_IN_REPLY: &str = "§11.2: the same selectors for this provider's ingress reply, \
      refusals included. An error reply (O2's fanout_forbidden, O3's unavailable) carries no key \
      and is checked against the selector; a value reply is checked against its own key, which \
@@ -254,11 +266,11 @@ const CITE_HISTORY_IN: &str = "§11.1 Consume, §2.5: the `@adv` subtrees of wha
      history, where the advanced subscriber queries the publisher's cache and watches its token";
 const CITE_HISTORY_OUT: &str = "§11.1 Consume, §2.5, egress: the history replies, heartbeats and \
      publisher tokens under those subtrees";
-const CITE_PRESENCE_IN: &str = "§11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads \
-     and the descriptor's GET and subscription on the `@zk` subtree of each service named. A \
-     refused read is answered complete and empty, so a reader the grants refuse would \
-     attribute silence to absence (§11.3)";
-const CITE_PRESENCE_OUT: &str = "§11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the \
+const CITE_PRESENCE_IN: &str = "§11.1 Consume, Call and Tool (0.8, 0.14, 0.27), §8.1, §3.3: \
+     liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each \
+     service bound, called or inspected. A refused read is answered complete and empty, so a \
+     reader the grants refuse would attribute silence to absence (§11.3)";
+const CITE_PRESENCE_OUT: &str = "§11.1 (0.8, 0.14, 0.27), §8.1, §3.3, egress: the tokens and the \
      descriptors those reads receive";
 const CITE_CALL_IN: &str = "§11.1 Call: query on the specific `…/@op/<op>` keys called";
 const CITE_CALL_OUT: &str = "§11.1 Call, egress: the replies, a server's refusal included \
@@ -1025,7 +1037,9 @@ fn compile_archive(
     Ok(h)
 }
 
-/// A tool, compiled: bindings and calls, nothing of its own.
+/// A tool, compiled: bindings, calls and inspected services, nothing of its
+/// own. An inspected service is presence alone (§11.1, 0.27): the `@zk`
+/// subtree its tokens and descriptor share, and no Consume.
 fn compile_tool(
     spec: &crate::report::ToolSpec,
     dep: &Deployment,
@@ -1039,6 +1053,10 @@ fn compile_tool(
     }
     for c in &spec.calls {
         compile_calls(&mut h, dep, contracts, None, c)?;
+    }
+    let what = format!("{} inspects", h.label);
+    for p in parse_providers(&spec.inspects, &what)? {
+        push_unique(&mut h.presence, format!("zk2/{}/@zk/**", p.chunks()));
     }
     Ok(h)
 }
@@ -1403,6 +1421,20 @@ pub fn plan_acl(
                         CITE_OWN_OUT,
                     ));
                     let fan_in = fan_in(h, run.iter().map(|l| compiled(l)));
+                    let fan_in_presence = fan_in_presence(h, run.iter().map(|l| compiled(l)));
+                    if !fan_in_presence.is_empty() {
+                        add(rule(
+                            format!("fan-in-presence:{label}"),
+                            AclPermission::Allow,
+                            OUT,
+                            &INTEREST,
+                            &ns,
+                            &fan_in_presence,
+                            AclGrantKind::FanIn,
+                            Some(label),
+                            CITE_FAN_IN_PRESENCE,
+                        ));
+                    }
                     if !fan_in.is_empty() {
                         add(rule(
                             format!("fan-in:{label}"),
@@ -1873,10 +1905,41 @@ fn fan_in<'a>(h: &Holder, all: impl Iterator<Item = &'a Holder>) -> Vec<String> 
         if other.label == h.label {
             continue;
         }
-        // Presence reads are answered by the routers, which hold every token
-        // (Appendix B): they never travel toward the provider.
+        // Liveliness reads are answered by the routers, which hold every
+        // token (Appendix B), and never travel toward the provider; the
+        // descriptor reads that share their grant do ([`fan_in_presence`]).
         for sel in other.data.iter().chain(&other.history).chain(&other.calls) {
             let touches = h.serves().iter().any(|o| intersects(o, sel));
+            let inside = h.own.iter().any(|o| includes(o, sel));
+            if touches && !inside {
+                push_unique(&mut out, sel.clone());
+            }
+        }
+    }
+    out
+}
+
+/// The presence selectors of every running holder that intersect `h`'s
+/// `@zk` subtree without being included in its Own patterns (§11.2, 0.27).
+///
+/// A liveliness read is answered by the routers and never travels toward
+/// the provider, but the descriptor's GET and subscription, which ride the
+/// same presence grant (§3.3, 0.14), do: the provider serves its
+/// descriptor. So a wildcard presence selector — a binding's over
+/// `vehicle-01/*`, a tool's inspection of `*/*` — joins its egress grant,
+/// or a descriptor read on it is refused at every provider. Not its
+/// ingress `reply`: a descriptor is answered with a value, checked against
+/// its own key, which Own includes, and a reply grant on the selector would
+/// let the provider answer under another provider's descriptor key.
+fn fan_in_presence<'a>(h: &Holder, all: impl Iterator<Item = &'a Holder>) -> Vec<String> {
+    let mut out = Vec::new();
+    let subtree: Vec<&String> = h.own.iter().filter(|o| o.ends_with("/@zk/**")).collect();
+    for other in all {
+        if other.label == h.label {
+            continue;
+        }
+        for sel in &other.presence {
+            let touches = subtree.iter().any(|o| intersects(o, sel));
             let inside = h.own.iter().any(|o| includes(o, sel));
             if touches && !inside {
                 push_unique(&mut out, sel.clone());
@@ -3237,6 +3300,136 @@ type = { raw = "text/plain" }
                 .rules
                 .iter()
                 .all(|r| r.grant != AclGrantKind::AdminRead)
+        );
+    }
+
+    /// §11.1 Tool (0.27, #748): a tool's `inspects` is presence alone — the
+    /// `@zk` subtree of each service named, exact or wildcard, which its
+    /// tokens and descriptor share — and none of their data: no Consume, no
+    /// Call. The shapes compose per principal: one that runs a service and
+    /// a tool holds Own on its own prefix and the tool's presence and admin
+    /// read beside it, and no write beyond its prefix. Under allow, what it
+    /// inspects is in none of its denies. An address that is not
+    /// `<system>/<service>` is refused, as a provider's is (R1).
+    #[test]
+    fn a_tool_inspects_presence_alone() {
+        let set = contracts(&["walkthrough"]);
+        let e = Enrollment {
+            principal: vec![
+                principal("teleop", &["vehicle-01/teleop"]),
+                PrincipalSpec {
+                    user: Some("ops".into()),
+                    services: vec!["ground/fleet-mgr".into()],
+                    tools: vec!["doctor".into()],
+                    ..Default::default()
+                },
+            ],
+            service: vec![
+                service("vehicle-01/teleop", &["twist_cmd.v1"]),
+                service("ground/fleet-mgr", &["mission_plan.v1"]),
+            ],
+            tool: vec![ToolSpec {
+                name: "doctor".into(),
+                admin: true,
+                inspects: vec!["*/*".into(), "vehicle-01/teleop".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let plan = plan_acl(&e, &set, &AclOptions::default()).unwrap();
+        assert!(plan.refusals.is_empty(), "{:?}", plan.refusals);
+        let presence = rule_of(&plan, "presence-in:tool.doctor");
+        assert_eq!(
+            presence.key_exprs,
+            ["zk2/*/*/@zk/**", "zk2/vehicle-01/teleop/@zk/**"]
+        );
+        assert_eq!(presence.messages, PRESENCE_IN);
+        assert_eq!(
+            rule_of(&plan, "presence-out:tool.doctor").messages,
+            PRESENCE_OUT
+        );
+        // The descriptor read travels to the provider: the wildcard joins
+        // its egress, with no reply grant (§11.2, 0.27). The exact address
+        // is inside teleop's own `@zk/**` and needs none.
+        let toward = rule_of(&plan, "fan-in-presence:vehicle-01/teleop");
+        assert_eq!(toward.key_exprs, ["zk2/*/*/@zk/**"]);
+        assert_eq!(toward.messages, INTEREST);
+        assert_eq!(toward.flows, OUT);
+        assert!(
+            plan.rules
+                .iter()
+                .filter(|r| r.grant == AclGrantKind::FanInReply)
+                .all(|r| !r.key_exprs.iter().any(|k| k.contains("@zk"))),
+            "no reply on another provider's descriptor key"
+        );
+        for absent in [
+            "consume-in:tool.doctor",
+            "call-in:tool.doctor",
+            "own-in:tool.doctor",
+        ] {
+            assert!(!plan.rules.iter().any(|r| r.id == absent), "{absent}");
+        }
+        let ops = &policy_of(&plan, "ops").rules;
+        for held in [
+            "own-in:ground/fleet-mgr",
+            "presence-in:tool.doctor",
+            "admin-read-in:tool.doctor",
+        ] {
+            assert!(ops.iter().any(|r| r == held), "{held}: {ops:?}");
+        }
+        // Inspection reads presence and the descriptor, never data.
+        let descriptor = explain_acl(
+            &plan,
+            "ops",
+            "zk2/vehicle-01/teleop/@zk/instance/0123456789abcdef",
+            AclMessage::Query,
+        )
+        .unwrap();
+        assert_eq!(descriptor.ingress.decision, AclDecision::Allowed);
+        let data = explain_acl(
+            &plan,
+            "ops",
+            "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd",
+            AclMessage::DeclareSubscriber,
+        )
+        .unwrap();
+        assert_eq!(data.ingress.decision, AclDecision::DeniedByDefault);
+        // No write grant beyond its own prefix.
+        let foreign_put = explain_acl(
+            &plan,
+            "ops",
+            "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd",
+            AclMessage::Put,
+        )
+        .unwrap();
+        assert_eq!(foreign_put.ingress.decision, AclDecision::DeniedByDefault);
+        // Under allow, the inspected presence is in no deny of its own.
+        let allow = plan_acl(
+            &e,
+            &set,
+            &AclOptions {
+                default_permission: AclPermission::Allow,
+                ..AclOptions::default()
+            },
+        )
+        .unwrap();
+        let read = &rule_of(&allow, "deny-read:ops").key_exprs;
+        assert!(
+            !read.iter().any(|k| k.contains("/@zk/")),
+            "presence it inspects is denied: {read:?}"
+        );
+        // A malformed address is refused with its reason.
+        let mut bad = e.clone();
+        bad.tool[0].inspects = vec!["ground".into()];
+        let plan = plan_acl(&bad, &set, &AclOptions::default()).unwrap();
+        assert_eq!(plan.refusals.len(), 1, "{:?}", plan.refusals);
+        assert!(
+            plan.refusals[0].reason.contains("tool.doctor inspects")
+                && plan.refusals[0]
+                    .reason
+                    .contains("is not <system>/<service>"),
+            "{}",
+            plan.refusals[0].reason
         );
     }
 

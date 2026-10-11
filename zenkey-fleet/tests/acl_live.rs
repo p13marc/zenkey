@@ -86,6 +86,9 @@ services = ["h1/beacon"]
 [[principal]]
 user = "reader"
 services = ["ops/reader"]
+[[principal]]
+user = "inspector"
+tools = ["inspector"]
 
 [[service]]
 address = "vehicle-01/thruster-l"
@@ -150,6 +153,10 @@ address = "ops/reader"
 interface = "beacon.v1"
 providers = ["*/beacon"]
 history = true
+
+[[tool]]
+name = "inspector"
+inspects = ["*/tc"]
 "#;
 
 /// A state with `history` (§2.5): the case the examples do not carry.
@@ -164,7 +171,7 @@ type = { raw = "text/plain" }
 history = true
 "#;
 
-const PRINCIPALS: [&str; 12] = [
+const PRINCIPALS: [&str; 13] = [
     "thruster-l",
     "teleop",
     "autopilot",
@@ -177,6 +184,7 @@ const PRINCIPALS: [&str; 12] = [
     "executor-2",
     "beacon",
     "reader",
+    "inspector",
 ];
 
 const CMD: &str = "zk2/vehicle-01/{}/twist_cmd.v1/stream/cmd";
@@ -761,6 +769,45 @@ async fn under_deny_the_grants_are_exactly_what_is_allowed() {
         .0 == [DESCRIPTOR]
     })
     .await;
+    // 0.27 (#748): a tool that inspects `*/tc`, binding and calling
+    // nothing, reads every backend's tokens and descriptor on the wildcard
+    // selector a doctor sends, complete, and none of their data.
+    let inspected = zenkey::presence::liveliness_read(bus.of("inspector"), "zk2/*/tc/@zk/**", T)
+        .await
+        .unwrap();
+    assert!(inspected.complete, "{inspected:?}");
+    assert_eq!(inspected.keys.len(), 2, "{inspected:?}");
+    assert_eq!(
+        get(
+            bus.of("inspector"),
+            "zk2/*/tc/@zk/instance/*",
+            QueryTarget::All,
+            T
+        )
+        .await
+        .0,
+        [DESCRIPTOR]
+    );
+    assert!(
+        get(
+            bus.of("inspector"),
+            "zk2/h1/tc/tc.netif.v1/state/namespaces",
+            QueryTarget::All,
+            T
+        )
+        .await
+        .0
+        .is_empty(),
+        "inspection is no Consume"
+    );
+    let outside =
+        zenkey::presence::liveliness_read(bus.of("inspector"), "zk2/vehicle-01/*/@zk/**", T)
+            .await
+            .unwrap();
+    assert!(
+        outside.keys.is_empty(),
+        "nor presence it does not inspect: {outside:?}"
+    );
 
     // §2.5: an advanced publisher declares its cache and token under Own,
     // and a late reader with history gets the value from the cache.
@@ -1195,6 +1242,46 @@ async fn the_generator_check_egress_and_reply() {
             fan_in(&bus).await,
             2,
             "a value reply is checked by its own key"
+        );
+    }
+    {
+        // 0.27 (#748): without the presence selectors on h1's egress, the
+        // inspector's wildcard descriptor read is refused at h1, while its
+        // liveliness read, which the router answers, still holds h1's
+        // tokens. With them, the deny case above reads the descriptor.
+        let plan = without_rule(plan(AclPermission::Deny), "fan-in-presence:h1/tc");
+        let bus = Bus::up(&plan).await;
+        let _servers = tcgui(&bus).await;
+        let _descriptor = serve(bus.of("tc-h1"), DESCRIPTOR, "{}").await;
+        eventually(
+            "the frontend reads h1's descriptor by its address",
+            || async {
+                get(
+                    bus.of("frontend"),
+                    "zk2/h1/tc/@zk/instance/*",
+                    QueryTarget::All,
+                    T,
+                )
+                .await
+                .0 == [DESCRIPTOR]
+            },
+        )
+        .await;
+        let tokens = zenkey::presence::liveliness_read(bus.of("inspector"), "zk2/*/tc/@zk/**", T)
+            .await
+            .unwrap();
+        assert_eq!(tokens.keys.len(), 2, "{tokens:?}");
+        assert!(
+            get(
+                bus.of("inspector"),
+                "zk2/*/tc/@zk/instance/*",
+                QueryTarget::All,
+                T
+            )
+            .await
+            .0
+            .is_empty(),
+            "the descriptor read never reaches h1"
         );
     }
 }

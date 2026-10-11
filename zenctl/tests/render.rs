@@ -1132,8 +1132,8 @@ fn an_acl_plan_draws_principals_then_rules_and_tags_its_row_kinds() {
 principals under namespace "" (default deny):
 
   subject   bound by         runs          rules
-  tc-h1     user tc-h1       h1/tc         own-in:h1/tc, own-out:h1/tc, fan-in:h1/tc, fan-in-reply:h1/tc, contracts-in, contracts-out
-  tc-h2     user tc-h2       h2/tc         own-in:h2/tc, own-out:h2/tc, fan-in:h2/tc, fan-in-reply:h2/tc, contracts-in, contracts-out
+  tc-h1     user tc-h1       h1/tc         own-in:h1/tc, own-out:h1/tc, fan-in-presence:h1/tc, fan-in:h1/tc, fan-in-reply:h1/tc, contracts-in, contracts-out
+  tc-h2     user tc-h2       h2/tc         own-in:h2/tc, own-out:h2/tc, fan-in-presence:h2/tc, fan-in:h2/tc, fan-in-reply:h2/tc, contracts-in, contracts-out
   frontend  cn frontend.ops  ops/frontend  own-in:ops/frontend, own-out:ops/frontend, consume-in:ops/frontend, consume-out:ops/frontend, presence-in:ops/frontend, presence-out:ops/frontend, call-in:ops/frontend, call-out:ops/frontend, contracts-in, contracts-out
 
 rules:
@@ -1151,6 +1151,8 @@ rules:
       zk2/h1/tc/*/@state/**
       zk2/h1/tc/*/@op/**
       zk2/h1/tc/@zk/**
+  fan-in-presence:h1/tc      fan_in        egress   query, declare_subscriber
+      zk2/*/tc/@zk/**
   fan-in:h1/tc               fan_in        egress   query, declare_subscriber
       zk2/*/tc/tc.netif.v1/state/**
       zk2/*/tc/tc.netif.v1/@op/interfaces/*/set
@@ -1169,6 +1171,8 @@ rules:
       zk2/h2/tc/*/@state/**
       zk2/h2/tc/*/@op/**
       zk2/h2/tc/@zk/**
+  fan-in-presence:h2/tc      fan_in        egress   query, declare_subscriber
+      zk2/*/tc/@zk/**
   fan-in:h2/tc               fan_in        egress   query, declare_subscriber
       zk2/*/tc/tc.netif.v1/state/**
       zk2/*/tc/tc.netif.v1/@op/interfaces/*/set
@@ -1209,7 +1213,7 @@ rules:
     assert_data_eq!(
         notes(&plan),
         str![[r#"
-18 rule(s), 3 subject(s), 3 polic(y/ies), compiled from 1 contract revision(s)
+20 rule(s), 3 subject(s), 3 polic(y/ies), compiled from 1 contract revision(s)
 write the fragment: `zenctl acl gen --enrollment … --contracts … --json5 > router-acl.json5`, merge it at the router config's top level, restart the router, and regenerate on every contract revision (spec §11.2)
 
 "#]]

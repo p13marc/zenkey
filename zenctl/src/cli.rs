@@ -1202,11 +1202,15 @@ pub(crate) enum AclCmd {
     ///            reads on each provider's @zk/** (0.8)
     ///   Call     query on the specific …/@op/<op> keys, and the same
     ///            liveliness reads on each service called
+    ///   Tool     a role a principal plays: Consume and Call on what it
+    ///            binds and calls, presence alone on what it inspects, and
+    ///            with admin the routers' admin space (0.15, 0.27)
     ///
     /// Egress is checked by inclusion against the query's or subscription's
     /// own key (§11.2): every consumer or caller selector over what a
-    /// provider serves joins its egress grant, and its ingress reply. Contract
-    /// bundles are open. Under --default-permission allow, zenoh evaluates no
+    /// provider serves joins its egress grant, and its ingress reply; every
+    /// wildcard presence selector over its @zk/** joins its egress, since a
+    /// descriptor read travels to it (0.27). Contract bundles are open. Under --default-permission allow, zenoh evaluates no
     /// allow rule, so each grant compiles into denies of its complement,
     /// enumerated from the contracts. Every rule names its grant and the fact
     /// it exists for. A principal the plan cannot place is refused, never
@@ -1238,7 +1242,9 @@ pub(crate) enum AclCmd {
     ///   records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"]
     ///   peers   = ["ground/archive"]
     ///   [[tool]]
-    ///   name = "ops"                           # bindings and calls, no address
+    ///   name     = "ops"                       # bindings and calls, no address
+    ///   admin    = true                        # the routers' admin space
+    ///   inspects = ["*/*"]                     # presence alone, no data
     // Verbatim, so the table and the enrollment example keep their lines:
     // clap would otherwise fold them into one.
     #[command(verbatim_doc_comment)]
