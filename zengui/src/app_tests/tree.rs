@@ -582,3 +582,164 @@ fn live_ticks_note_when_each_watch_began() {
         "three ticks in a row are no stall"
     );
 }
+
+/// A key only the capture below carries: `robot2/nav`'s status, which the
+/// live world never published.
+const REPLAY_ONLY: &str = "zk2/robot2/nav/nav.v2/state/status";
+
+/// A window whose live world stops `robot1/nav`'s keys at "no revision" —
+/// its catalog names the address from its tokens alone, no descriptor —
+/// with the walkthrough contracts held offline, the position stream's live
+/// identity resolved, and a replay open over a capture of that stream and
+/// of [`REPLAY_ONLY`].
+fn replaying() -> Zengui {
+    use crate::view::replay::ReplayMsg;
+
+    let mut app = test_app();
+    let walkthrough =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+    let loaded = Arc::new(crate::services::contracts::load_all(&[walkthrough]));
+    let _ = app.update(Message::Bus(crate::message::BusMsg::ContractsLoaded(
+        loaded,
+    )));
+    // The live lens moves (a catalog adopted) through the bus's own door,
+    // as the presence link would move it.
+    let landing = Arc::new(crate::presence_link::PresenceUpdate {
+        presence: Arc::new(zenkey_fleet::LivePresence::new(
+            zenkey_fleet::PresenceScope::all(),
+        )),
+        moved: Vec::new(),
+        catalog: Some(undescribed_catalog()),
+        generation: app.dep.lens_generation + 1,
+        seed: zenkey_fleet::SeedOutcome::Complete,
+    });
+    let epoch = app.obs.presence_epoch;
+    let _ = app.update(Message::Bus(crate::message::BusMsg::Presence(
+        epoch, landing,
+    )));
+    app.dep.ensure_identity(POSITION);
+
+    let at = std::time::Instant::now();
+    let view = |key: &str| {
+        Arc::new(zenkey_fleet::SampleView {
+            key: key.into(),
+            payload: zenoh::bytes::ZBytes::from(b"x".to_vec()),
+            encoding: String::new(),
+            kind: zenoh::sample::SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: at,
+        })
+    };
+    let mut file = Vec::new();
+    crate::services::record::write_window(
+        &[view(POSITION), view(REPLAY_ONLY)],
+        at,
+        vec!["**".into()],
+        String::new(),
+        &mut file,
+    )
+    .expect("a capture");
+    let state = crate::replay::ReplayState::load("t.zrec", file.as_slice()).expect("parses");
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Loaded("t.zrec".into(), Ok(crate::replay::LoadedReplay::new(state))),
+    )));
+    app
+}
+
+/// The rung a cache holds for `key`, when it holds one.
+fn rung_in(cache: &zenkey_fleet::IdentityCache, key: &str) -> Option<crate::keyfacts::Rung> {
+    cache
+        .get(key)
+        .map(|r| crate::keyfacts::Rung::of(&r.identity))
+}
+
+/// What the window draws for `key` in the Inspector, selected.
+fn drawn<'a>(app: &'a mut Zengui, key: &str) -> iced_test::Simulator<'a, Message> {
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        key.into(),
+    ))));
+    iced_test::simulator::<Message, _, _>(app.view(iced::window::Id::unique()))
+}
+
+/// #614 (FL7): a key only the capture carries gets its rung from the
+/// replay's offline lens, the moment its row is fed — in the replay's own
+/// cache, which the jump-to list reads, and never in the live one.
+#[test]
+fn a_replay_only_key_gets_its_rung_from_the_offline_lens() {
+    use crate::keyfacts::Rung;
+    use crate::view::palette::{Overlay, PaletteMsg};
+
+    let mut app = replaying();
+    let (cache, namespace) = app.work.replay.identities().expect("replaying");
+    assert_eq!(namespace, "", "the capture's base");
+    assert_eq!(
+        rung_in(cache, REPLAY_ONLY),
+        Some(Rung::Resolved),
+        "the one revision of nav.v2 held offline resolves it"
+    );
+    assert!(
+        app.dep.identity.get(REPLAY_ONLY).is_none(),
+        "the live cache never saw it, and still has not"
+    );
+    let _ = app.update(Message::Chrome(crate::message::ChromeMsg::Palette(
+        PaletteMsg::Open(Overlay::Keys),
+    )));
+    let mut ui = iced_test::simulator::<Message, _, _>(app.view(iced::window::Id::unique()));
+    assert!(
+        ui.find(REPLAY_ONLY).is_ok(),
+        "the jump-to list offers the capture's keys while it replays"
+    );
+}
+
+/// #614 (FL7): a key whose live rung differs from its offline one shows the
+/// offline one while the replay runs. Live, the catalog stops the position
+/// stream at "no revision"; the replay resolves it through the revision
+/// held offline, and the Inspector draws that.
+#[test]
+fn a_replay_shows_the_offline_rung_where_the_live_one_differs() {
+    use crate::keyfacts::Rung;
+
+    let mut app = replaying();
+    assert_eq!(rung_in(&app.dep.identity, POSITION), Some(Rung::NoRevision));
+    let (cache, _) = app.work.replay.identities().expect("replaying");
+    assert_eq!(rung_in(cache, POSITION), Some(Rung::Resolved));
+    let mut ui = drawn(&mut app, POSITION);
+    assert!(ui.find("resolved").is_ok(), "the offline rung is drawn");
+    assert!(
+        ui.find("no revision").is_err(),
+        "and the live one is not, anywhere in the window"
+    );
+}
+
+/// #614 (FL7): leaving the replay drops its identities with it, and the
+/// window reads the live cache again — the live rung back, the
+/// capture-only key gone from the jump-to list.
+#[test]
+fn exiting_the_replay_restores_the_live_identities() {
+    use crate::view::palette::{Overlay, PaletteMsg};
+
+    let mut app = replaying();
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        crate::view::replay::ReplayMsg::Exit,
+    )));
+    assert!(app.work.replay.identities().is_none());
+    let mut ui = drawn(&mut app, POSITION);
+    assert!(ui.find("no revision").is_ok(), "the live rung is back");
+    assert!(ui.find("resolved").is_err());
+    drop(ui);
+    let _ = app.update(Message::Chrome(crate::message::ChromeMsg::Palette(
+        PaletteMsg::Open(Overlay::Keys),
+    )));
+    let mut ui = iced_test::simulator::<Message, _, _>(app.view(iced::window::Id::unique()));
+    assert!(
+        ui.find(REPLAY_ONLY).is_err(),
+        "a key only the capture carried is no live observation"
+    );
+}

@@ -85,6 +85,10 @@ sub_state! {
         /// tree's — the live catalog describes another world than a
         /// capture's (O4).
         pub(crate) replay_skeleton: Option<Arc<Skeleton>>,
+        /// The namespace a replay's keys are read in (#614, FL7): its
+        /// offline lens's — a file's header `base` — so the tree labels a
+        /// capture's positions where its rungs resolve. `None` live.
+        pub(crate) replay_namespace: Option<String>,
     }
 }
 
@@ -100,6 +104,7 @@ impl Default for TreeState {
             shape_reused: 0,
             shape_rebuilt: 0,
             replay_skeleton: None,
+            replay_namespace: None,
         }
     }
 }
@@ -174,22 +179,24 @@ impl TreeState {
     pub(crate) fn reflatten(&mut self, dep: &Deployment, obs: &Observation) {
         let merged = self.merged(dep, obs);
         let now = std::time::Instant::now();
+        // The namespace positions are read in: a replay's own while one runs
+        // (#614, FL7), else the deployment's.
+        let namespace = match &self.replay_namespace {
+            Some(n) => n.as_str(),
+            None => dep.namespace(),
+        };
         // Pivot and filter re-key the flattened entries here — the hot tree
         // stays registry-blind (issue #65).
         self.flat = match (self.pivot, self.tree_search.is_empty()) {
             (view::tree::Pivot::Chunks, true) => {
-                view::tree::flatten(&merged, dep.namespace(), &self.expanded, MAX_ROWS, now)
+                view::tree::flatten(&merged, namespace, &self.expanded, MAX_ROWS, now)
             }
-            (view::tree::Pivot::Chunks, false) => view::tree::search_flatten(
-                &merged,
-                dep.namespace(),
-                &self.tree_search,
-                MAX_ROWS,
-                now,
-            ),
+            (view::tree::Pivot::Chunks, false) => {
+                view::tree::search_flatten(&merged, namespace, &self.tree_search, MAX_ROWS, now)
+            }
             (pivot, _) => view::tree::pivot_flatten(
                 &merged,
-                dep.namespace(),
+                namespace,
                 pivot,
                 &self.expanded,
                 &self.tree_search,

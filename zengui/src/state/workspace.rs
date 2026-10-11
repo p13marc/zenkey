@@ -487,6 +487,18 @@ sub_state! {
     }
 }
 
+impl ReplayMode {
+    /// While a replay runs, its identity cache and the namespace its
+    /// offline lens resolves in (#614, FL7): what the tree's rungs, the
+    /// Inspector's identity line and the jump-to list read instead of the
+    /// live cache. `None` live.
+    pub(crate) fn identities(&self) -> Option<(&zenkey_fleet::IdentityCache, &str)> {
+        self.replay
+            .as_ref()
+            .map(|r| (&r.identity, r.lens.namespace.as_str()))
+    }
+}
+
 impl Workspace {
     pub(crate) fn new(echo_lines: usize, layout: &LayoutNode) -> Workspace {
         Workspace {

@@ -42,8 +42,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use zenkey_fleet::{
-    BundleStore, ContractSet, MonitorCore, RetentionStats, SampleView, Skeleton, WireQos,
-    ZrecHeader, ZrecItem, ZrecReader,
+    BundleStore, ContractSet, IdentityCache, MonitorCore, RetentionStats, SampleView, Skeleton,
+    WireQos, ZrecHeader, ZrecItem, ZrecReader,
 };
 
 use crate::message::BusTick;
@@ -253,6 +253,13 @@ pub struct ReplayState {
     /// presence read. Built with no contracts at load; the landing gives it
     /// the window's ([`ReplayState::resolve_offline`]).
     pub lens: ReplayLens,
+    /// Each replayed key's identity through [`Self::lens`] (#614, FL7):
+    /// filled as rows are fed to the fold — every row, the ones a tick's
+    /// batch cap coalesced included — and dropped with the replay. While
+    /// one runs, the tree's rungs, the Inspector's identity line and the
+    /// jump-to list read this, never the live cache, whose resolutions were
+    /// made under the live catalog: another world than a capture's (O4).
+    pub identity: IdentityCache,
     /// Rows that recorded no wire axes — a version-1 or -2 file's, whose v1
     /// profile names zk2 does not read: "QoS not recorded", counted.
     pub qos_unrecorded: u64,
@@ -351,6 +358,7 @@ impl ReplayState {
         Ok(ReplayState {
             id: NEXT_REPLAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             lens: ReplayLens::offline(&header.base, None),
+            identity: IdentityCache::default(),
             qos_unrecorded: unrecorded.len() as u64,
             unrecorded,
             watched: Arc::from(header.selectors.clone()),
@@ -423,6 +431,7 @@ impl ReplayState {
             // The live namespace and no contracts until the landing gives
             // the window's (`resolve_offline`).
             lens: ReplayLens::offline("", None),
+            identity: IdentityCache::default(),
             qos_unrecorded: 0,
             unrecorded: HashSet::new(),
             watched,
@@ -465,6 +474,9 @@ impl ReplayState {
         if t_us < self.position_us {
             self.core = MonitorCore::new(1024);
             self.cursor = 0;
+            // The identities go with the fold: a key the rebuild has not
+            // reached again has not been observed at this playhead.
+            self.identity = IdentityCache::default();
         }
         self.position_us = t_us;
         self.feed_tick()
@@ -475,6 +487,7 @@ impl ReplayState {
     fn feed_tick(&mut self) -> Arc<BusTick> {
         let mut samples = Vec::new();
         let mut coalesced = 0u64;
+        let lens = self.lens.lens();
         while self
             .rows
             .get(self.cursor)
@@ -492,6 +505,9 @@ impl ReplayState {
                 self.fold_epoch + Duration::from_micros(row.t_us),
                 self.wall_epoch + Duration::from_micros(row.t_us),
             );
+            // Its identity, offline (#614, FL7): a cache hit after the
+            // key's first row.
+            self.identity.ensure(&lens, &row.view.key);
             if samples.len() < BATCH_CAP {
                 samples.push(Arc::clone(&row.view));
             } else {
@@ -539,6 +555,20 @@ impl ReplayState {
             ReplaySource::Retained { .. } => live_namespace.to_owned(),
         };
         self.lens = ReplayLens::offline(&namespace, contracts);
+        // What was resolved under the lens it replaces is resolved again
+        // under this one (#614, FL7): the rows fed so far, in order.
+        self.identity = IdentityCache::default();
+        let lens = self.lens.lens();
+        for row in &self.rows[..self.cursor] {
+            self.identity.ensure(&lens, &row.view.key);
+        }
+    }
+
+    /// Resolve `key` into this replay's identity cache through its offline
+    /// lens (#614, FL7) — a selection's, which may name a key no row did.
+    pub fn ensure_identity(&mut self, key: &str) {
+        let lens = self.lens.lens();
+        self.identity.ensure(&lens, key);
     }
 
     /// Whether `view`'s row recorded its wire axes: `false` for a row a
@@ -679,6 +709,53 @@ mod tests {
             .lens()
             .identity("spray/zk2/robot1/nav/nav.v2/stream/position");
         assert!(identity.unresolved.is_none(), "{identity:?}");
+    }
+
+    /// #614 (FL7): the replay's identities follow its fold. A row is
+    /// resolved through the offline lens as it is fed; a lens the landing
+    /// replaces resolves the fed rows again under the new one; a scrub back
+    /// forgets what the rebuild has not reached again.
+    #[test]
+    fn a_replays_identities_follow_its_fold() {
+        use crate::keyfacts::Rung;
+        let position = "spray/zk2/robot1/nav/nav.v2/stream/position";
+        let status = "spray/zk2/robot2/nav/nav.v2/state/status";
+        let header =
+            r#"{"zrec":3,"selectors":["**"],"base":"spray","captured_at":"x","excluded":[]}"#;
+        let f = format!(
+            "{header}\n{{\"key\":\"{position}\",\"t\":0,\"bytes\":\"\",\"qos_axes\":\"data/drop/reliable\"}}\n\
+             {{\"key\":\"{status}\",\"t\":1000000,\"bytes\":\"\",\"qos_axes\":\"data/block/reliable\"}}"
+        );
+        let rung =
+            |state: &ReplayState, key: &str| state.identity.get(key).map(|r| Rung::of(&r.identity));
+        let mut state = ReplayState::load("i.zrec", f.as_bytes()).unwrap();
+        state.scrub_to(0);
+        assert_eq!(
+            rung(&state, position),
+            Some(Rung::PresenceNotRead),
+            "no contracts yet: the offline lens names no revision"
+        );
+        assert_eq!(rung(&state, status), None, "not fed yet");
+
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+        let (set, _) = ContractSet::load_path(&dir);
+        state.resolve_offline("", Some(Arc::new(set)));
+        assert_eq!(
+            rung(&state, position),
+            Some(Rung::Resolved),
+            "resolved again"
+        );
+
+        state.scrub_to(state.span_us);
+        assert_eq!(rung(&state, status), Some(Rung::Resolved));
+        state.scrub_to(0);
+        assert_eq!(rung(&state, position), Some(Rung::Resolved));
+        assert_eq!(
+            rung(&state, status),
+            None,
+            "a key the rebuild has not reached is not observed at this playhead"
+        );
     }
 
     /// A malformed line is counted, and the rest of the file still loads.

@@ -258,15 +258,23 @@ fn locator<'a>(
     work: &'a Workspace,
     sp: Spacing,
 ) -> Element<'a, Message> {
+    // A replay's own identities, resolved offline (#614, FL7), and no
+    // budget badge: a live judgement describes another world than a
+    // capture's, and no window over a file is one an owner was present for.
+    let replaying = work.replay.replay.is_some();
+    let (identities, namespace) = work
+        .replay
+        .identities()
+        .unwrap_or((&dep.identity, dep.namespace()));
     view::tree::pane(view::tree::TreeData {
         flat: &tree.flat,
         pivot: tree.pivot,
         search: &tree.tree_search,
         viewport: tree.tree_scroll,
-        identities: &dep.identity,
-        namespace: dep.namespace(),
+        identities,
+        namespace,
         verdicts: &work.verdicts.payloads,
-        budgets: obs.budgets.as_deref(),
+        budgets: obs.budgets.as_deref().filter(|_| !replaying),
         watches: view::tree::Watches {
             mine: &obs.my_watch_paths,
             seeding: &obs.seeding_paths,
@@ -286,7 +294,13 @@ fn inspector<'a>(
     view::inspector::pane(view::inspector::InspectorData {
         slot: slot.id,
         subject: &slot.current,
-        identity: slot.current.key().and_then(|k| dep.identity.get(k)),
+        // A replay's identity of the key, resolved offline (#614, FL7).
+        identity: slot.current.key().and_then(|k| {
+            work.replay
+                .identities()
+                .map_or(&dep.identity, |(cache, _)| cache)
+                .get(k)
+        }),
         // A key parse per frame, for the selected key alone: the v1 panes'
         // classification, on demand (#614, FL7).
         v1: slot

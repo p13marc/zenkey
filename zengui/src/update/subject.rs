@@ -160,13 +160,16 @@ fn select(
     subject: Subject,
 ) -> Task<Message> {
     // The selection's identity, at once (#614, FL7): a declared key nobody
-    // has published resolves when it is selected, not never. Live only, as
-    // on the tick — and never a symbolic skeleton path, which is no key.
+    // has published resolves when it is selected, not never — through the
+    // replay's offline lens while one runs, the live one otherwise. Never a
+    // symbolic skeleton path, which is no key.
     if let Subject::Key(key) = &subject
         && !key.contains('{')
-        && work.replay.replay.is_none()
     {
-        dep.ensure_identity(key);
+        match work.replay.replay.as_mut() {
+            Some(replay) => replay.ensure_identity(key),
+            None => dep.ensure_identity(key),
+        }
     }
     let sub = &mut subs.follow;
     sub.current = subject;

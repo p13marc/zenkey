@@ -246,6 +246,10 @@ mod tests {
                     // from its offline lens — a merge input, invalidated by
                     // the replay opening and closing, never by the bus.
                     "replay_skeleton",
+                    // FL7: the namespace a replay's positions are read in,
+                    // its offline lens's — with the skeleton, the tree's
+                    // replay-scoped half.
+                    "replay_namespace",
                 ],
             ),
             (
@@ -383,7 +387,8 @@ mod tests {
         // Then FL6b: the skeleton's inputs and the admin space's answer — 92.
         // Then FL10b: the replay's skeleton — 93. Then FL7: v1's facts cache
         // went, the identity cache's epoch came, and the budget window's two
-        // observations — 95.
-        assert_eq!(leaves, 95, "the split must place every field exactly once");
+        // observations — 95; and the replay's namespace beside its
+        // skeleton — 96.
+        assert_eq!(leaves, 96, "the split must place every field exactly once");
     }
 }
