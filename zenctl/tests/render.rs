@@ -1514,6 +1514,37 @@ fn a_get_with_no_replies_names_the_three_silences() {
     assert_eq!(doc["timeout_s"], 5.0);
 }
 
+/// #765: a GET that heard an owner's tombstone counts it among its answers
+/// — a deletion is a reply, not silence — and its `answer` row is the row
+/// `get` builds for one: `"delete": true`, with no value and no byte count,
+/// so it never reads as an empty put. (The table shapes are pinned beside
+/// the verb, `cmd/get.rs`, where the human form is drawn.)
+#[test]
+fn a_get_that_heard_a_tombstone_draws_a_deletion_row() {
+    let key = "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    let mut deleted = zenkey_fleet::SampleRow::of_key(key);
+    deleted.encoding = Some("zenoh/bytes".into());
+    deleted.delete = true;
+    let report = zenctl::render::GetReport {
+        selector: key.into(),
+        timeout_s: 5.0,
+        elided: 0,
+        answers: vec![serde_json::to_value(&deleted).expect("a row serializes")],
+    };
+    assert_data_eq!(
+        ndjson(&report),
+        str![[r#"
+{"answers":1,"report":"get","selector":"acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","timeout_s":5.0}
+{"delete":true,"encoding":"zenoh/bytes","key":"acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","row":"answer"}
+
+"#]]
+    );
+    assert!(
+        !notes(&report).contains("no replies"),
+        "a tombstone is an answer"
+    );
+}
+
 /// A mock owner still publishes, so the plan is a dry run made visible
 /// before anything is brought up — the `replay --dry-run` precedent — and
 /// it says where the synthetic marker rides: the descriptor's `meta`, not a

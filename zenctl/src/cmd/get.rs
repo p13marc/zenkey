@@ -15,12 +15,17 @@
 //! is decoded as its declared type and a JSON Schema value checked against
 //! it; where the ladder stops, the rung is named; a foreign key renders
 //! structurally. v1's served-schema ladder left with the v1 registry.
+//!
+//! A reply that is a delete — an owner's `reply_del` within its tombstone
+//! window (core §4, S3) — is a deletion in every form (#765): the tombstone
+//! words in the table, `--hex`, `--raw` and `--fmt`'s `%v`, and
+//! `"delete": true` on its row, never a put with an empty payload.
 
 use anyhow::Result;
 use zenkey_model::authoring::Kind;
 
 use super::sample::{
-    Line, Payload, SampleLine, attachment_display, attachment_json, format_sample, hex,
+    Line, Payload, SampleLine, TOMBSTONE, attachment_display, attachment_json, format_sample, hex,
 };
 use crate::bus::Deployment;
 use crate::cmd::zk2;
@@ -104,74 +109,26 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
         };
         crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     } else {
+        let human = Human {
+            lens: &lens,
+            namespace: &namespace,
+            raw,
+            hex: hex_payload,
+            fmt: fmt.as_deref(),
+            structural_only,
+        };
         let mut n = 0usize;
         for a in &answers {
-            let payload = match &a.answer {
-                Answer::Error { name, message } => {
-                    // An error reply has no sample, so no key to name.
-                    println!("✗ {name} — {message}");
-                    continue;
-                }
-                Answer::Value(payload) => payload,
-            };
-            n += 1;
-            let bytes = payload.to_bytes().into_owned();
-            if raw {
-                println!("{}\n  {}", a.key, hex(&bytes));
-                if let Some(att) = &a.attachment {
-                    println!("  attachment: {}", hex(&att.to_bytes()));
-                }
-                continue;
+            if matches!(a.answer, Answer::Value(_)) {
+                n += 1;
             }
-            let line = line_of(a, bytes, &lens, structural_only);
-            if hex_payload {
-                println!("{}\n  {} {}", a.key, line.tag(), hex(&line.bytes));
-                if let Some(att) = &a.attachment {
-                    println!("  attachment: {}", hex(&att.to_bytes()));
-                }
-                continue;
+            let printed = human.reply(a, n);
+            for line in printed.out {
+                println!("{line}");
             }
-            if let Some(fmt) = fmt.as_deref() {
-                let value = line.value_text();
-                let declared = line.declared();
-                let stamp = a.timestamp.map(|t| t.to_string());
-                let attachment = line
-                    .attachment
-                    .as_ref()
-                    .map(crate::render::payload_text)
-                    .or_else(|| {
-                        a.attachment
-                            .as_ref()
-                            .map(|t| attachment_display(&t.to_bytes()))
-                    });
-                println!(
-                    "{}",
-                    format_sample(
-                        fmt,
-                        &SampleLine {
-                            n,
-                            wire_key: &a.key,
-                            relative: zenkey_fleet::strip_namespace(&namespace, &a.key),
-                            identity: &line.identity,
-                            type_name: declared.as_deref(),
-                            encoding: a.encoding.as_deref().unwrap_or(""),
-                            payload_len: line.bytes.len(),
-                            // A reply is not a subscribe-path sample: no QoS
-                            // axes and no SourceInfo, and an empty field is
-                            // honest (#120). The HLC is the one thing a reply
-                            // may carry — only when the responder stamped it
-                            // (#215).
-                            timestamp: stamp.as_deref(),
-                            value: &value,
-                            attachment: attachment.as_deref(),
-                            qos: None,
-                            source: None,
-                        },
-                    )
-                );
-                continue;
+            for line in printed.err {
+                eprintln!("{line}");
             }
-            print(a, &line);
         }
         match answers.len() {
             0 => println!(
@@ -202,7 +159,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
 }
 
 /// One reply through the lens: a response on an `@op` key, its resource's
-/// type otherwise.
+/// type otherwise. A delete carries nothing to decode (#765).
 fn line_of(a: &FleetAnswer, bytes: Vec<u8>, lens: &Lens<'_>, structural_only: bool) -> Line {
     let member = Line::member_of(&lens.identity(&a.key));
     let attachment = a.attachment.as_ref().map(|t| t.to_bytes());
@@ -212,7 +169,7 @@ fn line_of(a: &FleetAnswer, bytes: Vec<u8>, lens: &Lens<'_>, structural_only: bo
             encoding: a.encoding.as_deref().filter(|e| !e.is_empty()),
             bytes,
             attachment: attachment.as_deref(),
-            delete: false,
+            delete: a.is_delete(),
         },
         member,
         lens,
@@ -220,26 +177,130 @@ fn line_of(a: &FleetAnswer, bytes: Vec<u8>, lens: &Lens<'_>, structural_only: bo
     )
 }
 
-/// The table form: the reply's key, then the rendering with the rung it
-/// stopped at, and what failed against the declared type on stderr.
-fn print(a: &FleetAnswer, line: &Line) {
-    let Some((rendering, conformance)) = &line.checked else {
-        return;
-    };
-    println!("{}\n  {}", a.key, crate::render::payload_text(rendering));
-    if let Some(att) = &line.attachment {
-        println!("  attachment: {}", crate::render::payload_text(att));
-    } else if let Some(att) = &a.attachment {
-        println!("  attachment: {}", attachment_display(&att.to_bytes()));
-    }
-    if let Conformance::Invalid { violations } = conformance {
-        for v in violations {
-            eprintln!("  invalid: {v}");
+/// The table form's flags: which shape a reply is printed in, and the lens
+/// it is resolved through.
+struct Human<'a> {
+    lens: &'a Lens<'a>,
+    namespace: &'a str,
+    /// `--raw`: the key and the bytes in hex, nothing resolved.
+    raw: bool,
+    /// `--hex`: the key, the type tag and the bytes in hex.
+    hex: bool,
+    /// `--fmt`: one line per reply, from the `%` vocabulary.
+    fmt: Option<&'a str>,
+    structural_only: bool,
+}
+
+/// One reply as the table form prints it: stdout's lines, then stderr's
+/// (what failed against the declared type).
+#[derive(Debug, Default)]
+struct Printed {
+    out: Vec<String>,
+    err: Vec<String>,
+}
+
+impl Human<'_> {
+    /// One reply in the table form, pure so a snapshot pins it: the reply's
+    /// key, then the rendering with the rung it stopped at, or the
+    /// tombstone's words for a delete in every shape (#765). `n` is the
+    /// reply's place among the values, `--fmt`'s `%n`.
+    fn reply(&self, a: &FleetAnswer, n: usize) -> Printed {
+        let mut p = Printed::default();
+        let payload = match &a.answer {
+            Answer::Error { name, message } => {
+                // An error reply has no sample, so no key to name.
+                p.out.push(format!("✗ {name} — {message}"));
+                return p;
+            }
+            Answer::Value(payload) => payload,
+        };
+        let delete = a.is_delete();
+        let bytes = payload.to_bytes().into_owned();
+        if self.raw {
+            p.out.push(a.key.clone());
+            p.out.push(if delete {
+                format!("  {TOMBSTONE}")
+            } else {
+                format!("  {}", hex(&bytes))
+            });
+            if let Some(att) = &a.attachment {
+                p.out
+                    .push(format!("  attachment: {}", hex(&att.to_bytes())));
+            }
+            return p;
         }
+        let line = line_of(a, bytes, self.lens, self.structural_only);
+        if self.hex {
+            p.out.push(a.key.clone());
+            p.out.push(if delete {
+                format!("  {TOMBSTONE}")
+            } else {
+                format!("  {} {}", line.tag(), hex(&line.bytes))
+            });
+            if let Some(att) = &a.attachment {
+                p.out
+                    .push(format!("  attachment: {}", hex(&att.to_bytes())));
+            }
+            return p;
+        }
+        let attachment = line
+            .attachment
+            .as_ref()
+            .map(crate::render::payload_text)
+            .or_else(|| {
+                a.attachment
+                    .as_ref()
+                    .map(|t| attachment_display(&t.to_bytes()))
+            });
+        if let Some(fmt) = self.fmt {
+            let value = if delete {
+                TOMBSTONE.to_owned()
+            } else {
+                line.value_text()
+            };
+            let declared = line.declared();
+            let stamp = a.timestamp.map(|t| t.to_string());
+            p.out.push(format_sample(
+                fmt,
+                &SampleLine {
+                    n,
+                    wire_key: &a.key,
+                    relative: zenkey_fleet::strip_namespace(self.namespace, &a.key),
+                    identity: &line.identity,
+                    type_name: declared.as_deref(),
+                    encoding: a.encoding.as_deref().unwrap_or(""),
+                    payload_len: line.bytes.len(),
+                    // A reply is not a subscribe-path sample: no QoS axes
+                    // and no SourceInfo, and an empty field is honest
+                    // (#120). The HLC is the one thing a reply may carry —
+                    // only when the responder stamped it (#215).
+                    timestamp: stamp.as_deref(),
+                    value: &value,
+                    attachment: attachment.as_deref(),
+                    qos: None,
+                    source: None,
+                },
+            ));
+            return p;
+        }
+        p.out.push(a.key.clone());
+        p.out.push(match &line.checked {
+            Some((rendering, _)) => format!("  {}", crate::render::payload_text(rendering)),
+            None => format!("  {TOMBSTONE}"),
+        });
+        if let Some(att) = attachment {
+            p.out.push(format!("  attachment: {att}"));
+        }
+        if let Some((_, Conformance::Invalid { violations })) = &line.checked {
+            p.err
+                .extend(violations.iter().map(|v| format!("  invalid: {v}")));
+        }
+        p
     }
 }
 
 /// One reply as a JSON row — the ndjson line and the json array element.
+/// A delete says so, `"delete": true`, and carries no bytes (#765).
 fn row(a: &FleetAnswer, lens: &Lens<'_>, raw: bool, structural_only: bool) -> serde_json::Value {
     match &a.answer {
         Answer::Error { name, message } => serde_json::json!({
@@ -248,11 +309,16 @@ fn row(a: &FleetAnswer, lens: &Lens<'_>, raw: bool, structural_only: bool) -> se
         Answer::Value(payload) => {
             let bytes = payload.to_bytes().into_owned();
             if raw {
+                // `delete` is always written, as on the decoded row: every
+                // reply sample is a put or a delete, and that is a fact.
                 let mut obj = serde_json::json!({
                     "key": a.key,
                     "encoding": a.encoding,
-                    "hex": hex(&bytes),
+                    "delete": a.is_delete(),
                 });
+                if !a.is_delete() {
+                    obj["hex"] = serde_json::Value::String(hex(&bytes));
+                }
                 if let Some(att) = &a.attachment {
                     obj["attachment"] = serde_json::Value::String(hex(&att.to_bytes()));
                     obj["attachment_bytes"] = att.len().into();
@@ -271,6 +337,7 @@ fn value_row(a: &FleetAnswer, line: &Line) -> serde_json::Value {
     let mut row = zenkey_fleet::SampleRow::of_key(&a.key);
     row.encoding = a.encoding.clone().filter(|e| !e.is_empty());
     row.timestamp = a.timestamp.map(|t| t.to_string());
+    row.delete = a.is_delete();
     let attachment = a.attachment.as_ref().map(|t| t.to_bytes());
     line.fill(&mut row, attachment.as_deref());
     if let (None, Some(att)) = (&row.attachment, attachment.as_deref()) {
@@ -319,14 +386,42 @@ pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
 mod tests {
     use super::*;
 
+    use snapbox::{assert_data_eq, str};
+    use zenoh::sample::SampleKind;
+
     fn value(key: &str) -> FleetAnswer {
         FleetAnswer {
             key: key.into(),
             encoding: None,
             attachment: None,
             timestamp: None,
-            kind: Some(zenoh::sample::SampleKind::Put),
+            kind: Some(SampleKind::Put),
             answer: Answer::Value(zenoh::bytes::ZBytes::from("1")),
+        }
+    }
+
+    /// An owner's `reply_del` as `fleet_get` keeps it (#765): a sample,
+    /// stamped, its payload the empty one a delete carries.
+    fn tombstone(key: &str) -> FleetAnswer {
+        FleetAnswer {
+            key: key.into(),
+            encoding: Some("zenoh/bytes".into()),
+            attachment: None,
+            timestamp: Some(zenoh::time::Timestamp::new(
+                zenoh::time::NTP64(1 << 32),
+                "a1b2".parse().expect("an id"),
+            )),
+            kind: Some(SampleKind::Delete),
+            answer: Answer::Value(zenoh::bytes::ZBytes::new()),
+        }
+    }
+
+    /// A put whose payload is empty: what a tombstone read as a put looked
+    /// like before #765, and must never look like again.
+    fn empty_put(key: &str) -> FleetAnswer {
+        FleetAnswer {
+            answer: Answer::Value(zenoh::bytes::ZBytes::new()),
+            ..value(key)
         }
     }
 
@@ -398,5 +493,110 @@ mod tests {
 
         let err = row(&error(), &lens, false, false);
         assert_eq!(err["error"]["name"], "error/unavailable");
+    }
+
+    const ETH0: &str = "prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+
+    /// One reply's stdout in each shape of the table form: the default
+    /// rendering, `--hex`, `--raw` (which resolves nothing) and `--fmt`.
+    fn shown(a: &FleetAnswer, lens: &Lens<'_>) -> String {
+        let shape = |raw, hex, fmt| Human {
+            lens,
+            namespace: "prod",
+            raw,
+            hex,
+            fmt,
+            structural_only: raw,
+        };
+        let mut out = String::new();
+        for (name, h) in [
+            ("table", shape(false, false, None)),
+            ("--hex", shape(false, true, None)),
+            ("--raw", shape(true, false, None)),
+            (
+                "--fmt",
+                shape(false, false, Some("%n %k <%t> %v (%l B) %T")),
+            ),
+        ] {
+            out.push_str(&format!("# {name}\n"));
+            for line in h.reply(a, 1).out {
+                out.push_str(&line);
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// #765: an owner's `reply_del` reads as a deletion in every shape of
+    /// the table form, in the words `echo` uses for one — never as a put
+    /// whose payload is empty, which is drawn below it for contrast.
+    #[test]
+    fn a_deletion_renders_as_one_in_every_human_form() {
+        let contracts = zenkey_fleet::ContractSet::new();
+        let lens = Lens::new("prod", None, &contracts);
+        assert_data_eq!(
+            shown(&tombstone(ETH0), &lens),
+            str![[r#"
+# table
+prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
+  <tombstone — a deletion, not an empty value>
+# --hex
+prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
+  <tombstone — a deletion, not an empty value>
+# --raw
+prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
+  <tombstone — a deletion, not an empty value>
+# --fmt
+1 prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0 <> <tombstone — a deletion, not an empty value> (0 B) 4294967296/a1b2
+
+"#]]
+        );
+        let put = shown(&empty_put(ETH0), &lens);
+        assert!(put.contains("\n  <0 bytes>  (structural: "), "{put}");
+        assert!(!put.contains(TOMBSTONE), "an empty put is a value: {put}");
+        assert_eq!(exit_code(&[tombstone(ETH0)]), 0, "a deletion is an answer");
+    }
+
+    /// #765: a deletion's row says `"delete": true` and carries no value,
+    /// no byte count and no verdict — "0 bytes" would read as an empty
+    /// put — and `--raw`'s row says it too, with no hex; a put's rows say
+    /// `"delete": false`, always written.
+    #[test]
+    fn a_deletion_row_says_delete_and_carries_no_bytes() {
+        let contracts = zenkey_fleet::ContractSet::new();
+        let lens = Lens::new("prod", None, &contracts);
+        let r = row(&tombstone(ETH0), &lens, false, false);
+        assert_data_eq!(
+            serde_json::to_string_pretty(&r).expect("a row serializes"),
+            str![[r#"
+{
+  "delete": true,
+  "encoding": "zenoh/bytes",
+  "identity": {
+    "address": "host-a/tc",
+    "iface": "tc.netif.v1",
+    "is": "resource",
+    "token": "state",
+    "unresolved": {
+      "reason": "presence_not_read"
+    }
+  },
+  "key": "prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0",
+  "timestamp": "4294967296/a1b2"
+}
+"#]]
+        );
+        let put = row(&empty_put(ETH0), &lens, false, false);
+        assert_eq!(put["delete"], false);
+        assert_eq!(put["payload_bytes"], 0, "an empty put is a value");
+
+        let raw = row(&tombstone(ETH0), &lens, true, true);
+        assert_eq!(
+            raw,
+            serde_json::json!({"key": ETH0, "encoding": "zenoh/bytes", "delete": true})
+        );
+        let raw_put = row(&empty_put(ETH0), &lens, true, true);
+        assert_eq!(raw_put["delete"], false);
+        assert_eq!(raw_put["hex"], "");
     }
 }

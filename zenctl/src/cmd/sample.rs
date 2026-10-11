@@ -13,6 +13,10 @@ use zenkey_fleet::report::{
     Conformance, KeyGroup, KeyIdentity, PayloadRendering, Rendered, SampleRow, Unresolved,
 };
 
+/// A deletion, in the human forms' words: `echo`'s tombstone and `get`'s
+/// (#765) alike. Never an empty value, and never "0 bytes".
+pub const TOMBSTONE: &str = "<tombstone — a deletion, not an empty value>";
+
 /// One payload through the lens, once, for whichever medium prints it —
 /// `echo`'s sample and `get`'s reply alike.
 pub struct Line {
