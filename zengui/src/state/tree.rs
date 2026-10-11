@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet::{KeyTreeSnapshot, MergedNode, Skeleton, SliceSet};
+use zenkey_fleet_v1::{KeyTreeSnapshot, MergedNode, Skeleton, SliceSet};
 
 use super::deployment::Deployment;
 use super::observation::Observation;
@@ -133,7 +133,11 @@ impl TreeState {
                 &empty_skeleton
             }
         };
-        let merged = Arc::new(zenkey_fleet::merge(skeleton, &obs.observed, &obs.watched));
+        let merged = Arc::new(zenkey_fleet_v1::merge(
+            skeleton,
+            &obs.observed,
+            &obs.watched,
+        ));
         self.merged_cache = Some(MergedCache {
             skeleton: dep.skeleton.clone(),
             observed: Arc::clone(&obs.observed),

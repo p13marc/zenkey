@@ -22,7 +22,7 @@
 pub struct DecodedValue {
     /// The decode itself: rendering, verdict, and the decode error behind an
     /// `Undecodable` (#164).
-    pub sample: zenkey_fleet::DecodedSample,
+    pub sample: zenkey_fleet_v1::DecodedSample,
     /// The rendered document: pretty-printed for a schema decode, the
     /// structural rendering otherwise. Empty means the payload rendered to
     /// nothing, which the pane states as a byte count.
@@ -30,8 +30,8 @@ pub struct DecodedValue {
 }
 
 impl DecodedValue {
-    pub fn new(sample: zenkey_fleet::DecodedSample) -> DecodedValue {
-        use zenkey_fleet::Rendering;
+    pub fn new(sample: zenkey_fleet_v1::DecodedSample) -> DecodedValue {
+        use zenkey_fleet_v1::Rendering;
         let document = match &sample.rendering {
             Rendering::Typed(d) => serde_json::to_string_pretty(&d.value).unwrap_or_default(),
             Rendering::Structural(s) => s.clone(),
@@ -43,14 +43,14 @@ impl DecodedValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet::model::decode::{DecodedSample, Rendering};
+    use zenkey_fleet_v1::model::decode::{DecodedSample, Rendering};
 
     fn structural(s: &str) -> DecodedValue {
         DecodedValue::new(DecodedSample {
             type_name: None,
             rendering: Rendering::Structural(s.to_string()),
-            verdict: zenkey::schema::validate::Verdict::NotValidated(
-                zenkey::schema::validate::NotValidated::NoRegistry,
+            verdict: zenkey_v1::schema::validate::Verdict::NotValidated(
+                zenkey_v1::schema::validate::NotValidated::NoRegistry,
             ),
             decode_error: None,
         })

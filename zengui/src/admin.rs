@@ -5,15 +5,15 @@
 //! Pure logic, no widgets — the pane renders standalone in a test.
 //!
 //! **No key expression is spelled here.** Every admin selector lives inside
-//! `zenkey_fleet::bus::admin`; this module holds what came back. That is the right
+//! `zenkey_fleet_v1::bus::admin`; this module holds what came back. That is the right
 //! posture for a plane whose shape is the middleware's rather than this
 //! convention's, and it is why `scope.rs` needs no new entry.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use zenkey_fleet::report::StorageList;
-use zenkey_fleet::{DeclaredEntities, RouterInfo};
+use zenkey_fleet_v1::report::StorageList;
+use zenkey_fleet_v1::{DeclaredEntities, RouterInfo};
 
 /// One sweep's worth of admin space.
 #[derive(Debug)]
@@ -33,10 +33,10 @@ pub struct AdminSweep {
     pub coverage_note: Option<String>,
     /// The mesh as the admin space answered it (#118) — nodes, edges, and
     /// who only got mentioned. Same struct `zenctl admin graph` renders.
-    pub topology: zenkey_fleet::TopologyReport,
+    pub topology: zenkey_fleet_v1::TopologyReport,
     /// Liveliness origins joined to their sessions (#131) — evidence from
     /// the admin token sweep, never guessed; the overlay draws only these.
-    pub origins: Vec<zenkey_fleet::OriginAttachment>,
+    pub origins: Vec<zenkey_fleet_v1::OriginAttachment>,
     /// The base the coverage was judged against — the staleness guard.
     pub base: String,
 }
@@ -130,7 +130,7 @@ mod tests {
             },
             declared: None,
             coverage_note: None,
-            topology: zenkey_fleet::TopologyReport {
+            topology: zenkey_fleet_v1::TopologyReport {
                 nodes: vec![],
                 edges: vec![],
                 asked: "@/*/*".into(),

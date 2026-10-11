@@ -15,10 +15,11 @@ use crate::services::ServiceError;
 pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
     Task::perform(
         async move {
-            let out = zenkey_fleet::fetch_value(&session, &key, zenkey_fleet::FetchSpec::default())
-                .await
-                .map(Arc::new)
-                .map_err(ServiceError::of);
+            let out =
+                zenkey_fleet_v1::fetch_value(&session, &key, zenkey_fleet_v1::FetchSpec::default())
+                    .await
+                    .map(Arc::new)
+                    .map_err(ServiceError::of);
             (key, out)
         },
         |(key, out)| Message::Subject(SubjectMsg::ValueFetched(key, out)),
@@ -39,9 +40,9 @@ pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
 /// verdict is `NotValidated(NoRegistry)` — "nobody looked" rendered as
 /// itself, never omitted and never dressed as `NoSchema` (#164, #246).
 pub struct Decode {
-    pub store: Arc<zenkey_fleet::SchemaStore>,
+    pub store: Arc<zenkey_fleet_v1::SchemaStore>,
     pub session: zenoh::Session,
-    pub slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    pub slices: Option<Arc<zenkey_fleet_v1::SliceSet>>,
     pub base: String,
     /// What the *selection* asked for — the landing message is keyed by it.
     pub fetched_key: String,
@@ -66,8 +67,8 @@ pub fn decode(d: Decode) -> Task<Message> {
                 encoding,
                 bytes,
             } = d;
-            let d = zenkey_fleet::decode_sample(
-                &zenkey_fleet::Fleet::new(&session, &base),
+            let d = zenkey_fleet_v1::decode_sample(
+                &zenkey_fleet_v1::Fleet::new(&session, &base),
                 &store,
                 slices.as_deref(),
                 &wire_key,
@@ -94,18 +95,18 @@ pub fn decode(d: Decode) -> Task<Message> {
 /// producer's `describe` on a first miss. The render paths only ever *read*
 /// the cache this lands in.
 pub fn validate(
-    store: Arc<zenkey_fleet::SchemaStore>,
+    store: Arc<zenkey_fleet_v1::SchemaStore>,
     session: zenoh::Session,
-    slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    slices: Option<Arc<zenkey_fleet_v1::SliceSet>>,
     base: String,
     batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
+            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
             let mut out = Vec::with_capacity(batch.len());
             for (key, encoding, bytes) in batch {
-                let d = zenkey_fleet::decode_sample(
+                let d = zenkey_fleet_v1::decode_sample(
                     &fleet,
                     &store,
                     slices.as_deref(),
@@ -132,20 +133,20 @@ pub fn field(
     slot: crate::message::SlotId,
     session: zenoh::Session,
     base: String,
-    slices: Option<Arc<zenkey_fleet::SliceSet>>,
-    store: Arc<zenkey_fleet::SchemaStore>,
+    slices: Option<Arc<zenkey_fleet_v1::SliceSet>>,
+    store: Arc<zenkey_fleet_v1::SchemaStore>,
     key: String,
     window: std::time::Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet::FieldSpec {
+            let spec = zenkey_fleet_v1::FieldSpec {
                 selector: key,
                 window,
-                max_paths: zenkey_fleet::DEFAULT_MAX_PATHS,
+                max_paths: zenkey_fleet_v1::DEFAULT_MAX_PATHS,
             };
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            zenkey_fleet::run_field(&fleet, slices.as_deref(), &store, &spec)
+            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+            zenkey_fleet_v1::run_field(&fleet, slices.as_deref(), &store, &spec)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of)
@@ -170,18 +171,18 @@ pub fn why(
     slot: crate::message::SlotId,
     session: zenoh::Session,
     base: String,
-    slices: Option<Arc<zenkey_fleet::SliceSet>>,
+    slices: Option<Arc<zenkey_fleet_v1::SliceSet>>,
     key: String,
     timeout: std::time::Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet::WhySpec {
+            let spec = zenkey_fleet_v1::WhySpec {
                 timeout,
                 listen: None,
             };
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            zenkey_fleet::run_why(&fleet, &key, slices.as_deref(), &spec)
+            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+            zenkey_fleet_v1::run_why(&fleet, &key, slices.as_deref(), &spec)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of)
@@ -200,7 +201,7 @@ pub fn why(
 /// *is* an answer.
 pub fn request_schema(
     session: zenoh::Session,
-    store: Arc<zenkey_fleet::SchemaStore>,
+    store: Arc<zenkey_fleet_v1::SchemaStore>,
     producer: String,
     request: String,
 ) -> Task<Message> {

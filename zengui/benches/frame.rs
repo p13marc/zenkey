@@ -46,8 +46,8 @@ use std::hint::black_box;
 /// benches and `spray`.
 const HOST: &str = "h-3fa9c2d41b7e";
 
-fn sample(key: &str, payload: &[u8]) -> zenkey_fleet::SampleView {
-    zenkey_fleet::SampleView {
+fn sample(key: &str, payload: &[u8]) -> zenkey_fleet_v1::SampleView {
+    zenkey_fleet_v1::SampleView {
         key: key.to_string(),
         payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
         encoding: "application/json".to_string(),
@@ -150,11 +150,11 @@ fn bench_hex(c: &mut Criterion) {
 /// The nodes pane's watched-freshness join.
 ///
 /// Quadratic in (producers × watch selectors) by construction, which is why
-/// the per-pair key-expression work mattered: `zenkey_fleet::model::skeleton::merge`
+/// the per-pair key-expression work mattered: `zenkey_fleet_v1::model::skeleton::merge`
 /// was fixed to validate borrowed `&keyexpr` once per tick, and this site was
 /// missed.
 fn bench_roster(c: &mut Criterion) {
-    let mut stats = zenkey_fleet::model::stats::StatsTable::new();
+    let mut stats = zenkey_fleet_v1::model::stats::StatsTable::new();
     let now = Instant::now();
     for i in 0..40_000 {
         stats.record(
@@ -166,7 +166,7 @@ fn bench_roster(c: &mut Criterion) {
             None,
         );
     }
-    let tree = zenkey_fleet::KeyTreeSnapshot::build(&stats);
+    let tree = zenkey_fleet_v1::KeyTreeSnapshot::build(&stats);
     let watched: Vec<String> = (0..8).map(|i| format!("v1/*/state/p{i}/**")).collect();
 
     let mut roster = zengui::nodes::NodeRoster::default();
@@ -257,16 +257,16 @@ fn bench_tree(c: &mut Criterion) {
     /// The observed half, and the empty skeleton `reflatten` merges against
     /// when no registry has answered — which is the common case on a foreign
     /// bus, and the one `app.rs` rebuilds from scratch on every call.
-    fn inputs(n: usize) -> (zenkey_fleet::Skeleton, zenkey_fleet::KeyTreeSnapshot) {
-        let mut stats = zenkey_fleet::model::stats::StatsTable::new();
+    fn inputs(n: usize) -> (zenkey_fleet_v1::Skeleton, zenkey_fleet_v1::KeyTreeSnapshot) {
+        let mut stats = zenkey_fleet_v1::model::stats::StatsTable::new();
         let now = Instant::now();
         for k in keys(n) {
             stats.record(&k, 64, None, now, None, None);
         }
-        let observed = zenkey_fleet::KeyTreeSnapshot::build(&stats);
-        let skel = zenkey_fleet::Skeleton::build(
+        let observed = zenkey_fleet_v1::KeyTreeSnapshot::build(&stats);
+        let skel = zenkey_fleet_v1::Skeleton::build(
             "",
-            &zenkey_fleet::SliceSet::default(),
+            &zenkey_fleet_v1::SliceSet::default(),
             &std::collections::BTreeMap::new(),
             None,
         );
@@ -292,7 +292,7 @@ fn bench_tree(c: &mut Criterion) {
 
     let watched = ["**".to_string()];
     let (skel, observed) = inputs(TREE_KEYS);
-    let merged = zenkey_fleet::model::skeleton::merge(&skel, &observed, &watched);
+    let merged = zenkey_fleet_v1::model::skeleton::merge(&skel, &observed, &watched);
     let expanded = expand_all(TREE_KEYS);
     let now = Instant::now();
 
@@ -304,7 +304,7 @@ fn bench_tree(c: &mut Criterion) {
     // it flattens anything, on every one of its nine call sites.
     group.bench_function("merge_50k", |b| {
         b.iter(|| {
-            black_box(zenkey_fleet::model::skeleton::merge(
+            black_box(zenkey_fleet_v1::model::skeleton::merge(
                 black_box(&skel),
                 black_box(&observed),
                 black_box(&watched),
@@ -365,7 +365,8 @@ fn bench_tree(c: &mut Criterion) {
     // `shape_reused`/`shape_rebuilt` unit tests are what stand in for #177's
     // "allocation is O(1)" acceptance, which is not a thing a bench can say.
     let (small_skel, small_observed) = inputs(1_000);
-    let small_merged = zenkey_fleet::model::skeleton::merge(&small_skel, &small_observed, &watched);
+    let small_merged =
+        zenkey_fleet_v1::model::skeleton::merge(&small_skel, &small_observed, &watched);
     let small_expanded = expand_all(1_000);
     let small_snapshot = Arc::new(small_observed);
     let big_snapshot = Arc::new(observed);

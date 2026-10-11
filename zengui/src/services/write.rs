@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use iced::Task;
-use zenkey::qos::QosProfile;
-use zenkey_fleet::{Publication, SliceSet};
+use zenkey_fleet_v1::{Publication, SliceSet};
+use zenkey_v1::qos::QosProfile;
 
 use crate::message::{Message, PaneMsg, PublishOutcome};
 use crate::services::ServiceError;
@@ -47,7 +47,7 @@ pub fn call(c: Call) -> Task<Message> {
 /// the same engine call, answered into its own form).
 pub fn call_then(
     c: Call,
-    land: impl FnOnce(Result<Arc<zenkey_fleet::report::CallReport>, ServiceError>) -> Message
+    land: impl FnOnce(Result<Arc<zenkey_fleet_v1::report::CallReport>, ServiceError>) -> Message
     + Send
     + 'static,
 ) -> Task<Message> {
@@ -65,10 +65,10 @@ pub fn call_then(
                 timeout,
                 slices,
             } = c;
-            let target = zenkey_fleet::CallTarget::parse(&target).map_err(ServiceError::of)?;
-            zenkey_fleet::call(
-                &zenkey_fleet::Fleet::new(&session, &base),
-                zenkey_fleet::CallSpec {
+            let target = zenkey_fleet_v1::CallTarget::parse(&target).map_err(ServiceError::of)?;
+            zenkey_fleet_v1::call(
+                &zenkey_fleet_v1::Fleet::new(&session, &base),
+                zenkey_fleet_v1::CallSpec {
                     target: &target,
                     producer: &producer,
                     procedure: &procedure,
@@ -91,13 +91,13 @@ pub fn call_then(
 /// What one `Send` needs, gathered from the form before the future starts.
 pub struct Publish {
     pub session: zenoh::Session,
-    pub store: Arc<zenkey_fleet::SchemaStore>,
+    pub store: Arc<zenkey_fleet_v1::SchemaStore>,
     pub slices: Option<Arc<SliceSet>>,
     pub base: String,
     pub key: String,
     pub encoding: String,
     pub body: Vec<u8>,
-    pub mode: zenkey_fleet::PrepareMode,
+    pub mode: zenkey_fleet_v1::PrepareMode,
     pub qos: QosProfile,
     pub attachment: Option<Arc<Vec<u8>>>,
     pub repeat: bool,
@@ -120,12 +120,12 @@ pub fn publish(p: Publish) -> Task<Message> {
                 attachment,
                 repeat,
             } = p;
-            let prepared = zenkey_fleet::prepare_publish(
-                &zenkey_fleet::Fleet::new(&session, &base),
+            let prepared = zenkey_fleet_v1::prepare_publish(
+                &zenkey_fleet_v1::Fleet::new(&session, &base),
                 &store,
                 slices.as_deref(),
                 &key,
-                zenkey_fleet::PrepareSpec {
+                zenkey_fleet_v1::PrepareSpec {
                     declared_encoding: (!encoding.is_empty()).then_some(encoding.as_str()),
                     body: &body,
                     mode,
@@ -133,7 +133,7 @@ pub fn publish(p: Publish) -> Task<Message> {
             )
             .await
             .map_err(ServiceError::of)?;
-            let publication = zenkey_fleet::declare_publication(
+            let publication = zenkey_fleet_v1::declare_publication(
                 &session,
                 &key,
                 qos,
@@ -208,7 +208,7 @@ pub fn retire(session: zenoh::Session, key: String) -> Task<Message> {
     Task::perform(
         async move {
             let publication =
-                zenkey_fleet::declare_publication(&session, &key, QosProfile::Transition, None)
+                zenkey_fleet_v1::declare_publication(&session, &key, QosProfile::Transition, None)
                     .await
                     .map_err(ServiceError::of)?;
             let matching = publication.matching_status().await.ok();

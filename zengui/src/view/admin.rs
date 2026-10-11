@@ -19,8 +19,8 @@
 
 use iced::widget::{column, row, scrollable};
 use iced::{Element, Length};
-use zenkey_fleet::report::StorageList;
-use zenkey_fleet::{Coverage, CoverageRow, RouterInfo, StorageInfo};
+use zenkey_fleet_v1::report::StorageList;
+use zenkey_fleet_v1::{Coverage, CoverageRow, RouterInfo, StorageInfo};
 
 use crate::admin::{AdminState, AdminSweep, router_row_id, storage_row_id};
 use crate::message::{Message, PaneMsg};
@@ -146,7 +146,7 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState, sp: Spacing) -> El
                 // older doc's blank stays a blank.
                 if r.version
                     .as_deref()
-                    .is_some_and(zenkey_fleet::admin_doc_omits_loopback)
+                    .is_some_and(zenkey_fleet_v1::admin_doc_omits_loopback)
                 {
                     "no locators listed — zenoh 1.10+ may omit loopback listen endpoints \
                      from the admin doc"

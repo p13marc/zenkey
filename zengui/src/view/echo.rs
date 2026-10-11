@@ -207,11 +207,11 @@ pub fn visible<'a>(
 }
 
 /// One line in the explorers' row dialect (#72), written through the engine's
-/// [`zenkey_fleet::SampleRow`] so it cannot drift from the reader (#235).
+/// [`zenkey_fleet_v1::SampleRow`] so it cannot drift from the reader (#235).
 ///
 /// This doc used to claim the shared fields were "byte-for-byte the CLI's".
 /// They were not: the row spelled a payload byte *count* as `bytes`, which
-/// [`zenkey_fleet::parse_row`] reads as base64 of the wire payload
+/// [`zenkey_fleet_v1::parse_row`] reads as base64 of the wire payload
 /// (RFC 09 §5.2) and rejects as malformed. Sharing the writer is what makes
 /// the claim true rather than restating it.
 ///
@@ -225,7 +225,7 @@ pub fn visible<'a>(
 /// - this row carries `payload_bytes`, which the ring knows and the CLI's
 ///   row spells from the same field.
 pub fn ndjson_line(line: &EchoLine, base: &str) -> String {
-    let mut row = zenkey_fleet::SampleRow::of_key(&line.key, base);
+    let mut row = zenkey_fleet_v1::SampleRow::of_key(&line.key, base);
     row.encoding = Some(line.encoding.clone()).filter(|e| !e.is_empty());
     row.timestamp = line.timestamp.clone();
     row.delete = line.is_delete;
@@ -685,7 +685,7 @@ mod tests {
         );
         l.attachment = Some(r#"{"who":"me"}"#.to_string());
         l.attachment_len = Some(12);
-        let row = zenkey_fleet::parse_row(&ndjson_line(&l, "")).expect("the export reads back");
+        let row = zenkey_fleet_v1::parse_row(&ndjson_line(&l, "")).expect("the export reads back");
         assert_eq!(row.key, "v1/h-3fa9c2d41b7e/state/sysinfo/health");
         assert_eq!(row.payload, br#"{"status":"ok"}"#);
         assert_eq!(row.encoding.as_deref(), Some("application/json"));
@@ -696,7 +696,8 @@ mod tests {
         // (RFC 04 §1.2).
         let mut dead = line(1, "v1/h-3fa9c2d41b7e/state/sysinfo/health", "");
         dead.is_delete = true;
-        let row = zenkey_fleet::parse_row(&ndjson_line(&dead, "")).expect("a tombstone reads back");
+        let row =
+            zenkey_fleet_v1::parse_row(&ndjson_line(&dead, "")).expect("a tombstone reads back");
         assert!(row.delete);
     }
 

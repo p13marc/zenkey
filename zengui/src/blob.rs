@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet::BlobTarget;
-use zenkey_fleet::report::{BlobFetchReport, BlobList, BlobProbeReport};
+use zenkey_fleet_v1::BlobTarget;
+use zenkey_fleet_v1::report::{BlobFetchReport, BlobList, BlobProbeReport};
 
 /// A probe's state. `NotAsked` is a distinct variant on purpose: "never
 /// probed" and "probed, nobody answered" are different facts and must not
@@ -47,7 +47,7 @@ pub enum Fetch {
     Done(Arc<BlobFetchReport>),
     /// A `tree/<root>` target: inspected, not downloaded (RFC 07 §2.3,
     /// v1.17) — the validated index summary, no content store involved.
-    Inspected(Arc<zenkey_fleet::report::BlobTreeIndexReport>),
+    Inspected(Arc<zenkey_fleet_v1::report::BlobTreeIndexReport>),
     Failed(crate::services::ServiceError),
 }
 
@@ -76,7 +76,7 @@ pub struct BlobState {
     pub allow_unpinned: bool,
     pub fetch: Fetch,
     /// Live while a fetch runs, so the stop button is not a lie.
-    pub cancel: Option<zenkey_fleet::zblob::CancelToken>,
+    pub cancel: Option<zenkey_fleet_v1::zblob::CancelToken>,
 }
 
 impl BlobState {
@@ -96,7 +96,7 @@ impl BlobState {
     }
 
     /// The chosen holder, if the probe produced one and it was selected.
-    pub fn selected(&self) -> Option<&zenkey_fleet::report::BlobHolder> {
+    pub fn selected(&self) -> Option<&zenkey_fleet_v1::report::BlobHolder> {
         let Probe::Done(report) = &self.probe else {
             return None;
         };
@@ -199,7 +199,7 @@ impl BlobState {
     pub fn inspect_finished(
         &mut self,
         outcome: Result<
-            Arc<zenkey_fleet::report::BlobTreeIndexReport>,
+            Arc<zenkey_fleet_v1::report::BlobTreeIndexReport>,
             crate::services::ServiceError,
         >,
         ran_against: &str,
@@ -227,7 +227,7 @@ impl BlobState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet::report::{BlobHolder, BlobManifest};
+    use zenkey_fleet_v1::report::{BlobHolder, BlobManifest};
 
     fn holder(origin: &str, root: &str) -> BlobHolder {
         BlobHolder {
@@ -317,7 +317,7 @@ mod tests {
                 bytes: 65536,
                 coalesced: 0,
             },
-            cancel: Some(zenkey_fleet::zblob::CancelToken::new()),
+            cancel: Some(zenkey_fleet_v1::zblob::CancelToken::new()),
             ..BlobState::default()
         };
 

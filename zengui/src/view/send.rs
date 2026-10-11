@@ -13,7 +13,7 @@
 //! Everything both modes promised, they still promise:
 //!
 //! **The body is encoded by the engine, never here.** The editor holds JSON;
-//! `zenkey_fleet::prepare_publish` (#97) turns it into the bytes that ship,
+//! `zenkey_fleet_v1::prepare_publish` (#97) turns it into the bytes that ship,
 //! against the producer's served schema, labelled with the declared encoding.
 //! No GUI-side codec logic exists or may be added — a missing codec is a
 //! zenkey-fleet issue (`docs/redesign-2026-07.md` §15). What the pane *does*
@@ -27,7 +27,7 @@
 //! bound bites the pane reports what it dropped (RFC 09 §5.1 O6).
 //!
 //! **Calls go through the engine.** The target parses through
-//! [`CallTarget`](zenkey_fleet::CallTarget) (a hostname fails with the
+//! [`CallTarget`](zenkey_fleet_v1::CallTarget) (a hostname fails with the
 //! RFC 06 §6 pointer, exactly like the CLI), and a fleet call to a
 //! forbidden-fanout procedure is refused by the engine's registry guard —
 //! this pane adds the visual layer: the fleet option is *labelled* refused as
@@ -37,9 +37,9 @@ use std::collections::VecDeque;
 
 use iced::widget::{Column, column, row};
 use iced::{Element, Length};
-use zenkey::qos::QosProfile;
-use zenkey_fleet::report::CallReport;
-use zenkey_fleet::{BodySource, KeyFacts, SliceSet};
+use zenkey_fleet_v1::report::CallReport;
+use zenkey_fleet_v1::{BodySource, KeyFacts, SliceSet};
+use zenkey_v1::qos::QosProfile;
 
 use std::sync::Arc;
 
@@ -111,7 +111,7 @@ pub fn qos_choices() -> &'static [QosChoice] {
 /// The declared profile behind a classified key, when there is one (#158).
 /// Drives the picker default until the user takes the picker over.
 pub fn declared_qos(facts: Option<&KeyFacts>) -> Option<QosProfile> {
-    use zenkey_fleet::Registration;
+    use zenkey_fleet_v1::Registration;
     match facts.map(|f| &f.registration) {
         Some(Registration::Registered(s)) => s.declared_qos(),
         _ => None,
@@ -156,7 +156,7 @@ impl SchemaField {
 /// `json-schema` kind describes fields in a form this can read; every other
 /// kind returns an empty list, which the pane renders as "nothing to
 /// scaffold" rather than as "no fields".
-pub fn schema_fields(schema: &zenkey::schema::TypeSchema) -> Vec<SchemaField> {
+pub fn schema_fields(schema: &zenkey_v1::schema::TypeSchema) -> Vec<SchemaField> {
     let Some(doc) = schema.json_document() else {
         return Vec::new();
     };
@@ -379,14 +379,14 @@ pub enum SendMsg {
     RequestSchema(Option<Vec<SchemaField>>),
     /// The call finished — its report, or why it did not (#176). Its `Err`
     /// is written into [`SendForm::outcome`].
-    Done(Result<Arc<zenkey_fleet::report::CallReport>, crate::services::ServiceError>),
+    Done(Result<Arc<zenkey_fleet_v1::report::CallReport>, crate::services::ServiceError>),
 }
 
 /// Whether retiring this key is the v1.12 operator act — i.e. anything but a
 /// state key, where retirement is the class's own semantics. Display logic
 /// only: the engine's `check_retire` is the judge at submit.
 pub fn retire_needs_i_know(facts: Option<&KeyFacts>) -> bool {
-    use zenkey_fleet::model::facts::{ClassKind, KeyShape};
+    use zenkey_fleet_v1::model::facts::{ClassKind, KeyShape};
     match facts.map(|f| &f.shape) {
         Some(KeyShape::V1(v)) => v.class_kind != ClassKind::State,
         _ => true,
@@ -960,8 +960,11 @@ fn outcome_view<'a>(
 /// chip — words, where hand-drawn ✓/✗ used to stand — and what it said.
 /// A total match on the outcome: the old flat shape could spell ok:false
 /// with no error, and that row fell through every arm.
-fn answer_card<'a>(a: &'a zenkey_fleet::report::CallAnswer, sp: Spacing) -> Element<'a, Message> {
-    use zenkey_fleet::report::CallOutcome;
+fn answer_card<'a>(
+    a: &'a zenkey_fleet_v1::report::CallAnswer,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    use zenkey_fleet_v1::report::CallOutcome;
     let (chip, said): (Element<'a, Message>, Option<String>) = match &a.outcome {
         CallOutcome::Err(err) => (
             kit::status_chip(Tone::Negative, err.name.clone()),
@@ -1049,14 +1052,14 @@ mod tests {
     /// already holds — and only the `Registered` rung ever yields one.
     #[test]
     fn declared_qos_reads_only_the_registered_rung() {
-        use zenkey::slice::{RegistrySlice, SubjectDecl};
-        let mut health = SubjectDecl::new("health", zenkey::Class::State);
+        use zenkey_v1::slice::{RegistrySlice, SubjectDecl};
+        let mut health = SubjectDecl::new("health", zenkey_v1::Class::State);
         health.type_name = "Health".into();
-        health.qos = Some(zenkey::QosProfile::Transition.into());
+        health.qos = Some(zenkey_v1::QosProfile::Transition.into());
         let mut slice = RegistrySlice::new("1.0", "test", "sysinfo");
         slice.subjects = vec![health];
-        let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
-        let facts = |key: &str| zenkey_fleet::describe_key("", key, Some(&slices)).facts;
+        let slices = zenkey_fleet_v1::SliceSet::from_slices(vec![slice]);
+        let facts = |key: &str| zenkey_fleet_v1::describe_key("", key, Some(&slices)).facts;
         let registered = facts("v1/h-3fa9c2d41b7e/state/sysinfo/health");
         assert_eq!(
             declared_qos(Some(&registered)),

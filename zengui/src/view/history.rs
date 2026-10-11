@@ -18,7 +18,7 @@
 
 use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet::model::diff::{Change, ValueDiff};
+use zenkey_fleet_v1::model::diff::{Change, ValueDiff};
 
 use crate::history::{HistoryEntry, HistoryRecorder};
 use crate::message::{Message, PaneMsg, SlotId, SubjectMsg};
@@ -67,7 +67,10 @@ pub struct HistoryData<'a> {
     pub scroll: crate::view::kit::Viewport,
     /// The loaded `.zsnap`'s row for this key and the file's header (#219),
     /// when a snapshot is loaded and carries the key.
-    pub snapshot: Option<(&'a zenkey_fleet::SnapshotRow, &'a zenkey_fleet::ZsnapHeader)>,
+    pub snapshot: Option<(
+        &'a zenkey_fleet_v1::SnapshotRow,
+        &'a zenkey_fleet_v1::ZsnapHeader,
+    )>,
     /// Whether the panel compares against that row rather than the
     /// previous sample.
     pub compare_snapshot: bool,
@@ -235,8 +238,8 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
 /// by the snapshot's moment and span.
 fn snapshot_section<'a>(
     rec: &HistoryRecorder,
-    row: &zenkey_fleet::SnapshotRow,
-    header: &zenkey_fleet::ZsnapHeader,
+    row: &zenkey_fleet_v1::SnapshotRow,
+    header: &zenkey_fleet_v1::ZsnapHeader,
     sp: Spacing,
 ) -> Element<'a, Message> {
     let mut col = Column::new().spacing(sp.xs);
@@ -384,7 +387,7 @@ fn pair_view<'a>(
 
     match (&prev.value, &entry.value) {
         (Some(old), Some(new)) => {
-            let d = zenkey_fleet::value_diff(old, new, MAX_CHANGES);
+            let d = zenkey_fleet_v1::value_diff(old, new, MAX_CHANGES);
             if d.is_empty() {
                 return col
                     .push(kit::muted(
@@ -441,7 +444,7 @@ enum Tone {
 fn bytes_view<'a>(prev: &HistoryEntry, entry: &HistoryEntry, sp: Spacing) -> Element<'a, Message> {
     let old = prev.payload.to_bytes();
     let new = entry.payload.to_bytes();
-    let d = zenkey_fleet::byte_diff(&old, &new);
+    let d = zenkey_fleet_v1::byte_diff(&old, &new);
     let which = match (prev.value.is_some(), entry.value.is_some()) {
         (false, false) => "neither sample has a structural form",
         (true, false) => "this sample has no structural form",

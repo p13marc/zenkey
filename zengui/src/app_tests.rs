@@ -91,9 +91,9 @@ fn switching_base_keeps_what_the_user_typed() {
 #[test]
 fn a_forgotten_deployment_needs_no_merge_cache_reset() {
     let mut app = test_app();
-    app.dep.skeleton = Some(Arc::new(zenkey_fleet::Skeleton::build(
+    app.dep.skeleton = Some(Arc::new(zenkey_fleet_v1::Skeleton::build(
         "",
-        &zenkey_fleet::SliceSet::default(),
+        &zenkey_fleet_v1::SliceSet::default(),
         &std::collections::BTreeMap::new(),
         None,
     )));
@@ -114,9 +114,9 @@ fn a_forgotten_deployment_needs_no_merge_cache_reset() {
 
 /// A tick that changes nothing about the key set or the watch set.
 fn tick(keys: usize, evicted: u64, unwatched: u64, watched: &Arc<[String]>) -> BusTick {
-    let stats = zenkey_fleet::StatsTable::new();
+    let stats = zenkey_fleet_v1::StatsTable::new();
     BusTick {
-        tree: Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats)),
+        tree: Arc::new(zenkey_fleet_v1::KeyTreeSnapshot::build(&stats)),
         samples: Vec::new(),
         lagged: 0,
         coalesced: 0,
@@ -225,8 +225,8 @@ fn a_presentation_change_does_not_re_merge_the_tree() {
 
     // A new observed snapshot is a different tree, and must not be served
     // from the cache.
-    let stats = zenkey_fleet::StatsTable::new();
-    app.obs.observed = Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats));
+    let stats = zenkey_fleet_v1::StatsTable::new();
+    app.obs.observed = Arc::new(zenkey_fleet_v1::KeyTreeSnapshot::build(&stats));
     app.tree.reflatten(&app.dep, &app.obs);
     assert!(
         !Arc::ptr_eq(
@@ -445,7 +445,7 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
     use std::sync::Arc;
 
     use crate::message::RightPane;
-    use zenkey_fleet::FetchOutcome;
+    use zenkey_fleet_v1::FetchOutcome;
 
     let mut app = test_app();
     let stale = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
@@ -496,12 +496,12 @@ fn a_fetch_for_a_stale_subject_supersedes_rather_than_replaces() {
 /// Synthetic traffic for the retained-window tests (#217): ~88 s of
 /// watched keys with an LWW update, a tombstone, an attachment and one
 /// key that is not this convention at all (O1 — a window curates nothing).
-fn traffic(epoch: std::time::Instant) -> Vec<zenkey_fleet::SampleView> {
+fn traffic(epoch: std::time::Instant) -> Vec<zenkey_fleet_v1::SampleView> {
     use std::time::Duration;
     use zenoh::sample::SampleKind;
     let view =
         |t_s: u64, key: &str, payload: &[u8], encoding: &str, kind, attachment: Option<&[u8]>| {
-            zenkey_fleet::SampleView {
+            zenkey_fleet_v1::SampleView {
                 key: key.to_string(),
                 payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
                 encoding: encoding.to_string(),
@@ -575,7 +575,7 @@ fn traffic(epoch: std::time::Instant) -> Vec<zenkey_fleet::SampleView> {
 fn canonical(app: &Zengui) -> String {
     use std::fmt::Write;
     let mut out = String::new();
-    fn node(out: &mut String, path: &str, n: &zenkey_fleet::TreeNode) {
+    fn node(out: &mut String, path: &str, n: &zenkey_fleet_v1::TreeNode) {
         writeln!(
             out,
             "{path} c={} b={} r={:016x} sc={} sb={} sr={:016x} sk={}",
@@ -630,7 +630,7 @@ fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
     let watched: StdArc<[String]> = StdArc::from(["v1/**".to_string()]);
 
     // Route one: the live monitor's ring, entered through the toggle's seam.
-    let core = zenkey_fleet::MonitorCore::new(1024);
+    let core = zenkey_fleet_v1::MonitorCore::new(1024);
     for v in &views {
         core.ingest(v.clone(), None);
     }
@@ -646,7 +646,7 @@ fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
     );
 
     // Route two: the same window saved as a `.zrec` and opened from disk.
-    let rows: Vec<StdArc<zenkey_fleet::SampleView>> =
+    let rows: Vec<StdArc<zenkey_fleet_v1::SampleView>> =
         views.iter().cloned().map(StdArc::new).collect();
     let mut bytes = Vec::new();
     let samples = crate::services::record::write_window(
@@ -792,9 +792,9 @@ fn a_loaded_snapshot_is_held_beside_the_live_world_not_instead_of_it() {
     );
     assert!(app.work.replay.snapshot_note.is_some());
 
-    let snapshot = std::sync::Arc::new(zenkey_fleet::Snapshot {
-        header: zenkey_fleet::ZsnapHeader {
-            zsnap: zenkey_fleet::ZSNAP_VERSION,
+    let snapshot = std::sync::Arc::new(zenkey_fleet_v1::Snapshot {
+        header: zenkey_fleet_v1::ZsnapHeader {
+            zsnap: zenkey_fleet_v1::ZSNAP_VERSION,
             selectors: vec!["v1/**".into()],
             base: String::new(),
             collected_at: "2026-09-06T00:00:00Z".into(),
@@ -804,7 +804,7 @@ fn a_loaded_snapshot_is_held_beside_the_live_world_not_instead_of_it() {
             elided: 0,
             errors: 0,
             superseded: 0,
-            roster: zenkey_fleet::report::Asked::NotAsked,
+            roster: zenkey_fleet_v1::report::Asked::NotAsked,
         },
         rows: Vec::new(),
     });
@@ -839,7 +839,7 @@ fn the_retained_window_is_replay_mode_with_all_its_locks() {
     use crate::view::replay::ReplayMsg;
 
     let epoch = std::time::Instant::now();
-    let core = zenkey_fleet::MonitorCore::new(64);
+    let core = zenkey_fleet_v1::MonitorCore::new(64);
     for v in traffic(epoch) {
         core.ingest(v, None);
     }
@@ -1387,7 +1387,7 @@ fn replay_forbids_publishing_and_recording_in_every_window() {
     use crate::view::replay::ReplayMsg;
 
     let epoch = std::time::Instant::now();
-    let core = zenkey_fleet::MonitorCore::new(64);
+    let core = zenkey_fleet_v1::MonitorCore::new(64);
     for v in traffic(epoch) {
         core.ingest(v, None);
     }
@@ -1624,8 +1624,8 @@ fn a_tuning_apply_resizes_live_keeps_the_counters_and_forgets_on_registry() {
 }
 
 /// One sample on one key, for the slot fan-out tests (#257).
-fn sample_on(key: &str, payload: &[u8]) -> Arc<zenkey_fleet::SampleView> {
-    Arc::new(zenkey_fleet::SampleView {
+fn sample_on(key: &str, payload: &[u8]) -> Arc<zenkey_fleet_v1::SampleView> {
+    Arc::new(zenkey_fleet_v1::SampleView {
         key: key.to_string(),
         payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
         encoding: "application/json".to_string(),
@@ -1985,8 +1985,8 @@ fn a_recording_is_a_status_not_an_alarm() {
 
 /// The RFC 05 §5.1 test double. zengui is its only includer since #612's
 /// FJ9 took `config` out of zenctl and the in-tree engine; the file's own
-/// header says why it still lives under zenkey-fleet.
-#[path = "../../zenkey-fleet/tests/util/config_server.rs"]
+/// header says why it moved here from zenkey-fleet (#614, FL5).
+#[path = "../tests/util/config_server.rs"]
 mod config_server;
 
 /// A live producer serving the double's fixture as `radio` on `origin`;
@@ -1997,11 +1997,11 @@ async fn config_producer(
     zenoh::Session,
     config_server::ConfigServer,
     Vec<tokio::task::JoinHandle<()>>,
-    zenkey_fleet::bus::producer::LiveProducer,
+    zenkey_fleet_v1::bus::producer::LiveProducer,
     zenoh::Session,
 ) {
-    use zenkey_fleet::bus::producer::BringUp;
-    let server = zenkey_fleet::bus::session::open(&[], &["tcp/127.0.0.1:0".to_string()], false)
+    use zenkey_fleet_v1::bus::producer::BringUp;
+    let server = zenkey_fleet_v1::bus::session::open(&[], &["tcp/127.0.0.1:0".to_string()], false)
         .await
         .expect("the producer's session");
     let endpoint = server
@@ -2012,7 +2012,7 @@ async fn config_producer(
         .map(|l| l.to_string())
         .find(|l| l.starts_with("tcp/127.0.0.1:"))
         .expect("a loopback listener");
-    let client = zenkey_fleet::bus::session::open(&[endpoint], &[], false)
+    let client = zenkey_fleet_v1::bus::session::open(&[endpoint], &[], false)
         .await
         .expect("the explorer's session");
     let double = config_server::ConfigServer::fixture("radio");
@@ -2062,7 +2062,7 @@ async fn config_open(app: &mut Zengui, origin: &str) {
 async fn the_config_tool_applies_a_hot_change_and_refuses_an_unsound_one_unsent() {
     use crate::configure::GroupNote;
     use crate::view::configure::ConfigMsg;
-    use zenkey::config::{ParamValue, ValueSource};
+    use zenkey_v1::config::{ParamValue, ValueSource};
 
     const ORIGIN: &str = "h-c0f1c0f1c0f1";
     let (client, double, _served, _live, _server) = config_producer(ORIGIN).await;
@@ -2127,7 +2127,7 @@ async fn the_config_tool_arms_joins_confirms_and_persists_a_reach_change() {
     use crate::configure::Verb;
     use crate::message::PaneMsg;
     use crate::view::configure::ConfigMsg;
-    use zenkey::config::ValueSource;
+    use zenkey_v1::config::ValueSource;
 
     const ORIGIN: &str = "h-c0f1c0f1c0f2";
     let (client, double, _served, _live, _server) = config_producer(ORIGIN).await;

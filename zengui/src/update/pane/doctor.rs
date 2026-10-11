@@ -60,7 +60,7 @@ pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message>
                 session,
                 base,
                 dirs,
-                zenkey_fleet::DoctorSpec {
+                zenkey_fleet_v1::DoctorSpec {
                     deep,
                     sample: None,
                     timeout,

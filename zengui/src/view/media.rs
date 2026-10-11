@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use iced::Length;
 use iced::widget::{Column, column, row};
-use zenkey_fleet::{SampleView, SliceSet, WatchId};
+use zenkey_fleet_v1::{SampleView, SliceSet, WatchId};
 
 use super::kit;
 use super::tokens::{Spacing, font};

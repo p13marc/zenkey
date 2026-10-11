@@ -19,8 +19,8 @@
 
 use iced::widget::{Column, row};
 use iced::{Element, Length};
-use zenkey_fleet::Rendering;
-use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
+use zenkey_fleet_v1::Rendering;
+use zenkey_fleet_v1::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::{NumericLeaves, Series};
@@ -77,7 +77,7 @@ fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
         )));
         return col.into();
     }
-    let rendered = zenkey_fleet::structural(bytes);
+    let rendered = zenkey_fleet_v1::structural(bytes);
     let (shown, elided) = clamp_document(&rendered);
     col = col.push(kit::mono(shown.to_string()));
     if elided > 0 {
@@ -90,11 +90,11 @@ fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
 
 /// Which rung of the fetch ladder answered, as a word (#563) — never the
 /// enum's `Debug` name. The ladder's own spelling: storage → cache → window.
-pub(crate) fn source_word(source: zenkey_fleet::ValueSource) -> &'static str {
+pub(crate) fn source_word(source: zenkey_fleet_v1::ValueSource) -> &'static str {
     match source {
-        zenkey_fleet::ValueSource::Storage => "storage",
-        zenkey_fleet::ValueSource::Cache => "@adv cache",
-        zenkey_fleet::ValueSource::Window => "live window",
+        zenkey_fleet_v1::ValueSource::Storage => "storage",
+        zenkey_fleet_v1::ValueSource::Cache => "@adv cache",
+        zenkey_fleet_v1::ValueSource::Window => "live window",
     }
 }
 
@@ -151,7 +151,7 @@ pub struct DetailData<'a> {
     /// The key's observed skewed-latency summary and unstamped count,
     /// refreshed per bus tick (#119). Absent = nothing stamped, which is
     /// not zero latency.
-    pub latency: Option<(zenkey_fleet::LatencyReport, u64)>,
+    pub latency: Option<(zenkey_fleet_v1::LatencyReport, u64)>,
     /// The dock's resolved spacing grid (#192).
     pub sp: Spacing,
 }
@@ -177,7 +177,7 @@ pub fn human_us(us: i64) -> String {
 /// frontends cannot describe one sample's QoS differently — which they
 /// previously guaranteed with a comment (#353).
 pub fn qos_token(entry: &crate::history::HistoryEntry) -> String {
-    zenkey_fleet::report::qos_axes_token(
+    zenkey_fleet_v1::report::qos_axes_token(
         entry.priority,
         entry.congestion_control,
         entry.reliability,
@@ -190,7 +190,7 @@ pub fn qos_token(entry: &crate::history::HistoryEntry) -> String {
 /// `None` = the declared name is not a profile, so there is nothing to
 /// judge (O4).
 pub fn qos_verdict(
-    declared: &zenkey::Declared<zenkey::QosProfile>,
+    declared: &zenkey_v1::Declared<zenkey_v1::QosProfile>,
     entry: &crate::history::HistoryEntry,
 ) -> Option<bool> {
     // The slice recognised the token on parse; a profile this build cannot
@@ -207,7 +207,7 @@ pub fn qos_verdict(
 /// The declared-vs-observed QoS lines, when there is anything to say.
 fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
     let declared = data.facts.and_then(|f| match &f.registration {
-        zenkey_fleet::Registration::Registered(s) => s.qos.clone(),
+        zenkey_fleet_v1::Registration::Registered(s) => s.qos.clone(),
         _ => None,
     });
     let observed = data.observed;
@@ -540,8 +540,8 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
                 row![
                     kit::mono(v.origin.to_string()),
                     kit::muted(match v.origin_kind {
-                        zenkey_fleet::model::facts::OriginKind::Host => "host",
-                        zenkey_fleet::model::facts::OriginKind::Service => "service",
+                        zenkey_fleet_v1::model::facts::OriginKind::Host => "host",
+                        zenkey_fleet_v1::model::facts::OriginKind::Service => "service",
                     }),
                 ]
                 .spacing(sp.xs)
@@ -599,7 +599,8 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
             }
             if let Some(w) = &s.when {
                 // RFC 08 §2 (v1.35): the gate, so silence reads as honest.
-                let tokens: Vec<String> = w.iter().map(zenkey::slice::Predicate::token).collect();
+                let tokens: Vec<String> =
+                    w.iter().map(zenkey_v1::slice::Predicate::token).collect();
                 grid.push(kit::field("WHEN", kit::mono(tokens.join(" and "))));
             }
             if let Some(e) = &s.exposure {
@@ -757,7 +758,7 @@ fn decoded_pane<'a>(
                 crate::verdict::label(&sample.verdict),
             ));
             match &sample.verdict {
-                zenkey::schema::validate::Verdict::Invalid(errors) => {
+                zenkey_v1::schema::validate::Verdict::Invalid(errors) => {
                     for e in errors.iter().take(VIOLATION_ROWS) {
                         col = col.push(kit::muted(format!("violation: {e}")));
                     }
@@ -768,12 +769,12 @@ fn decoded_pane<'a>(
                         )));
                     }
                 }
-                zenkey::schema::validate::Verdict::NotValidated(reason) => {
+                zenkey_v1::schema::validate::Verdict::NotValidated(reason) => {
                     // The full sentence under the compact badge, so the
                     // reason is never only a parenthetical.
                     col = col.push(kit::muted(reason.to_string()));
                 }
-                zenkey::schema::validate::Verdict::Valid => {}
+                zenkey_v1::schema::validate::Verdict::Valid => {}
             }
             if let Some(e) = &sample.decode_error {
                 col = col.push(kit::muted(format!("decode error: {e}")));
@@ -846,7 +847,7 @@ mod tests {
         }
     }
 
-    fn entry(profile: zenkey::qos::QosProfile) -> crate::history::HistoryEntry {
+    fn entry(profile: zenkey_v1::qos::QosProfile) -> crate::history::HistoryEntry {
         crate::history::HistoryEntry {
             seq: 0,
             received: Instant::now(),
@@ -869,18 +870,21 @@ mod tests {
     /// name judges nothing rather than judging falsely (O4).
     #[test]
     fn declared_vs_observed_judges_axes_not_names() {
-        use zenkey::qos::QosProfile;
+        use zenkey_v1::qos::QosProfile;
         let observed_alert = entry(QosProfile::Alert);
         assert_eq!(
-            qos_verdict(&zenkey::Declared::parse("alert"), &observed_alert),
+            qos_verdict(&zenkey_v1::Declared::parse("alert"), &observed_alert),
             Some(true)
         );
         assert_eq!(
-            qos_verdict(&zenkey::Declared::parse("sampled"), &observed_alert),
+            qos_verdict(&zenkey_v1::Declared::parse("sampled"), &observed_alert),
             Some(false)
         );
         assert_eq!(
-            qos_verdict(&zenkey::Declared::parse("not-a-profile"), &observed_alert),
+            qos_verdict(
+                &zenkey_v1::Declared::parse("not-a-profile"),
+                &observed_alert
+            ),
             None
         );
     }
@@ -889,7 +893,7 @@ mod tests {
     /// frontends agree on what the wire said.
     #[test]
     fn the_token_matches_the_cli_spelling() {
-        use zenkey::qos::QosProfile;
+        use zenkey_v1::qos::QosProfile;
         let e = entry(QosProfile::Alert);
         // alert = interactive_high / block / reliable / express (RFC 04 §3).
         assert_eq!(qos_token(&e), "interactive_high/block/reliable+express");

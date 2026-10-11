@@ -30,7 +30,7 @@ impl ServiceError {
 
     /// The whole chain on one line, `outer: inner: innermost`.
     ///
-    /// The convention `zenkey_fleet::Error` follows — Display says *what*
+    /// The convention `zenkey_fleet_v1::Error` follows — Display says *what*
     /// failed and `source()` says *why* — only pays off if something reads
     /// the sources. This is the reader.
     pub fn one_line(&self) -> String {

@@ -3,7 +3,7 @@
 //!
 //! Validation is per-sample and per-key stats are about arrival; between
 //! them sits the field that stopped moving while both stayed green. The
-//! engine's [`zenkey_fleet::judge::field`] observation is the judge; this section
+//! engine's [`zenkey_fleet_v1::judge::field`] observation is the judge; this section
 //! is its GUI face, and it follows the doctor's cost posture: **run on
 //! demand, never ambient** — the button declares one subscriber on exactly
 //! the subject key, holds it for the stated window, and provably releases
@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use iced::widget::{Column, row};
-use zenkey_fleet::report::FieldReport;
+use zenkey_fleet_v1::report::FieldReport;
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::Series;

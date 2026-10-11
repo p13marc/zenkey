@@ -16,7 +16,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use zenkey_fleet::{KeyTreeSnapshot, Monitor, WatchId};
+use zenkey_fleet_v1::{KeyTreeSnapshot, Monitor, WatchId};
 
 use crate::message::LinkState;
 
@@ -76,7 +76,7 @@ sub_state! {
         /// broadcast's lag (RFC 09 §5.1 O6). `None` until a monitor exists,
         /// which is not "empty" (O4) — and left stale during replay, when
         /// the strip does not show it.
-        pub(crate) retention: Option<zenkey_fleet::RetentionStats>,
+        pub(crate) retention: Option<zenkey_fleet_v1::RetentionStats>,
         /// The key-population budget join (#221): declared `cardinality`
         /// against the observed tree, recomputed on a throttled cadence.
         /// `None` = not computed (no registry loaded, or the first join has

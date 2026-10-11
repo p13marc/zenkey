@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use iced::Task;
-use zenkey::config::{ControlRequest, ParamClass, PendingReply};
+use zenkey_v1::config::{ControlRequest, ParamClass, PendingReply};
 
 use crate::configure::{
     Armed, ConfigAct, ConfigForm, ConfigRead, GroupNote, Reply, Verb, busy_token, change_of,
@@ -392,7 +392,7 @@ fn call(
     // The claimed actor, for the change event's record — a label, never an
     // authentication (RFC 06 §5.5).
     let params = match std::env::var("USER") {
-        Ok(user) if body.is_some() && zenkey::grammar::is_valid_plain_chunk(&user) => {
+        Ok(user) if body.is_some() && zenkey_v1::grammar::is_valid_plain_chunk(&user) => {
             vec![format!("actor={user}")]
         }
         _ => Vec::new(),

@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use iced::widget::{Column, row};
-use zenkey_fleet::report::{AdminAnswer, Attribution, ConsumerRow, ConsumersReport, Relation};
+use zenkey_fleet_v1::report::{AdminAnswer, Attribution, ConsumerRow, ConsumersReport, Relation};
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::view::kit;
@@ -157,7 +157,7 @@ pub fn section(state: &ConsumersState, slot: SlotId, sp: Spacing) -> Column<'_, 
                 .push(kit::muted(format!(
                     "{} {} — {}",
                     match r.kind {
-                        zenkey_fleet::EntityKind::Querier => "querier",
+                        zenkey_fleet_v1::EntityKind::Querier => "querier",
                         _ => "subscriber",
                     },
                     r.keyexpr,

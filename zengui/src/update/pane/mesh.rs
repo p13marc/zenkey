@@ -18,7 +18,7 @@ pub(crate) fn update(admin: &AdminState, msg: MeshMsg) -> Task<Message> {
             let Some(sweep) = admin.sweep.as_deref() else {
                 return Task::none();
             };
-            iced::clipboard::write(zenkey_fleet::render_dot(&sweep.topology, &sweep.origins))
+            iced::clipboard::write(zenkey_fleet_v1::render_dot(&sweep.topology, &sweep.origins))
         }
     }
 }

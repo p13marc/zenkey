@@ -7,8 +7,8 @@
 //! **Key-agnostic by construction.** zengui is a useful explorer on *any* Zenoh
 //! bus; the keyspace-v2 convention is an enrichment overlay that lights up when
 //! a key parses, never a precondition. That is the grain of the engine already:
-//! [`zenkey_fleet::KeyTreeSnapshot`] groups on a plain `split('/')` with no
-//! grammar knowledge, and `zenkey::grammar::parse_full` returns `Option` rather
+//! [`zenkey_fleet_v1::KeyTreeSnapshot`] groups on a plain `split('/')` with no
+//! grammar knowledge, and `zenkey_v1::grammar::parse_full` returns `Option` rather
 //! than `Result` because for an observer "does not parse" is an answer, not an
 //! error. The overlay lives in exactly one module, [`keyfacts`].
 //!

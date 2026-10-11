@@ -34,7 +34,7 @@
 //! ```
 
 /// The RFC 05 §5.1 config double (#481), shared with the test suites.
-#[path = "../../zenkey-fleet/tests/util/config_server.rs"]
+#[path = "../tests/util/config_server.rs"]
 mod config_server;
 
 use std::time::Duration;
@@ -324,10 +324,10 @@ fn probe_descriptor_set() -> Vec<u8> {
 
 /// The `describe` reply (RFC 08 §7).
 fn probe_schema_set() -> String {
-    zenkey::schema::SchemaSet::builder("spray")
+    zenkey_v1::schema::SchemaSet::builder("spray")
         .entry(
             "Reading",
-            zenkey::schema::TypeSchema::protobuf("demo.Reading", &probe_descriptor_set()),
+            zenkey_v1::schema::TypeSchema::protobuf("demo.Reading", &probe_descriptor_set()),
         )
         .build()
         .to_json()
@@ -433,7 +433,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let with_base = |k: &str| zenkey::grammar::with_base(&args.base, k);
+    let with_base = |k: &str| zenkey_v1::grammar::with_base(&args.base, k);
     let host = "h-3fa9c2d41b7e";
 
     // (key, payload source) pairs, one publisher each.
@@ -503,7 +503,7 @@ async fn main() -> anyhow::Result<()> {
     let mut described = Vec::new();
     // A slice reply declares its spelling (RFC 08 §6, v1.44): one that
     // declares nothing is only sniffed.
-    let toml = Some(zenkey::SliceFormat::Toml.media_type());
+    let toml = Some(zenkey_v1::SliceFormat::Toml.media_type());
     for (producer, procedure, payload, encoding) in [
         ("probe", "introspect", PROBE_SLICE.to_string(), toml),
         ("probe", "describe", probe_schema_set(), None),
@@ -534,13 +534,13 @@ async fn main() -> anyhow::Result<()> {
 
     // ── RFC 05 §5.1, served (#481) ───────────────────────────────────────
     //
-    // The configuration test double — the same file zenkey-fleet's
-    // lifecycle test, zenctl's live suite and zengui's app tests serve — as
+    // The configuration test double — the same file zengui's app tests
+    // serve (`tests/util/config_server.rs`) — as
     // `probe`'s configuration, so the Config tool has a resource to read,
     // change, arm and roll back. No alive token of its own: probe's is
     // declared below with the others.
     let config = config_server::ConfigServer::fixture("probe");
-    let mut up = zenkey_fleet::bus::producer::BringUp::new(&session);
+    let mut up = zenkey_fleet_v1::bus::producer::BringUp::new(&session);
     config
         .declare(&mut up, &with_base(&format!("v1/{host}/@rpc/probe")))
         .await
@@ -564,22 +564,22 @@ async fn main() -> anyhow::Result<()> {
     // trip works, and only two disagreeing ones prove the explorer *reports*
     // the disagreement instead of trusting whoever answered first (§2.1).
     let blob_prefix = with_base(
-        zenkey::grammar::blob_tier_prefix(
-            &zenkey::grammar::Origin::Host(zenkey::HostId::parse(host)?),
-            zenkey::grammar::BlobTier::Artifact,
+        zenkey_v1::grammar::blob_tier_prefix(
+            &zenkey_v1::grammar::Origin::Host(zenkey_v1::HostId::parse(host)?),
+            zenkey_v1::grammar::BlobTier::Artifact,
         )
         .as_str(),
     );
     let blob_data = artifact_bytes(1 << 20, 42);
-    let blob_server = zenkey_fleet::zblob::BlobServer::new(
+    let blob_server = zenkey_fleet_v1::zblob::BlobServer::new(
         &session,
-        zenkey_fleet::zblob::ServePrefix::new(blob_prefix.clone())
+        zenkey_fleet_v1::zblob::ServePrefix::new(blob_prefix.clone())
             .map_err(|e| anyhow::anyhow!("blob prefix: {e}"))?,
     );
     let manifest = blob_server
         .register_source(
-            zenkey_fleet::zblob::BlobSpec::new(BLOB_ID).filename("demo-bundle.bin"),
-            std::sync::Arc::new(zenkey_fleet::zblob::MemoryBlobSource::new(blob_data)),
+            zenkey_fleet_v1::zblob::BlobSpec::new(BLOB_ID).filename("demo-bundle.bin"),
+            std::sync::Arc::new(zenkey_fleet_v1::zblob::MemoryBlobSource::new(blob_data)),
         )
         .await
         .map_err(|e| anyhow::anyhow!("register blob: {e}"))?;
@@ -599,22 +599,22 @@ async fn main() -> anyhow::Result<()> {
     // not need to, because a fetch from it with the honest root pinned must
     // fail before a byte reaches disk, naming this origin.
     let rogue_prefix = with_base(
-        zenkey::grammar::blob_tier_prefix(
-            &zenkey::grammar::Origin::Host(zenkey::HostId::parse(ROGUE_ORIGIN)?),
-            zenkey::grammar::BlobTier::Artifact,
+        zenkey_v1::grammar::blob_tier_prefix(
+            &zenkey_v1::grammar::Origin::Host(zenkey_v1::HostId::parse(ROGUE_ORIGIN)?),
+            zenkey_v1::grammar::BlobTier::Artifact,
         )
         .as_str(),
     );
-    let rogue_manifest = zenkey_fleet::zblob::Manifest {
-        version: zenkey_fleet::zblob::wire::WIRE_VERSION,
-        id: zenkey_fleet::zblob::BlobId::new(BLOB_ID)
+    let rogue_manifest = zenkey_fleet_v1::zblob::Manifest {
+        version: zenkey_fleet_v1::zblob::wire::WIRE_VERSION,
+        id: zenkey_fleet_v1::zblob::BlobId::new(BLOB_ID)
             .map_err(|e| anyhow::anyhow!("rogue id: {e}"))?,
         filename: Some("demo-bundle.bin".into()),
         total_len: manifest.total_len,
         chunk_size: manifest.chunk_size,
-        root: zenkey_fleet::zblob::Hash::of(b"a different artifact entirely"),
+        root: zenkey_fleet_v1::zblob::Hash::of(b"a different artifact entirely"),
         created_ms: 0,
-        ext: zenkey_fleet::zblob::wire::Ext::default(),
+        ext: zenkey_fleet_v1::zblob::wire::Ext::default(),
     };
     println!(
         "serving: {rogue_prefix}/{BLOB_ID}/**  root {}  (the disagreeing holder)",
@@ -623,24 +623,24 @@ async fn main() -> anyhow::Result<()> {
     let chunk_count = manifest.total_len.div_ceil(manifest.chunk_size as u64) as u32;
     let rogue_replies: std::collections::HashMap<
         String,
-        (Vec<u8>, &'static zenkey_fleet::zblob::wire::WireTag),
+        (Vec<u8>, &'static zenkey_fleet_v1::zblob::wire::WireTag),
     > = std::collections::HashMap::from([
         (
-            zenkey_fleet::zblob::keys::manifest_key(&rogue_prefix, BLOB_ID),
+            zenkey_fleet_v1::zblob::keys::manifest_key(&rogue_prefix, BLOB_ID),
             (
-                zenkey_fleet::zblob::wire::encode(&rogue_manifest)
+                zenkey_fleet_v1::zblob::wire::encode(&rogue_manifest)
                     .map_err(|e| anyhow::anyhow!("encode rogue manifest: {e}"))?,
-                &zenkey_fleet::zblob::wire::ENC_MANIFEST,
+                &zenkey_fleet_v1::zblob::wire::ENC_MANIFEST,
             ),
         ),
         (
-            zenkey_fleet::zblob::keys::availability_key(&rogue_prefix, BLOB_ID),
+            zenkey_fleet_v1::zblob::keys::availability_key(&rogue_prefix, BLOB_ID),
             (
-                zenkey_fleet::zblob::wire::encode(&zenkey_fleet::zblob::wire::Availability::full(
-                    chunk_count,
-                ))
+                zenkey_fleet_v1::zblob::wire::encode(
+                    &zenkey_fleet_v1::zblob::wire::Availability::full(chunk_count),
+                )
                 .map_err(|e| anyhow::anyhow!("encode rogue availability: {e}"))?,
-                &zenkey_fleet::zblob::wire::ENC_AVAIL,
+                &zenkey_fleet_v1::zblob::wire::ENC_AVAIL,
             ),
         ),
     ]);

@@ -1,8 +1,8 @@
 //! Key-population budgets in the tree (#221): the declared `cardinality`
 //! bound joined against the observed population, per `{var}` family and per
-//! origin — the GUI half of [`zenkey_fleet::judge::budget`].
+//! origin — the GUI half of [`zenkey_fleet_v1::judge::budget`].
 //!
-//! The join itself is the engine's ([`zenkey_fleet::BudgetObservation`]);
+//! The join itself is the engine's ([`zenkey_fleet_v1::BudgetObservation`]);
 //! this module walks the observed key tree into the key list the engine
 //! wants, and turns each judged family into a badge keyed by the family's
 //! **subtree display path** — the literal prefix under one origin — so the
@@ -23,8 +23,8 @@
 
 use std::collections::BTreeMap;
 
-use zenkey_fleet::BudgetObservation;
-use zenkey_fleet::{KeyTreeSnapshot, SliceSet};
+use zenkey_fleet_v1::BudgetObservation;
+use zenkey_fleet_v1::{KeyTreeSnapshot, SliceSet};
 
 /// One family's badge, at one origin's subtree path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +76,7 @@ impl BudgetBadges {
 /// on. The engine's observation wants wire keys; the tree stores them as
 /// chunk paths, so this is the inverse walk of `KeyTreeSnapshot::build`.
 pub fn observed_keys(tree: &KeyTreeSnapshot) -> Vec<String> {
-    fn walk(prefix: &str, node: &zenkey_fleet::TreeNode, out: &mut Vec<String>) {
+    fn walk(prefix: &str, node: &zenkey_fleet_v1::TreeNode, out: &mut Vec<String>) {
         for (chunk, child) in &node.children {
             let path = if prefix.is_empty() {
                 chunk.clone()
@@ -157,17 +157,17 @@ pub fn badges(base: &str, slices: &SliceSet, tree: &KeyTreeSnapshot) -> BudgetBa
 mod tests {
     use super::*;
     use std::time::Instant;
-    use zenkey_fleet::StatsTable;
+    use zenkey_fleet_v1::StatsTable;
 
-    fn subject(path: &str, class: &str, cardinality: Option<i64>) -> zenkey::slice::SubjectDecl {
-        let mut d = zenkey::slice::SubjectDecl::new(path, zenkey::Declared::parse(class));
+    fn subject(path: &str, class: &str, cardinality: Option<i64>) -> zenkey_v1::slice::SubjectDecl {
+        let mut d = zenkey_v1::slice::SubjectDecl::new(path, zenkey_v1::Declared::parse(class));
         d.type_name = "T".into();
         d.cardinality = cardinality;
         d
     }
 
     fn fixture_slices() -> SliceSet {
-        let mut slice = zenkey::slice::RegistrySlice::new("1.0", "t", "sysinfo");
+        let mut slice = zenkey_v1::slice::RegistrySlice::new("1.0", "t", "sysinfo");
         slice.subjects = vec![
             subject("disk/{mount}/used", "telemetry", Some(2)),
             subject("log/{path...}", "events", Some(1)),

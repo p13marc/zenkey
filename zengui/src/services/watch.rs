@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use iced::Task;
-use zenkey_fleet::{Monitor, MonitorSpec, WatchId};
+use zenkey_fleet_v1::{Monitor, MonitorSpec, WatchId};
 
 use crate::message::{BusMsg, DeploymentMsg, Message, SubjectMsg};
 use crate::services::ServiceError;
@@ -81,7 +81,7 @@ pub fn subtree(
     monitor: Arc<Monitor>,
     path: String,
     selector: String,
-    policy: zenkey_fleet::SeedPolicy,
+    policy: zenkey_fleet_v1::SeedPolicy,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -110,7 +110,7 @@ pub fn release(monitor: Arc<Monitor>, path: String, id: WatchId) -> Task<Message
 pub fn scope(
     monitor: Arc<Monitor>,
     selectors: Vec<String>,
-    policy: zenkey_fleet::SeedPolicy,
+    policy: zenkey_fleet_v1::SeedPolicy,
 ) -> Task<Message> {
     Task::perform(
         async move {

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use iced::Task;
-use zenkey_fleet::{Skeleton, SliceSet};
+use zenkey_fleet_v1::{Skeleton, SliceSet};
 
 use crate::message::{BusMsg, Message, PaneMsg};
 use anyhow::Context as _;
@@ -27,7 +27,7 @@ use crate::view::nodes::NodesMsg;
 pub fn slices(session: zenoh::Session, base: String, timeout: Duration) -> Task<Message> {
     Task::perform(
         async move {
-            SliceSet::from_bus(&zenkey_fleet::Fleet::new(&session, &base), timeout)
+            SliceSet::from_bus(&zenkey_fleet_v1::Fleet::new(&session, &base), timeout)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of)
@@ -63,19 +63,23 @@ pub fn slices_union(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            SliceSet::from_union(&zenkey_fleet::Fleet::new(&session, &base), &dirs, timeout)
-                .await
-                .map(|out| {
-                    let counts = crate::view::status::UnionCounts {
-                        from_bus: out.from_bus.len(),
-                        dirs_only: out.dirs_only.len(),
-                        disagreements: out.disagreements.len(),
-                        // Read before the set moves into the `Arc` (#399).
-                        self_disagreements: self_disagreements(&out.set),
-                    };
-                    (Arc::new(out.set), counts)
-                })
-                .map_err(ServiceError::of)
+            SliceSet::from_union(
+                &zenkey_fleet_v1::Fleet::new(&session, &base),
+                &dirs,
+                timeout,
+            )
+            .await
+            .map(|out| {
+                let counts = crate::view::status::UnionCounts {
+                    from_bus: out.from_bus.len(),
+                    dirs_only: out.dirs_only.len(),
+                    disagreements: out.disagreements.len(),
+                    // Read before the set moves into the `Arc` (#399).
+                    self_disagreements: self_disagreements(&out.set),
+                };
+                (Arc::new(out.set), counts)
+            })
+            .map_err(ServiceError::of)
         },
         |r| Message::Bus(BusMsg::SlicesUnionLoaded(r)),
     )
@@ -91,11 +95,11 @@ pub fn skeleton(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            let roster = zenkey_fleet::roster(&fleet, timeout)
+            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+            let roster = zenkey_fleet_v1::roster(&fleet, timeout)
                 .await
                 .unwrap_or_default();
-            let admin = zenkey_fleet::declared_entities(&session, timeout)
+            let admin = zenkey_fleet_v1::declared_entities(&session, timeout)
                 .await
                 .unwrap_or(None);
             let skeleton = Arc::new(Skeleton::build(&base, &slices, &roster, admin.as_ref()));
@@ -115,8 +119,8 @@ pub fn node_info(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            let out = zenkey_fleet::node_info(&fleet, &origin, timeout, true)
+            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+            let out = zenkey_fleet_v1::node_info(&fleet, &origin, timeout, true)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of);
@@ -135,7 +139,7 @@ pub fn doctor(
     session: zenoh::Session,
     base: String,
     dirs: Vec<std::path::PathBuf>,
-    spec: zenkey_fleet::DoctorSpec,
+    spec: zenkey_fleet_v1::DoctorSpec,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -153,8 +157,8 @@ pub fn doctor(
                     }
                 },
             };
-            zenkey_fleet::run_doctor(
-                &zenkey_fleet::Fleet::new(&session, &base),
+            zenkey_fleet_v1::run_doctor(
+                &zenkey_fleet_v1::Fleet::new(&session, &base),
                 locals.as_ref(),
                 &spec,
             )
@@ -186,20 +190,20 @@ pub fn admin(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let routers = zenkey_fleet::routers(&session, timeout)
+            let routers = zenkey_fleet_v1::routers(&session, timeout)
                 .await
                 .context("failed to list the routers")
                 .map_err(ServiceError::of)?;
-            let storages = zenkey_fleet::storages(&session, timeout)
+            let storages = zenkey_fleet_v1::storages(&session, timeout)
                 .await
                 .context("failed to list the storages")
                 .map_err(ServiceError::of)?;
-            let declared = zenkey_fleet::declared_entities(&session, timeout)
+            let declared = zenkey_fleet_v1::declared_entities(&session, timeout)
                 .await
                 .context("failed to list the declared entities")
                 .map_err(ServiceError::of)?;
             let (coverage, coverage_note) = match slices.as_deref() {
-                Some(set) => (zenkey_fleet::state_coverage(set, &base, &storages), None),
+                Some(set) => (zenkey_fleet_v1::state_coverage(set, &base, &storages), None),
                 None => (
                     Vec::new(),
                     Some(
@@ -211,12 +215,12 @@ pub fn admin(
                     ),
                 ),
             };
-            let topology = zenkey_fleet::topology(&session, timeout)
+            let topology = zenkey_fleet_v1::topology(&session, timeout)
                 .await
                 .context("failed to read the topology")
                 .map_err(ServiceError::of)?;
-            let origins = zenkey_fleet::origin_attachments(
-                &zenkey_fleet::Fleet::new(&session, &base),
+            let origins = zenkey_fleet_v1::origin_attachments(
+                &zenkey_fleet_v1::Fleet::new(&session, &base),
                 timeout,
             )
             .await
@@ -224,7 +228,7 @@ pub fn admin(
             .map_err(ServiceError::of)?;
             Ok(Arc::new(crate::admin::AdminSweep {
                 routers,
-                storage: zenkey_fleet::report::StorageList { storages, coverage },
+                storage: zenkey_fleet_v1::report::StorageList { storages, coverage },
                 declared,
                 coverage_note,
                 topology,
@@ -242,12 +246,12 @@ pub fn admin(
 /// The one entry in this module that costs the bus **nothing** — it joins
 /// data already in hand — but it is O(observed keys × refinement) and runs on
 /// a throttled cadence, so it is a `Task` like the sweeps rather than work on
-/// the update thread. `zenkey_fleet::judge::budget` does the judging; the landing
+/// the update thread. `zenkey_fleet_v1::judge::budget` does the judging; the landing
 /// carries the badge map the tree looks rows up in.
 pub fn budget(
     base: String,
     slices: Arc<SliceSet>,
-    observed: Arc<zenkey_fleet::KeyTreeSnapshot>,
+    observed: Arc<zenkey_fleet_v1::KeyTreeSnapshot>,
 ) -> Task<Message> {
     Task::perform(
         async move { Arc::new(crate::budget::badges(&base, &slices, &observed)) },
@@ -259,14 +263,14 @@ pub fn budget(
 pub fn blob_probe(
     session: zenoh::Session,
     base: String,
-    target: zenkey_fleet::BlobTarget,
-    slices: Vec<zenkey::RegistrySlice>,
+    target: zenkey_fleet_v1::BlobTarget,
+    slices: Vec<zenkey_v1::RegistrySlice>,
     timeout: Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            let out = zenkey_fleet::blob_probe(&fleet, &target, &slices, timeout)
+            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+            let out = zenkey_fleet_v1::blob_probe(&fleet, &target, &slices, timeout)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of);
@@ -283,13 +287,13 @@ pub fn blob_tree(
     session: zenoh::Session,
     base: String,
     origin: String,
-    root: zenkey::ContentHash,
+    root: zenkey_v1::ContentHash,
     timeout: Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            let out = zenkey_fleet::blob_tree_index(&fleet, &origin, &root, timeout)
+            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+            let out = zenkey_fleet_v1::blob_tree_index(&fleet, &origin, &root, timeout)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of);
@@ -305,9 +309,9 @@ pub struct BlobFetch {
     pub session: zenoh::Session,
     pub base: String,
     pub origin: String,
-    pub target: zenkey_fleet::BlobTarget,
+    pub target: zenkey_fleet_v1::BlobTarget,
     pub dest: std::path::PathBuf,
-    pub spec: zenkey_fleet::BlobFetchSpec,
+    pub spec: zenkey_fleet_v1::BlobFetchSpec,
 }
 
 /// How many progress events may queue ahead of the pane (#344).
@@ -358,8 +362,8 @@ pub fn blob_fetch(f: BlobFetch) -> Task<Message> {
                 counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         };
-        let fleet = zenkey_fleet::Fleet::new(&session, &base);
-        let out = zenkey_fleet::blob_fetch(&fleet, &origin, &target, &dest, &spec, &sink)
+        let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+        let out = zenkey_fleet_v1::blob_fetch(&fleet, &origin, &target, &dest, &spec, &sink)
             .await
             .map(Arc::new)
             .map_err(ServiceError::of);
@@ -382,7 +386,7 @@ pub fn blob_fetch(f: BlobFetch) -> Task<Message> {
 /// like, and a backlogged `Progress` landing after `FetchDone` was harmless
 /// only because the handler happens to guard on `Fetch::InFlight`.
 fn ordered<T>(
-    mut rx: tokio::sync::mpsc::Receiver<zenkey_fleet::report::BlobProgress>,
+    mut rx: tokio::sync::mpsc::Receiver<zenkey_fleet_v1::report::BlobProgress>,
     transfer: impl Future<Output = T>,
     coalesced: Arc<std::sync::atomic::AtomicU64>,
     finish: impl FnOnce(T) -> Message,
@@ -421,7 +425,7 @@ fn ordered<T>(
 
 /// One progress event plus what the queue has coalesced away so far.
 fn progress(
-    p: zenkey_fleet::report::BlobProgress,
+    p: zenkey_fleet_v1::report::BlobProgress,
     coalesced: &std::sync::atomic::AtomicU64,
 ) -> Message {
     Message::Pane(PaneMsg::Blob(BlobMsg::Progress(
@@ -459,8 +463,8 @@ pub fn consumers_of(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            zenkey_fleet::consumers(&fleet, &target, timeout)
+            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+            zenkey_fleet_v1::consumers(&fleet, &target, timeout)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of)
@@ -479,7 +483,7 @@ pub fn consumers_of(
 mod tests {
     use super::*;
     use iced::futures::StreamExt as _;
-    use zenkey_fleet::report::BlobProgress;
+    use zenkey_fleet_v1::report::BlobProgress;
 
     fn chunk(i: u32) -> BlobProgress {
         BlobProgress::Chunk {

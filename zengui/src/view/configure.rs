@@ -17,8 +17,8 @@ use std::time::Instant;
 
 use iced::widget::{Column, column, row};
 use iced::{Element, Length};
-use zenkey::config::{ConfigView, GroupView, ParamClass, ParamKind, ParamView};
-use zenkey_fleet::report::CallReport;
+use zenkey_fleet_v1::report::CallReport;
+use zenkey_v1::config::{ConfigView, GroupView, ParamClass, ParamKind, ParamView};
 
 use crate::configure::{
     ConfigAct, ConfigForm, ConfigRead, ConfigTarget, GroupNote, Reply, Slot, Verb, change_of,
@@ -308,7 +308,7 @@ fn class_tone(class: ParamClass) -> Tone {
 /// window's count from the send when it armed the change, and the verbs
 /// that drive it.
 fn pending<'a>(
-    p: &'a zenkey::config::PendingChange,
+    p: &'a zenkey_v1::config::PendingChange,
     form: &'a ConfigForm,
     can_drive: bool,
     sp: Spacing,
@@ -676,7 +676,7 @@ fn edit_control<'a>(p: &'a ParamView, e: Editor<'a>, sp: Spacing) -> Element<'a,
     let control: Element<'a, Message> = match &p.spec.kind {
         ParamKind::Bool => {
             let lit = e.draft.map(|d| d == "true").or(match p.value {
-                Some(zenkey::config::ParamValue::Bool(b)) => Some(b),
+                Some(zenkey_v1::config::ParamValue::Bool(b)) => Some(b),
                 _ => None,
             });
             let segment = |v: bool| kit::Segment {

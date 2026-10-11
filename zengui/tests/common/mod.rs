@@ -18,8 +18,8 @@ use zengui::app::Zengui;
 use zengui::config::Settings;
 use zengui::message::{BusMsg, BusTick, LinkState, Message, WatchedTotals};
 use zengui::prefs::Prefs;
-use zenkey_fleet::model::stats::StatsTable;
-use zenkey_fleet::{KeyTreeSnapshot, SampleView, SliceSet};
+use zenkey_fleet_v1::model::stats::StatsTable;
+use zenkey_fleet_v1::{KeyTreeSnapshot, SampleView, SliceSet};
 
 /// The ZenSight registry snapshot `fixture-tests/` compiles — the codegen
 /// corpus doubles as the GUI's declared world.
@@ -248,8 +248,8 @@ impl World {
 /// each class, a sensitive parameter, a value differing from its startup
 /// one, one with no value read back, a change pending on the reach group
 /// and the last change on the hot one.
-pub fn config_view() -> zenkey::config::ConfigView {
-    use zenkey::config::{
+pub fn config_view() -> zenkey_v1::config::ConfigView {
+    use zenkey_v1::config::{
         ConfigGroup, ConfigSchema, ConfigView, LastChange, ParamClass, ParamKind, ParamSpec,
         ParamValue, PendingChange, ValueSource,
     };

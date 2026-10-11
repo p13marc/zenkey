@@ -22,14 +22,14 @@ use zengui::keyfacts::KeyFacts;
 use zengui::message::Message;
 use zengui::view::tokens::Spacing;
 use zengui::view::tree::{self, FactsIndex};
-use zenkey_fleet::model::stats::StatsTable;
-use zenkey_fleet::{KeyTreeSnapshot, SliceSet};
+use zenkey_fleet_v1::model::stats::StatsTable;
+use zenkey_fleet_v1::{KeyTreeSnapshot, SliceSet};
 
 const REGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
 const UNREGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/no/such/thing";
 const FOREIGN: &str = "demo/example/foo";
 
-fn snapshot(keys: &[&str]) -> zenkey_fleet::model::skeleton::MergedNode {
+fn snapshot(keys: &[&str]) -> zenkey_fleet_v1::model::skeleton::MergedNode {
     let mut stats = StatsTable::new();
     let now = Instant::now();
     for k in keys {
@@ -37,8 +37,8 @@ fn snapshot(keys: &[&str]) -> zenkey_fleet::model::skeleton::MergedNode {
     }
     let observed = KeyTreeSnapshot::build(&stats);
     // Pane tests watch everything: rows read Observed, as the bootstrap did.
-    let skel = zenkey_fleet::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
-    zenkey_fleet::model::skeleton::merge(&skel, &observed, &["**".to_string()])
+    let skel = zenkey_fleet_v1::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
+    zenkey_fleet_v1::model::skeleton::merge(&skel, &observed, &["**".to_string()])
 }
 
 /// The comfortable grid — panes render the same claims at either density
@@ -211,8 +211,8 @@ fn a_narrow_tree_keeps_each_row_on_its_line() {
             );
         }
     }
-    let skel = zenkey_fleet::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
-    let snap = zenkey_fleet::model::skeleton::merge(
+    let skel = zenkey_fleet_v1::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
+    let snap = zenkey_fleet_v1::model::skeleton::merge(
         &skel,
         &KeyTreeSnapshot::build(&stats),
         &["**".to_string()],
@@ -443,12 +443,12 @@ fn the_empty_tree_explains_itself() {
 #[test]
 fn the_call_mode_labels_forbidden_fanout() {
     use zengui::view::send::{SendForm, SendMode, pane};
-    use zenkey::slice::{ProcedureDecl, RegistrySlice};
+    use zenkey_v1::slice::{ProcedureDecl, RegistrySlice};
 
     let mut trigger = ProcedureDecl::new("capture/trigger");
-    trigger.kind = Some(zenkey::ProcedureKind::Write.into());
+    trigger.kind = Some(zenkey_v1::ProcedureKind::Write.into());
     trigger.reply = Some("Ack".into());
-    trigger.fanout = Some(zenkey::Fanout::Forbidden.into());
+    trigger.fanout = Some(zenkey_v1::Fanout::Forbidden.into());
     trigger.idempotent = Some(false);
     let mut slice = RegistrySlice::new("1.0", "t", "netring");
     slice.procedures = vec![trigger];
@@ -502,7 +502,7 @@ fn the_call_mode_labels_forbidden_fanout() {
 #[test]
 fn the_call_mode_names_the_origins_that_did_not_answer() {
     use zengui::view::send::{SendForm, SendMode, pane};
-    use zenkey_fleet::report::{CallAnswer, CallReport};
+    use zenkey_fleet_v1::report::{CallAnswer, CallReport};
 
     let mut roster = zengui::nodes::NodeRoster::default();
     roster.seed(&BTreeMap::from([
@@ -522,7 +522,7 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
             timeout_s: 5.0,
             answers: vec![CallAnswer {
                 origin: "h-aaaaaaaaaaaa".into(),
-                outcome: zenkey_fleet::report::CallOutcome::Ok {
+                outcome: zenkey_fleet_v1::report::CallOutcome::Ok {
                     value: None,
                     text: Some("slice".into()),
                 },
@@ -532,11 +532,11 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
         })),
         ..SendForm::default()
     };
-    let mut introspect = zenkey::slice::ProcedureDecl::new("introspect");
-    introspect.kind = Some(zenkey::ProcedureKind::Read.into());
+    let mut introspect = zenkey_v1::slice::ProcedureDecl::new("introspect");
+    introspect.kind = Some(zenkey_v1::ProcedureKind::Read.into());
     introspect.reply = Some("RegistrySlice".into());
     introspect.idempotent = Some(true);
-    let mut netring = zenkey::slice::RegistrySlice::new("1.0", "t", "netring");
+    let mut netring = zenkey_v1::slice::RegistrySlice::new("1.0", "t", "netring");
     netring.procedures = vec![introspect];
     let slices = SliceSet::from_slices(vec![netring]);
     let mut ui = simulator::<Message, _, _>(pane(&form, Some(&slices), &roster, sp()));
@@ -553,10 +553,10 @@ fn the_call_mode_names_the_origins_that_did_not_answer() {
 #[test]
 fn the_call_mode_distinguishes_an_unasked_schema_from_an_empty_one() {
     use zengui::view::send::{SchemaField, SendForm, SendMode, pane};
-    use zenkey::slice::{ProcedureDecl, RegistrySlice};
+    use zenkey_v1::slice::{ProcedureDecl, RegistrySlice};
 
     let mut start = ProcedureDecl::new("capture/start");
-    start.kind = Some(zenkey::ProcedureKind::Write.into());
+    start.kind = Some(zenkey_v1::ProcedureKind::Write.into());
     start.reply = Some("Ack".into());
     start.request = Some("CaptureSpec".into());
     start.idempotent = Some(false);
@@ -616,7 +616,7 @@ fn the_call_mode_distinguishes_an_unasked_schema_from_an_empty_one() {
 #[test]
 fn the_publish_mode_says_how_the_body_reached_the_wire() {
     use zengui::view::send::{SendForm, pane};
-    use zenkey_fleet::BodySource;
+    use zenkey_fleet_v1::BodySource;
 
     let slices = slices();
     let roster = zengui::nodes::NodeRoster::default();
@@ -682,10 +682,10 @@ fn the_publish_mode_bounds_its_log_and_never_invents_a_matcher() {
         assert!(ui.find("matching: not asked").is_ok());
     }
     // The five profiles, and only those (RFC 04 §3's closed vocabulary).
-    assert_eq!(zenkey::qos::QosProfile::ALL.len(), 5);
+    assert_eq!(zenkey_v1::qos::QosProfile::ALL.len(), 5);
     for name in ["sampled", "refreshed", "transition", "alert", "frame"] {
         assert!(
-            zenkey::qos::QosProfile::ALL
+            zenkey_v1::qos::QosProfile::ALL
                 .iter()
                 .any(|p| p.name() == name),
             "{name} must stay in the vocabulary the picker renders"
@@ -772,8 +772,8 @@ fn the_send_pane_offers_both_modes_over_one_form() {
 fn the_detail_pane_tags_decode_provenance() {
     use std::sync::Arc;
     use zengui::view::detail::{DetailData, Fetched, section};
-    use zenkey_fleet::model::decode::Rendering;
-    use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
+    use zenkey_fleet_v1::model::decode::Rendering;
+    use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
 
     let slices = slices();
     let key = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
@@ -793,11 +793,11 @@ fn the_detail_pane_tags_decode_provenance() {
     // Structural fallback with a declared type: the honest <T?> tag — and
     // the verdict rides the sample now (#164): an undecodable payload under
     // a present schema is `NotValidated(Undecodable)`, worded as itself.
-    let decoded = zengui::value::DecodedValue::new(zenkey_fleet::model::decode::DecodedSample {
+    let decoded = zengui::value::DecodedValue::new(zenkey_fleet_v1::model::decode::DecodedSample {
         type_name: Some("TelemetryPoint".to_string()),
         rendering: Rendering::Structural(r#"{"value":42.0}"#.to_string()),
-        verdict: zenkey::schema::validate::Verdict::NotValidated(
-            zenkey::schema::validate::NotValidated::Undecodable,
+        verdict: zenkey_v1::schema::validate::Verdict::NotValidated(
+            zenkey_v1::schema::validate::NotValidated::Undecodable,
         ),
         decode_error: Some("wrong wire kind".to_string()),
     });
@@ -921,7 +921,7 @@ fn the_inspector_follows_the_subject_and_its_plane() {
     use zengui::view::inspector::{InspectorData, pane};
     use zengui::view::media::MediaState;
     use zengui::view::nodes::DetailState;
-    use zenkey_fleet::model::facts::KeyFacts;
+    use zenkey_fleet_v1::model::facts::KeyFacts;
 
     let slices = slices();
     let blob = BlobState::default();
@@ -1139,7 +1139,7 @@ fn the_node_detail_reports_freshness_honestly() {
     use std::sync::Arc;
     use zengui::nodes::NodeRoster;
     use zengui::view::nodes::{DetailState, NodesData, pane};
-    use zenkey_fleet::{Freshness, NodeInfo, ProducerInfo};
+    use zenkey_fleet_v1::{Freshness, NodeInfo, ProducerInfo};
 
     let mut roster = NodeRoster::default();
     roster.apply_transitions(
@@ -1192,8 +1192,8 @@ fn the_node_detail_says_unreadable_not_no_reply() {
     use std::sync::Arc;
     use zengui::nodes::NodeRoster;
     use zengui::view::nodes::{DetailState, NodesData, pane};
-    use zenkey_fleet::report::UnreadableSlice;
-    use zenkey_fleet::{NodeInfo, ProducerInfo};
+    use zenkey_fleet_v1::report::UnreadableSlice;
+    use zenkey_fleet_v1::{NodeInfo, ProducerInfo};
 
     let mut roster = NodeRoster::default();
     roster.apply_transitions(
@@ -1258,7 +1258,7 @@ fn the_node_detail_says_unreadable_not_no_reply() {
 fn the_presence_row_says_unreadable_not_blank() {
     use zengui::nodes::NodeRoster;
     use zengui::view::nodes::presence_section;
-    use zenkey_fleet::report::{NodeList, NodeRow, UnreadableSlice};
+    use zenkey_fleet_v1::report::{NodeList, NodeRow, UnreadableSlice};
 
     let origin = "h-3fa9c2d41b7e";
     let mut roster = NodeRoster::default();
@@ -1314,7 +1314,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
     use std::sync::Arc;
     use zengui::doctor::DoctorState;
     use zengui::view::doctor::section;
-    use zenkey_fleet::report::{DoctorFinding, DoctorReport, DoctorSeverity};
+    use zenkey_fleet_v1::report::{DoctorFinding, DoctorReport, DoctorSeverity};
 
     let state = DoctorState::default();
     let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
@@ -1326,12 +1326,12 @@ fn the_doctor_pane_never_invents_a_verdict() {
     let report = DoctorReport {
         findings: vec![DoctorFinding {
             severity: DoctorSeverity::Error,
-            check: zenkey_fleet::report::CheckId::SliceSync,
+            check: zenkey_fleet_v1::report::CheckId::SliceSync,
             subject: "h-3fa9c2d41b7e/sysinfo".into(),
             evidence: "registry version differs: served 1.0, local 2.0".into(),
             citation: Some("RFC 08 §6".into()),
         }],
-        synced: zenkey_fleet::report::Asked::NotAsked,
+        synced: zenkey_fleet_v1::report::Asked::NotAsked,
         introspect_answered: 1,
         live_producers: 1,
         describe_served: 0,
@@ -1370,7 +1370,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
     let second = DoctorReport {
         findings: vec![DoctorFinding {
             severity: DoctorSeverity::Info,
-            check: zenkey_fleet::report::CheckId::DescribeMissing,
+            check: zenkey_fleet_v1::report::CheckId::DescribeMissing,
             subject: "fleet".into(),
             evidence: "1 producer(s) serve no describe".into(),
             citation: Some("RFC 08 §7".into()),
@@ -1404,11 +1404,11 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
     use std::sync::Arc;
     use zengui::doctor::DoctorState;
     use zengui::view::doctor::section;
-    use zenkey_fleet::report::{DoctorReport, ObservationSummary};
+    use zenkey_fleet_v1::report::{DoctorReport, ObservationSummary};
 
     let report = DoctorReport {
         findings: vec![],
-        synced: zenkey_fleet::report::Asked::NotAsked,
+        synced: zenkey_fleet_v1::report::Asked::NotAsked,
         introspect_answered: 1,
         live_producers: 1,
         describe_served: 0,
@@ -1752,7 +1752,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
 fn recording(key: &str, max_entries: usize, samples: &[(&[u8], bool)]) -> HistoryRecorder {
     let mut rec = HistoryRecorder::new(key, max_entries);
     for (payload, is_delete) in samples {
-        rec.observe(&zenkey_fleet::SampleView {
+        rec.observe(&zenkey_fleet_v1::SampleView {
             key: key.to_string(),
             payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
             encoding: "application/json".to_string(),
@@ -2139,7 +2139,7 @@ mod blob {
     use std::sync::Arc;
     use zengui::blob::{BlobState, Probe};
     use zengui::view::blob::section;
-    use zenkey_fleet::report::{
+    use zenkey_fleet_v1::report::{
         BlobAvailability, BlobHolder, BlobList, BlobListSource, BlobManifest, BlobProbeReport,
         BlobTierRow,
     };
@@ -2220,7 +2220,7 @@ mod blob {
                     encoding: None,
                     since: None,
                     description: None,
-                    origins: zenkey_fleet::report::Asked::NotAsked,
+                    origins: zenkey_fleet_v1::report::Asked::NotAsked,
                 }],
                 source: BlobListSource::RegistryDirs,
                 slices_considered: 3,
@@ -2440,8 +2440,8 @@ mod admin {
     use std::sync::Arc;
     use zengui::admin::{AdminState, AdminSweep};
     use zengui::view::admin::pane;
-    use zenkey_fleet::report::StorageList;
-    use zenkey_fleet::{Coverage, CoverageRow, DeclaredEntities, RouterInfo, StorageInfo};
+    use zenkey_fleet_v1::report::StorageList;
+    use zenkey_fleet_v1::{Coverage, CoverageRow, DeclaredEntities, RouterInfo, StorageInfo};
 
     fn sweep(
         routers: Vec<RouterInfo>,
@@ -2457,7 +2457,7 @@ mod admin {
                 storage: StorageList { storages, coverage },
                 declared,
                 coverage_note: note.map(str::to_string),
-                topology: zenkey_fleet::TopologyReport {
+                topology: zenkey_fleet_v1::TopologyReport {
                     nodes: vec![],
                     edges: vec![],
                     asked: "@/*/*".into(),
@@ -2488,9 +2488,9 @@ mod admin {
                 },
                 declared: None,
                 coverage_note: None,
-                topology: zenkey_fleet::TopologyReport {
+                topology: zenkey_fleet_v1::TopologyReport {
                     nodes: vec![
-                        zenkey_fleet::TopologyNode {
+                        zenkey_fleet_v1::TopologyNode {
                             zid: "z1".into(),
                             whatami: "router".into(),
                             version: Some("1.9.0".into()),
@@ -2498,7 +2498,7 @@ mod admin {
                             locators_via_links: vec![],
                             answered: true,
                         },
-                        zenkey_fleet::TopologyNode {
+                        zenkey_fleet_v1::TopologyNode {
                             zid: "z2".into(),
                             whatami: "peer".into(),
                             version: None,
@@ -2508,7 +2508,7 @@ mod admin {
                         },
                     ],
                     edges: vec![
-                        zenkey_fleet::TopologyEdge {
+                        zenkey_fleet_v1::TopologyEdge {
                             reporter: "z1".into(),
                             peer: "z2".into(),
                             whatami: "peer".into(),
@@ -2517,7 +2517,7 @@ mod admin {
                         },
                         // The same link from the other end: corroboration,
                         // not duplication (`mesh_links`, #234).
-                        zenkey_fleet::TopologyEdge {
+                        zenkey_fleet_v1::TopologyEdge {
                             reporter: "z2".into(),
                             peer: "z1".into(),
                             whatami: "router".into(),
@@ -2530,19 +2530,19 @@ mod admin {
                     self_zid: "z2".into(),
                 },
                 origins: vec![
-                    zenkey_fleet::OriginAttachment {
+                    zenkey_fleet_v1::OriginAttachment {
                         origin: "h-cccccccccccc".into(),
                         session_zid: Some("z2".into()),
                         reporter_zid: "z1".into(),
                         token_key: "v1/h-cccccccccccc/state/demo/alive".into(),
                     },
-                    zenkey_fleet::OriginAttachment {
+                    zenkey_fleet_v1::OriginAttachment {
                         origin: "h-dddddddddddd".into(),
                         session_zid: None,
                         reporter_zid: "z1".into(),
                         token_key: "v1/h-dddddddddddd/state/demo/alive".into(),
                     },
-                    zenkey_fleet::OriginAttachment {
+                    zenkey_fleet_v1::OriginAttachment {
                         origin: "h-eeeeeeeeeeee".into(),
                         session_zid: Some("z-not-drawn".into()),
                         reporter_zid: "z9".into(),
@@ -2883,7 +2883,7 @@ fn the_media_pane_lists_declared_streams_honestly() {
         .is_ok()
     );
 
-    let slice = zenkey::slice::parse_slice(
+    let slice = zenkey_v1::slice::parse_slice(
         r#"
 [registry]
 version = "1.3"
@@ -2924,7 +2924,7 @@ fn a_media_viewing_reports_what_it_cannot_render() {
     use zengui::view::media::{MediaState, Viewing, section};
 
     let mut viewing = Viewing::new("v1/h-0123456789ab/@media/parallax/cam0/video/h264/hi".into());
-    let sample = zenkey_fleet::SampleView {
+    let sample = zenkey_fleet_v1::SampleView {
         key: viewing.key.clone(),
         payload: zenoh::bytes::ZBytes::from(vec![0u8; 4096]),
         encoding: "video/h264".into(),
@@ -3281,10 +3281,10 @@ fn the_settings_overlay_labels_live_against_reconnect_and_states_each_cost() {
 /// A two-subject slice where exactly one subject has traffic, plus a ledger
 /// entry — the smallest fleet in which declared and observed diverge.
 fn projection_fixture() -> (SliceSet, zengui::nodes::NodeRoster, KeyTreeSnapshot) {
-    use zenkey::slice::{DeprecationDecl, RegistrySlice, SubjectDecl};
+    use zenkey_v1::slice::{DeprecationDecl, RegistrySlice, SubjectDecl};
 
     let subject = |path: &str| {
-        let mut d = SubjectDecl::new(path, zenkey::Class::State);
+        let mut d = SubjectDecl::new(path, zenkey_v1::Class::State);
         d.type_name = "Health".into();
         d
     };
@@ -3453,9 +3453,9 @@ fn the_inspector_places_a_registered_type_in_the_vocabulary() {
 fn the_decoded_pane_renders_three_verdict_states_and_keeps_the_silences_apart() {
     use std::sync::Arc;
     use zengui::view::detail::{DetailData, Fetched, section};
-    use zenkey::schema::validate::{NotValidated, Verdict};
-    use zenkey_fleet::model::decode::{DecodedSample, Rendering};
-    use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
+    use zenkey_fleet_v1::model::decode::{DecodedSample, Rendering};
+    use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
+    use zenkey_v1::schema::validate::{NotValidated, Verdict};
 
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
     let fetched: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
@@ -3530,8 +3530,8 @@ fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
     use zengui::echo::EchoRing;
     use zengui::verdict::VerdictCache;
     use zengui::view::echo::{EchoView, section};
-    use zenkey::schema::validate::Verdict;
-    use zenkey_fleet::SampleView;
+    use zenkey_fleet_v1::SampleView;
+    use zenkey_v1::schema::validate::Verdict;
 
     let sample = |key: &str| SampleView {
         key: key.to_string(),
@@ -3590,17 +3590,17 @@ fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
 #[test]
 fn the_tree_badges_the_budget_join() {
     use zengui::budget;
-    use zenkey_fleet::model::stats::StatsTable;
+    use zenkey_fleet_v1::model::stats::StatsTable;
 
     // A registry that declares a tight budget (2) on the disk family and a
     // rest-variable family beside it.
     let subject = |path: &str, class: &str, cardinality: Option<i64>| {
-        let mut d = zenkey::slice::SubjectDecl::new(path, zenkey::Declared::parse(class));
+        let mut d = zenkey_v1::slice::SubjectDecl::new(path, zenkey_v1::Declared::parse(class));
         d.type_name = "T".into();
         d.cardinality = cardinality;
         d
     };
-    let mut tight_slice = zenkey::slice::RegistrySlice::new("1.0", "t", "sysinfo");
+    let mut tight_slice = zenkey_v1::slice::RegistrySlice::new("1.0", "t", "sysinfo");
     tight_slice.subjects = vec![
         subject("disk/{mount}/used", "telemetry", Some(2)),
         subject("log/{path...}", "events", Some(1)),
@@ -3654,7 +3654,7 @@ fn the_tree_badges_the_budget_join() {
 fn the_fields_section_states_its_window_and_its_bounds() {
     use std::sync::Arc;
     use zengui::view::fields::{FieldsState, section};
-    use zenkey_fleet::report::{FieldReport, FieldRow};
+    use zenkey_fleet_v1::report::{FieldReport, FieldRow};
 
     // Never run: the section explains its cost instead of claiming absence.
     let state = FieldsState::default();
@@ -3753,8 +3753,8 @@ fn the_fields_section_states_its_window_and_its_bounds() {
 fn the_why_section_renders_not_asked_and_never_no() {
     use std::sync::Arc;
     use zengui::view::why::{WhyState, section};
-    use zenkey_fleet::judge::why::{WhyInputs, ladder};
-    use zenkey_fleet::report::RungAnswer;
+    use zenkey_fleet_v1::judge::why::{WhyInputs, ladder};
+    use zenkey_fleet_v1::report::RungAnswer;
 
     // Never run: the section states the frugal default's cost.
     let state = WhyState::default();
@@ -3829,7 +3829,7 @@ fn the_why_section_renders_not_asked_and_never_no() {
 fn the_consumers_section_renders_not_asked_and_never_matching_status() {
     use std::sync::Arc;
     use zengui::view::consumers::{ConsumersState, section};
-    use zenkey_fleet::report::{
+    use zenkey_fleet_v1::report::{
         AdminAnswer, Attribution, ConsumerRow, ConsumersReport, EntityKind, Relation,
     };
 
@@ -3967,7 +3967,7 @@ fn the_traffic_tab_never_reports_a_number_it_did_not_take() {
             .is_ok()
     );
 
-    let mut stats = zenkey_fleet::model::stats::StatsTable::new();
+    let mut stats = zenkey_fleet_v1::model::stats::StatsTable::new();
     stats.record(REGISTERED, 64, None, Instant::now(), None, None);
     let observed = KeyTreeSnapshot::build(&stats);
     let table = top(&observed, TrafficSort::Rate, 50);
@@ -4008,7 +4008,8 @@ fn the_config_tool_draws_the_served_schema_and_nothing_it_did_not_say() {
 
     let mut view = common::config_view();
     // A producer that breaks the rule: the view must not repeat it.
-    view.groups[0].parameters[2].value = Some(zenkey::config::ParamValue::Text("hunter2".into()));
+    view.groups[0].parameters[2].value =
+        Some(zenkey_v1::config::ParamValue::Text("hunter2".into()));
     let target = ConfigTarget::new("h-3fa9c2d41b7e", "radio", "wlan0");
     let form = ConfigForm {
         target: target.clone(),
@@ -4269,7 +4270,7 @@ fn a_configurable_producer_is_one_click_from_the_config_tool() {
     use zengui::nodes::NodeRoster;
     use zengui::view::nodes::{DetailState, NodesData, pane};
 
-    let radio = zenkey::slice::parse_slice(
+    let radio = zenkey_v1::slice::parse_slice(
         r#"
 [registry]
 version = "1.0"

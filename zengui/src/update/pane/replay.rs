@@ -243,7 +243,7 @@ pub(crate) fn update(
             let (stop, stopped) = tokio::sync::oneshot::channel();
             let path = format!(
                 "zengui-{}.zrec",
-                zenkey_fleet::rfc3339_now().replace(':', "-")
+                zenkey_fleet_v1::rfc3339_now().replace(':', "-")
             );
             let base = dep.base().to_string();
             work.replay.recording = Some(RecordingHandle {
@@ -288,11 +288,11 @@ pub(crate) fn update(
             if !matches!(state.source, crate::replay::ReplaySource::Retained { .. }) {
                 return Task::none();
             }
-            let rows: Vec<Arc<zenkey_fleet::SampleView>> =
+            let rows: Vec<Arc<zenkey_fleet_v1::SampleView>> =
                 state.rows.iter().map(|r| Arc::clone(&r.view)).collect();
             let path = format!(
                 "zengui-window-{}.zrec",
-                zenkey_fleet::rfc3339_now().replace(':', "-")
+                zenkey_fleet_v1::rfc3339_now().replace(':', "-")
             );
             work.replay.recorded = None;
             services::record::save_window(
@@ -313,7 +313,7 @@ pub(crate) fn update(
 /// you noticed".
 ///
 /// Takes the core rather than the monitor so a headless test can drive it
-/// with a session-less [`zenkey_fleet::MonitorCore`] — the same posture as
+/// with a session-less [`zenkey_fleet_v1::MonitorCore`] — the same posture as
 /// replay itself, and the seam #217's acceptance simulation enters through.
 pub(crate) fn enter_retained(
     dep: &mut Deployment,
@@ -321,7 +321,7 @@ pub(crate) fn enter_retained(
     sub: &mut SubjectState,
     tree: &mut TreeState,
     work: &mut Workspace,
-    core: &Arc<zenkey_fleet::MonitorCore>,
+    core: &Arc<zenkey_fleet_v1::MonitorCore>,
 ) {
     let taken = core.retention();
     // Both reads are bounded work under the ingest mutex (#331): `retention`

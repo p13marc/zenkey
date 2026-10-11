@@ -23,7 +23,7 @@
 
 use iced::widget::{Column, column, row};
 use iced::{Element, Length};
-use zenkey_fleet::SliceSet;
+use zenkey_fleet_v1::SliceSet;
 
 use super::tokens::Spacing;
 use super::{doctor, echo, kit, replay, send};
@@ -52,7 +52,7 @@ pub(crate) struct ActivityData<'a> {
     /// what the Replay tab's "scrub retained" affordance describes.
     /// `None` before a monitor exists, which is "not asked", not "empty"
     /// (O4).
-    pub retention: Option<zenkey_fleet::RetentionStats>,
+    pub retention: Option<zenkey_fleet_v1::RetentionStats>,
     /// The theme the window renders in — echo's coloured previews resolve
     /// their syntax colours from it (#538).
     pub theme: crate::prefs::ThemeChoice,
@@ -119,7 +119,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
 fn replay_stream<'a>(
     r: &'a ReplayMode,
     _slices: Option<&'a SliceSet>,
-    retention: Option<zenkey_fleet::RetentionStats>,
+    retention: Option<zenkey_fleet_v1::RetentionStats>,
     sp: Spacing,
 ) -> Element<'a, Message> {
     let mut col: Column<'a, Message> = column![].spacing(sp.sm);

@@ -83,7 +83,7 @@ say is drawn as not said: a value not read back is *unknown*, a sensitive one
 *write-only*, and silence after a write is *unknown outcome*, never a failure.
 
 No codec logic lives here. The publish form hands its body to
-`zenkey_fleet::prepare_publish` and renders what comes back — encoded, sent as
+`zenkey_fleet_v1::prepare_publish` and renders what comes back — encoded, sent as
 typed, or sent raw — because a payload that shipped unencoded must never look
 like one that did not.
 

@@ -26,7 +26,7 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet::{
+use zenkey_fleet_v1::{
     DiscoveredBase, FetchOutcome, KeyTreeSnapshot, Monitor, SampleView, Skeleton, SliceSet, WatchId,
 };
 
@@ -106,7 +106,7 @@ pub enum BusMsg {
     /// One bounded validation batch finished (#164): per checked key, the
     /// payload-conformance verdict of its newest sample. Lands in the
     /// verdict cache; the render paths only look up.
-    VerdictsChecked(Vec<(String, zenkey::schema::validate::Verdict)>),
+    VerdictsChecked(Vec<(String, zenkey_v1::schema::validate::Verdict)>),
     /// The throttled budget join finished (#221): declared `cardinality`
     /// against the observed tree, keyed by subtree display path.
     BudgetJoined(Arc<crate::budget::BudgetBadges>),
@@ -279,7 +279,7 @@ pub enum SubjectMsg {
     WatchStarted(String, Result<WatchId, crate::services::ServiceError>),
     /// A watch was released for the given display path.
     WatchReleased(String, Result<(), crate::services::ServiceError>),
-    /// A value arrived for the selected key ([`zenkey_fleet::fetch_value`]).
+    /// A value arrived for the selected key ([`zenkey_fleet_v1::fetch_value`]).
     ValueFetched(
         String,
         Result<Arc<FetchOutcome>, crate::services::ServiceError>,
@@ -565,8 +565,8 @@ pub enum PrefsMsg {
 /// an explorer does not leave declarations lying around on the bus.
 #[derive(Debug)]
 pub struct PublishOutcome {
-    pub prepared: zenkey_fleet::PreparedBody,
-    pub publication: Option<Arc<zenkey_fleet::Publication>>,
+    pub prepared: zenkey_fleet_v1::PreparedBody,
+    pub publication: Option<Arc<zenkey_fleet_v1::Publication>>,
     /// `None` = the status could not be asked, which is not `false` (O4).
     pub matching: Option<bool>,
     /// The attachment that rode the send, kept so a repeating publish
@@ -718,7 +718,7 @@ pub struct BusTick {
     pub watched: Arc<[String]>,
     /// Seed boundaries that fired during this tick (issue #92): each seeded
     /// watch's id and what its seed paths contributed.
-    pub seeded: Vec<(WatchId, zenkey_fleet::SeedCoverage)>,
+    pub seeded: Vec<(WatchId, zenkey_fleet_v1::SeedCoverage)>,
     /// Across everything watched. Named, because two of the three are `u64`
     /// and the doc comment `(samples, bytes, rate_hz)` was the only thing
     /// saying which was which (#357).
