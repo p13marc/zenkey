@@ -45,7 +45,8 @@
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed` (a late
-//!   joiner's: subscribe, then S4's GET, merged by stamp, core §4.2 0.26),
+//!   joiner's: subscribe, then S4's GET, merged by stamp, core §4.2 0.26,
+//!   by `zenkey_model::seed` since 0.27),
 //!   and zk2's `presence` (its `PresenceFeed` keeps `model::presence_live`
 //!   current from a monitor, #614), `contracts`, `operation`, `consume`,
 //!   `lens` (its `LensFeed` follows presence moves and re-reads when

@@ -1,0 +1,413 @@
+{
+  "description": "core §4.2 (0.26; the open cases decided in 0.27), a late joiner's merge. A stamp is `{time, id}`: `time` an NTP64 value (unit 2^-32 s), `id` the 128-bit id of the HLC that issued it, written as zenoh writes an id and a zid: lowercase hexadecimal without leading zeros. `order`: two stamps → `expect`, `less`, `equal` or `greater` for `a` against `b`. Stamps compare by time; on equal times by id, as zenoh's `Timestamp` compares them: the id's 128-bit value written as 16 bytes little-endian (least significant byte first), the two byte strings compared lexicographically from the first byte. So the least significant byte that differs decides, which is not the ids' order as integers. `cases`: one key's arrivals, in arrival order, whichever path brought each (S4's GET or the subscription), each a `stamp` or `null` (unstamped) and a `kind` (`put` or `delete`; a `reply_del` is a `delete` with its stamp) → `expect.kept`, whether each arrival replaces what the key holds. A stamped arrival is kept when the key holds nothing, only unstamped arrivals, or a lower stamp; an equal stamp is the same mutation, not kept again; a higher one held makes it stale. An unstamped arrival is kept when the key holds nothing or only unstamped arrivals (the later replacing the earlier), and never when it holds a stamped one. The kind never decides.",
+  "order": [
+    {
+      "note": "time first, whatever the ids",
+      "a": {
+        "time": 1,
+        "id": "ff"
+      },
+      "b": {
+        "time": 2,
+        "id": "1"
+      },
+      "expect": "less"
+    },
+    {
+      "note": "the same stamp",
+      "a": {
+        "time": 5,
+        "id": "ab"
+      },
+      "b": {
+        "time": 5,
+        "id": "ab"
+      },
+      "expect": "equal"
+    },
+    {
+      "note": "equal times: 100's low byte 00 is below 2's 02, though 0x100 is above 0x2",
+      "a": {
+        "time": 5,
+        "id": "100"
+      },
+      "b": {
+        "time": 5,
+        "id": "2"
+      },
+      "expect": "less"
+    },
+    {
+      "note": "equal times: the low bytes ff and fe decide, not the high bytes 1 and 2",
+      "a": {
+        "time": 5,
+        "id": "1ff"
+      },
+      "b": {
+        "time": 5,
+        "id": "2fe"
+      },
+      "expect": "greater"
+    },
+    {
+      "note": "equal times: a 16-byte id whose low byte is 00 is below 1",
+      "a": {
+        "time": 7386690599959157260,
+        "id": "10000000000000000000000000000000"
+      },
+      "b": {
+        "time": 7386690599959157260,
+        "id": "1"
+      },
+      "expect": "less"
+    },
+    {
+      "note": "equal times, equal low bytes: the next byte decides",
+      "a": {
+        "time": 7386690599959157260,
+        "id": "a1b2"
+      },
+      "b": {
+        "time": 7386690599959157260,
+        "id": "a2b2"
+      },
+      "expect": "less"
+    },
+    {
+      "note": "a realistic pair of zids at one time",
+      "a": {
+        "time": 7386690599959157260,
+        "id": "7db42403f70edc0d9e28614c0eeeb1b1"
+      },
+      "b": {
+        "time": 7386690599959157260,
+        "id": "4baa50f80d37a5dda951691aac616ef2"
+      },
+      "expect": "less"
+    }
+  ],
+  "cases": [
+    {
+      "note": "a newer live put replaces the reply (state.md §10, plans/a)",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 101,
+            "id": "a1"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 104,
+            "id": "a1"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "note": "a reply older than a live put is stale, never shown after it",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 104,
+            "id": "a1"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 101,
+            "id": "a1"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "equal stamps are one mutation, kept once (state.md §10, plans/d)",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 103,
+            "id": "a1"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 103,
+            "id": "a1"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "a reply_del is a deletion with its stamp, merged as a live delete",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 101,
+            "id": "a1"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 102,
+            "id": "a1"
+          },
+          "kind": "delete"
+        },
+        {
+          "stamp": {
+            "time": 101,
+            "id": "a1"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "an unstamped arrival on a key holding nothing is kept",
+      "arrivals": [
+        {
+          "stamp": null,
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true
+        ]
+      }
+    },
+    {
+      "note": "unstamped arrivals replace one another: the later arrival wins",
+      "arrivals": [
+        {
+          "stamp": null,
+          "kind": "put"
+        },
+        {
+          "stamp": null,
+          "kind": "put"
+        },
+        {
+          "stamp": null,
+          "kind": "delete"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "note": "a stamped arrival replaces an unstamped one",
+      "arrivals": [
+        {
+          "stamp": null,
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 101,
+            "id": "a1"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "note": "an unstamped arrival never replaces a stamped one, as Latest ranks an unstamped reply lowest",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 101,
+            "id": "a1"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": null,
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "once a stamp is held, unstamped arrivals stay out and a newer stamp still replaces",
+      "arrivals": [
+        {
+          "stamp": null,
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 101,
+            "id": "a1"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": null,
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 102,
+            "id": "b2"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          true,
+          false,
+          true
+        ]
+      }
+    },
+    {
+      "note": "an unstamped deletion ranks as an unstamped put",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 101,
+            "id": "a1"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": null,
+          "kind": "delete"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "equal times, ids 2 then 100: 100 is the lower stamp, not kept",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 7386690599959157260,
+            "id": "2"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 7386690599959157260,
+            "id": "100"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "note": "equal times, ids 100 then 2: 2 is the higher stamp, kept",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 7386690599959157260,
+            "id": "100"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 7386690599959157260,
+            "id": "2"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "note": "two ids for one key (an owner's new epoch inside the seed): compared as Latest compares them, so an older time under the new id is not kept (§4.3's residual risk)",
+      "arrivals": [
+        {
+          "stamp": {
+            "time": 200,
+            "id": "a1"
+          },
+          "kind": "put"
+        },
+        {
+          "stamp": {
+            "time": 150,
+            "id": "b2"
+          },
+          "kind": "put"
+        }
+      ],
+      "expect": {
+        "kept": [
+          true,
+          false
+        ]
+      }
+    }
+  ]
+}

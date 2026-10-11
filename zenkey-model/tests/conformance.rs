@@ -947,3 +947,57 @@ fn budget_lossless() {
         );
     }
 }
+
+/// `spec/conformance/seed/merge.json` (core §4.2, 0.26; 0.27, #752): how
+/// two stamps compare — time, then the id's bytes as zenoh compares them —
+/// and which of one key's arrivals a late joiner keeps, unstamped ones
+/// ranked below every stamp. Written by hand from the text, checked, never
+/// blessed.
+#[test]
+fn seed_merge() {
+    use std::cmp::Ordering;
+    use zenkey_model::seed::{Stamp, merge};
+    let doc = read_json(&spec().join("conformance/seed/merge.json"));
+    let stamp = |v: &Value| -> Option<Stamp> {
+        if v.is_null() {
+            return None;
+        }
+        let time = v["time"].as_u64().expect("time");
+        let id = v["id"].as_str().expect("id");
+        Some(Stamp::parse(time, id).unwrap_or_else(|| panic!("{id:?} is an id")))
+    };
+    let order = doc["order"].as_array().expect("order");
+    assert!(!order.is_empty());
+    for case in order {
+        let (a, b) = (stamp(&case["a"]), stamp(&case["b"]));
+        let got = match a.expect("a").cmp(&b.expect("b")) {
+            Ordering::Less => "less",
+            Ordering::Equal => "equal",
+            Ordering::Greater => "greater",
+        };
+        assert_eq!(case["expect"], json!(got), "{}", case["note"]);
+    }
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let arrivals: Vec<Option<Stamp>> = case["arrivals"]
+            .as_array()
+            .expect("arrivals")
+            .iter()
+            .map(|a| {
+                assert!(
+                    matches!(a["kind"].as_str(), Some("put" | "delete")),
+                    "{}",
+                    case["note"]
+                );
+                stamp(&a["stamp"])
+            })
+            .collect();
+        assert_eq!(
+            case["expect"],
+            json!({"kept": merge(&arrivals)}),
+            "{}",
+            case["note"]
+        );
+    }
+}
