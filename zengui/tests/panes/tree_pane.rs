@@ -729,3 +729,50 @@ fn an_operation_row_offers_no_watch_control() {
         "a stream's row does, and shows the watch held"
     );
 }
+
+/// #614 (FL7): a resolved rung is the expected answer, and with no room for
+/// both it gives way to the verdict, which may be a finding — at no width is
+/// "resolved" drawn while an "invalid" beside it is counted away.
+#[test]
+fn a_resolved_rung_yields_to_a_finding_verdict() {
+    let key = common::WLAN0;
+    let (flat, identities) = render(&[key], true);
+    let invalid = zenkey_fleet::report::Conformance::Invalid {
+        violations: vec!["/index: -1 is less than 0".into()],
+    };
+    let mut verdicts = zengui::verdict::VerdictCache::default();
+    verdicts.record(key, invalid.clone());
+    let watches = BTreeSet::new();
+    let mut both = false;
+    for width in (240..=900).step_by(20) {
+        let mut ui = iced_test::Simulator::with_size(
+            iced::Settings::default(),
+            (width as f32, 600.0),
+            tree::pane(tree::TreeData {
+                sp: sp(),
+                flat: &flat,
+                pivot: tree::Pivot::Chunks,
+                search: "",
+                viewport: Default::default(),
+                identities: &identities,
+                namespace: "",
+                verdicts: &verdicts,
+                budgets: None,
+                watches: tree::Watches {
+                    mine: &watches,
+                    seeding: &watches,
+                },
+                selected: None,
+            }),
+        );
+        let resolved = ui.find("resolved").is_ok();
+        let finding = ui.find(zengui::verdict::short_label(&invalid)).is_ok()
+            || ui.find(zengui::verdict::label(&invalid).as_str()).is_ok();
+        assert!(
+            !resolved || finding,
+            "at {width}px the resolved badge is drawn and the finding is not"
+        );
+        both |= resolved && finding;
+    }
+    assert!(both, "at some width both fit, or the test pins nothing");
+}

@@ -1579,8 +1579,9 @@ struct RowContext<'a> {
 /// narrow Locator would be all numbers and no names. The tiers are what it
 /// gives up, lowest priority first: the declared type, the bytes and the
 /// verdict's parenthetical, then the role word and the sample count. The
-/// identity and verdict badges are the last to go — they are findings —
-/// and below the narrowest tier `fit` drops them whole and counts them
+/// identity and verdict badges are the last to go — they are findings, and
+/// a resolved rung, the expected answer, yields to the verdict (#614, FL7)
+/// — and below the narrowest tier `fit` drops them whole and counts them
 /// (`+N`) rather than let the right half take the name past `NAME_FLOOR`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RowTier {
@@ -1647,8 +1648,9 @@ fn chip_width(s: &str) -> f32 {
 
 /// One cell of a row's right half (#557).
 struct RightCell<'a> {
-    /// Lower keeps longer: the numbers, then the identity, then the
-    /// verdict, then the type name.
+    /// Lower keeps longer: the numbers, then a rung that stopped short (a
+    /// finding), then the verdict, then a resolved rung (the expected
+    /// answer, #614, FL7), then the type name.
     rank: u8,
     /// Estimated, see [`SANS_W`].
     width: f32,
@@ -1841,7 +1843,13 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
             if let Some(rung) = crate::keyfacts::badged(t, namespace, &res.identity) {
                 let word = rung.label();
                 right.push(RightCell {
-                    rank: 1,
+                    // A resolved key is the expected answer: with no room,
+                    // it gives way to the verdict, which may be a finding.
+                    rank: if rung == crate::keyfacts::Rung::Resolved {
+                        3
+                    } else {
+                        1
+                    },
                     width: badge_width(word),
                     el: kit::tone_badge(rung.tone(), word),
                 });
@@ -1855,7 +1863,7 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
                 .map(crate::keyfacts::type_name)
             {
                 right.push(RightCell {
-                    rank: 3,
+                    rank: 4,
                     width: text_width(&ty),
                     el: kit::cell(ty).into(),
                 });
