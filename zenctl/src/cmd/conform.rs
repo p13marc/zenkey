@@ -39,6 +39,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         calls_granted,
         clocks_synced,
         lease,
+        wait_before_close,
         skip,
         contracts,
         ns,
@@ -46,6 +47,10 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
     let dep = ASKING.ask(Deployment::resolve(&ns));
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let lease = ASKING.ask(super::positive_secs("--lease", lease));
+    let wait_before_close = ASKING.ask(super::positive_secs(
+        "--wait-before-close",
+        wait_before_close,
+    ));
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
     let spec = ConformSpec {
         timeout: dep.timeout(),
@@ -59,6 +64,10 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         // deployment's lease is not on the bus: zenoh's default
         // (`zenkey_model::budget::DEFAULT_LEASE`) unless `--lease` says.
         lease,
+        // §2.7 (0.27): a window is lossless only if this run never stalled
+        // past it, nor past the lease less a keep-alive. Not on the bus
+        // either: zenoh's default unless `--wait-before-close` says.
+        wait_before_close,
     };
     // The service is read in the deployment's namespace, and the admin
     // space in none, as the doctor reads them (S1, §4.2, 0.17).

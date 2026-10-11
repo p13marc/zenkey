@@ -1,5 +1,5 @@
 {
-  "description": "core §2.7 (0.25), whether a window lost no delivery: the resource's declared QoS (`qos.reliability`: best_effort or reliable; `qos.congestion`: drop or block), the deliveries the window's own reader lost (`reader_lost`: its queue overflowed or fell behind, or a cap kept them out of its count), and miss detection (`miss_detection.declared`: the resource declares `history.miss_detection_ms`; `used`: the window's subscription detects misses; `misses`: how many it detected) → whether the window is shown to have lost no delivery (`expect.lossless`) and the reason class (`expect.reason`). Miss detection counts only when the resource declares it and the subscription uses it; a detected miss is a loss, and none detected establishes nothing. Reasons are chosen in this order: reader_lost (reader_lost above 0); misses_detected (declared and used, misses above 0); best_effort (reliability best_effort, whatever the congestion); congestion_drop (reliable with drop); else lossless, reliable_block. Only reliable_block is lossless.",
+  "description": "core §2.7 (0.25; the reader's stall 0.27), whether a window lost no delivery: the resource's declared QoS (`qos.reliability`: best_effort or reliable; `qos.congestion`: drop or block), the deliveries the window's own reader lost (`reader_lost`: its queue overflowed or fell behind, or a cap kept them out of its count), what the reader saw of its own receive path over the window and one lease after it (`reader_stall.gap_ms`: the greatest gap between two ticks of its monotonic ticker, the one still open when it was read included; `reader_stall.bound_ms`: the longest stall tolerated, as `stall_bounds` derives it; `reader_stall.transport_closed`: its session saw one of its own transports close), and miss detection (`miss_detection.declared`: the resource declares `history.miss_detection_ms`; `used`: the window's subscription detects misses; `misses`: how many it detected) → whether the window is shown to have lost no delivery (`expect.lossless`) and the reason class (`expect.reason`). The reader stalled when a transport of its session closed, or when its ticker's gap is longer than the bound (a gap of exactly the bound is not). Miss detection counts only when the resource declares it and the subscription uses it; a detected miss is a loss, and none detected establishes nothing. Reasons are chosen in this order: reader_lost (reader_lost above 0); reader_stalled (the reader stalled, 0.27: second, after the reader's counted loss and before every reason about the path); misses_detected (declared and used, misses above 0); best_effort (reliability best_effort, whatever the congestion); congestion_drop (reliable with drop); else lossless, reliable_block. Only reliable_block is lossless. `stall_bounds` (0.27): the routers' `wait_before_close`, the reader's session's lease and its keep-alive count (keep-alive messages per lease, zenoh's `transport/link/tx/keep_alive`; 0 is taken as 1) → the bound (`expect_ms`): the lesser of wait_before_close and the lease less one keep-alive interval (lease ÷ keep_alive), in milliseconds, the interval rounded up to a whole millisecond (the shorter bound).",
   "cases": [
     {
       "note": "reliable and block, nothing lost by the reader: a router's queue never drops such a sample, so the window lost none",
@@ -8,6 +8,11 @@
         "congestion": "block"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": false,
         "used": false,
@@ -25,6 +30,11 @@
         "congestion": "block"
       },
       "reader_lost": 3,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": false,
         "used": false,
@@ -42,6 +52,11 @@
         "congestion": "drop"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": false,
         "used": false,
@@ -59,6 +74,11 @@
         "congestion": "block"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": false,
         "used": false,
@@ -76,6 +96,11 @@
         "congestion": "drop"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": false,
         "used": false,
@@ -93,6 +118,11 @@
         "congestion": "drop"
       },
       "reader_lost": 1,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": false,
         "used": false,
@@ -110,6 +140,11 @@
         "congestion": "block"
       },
       "reader_lost": 2,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": true,
         "used": true,
@@ -127,6 +162,11 @@
         "congestion": "drop"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": true,
         "used": true,
@@ -144,6 +184,11 @@
         "congestion": "drop"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": true,
         "used": true,
@@ -161,6 +206,11 @@
         "congestion": "block"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": true,
         "used": true,
@@ -178,6 +228,11 @@
         "congestion": "block"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": true,
         "used": true,
@@ -195,6 +250,11 @@
         "congestion": "drop"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": true,
         "used": false,
@@ -212,6 +272,11 @@
         "congestion": "block"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": true,
         "used": false,
@@ -229,6 +294,11 @@
         "congestion": "drop"
       },
       "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 50,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
       "miss_detection": {
         "declared": false,
         "used": true,
@@ -238,6 +308,211 @@
         "lossless": false,
         "reason": "congestion_drop"
       }
+    },
+    {
+      "note": "0.27: reliable and block, and the reader's own transport closed: what its router queued for it went with the transport, whether or not it ever saw the owner's token",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 60,
+        "bound_ms": 5000,
+        "transport_closed": true
+      },
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_stalled"
+      }
+    },
+    {
+      "note": "0.27: reliable and block, and the reader's process stopped for 7 s, beyond the 5 s a router waits on a full queue",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 7000,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_stalled"
+      }
+    },
+    {
+      "note": "0.27: a gap of exactly the bound is no stall: lossless by the QoS",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 5000,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": true,
+        "reason": "reliable_block"
+      }
+    },
+    {
+      "note": "0.27: a 1 s lease bounds a stall at 750 ms, and an 800 ms gap is beyond it",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 800,
+        "bound_ms": 750,
+        "transport_closed": false
+      },
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_stalled"
+      }
+    },
+    {
+      "note": "0.27: the reader's counted loss comes before its stall",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 4,
+      "reader_stall": {
+        "gap_ms": 7000,
+        "bound_ms": 5000,
+        "transport_closed": true
+      },
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_lost"
+      }
+    },
+    {
+      "note": "0.27: the reader's stall comes before a detected miss",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 60,
+        "bound_ms": 5000,
+        "transport_closed": true
+      },
+      "miss_detection": {
+        "declared": true,
+        "used": true,
+        "misses": 3
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_stalled"
+      }
+    },
+    {
+      "note": "0.27: the reader's stall comes before the QoS",
+      "qos": {
+        "reliability": "best_effort",
+        "congestion": "drop"
+      },
+      "reader_lost": 0,
+      "reader_stall": {
+        "gap_ms": 9000,
+        "bound_ms": 5000,
+        "transport_closed": false
+      },
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_stalled"
+      }
+    }
+  ],
+  "stall_bounds": [
+    {
+      "note": "zenoh's defaults: wait_before_close 5 s, against 7.5 s for a 10 s lease",
+      "wait_before_close_ms": 5000,
+      "lease_ms": 10000,
+      "keep_alive": 4,
+      "expect_ms": 5000
+    },
+    {
+      "note": "a 1 s lease: its last keep-alive may be 250 ms old, so 750 ms",
+      "wait_before_close_ms": 5000,
+      "lease_ms": 1000,
+      "keep_alive": 4,
+      "expect_ms": 750
+    },
+    {
+      "note": "a wait_before_close longer than the lease allows: the lease decides",
+      "wait_before_close_ms": 20000,
+      "lease_ms": 10000,
+      "keep_alive": 4,
+      "expect_ms": 7500
+    },
+    {
+      "note": "a shorter wait_before_close decides",
+      "wait_before_close_ms": 2000,
+      "lease_ms": 10000,
+      "keep_alive": 4,
+      "expect_ms": 2000
+    },
+    {
+      "note": "three keep-alives per lease",
+      "wait_before_close_ms": 20000,
+      "lease_ms": 30000,
+      "keep_alive": 3,
+      "expect_ms": 20000
+    },
+    {
+      "note": "a keep-alive count of 0 is taken as 1: the interval is the whole lease",
+      "wait_before_close_ms": 5000,
+      "lease_ms": 10000,
+      "keep_alive": 0,
+      "expect_ms": 0
+    },
+    {
+      "note": "the interval rounds up to a whole millisecond: 1000 ÷ 3 is 333.3, so 334, and 666",
+      "wait_before_close_ms": 5000,
+      "lease_ms": 1000,
+      "keep_alive": 3,
+      "expect_ms": 666
     }
   ]
 }

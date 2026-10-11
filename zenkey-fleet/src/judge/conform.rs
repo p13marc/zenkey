@@ -31,9 +31,11 @@
 //!
 //! **"Lost no delivery" is established, never assumed** (core §2.7, 0.25;
 //! #740): this run's reader lost nothing (no lag, nothing past the arrival
-//! cap), and the resource is `reliable` with `block`, which no router
-//! queue drops — by `zenkey_model::budget::lossless`, from the contract in
-//! hand. A best-effort or `drop` resource's window is never lossless, and
+//! cap), its receive path never stalled — its session's transports held
+//! and its ticker never stopped beyond the bound, over the window and the
+//! watch after it (0.27, #753) — and the resource is `reliable` with
+//! `block`, which no router queue drops — by
+//! `zenkey_model::budget::lossless`, from the contract in hand. A best-effort or `drop` resource's window is never lossless, and
 //! its case says which QoS. The run's subscriptions detect no misses, so
 //! that input is always "not used". The owner must stay present a lease
 //! (and the reply timeout) past the window's end, and a window counts its
@@ -364,19 +366,70 @@ fn occurrence_instants(arrivals: &[&Arrival]) -> Vec<std::time::Duration> {
 }
 
 /// "Lost no delivery" for a window over `r` (core §2.7, 0.25): what this
-/// run's reader lost, the misses its subscription detected (none: it
-/// detects none), and the resource's declared QoS, by
-/// `zenkey_model::budget::lossless`.
-fn window_loss(r: &Resource, h: &Heard) -> (budget::LossReason, u64) {
+/// run's reader lost, whether its receive path stalled (0.27), the misses
+/// its subscription detected (none: it detects none), and the resource's
+/// declared QoS, by `zenkey_model::budget::lossless`.
+fn window_loss(obs: &ConformObservation, r: &Resource, h: &Heard) -> (budget::LossReason, u64) {
     let lost = h.lagged + h.arrivals_capped;
-    let reason = budget::delivery_of(r, lost, h.misses_detected)
+    let reason = budget::delivery_of(r, lost, reader_stall(obs), h.misses_detected)
         .map_or(budget::LossReason::ReaderLost, |d| budget::lossless(&d));
     (reason, lost)
 }
 
+/// What this run's reader saw of its own receive path over the window and
+/// the watch after it (core §2.7, 0.27), against the deployment's bound. A
+/// reader that was not watched, or whose watch could not be made, is taken
+/// as stalled: its window is never lossless, and [`stall_words`] says why.
+fn reader_stall(obs: &ConformObservation) -> budget::ReaderStall {
+    let bound = obs.spec.stall_bound();
+    match &obs.reader_stall {
+        Some(Ok(seen)) => budget::ReaderStall {
+            gap: seen.gap,
+            bound,
+            transport_closed: seen.transports_closed > 0,
+        },
+        _ => budget::ReaderStall {
+            gap: std::time::Duration::MAX,
+            bound,
+            transport_closed: false,
+        },
+    }
+}
+
+/// Why this run's reader is taken as stalled (core §2.7, 0.27), as it says
+/// it: its own transport closed, its process stopped beyond the bound, or
+/// its receive path was not watched.
+fn stall_words(obs: &ConformObservation) -> String {
+    let bound = obs.spec.stall_bound().as_secs_f64();
+    match &obs.reader_stall {
+        Some(Ok(s)) if s.transports_closed > 0 => format!(
+            "this run's session saw {} of its own transport(s) close over the window and the \
+             {:.1}s watch after it: a router that gives up on a reader drops what it held for \
+             it, and the reader sees the owner's token withdrawn only if it had received it",
+            s.transports_closed,
+            obs.spec.presence_tail().as_secs_f64()
+        ),
+        Some(Ok(s)) => format!(
+            "this run's process stalled {:.2}s, longer than the {bound:.2}s a router waits on a \
+             reader before it closes the transport (wait_before_close, or the lease less one \
+             keep-alive: --wait-before-close and --lease)",
+            s.gap.as_secs_f64()
+        ),
+        Some(Err(e)) => format!("this run could not watch its own receive path: {e}"),
+        None => "this run did not watch its own receive path".to_owned(),
+    }
+}
+
 /// Why a window is not shown lossless, as a reader says it (core §2.7,
-/// 0.25): the reader's own loss, a detected miss, or the QoS named.
-fn loss_words(r: &Resource, reason: budget::LossReason, lost: u64, h: &Heard) -> String {
+/// 0.25, 0.27): the reader's own loss or stall, a detected miss, or the QoS
+/// named.
+fn loss_words(
+    obs: &ConformObservation,
+    r: &Resource,
+    reason: budget::LossReason,
+    lost: u64,
+    h: &Heard,
+) -> String {
     let declared = matches!(&r.body, Body::Data(d)
         if d.history.as_ref().is_some_and(|x| x.miss_detection_ms.is_some()));
     let unused = if declared && h.misses_detected.is_none() {
@@ -389,6 +442,7 @@ fn loss_words(r: &Resource, reason: budget::LossReason, lost: u64, h: &Heard) ->
         budget::LossReason::ReaderLost => {
             format!("this run lost {lost} delivery(ies)")
         }
+        budget::LossReason::ReaderStalled => stall_words(obs),
         budget::LossReason::MissesDetected => format!(
             "the subscription detected {} missed sample(s)",
             h.misses_detected.unwrap_or(0)
@@ -508,8 +562,8 @@ fn budget_case(
         },
         _ => match heard {
             Some(Ok(h)) => {
-                let (loss, lost) = window_loss(r, h);
-                lost_words = loss_words(r, loss, lost, h);
+                let (loss, lost) = window_loss(obs, r, h);
+                lost_words = loss_words(obs, r, loss, lost, h);
                 w = h.listened.as_secs_f64();
                 let listened = obs.spec.counted(h.listened);
                 counted = listened.as_secs_f64();
@@ -586,7 +640,8 @@ fn budget_case(
                 Reading::Window(_) => format!(
                     "{n} member(s) {live} over a {w:.1}s window, {counted:.1}s of it counted, \
                      at least one liveness span; reliable with block and nothing lost by this \
-                     run; the owner present throughout and a lease after: within {of} (§2.7)"
+                     run, which never stalled; the owner present throughout and a lease after: \
+                     within {of} (§2.7)"
                 ),
             },
         ),
@@ -693,7 +748,7 @@ fn rate_case(
         .iter()
         .map(|(m, a)| ((*m).to_owned(), occurrence_instants(a)))
         .collect();
-    let (loss, lost) = window_loss(r, h);
+    let (loss, lost) = window_loss(obs, r, h);
     let listened = obs.spec.counted(h.listened);
     let o = Occurrences {
         listened,
@@ -736,7 +791,8 @@ fn rate_case(
             format!(
                 "{} member(s) over a {w:.1}s window, {counted:.1}s of it counted, none with more \
                  than {n} occurrence(s) within {period}; reliable with block and nothing lost by \
-                 this run; the owner present throughout and a lease after ({rate}, §2.7)",
+                 this run, which never stalled; the owner present throughout and a lease after \
+                 ({rate}, §2.7)",
                 o.members.len()
             ),
         ),
@@ -746,7 +802,7 @@ fn rate_case(
             format!(
                 "the window is not shown to have lost no delivery: {} — an occurrence it did \
                  not hear could exceed {rate} (§2.7)",
-                loss_words(r, loss, lost, h)
+                loss_words(obs, r, loss, lost, h)
             ),
         ),
         budget::Reason::WindowTooShort => ConformCase::unobservable(
@@ -1783,6 +1839,7 @@ mod tests {
 
     use super::*;
     use crate::bus::conform::{ConformSpec, WindowPresence};
+    use crate::bus::stall::StallSeen;
     use crate::model::catalog::{DescriptorRead, Observed};
     use crate::model::render::{Member, render_with};
     use crate::report::{
@@ -2074,6 +2131,7 @@ mod tests {
                 calls_granted: true,
                 clocks_synced: false,
                 lease: Duration::from_secs(10),
+                wait_before_close: Duration::from_secs(5),
             },
             asked_fp: None,
             presence: Ok(presence(Some(OWNER))),
@@ -2088,6 +2146,12 @@ mod tests {
                 complete: true,
                 gone: BTreeSet::new(),
                 tail: Duration::from_secs(11),
+            })),
+            // This run's ticker never stopped and its transport held (0.27).
+            reader_stall: Some(Ok(StallSeen {
+                gap: Duration::from_millis(60),
+                transports_closed: 0,
+                watched: Duration::from_secs(13),
             })),
             calls: BTreeMap::new(),
             admin: Some(Ok(AdminSpace {
@@ -2997,6 +3061,106 @@ mod tests {
         let b = budget_case(&o, &journal, "events/journal/{src}", Some(&three), None).unwrap();
         assert_eq!(b.verdict, Judgement::NotAsked, "{b:#?}");
         assert!(b.detail.as_deref().unwrap().contains("no-ceiling"));
+    }
+
+    /// A stalled reader's window reads unobservable (core §2.7, 0.27; #753):
+    /// over a whole counted hour, nothing lagged or capped and the owner
+    /// present a lease after, a window is still not lossless when this
+    /// run's own transport closed, or its ticker stopped longer than the
+    /// bound — `wait_before_close`, or the lease less one keep-alive — or
+    /// its receive path was not watched; for the population and for the
+    /// rate alike. A gap of exactly the bound is no stall.
+    #[test]
+    fn a_stalled_readers_window_reads_unobservable() {
+        let rev = alarms();
+        let alarms_r = rev
+            .contract()
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "alarms/{src}")
+            .unwrap()
+            .clone();
+        let hour: Result<Heard, String> = {
+            let mut h = Heard {
+                listened: Duration::from_secs(3601),
+                ..Heard::default()
+            };
+            for (k, a) in [occurrence("a", 1, 1.0, None), occurrence("b", 2, 2.0, None)] {
+                h.received += 1;
+                h.arrivals.entry(k).or_default().push(a);
+            }
+            Ok(h)
+        };
+        let mut o = conforming();
+        o.revision = Some(Arc::clone(&rev));
+        o.presence = Ok(Observed::from_keys("zk2/lab/al/@zk/**", &[], true));
+        let verdicts = |o: &ConformObservation| {
+            let b = budget_case(o, &alarms_r, "events/alarms/{src}", Some(&hour), None).unwrap();
+            let r = rate_case(o, &alarms_r, "events/alarms/{src}", Some(&hour)).unwrap();
+            (b.verdict, r.verdict)
+        };
+        let seen = |gap_ms: u64, closed: u64| {
+            Some(Ok(StallSeen {
+                gap: Duration::from_millis(gap_ms),
+                transports_closed: closed,
+                watched: Duration::from_secs(3613),
+            }))
+        };
+        let unobservable = |v: &Judgement, want: &str| {
+            assert!(
+                matches!(v, Judgement::Unobservable { reason }
+                    if reason.contains("not shown to have lost no delivery") && reason.contains(want)),
+                "{want}: {v:#?}"
+            );
+        };
+        // The control: clean, for both.
+        let (b, r) = verdicts(&o);
+        assert!(
+            matches!(&b, Judgement::NotEstablished { reason } if reason.contains("which never stalled")),
+            "{b:#?}"
+        );
+        assert!(
+            matches!(&r, Judgement::NotEstablished { reason } if reason.contains("which never stalled")),
+            "{r:#?}"
+        );
+        // Its own transport closed: what the router held for it is gone.
+        o.reader_stall = seen(60, 1);
+        let (b, r) = verdicts(&o);
+        unobservable(&b, "saw 1 of its own transport(s) close");
+        unobservable(&r, "saw 1 of its own transport(s) close");
+        // Its process stopped 7 s, beyond wait_before_close's 5 s.
+        o.reader_stall = seen(7000, 0);
+        let (b, r) = verdicts(&o);
+        unobservable(&b, "stalled 7.00s, longer than the 5.00s");
+        unobservable(&r, "stalled 7.00s, longer than the 5.00s");
+        // Exactly the bound: no stall.
+        o.reader_stall = seen(5000, 0);
+        let (b, r) = verdicts(&o);
+        assert!(matches!(b, Judgement::NotEstablished { .. }), "{b:#?}");
+        assert!(matches!(r, Judgement::NotEstablished { .. }), "{r:#?}");
+        // A 1 s lease bounds a stall at 750 ms, past its last keep-alive:
+        // an 800 ms gap is beyond it.
+        let mut short = o.clone();
+        short.spec.lease = Duration::from_secs(1);
+        if let Some(Ok(p)) = &mut short.window_presence {
+            p.tail = Duration::from_secs(2);
+        }
+        short.reader_stall = seen(800, 0);
+        let (b, _) = verdicts(&short);
+        unobservable(&b, "longer than the 0.75s");
+        short.reader_stall = seen(700, 0);
+        assert!(matches!(
+            verdicts(&short).0,
+            Judgement::NotEstablished { .. }
+        ));
+        // Not watched, or a watch that could not be made: never lossless.
+        o.reader_stall = None;
+        unobservable(&verdicts(&o).0, "did not watch its own receive path");
+        o.reader_stall = Some(Err("no listener".into()));
+        unobservable(
+            &verdicts(&o).1,
+            "could not watch its own receive path: no listener",
+        );
     }
 
     /// A key a more specific template wins is that template's member, never

@@ -997,7 +997,10 @@ pub(crate) enum CheckCmd {
     /// is, whatever its length, and its case names the QoS. A window's span
     /// counts from its subscription plus --timeout, and the owner is
     /// watched --lease and --timeout past its end, where a window could
-    /// pass.
+    /// pass. Over the same span this run watches itself (0.27): a transport
+    /// of its own session that closed, or a stall of its process longer
+    /// than --wait-before-close (or --lease less one keep-alive), means a
+    /// router may have given up on it, and no window is lossless.
     ///
     /// A reply's stamp is aged only against a clock this run measured on a
     /// live put of the same clock, or on --clocks-synced; otherwise its age
@@ -2493,6 +2496,14 @@ pub(crate) struct CheckConformArgs {
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
     pub(crate) lease: f64,
+    /// The routers' wait_before_close, seconds (zenoh's
+    /// `transport/link/tx/queue/congestion_control/block/wait_before_close`):
+    /// a router waits that long on this run's full queue, then closes the
+    /// transport. A window is lossless only if this run never stalled longer
+    /// than it, nor than --lease less one keep-alive (spec §2.7, 0.27).
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
+    pub(crate) wait_before_close: f64,
     /// Do not ask this case (repeatable): every row of it reads `not_asked`,
     /// which neither passes nor fails the run.
     #[arg(long, value_name = "CASE", value_parser = case_id,

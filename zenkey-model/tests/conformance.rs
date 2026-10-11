@@ -883,20 +883,38 @@ fn budget_rates() {
     }
 }
 
-/// `spec/conformance/budget/lossless.json` (core §2.7, 0.25): a resource's
-/// declared QoS, the reader's own loss and miss detection → whether a
-/// window lost no delivery, and why. Written by hand from the text,
-/// checked, never blessed.
+/// `spec/conformance/budget/lossless.json` (core §2.7, 0.25, 0.27): a
+/// resource's declared QoS, the reader's own loss, what it saw of its own
+/// receive path, and miss detection → whether a window lost no delivery,
+/// and why; and the stall bound from the queue's `wait_before_close`, the
+/// lease and its keep-alive count. Written by hand from the text, checked,
+/// never blessed.
 #[test]
 fn budget_lossless() {
+    use std::time::Duration;
     use zenkey_model::authoring::{Congestion, Reliability};
-    use zenkey_model::budget::{Delivery, MissDetection, lossless};
+    use zenkey_model::budget::{Delivery, MissDetection, ReaderStall, lossless, stall_bound};
     let doc = read_json(&spec().join("conformance/budget/lossless.json"));
+    let ms = |v: &serde_json::Value, what: &str| {
+        Duration::from_millis(v.as_u64().unwrap_or_else(|| panic!("{what}")))
+    };
+    let bounds = doc["stall_bounds"].as_array().expect("stall_bounds");
+    assert!(!bounds.is_empty());
+    for case in bounds {
+        let keep_alive = case["keep_alive"].as_u64().expect("keep_alive");
+        let got = stall_bound(
+            ms(&case["wait_before_close_ms"], "wait_before_close_ms"),
+            ms(&case["lease_ms"], "lease_ms"),
+            u32::try_from(keep_alive).expect("a u32"),
+        );
+        assert_eq!(got, ms(&case["expect_ms"], "expect_ms"), "{}", case["note"]);
+    }
     let cases = doc["cases"].as_array().expect("cases");
     assert!(!cases.is_empty());
     for case in cases {
         let q = &case["qos"];
         let m = &case["miss_detection"];
+        let st = &case["reader_stall"];
         let d = Delivery {
             reliability: match q["reliability"].as_str().expect("reliability") {
                 "reliable" => Reliability::Reliable,
@@ -909,6 +927,11 @@ fn budget_lossless() {
                 other => panic!("congestion {other:?}"),
             },
             reader_lost: case["reader_lost"].as_u64().expect("reader_lost"),
+            stall: ReaderStall {
+                gap: ms(&st["gap_ms"], "gap_ms"),
+                bound: ms(&st["bound_ms"], "bound_ms"),
+                transport_closed: st["transport_closed"].as_bool().expect("transport_closed"),
+            },
             miss_detection: MissDetection {
                 declared: m["declared"].as_bool().expect("declared"),
                 used: m["used"].as_bool().expect("used"),
