@@ -427,16 +427,6 @@ pub fn producers(slices: Option<&SliceSet>) -> Vec<String> {
     out
 }
 
-/// Origins the roster has seen running `producer` — any producer when none
-/// is named. Liveliness-fed, so an origin that never announced is typed.
-pub fn origins(roster: &crate::nodes::NodeRoster, producer: &str) -> Vec<String> {
-    roster
-        .iter()
-        .filter(|(_, producers)| producer.is_empty() || producers.contains_key(producer))
-        .map(|(origin, _)| origin.clone())
-        .collect()
-}
-
 /// A class as the form says it: the word, and what it means for a change.
 pub fn class_words(class: ParamClass) -> &'static str {
     match class {

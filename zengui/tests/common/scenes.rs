@@ -15,7 +15,7 @@ use zengui::message::{
 use zengui::prefs::{Density, LayoutPreset, Prefs, ThemeChoice};
 use zengui::view::palette::{Overlay, PaletteMsg};
 
-use super::{ETH0, HEALTH, ORIGIN_A, ORIGIN_B, POSITION, USED, World, send, window};
+use super::{ETH0, HEALTH, POSITION, USED, World, send, window};
 
 pub struct Scene {
     pub name: &'static str,
@@ -51,7 +51,8 @@ pub const ALL: &[Scene] = &[
         name: "diagnose",
         size: DESKTOP,
         build: diagnose,
-        landmark: "slice-sync",
+        // A zk2 check id (#614, FL9): the spray's phantom, found.
+        landmark: "token-missing",
     },
     Scene {
         name: "workbench-send",
@@ -63,9 +64,10 @@ pub const ALL: &[Scene] = &[
         name: "workbench-nodes",
         size: DESKTOP,
         build: workbench_nodes,
-        // The nodes pane reads v1 alive tokens, which a zk2 deployment does
-        // not hold (#614, FL6a): it says so until it reads zk2 presence.
-        landmark: "v1 presence not asked",
+        // An address up, read from zk2 presence (#614, FL9): `robot1/nav`
+        // selected, its instance and descriptor, and the health reading
+        // its selection asked for.
+        landmark: "robot1/nav: up",
     },
     Scene {
         name: "workbench-admin",
@@ -363,55 +365,103 @@ fn watching(prefs: Prefs) -> Zengui {
     app
 }
 
+/// The Diagnose layout on a zk2 doctor run (#614, FL9): two findings — the
+/// spray's phantom, an interface token with no instance token, and a router
+/// storage answering on owners' state (S4) — every other check's verdict
+/// in its own pole, the deep checks not asked.
 fn diagnose(theme: ThemeChoice) -> Zengui {
     use zengui::view::doctor::DoctorMsg;
-    use zenkey_fleet_v1::report::{Asked, CheckId, DoctorFinding, DoctorReport, DoctorSeverity};
+    use zenkey_fleet::report::{
+        Asked, CheckId, CheckReport, DoctorFinding, DoctorHealth, DoctorPresence, DoctorReport,
+        DoctorScope, DoctorSeverity,
+    };
 
     let mut app = live(prefs(theme));
     preset(&mut app, LayoutPreset::Diagnose);
+    let finding = |check, subject: &str, evidence: &str| DoctorFinding {
+        severity: DoctorSeverity::Error,
+        check,
+        subject: subject.into(),
+        evidence: evidence.into(),
+    };
+    let clean = |id: CheckId| -> &'static str {
+        match id {
+            CheckId::SplitBrain => "no interface held by two instances in both reads",
+            CheckId::BindingUnsatisfied => "no descriptor requires a role",
+            CheckId::ContractDrift => "one revision per interface",
+            CheckId::ContractUnavailable => "2 revisions named, 2 held verified",
+            CheckId::DescriptorInvalid => "3 descriptors pass the descriptor check",
+            CheckId::PresenceOverBudget => "7 tokens in the presence domain, under 10000",
+            CheckId::ArchiveUnaligned => "no archive.v1 provider in presence",
+            CheckId::ShmMemlockLow => "RLIMIT_MEMLOCK is unlimited",
+            CheckId::AdminUnreachable => "1 router answered the admin space",
+            CheckId::RouterVersionSkew => "1 router, zenoh 1.10.1",
+            CheckId::HostidDuplicate => "no instance lists hostid.v1",
+            _ => "no present service lists health.v1 (§2.7)",
+        }
+    };
+    let checks = CheckId::ALL
+        .into_iter()
+        .map(|id| match id {
+            CheckId::TokenMissing => CheckReport::of(
+                id,
+                vec![finding(
+                    id,
+                    "robot9/phantom@00000000000000aa",
+                    "holds an interface token for nav.v2 and no instance token, in both reads \
+                     2 s apart",
+                )],
+                vec![],
+                "",
+            ),
+            CheckId::StorageOnState => CheckReport::of(
+                id,
+                vec![finding(
+                    id,
+                    "state@z1",
+                    "captures `**`, which answers on owners' state keys \
+                     (`zk2/*/*/*/state/**`): the owner is authoritative for its state, and \
+                     last-known state is an archive.v1's (§4.4)",
+                )],
+                vec![],
+                "",
+            ),
+            id if id.reads_data() => CheckReport::not_asked(id),
+            id => CheckReport::of(id, vec![], vec![], clean(id)),
+        })
+        .collect();
     let report = DoctorReport {
-        findings: vec![
-            DoctorFinding {
-                severity: DoctorSeverity::Error,
-                check: CheckId::SliceSync,
-                subject: format!("{ORIGIN_B}/sysinfo"),
-                evidence: "registry version differs: served 1.0, local 2.0".into(),
-                citation: Some("RFC 08 §6".into()),
-            },
-            DoctorFinding {
-                severity: DoctorSeverity::Warning,
-                check: CheckId::DescribeMissing,
-                subject: format!("{ORIGIN_A}/sysinfo"),
-                evidence: "no describe document served for sysinfo".into(),
-                citation: Some("RFC 08 §7".into()),
-            },
-            DoctorFinding {
-                severity: DoctorSeverity::Info,
-                check: CheckId::DescribeMissing,
-                subject: "fleet".into(),
-                evidence: "1 producer(s) serve no describe".into(),
-                citation: Some("RFC 08 §7".into()),
-            },
-        ],
-        synced: Asked::NotAsked,
-        introspect_answered: 2,
-        live_producers: 2,
-        describe_served: 1,
-        describe_missing: 1,
-        routers: 1,
-        router_version: Some("1.9.0".into()),
-        deep: false,
-        observation: None,
+        scope: DoctorScope {
+            namespace: String::new(),
+            presence: Asked::Asked(DoctorPresence {
+                selector: "zk2/*/*/@zk/**".into(),
+                complete: true,
+                grace_s: 2.0,
+                services: 3,
+                instances: 3,
+                tokens: 7,
+                undescribed: 0,
+                revisions: 2,
+                held: 2,
+            }),
+            routers: Asked::Asked(1),
+            health: Asked::Asked(DoctorHealth {
+                selector: "zk2/*/*/health.v1/state/**".into(),
+                services: 0,
+                clocks_synced: false,
+            }),
+        },
+        checks,
         unobservable: None,
     };
     send(
         &mut app,
-        Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(Ok(
+        Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(
             zengui::doctor::DoctorRun {
                 report: Arc::new(report),
-                base: String::new(),
+                namespace: String::new(),
             },
-        )))),
+        ))),
     );
     app
 }
@@ -576,8 +626,27 @@ fn publish_log(theme: ThemeChoice) -> Zengui {
     app
 }
 
+/// The nodes tool on zk2 presence (#614, FL9): both addresses the world
+/// holds up, `robot1/nav` selected — its instance, what its descriptor
+/// says, and its `health.v1` as the reading its selection asks for would
+/// answer: not asked, since its descriptor does not list the profile.
 fn workbench_nodes(theme: ThemeChoice) -> Zengui {
-    workbench(theme, RightPane::Nodes)
+    use zengui::view::nodes::NodesMsg;
+    let mut app = workbench(theme, RightPane::Nodes);
+    let nav: zenkey_model::grammar::Addr = "robot1/nav".parse().expect("an address");
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Address(nav.clone()))),
+    );
+    send(
+        &mut app,
+        Message::Pane(PaneMsg::Nodes(NodesMsg::HealthRead(
+            nav,
+            String::new(),
+            World::new().health("robot1/nav"),
+        ))),
+    );
+    app
 }
 
 fn workbench_mesh(theme: ThemeChoice) -> Zengui {
@@ -633,19 +702,22 @@ fn workbench_config(theme: ThemeChoice) -> Zengui {
     app
 }
 
+/// The admin pane on zk2 (#614, FL9): one router, two storages judged
+/// against S4 — one on owners' state (the finding), one beside it — and the
+/// topology with the world's instances joined onto the router by the zid
+/// their descriptors state (#705), one of them unattached.
 fn workbench_admin(theme: ThemeChoice) -> Zengui {
     use zengui::admin::AdminSweep;
     use zengui::view::admin::AdminMsg;
-    use zenkey_fleet_v1::report::StorageList;
-    use zenkey_fleet_v1::{
-        Coverage, CoverageRow, OriginAttachment, RouterInfo, StorageInfo, TopologyEdge,
-        TopologyNode, TopologyReport,
+    use zenkey_fleet::report::{
+        Asked, AttachedTo, Attachment, InstanceAttachment, InstanceJoin, RouterInfo, StorageInfo,
+        TopologyEdge, TopologyNode, TopologyReport,
     };
 
     let node = |zid: &str, whatami: &str, answered: bool| TopologyNode {
         zid: zid.into(),
         whatami: whatami.into(),
-        version: answered.then(|| "1.9.0".into()),
+        version: answered.then(|| "1.10.1".into()),
         locators: if answered {
             vec![format!("tcp/10.0.4.{}:7447", zid.len())]
         } else {
@@ -661,46 +733,34 @@ fn workbench_admin(theme: ThemeChoice) -> Zengui {
         region: None,
         links: vec![],
     };
+    let storage = |name: &str, key_expr: &str| StorageInfo {
+        zid: "z1".into(),
+        name: name.into(),
+        key_expr: Some(key_expr.into()),
+        strip_prefix: None,
+        volume: Some("rocksdb".into()),
+        raw: serde_json::json!({"volume": "rocksdb"}),
+    };
+    let instance = |address: &str, id: &str, attachment| InstanceAttachment {
+        address: address.into(),
+        instance: id.into(),
+        zid: Some("ab12".into()),
+        attachment,
+    };
     let mut app = workbench(theme, RightPane::Admin);
+    let storages = vec![
+        storage("state", "**"),
+        storage("events", "zk2/*/*/*/events/**"),
+    ];
     let sweep = AdminSweep {
         routers: vec![RouterInfo {
             zid: "z1".into(),
-            version: Some("1.9.0".into()),
+            version: Some("1.10.1".into()),
             locators: vec!["tcp/10.0.4.2:7447".into()],
-            raw: serde_json::json!({"zid": "z1", "version": "1.9.0"}),
+            raw: serde_json::json!({"zid": "z1", "version": "1.10.1"}),
         }],
-        storage: StorageList {
-            storages: vec![StorageInfo {
-                zid: "z1".into(),
-                name: "state".into(),
-                key_expr: Some("v1/*/state/**".into()),
-                strip_prefix: None,
-                volume: Some("rocksdb".into()),
-                raw: serde_json::json!({"volume": "rocksdb"}),
-            }],
-            coverage: vec![
-                CoverageRow {
-                    producer: "sysinfo".into(),
-                    path: "health".into(),
-                    ttl_s: Some(60),
-                    coverage: Coverage::Covered("state@z1".into()),
-                },
-                CoverageRow {
-                    producer: "netring".into(),
-                    path: "capture/{iface}/state".into(),
-                    ttl_s: None,
-                    coverage: Coverage::Partial("state@z1".into()),
-                },
-                CoverageRow {
-                    producer: "snmp".into(),
-                    path: "device/{host}/status".into(),
-                    ttl_s: Some(30),
-                    coverage: Coverage::Uncovered,
-                },
-            ],
-        },
-        declared: None,
-        coverage_note: None,
+        s4: zengui::admin::s4_rows("", &storages),
+        storages,
         topology: TopologyReport {
             nodes: vec![
                 node("z1", "router", true),
@@ -717,22 +777,35 @@ fn workbench_admin(theme: ThemeChoice) -> Zengui {
             asked: "@/*/*".into(),
             answered: 2,
             self_zid: "z4".into(),
+            instances: Asked::Asked(InstanceJoin {
+                namespace: String::new(),
+                selector: "zk2/*/*/@zk/**".into(),
+                complete: true,
+                verified: vec!["z1".into()],
+                unverified: vec![],
+                unobservable: None,
+                instances: vec![
+                    instance(
+                        "robot1/nav",
+                        "0000000000000001",
+                        Attachment::Attached {
+                            routers: vec![AttachedTo {
+                                router: "z1".into(),
+                                listed_as: "client".into(),
+                            }],
+                        },
+                    ),
+                    instance(
+                        "host-a/tc",
+                        "0000000000000002",
+                        Attachment::Unattached {
+                            reason: "no verified router lists ab12".into(),
+                        },
+                    ),
+                ],
+            }),
         },
-        origins: vec![
-            OriginAttachment {
-                origin: ORIGIN_A.into(),
-                session_zid: Some("z2".into()),
-                reporter_zid: "z1".into(),
-                token_key: format!("v1/{ORIGIN_A}/state/sysinfo/alive"),
-            },
-            OriginAttachment {
-                origin: ORIGIN_B.into(),
-                session_zid: None,
-                reporter_zid: "z1".into(),
-                token_key: format!("v1/{ORIGIN_B}/state/sysinfo/alive"),
-            },
-        ],
-        base: String::new(),
+        namespace: String::new(),
     };
     send(
         &mut app,

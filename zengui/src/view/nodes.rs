@@ -1,60 +1,61 @@
-//! The node dashboard (#61): one card per origin, fed by liveliness (free)
-//! and the watched-only freshness join; per-node detail loads on selection
-//! through one `node_info` GET — the pane's only data-plane cost (the
-//! laziness ground rule).
+//! The node dashboard (#61; zk2's since #614, FL9): one card per address,
+//! fed by presence (free — the presence link's own monitor) and the
+//! watched-only freshness join; health loads on selection, through one
+//! `health.v1` reading — the pane's only data-plane cost (the laziness
+//! ground rule).
+//!
+//! v1's roster keyed alive tokens by origin and producer. zk2 has neither:
+//! a service is an **address**, `<system>/<service>`, run as instances that
+//! hold an instance token (core §8.1), and what each instance is comes from
+//! its descriptor (§3.3), never from the shape of its name.
 
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use iced::widget::{column, row, scrollable};
+use iced::widget::{Column, column, row, scrollable};
 use iced::{Element, Length};
-use zenkey_fleet_v1::report::NodeList;
-use zenkey_fleet_v1::{NodeInfo, SliceSet};
+use zenkey_fleet::report::{
+    ClockGround, HealthAnswer, HealthAnswerToken, HealthReport, HealthRow, HealthVerdict, LevelRead,
+};
+use zenkey_fleet::{AddressStatus, LiveAddress, PresenceBasis};
+use zenkey_model::grammar::Addr;
 
 use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
-use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
+use crate::nodes::{Described, HealthState, NodesState};
+use crate::presence_link::PresenceUpdate;
 use crate::view::kit;
-use crate::view::theme::PresenceTone;
-use crate::view::tokens::{Spacing, face};
+use crate::view::theme::{PresenceTone, Tone};
+use crate::view::tokens::{Spacing, face, font};
 
 /// The pane's interactions, nested per the `CallMsg` precedent.
 #[derive(Debug, Clone)]
 pub enum NodesMsg {
-    /// The one-shot `node_info` landed.
-    InfoLoaded(
-        String,
-        String,
-        Result<Arc<NodeInfo>, crate::services::ServiceError>,
-    ),
-    /// Click-through: land on the origin's subtree in the key tree.
-    ShowInTree(String),
-}
-
-/// The selected node's detail state — a value, an error, or "not asked".
-#[derive(Debug, Default)]
-pub enum DetailState {
-    #[default]
-    NotAsked,
-    Loading(String),
-    Loaded(String, Result<Arc<NodeInfo>, crate::services::ServiceError>),
+    /// The selected address's `health.v1` reading landed: the address, the
+    /// namespace it ran in (the staleness guard, #109), and the engine's
+    /// report.
+    HealthRead(Addr, String, Arc<HealthReport>),
+    /// Read the selected address's health again — one more reading, asked.
+    AskHealth,
+    /// The "clocks synced" toggle (D11): the operator's word that this
+    /// host's clock and the owners' agree. Re-asks the selected address.
+    ClocksSynced(bool),
+    /// Click-through: land on the address's subtree in the key tree.
+    ShowInTree(Addr),
 }
 
 /// Everything the pane renders (args struct per the `DetailData` precedent).
 pub struct NodesData<'a> {
-    pub roster: &'a NodeRoster,
-    pub selected: Option<&'a str>,
-    pub detail: &'a DetailState,
-    /// The loaded registry, for the roster→slice join (#234). `None` = not
-    /// asked, and the rows then claim nothing about apps or versions.
-    pub slices: Option<&'a SliceSet>,
+    /// The presence link's last landing; `None` = not read (O4).
+    pub presence: Option<&'a PresenceUpdate>,
+    /// Descriptors, freshness and health.
+    pub nodes: &'a NodesState,
+    /// The address the workspace points at, when it points at one.
+    pub selected: Option<&'a Addr>,
     /// The dock's resolved spacing grid (#192).
     pub sp: Spacing,
 }
 
 /// Wrap one of this pane's messages for the app (#176).
-///
-/// One place the pane's name is spelled, rather than at every widget —
-/// which is what the other seven panes already did, and what makes the
-/// six-group regroup a one-line change here instead of 2.
 fn msg(m: NodesMsg) -> Message {
     Message::Pane(PaneMsg::Nodes(m))
 }
@@ -63,302 +64,497 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
     let sp = d.sp;
     let mut col = column![kit::section_header("Nodes", None)].spacing(sp.sm);
 
-    // The catalog line comes first, always, by name: "catalog dead" and
-    // "no entities" must never look alike (D4 / RFC 04 §5).
-    col = col.push(match d.roster.catalog() {
-        CatalogPresence::Alive => kit::badge_presence(PresenceTone::Alive, "catalog: alive"),
-        CatalogPresence::Suspect => {
-            kit::badge_presence(PresenceTone::Suspect, "catalog: suspect (token retracted)")
-        }
-        CatalogPresence::NoTokenObserved => kit::badge_presence(
-            PresenceTone::Unknown,
-            "catalog: no token observed — not proof none exists (RFC 05 §3.1)",
-        ),
-    });
-
-    // This pane's roster is v1's — alive tokens by origin — and since #614
-    // (FL6a) nothing feeds it: presence is zk2's instance tokens, read on
-    // the session in the namespace and counted in the status strip, until
-    // this pane reads them itself. Both empty states say so, rather than
-    // reading a zk2 deployment as a fleet with nobody in it.
-    if !d.roster.is_seeded() {
+    let Some(update) = d.presence else {
         col = col.push(kit::empty(
             kit::EmptyKind::NotAsked,
-            "v1 presence not asked",
-            "this roster reads v1 alive tokens, which zk2 services do not hold — \
-             zk2 presence is the status strip's presence cell",
+            "presence not read",
+            "the nodes pane reads zk2's instance tokens on the session in the \
+             namespace, and no read has landed — not asked is not an empty \
+             deployment (O4)",
         ));
         return col.into();
-    }
-    if d.roster.is_empty() {
-        col = col.push(kit::empty(
-            kit::EmptyKind::Silent,
-            "no v1 liveliness tokens observed",
-            "zk2 services hold instance tokens, counted in the status strip's \
-             presence cell — and silence is not a verdict (RFC 05 §3.1)",
-        ));
-        return col.into();
-    }
+    };
+    let presence = &update.presence;
+    // The strip's own sentence (one wording): counts, and the basis when it
+    // is not complete — a loss as a caution, never as everything down.
+    let (said, caution) = crate::view::status::presence_text(Some(update));
+    col = col.push(if caution {
+        kit::status_chip(Tone::Caution, said)
+    } else {
+        kit::muted(said)
+    });
 
-    // The roster→slice join is the engine's `node_rows` (#234) — the same
-    // rows `zenctl node list --verbose` prints, so the two explorers cannot
-    // disagree about which app a producer belongs to. `live_map()` is `None`
-    // while unseeded, so an unasked join claims nothing (O4).
-    let joined = d
-        .roster
-        .live_map()
-        .map(|m| zenkey_fleet_v1::node_rows(&m, d.slices));
+    if presence.addresses().next().is_none() {
+        col = col.push(match presence.basis() {
+            PresenceBasis::Complete => kit::empty(
+                kit::EmptyKind::Empty,
+                "no zk2 service holds a token here",
+                "a complete presence read of this namespace found no instance \
+                 token — a reading of this namespace, so check it is the right \
+                 one before reading a dead deployment",
+            ),
+            _ => kit::empty(
+                kit::EmptyKind::Silent,
+                "no token observed",
+                "the read was not complete, so nothing here is down: silence is \
+                 not a verdict (§8.1)",
+            ),
+        });
+        return col.into();
+    }
 
     // MD between cards (#192): the rule, not a taste — SM is for inside one.
     let mut cards = column![].spacing(sp.md);
-    // Producers whose slice declares RFC 05 §5.1 procedures (#481).
-    let configurable = crate::configure::producers(d.slices);
-    for (origin, producers) in d.roster.iter() {
-        let selected = d.selected == Some(origin.as_str());
-        cards = cards.push(origin_card(
-            origin,
-            producers,
-            selected,
-            d.detail,
-            joined.as_ref(),
-            &configurable,
-            sp,
-        ));
+    for (addr, live) in presence.addresses() {
+        let selected = d.selected == Some(addr);
+        cards = cards.push(address_card(addr, live, presence.basis(), selected, &d));
     }
     col = col.push(scrollable(cards).height(Length::Fill));
     col.into()
 }
 
-fn origin_card<'a>(
-    origin: &'a str,
-    producers: &'a std::collections::BTreeMap<String, ProducerPresence>,
+fn address_card<'a>(
+    addr: &'a Addr,
+    live: &'a LiveAddress,
+    basis: PresenceBasis,
     selected: bool,
-    detail: &'a DetailState,
-    joined: Option<&NodeList>,
-    configurable: &[String],
-    sp: Spacing,
+    d: &NodesData<'a>,
 ) -> Element<'a, Message> {
-    let mut body = column![].spacing(sp.xs);
-
+    let sp = d.sp;
     let header = row![
-        kit::link(kit::emphasis(origin).font(face::MONO))
+        kit::link(kit::emphasis(addr.to_string()).font(face::MONO))
             .padding(iced::Padding::ZERO)
-            // Straight to the workspace's subject rather than to this pane
-            // (#181): a card is one of several ways to point the window at an
-            // origin, and the pane is not the owner of what is being looked at.
-            // Re-click deselects, and the pane knows that because it is told
-            // which card is current.
+            // Straight to the workspace's subject (#181): a card is one of
+            // several ways to point the window at an address. Re-click
+            // deselects.
             .on_press(Message::Subject(SubjectMsg::Select(if selected {
                 Subject::None
             } else {
-                Subject::Origin(origin.to_string())
+                Subject::Address(addr.clone())
             }))),
         iced::widget::space::horizontal(),
         kit::secondary(kit::caption("show in tree"))
             .padding([0.0, sp.xs])
-            .on_press(msg(NodesMsg::ShowInTree(origin.to_string()))),
+            .on_press(msg(NodesMsg::ShowInTree(addr.clone()))),
     ]
     .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
-    body = body.push(header);
-
-    for row in presence_rows(origin, producers, joined, configurable, sp) {
-        body = body.push(row);
-    }
-
+    let mut body = column![header, presence_row(addr, live, basis, d.nodes, sp)].spacing(sp.xs);
     if selected {
-        body = body.push(detail_section(detail, sp));
+        body = body.push(detail_section(addr, d.presence, d.nodes, sp));
     }
     kit::card(body)
 }
 
-/// One row per producer: presence, why, how fresh its state is — and which
-/// app the registry says it belongs to, when the engine's `node_rows` join
-/// answered (#234). "(declared)" because the claim comes from the loaded
-/// slices, not from this node's own introspect — that one is the detail
-/// section's, on demand.
+/// One address's presence in a row: its status — up, down or unobservable,
+/// never folded — since when, how many instances, and how fresh its state
+/// is when a watch covers it.
 ///
-/// Shared between the dashboard card and the Inspector's origin sections
-/// (#182) — the same sentences in both places, because they are the same
-/// claim and a second wording would be a second answer.
-fn presence_rows<'a>(
-    origin: &'a str,
-    producers: &'a std::collections::BTreeMap<String, ProducerPresence>,
-    joined: Option<&NodeList>,
-    configurable: &[String],
-    sp: Spacing,
-) -> Vec<Element<'a, Message>> {
-    producers
-        .iter()
-        .map(|(producer, p)| {
-            let declared = joined
-                .and_then(|list| {
-                    list.nodes
-                        .iter()
-                        .find(|r| r.origin == origin && &r.producer == producer)
-                })
-                .and_then(|r| match (&r.app, &r.registry_version, &r.unreadable) {
-                    (Some(app), Some(v), _) => {
-                        Some(format!("app {app} · registry v{v} (declared)"))
-                    }
-                    // This origin answered and its slice did not read: the
-                    // detail section's sentence, not a blank (#495; RFC 08
-                    // §6, v1.44).
-                    (.., Some(u)) => Some(u.sentence()),
-                    _ => None,
-                });
-            let (tone, presence_label) = if p.alive {
-                (PresenceTone::Alive, "alive".to_string())
-            } else {
-                let since = p
-                    .suspect_since
-                    .map(|t| format!(" since {}s", t.elapsed().as_secs()))
-                    .unwrap_or_default();
-                (
-                    PresenceTone::Suspect,
-                    format!("suspect{since} (token retracted)"),
-                )
-            };
-            let freshness = match (p.watched, p.last_state_age) {
-                (true, Some(age)) => format!("last state sample {}s ago", age.as_secs()),
-                (true, None) => "watched — no state sample seen".to_string(),
-                (false, _) => "not watched — freshness unknown".to_string(),
-            };
-            let mut r = row![kit::badge_presence(
-                tone,
-                format!("{producer}: {presence_label}")
-            )]
-            .spacing(sp.sm)
-            .align_y(iced::Alignment::Center);
-            if let Some(declared) = declared {
-                r = r.push(kit::muted(declared));
-            }
-            r = r.push(iced::widget::space::horizontal());
-            r = r.push(kit::muted(freshness));
-            // Only where the producer's slice declares RFC 05 §5.1
-            // procedures (#481): a link to a form nothing serves would be a
-            // promise this window cannot keep.
-            if configurable.iter().any(|c| c == producer) {
-                r = r.push(
-                    kit::secondary(kit::labelled(kit::Icon::Config, "configure"))
-                        .padding([0.0, sp.xs])
-                        .on_press(Message::Pane(PaneMsg::Config(
-                            crate::view::configure::ConfigMsg::Goto(
-                                crate::configure::ConfigTarget::new(origin, producer.as_str(), ""),
-                            ),
-                        ))),
-                );
-            }
-            r.into()
-        })
-        .collect()
-}
-
-/// The Inspector's presence sections for one origin (#182).
-///
-/// An origin the roster has never seen is a *fact* and says so — it is not
-/// rendered as an empty card, which would read as "this node has no
-/// producers".
-pub fn presence_section<'a>(
-    roster: &'a NodeRoster,
-    origin: &'a str,
-    joined: Option<&NodeList>,
-    configurable: &[String],
+/// Shared between the dashboard card and the Inspector's address section
+/// (#182): one claim, one wording.
+fn presence_row<'a>(
+    addr: &Addr,
+    live: &LiveAddress,
+    basis: PresenceBasis,
+    nodes: &NodesState,
     sp: Spacing,
 ) -> Element<'a, Message> {
-    let Some((_, producers)) = roster.iter().find(|(o, _)| o.as_str() == origin) else {
-        return kit::empty(
-            kit::EmptyKind::Silent,
-            "no liveliness token observed for this origin",
-            "it may be down, unreachable, or holding no tokens — silence is not \
-             a verdict (RFC 05 §3.1)",
-        );
+    let tone = match live.status {
+        AddressStatus::Up => PresenceTone::Up,
+        AddressStatus::Down => PresenceTone::Down,
+        AddressStatus::Unobservable => PresenceTone::Unobservable,
     };
+    let since = ago(live.since);
+    let status = match live.status {
+        AddressStatus::Up => format!("since {since}"),
+        AddressStatus::Down => format!("no instance token since {since}"),
+        // Why it is not down, said: a loss, or no complete seed behind it.
+        AddressStatus::Unobservable => match basis {
+            PresenceBasis::Lost { .. } => {
+                "events lost since the last complete read — not down".to_string()
+            }
+            _ => "no complete read behind it — not down (§8.1)".to_string(),
+        },
+    };
+    let held = live.instance_tokens().count();
+    let instances = match (held, live.instances.len()) {
+        (0, 0) => None,
+        (0, n) => Some(format!(
+            "{} known from interface tokens alone",
+            kit::plural(n, "instance")
+        )),
+        (1, _) => Some("1 instance".to_string()),
+        // A re-mint's overlap, a redundant pair, or a split brain: telling
+        // them apart is the doctor's, not this row's.
+        (n, _) => Some(format!(
+            "{} — an overlap, a pair or a split brain (the doctor tells them apart)",
+            kit::plural(n, "instance")
+        )),
+    };
+    let fresh = nodes.freshness(addr);
+    let freshness = match (fresh.watched, fresh.last_state_age) {
+        (true, Some(age)) => format!("last state sample {}s ago", age.as_secs()),
+        (true, None) => "watched — no state sample seen".to_string(),
+        (false, _) => "state not watched — freshness unknown".to_string(),
+    };
+    let mut r = row![
+        kit::badge_presence(tone, format!("{addr}: {}", live.status.as_str())),
+        kit::muted(status),
+    ]
+    .spacing(sp.sm)
+    .align_y(iced::Alignment::Center);
+    if let Some(instances) = instances {
+        r = r.push(kit::muted(instances));
+    }
+    r.push(iced::widget::space::horizontal())
+        .push(kit::muted(freshness))
+        .into()
+}
+
+/// The Inspector's presence sections for one address (#182).
+///
+/// An address presence holds no record of is a *fact* and says so on the
+/// basis it stands on — never an empty card reading as "no instances".
+pub fn address_sections<'a>(
+    addr: &'a Addr,
+    presence: Option<&'a PresenceUpdate>,
+    nodes: &'a NodesState,
+    sp: Spacing,
+) -> Column<'a, Message> {
     let mut col = column![].spacing(sp.xs);
-    for row in presence_rows(origin, producers, joined, configurable, sp) {
-        col = col.push(row);
+    let Some(update) = presence else {
+        // Health reads presence itself, so it stands without the link's.
+        return col
+            .push(kit::empty(
+                kit::EmptyKind::NotAsked,
+                "presence not read",
+                "no presence read has landed — whether this address is up is not \
+                 asked yet (O4)",
+            ))
+            .push(health_section(addr, nodes, sp));
+    };
+    match update.presence.address(addr) {
+        Some(live) => {
+            col = col.push(presence_row(addr, live, update.presence.basis(), nodes, sp));
+        }
+        None => {
+            let status = update.presence.status(addr);
+            col = col.push(kit::badge_presence(
+                match status {
+                    AddressStatus::Down => PresenceTone::Down,
+                    AddressStatus::Up => PresenceTone::Up,
+                    AddressStatus::Unobservable => PresenceTone::Unobservable,
+                },
+                format!("{addr}: {}", status.as_str()),
+            ));
+            col = col.push(kit::muted(match status {
+                AddressStatus::Down => {
+                    "no token of it in a complete presence read of this namespace"
+                }
+                _ => "no token of it observed, and no complete read behind that — not down",
+            }));
+        }
+    }
+    col.push(detail_section(addr, presence, nodes, sp))
+}
+
+/// The selected address's detail: each instance as presence and its
+/// descriptor describe it, and its `health.v1`, read on selection.
+pub fn detail_section<'a>(
+    addr: &Addr,
+    presence: Option<&'a PresenceUpdate>,
+    nodes: &'a NodesState,
+    sp: Spacing,
+) -> Column<'a, Message> {
+    let mut col = column![kit::eyebrow("INSTANCES")].spacing(sp.xs);
+    let live = presence.and_then(|p| p.presence.address(addr));
+    let described = nodes.instances(addr);
+    // Every instance either source names: presence's tokens and the
+    // catalog's descriptors are read apart, and neither is folded into the
+    // other.
+    let mut ids: Vec<String> = live
+        .map(|l| l.instances.keys().map(|i| i.to_string()).collect())
+        .unwrap_or_default();
+    for i in described.into_iter().flatten() {
+        if !ids.contains(&i.instance) {
+            ids.push(i.instance.clone());
+        }
+    }
+    ids.sort();
+    if ids.is_empty() {
+        col = col.push(kit::muted(
+            "no instance of it in presence or in the lens's catalog",
+        ));
+    }
+    for id in &ids {
+        let token = live.and_then(|l| {
+            l.instances
+                .iter()
+                .find(|(i, _)| i.as_str() == id.as_str())
+                .map(|(_, t)| t)
+        });
+        let held = match token {
+            Some(t) if t.instance_token => match t.since {
+                Some(since) => format!("instance token held since {}", ago(since)),
+                None => "instance token held".to_string(),
+            },
+            Some(_) => "no instance token — interface tokens only (§8.2's order caught \
+                        mid-way, or broken)"
+                .to_string(),
+            None => "not in the presence projection".to_string(),
+        };
+        col = col.push(
+            row![kit::data_chip(id.clone()), kit::muted(held)]
+                .spacing(sp.sm)
+                .align_y(iced::Alignment::Center),
+        );
+        let facts = described
+            .and_then(|all| all.iter().find(|i| &i.instance == id))
+            .map(|i| &i.described);
+        col = col.push(descriptor_lines(facts, sp));
+    }
+    if let Some(l) = live
+        && !l.members.is_empty()
+    {
+        col = col.push(kit::muted(format!(
+            "{} held by this address",
+            kit::plural(l.members.len(), "member token")
+        )));
+    }
+    col.push(health_section(addr, nodes, sp))
+}
+
+/// What one instance's descriptor says (§3.3) — host, process, build and
+/// session zid as written, its profiles, what it implements — or why there
+/// is nothing to say, in each case's own words.
+fn descriptor_lines<'a>(facts: Option<&Described>, sp: Spacing) -> Element<'a, Message> {
+    let f = match facts {
+        None => return kit::muted("descriptor: no catalog read names this instance"),
+        Some(Described::NotAsked) => return kit::muted("descriptor: not asked"),
+        Some(Described::Silent) => {
+            return kit::muted(
+                "descriptor: no reply within the timeout — the instance may be gone, or \
+                 the reply did not cross; not a verdict",
+            );
+        }
+        Some(Described::Invalid(why)) => {
+            return kit::status_chip(Tone::Caution, format!("descriptor invalid: {why}"));
+        }
+        Some(Described::Failed(why)) => {
+            return kit::muted(format!("descriptor not read: {why}"));
+        }
+        Some(Described::Served(f)) => f,
+    };
+    let dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".to_string());
+    let mut col = column![kit::muted(format!(
+        "host {} · process {} · build {} · zid {}",
+        dash(&f.host),
+        dash(&f.process),
+        dash(&f.build),
+        dash(&f.zid),
+    ))]
+    .spacing(sp.xs);
+    let mut chips = row![].spacing(sp.xs).align_y(iced::Alignment::Center);
+    // Minted only by the descriptor's own word (hostid.v1 §2.8): a system
+    // *named* like `h-…` says nothing (§2.11).
+    if f.lists_hostid() {
+        chips = chips.push(kit::data_chip("hostid.v1 — listed in its profiles"));
+    }
+    for (iface, fp) in &f.interfaces {
+        chips = chips.push(kit::data_chip(format!("{iface} @ {fp}")));
+    }
+    col = col.push(chips);
+    let others: Vec<&str> = f
+        .profiles
+        .iter()
+        .map(String::as_str)
+        .filter(|p| *p != crate::nodes::HOSTID)
+        .collect();
+    if !others.is_empty() {
+        col = col.push(kit::muted(format!("profiles: {}", others.join(", "))));
     }
     col.into()
 }
 
-/// The `node_info` one-shot, rendered — the pane's only data-plane cost.
-pub fn detail_section(detail: &DetailState, sp: Spacing) -> Element<'_, Message> {
-    match detail {
-        DetailState::NotAsked => kit::muted("select to ask node_info"),
-        DetailState::Loading(origin) => kit::muted(format!("asking node_info for {origin}…")),
-        DetailState::Loaded(_, Err(e)) => kit::error(format!("node_info failed: {e}")),
-        DetailState::Loaded(_, Ok(info)) => {
-            let mut col = column![].spacing(sp.xs);
-            if info.producers.is_empty() {
-                col = col.push(kit::muted(
-                    "no introspect reply — capabilities unknown, not absent",
-                ));
-            }
-            for p in &info.producers {
-                let caps = match (&p.app, &p.registry_version, &p.unreadable) {
-                    (Some(app), Some(v), _) => format!(
-                        "app {app} · registry v{v} · {} subject(s) · {} procedure(s){}{}{}",
-                        p.subjects,
-                        p.procedures,
-                        if p.blob_tiers.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" · blob: {}", p.blob_tiers.join(","))
-                        },
-                        if p.media.is_empty() {
-                            String::new()
-                        } else {
-                            format!(
-                                " · media: {}",
-                                p.media
-                                    .iter()
-                                    .map(|m| format!("{} ({})", m.path, m.encoding))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )
-                        },
-                        if p.deprecated_served > 0 {
-                            format!(" · {} DEPRECATED still served", p.deprecated_served)
-                        } else {
-                            String::new()
-                        },
-                    ),
-                    // Answered, and the slice did not read: zenctl's sentence,
-                    // because it is the same claim (#491; RFC 08 §6, v1.44).
-                    (.., Some(u)) => u.sentence(),
-                    _ => "no introspect reply — capabilities unknown, not absent".to_string(),
-                };
-                col = col.push(kit::muted(format!("{}: {caps}", p.name)));
-            }
-            // Freshness rows exist only for ttl-declaring subjects; their
-            // absence is "no ttl declared", never "fresh" (O4).
-            if info.freshness.is_empty() {
-                col = col.push(kit::muted(
-                    "no ttl declared on any state subject — freshness unknown (O4)",
-                ));
-            } else {
-                for f in &info.freshness {
-                    let age = f
-                        .age_s
-                        .map(|a| format!("{a}s old"))
-                        .unwrap_or_else(|| "no sample answered — stale".into());
-                    let line = format!(
-                        "{}/{}  {age}  (ttl {}s){}",
-                        f.producer,
-                        f.path,
-                        f.ttl_s,
-                        if f.stale { "  STALE" } else { "" }
-                    );
-                    if f.stale {
-                        // A finding about the fleet: caution's chip, the
-                        // line's own words — never red text alone (#566).
-                        col = col.push(kit::status_chip(crate::view::theme::Tone::Caution, line));
-                    } else {
-                        col = col.push(kit::muted(line));
-                    }
-                }
-            }
-            col.into()
+/// `health.v1` for this address (#614, FL9; D11): asked on selection,
+/// never polled, its clock ground said.
+fn health_section<'a>(addr: &Addr, nodes: &'a NodesState, sp: Spacing) -> Column<'a, Message> {
+    let clocks = kit::check(nodes.clocks_synced)
+        .label("clocks synced — take my word that this host's clock agrees with the owners'")
+        .size(font::CAPTION)
+        .text_size(font::CAPTION)
+        .on_toggle(|b| msg(NodesMsg::ClocksSynced(b)));
+    let mut ask = kit::secondary(kit::caption("read again")).padding([0.0, sp.xs]);
+    let mine = nodes.health.address() == Some(addr);
+    if mine && !matches!(nodes.health, HealthState::Asking(_)) {
+        ask = ask.on_press(msg(NodesMsg::AskHealth));
+    }
+    let mut col = column![
+        kit::eyebrow("HEALTH (HEALTH.V1)"),
+        row![clocks, iced::widget::space::horizontal(), ask]
+            .spacing(sp.sm)
+            .align_y(iced::Alignment::Center),
+    ]
+    .spacing(sp.xs);
+    match &nodes.health {
+        HealthState::Read(a, report) if a == addr => {
+            col = col.push(health_lines(addr, report, sp));
         }
+        HealthState::Asking(a) if a == addr => {
+            col = col.push(kit::muted(
+                "reading health.v1 — two readings of the owner's status, a grace apart",
+            ));
+        }
+        // Read for another address, or never — no session in the namespace
+        // to ask through included: this one was not asked.
+        _ => {
+            col = col.push(kit::muted(
+                "health not asked for this address — it is read on selection, never polled",
+            ));
+        }
+    }
+    col
+}
+
+/// The engine's health report for one address, in its own tokens: the
+/// verdict, its level and reason, the clock it was aged against, the
+/// status and checks as read, and §5's other questions.
+fn health_lines<'a>(addr: &Addr, report: &HealthReport, sp: Spacing) -> Element<'a, Message> {
+    let mut col = column![].spacing(sp.xs);
+    if let Some(why) = &report.unobservable {
+        col = col.push(kit::callout(
+            Tone::Neutral,
+            kit::caption(format!("unobservable — {why}")),
+        ));
+    }
+    let want = addr.to_string();
+    let Some(row) = report.services.iter().find(|r| r.address == want) else {
+        return col
+            .push(kit::muted("the reading named no row for this address"))
+            .into();
+    };
+    let (tone, said) = verdict_words(row, report.clock);
+    col = col.push(kit::status_chip(tone, said));
+    // A question the reading did not put to this service has no clock, no
+    // agreement and no clock-ahead to report: the verdict said why.
+    if row.verdict == HealthVerdict::NotAsked {
+        return col.into();
+    }
+    col = col.push(kit::muted(match report.clock {
+        ClockGround::DeploymentWord => "clock: the deployment's word (clocks synced)",
+        ClockGround::Measured => "clock: measured on the owners' live puts",
+        ClockGround::None => {
+            "clock: no word and no window — a reply's age is unobservable (freshness.v1 §2.6)"
+        }
+    }));
+    if let Some(s) = &row.status {
+        let mut line = format!("status {}", level(&s.level));
+        if !s.reason.is_empty() {
+            line.push_str(&format!(" — {}", s.reason));
+        }
+        line.push_str(match s.via {
+            zenkey_fleet::report::StatusVia::Get => " (the owner's reply, S4)",
+            zenkey_fleet::report::StatusVia::Subscription => " (heard on the subscription)",
+        });
+        col = col.push(kit::muted(line));
+    }
+    for c in &row.checks {
+        col = col.push(kit::muted(format!(
+            "check {}: {}{}",
+            c.check,
+            level(&c.level),
+            if c.detail.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", c.detail)
+            }
+        )));
+    }
+    col = col.push(kit::muted(answer("agrees with its checks", &row.agrees)));
+    col = col.push(kit::muted(answer("clock ahead", &row.clock_ahead)));
+    if let Some(lk) = &row.last_known {
+        col = col.push(kit::muted(format!(
+            "last-known from {}: {} — an archive's, never current (S6)",
+            lk.archive,
+            level(&lk.level)
+        )));
+    }
+    col.into()
+}
+
+/// "Is this service healthy?" in words, with the tone that groups it. An
+/// age the reader could not judge says *age unobservable*, and how to give
+/// it a ground — never a level, never stale.
+pub fn verdict_words(row: &HealthRow, clock: ClockGround) -> (Tone, String) {
+    let level = row
+        .level
+        .map(|l| format!(" ({})", l.as_str()))
+        .unwrap_or_default();
+    match row.verdict {
+        HealthVerdict::Healthy => (Tone::Positive, format!("healthy{level} — {}", row.says)),
+        HealthVerdict::Unhealthy => {
+            let tone = match row.level {
+                Some(zenkey_fleet::report::HealthLevel::Failed) => Tone::Negative,
+                _ => Tone::Caution,
+            };
+            (tone, format!("unhealthy{level} — {}", row.says))
+        }
+        HealthVerdict::Stale => (Tone::Caution, format!("stale — {}", row.says)),
+        HealthVerdict::Unobservable if row.reason == "clock_untrusted" => (
+            Tone::Neutral,
+            format!(
+                "age unobservable — {}{}",
+                row.says,
+                if clock == ClockGround::None {
+                    "; tick \"clocks synced\" if they agree"
+                } else {
+                    ""
+                }
+            ),
+        ),
+        HealthVerdict::Unobservable => (Tone::Neutral, format!("unobservable — {}", row.says)),
+        HealthVerdict::NotAsked => (Tone::Neutral, format!("not asked — {}", row.says)),
+    }
+}
+
+/// One of §5's yes-or-no questions, in the three states.
+fn answer(question: &str, a: &HealthAnswer) -> String {
+    let word = match a.answer {
+        HealthAnswerToken::Yes => "yes",
+        HealthAnswerToken::No => "no",
+        HealthAnswerToken::Unobservable => "unobservable",
+        HealthAnswerToken::NotAsked => "not asked",
+    };
+    // The engine's words point a CLI at `--for`; a reading on selection
+    // opens no window, and says so in this window's terms.
+    let says = match a.reason.as_str() {
+        "no_window" => {
+            "a reading on selection opens no subscription, and the question rests \
+                        on what a subscriber hears"
+        }
+        _ => a.says.as_str(),
+    };
+    format!("{question}: {word} — {says}")
+}
+
+/// A level as the payload carried it (§2.6).
+fn level(l: &LevelRead) -> String {
+    match l {
+        LevelRead::Token(t) => (*t).to_string(),
+        LevelRead::Unlisted(n) => format!("unlisted level {n} — unknown, never ok"),
+    }
+}
+
+/// How long ago `since` was, in the age words the tree uses: "just now",
+/// "12s ago", "4m ago". A presence `since` is the fold that learned it — a
+/// seed's is a lower bound on how long the token was held (FL4).
+fn ago(since: SystemTime) -> String {
+    let secs = SystemTime::now()
+        .duration_since(since)
+        .unwrap_or_default()
+        .as_secs_f32();
+    match kit::age_word(secs).as_str() {
+        "now" => "just now".to_string(),
+        w => format!("{w} ago"),
     }
 }

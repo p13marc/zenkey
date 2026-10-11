@@ -40,12 +40,11 @@
 
 use iced::widget::{Column, column, scrollable};
 use iced::{Element, Length};
-use zenkey_fleet::{KeyTreeSnapshot, LatencyReport};
+use zenkey_fleet::LatencyReport;
 use zenkey_fleet_v1::SliceSet;
 use zenkey_fleet_v1::model::facts::{ClassKind, KeyFacts, KeyShape, Registration};
 
 use crate::keyfacts::{KeyGroup, Resolution};
-use zenkey_fleet_v1::report::TopicRow;
 
 use super::detail::{DetailData, Fetched, SeriesData};
 use super::history::HistoryData;
@@ -53,9 +52,9 @@ use super::{blob, detail, history, kit, media, nodes};
 use crate::blob::BlobState;
 use crate::history::HistoryRecorder;
 use crate::message::{Message, SlotId, Subject};
-use crate::nodes::NodeRoster;
+use crate::nodes::NodesState;
+use crate::presence_link::PresenceUpdate;
 use crate::view::media::MediaState;
-use crate::view::nodes::DetailState;
 use crate::view::tokens::{Spacing, face};
 
 /// Everything the Inspector may show, for whatever the subject turns out to
@@ -99,21 +98,18 @@ pub struct InspectorData<'a> {
     pub blob: &'a BlobState,
     pub media: &'a MediaState,
     pub slices: Option<&'a SliceSet>,
-    pub roster: &'a NodeRoster,
-    pub node_detail: &'a DetailState,
+    /// The presence link's last landing (#614, FL9): an address subject's
+    /// status, since when, and its instances. `None` = not read (O4).
+    pub presence: Option<&'a PresenceUpdate>,
+    /// The nodes pane's model: an address's descriptors, its freshness
+    /// join, and the health reading of the address selected.
+    pub nodes: &'a NodesState,
     /// The bounded field observation on the subject key (#223).
     pub fields: &'a super::fields::FieldsState,
     /// The why ladder's state for the subject key (#214).
     pub why: &'a super::why::WhyState,
     /// The declared readers of the subject (#224).
     pub consumers: &'a super::consumers::ConsumersState,
-    /// The deployment base, for building the wire chunks the observed-tree
-    /// lookups below need.
-    pub base: &'a str,
-    /// The observed key tree — what has actually arrived (#234): the
-    /// declared-subjects section joins the registry's claims against it, so
-    /// a subject declared and never seen is loud rather than invisible.
-    pub observed: &'a KeyTreeSnapshot,
     /// The dock's resolved spacing grid (#192) — Comfortable by default: a
     /// form wants air.
     pub sp: Spacing,
@@ -155,7 +151,7 @@ pub fn pane<'a>(d: InspectorData<'a>) -> Element<'a, Message> {
         Subject::None => nothing_selected(),
         Subject::Key(key) => key_sections(key, &d),
         Subject::Prefix(prefix) => prefix_sections(prefix, &d),
-        Subject::Origin(origin) => origin_sections(origin, &d),
+        Subject::Address(addr) => address_sections(addr, &d),
     };
     scrollable(body.spacing(d.sp.md).padding(d.sp.sm))
         .height(Length::Fill)
@@ -254,184 +250,20 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     }))
 }
 
-fn origin_sections<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
-    // The roster→slice join is the engine's `node_rows` (#234) — the same
-    // rows `zenctl node list --verbose` prints, not a scan of this pane's
-    // own. `live_map()` is `None` while unseeded, so an unasked join stays
-    // "not asked" (O4).
-    let joined = d
-        .roster
-        .live_map()
-        .map(|m| zenkey_fleet_v1::node_rows(&m, d.slices));
+/// An address names a service, and a service has presence, instances and a
+/// health — no value, no decode, no chart (#614, FL9; D10). The sections are
+/// the nodes pane's own, called unchanged: one claim, one wording.
+fn address_sections<'a>(
+    addr: &'a zenkey_model::grammar::Addr,
+    d: &InspectorData<'a>,
+) -> Column<'a, Message> {
     column![
         kit::section_header("Inspector", None),
         // The subject, restated in the pane. The one TITLE lives in the
         // location bar since #185.
-        kit::emphasis(origin).font(face::MONO),
-        nodes::presence_section(
-            d.roster,
-            origin,
-            joined.as_ref(),
-            &crate::configure::producers(d.slices),
-            d.sp,
-        ),
-        nodes::detail_section(d.node_detail, d.sp),
+        kit::emphasis(addr.to_string()).font(face::MONO),
+        nodes::address_sections(addr, d.presence, d.nodes, d.sp),
     ]
-    .push(declared_subjects(origin, d))
-}
-
-/// How many declared-subject rows render before the list stops and says so —
-/// sysinfo alone declares 121, and an unbounded list is the O6 bug this
-/// project already fixed once for the key tree (RFC 09 §5.1 O6).
-const DECLARED_ROWS: usize = 40;
-
-/// What this origin's producers **declare**, joined against what has been
-/// **observed** — #234's headline. The tree answers "what is publishing?";
-/// this section answers "what did the registry promise?", and the difference
-/// between the two questions is the registry itself: a subject declared and
-/// never published used to be invisible in the GUI, which is precisely the
-/// case an explorer should make loud.
-///
-/// The rows are [`SliceSet::topic_list`] — the engine's projection, declared
-/// not observed — with the ledger rows included, because "which hosts still
-/// serve a deprecated subject" is RFC 08 §6's headline buy.
-fn declared_subjects<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
-    let mut col = column![kit::section_header("Declared subjects", None)].spacing(d.sp.xs);
-    let Some(slices) = d.slices else {
-        return col.push(kit::muted(
-            "no registry loaded — what this origin's producers declare is \
-             unknown (not asked, O4)",
-        ));
-    };
-    let Some(producers) = d.roster.get(origin) else {
-        return col.push(kit::muted(
-            "no liveliness token observed — the producers to project are \
-             unknown (RFC 05 §3.1)",
-        ));
-    };
-    let mut shown = 0usize;
-    let mut cut = 0usize;
-    for producer in producers.keys() {
-        // Instance suffixes share the base slice (RFC 03 §1.5) — the same
-        // resolution the engine's `node_rows` applies.
-        let name = zenkey_v1::grammar::Producer::parse_chunk(producer)
-            .map(|p| p.name().to_string())
-            .unwrap_or_else(|_| producer.clone());
-        if slices.get(&name).is_none() {
-            col = col.push(kit::muted(format!(
-                "{producer}: no slice declares it — its subjects are unknown, \
-                 not absent (O4)"
-            )));
-            continue;
-        }
-        let list = match slices.topic_list(Some(&name), None, None, true) {
-            Ok(list) => list,
-            Err(e) => {
-                col = col.push(kit::muted(format!("{producer}: {e}")));
-                continue;
-            }
-        };
-        let declared = list.subjects.iter().filter(|r| !r.deprecated).count();
-        let observed = list
-            .subjects
-            .iter()
-            .filter(|r| !r.deprecated)
-            .filter(|r| subject_observed(d.observed, d.base, origin, producer, r))
-            .count();
-        col = col.push(kit::muted(format!(
-            "{producer}: {declared} declared subject(s) · {observed} observed \
-             on this origin"
-        )));
-        for row in &list.subjects {
-            if shown >= DECLARED_ROWS {
-                cut += 1;
-                continue;
-            }
-            shown += 1;
-            col = col.push(declared_row(
-                row,
-                subject_observed(d.observed, d.base, origin, producer, row),
-                d.sp,
-            ));
-        }
-    }
-    if cut > 0 {
-        col = col.push(kit::muted(format!("+{cut} more not shown (display bound)")));
-    }
-    col
-}
-
-/// One declared subject, with the declared-vs-observed verdict beside it.
-///
-/// "Not observed by this session" is worded to what the evidence supports:
-/// the tree holds only what watches let through, so absence there is a fact
-/// about this window's coverage, never proof nothing publishes (O4/O5).
-fn declared_row<'a>(row: &TopicRow, observed: bool, sp: Spacing) -> Element<'a, Message> {
-    if row.deprecated {
-        return kit::muted(format!(
-            "{} DEPRECATED{}{}",
-            row.path,
-            row.deprecated_since
-                .as_deref()
-                .map(|s| format!(" since {s}"))
-                .unwrap_or_default(),
-            row.replaced_by
-                .as_deref()
-                .map(|r| format!(" — replaced by {r}"))
-                .unwrap_or_default(),
-        ));
-    }
-    let status = match (row.open_ended, observed) {
-        (false, true) => "observed on this origin".to_string(),
-        (false, false) => {
-            "declared — not observed by this session (only watched keys are seen)".to_string()
-        }
-        // The registry fixes an open-ended family's shape, not its members
-        // (RFC 08 §2), so members are only checkable at the literal prefix.
-        (true, true) => "family — observed under its prefix on this origin".to_string(),
-        (true, false) => "family — nothing observed under its prefix by this session".to_string(),
-    };
-    iced::widget::row![
-        kit::mono(format!("{} {} ({})", row.class, row.path, row.type_name)),
-        kit::muted(status),
-    ]
-    .spacing(sp.sm)
-    .align_y(iced::Alignment::Center)
-    .into()
-}
-
-/// Whether anything has been observed under one declared subject on one
-/// origin, judged against the tick's tree snapshot — zero bus cost, the same
-/// in-memory join the roster's freshness column makes.
-///
-/// The chunks are assembled from parsed identities: the origin comes from a
-/// liveliness token, the class and path from a registry slice — never from
-/// user input. A `{var}` position truncates to the family's literal prefix,
-/// and a service origin carries no producer chunk (RFC 06 §5).
-fn subject_observed(
-    tree: &KeyTreeSnapshot,
-    base: &str,
-    origin: &str,
-    producer: &str,
-    row: &TopicRow,
-) -> bool {
-    let mut chunks: Vec<&str> = Vec::new();
-    if !base.is_empty() {
-        chunks.extend(base.split('/'));
-    }
-    chunks.push("v1");
-    chunks.push(origin);
-    chunks.push(&row.class);
-    if !origin.starts_with('@') {
-        chunks.push(producer);
-    }
-    for c in row.path.split('/') {
-        if c.contains('{') {
-            break;
-        }
-        chunks.push(c);
-    }
-    tree.node(&chunks).is_some()
 }
 
 /// The subject's payload type against the registry's type vocabulary (#234):

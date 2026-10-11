@@ -190,91 +190,34 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
 fn the_inspector_follows_the_subject_and_its_plane() {
     use zengui::blob::BlobState;
     use zengui::message::Subject;
-    use zengui::nodes::NodeRoster;
-    use zengui::view::detail::Fetched;
-    use zengui::view::inspector::{InspectorData, pane};
+    use zengui::nodes::NodesState;
+    use zengui::view::inspector::pane;
     use zengui::view::media::MediaState;
-    use zengui::view::nodes::DetailState;
-    use zenkey_fleet_v1::model::facts::KeyFacts;
 
     let slices = slices();
     let blob = BlobState::default();
     let media = MediaState::default();
-    let roster = NodeRoster::default();
-    let node_detail = DetailState::NotAsked;
-    let observed = KeyTreeSnapshot::default();
+    let nodes = NodesState::default();
 
     let facts_for = |key: &str| {
         let mut f = KeyFacts::project("", key);
         f.resolve(&slices);
         f
     };
-    #[allow(clippy::too_many_arguments)]
-    fn data<'a>(
-        subject: &'a Subject,
-        facts: Option<&'a KeyFacts>,
-        blob: &'a BlobState,
-        media: &'a MediaState,
-        slices: &'a SliceSet,
-        roster: &'a NodeRoster,
-        node_detail: &'a DetailState,
-        observed: &'a KeyTreeSnapshot,
-    ) -> InspectorData<'a> {
-        InspectorData {
-            slot: zengui::message::SlotId::FOLLOW,
-            sp: sp(),
-            subject,
-            identity: None,
-            v1: facts.cloned(),
-            fetched: Fetched::NotAsked,
-            decoded: None,
-            series: None,
-            history: None,
-            history_scroll: Default::default(),
-            watched: false,
-            snapshot: None,
-            compare_snapshot: false,
-            latency: None,
-            blob,
-            media,
-            slices: Some(slices),
-            roster,
-            node_detail,
-            fields: Box::leak(Box::default()),
-            why: Box::leak(Box::default()),
-            consumers: Box::leak(Box::default()),
-            base: "",
-            observed,
-        }
-    }
 
     // Nothing selected: the Inspector holds nothing of its own and says so.
     let none = Subject::None;
-    let mut ui = simulator::<Message, _, _>(pane(data(
-        &none,
-        None,
-        &blob,
-        &media,
-        &slices,
-        &roster,
-        &node_detail,
-        &observed,
+    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
+        &none, None, &slices, &blob, &media, &nodes,
     )));
     assert!(ui.find("Nothing selected").is_ok());
     assert!(ui.find("Detail").is_err(), "no subject, no sections");
 
     // A prefix is a subtree, and the pane says that rather than reporting
     // "no value fetched" about a key that was never a key (#85).
-    let prefix = Subject::Prefix("v1/h-3fa9c2d41b7e".into());
-    let mut ui = simulator::<Message, _, _>(pane(data(
-        &prefix,
-        None,
-        &blob,
-        &media,
-        &slices,
-        &roster,
-        &node_detail,
-        &observed,
+    let prefix = Subject::Prefix("zk2/robot1/nav".into());
+    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
+        &prefix, None, &slices, &blob, &media, &nodes,
     )));
     assert!(ui.find("A subtree, not a key").is_ok());
     assert!(ui.find("History").is_err(), "a subtree records nothing");
@@ -283,15 +226,13 @@ fn the_inspector_follows_the_subject_and_its_plane() {
     let state_key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
     let state_facts = facts_for(state_key);
     let key = Subject::Key(state_key.into());
-    let mut ui = simulator::<Message, _, _>(pane(data(
+    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
         &key,
         Some(&state_facts),
+        &slices,
         &blob,
         &media,
-        &slices,
-        &roster,
-        &node_detail,
-        &observed,
+        &nodes,
     )));
     assert!(ui.find("Detail").is_ok());
     assert!(
@@ -305,15 +246,13 @@ fn the_inspector_follows_the_subject_and_its_plane() {
     let blob_key = "v1/h-3fa9c2d41b7e/@blob/artifact/abc123";
     let blob_facts = facts_for(blob_key);
     let key = Subject::Key(blob_key.into());
-    let mut ui = simulator::<Message, _, _>(pane(data(
+    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
         &key,
         Some(&blob_facts),
+        &slices,
         &blob,
         &media,
-        &slices,
-        &roster,
-        &node_detail,
-        &observed,
+        &nodes,
     )));
     assert!(ui.find("Blobs").is_ok(), "the plane is read off ClassKind");
     assert!(
@@ -321,25 +260,52 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         "one plane, not every plane the key is not on"
     );
 
-    // An origin subject: presence, not a value.
-    let origin = Subject::Origin("h-3fa9c2d41b7e".into());
-    let mut ui = simulator::<Message, _, _>(pane(data(
-        &origin,
-        None,
-        &blob,
-        &media,
-        &slices,
-        &roster,
-        &node_detail,
-        &observed,
+    // An address subject (#614, FL9): presence and health, not a value —
+    // and with no presence read, "not read", never "nobody there".
+    let address = Subject::Address("robot1/nav".parse().expect("an address"));
+    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
+        &address, None, &slices, &blob, &media, &nodes,
     )));
+    assert!(ui.find("robot1/nav").is_ok(), "the subject, restated");
+    assert!(ui.find("presence not read").is_ok());
     assert!(
-        ui.find("no liveliness token observed for this origin")
+        ui.find("health not asked for this address — it is read on selection, never polled")
             .is_ok()
     );
     assert!(
         ui.find("Detail").is_err(),
-        "an origin has no value, no decode and no chart"
+        "an address has no value, no decode and no chart"
+    );
+}
+
+/// An address subject in the Inspector (#614, FL9): what presence holds of
+/// it, its instance as its descriptor describes it, and its health once
+/// read — the nodes pane's sections, one wording.
+#[test]
+fn the_inspector_shows_an_address_from_presence_and_its_descriptor() {
+    use zengui::message::Subject;
+    use zengui::view::inspector::pane;
+
+    let world = common::World::new();
+    let update = world.presence_update();
+    let mut nodes = zengui::nodes::NodesState::default();
+    nodes.describe(Some(&world.catalog()));
+    let slices = slices();
+    let blob = zengui::blob::BlobState::default();
+    let media = zengui::view::media::MediaState::default();
+    let subject = Subject::Address("robot1/nav".parse().expect("an address"));
+    let mut data = projection_inspector(&subject, None, &slices, &blob, &media, &nodes);
+    data.presence = Some(&update);
+    let mut ui = simulator::<Message, _, _>(pane(data));
+    assert!(ui.find("robot1/nav: up").is_ok());
+    assert!(ui.find("0000000000000001").is_ok(), "its instance, by id");
+    assert!(
+        ui.find("instance token held since just now").is_ok(),
+        "since when, as the projection learned it"
+    );
+    assert!(
+        ui.find("host — · process — · build — · zid —").is_ok(),
+        "a descriptor naming no meta says so field by field"
     );
 }
 
@@ -446,9 +412,9 @@ fn the_detail_pane_labels_the_series_it_plots() {
 
 // ── The engine's projections, consumed (#234) ────────────────────────────
 
-/// A two-subject slice where exactly one subject has traffic, plus a ledger
-/// entry — the smallest fleet in which declared and observed diverge.
-fn projection_fixture() -> (SliceSet, zengui::nodes::NodeRoster, KeyTreeSnapshot) {
+/// A two-subject slice plus a ledger entry — v1's declared world, which the
+/// type section still reads until FL8 moves it.
+fn projection_fixture() -> SliceSet {
     use zenkey_v1::slice::{DeprecationDecl, RegistrySlice, SubjectDecl};
 
     let subject = |path: &str| {
@@ -462,37 +428,16 @@ fn projection_fixture() -> (SliceSet, zengui::nodes::NodeRoster, KeyTreeSnapshot
     let mut slice = RegistrySlice::new("1.0", "demo", "sysinfo");
     slice.subjects = vec![subject("health"), subject("mode")];
     slice.deprecated = vec![retired];
-    let slices = SliceSet::from_slices(vec![slice]);
-
-    let mut roster = zengui::nodes::NodeRoster::default();
-    roster.apply_transitions(
-        "",
-        &[("v1/h-3fa9c2d41b7e/state/sysinfo/alive".to_string(), true)],
-        Instant::now(),
-    );
-
-    let mut stats = StatsTable::new();
-    stats.record(
-        "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-        8,
-        None,
-        Instant::now(),
-        None,
-        None,
-    );
-    (slices, roster, KeyTreeSnapshot::build(&stats))
+    SliceSet::from_slices(vec![slice])
 }
 
-#[allow(clippy::too_many_arguments)]
 fn projection_inspector<'a>(
     subject: &'a zengui::message::Subject,
     facts: Option<&'a KeyFacts>,
     slices: &'a SliceSet,
-    roster: &'a zengui::nodes::NodeRoster,
-    observed: &'a KeyTreeSnapshot,
     blob: &'a zengui::blob::BlobState,
     media: &'a zengui::view::media::MediaState,
-    node_detail: &'a zengui::view::nodes::DetailState,
+    nodes: &'a zengui::nodes::NodesState,
 ) -> zengui::view::inspector::InspectorData<'a> {
     zengui::view::inspector::InspectorData {
         slot: zengui::message::SlotId::FOLLOW,
@@ -511,67 +456,13 @@ fn projection_inspector<'a>(
         blob,
         media,
         slices: Some(slices),
-        roster,
-        node_detail,
+        presence: None,
+        nodes,
         fields: Box::leak(Box::default()),
         why: Box::leak(Box::default()),
         consumers: Box::leak(Box::default()),
-        base: "",
-        observed,
         sp: sp(),
     }
-}
-
-/// #234's headline acceptance: a subject the registry declares and nothing
-/// publishes is visible, and distinguishable from one that is publishing.
-/// The rows are the engine's `topic_list` — declared, not observed — joined
-/// against the tick's tree; the ledger rows ride along (RFC 08 §6), and the
-/// presence line carries the `node_rows` slice join.
-#[test]
-fn the_inspector_marks_a_declared_but_unpublished_subject() {
-    use zengui::message::Subject;
-
-    let (slices, roster, observed) = projection_fixture();
-    let blob = zengui::blob::BlobState::default();
-    let media = zengui::view::media::MediaState::default();
-    let node_detail = zengui::view::nodes::DetailState::NotAsked;
-    let subject = Subject::Origin("h-3fa9c2d41b7e".into());
-
-    let mut ui = simulator::<Message, _, _>(zengui::view::inspector::pane(projection_inspector(
-        &subject,
-        None,
-        &slices,
-        &roster,
-        &observed,
-        &blob,
-        &media,
-        &node_detail,
-    )));
-    assert!(ui.find("Declared subjects").is_ok());
-    assert!(
-        ui.find("sysinfo: 2 declared subject(s) · 1 observed on this origin")
-            .is_ok(),
-        "declared and observed are counted apart — the registry is the difference"
-    );
-    assert!(
-        ui.find("observed on this origin").is_ok(),
-        "the publishing subject says so"
-    );
-    assert!(
-        ui.find("declared — not observed by this session (only watched keys are seen)")
-            .is_ok(),
-        "the unpublished subject is visible AND worded to this window's coverage (O5), \
-         never as proof nothing publishes"
-    );
-    assert!(
-        ui.find("old/health DEPRECATED since 0.9 — replaced by health")
-            .is_ok(),
-        "the ledger rows ride along — RFC 08 §6's headline buy"
-    );
-    assert!(
-        ui.find("app demo · registry v1.0 (declared)").is_ok(),
-        "the presence row carries the node_rows slice join, labelled as declared"
-    );
 }
 
 /// The type-subject arm (#234): a registered key's payload type is placed in
@@ -582,10 +473,10 @@ fn the_inspector_marks_a_declared_but_unpublished_subject() {
 fn the_inspector_places_a_registered_type_in_the_vocabulary() {
     use zengui::message::Subject;
 
-    let (slices, roster, observed) = projection_fixture();
+    let slices = projection_fixture();
     let blob = zengui::blob::BlobState::default();
     let media = zengui::view::media::MediaState::default();
-    let node_detail = zengui::view::nodes::DetailState::NotAsked;
+    let nodes = zengui::nodes::NodesState::default();
 
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
     let mut facts = KeyFacts::project("", key);
@@ -596,11 +487,9 @@ fn the_inspector_places_a_registered_type_in_the_vocabulary() {
         &subject,
         Some(&facts),
         &slices,
-        &roster,
-        &observed,
         &blob,
         &media,
-        &node_detail,
+        &nodes,
     )));
     assert!(ui.find("Type").is_ok());
     assert!(

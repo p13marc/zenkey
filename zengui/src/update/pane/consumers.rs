@@ -15,12 +15,13 @@ use crate::state::subject::SubjectSlot;
 use crate::view::consumers::ConsumersMsg;
 
 /// The wire target one subject resolves to: a key as itself, a subtree
-/// as `<prefix>/**`. An origin has no keyexpr to relate declarations to.
+/// as `<prefix>/**`. An address's readers are R3 edges from descriptors,
+/// FL8's to draw, not an admin-space keyexpr relation.
 fn target_of(subject: &Subject) -> Option<String> {
     match subject {
         Subject::Key(k) => Some(k.clone()),
         Subject::Prefix(p) => Some(format!("{p}/**")),
-        Subject::Origin(_) | Subject::None => None,
+        Subject::Address(_) | Subject::None => None,
     }
 }
 

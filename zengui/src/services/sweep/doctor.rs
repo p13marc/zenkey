@@ -3,51 +3,45 @@
 use std::sync::Arc;
 
 use iced::Task;
-use zenkey_fleet_v1::SliceSet;
 
 use crate::message::{Message, PaneMsg};
-use crate::services::ServiceError;
 use crate::view::doctor::DoctorMsg;
 
-/// The doctor run (#109).
+/// The doctor run (#109; zk2's since #614, FL9): the engine's `run_doctor`
+/// over the window's two sessions, as `zenctl doctor` runs it — the
+/// deployment read through the session **in** the namespace, the routers'
+/// admin space and the presence domain through the one in **none**
+/// (decided 2026-10-08).
 ///
-/// `dirs` rather than the app's resolved slice set, deliberately: the doctor
-/// diffs local declarations against served ones, and handing it the union
-/// would diff the bus against itself.
+/// `store` is the window's own contract store: a verified revision is
+/// content-addressed and kept across runs, and the engine forgets its
+/// absences at the start of each, so a revision no holder served is asked
+/// about again — the same store the lens resolves through, whose answers
+/// then move with it.
+///
+/// It cannot fail: an input it could not read is that check's
+/// `Unobservable`, and a scope with no zk2 token in it is the report's own
+/// unobservable — never a green run.
 pub fn doctor(
     session: zenoh::Session,
-    base: String,
-    dirs: Vec<std::path::PathBuf>,
-    spec: zenkey_fleet_v1::DoctorSpec,
+    raw: zenoh::Session,
+    namespace: String,
+    store: zenkey_fleet::BundleStore,
+    spec: zenkey_fleet::DoctorSpec,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            // `None` when no dirs were given: "no registry loaded" is a
-            // different claim from "a registry that declares nothing", and
-            // only the engine's `Option` can say which happened.
-            let locals = match dirs.is_empty() {
-                true => None,
-                false => match SliceSet::from_dirs(&dirs) {
-                    Ok(set) => Some(set),
-                    Err(e) => {
-                        return Err(ServiceError::of(
-                            anyhow::Error::new(e).context("failed to read the registry dirs"),
-                        ));
-                    }
-                },
+            let bus = zenkey_fleet::DoctorBus {
+                session,
+                raw,
+                namespace: namespace.clone(),
             };
-            zenkey_fleet_v1::run_doctor(
-                &zenkey_fleet_v1::Fleet::new(&session, &base),
-                locals.as_ref(),
-                &spec,
-            )
-            .await
-            .map(|r| crate::doctor::DoctorRun {
-                report: Arc::new(r),
-                base,
-            })
-            .map_err(ServiceError::of)
+            let report = zenkey_fleet::run_doctor(&bus, &store, &spec).await;
+            crate::doctor::DoctorRun {
+                report: Arc::new(report),
+                namespace,
+            }
         },
-        |out| Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(out))),
+        |run| Message::Pane(PaneMsg::Doctor(DoctorMsg::Done(run))),
     )
 }

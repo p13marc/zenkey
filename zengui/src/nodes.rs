@@ -1,330 +1,463 @@
-//! The node roster model (#61): per-producer presence per RFC 04 §5, where
-//! the liveliness token *key* is the record.
+//! The nodes pane's model (#61; zk2's since #614, FL9): one row per
+//! **address**, read from presence, never from a roster of its own.
 //!
-//! Presence semantics are GDBusProxy-style: a token retraction marks the
-//! producer **suspect immediately** — never aged out — and a reappearance
-//! recovers it. `@catalog` is tracked like any origin but surfaced by name,
-//! because "catalog dead" and "no entities" must never look alike (D4).
+//! Three sources, each costing what it says:
 //!
-//! Laziness (the epic ground rule): everything here is fed by liveliness
-//! (zero payload) plus the already-in-memory tree snapshot for *watched*
-//! producers. The model itself never touches the bus.
+//! - **presence** — the [`LivePresence`] the presence link keeps current on
+//!   its own monitor (`presence_link.rs`): each address up, down or
+//!   unobservable, since when, its instances with theirs, its members. Zero
+//!   payload, already in memory; this module holds none of it, it reads
+//!   the window's;
+//! - **descriptors** — what each instance says of itself (core §3.3): host,
+//!   process, build, session zid, profiles, interfaces. Read off the lens's
+//!   catalog, indexed once per catalog the feed swaps in
+//!   ([`NodesState::describe`]), never per frame;
+//! - **health** — `health.v1`, read lazily for the one address selected
+//!   (the laziness ground rule, #84/#85), never polled: [`HealthState`].
+//!
+//! Plus the zero-cost join v1's roster made: for every address whose state
+//! an active watch covers, the age of its newest state sample, read from
+//! the tick's tree snapshot ([`NodesState::refresh`]).
+//!
+//! **The three states stay three** (spec §8.1, O5, R7): an address with no
+//! instance token is *down* only under a complete seed; with no seed, an
+//! incomplete one, or events lost since, it is *unobservable* — which never
+//! reads as down, and "presence not read" never reads as an empty
+//! deployment.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::KeyTreeSnapshot;
+use zenkey_fleet::report::{Asked, DescriptorAnswer, HealthReport};
+use zenkey_fleet::{Catalog, KeyTreeSnapshot, LivePresence};
+use zenkey_model::grammar::{Addr, GRAMMAR, KindToken};
 use zenoh::key_expr::keyexpr;
 
-/// One producer's presence on one origin.
-#[derive(Debug, Clone, Default)]
-pub struct ProducerPresence {
-    pub alive: bool,
-    /// Set the instant a retraction was applied; cleared on reappearance.
-    pub suspect_since: Option<Instant>,
-    /// Age of the newest state sample under this producer — present only
-    /// when the producer's state subtree is covered by an active watch
-    /// (zero bus cost: read from the tick's tree snapshot). `None` =
-    /// not watched or no sample = unknown, never "fresh" (O4).
-    pub last_state_age: Option<Duration>,
-    /// Whether any active watch selector covers this producer's state
-    /// subtree — what makes `last_state_age`'s absence legible.
+/// The profile whose listing in a descriptor makes a system minted
+/// (`hostid.v1` §2.8) — and the only thing that does: never the shape of a
+/// system's name (§2.11).
+pub const HOSTID: &str = zenkey_model::hostid::PROFILE;
+
+/// How old one address's state is, as far as this window can tell.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Freshness {
+    /// Whether an active watch covers the address's state — `state/**` or
+    /// `@state/**` under any of its interfaces: what makes the age's
+    /// absence legible.
     pub watched: bool,
+    /// The age of the newest state sample under the address, when watched
+    /// and one arrived. `None` = unknown, never "fresh" (O4).
+    pub last_state_age: Option<Duration>,
 }
 
-/// What the catalog line says. A dedicated type so the pane cannot fold
-/// "no token observed" into an empty node list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CatalogPresence {
-    /// No `@catalog` token has been observed — not a verdict that no
-    /// catalog exists (RFC 05 §3.1).
-    NoTokenObserved,
-    Alive,
-    Suspect,
+/// What one instance's descriptor says (core §3.3), as the pane shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Described {
+    /// The descriptor was not asked for: the catalog holds tokens alone.
+    NotAsked,
+    /// A descriptor that passes the syntax checks.
+    Served(DescriptorFacts),
+    /// A reply that fails the descriptor check, with its findings.
+    Invalid(String),
+    /// No reply within the timeout: not a verdict.
+    Silent,
+    /// The GET could not be put on the bus.
+    Failed(String),
 }
 
-/// The roster: origin → producer → presence.
+/// The informative half of a descriptor, plus what it implements.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DescriptorFacts {
+    /// `meta.host`, `meta.process`, `meta.build`, `meta.zid`: informative,
+    /// never interpreted (§3.3); absent when the descriptor names none.
+    pub host: Option<String>,
+    pub process: Option<String>,
+    pub build: Option<String>,
+    pub zid: Option<String>,
+    /// The profiles it lists (`<name>.v<major>`).
+    pub profiles: Vec<String>,
+    /// Each interface it implements, with the first chunk of the
+    /// fingerprint it names.
+    pub interfaces: Vec<(String, String)>,
+}
+
+impl DescriptorFacts {
+    /// Whether the descriptor lists `hostid.v1` (§2.8) — the hostid chip's
+    /// one premise. A system *named* like a minted one says nothing (§2.11).
+    pub fn lists_hostid(&self) -> bool {
+        self.profiles.iter().any(|p| p == HOSTID)
+    }
+}
+
+/// One instance of an address, as its descriptor describes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstanceFacts {
+    /// 16 lowercase hex digits.
+    pub instance: String,
+    pub described: Described,
+}
+
+/// The catalog's descriptors, indexed by address — built once per catalog.
+#[derive(Debug, Clone, Default)]
+struct DescriptorIndex {
+    /// The catalog the index was built from, held so a refresh can ask
+    /// whether the feed swapped another in (pointer identity: a held `Arc`
+    /// cannot be freed and reused).
+    from: Option<Arc<Catalog>>,
+    by_address: BTreeMap<Addr, Vec<InstanceFacts>>,
+}
+
+/// `health.v1` for the one address selected (D11): asked on selection,
+/// never polled.
+#[derive(Debug, Clone, Default)]
+pub enum HealthState {
+    /// Nothing selected yet, or the selection is not an address.
+    #[default]
+    NotAsked,
+    /// The reading is in flight — two readings a grace apart.
+    Asking(Addr),
+    /// The engine's report, as `zenctl health <address>` prints it.
+    Read(Addr, Arc<HealthReport>),
+}
+
+impl HealthState {
+    /// The address this state is about, if any.
+    pub fn address(&self) -> Option<&Addr> {
+        match self {
+            HealthState::NotAsked => None,
+            HealthState::Asking(a) | HealthState::Read(a, _) => Some(a),
+        }
+    }
+}
+
+/// The pane's whole state.
 #[derive(Debug, Default)]
-pub struct NodeRoster {
-    nodes: BTreeMap<String, BTreeMap<String, ProducerPresence>>,
-    /// Whether any presence source has reported yet — "not asked" is not
-    /// "empty fleet" (O4).
-    seeded: bool,
+pub struct NodesState {
+    described: DescriptorIndex,
+    freshness: BTreeMap<Addr, Freshness>,
+    /// `health.v1` for the address selected.
+    pub health: HealthState,
+    /// The operator's word that this host's clock and the owners' agree
+    /// within the HLC delta (`freshness.v1` §2.6, ground 1). Off by default
+    /// (D11): without it no reply's age can be judged, and health reads
+    /// "age unobservable" rather than a level. User input, kept across a
+    /// forget, like the doctor's `deep`.
+    pub clocks_synced: bool,
 }
 
-impl NodeRoster {
-    /// Seed from a one-shot v1 liveliness roster: everything listed is
-    /// alive; a re-seen origin recovers from suspect. The window itself no
-    /// longer seeds it — the skeleton build that read the roster is zk2's
-    /// since #614 (FL6b), and the nodes pane reads zk2 presence from FL9.
-    pub fn seed(&mut self, roster: &BTreeMap<String, Vec<String>>) {
-        self.seeded = true;
-        for (origin, producers) in roster {
-            let node = self.nodes.entry(origin.clone()).or_default();
-            for producer in producers {
-                let p = node.entry(producer.clone()).or_default();
-                p.alive = true;
-                p.suspect_since = None;
+impl NodesState {
+    /// Index the catalog's descriptors, when the feed swapped another
+    /// catalog in. A pointer compare when it did not — cheap enough per
+    /// tick; one `Catalog::services` walk when it did, which is the same
+    /// listing `Catalog::service(addr)` takes for one address, taken once
+    /// for all of them.
+    pub fn describe(&mut self, catalog: Option<&Arc<Catalog>>) {
+        let same = match (catalog, &self.described.from) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        let mut by_address = BTreeMap::new();
+        if let Some(catalog) = catalog {
+            for s in catalog.services().services {
+                let Ok(addr) = s.address.parse::<Addr>() else {
+                    continue;
+                };
+                let instances = s
+                    .instances
+                    .into_iter()
+                    .map(|i| InstanceFacts {
+                        instance: i.instance,
+                        described: described(&i.descriptor),
+                    })
+                    .collect();
+                by_address.insert(addr, instances);
             }
         }
+        self.described = DescriptorIndex {
+            from: catalog.cloned(),
+            by_address,
+        };
     }
 
-    /// Apply one tick's liveliness transitions **in arrival order** — a
-    /// down→up flap within one tick nets alive, up→down nets suspect.
-    /// A retraction for a producer never seen still records a suspect row:
-    /// the token existed, whatever we missed before.
-    pub fn apply_transitions(&mut self, base: &str, transitions: &[(String, bool)], now: Instant) {
-        for (key, up) in transitions {
-            let Some(parsed) = zenkey_v1::grammar::parse_full(base, key) else {
-                continue;
-            };
-            self.seeded = true;
-            let origin = parsed.origin.chunk().to_string();
-            // `@catalog`'s token has no producer chunk — the service is the
-            // producer (same fallback as the engine's roster()).
-            let producer = parsed
-                .producer()
-                .map(|p| p.chunk())
-                .unwrap_or_else(|| origin.trim_start_matches('@').to_string());
-            let presence = self
-                .nodes
-                .entry(origin)
-                .or_default()
-                .entry(producer)
-                .or_default();
-            if *up {
-                presence.alive = true;
-                presence.suspect_since = None;
-            } else {
-                presence.alive = false;
-                presence.suspect_since = Some(now);
-            }
-        }
+    /// What `addr`'s instances' descriptors say; `None` when the catalog
+    /// holds no record of it (no presence read, or not in it).
+    pub fn instances(&self, addr: &Addr) -> Option<&[InstanceFacts]> {
+        self.described.by_address.get(addr).map(Vec::as_slice)
     }
 
-    /// The watched-only freshness join: for each producer whose state
-    /// subtree an active watch covers, read the newest sample age from the
-    /// tick's tree snapshot. Purely in-memory.
+    /// The watched-freshness join for one address.
+    pub fn freshness(&self, addr: &Addr) -> Freshness {
+        self.freshness.get(addr).copied().unwrap_or_default()
+    }
+
+    /// The watched-only freshness join, per live tick: for each address
+    /// presence holds, whether a watch covers its state, and if so the age
+    /// of its newest state sample in the tick's tree. Purely in memory.
+    ///
+    /// `namespace` is the deployment's: the tree holds wire keys, and an
+    /// address's state lives under `<namespace>/zk2/<system>/<service>`.
     pub fn refresh(
         &mut self,
+        presence: Option<&LivePresence>,
         tree: &KeyTreeSnapshot,
-        base: &str,
+        namespace: &str,
         watched: &[String],
         now: Instant,
     ) {
-        // Validated once per tick rather than once per (producer × watch)
-        // pair, and *borrowed*: `keyexpr::new(&str)` validates without
-        // allocating, where `KeyExpr::new(String)` builds an `OwnedKeyExpr`
-        // — an `Arc<str>` copy — per selector per producer per tick.
-        // `zenkey_fleet::merge_skeleton` was deliberately fixed this way
-        // (`docs/zero-copy.md`) and this site was missed (#178).
+        self.freshness.clear();
+        let Some(presence) = presence else {
+            return;
+        };
+        // Validated once per tick, borrowed (#178).
         let watched: Vec<&keyexpr> = watched
             .iter()
             .filter_map(|w| keyexpr::new(w.as_str()).ok())
             .collect();
-        // One reusable buffer for the subtree selector, instead of a fresh
-        // `String` per producer per tick.
-        let mut subtree = String::new();
-        for (origin, producers) in &mut self.nodes {
-            for (producer, presence) in producers.iter_mut() {
-                write_state_subtree(&mut subtree, base, origin, producer);
-                presence.watched = keyexpr::new(subtree.as_str())
+        let state_tokens = [KindToken::State.as_str(), KindToken::ExplicitState.as_str()];
+        for (addr, _) in presence.addresses() {
+            let (system, service) = (addr.system.as_str(), addr.service.as_str());
+            // `state/**` and `@state/**` named apart: `*` and `**` never
+            // cross a verbatim chunk (core §1.3), so one selector cannot
+            // stand for both.
+            let covered = state_tokens.iter().any(|token| {
+                let sel = zenkey_fleet::with_namespace(
+                    namespace,
+                    [GRAMMAR, system, service, "*", token, "**"].join("/"),
+                );
+                keyexpr::new(sel.as_str())
                     .map(|s| watched.iter().any(|w| w.intersects(s)))
-                    .unwrap_or(false);
-                presence.last_state_age = if presence.watched {
-                    // Borrows `subtree`, so it cannot outlive the iteration —
-                    // and it is only built for the producers a watch actually
-                    // covers, which on a real fleet is a handful.
-                    let chunks: Vec<&str> = subtree.split('/').take_while(|c| *c != "**").collect();
-                    tree.node(&chunks)
-                        .and_then(|n| n.subtree_last_seen)
-                        .map(|seen| now.saturating_duration_since(seen))
-                } else {
-                    None
-                };
+                    .unwrap_or(false)
+            });
+            let mut fresh = Freshness {
+                watched: covered,
+                last_state_age: None,
+            };
+            if covered {
+                let mut chunks: Vec<&str> =
+                    namespace.split('/').filter(|c| !c.is_empty()).collect();
+                chunks.extend([GRAMMAR, system, service]);
+                let newest = tree.node(&chunks).and_then(|node| {
+                    node.children
+                        .values()
+                        .flat_map(|iface| {
+                            state_tokens
+                                .iter()
+                                .filter_map(|t| iface.children.get(*t))
+                                .filter_map(|n| n.subtree_last_seen)
+                        })
+                        .max()
+                });
+                fresh.last_state_age = newest.map(|seen| now.saturating_duration_since(seen));
             }
+            self.freshness.insert(addr.clone(), fresh);
         }
     }
 
-    /// Base change / reconnect: back to "not asked".
+    /// A health reading was asked for `addr`.
+    pub fn asking(&mut self, addr: Addr) {
+        self.health = HealthState::Asking(addr);
+    }
+
+    /// A health reading landed. The handler admits only one about the
+    /// address the window points at, in the namespace it shows (#109) —
+    /// the staleness guard is the selection's, as v1's `node_info` was.
+    pub fn health_read(&mut self, addr: Addr, report: Arc<HealthReport>) {
+        self.health = HealthState::Read(addr, report);
+    }
+
+    /// A namespace switch or reconnect: what was read described another
+    /// deployment. The clock toggle is the operator's word, and stays.
     pub fn clear(&mut self) {
-        self.nodes.clear();
-        self.seeded = false;
-    }
-
-    pub fn is_seeded(&self) -> bool {
-        self.seeded
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-    }
-
-    /// Origins in order, catalog included (the pane surfaces it separately
-    /// too, via [`catalog`](Self::catalog)).
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &BTreeMap<String, ProducerPresence>)> {
-        self.nodes.iter()
-    }
-
-    pub fn get(&self, origin: &str) -> Option<&BTreeMap<String, ProducerPresence>> {
-        self.nodes.get(origin)
-    }
-
-    /// Origin → live producers, in the shape `zenkey_fleet_v1::bus::roster` returns —
-    /// for joins that need "who is actually up".
-    ///
-    /// `None` while unseeded, and that is the whole point of the method: a
-    /// caller must be able to tell "no presence source has reported" from "the
-    /// fleet is empty" (RFC 09 §5.1 O4), and a `BTreeMap` alone cannot say it.
-    pub fn live_map(&self) -> Option<BTreeMap<String, Vec<String>>> {
-        if !self.seeded {
-            return None;
-        }
-        Some(
-            self.nodes
-                .iter()
-                .map(|(origin, producers)| {
-                    (
-                        origin.clone(),
-                        producers
-                            .iter()
-                            .filter(|(_, p)| p.alive)
-                            .map(|(name, _)| name.clone())
-                            .collect(),
-                    )
-                })
-                .collect(),
-        )
-    }
-
-    /// The catalog's own presence, by name — never folded into "no nodes".
-    pub fn catalog(&self) -> CatalogPresence {
-        match self
-            .nodes
-            .get("@catalog")
-            .and_then(|producers| producers.values().next())
-        {
-            None => CatalogPresence::NoTokenObserved,
-            Some(p) if p.alive => CatalogPresence::Alive,
-            Some(_) => CatalogPresence::Suspect,
-        }
+        *self = NodesState {
+            clocks_synced: self.clocks_synced,
+            ..NodesState::default()
+        };
     }
 }
 
-/// The display-path selector of one producer's state subtree, into a
-/// caller-owned buffer.
-///
-/// Assembled from grammar constants, never `format!` of user input —
-/// `origin` and `producer` come from parsed token keys — and the base is
-/// applied through `grammar::with_base`, which has one home.
-///
-/// Into a buffer because `refresh` calls this once per producer per tick, so
-/// the caller reuses one allocation rather than taking a fresh `String` each
-/// time (#178).
-fn write_state_subtree(out: &mut String, base: &str, origin: &str, producer: &str) {
-    use std::fmt::Write as _;
-    let mut tail = String::with_capacity(32);
-    if origin.starts_with('@') {
-        // A service origin has no producer chunk under state.
-        let _ = write!(tail, "v1/{origin}/state/**");
-    } else {
-        let _ = write!(tail, "v1/{origin}/state/{producer}/**");
+/// A descriptor answer, as the pane shows it.
+fn described(answer: &Asked<DescriptorAnswer>) -> Described {
+    match answer.as_option() {
+        None => Described::NotAsked,
+        Some(DescriptorAnswer::Served { descriptor }) => {
+            let meta = |k: &str| {
+                descriptor.meta.get(k).map(|v| match v.as_str() {
+                    Some(s) => s.to_owned(),
+                    None => v.to_string(),
+                })
+            };
+            Described::Served(DescriptorFacts {
+                host: meta("host"),
+                process: meta("process"),
+                build: meta("build"),
+                zid: meta("zid"),
+                profiles: descriptor.profiles.clone(),
+                interfaces: descriptor
+                    .interfaces
+                    .iter()
+                    .map(|e| {
+                        let short = e
+                            .contract
+                            .strip_prefix("sha256:")
+                            .map(|h| h.chars().take(12).collect::<String>())
+                            .unwrap_or_else(|| e.contract.clone());
+                        (e.iface.clone(), short)
+                    })
+                    .collect(),
+            })
+        }
+        Some(DescriptorAnswer::Invalid { findings }) => Described::Invalid(findings.clone()),
+        Some(DescriptorAnswer::Silent) => Described::Silent,
+        Some(DescriptorAnswer::Failed { reason }) => Described::Failed(reason.clone()),
     }
-    out.clear();
-    out.push_str(&zenkey_v1::grammar::with_base(base, tail));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::SystemTime;
+    use zenkey_fleet::model::catalog::{DescriptorRead, Observed};
+    use zenkey_fleet::{PresenceScope, StatsTable};
+    use zenkey_model::descriptor::Descriptor;
 
-    const TOKEN: &str = "v1/h-3fa9c2d41b7e/state/sysinfo/alive";
-    const CATALOG_TOKEN: &str = "v1/@catalog/state/alive";
+    const NAV: &str = "zk2/robot1/nav/@zk/instance/0000000000000001";
 
-    fn now() -> Instant {
-        Instant::now()
+    fn addr(s: &str) -> Addr {
+        s.parse().expect("an address")
     }
 
-    #[test]
-    fn seed_marks_alive_and_reseed_recovers_suspect() {
-        let mut roster = NodeRoster::default();
-        assert!(!roster.is_seeded(), "not asked yet");
-
-        let mut seed = BTreeMap::new();
-        seed.insert("h-3fa9c2d41b7e".to_string(), vec!["sysinfo".to_string()]);
-        roster.seed(&seed);
-        assert!(roster.is_seeded());
-        let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
-        assert!(p.alive && p.suspect_since.is_none());
-
-        roster.apply_transitions("", &[(TOKEN.to_string(), false)], now());
-        let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
-        assert!(
-            !p.alive && p.suspect_since.is_some(),
-            "retraction ⇒ suspect"
+    fn presence(keys: &[&str], complete: bool) -> LivePresence {
+        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let mut live = LivePresence::new(PresenceScope::all());
+        live.seed(
+            &Observed::from_keys("zk2/*/*/@zk/**", &keys, complete),
+            SystemTime::now(),
         );
-
-        roster.seed(&seed);
-        let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
-        assert!(
-            p.alive && p.suspect_since.is_none(),
-            "reappearance recovers"
-        );
+        live
     }
 
-    /// Transitions apply in arrival order: what nets out inside one tick is
-    /// the last word, not the first.
+    /// The join reaches only watched addresses, and an address watched with
+    /// nothing arrived is unknown, not fresh (O4) — `state` and `@state`
+    /// both count, a stream does not.
     #[test]
-    fn flaps_within_one_tick_resolve_in_order() {
-        let mut roster = NodeRoster::default();
-        roster.apply_transitions(
-            "",
-            &[(TOKEN.to_string(), false), (TOKEN.to_string(), true)],
-            now(),
+    fn freshness_joins_watched_state_only() {
+        let live = presence(&[NAV], true);
+        let mut stats = StatsTable::new();
+        let now = Instant::now();
+        stats.record(
+            "acme/zk2/robot1/nav/nav.v2/stream/position",
+            8,
+            None,
+            now,
+            None,
+            None,
         );
-        assert!(roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"].alive);
-
-        roster.apply_transitions(
-            "",
-            &[(TOKEN.to_string(), true), (TOKEN.to_string(), false)],
-            now(),
-        );
-        let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
-        assert!(!p.alive && p.suspect_since.is_some());
-    }
-
-    #[test]
-    fn the_catalog_is_named_never_folded() {
-        let mut roster = NodeRoster::default();
-        assert_eq!(roster.catalog(), CatalogPresence::NoTokenObserved);
-
-        roster.apply_transitions("", &[(CATALOG_TOKEN.to_string(), true)], now());
-        assert_eq!(roster.catalog(), CatalogPresence::Alive);
-
-        roster.apply_transitions("", &[(CATALOG_TOKEN.to_string(), false)], now());
-        assert_eq!(roster.catalog(), CatalogPresence::Suspect);
-    }
-
-    /// The freshness join reaches only watched producers; everything else
-    /// stays `None` — unknown, not fresh (O4).
-    #[test]
-    fn freshness_joins_watched_producers_only() {
-        let mut roster = NodeRoster::default();
-        roster.apply_transitions("", &[(TOKEN.to_string(), true)], now());
-
-        let tree = KeyTreeSnapshot::default();
-        roster.refresh(
+        let tree = KeyTreeSnapshot::build(&stats);
+        let mut nodes = NodesState::default();
+        nodes.refresh(
+            Some(&live),
             &tree,
-            "",
-            &["v1/h-3fa9c2d41b7e/state/**".to_string()],
-            now(),
+            "acme",
+            &["acme/zk2/**".to_string()],
+            now,
         );
-        let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
-        assert!(p.watched, "the selector covers this producer's subtree");
-        assert!(p.last_state_age.is_none(), "no sample yet = unknown age");
+        let f = nodes.freshness(&addr("robot1/nav"));
+        assert!(f.watched, "acme/zk2/** covers robot1/nav's state/**");
+        assert_eq!(f.last_state_age, None, "a stream is no state sample");
 
-        roster.refresh(&tree, "", &[], now());
-        let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
-        assert!(!p.watched);
+        stats.record(
+            "acme/zk2/robot1/nav/nav.v2/state/status",
+            8,
+            None,
+            now,
+            None,
+            None,
+        );
+        let tree = KeyTreeSnapshot::build(&stats);
+        nodes.refresh(
+            Some(&live),
+            &tree,
+            "acme",
+            &["acme/zk2/**".to_string()],
+            now,
+        );
+        assert!(
+            nodes
+                .freshness(&addr("robot1/nav"))
+                .last_state_age
+                .is_some()
+        );
+
+        nodes.refresh(Some(&live), &tree, "acme", &[], now);
+        assert!(!nodes.freshness(&addr("robot1/nav")).watched);
+        // `**` never crosses `@state` (core §1.3): only a selector naming it
+        // covers an explicit state population.
+        nodes.refresh(
+            Some(&live),
+            &tree,
+            "acme",
+            &["acme/zk2/robot1/nav/*/@state/**".to_string()],
+            now,
+        );
+        assert!(nodes.freshness(&addr("robot1/nav")).watched);
+    }
+
+    /// The index is built from the catalog's descriptors, rebuilt only when
+    /// another catalog is swapped in, and a hostid listing comes from the
+    /// descriptor's `profiles` alone.
+    #[test]
+    fn descriptors_are_indexed_once_per_catalog() {
+        let mut observed = Observed::from_keys("zk2/*/*/@zk/**", &[NAV.to_string()], true);
+        let mut meta = BTreeMap::new();
+        meta.insert("host".to_owned(), serde_json::json!("rover-01"));
+        meta.insert("zid".to_owned(), serde_json::json!("a1b2"));
+        observed.descriptors = Some(BTreeMap::from([(
+            (
+                addr("robot1/nav"),
+                "0000000000000001".parse().expect("an id"),
+            ),
+            DescriptorRead::Served(Box::new(Descriptor {
+                format: "zk2-descriptor/0.1".into(),
+                service: "robot1/nav".into(),
+                instance: "0000000000000001".into(),
+                interfaces: Vec::new(),
+                capabilities: Vec::new(),
+                requires: Vec::new(),
+                profiles: vec![HOSTID.into()],
+                meta,
+            })),
+        )]));
+        let catalog = Arc::new(Catalog::new(&observed));
+        let mut nodes = NodesState::default();
+        assert!(nodes.instances(&addr("robot1/nav")).is_none());
+        nodes.describe(Some(&catalog));
+        let got = nodes.instances(&addr("robot1/nav")).expect("indexed");
+        let Described::Served(facts) = &got[0].described else {
+            panic!("served: {got:?}");
+        };
+        assert_eq!(facts.host.as_deref(), Some("rover-01"));
+        assert_eq!(facts.zid.as_deref(), Some("a1b2"));
+        assert!(facts.lists_hostid());
+        nodes.describe(None);
+        assert!(nodes.instances(&addr("robot1/nav")).is_none());
+    }
+
+    /// A forget drops the reading and keeps the operator's word.
+    #[test]
+    fn a_forget_keeps_the_clock_word_and_drops_the_reading() {
+        let mut nodes = NodesState {
+            clocks_synced: true,
+            ..NodesState::default()
+        };
+        nodes.asking(addr("robot1/nav"));
+        assert_eq!(nodes.health.address(), Some(&addr("robot1/nav")));
+        nodes.clear();
+        assert!(nodes.clocks_synced, "the operator's word is kept");
+        assert!(matches!(nodes.health, HealthState::NotAsked));
     }
 }

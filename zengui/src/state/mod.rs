@@ -281,12 +281,10 @@ mod tests {
                 // verdict about a fleet — judged under its served schemas —
                 // and must drop with the rest when the window points away.
                 &[
-                    "roster",
-                    "node_detail",
-                    "doctor",
-                    "blob",
-                    "admin",
-                    "payloads",
+                    // FL9: v1's roster and its `node_info` detail became one
+                    // per-address model over presence — descriptors, the
+                    // freshness join and the selected address's health.
+                    "nodes", "doctor", "blob", "admin", "payloads",
                 ],
             ),
             (
@@ -388,7 +386,8 @@ mod tests {
         // Then FL10b: the replay's skeleton — 93. Then FL7: v1's facts cache
         // went, the identity cache's epoch came, and the budget window's two
         // observations — 95; and the replay's namespace beside its
-        // skeleton — 96.
-        assert_eq!(leaves, 96, "the split must place every field exactly once");
+        // skeleton — 96. Then FL9: v1's roster and its `node_info` detail
+        // became the one per-address `nodes` — 95.
+        assert_eq!(leaves, 95, "the split must place every field exactly once");
     }
 }

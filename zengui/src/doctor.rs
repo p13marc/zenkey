@@ -1,239 +1,199 @@
-//! The doctor panel's model (#71): run state, run-over-run deltas, and
-//! finding navigation — pure logic over the engine's `DoctorReport`, which
-//! is the *same struct* `zenctl doctor --format json` serializes. The panel
-//! never reimplements a check (RFC 08 §6.1's argument: only a check catches
-//! a lying registry, and it must not live in only one frontend).
+//! The doctor panel's model (#71; zk2's since #614, FL9): run state,
+//! run-over-run deltas, and finding navigation — pure logic over the
+//! engine's zk2 `DoctorReport`, which is the *same struct* `zenctl doctor
+//! --format json` serializes: one `Judgement` per check, each named for a
+//! condition firing, its finding the yes. The panel never reimplements a
+//! check — only a check catches a deployment lying about itself, and it must
+//! not live in only one frontend.
 
 use std::sync::Arc;
 
-use zenkey_fleet_v1::doctor_delta;
-use zenkey_fleet_v1::report::{DoctorDelta, DoctorFinding, DoctorReport};
+use zenkey_fleet::doctor_delta;
+use zenkey_fleet::report::{DoctorDelta, DoctorFinding, DoctorReport};
+use zenkey_model::grammar::{Addr, ZkKey};
 
-/// One finished run and the base it was judged against — the staleness
+/// One finished run and the namespace it was judged in — the staleness
 /// guard (#109). `DoctorReport` is the engine's serde type, shared with
-/// `zenctl doctor --format json`, so the base rides *beside* the report
-/// rather than inside it.
+/// `zenctl doctor --format json`; its scope names the namespace too, and
+/// this is the one the window asked in.
 #[derive(Debug, Clone)]
 pub struct DoctorRun {
     pub report: Arc<DoctorReport>,
-    pub base: String,
+    pub namespace: String,
 }
 
 /// The panel's whole state.
 #[derive(Debug, Default)]
 pub struct DoctorState {
     pub in_flight: bool,
+    /// Ask the checks that read the owners' data plane —
+    /// `state-stamp-foreign` and `population-over-bound`, a GET of every
+    /// owner's state each (`DoctorSpec::deep`).
     pub deep: bool,
-    /// The `--listen` window in seconds, as typed (#161). Empty = the
-    /// passive phase does not run; parsed leniently at run time.
-    pub listen: String,
+    /// The operator's word that this host's clock and the owners' agree
+    /// (`DoctorSpec::clocks_synced`, `freshness.v1` §2.6): without it the
+    /// `health-*` checks of every service implementing `health.v1` are
+    /// unobservable. Off by default (D11), and its own toggle beside the
+    /// nodes pane's, as `zenctl doctor` and `zenctl health` each take
+    /// `--clocks-synced`.
+    pub clocks_synced: bool,
     pub current: Option<Arc<DoctorReport>>,
-    /// The last *successful* run before `current` — a failed run keeps the
-    /// baseline (deltas against nothing would misreport everything as new).
+    /// The run before `current`.
     pub previous: Option<Arc<DoctorReport>>,
     /// The engine's run-over-run comparison (#389): keyed on `(check,
-    /// subject)`, shared with zenwatch's `doctor` rule.
+    /// subject)`, shared with zenwatch's scheduled doctor.
     pub delta: Option<DoctorDelta>,
+    /// Why a run could not start — no session to ask through. A run that
+    /// started always lands a report: an input it could not read is a
+    /// check's `Unobservable`, never an error here.
     pub error: Option<crate::services::ServiceError>,
-    /// How many times the schema cache has been cleared this session
-    /// (issue #101) — shown so the button is visibly a thing that happened,
-    /// not a no-op the user has to guess at.
-    pub schemas_forgotten: usize,
+    /// How many times presence and the contracts have been re-read this
+    /// session — shown so the button is visibly a thing that happened, not
+    /// a no-op the user has to guess at (#101).
+    pub rereads: usize,
 }
 
 impl DoctorState {
-    /// A run finished. Shifts current → previous only on success — and only
-    /// when the run was judged against the base this window is looking at.
+    /// A run finished. Shifts current → previous — but only when the run
+    /// was judged in the namespace this window is looking at.
     ///
-    /// A run from another base is dropped silently, deliberately (#109,
-    /// mirroring `AdminState::finish`): it is not an error, and reporting it
-    /// would explain a deployment the user has left. `clear()` cannot stop a
-    /// task already in flight, and a doctor run takes seconds — this is what
-    /// catches the one that lands after the switch. The `Err` arm is *not*
-    /// base-guarded, same asymmetry as admin: an error carries no base to
-    /// judge, and it rides the Ok carrier only.
-    pub fn finish(
-        &mut self,
-        outcome: Result<DoctorRun, crate::services::ServiceError>,
-        base: &str,
-    ) {
+    /// A run from another namespace is dropped silently, deliberately
+    /// (#109, mirroring `AdminState::finish`): it is not an error, and
+    /// reporting it would explain a deployment the user has left. `clear()`
+    /// cannot stop a task already in flight, and a doctor run takes seconds
+    /// — this is what catches the one that lands after the switch.
+    pub fn finish(&mut self, run: DoctorRun, namespace: &str) {
         self.in_flight = false;
-        match outcome {
-            Ok(run) if run.base == base => {
-                self.delta = self
-                    .current
-                    .as_deref()
-                    .map(|prev| doctor_delta(prev, &run.report));
-                self.previous = self.current.replace(run.report);
-                self.error = None;
-            }
-            Ok(_) => {
-                // A run about another deployment says nothing about this one.
-            }
-            Err(e) => self.error = Some(e),
+        if run.namespace != namespace {
+            return;
         }
+        self.delta = self
+            .current
+            .as_deref()
+            .map(|prev| doctor_delta(prev, &run.report));
+        self.previous = self.current.replace(run.report);
+        self.error = None;
     }
 
-    /// Base change / reconnect: a report against another base is not
-    /// evidence here.
+    /// Namespace change / reconnect: a report about another deployment is
+    /// not evidence here. The two toggles are the operator's, and stay.
     pub fn clear(&mut self) {
         *self = DoctorState {
             deep: self.deep,
-            listen: std::mem::take(&mut self.listen),
+            clocks_synced: self.clocks_synced,
             ..DoctorState::default()
         };
-    }
-
-    /// The listen window the run button will use: empty = off, otherwise
-    /// parsed seconds floored at 1 (a 0-second listen would claim an
-    /// observation that never happened).
-    pub fn listen_window(&self) -> Option<std::time::Duration> {
-        let t = self.listen.trim();
-        if t.is_empty() {
-            return None;
-        }
-        Some(std::time::Duration::from_secs_f64(
-            t.parse::<f64>().unwrap_or(10.0).max(1.0),
-        ))
     }
 }
 
 /// Where a finding can navigate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
-    /// A concrete wire key — select it in the tree (and fetch its value).
+    /// A concrete zk2 key, as the wire spells it in this namespace — select
+    /// it in the tree (and fetch its value).
     Key(String),
-    /// An `origin/producer` subject — select the origin in the nodes pane.
-    Node(String),
+    /// A service address — select it, and land on the nodes tool.
+    Address(Addr),
 }
 
-/// Resolve a finding's subject to a navigation target. `fleet` / `mesh`
-/// subjects (and anything else unresolvable) navigate nowhere — the button
-/// simply is not rendered.
-pub fn finding_target(finding: &DoctorFinding, base: &str) -> Option<Target> {
-    let subject = &finding.subject;
-    if subject == "fleet" || subject == "mesh" {
+/// Resolve a finding's subject to a navigation target.
+///
+/// zk2's checks spell a subject the same way every run (the delta keys on
+/// it): `<system>/<service>@<instance>`, `<system>/<service> <role>`,
+/// `<system>/<service> <iface>`, `<iface> <fingerprint>`,
+/// `<storage>@<zid>`. Its first word is read: a zk2 data key navigates to
+/// itself under the namespace, a `<system>/<service>` (an instance id taken
+/// off) to the address. A revision, a storage, the presence domain or this
+/// host navigates nowhere — the button simply is not rendered.
+pub fn finding_target(finding: &DoctorFinding, namespace: &str) -> Option<Target> {
+    let first = finding.subject.split_whitespace().next()?;
+    if let Ok(ZkKey::Data { .. }) = zenkey_model::grammar::parse(first) {
+        return Some(Target::Key(zenkey_fleet::with_namespace(namespace, first)));
+    }
+    let addr = first.split('@').next()?;
+    if !addr.contains('/') {
         return None;
     }
-    // A concrete wire key parses under the configured base.
-    if zenkey_v1::grammar::parse_full(base, subject).is_some() {
-        return Some(Target::Key(subject.clone()));
-    }
-    // `origin/producer` — the shape slice-sync/slice-parse findings use.
-    if let Some((origin, _producer)) = subject.split_once('/')
-        && (zenkey_v1::grammar::is_valid_host_origin(origin) || origin.starts_with('@'))
-    {
-        return Some(Target::Node(origin.to_string()));
-    }
-    None
+    addr.parse::<Addr>().ok().map(Target::Address)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet_v1::report::DoctorSeverity;
+    use zenkey_fleet::report::{Asked, CheckId, CheckReport, DoctorScope, DoctorSeverity};
 
-    fn finding(check: zenkey_fleet_v1::report::CheckId, subject: &str) -> DoctorFinding {
+    fn finding(check: CheckId, subject: &str) -> DoctorFinding {
         DoctorFinding {
             severity: DoctorSeverity::Error,
             check,
             subject: subject.into(),
             evidence: "e".into(),
-            citation: None,
         }
     }
 
     fn report(findings: Vec<DoctorFinding>) -> DoctorReport {
         DoctorReport {
-            findings,
-            synced: zenkey_fleet_v1::report::Asked::NotAsked,
-            introspect_answered: 0,
-            live_producers: 0,
-            describe_served: 0,
-            describe_missing: 0,
-            routers: 0,
-            router_version: None,
-            deep: false,
-            observation: None,
+            scope: DoctorScope {
+                namespace: "acme".into(),
+                presence: Asked::NotAsked,
+                routers: Asked::NotAsked,
+                health: Asked::NotAsked,
+            },
+            checks: CheckId::ALL
+                .into_iter()
+                .map(|id| {
+                    let mine: Vec<DoctorFinding> =
+                        findings.iter().filter(|f| f.check == id).cloned().collect();
+                    CheckReport::of(id, mine, vec![], "clean")
+                })
+                .collect(),
             unobservable: None,
         }
     }
 
-    /// #161: empty = off; garbage falls back to 10s; sub-second asks floor
-    /// at 1s (a 0s listen would claim an observation that never happened).
-    #[test]
-    fn the_listen_window_parses_leniently() {
-        let mut state = DoctorState::default();
-        assert_eq!(state.listen_window(), None);
-        state.listen = "10".into();
-        assert_eq!(
-            state.listen_window(),
-            Some(std::time::Duration::from_secs(10))
-        );
-        state.listen = "0".into();
-        assert_eq!(
-            state.listen_window(),
-            Some(std::time::Duration::from_secs(1))
-        );
-        state.listen = "nonsense".into();
-        assert_eq!(
-            state.listen_window(),
-            Some(std::time::Duration::from_secs(10))
-        );
-    }
-
-    fn run(base: &str, findings: Vec<DoctorFinding>) -> DoctorRun {
+    fn run(namespace: &str, findings: Vec<DoctorFinding>) -> DoctorRun {
         DoctorRun {
             report: Arc::new(report(findings)),
-            base: base.into(),
+            namespace: namespace.into(),
         }
     }
 
+    /// The second run is compared with the first, keyed on `(check,
+    /// subject)`: the engine's delta, shared with zenwatch.
     #[test]
-    fn a_failed_run_keeps_the_baseline() {
+    fn the_second_run_is_a_delta_against_the_first() {
         let mut state = DoctorState::default();
-        state.finish(
-            Ok(run(
-                "acme",
-                vec![finding(
-                    zenkey_fleet_v1::report::CheckId::SliceSync,
-                    "h-1/p",
-                )],
-            )),
-            "acme",
-        );
-        assert!(state.current.is_some());
-
-        state.finish(Err("bus went away".into()), "acme");
-        assert!(state.current.is_some(), "the baseline survives a failure");
-        assert!(state.error.is_some());
+        let missing = finding(CheckId::TokenMissing, "robot9/phantom@00000000000000aa");
+        state.finish(run("acme", vec![missing.clone()]), "acme");
+        assert!(state.delta.is_none(), "one run compares with nothing");
+        let squatter = finding(CheckId::StorageOnState, "state@z1");
+        state.finish(run("acme", vec![squatter.clone()]), "acme");
+        let d = state.delta.as_ref().expect("a delta");
+        assert!(d.is_new(&squatter));
+        assert_eq!(d.fixed, vec![missing]);
+        assert!(state.previous.is_some());
     }
 
-    /// #109: the user switched deployment while a run was in flight. Its
-    /// findings are about a deployment this window no longer shows — dropped,
-    /// not displayed, and not an error either (the shape of
-    /// `admin.rs::a_sweep_from_another_base_is_not_evidence_here`).
+    /// #109: the user switched namespace while a run was in flight. Its
+    /// findings are about a deployment this window no longer shows —
+    /// dropped, not displayed, and not an error either.
     #[test]
-    fn a_run_from_another_base_is_not_evidence_here() {
-        let mut state = DoctorState::default();
+    fn a_run_from_another_namespace_is_not_evidence_here() {
+        let mut state = DoctorState {
+            deep: true,
+            clocks_synced: true,
+            ..DoctorState::default()
+        };
         state.finish(
-            Ok(run(
-                "acme",
-                vec![finding(
-                    zenkey_fleet_v1::report::CheckId::SliceSync,
-                    "h-1/p",
-                )],
-            )),
+            run("acme", vec![finding(CheckId::TokenMissing, "a/b@00")]),
             "acme",
         );
         assert!(state.current.is_some());
 
         state.clear();
+        assert!(state.deep && state.clocks_synced, "the toggles are kept");
         state.finish(
-            Ok(run(
-                "acme",
-                vec![finding(zenkey_fleet_v1::report::CheckId::StaleState, "k")],
-            )),
+            run("acme", vec![finding(CheckId::StorageOnState, "s@z")]),
             "other",
         );
         assert!(
@@ -244,52 +204,47 @@ mod tests {
         assert!(state.error.is_none(), "and it is not an error either");
     }
 
+    /// A zk2 key navigates to itself under the namespace, an address
+    /// subject to the address (its instance id taken off), and a revision,
+    /// a storage or the domain nowhere.
     #[test]
     fn finding_targets_resolve_by_subject_shape() {
-        assert_eq!(
-            finding_target(
-                &finding(zenkey_fleet_v1::report::CheckId::SliceSync, "fleet"),
-                ""
-            ),
-            None
-        );
-        assert_eq!(
-            finding_target(
-                &finding(zenkey_fleet_v1::report::CheckId::SliceSync, "mesh"),
-                ""
-            ),
-            None
-        );
-        assert_eq!(
-            finding_target(
-                &finding(
-                    zenkey_fleet_v1::report::CheckId::StaleState,
-                    "v1/h-3fa9c2d41b7e/state/p/health"
-                ),
-                ""
-            ),
-            Some(Target::Key("v1/h-3fa9c2d41b7e/state/p/health".into()))
-        );
+        let nav: Addr = "robot1/nav".parse().unwrap();
+        for subject in [
+            "robot1/nav@0000000000000001",
+            "robot1/nav input",
+            "robot1/nav@0000000000000001 nav.v2",
+            "robot1/nav nav.v2 plans/{vehicle}",
+        ] {
+            assert_eq!(
+                finding_target(&finding(CheckId::TokenMissing, subject), "acme"),
+                Some(Target::Address(nav.clone())),
+                "{subject}"
+            );
+        }
         assert_eq!(
             finding_target(
                 &finding(
-                    zenkey_fleet_v1::report::CheckId::SliceSync,
-                    "h-3fa9c2d41b7e/sysinfo"
+                    CheckId::StateStampForeign,
+                    "zk2/robot1/nav/nav.v2/state/status"
                 ),
-                ""
+                "acme"
             ),
-            Some(Target::Node("h-3fa9c2d41b7e".into()))
+            Some(Target::Key(
+                "acme/zk2/robot1/nav/nav.v2/state/status".into()
+            ))
         );
-        assert_eq!(
-            finding_target(
-                &finding(
-                    zenkey_fleet_v1::report::CheckId::SchemaDrift,
-                    "TelemetryPoint"
-                ),
-                ""
-            ),
-            None,
-            "a bare type name navigates nowhere"
-        );
+        for subject in [
+            "nav.v2 sha256:0123",
+            "state@z1",
+            "presence domain",
+            "this host",
+        ] {
+            assert_eq!(
+                finding_target(&finding(CheckId::StorageOnState, subject), ""),
+                None,
+                "{subject} navigates nowhere"
+            );
+        }
     }
 }

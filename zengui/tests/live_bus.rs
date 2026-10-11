@@ -711,116 +711,6 @@ async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
-/// v1's alive-token selectors — the fleet's alive tokens, and `@catalog`'s
-/// by name (RFC 03 §4 D4). The nodes pane's roster reads v1 tokens until
-/// FL9 moves it onto zk2 presence; the test below keeps its own copy.
-fn liveliness_selectors(base: &str) -> Vec<String> {
-    use zenkey_v1::grammar::with_base;
-    use zenkey_v1::origin::ServiceOrigin;
-    use zenkey_v1::selector::{self, Scope};
-    vec![
-        with_base(base, selector::all_liveliness(Scope::fleet())),
-        with_base(base, selector::service_alive(&ServiceOrigin::catalog())),
-    ]
-}
-
-/// Suspect-on-retraction (#61), self-contained (NOT ignored): a second
-/// in-process peer declares a conforming v1 liveliness token; undeclaring it
-/// must flip the roster to suspect on the very next NodeDown event — no ttl
-/// aging, no polling — and redeclaring recovers it. zk2's monitor carries
-/// the token events since FL6b; the roster itself is v1's until FL9. The
-/// port is ephemeral, so two test runs at once cannot collide.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
-    use std::time::Instant;
-    use zenkey_fleet::{FleetEvent, StreamItem};
-
-    // A port the OS has just said is free, released the instant its number is
-    // known: a hard-coded one collides with a second `cargo test` run.
-    let endpoint = {
-        let held = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
-        let port = held.local_addr().expect("local addr").port();
-        format!("tcp/127.0.0.1:{port}")
-    };
-    let producer_side = zenkey_fleet::open(&[], std::slice::from_ref(&endpoint), false)
-        .await
-        .expect("producer session");
-    let observer_side = zenkey_fleet::open(std::slice::from_ref(&endpoint), &[], false)
-        .await
-        .expect("observer session");
-
-    let monitor = Monitor::start(
-        &observer_side,
-        MonitorSpec {
-            selectors: vec![], // lazy: liveliness only
-            liveliness: liveliness_selectors(""),
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("start monitor");
-    let mut events = monitor.events();
-
-    let mut roster = zengui::nodes::NodeRoster::default();
-    const TOKEN: &str = "v1/h-3fa9c2d41b7e/state/sysinfo/alive";
-
-    // Bounded wait for the matching liveliness event, applied in order.
-    async fn apply_next(
-        roster: &mut zengui::nodes::NodeRoster,
-        events: &mut zenkey_fleet::EventStream,
-        want_up: bool,
-    ) {
-        loop {
-            let item = tokio::time::timeout(Duration::from_secs(5), events.recv())
-                .await
-                .expect("liveliness event within 5s")
-                .expect("monitor alive");
-            if let StreamItem::Event(ev) = item {
-                match ev {
-                    FleetEvent::NodeUp(key) if want_up => {
-                        roster.apply_transitions("", &[(key, true)], Instant::now());
-                        break;
-                    }
-                    FleetEvent::NodeDown(key) if !want_up => {
-                        roster.apply_transitions("", &[(key, false)], Instant::now());
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    let token = producer_side
-        .liveliness()
-        .declare_token(TOKEN)
-        .await
-        .expect("token");
-    apply_next(&mut roster, &mut events, true).await;
-    let p = &roster.get("h-3fa9c2d41b7e").expect("origin seen")["sysinfo"];
-    assert!(p.alive && p.suspect_since.is_none());
-
-    token.undeclare().await.expect("undeclare");
-    apply_next(&mut roster, &mut events, false).await;
-    let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
-    assert!(
-        !p.alive && p.suspect_since.is_some(),
-        "retraction must mark suspect on the event itself, never aged out"
-    );
-
-    let _token = producer_side
-        .liveliness()
-        .declare_token(TOKEN)
-        .await
-        .expect("redeclare");
-    apply_next(&mut roster, &mut events, true).await;
-    let p = &roster.get("h-3fa9c2d41b7e").unwrap()["sysinfo"];
-    assert!(
-        p.alive && p.suspect_since.is_none(),
-        "reappearance recovers the row"
-    );
-}
-
 // ── the Send pane on zk2 (#614, FL10) ──────────────────────────────────────
 
 /// A window booted against `bus`, holding `contracts` (as `--contracts`
@@ -1244,5 +1134,300 @@ async fn a_recorded_window_replays_through_the_offline_lens() {
     );
 
     let _ = std::fs::remove_file(&path);
+    bus.down().await;
+}
+
+// ── the Workbench on zk2 (#614, FL9) ───────────────────────────────────────
+
+/// A port the OS has just said is free, released the instant its number is
+/// known: a hard-coded one collides with a second `cargo test` run.
+fn ephemeral() -> String {
+    let held = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+    let port = held.local_addr().expect("local addr").port();
+    format!("tcp/127.0.0.1:{port}")
+}
+
+/// A service implementing `health.v1` alone at `addr`, its status OK — the
+/// spray's `host-a/sysmon`, in miniature.
+async fn health_owner(
+    session: &zenoh::Session,
+    addr: &zenkey_model::grammar::Addr,
+) -> zenkey::Service {
+    let mut b = zenkey::ServiceBuilder::new(session, zenkey::ServiceConfig::new(addr.clone()));
+    let health = b.health().await.expect("health.v1");
+    health
+        .set_status(zenkey::health::Level::Ok, "nominal")
+        .await
+        .expect("a status");
+    b.start().await.expect("the service starts")
+}
+
+/// The window's presence link (its subscription's own stream) over a
+/// presence monitor on `session`, as the window starts one.
+async fn presence_stream(
+    session: &zenoh::Session,
+) -> impl iced::futures::Stream<Item = zengui::message::Message> {
+    let spec = MonitorSpec {
+        stats_tick: Duration::from_secs(3600),
+        ..MonitorSpec::default()
+    }
+    .with_presence("", &zenkey_fleet::PresenceScope::all());
+    let monitor = Monitor::start(session, spec)
+        .await
+        .expect("presence monitor");
+    zengui::presence_link::stream(zengui::presence_link::PresenceKey {
+        epoch: 1,
+        session: session.clone(),
+        monitor: std::sync::Arc::new(monitor),
+        store: zenkey_fleet::BundleStore::new(Duration::from_secs(2)),
+        timeout: Duration::from_secs(2),
+    })
+}
+
+/// The next presence landing for which `want` holds, within ten seconds.
+async fn landing<S>(
+    link: &mut std::pin::Pin<Box<S>>,
+    want: impl Fn(&zenkey_fleet::LivePresence) -> bool,
+) -> std::sync::Arc<zengui::presence_link::PresenceUpdate>
+where
+    S: iced::futures::Stream<Item = zengui::message::Message>,
+{
+    use iced::futures::StreamExt as _;
+    use zengui::message::{BusMsg, Message};
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let message = tokio::time::timeout_at(deadline, link.next())
+            .await
+            .expect("the landing arrives in time")
+            .expect("the link runs");
+        if let Message::Bus(BusMsg::Presence(_, update)) = message
+            && want(&update.presence)
+        {
+            return update;
+        }
+    }
+}
+
+/// The nodes pane over one presence landing, `addr` selected.
+fn nodes_pane_shows(
+    update: &zengui::presence_link::PresenceUpdate,
+    addr: &zenkey_model::grammar::Addr,
+    text: &str,
+) -> bool {
+    let nodes = zengui::nodes::NodesState::default();
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1600.0, 1200.0),
+        zengui::view::nodes::pane(zengui::view::nodes::NodesData {
+            presence: Some(update),
+            nodes: &nodes,
+            selected: Some(addr),
+            sp: zengui::view::tokens::Spacing::default(),
+        }),
+    );
+    ui.find(text).is_ok()
+}
+
+/// An owner going away reads **down**, and coming back reads **up** with a
+/// new instance (#614, FL9; core §8.1) — through the window's own presence
+/// link, on its own monitor, and drawn by the nodes pane. Self-contained
+/// (NOT ignored): two in-process sessions on an ephemeral port, the zk2
+/// successor of v1's retracted-token check. Down is said only because the
+/// link's seed was complete; the instance that comes back is another
+/// instance, and the pane names it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_owner_going_away_reads_down_and_coming_back_reads_up_with_a_new_instance() {
+    use zenkey_fleet::AddressStatus;
+
+    let endpoint = ephemeral();
+    let owners = zenkey_fleet::open_in_namespace(
+        "acme",
+        None,
+        &[],
+        std::slice::from_ref(&endpoint),
+        Some(false),
+    )
+    .await
+    .expect("the owners' session");
+    let observer = zenkey_fleet::open_in_namespace(
+        "acme",
+        None,
+        std::slice::from_ref(&endpoint),
+        &[],
+        Some(false),
+    )
+    .await
+    .expect("the window's session in the namespace");
+    let svc: zenkey_model::grammar::Addr = "lab/svc".parse().expect("an address");
+
+    let first = health_owner(&owners, &svc).await;
+    let first_id = first.instance().to_string();
+    let mut link = Box::pin(presence_stream(&observer).await);
+    let up = landing(&mut link, |p| p.status(&svc) == AddressStatus::Up).await;
+    assert!(nodes_pane_shows(&up, &svc, "lab/svc: up"));
+    assert!(
+        nodes_pane_shows(&up, &svc, &first_id),
+        "its instance, named"
+    );
+
+    first.close().await.expect("the owner closes");
+    let down = landing(&mut link, |p| p.status(&svc) == AddressStatus::Down).await;
+    assert!(
+        nodes_pane_shows(&down, &svc, "lab/svc: down"),
+        "a complete seed behind it: no instance token is down"
+    );
+
+    let second = health_owner(&owners, &svc).await;
+    let second_id = second.instance().to_string();
+    assert_ne!(first_id, second_id, "a new run is a new instance");
+    let back = landing(&mut link, |p| {
+        p.address(&svc)
+            .is_some_and(|a| a.instance_tokens().any(|i| i.as_str() == second_id))
+    })
+    .await;
+    assert!(nodes_pane_shows(&back, &svc, "lab/svc: up"));
+    assert!(
+        nodes_pane_shows(&back, &svc, &second_id),
+        "up again, with the new instance"
+    );
+    assert!(
+        !nodes_pane_shows(&back, &svc, &first_id),
+        "and not the old one"
+    );
+
+    let _ = second.close().await;
+    let _ = observer.close().await;
+    let _ = owners.close().await;
+}
+
+/// Health on selection, through the window (#614, FL9; D11): the window
+/// boots against the spray, its presence link reads `host-a/sysmon`, and
+/// selecting the address reads its `health.v1` — "age unobservable" with no
+/// word for the clock (there is no ambient poll, and no window to measure
+/// one), then a level once the operator's word is given.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn health_is_read_on_selection_from_the_sprays_sysmon() {
+    use zengui::message::{Message, PaneMsg, RightPane, Subject, SubjectMsg, WorkspaceMsg};
+    use zengui::view::nodes::NodesMsg;
+
+    let bus = Bus::up().await;
+    let mut app = booted(&bus, vec![]).await;
+    let sysmon: zenkey_model::grammar::Addr = spray::SYSMON.parse().expect("an address");
+    let key = app.presence_link().expect("a presence link after the boot");
+    let mut link = Box::pin(zengui::presence_link::stream(key));
+    let update = landing(&mut link, |p| {
+        p.status(&sysmon) == zenkey_fleet::AddressStatus::Up
+    })
+    .await;
+    let _ = app.update(Message::Bus(zengui::message::BusMsg::Presence(
+        // The window's own epoch: the link was built from it.
+        app.presence_link().expect("the link").epoch,
+        update,
+    )));
+    let _ = app.update(Message::Workspace(WorkspaceMsg::PaneSelected(
+        RightPane::Nodes,
+    )));
+
+    let read = app.update(Message::Subject(SubjectMsg::Select(Subject::Address(
+        sysmon.clone(),
+    ))));
+    tokio::time::timeout(Duration::from_secs(20), drive(&mut app, read))
+        .await
+        .expect("the reading lands");
+    assert!(
+        shows(
+            &app,
+            "age unobservable — this reader's clock is not trusted to the HLC delta against \
+             the stamping clock; tick \"clocks synced\" if they agree"
+        ),
+        "no word and no window: the reply's age is unobservable"
+    );
+
+    let read = app.update(Message::Pane(PaneMsg::Nodes(NodesMsg::ClocksSynced(true))));
+    tokio::time::timeout(Duration::from_secs(20), drive(&mut app, read))
+        .await
+        .expect("the second reading lands");
+    assert!(
+        shows(&app, "clock: the deployment's word (clocks synced)"),
+        "read again under the word"
+    );
+    let said = [
+        "healthy (ok) — its status is OK and confirmed, and no check is worse",
+        "unhealthy (degraded) — its status is DEGRADED",
+    ]
+    .into_iter()
+    .find(|w| shows(&app, w));
+    println!("host-a/sysmon read: {said:?}");
+    assert!(
+        said.is_some(),
+        "sysmon cycles OK → DEGRADED → OK: either level, never unobservable"
+    );
+
+    bus.down().await;
+}
+
+/// Whether the window, drawn tall enough for a long dock, shows `text`.
+fn shows_tall(app: &zengui::app::Zengui, text: &str) -> bool {
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (2400.0, 4000.0),
+        app.view(iced::window::Id::unique()),
+    );
+    ui.find(text).is_ok()
+}
+
+/// The doctor, through the window (#614, FL9): booted against the spray,
+/// deep and with the clock's word, a run finds what `tests/spray_smoke.rs`
+/// finds through the engine — the phantom's interface token with no
+/// instance token (`token-missing`) and the squatter's foreign stamp on
+/// `host-a/tc`'s state (`state-stamp-foreign`) — and draws both as
+/// findings, each check's verdict beside them. Run again until the spray's
+/// presence has settled.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn the_windows_doctor_finds_the_sprays_phantom_and_squatter() {
+    use zengui::message::{ActivityTab, Message, PaneMsg, WorkspaceMsg};
+    use zengui::prefs::LayoutPreset;
+    use zengui::view::doctor::DoctorMsg;
+
+    let bus = Bus::up().await;
+    let mut app = booted(&bus, vec![]).await;
+    let _ = app.update(Message::Workspace(WorkspaceMsg::LayoutPreset(
+        LayoutPreset::Diagnose,
+    )));
+    let _ = app.update(Message::Workspace(WorkspaceMsg::ActivityTab(
+        ActivityTab::Doctor,
+    )));
+    let _ = app.update(Message::Pane(PaneMsg::Doctor(DoctorMsg::DeepToggled(true))));
+    let _ = app.update(Message::Pane(PaneMsg::Doctor(DoctorMsg::ClocksSynced(
+        true,
+    ))));
+
+    let phantom = format!("{}@5ca1ab1e00000001", spray::PHANTOM);
+    let (owner, iface, _) = spray::SQUATTED;
+    let squatter = format!("{owner} {iface}");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        let run = app.update(Message::Pane(PaneMsg::Doctor(DoctorMsg::Run)));
+        tokio::time::timeout(Duration::from_secs(60), drive(&mut app, run))
+            .await
+            .expect("the run lands");
+        if shows_tall(&app, &phantom) && shows_tall(&app, &squatter) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the doctor never found both: {phantom:?}, {squatter:?}"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    assert!(shows_tall(&app, "token-missing: finding"));
+    assert!(shows_tall(&app, "state-stamp-foreign: finding"));
+    assert!(
+        shows_tall(&app, "run: a finding at or above warning"),
+        "the run as one judgement"
+    );
+
     bus.down().await;
 }

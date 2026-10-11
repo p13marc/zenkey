@@ -210,6 +210,18 @@ pub(crate) fn update(
                 super::bus::read_declared(dep),
             ])
         }
+        DeploymentMsg::RereadPresence => {
+            // A revision no holder served is asked again by the lens that
+            // opens next; a verified one is content-addressed and kept.
+            dep.store.forget_absences();
+            dep.recount_contracts();
+            // The link restarts over the same monitor and store: a fresh
+            // seed and a fresh lens read. What they held stays on screen
+            // until their first landing replaces it — a re-read, not a
+            // forget.
+            super::bus::restart_presence(obs);
+            Task::none()
+        }
     }
 }
 
@@ -274,7 +286,8 @@ fn repoint(
 /// each keyed by a full wire key that names its own namespace, or user
 /// input rather than projected evidence. What cannot be cleared here — a
 /// task already in flight — is judged at its landing instead: doctor, blob
-/// probe/fetch and node_info each carry the namespace they ran against.
+/// probe/fetch and an address's health reading each carry the namespace
+/// they ran against.
 ///
 /// Four of the six sub-states, and that number is the finding: the issue
 /// assumed this could be one field replacement. Two of the four delegate,

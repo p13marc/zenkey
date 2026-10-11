@@ -470,8 +470,9 @@ impl ThemeColors<'_> {
         self.tone(kind.tone())
     }
 
-    /// The storage-coverage scale (#70), mirroring the CLI's ✓/~/· marks.
-    pub fn coverage(&self, kind: CoverageTone) -> Color {
+    /// The judgement scale (#614, FL9): RFC 13's four poles, mirroring the
+    /// CLI's ✗/✓/~/· marks.
+    pub fn judgement(&self, kind: JudgementTone) -> Color {
         self.tone(kind.tone())
     }
 
@@ -526,41 +527,72 @@ pub enum SyntaxRole {
     Punct,
 }
 
-/// How storage coverage should read (#70).
+/// How a judgement should read (#614, FL9; RFC 13 §1.2): the four poles of
+/// zk2's `Judgement`, a doctor check's verdict and the admin pane's S4 row
+/// alike. Each is **named for a condition firing** (tooling guide §1), so
+/// `Established` is the finding and `NotEstablished` the clean answer —
+/// and `Unobservable` and `NotAsked` share the neutral swatch with a glyph
+/// each: neither is a verdict, and neither is the other.
 ///
-/// `Uncovered` is **dimmed, never `danger()`**: RFC 04 §3.5 makes an uncovered
-/// ttl'd family perfectly legitimate — volatile state may be seeded by the
-/// advanced pub/sub cache — so a red badge would report a verdict the tool
-/// never obtained.
+/// It replaced v1's coverage scale (#70), which read "a storage covers this
+/// state" as good — the reading S4 inverts (D14).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoverageTone {
-    Covered,
-    Partial,
-    Uncovered,
+pub enum JudgementTone {
+    Established,
+    NotEstablished,
+    Unobservable,
+    NotAsked,
 }
 
-impl CoverageTone {
+impl JudgementTone {
     /// Every state of the scale, for the uniqueness tests.
-    pub const ALL: [Self; 3] = [Self::Covered, Self::Partial, Self::Uncovered];
+    pub const ALL: [Self; 4] = [
+        Self::Established,
+        Self::NotEstablished,
+        Self::Unobservable,
+        Self::NotAsked,
+    ];
 
-    /// The swatch this state resolves through. `Uncovered` is
-    /// [`Tone::Neutral`] by the doc above: dim, never `danger()`.
-    pub fn tone(self) -> Tone {
-        match self {
-            Self::Covered => Tone::Positive,
-            Self::Partial => Tone::Caution,
-            Self::Uncovered => Tone::Neutral,
+    /// The pole a judgement stands at.
+    pub fn of(j: &zenkey_fleet::report::Judgement) -> Self {
+        use zenkey_fleet::report::Judgement;
+        match j {
+            Judgement::Established => Self::Established,
+            Judgement::NotEstablished { .. } => Self::NotEstablished,
+            Judgement::Unobservable { .. } => Self::Unobservable,
+            Judgement::NotAsked => Self::NotAsked,
         }
     }
 
-    /// The badge glyph — the CLI's own ✓/~/· marks, so the two explorers
-    /// read alike. Carried by the type (#193): no call site can omit it or
-    /// give two states of this scale the same mark.
+    /// The swatch this state resolves through: the finding a negative,
+    /// the clean answer a positive, the two non-verdicts neutral.
+    pub fn tone(self) -> Tone {
+        match self {
+            Self::Established => Tone::Negative,
+            Self::NotEstablished => Tone::Positive,
+            Self::Unobservable | Self::NotAsked => Tone::Neutral,
+        }
+    }
+
+    /// The badge glyph, carried by the type (#193): the CLI's ✗ for the
+    /// finding, ✓ for a clean answer, `~` for a question that could not be
+    /// answered, `·` for one not put.
     pub fn glyph(self) -> &'static str {
         match self {
-            Self::Covered => "✓",
-            Self::Partial => "~",
-            Self::Uncovered => "·",
+            Self::Established => "✗",
+            Self::NotEstablished => "✓",
+            Self::Unobservable => "~",
+            Self::NotAsked => "·",
+        }
+    }
+
+    /// The pole in words, as a check row says it.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Established => "finding",
+            Self::NotEstablished => "clean",
+            Self::Unobservable => "unobservable",
+            Self::NotAsked => "not asked",
         }
     }
 }
@@ -583,10 +615,21 @@ pub enum SeverityTone {
 }
 
 impl SeverityTone {
-    /// A doctor finding's severity as its tone (#564) — the one mapping the
-    /// doctor, the Fields section and the finding card share, where each
-    /// used to keep its own copy.
-    pub fn of(severity: zenkey_fleet_v1::report::DoctorSeverity) -> Self {
+    /// A doctor finding's severity as its tone (#564; zk2's since #614,
+    /// FL9) — the one mapping the doctor and the finding card share, where
+    /// each used to keep its own copy.
+    pub fn of(severity: zenkey_fleet::report::DoctorSeverity) -> Self {
+        use zenkey_fleet::report::DoctorSeverity;
+        match severity {
+            DoctorSeverity::Error => SeverityTone::Error,
+            DoctorSeverity::Warning => SeverityTone::Warning,
+            DoctorSeverity::Info => SeverityTone::Info,
+        }
+    }
+
+    /// [`Self::of`] for a v1 severity: the Fields section's findings are
+    /// v1's `run_field` until FL8 moves them.
+    pub fn of_v1(severity: zenkey_fleet_v1::report::DoctorSeverity) -> Self {
         use zenkey_fleet_v1::report::DoctorSeverity;
         match severity {
             DoctorSeverity::Error => SeverityTone::Error,
@@ -806,36 +849,41 @@ impl RungTone {
     }
 }
 
-/// How a liveliness presence should read (#61) — same discipline as
-/// [`IdentityTone`]: "unknown" must not look like a verdict.
+/// How an address's presence should read (#61; zk2's three states since
+/// #614, FL9: spec §8.1, O5) — same discipline as [`IdentityTone`]:
+/// "unobservable" must not look like a verdict, and above all not like
+/// "down".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresenceTone {
-    Alive,
-    Suspect,
-    Unknown,
+    /// An instance token held.
+    Up,
+    /// No instance token held, with a complete read behind the claim.
+    Down,
+    /// Neither established.
+    Unobservable,
 }
 
 impl PresenceTone {
     /// Every state of the scale, for the uniqueness tests.
-    pub const ALL: [Self; 3] = [Self::Alive, Self::Suspect, Self::Unknown];
+    pub const ALL: [Self; 3] = [Self::Up, Self::Down, Self::Unobservable];
 
-    /// The swatch this state resolves through — "unknown" is
+    /// The swatch this state resolves through — "unobservable" is
     /// [`Tone::Neutral`], the same discipline as identity.
     pub fn tone(self) -> Tone {
         match self {
-            Self::Alive => Tone::Positive,
-            Self::Suspect => Tone::Negative,
-            Self::Unknown => Tone::Neutral,
+            Self::Up => Tone::Positive,
+            Self::Down => Tone::Negative,
+            Self::Unobservable => Tone::Neutral,
         }
     }
 
-    /// The badge glyph, carried by the type (#193): a token seen, a token
-    /// retracted, and a question never asked.
+    /// The badge glyph, carried by the type (#193): a token held, none held,
+    /// and a question that could not be answered.
     pub fn glyph(self) -> &'static str {
         match self {
-            Self::Alive => "●",
-            Self::Suspect => "✗",
-            Self::Unknown => "·",
+            Self::Up => "●",
+            Self::Down => "✗",
+            Self::Unobservable => "·",
         }
     }
 }
@@ -902,7 +950,7 @@ mod tests {
         all_distinct("budget", &BudgetTone::ALL.map(BudgetTone::glyph));
         all_distinct("presence", &PresenceTone::ALL.map(PresenceTone::glyph));
         all_distinct("severity", &SeverityTone::ALL.map(SeverityTone::glyph));
-        all_distinct("coverage", &CoverageTone::ALL.map(CoverageTone::glyph));
+        all_distinct("judgement", &JudgementTone::ALL.map(JudgementTone::glyph));
         all_distinct("verdict", &VerdictTone::ALL.map(VerdictTone::glyph));
         all_distinct("rung", &RungTone::ALL.map(RungTone::glyph));
     }

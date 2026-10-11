@@ -18,7 +18,9 @@ pub(crate) fn update(admin: &AdminState, msg: MeshMsg) -> Task<Message> {
             let Some(sweep) = admin.sweep.as_deref() else {
                 return Task::none();
             };
-            iced::clipboard::write(zenkey_fleet_v1::render_dot(&sweep.topology, &sweep.origins))
+            // zk2's (#614, FL9): the instance join rides in the topology
+            // itself, drawn as `zenctl admin graph --format dot` draws it.
+            iced::clipboard::write(zenkey_fleet::render_dot(&sweep.topology))
         }
     }
 }

@@ -188,7 +188,7 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
 
     for f in &report.findings {
         col = col.push(kit::finding(
-            SeverityTone::of(f.severity),
+            SeverityTone::of_v1(f.severity),
             f.check.as_str(),
             f.subject.clone(),
             f.evidence.clone(),

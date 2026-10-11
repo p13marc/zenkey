@@ -119,13 +119,14 @@ impl MeshRole {
     }
 }
 
-/// One origin satellite (#131): drawn beside the node its evidence names.
-struct MeshOrigin {
+/// One instance satellite (#131; zk2's since #614, FL9): drawn beside a
+/// verified router whose session list names its zid. There is no weaker
+/// grade to draw: an unverified answer attaches nothing (§4.2).
+struct MeshInstance {
+    /// Its address, `<system>/<service>`.
     label: String,
-    /// Index into `nodes` of the session (solid) or reporter (dotted).
+    /// Index into `nodes` of the router it is attached to.
     anchor: usize,
-    /// `true` = only reported-by — the weaker evidence, drawn dotted.
-    reported: bool,
 }
 
 /// The caption + canvas pair.
@@ -146,12 +147,8 @@ fn topology<'a>(
         return col.into();
     }
     let heard_of = report.nodes.iter().filter(|n| !n.answered).count();
-    let storage_zids: std::collections::BTreeSet<&str> = sweep
-        .storage
-        .storages
-        .iter()
-        .map(|s| s.zid.as_str())
-        .collect();
+    let storage_zids: std::collections::BTreeSet<&str> =
+        sweep.storages.iter().map(|s| s.zid.as_str()).collect();
     let nodes: Vec<MeshNode> = report
         .nodes
         .iter()
@@ -168,53 +165,70 @@ fn topology<'a>(
     // the per-reporter edges by unordered zid pair and marks reciprocal
     // reports as corroboration — a distinction the hand-rolled dedup this
     // replaces used to throw away.
-    let links = zenkey_fleet_v1::mesh_links(report);
+    let links = zenkey_fleet::mesh_links(report);
     let edges: Vec<(usize, usize, bool)> = links
         .iter()
         .filter_map(|l| Some((index_of(&l.a)?, index_of(&l.b)?, l.corroborated)))
         .collect();
-    // The origin overlay (#131): anchor each attachment to the node its
-    // evidence names — session zid when the admin sources named one, the
-    // mere reporter (drawn dotted) otherwise. Unanchorable rows are counted
-    // out loud rather than dropped silently.
-    let mut origins: Vec<MeshOrigin> = Vec::new();
+    // The instance overlay (#131; zk2's since #614, FL9 — #705's join):
+    // each zk2 instance hangs off every verified router whose session list
+    // names the zid its descriptor states. An unattached or unattributable
+    // instance has no node to hang off, and is counted out loud rather than
+    // dropped; a router the drawing does not hold likewise.
+    let mut instances: Vec<MeshInstance> = Vec::new();
     let mut unanchored = 0usize;
-    for a in &sweep.origins {
-        let (zid, reported) = match &a.session_zid {
-            Some(z) => (z.as_str(), false),
-            None => (a.reporter_zid.as_str(), true),
-        };
-        match index_of(zid) {
-            Some(anchor) => origins.push(MeshOrigin {
-                label: a.origin.clone(),
-                anchor,
-                reported,
-            }),
-            None => unanchored += 1,
+    let join = report.instances.as_option();
+    for i in join.map(|j| j.instances.as_slice()).unwrap_or_default() {
+        if let zenkey_fleet::report::Attachment::Attached { routers } = &i.attachment {
+            for r in routers {
+                match index_of(&r.router) {
+                    Some(anchor) => instances.push(MeshInstance {
+                        label: i.address.clone(),
+                        anchor,
+                    }),
+                    None => unanchored += 1,
+                }
+            }
         }
     }
     col = col.push(kit::muted(format!(
         "{} node(s) ({} answered, {heard_of} heard of, not queryable) · {} link(s) · \
          filled = admin space answered · ⌂ = hosts a storage · ring = this session · \
-         base {:?} (bases are deployment-global; the drawing is base-blind)",
+         the mesh is the bus's; only the instances are {}'s",
         report.nodes.len(),
         report.answered,
         edges.len(),
-        sweep.base,
+        if sweep.namespace.is_empty() {
+            "the bus root".to_string()
+        } else {
+            format!("namespace {:?}", sweep.namespace)
+        },
     )));
     // The letters inside the nodes (#540), said in words.
     col = col.push(kit::muted(
         "R router · P peer · C client — the role each node reported",
     ));
-    if !sweep.origins.is_empty() || unanchored > 0 {
-        let attached = origins.iter().filter(|o| !o.reported).count();
-        col = col.push(kit::muted(format!(
-            "origins: {} attached by declaration · {} reported-only (dotted) · \
-             {unanchored} naming a session outside the drawn mesh (listed, not drawn)",
-            attached,
-            origins.len() - attached,
-        )));
-    }
+    col = col.push(kit::muted(match join {
+        None => "instances: not joined — no session in the namespace to read presence through"
+            .to_string(),
+        Some(j) if j.unobservable.is_some() => format!(
+            "instances: unobservable — {}",
+            j.unobservable.as_deref().unwrap_or_default()
+        ),
+        Some(j) => {
+            let (attached, unattached, unattributable) = j.counts();
+            format!(
+                "instances: {attached} attached to a verified router (drawn) · {unattached} \
+                 unattached · {unattributable} unattributable (no zid) · {unanchored} on a \
+                 router outside the drawing — listed, not drawn{}",
+                if j.complete {
+                    ""
+                } else {
+                    " · presence possibly incomplete (§8.1)"
+                }
+            )
+        }
+    }));
     if !edges.is_empty() {
         let corroborated = edges.iter().filter(|(_, _, c)| *c).count();
         // Reciprocal reports are corroboration, not duplication — a link
@@ -272,7 +286,7 @@ fn topology<'a>(
         iced::widget::canvas(Mesh {
             nodes,
             edges,
-            origins,
+            instances,
             cache: mesh_cache,
         })
         .width(Length::Fill)
@@ -299,7 +313,7 @@ struct Mesh<'a> {
     /// `(a, b, corroborated)` — corroborated links draw wider, because both
     /// ends reported them (the engine's `mesh_links` distinction, #234).
     edges: Vec<(usize, usize, bool)>,
-    origins: Vec<MeshOrigin>,
+    instances: Vec<MeshInstance>,
     /// Retained geometry (#178).
     ///
     /// The drawing depends on the sweep *and* on the pan/zoom viewport, and
@@ -505,11 +519,11 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
                     ..canvas::Text::default()
                 });
             }
-            // Origin satellites (#131): hexagon-ish diamonds fanned around
-            // their anchor, solid line for a sources-named session, dotted for
-            // reported-only — the drawing keeps the evidence distinction.
+            // Instance satellites (#131; zk2's since FL9): small dots fanned
+            // around the router whose verified session list names them, a
+            // solid line to it — attached is the only grade there is.
             let mut fan: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-            for o in &self.origins {
+            for o in &self.instances {
                 let slot = fan.entry(o.anchor).or_insert(0);
                 let k = *slot;
                 *slot += 1;
@@ -517,44 +531,14 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
                 let angle = std::f32::consts::TAU * (k as f32) / 6.0 + 0.5;
                 let d = NODE_R + 22.0 + 10.0 * (k / 6) as f32;
                 let p = Point::new(a.x + d * angle.cos(), a.y + d * angle.sin());
-                // Neutral (#540): the evidence grade is the drawing — solid
-                // and filled for a declared session, dotted and outlined for
-                // the reporter's word alone — never a verdict colour.
+                // Neutral (#540): an attachment is evidence, never a verdict
+                // colour.
                 let tone = palette.text_muted();
-                if o.reported {
-                    // Dotted: short dashes along the anchor line.
-                    let steps = 6;
-                    for t in 0..steps {
-                        let f0 = t as f32 / steps as f32;
-                        let f1 = f0 + 0.5 / steps as f32;
-                        let seg = canvas::Path::line(
-                            Point::new(a.x + (p.x - a.x) * f0, a.y + (p.y - a.y) * f0),
-                            Point::new(a.x + (p.x - a.x) * f1, a.y + (p.y - a.y) * f1),
-                        );
-                        frame.stroke(
-                            &seg,
-                            canvas::Stroke::default()
-                                .with_width(1.0)
-                                .with_color(palette.text_muted()),
-                        );
-                    }
-                } else {
-                    frame.stroke(
-                        &canvas::Path::line(a, p),
-                        canvas::Stroke::default().with_width(1.0).with_color(tone),
-                    );
-                }
-                let dot = canvas::Path::circle(p, NODE_R - 5.0);
-                if o.reported {
-                    frame.stroke(
-                        &dot,
-                        canvas::Stroke::default()
-                            .with_width(1.2)
-                            .with_color(palette.text_muted()),
-                    );
-                } else {
-                    frame.fill(&dot, tone);
-                }
+                frame.stroke(
+                    &canvas::Path::line(a, p),
+                    canvas::Stroke::default().with_width(1.0).with_color(tone),
+                );
+                frame.fill(&canvas::Path::circle(p, NODE_R - 5.0), tone);
                 frame.fill_text(canvas::Text {
                     content: o.label.clone(),
                     position: Point::new(p.x + NODE_R, p.y + 3.0),

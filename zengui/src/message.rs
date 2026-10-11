@@ -202,6 +202,13 @@ pub enum DeploymentMsg {
     /// rewrite in front.
     CustomSelectorsApplied(Vec<String>),
     Reconnect,
+    /// Read presence and the contracts again (#614, FL9; v1's "re-ask
+    /// schemas", from the doctor): the contract store forgets every
+    /// revision no holder served, and the presence link restarts — a new
+    /// seed, a new lens over the same store, which retrieves what the
+    /// descriptors name. Here rather than under `Pane` because its body
+    /// moves the deployment and the observation, not the doctor's form.
+    RereadPresence,
 }
 
 /// What the whole workspace is looking at (#181).
@@ -244,8 +251,8 @@ pub enum DeploymentMsg {
 /// ## Why `Prefix` is separate from `Key`, which the issue did not have
 ///
 /// A prefix is not a key. `Key` heads a causal chain that ends in a
-/// `fetch_value` GET; routing "show this origin in the tree" through it would
-/// query something no producer publishes — an unasked-for bus query, which is
+/// `fetch_value` GET; routing "show this address in the tree" through it would
+/// query something no owner publishes — an unasked-for bus query, which is
 /// what #85's laziness rule forbids. The distinction is load-bearing, and the
 /// type is where it belongs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -257,8 +264,11 @@ pub enum Subject {
     Key(String),
     /// A subtree prefix — highlighted in the tree, never fetched.
     Prefix(String),
-    /// One origin from the liveliness roster: a host or a service token.
-    Origin(String),
+    /// One service address, `<system>/<service>` (#614, FL9; D10): what
+    /// presence holds up, down or unobservable, and what health is read
+    /// for. v1's origin, which named a host or a service token, has no zk2
+    /// counterpart; an instance is no subject of its own in this port.
+    Address(zenkey_model::grammar::Addr),
 }
 
 impl Subject {
@@ -282,10 +292,10 @@ impl Subject {
         }
     }
 
-    /// The origin, if the subject is one.
-    pub fn origin(&self) -> Option<&str> {
+    /// The address, if the subject is one.
+    pub fn address(&self) -> Option<&zenkey_model::grammar::Addr> {
         match self {
-            Subject::Origin(o) => Some(o),
+            Subject::Address(a) => Some(a),
             _ => None,
         }
     }
@@ -326,8 +336,8 @@ pub enum SubjectMsg {
     ///
     /// One message where there were three — `SelectKey`, `SelectPath` and the
     /// nodes pane's own `Selected`. What happens next is the [`Subject`]'s
-    /// business, not the caller's: a `Key` fetches, an `Origin` asks for its
-    /// `node_info`, a `Prefix` does neither.
+    /// business, not the caller's: a `Key` fetches, an `Address` asks for its
+    /// `health.v1` (#614, FL9), a `Prefix` does neither.
     Select(Subject),
 }
 
@@ -454,14 +464,15 @@ pub enum ChromeMsg {
 /// nothing. The pane identity is already the variant tag.
 ///
 /// `Pane(..)` is a **provenance** tag — which surface emitted the message — not
-/// a **scope** claim about what its handler may touch. Six of them mutate
+/// a **scope** claim about what its handler may touch. Five of them mutate
 /// app-wide state today and #176 deliberately left them:
 ///
 /// * `NodesMsg::ShowInTree` — writes `expanded` and `selected`, reflattens
 /// * `DoctorMsg::FindingClicked` — opens tree prefixes and re-enters a
-///   selection, or flips `right_pane` and drives the nodes handler
-/// * `DoctorMsg::ReaskSchemas` — clears the global schema store
-/// * `AdminMsg::FilterProducer` — flips `right_pane`, re-emits a tree search
+///   selection, or flips `right_pane` and re-enters an address selection
+/// * `DoctorMsg::Reread` — raises `DeploymentMsg::RereadPresence`, which
+///   restarts the presence link (#614, FL9; it was `ReaskSchemas`, which
+///   cleared v1's schema store)
 /// * `EchoMsg::LineClicked` — flips `right_pane`, re-enters a selection
 /// * `ContextMsg::{SaveAndSelect, Isolate}` — reopens the session, rewrites
 ///   deployment settings
@@ -793,22 +804,27 @@ mod tests {
     /// rather than merely avoided at each call site.
     #[test]
     fn only_a_key_is_fetchable_and_a_prefix_is_still_a_path() {
-        let key = Subject::Key("v1/h-3fa9c2d41b7e/state/sysinfo/health".into());
-        let prefix = Subject::Prefix("v1/h-3fa9c2d41b7e".into());
-        let origin = Subject::Origin("h-3fa9c2d41b7e".into());
+        let key = Subject::Key("zk2/robot1/nav/nav.v2/state/status".into());
+        let prefix = Subject::Prefix("zk2/robot1/nav".into());
+        let nav: zenkey_model::grammar::Addr = "robot1/nav".parse().expect("an address");
+        let address = Subject::Address(nav.clone());
 
-        assert_eq!(key.key(), Some("v1/h-3fa9c2d41b7e/state/sysinfo/health"));
+        assert_eq!(key.key(), Some("zk2/robot1/nav/nav.v2/state/status"));
         assert_eq!(prefix.key(), None, "a prefix must never be fetched");
-        assert_eq!(origin.key(), None);
+        assert_eq!(address.key(), None, "an address has no value of its own");
         assert_eq!(Subject::None.key(), None);
 
         // Both are display paths, and the tree highlights either.
-        assert_eq!(key.path(), Some("v1/h-3fa9c2d41b7e/state/sysinfo/health"));
-        assert_eq!(prefix.path(), Some("v1/h-3fa9c2d41b7e"));
-        assert_eq!(origin.path(), None, "an origin id is not a display path");
+        assert_eq!(key.path(), Some("zk2/robot1/nav/nav.v2/state/status"));
+        assert_eq!(prefix.path(), Some("zk2/robot1/nav"));
+        assert_eq!(
+            address.path(),
+            None,
+            "an address is namespace-relative, not a display path"
+        );
 
-        assert_eq!(origin.origin(), Some("h-3fa9c2d41b7e"));
-        assert_eq!(key.origin(), None);
+        assert_eq!(address.address(), Some(&nav));
+        assert_eq!(key.address(), None);
     }
 
     #[test]
@@ -821,7 +837,7 @@ mod tests {
                 SlotId::FOLLOW,
                 view::detail::DetailMsg::LeafSelected(String::new()),
             ),
-            PaneMsg::Nodes(view::nodes::NodesMsg::ShowInTree(String::new())),
+            PaneMsg::Nodes(view::nodes::NodesMsg::AskHealth),
             PaneMsg::Doctor(view::doctor::DoctorMsg::Run),
             PaneMsg::History(SlotId::FOLLOW, view::history::HistoryMsg::Clear),
             PaneMsg::Blob(view::blob::BlobMsg::Probe),

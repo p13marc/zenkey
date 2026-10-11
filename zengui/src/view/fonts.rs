@@ -50,7 +50,7 @@ mod tests {
     use super::*;
     use crate::view::kit::Icon;
     use crate::view::theme::{
-        BudgetTone, CoverageTone, IdentityTone, PresenceTone, RungTone, SeverityTone, VerdictTone,
+        BudgetTone, IdentityTone, JudgementTone, PresenceTone, RungTone, SeverityTone, VerdictTone,
     };
 
     fn face_of(bytes: &[u8]) -> ttf_parser::Face<'_> {
@@ -122,7 +122,7 @@ mod tests {
         glyphs.extend(BudgetTone::ALL.map(|t| t.glyph()));
         glyphs.extend(PresenceTone::ALL.map(|t| t.glyph()));
         glyphs.extend(SeverityTone::ALL.map(|t| t.glyph()));
-        glyphs.extend(CoverageTone::ALL.map(|t| t.glyph()));
+        glyphs.extend(JudgementTone::ALL.map(|t| t.glyph()));
         glyphs.extend(VerdictTone::ALL.map(|t| t.glyph()));
         glyphs.extend(RungTone::ALL.map(|t| t.glyph()));
         // The sentences' own punctuation: separators, arrows, units.

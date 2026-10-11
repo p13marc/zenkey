@@ -78,7 +78,9 @@ pub struct ConfigData<'a> {
     pub form: &'a ConfigForm,
     /// Producers whose slice declares `config/…` — the picker's offer.
     pub producers: Vec<String>,
-    /// Origins the roster has seen running the named producer.
+    /// v1 origins to offer. Empty since #614 (FL9): the v1 roster that
+    /// offered them read alive tokens no zk2 service holds, and it is gone,
+    /// so an origin is typed until FL11 removes this tool.
     pub origins: Vec<String>,
     /// Whether a session exists to ask through.
     pub session: bool,

@@ -153,11 +153,12 @@ pub fn badge_severity<'a, M: 'a>(
     glyph_badge(tone.glyph(), label, tone.tone())
 }
 
-/// A storage-coverage badge (#70) — theme-resolved like [`tone_badge`], and
-/// carrying the CLI's own mark via the tone so the two explorers read alike.
-/// Mark **and** text, never colour alone.
-pub fn badge_coverage<'a, M: 'a>(
-    tone: crate::view::theme::CoverageTone,
+/// A judgement badge (#614, FL9; RFC 13 §1.2) — theme-resolved like
+/// [`tone_badge`], carrying the CLI's own mark via the tone so the two
+/// explorers read alike: a doctor check's verdict, an S4 storage row. Mark
+/// **and** text, never colour alone.
+pub fn badge_judgement<'a, M: 'a>(
+    tone: crate::view::theme::JudgementTone,
     label: impl Into<String>,
 ) -> Element<'a, M> {
     glyph_badge(tone.glyph(), label, tone.tone())

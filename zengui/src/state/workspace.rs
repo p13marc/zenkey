@@ -3,14 +3,14 @@
 //! Four sub-groups, split by what a base change owes each:
 //!
 //! - [`Verdicts`] — the nodes, doctor, blob and admin panes, whose content is
-//!   *a verdict about a fleet*. They are dropped with it. (`roster` lives here
+//!   *a verdict about a fleet*. They are dropped with it. (`nodes` lives here
 //!   rather than in [`super::observation`], which is the one placement worth
-//!   arguing about: it is fed by the tick, like the key tree. But being fed by
-//!   the tick is not a group — the tick also feeds `media.viewing` and the
-//!   subject\'s history. It is `NodesData`\'s first field, and it is cleared
-//!   with `node_detail`, so it is filed with it. The origin *selection* is no
-//!   longer here at all — since #181 there is one subject, and it is the
-//!   user's, not this pane's.)
+//!   arguing about: its freshness join is fed by the tick, like the key tree.
+//!   But being fed by the tick is not a group — the tick also feeds
+//!   `media.viewing` and the subject\'s history — and the same state holds
+//!   the selected address's health reading, a verdict if anything is. The
+//!   address *selection* is not here at all — since #181 there is one
+//!   subject, and it is the user's, not this pane's.)
 //! - [`Workbench`] — what the user typed. Kept: a half-written publish body is
 //!   not a claim about any fleet.
 //! - [`EchoPane`] — the live line ring and its filters. Kept, and the ring is
@@ -353,10 +353,12 @@ sub_state! {
     /// Panes whose content is a verdict about a fleet.
     #[derive(Default)]
     pub(crate) struct Verdicts {
-        /// The node dashboard's presence model (#61), fed by liveliness only.
-        pub(crate) roster: crate::nodes::NodeRoster,
-        /// Its one-shot `node_info` detail — the pane's only data-plane cost.
-        pub(crate) node_detail: view::nodes::DetailState,
+        /// The node dashboard's model (#61; zk2's since #614, FL9): each
+        /// address's descriptors, indexed per catalog; the watched-freshness
+        /// join, per tick; and the selected address's `health.v1`, read on
+        /// selection — the pane's only data-plane cost. Presence itself is
+        /// the deployment's (`Deployment::presence`), never copied here.
+        pub(crate) nodes: crate::nodes::NodesState,
         /// The doctor panel's run state (#71) — run-on-demand only.
         pub(crate) doctor: crate::doctor::DoctorState,
         /// The blob browser's state (#68) — probe and fetch, both on demand.
@@ -374,13 +376,13 @@ sub_state! {
 impl Verdicts {
     /// Drop every verdict — deliberately **not** `Default::default()`.
     ///
-    /// `DoctorState::clear` keeps `deep` and `listen` (user input, not a
-    /// verdict) and `BlobState::clear` cancels an in-flight transfer first. A
-    /// blanket default would abandon a running fetch and silently retype the
+    /// `DoctorState::clear` keeps `deep` (user input, not a verdict),
+    /// `NodesState::clear` keeps the clock toggle (the operator's word), and
+    /// `BlobState::clear` cancels an in-flight transfer first. A blanket
+    /// default would abandon a running fetch and silently retype the
     /// doctor\'s form.
     pub(crate) fn forget(&mut self) {
-        self.roster.clear();
-        self.node_detail = view::nodes::DetailState::NotAsked;
+        self.nodes.clear();
         self.doctor.clear();
         self.blob.clear();
         self.admin.clear();

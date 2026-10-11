@@ -180,8 +180,8 @@ fn pin_banner<'a>(sub: &'a SubjectState, slot: SlotId) -> Element<'a, Message> {
                 "pinned to the subtree {p} — the selection drives the docked \
                  Inspector, not this window; closing it unpins"
             ),
-            crate::message::Subject::Origin(o) => format!(
-                "pinned to the origin {o} — the selection drives the docked \
+            crate::message::Subject::Address(a) => format!(
+                "pinned to the address {a} — the selection drives the docked \
                  Inspector, not this window; closing it unpins"
             ),
             // Unreachable — a pin is only minted for a subject — but a match
@@ -328,13 +328,11 @@ fn inspector<'a>(
         blob: &work.verdicts.blob,
         media: &work.bench.media,
         slices: None,
-        roster: &work.verdicts.roster,
-        node_detail: &work.verdicts.node_detail,
+        presence: dep.presence.as_deref(),
+        nodes: &work.verdicts.nodes,
         fields: &slot.fields,
         why: &slot.why,
         consumers: &slot.consumers,
-        base: dep.namespace(),
-        observed: &obs.observed,
         sp,
     })
 }
@@ -427,23 +425,21 @@ fn workbench<'a>(
             view::send::pane(&work.bench.send_form, work.replay.replay.is_some(), sp)
         }
         RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
-            roster: &work.verdicts.roster,
-            selected: sub.follow.current.origin(),
-            detail: &work.verdicts.node_detail,
-            slices: None,
+            presence: dep.presence.as_deref(),
+            nodes: &work.verdicts.nodes,
+            selected: sub.follow.current.address(),
             sp,
         }),
-        RightPane::Admin => view::admin::pane(&work.verdicts.admin, sp),
+        RightPane::Admin => {
+            view::admin::pane(&work.verdicts.admin, dep.admin_declared.as_deref(), sp)
+        }
         RightPane::Mesh => view::mesh::pane(&work.verdicts.admin, sp),
         RightPane::Config => {
             let form = &work.bench.config_form;
             view::configure::pane(view::configure::ConfigData {
                 form,
                 producers: crate::configure::producers(None),
-                origins: crate::configure::origins(
-                    &work.verdicts.roster,
-                    form.target.producer.trim(),
-                ),
+                origins: Vec::new(),
                 session: dep.raw.is_some(),
                 sp,
             })
