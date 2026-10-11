@@ -162,67 +162,191 @@ fn router_process() {
     });
 }
 
-/// What one run of §1 saw: the sequence numbers heard, and the owner's
-/// instance-token deletes the consumer saw.
-struct SlowRun {
-    heard: Vec<u32>,
-    deletes: usize,
-    took: Duration,
+/// A monotonic ticker on a thread of its own (core §2.7, 0.27): the
+/// greatest gap between two of its ticks, the one still open included, is
+/// how long this process was stalled at most. It sees a process that does
+/// not run (stopped, starved, swapped out), and not zenoh's receive threads
+/// blocked while the rest of the process runs (`spec/scenarios/budget.md`
+/// §1). Stops when dropped.
+struct Ticker {
+    worst: Arc<Mutex<Duration>>,
+    last: Arc<Mutex<Instant>>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
-/// One run of §1: R2 → R1 each in a process of its own; an owner, a client
-/// of R2 holding an instance token, puts `sent` samples of 16 KiB as fast as
-/// its publisher lets it, with the QoS given; a consumer, a client of R1,
-/// takes 2 ms over each sample, and `stuck` over the 100th. It runs until a
-/// second passes with nothing new heard.
-async fn slow_reader(
+impl Ticker {
+    const PERIOD: Duration = Duration::from_millis(50);
+
+    fn start() -> Ticker {
+        let worst: Arc<Mutex<Duration>> = Arc::default();
+        let last = Arc::new(Mutex::new(Instant::now()));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (w, l, s) = (Arc::clone(&worst), Arc::clone(&last), Arc::clone(&stop));
+        std::thread::spawn(move || {
+            while !s.load(Ordering::SeqCst) {
+                std::thread::sleep(Self::PERIOD);
+                let now = Instant::now();
+                let mut last = l.lock().unwrap();
+                let mut worst = w.lock().unwrap();
+                *worst = (*worst).max(now - *last);
+                *last = now;
+            }
+        });
+        Ticker { worst, last, stop }
+    }
+
+    fn worst(&self) -> Duration {
+        let open = self.last.lock().unwrap().elapsed();
+        (*self.worst.lock().unwrap()).max(open)
+    }
+}
+
+impl Drop for Ticker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
+}
+
+/// What one run of §1 saw. Beside the samples: whether the consumer had
+/// received the owner's instance token when it stalled, the withdrawals of
+/// it the consumer saw, the transports of the consumer's own session that
+/// closed (zenoh's transport events, unstable in 1.10.1), and the worst gap
+/// its ticker saw.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct SlowRun {
+    heard: Vec<u32>,
+    token_before_stall: bool,
+    withdrawals: usize,
+    transports_closed: usize,
+    worst_gap_ms: u64,
+    took_ms: u64,
+}
+
+/// The consumer of §1, on a session of its own: its subscription takes
+/// 2 ms over each sample, and `stuck` over the 100th, with zenoh's receive
+/// thread held; beside it, the owner's instance tokens, the session's
+/// transport events and a ticker. `on_100` runs when the 100th sample
+/// arrives, before the stall.
+struct Reader {
+    heard: Heard,
+    token_before_stall: Arc<std::sync::atomic::AtomicBool>,
+    withdrawals: Arc<AtomicU64>,
+    closed: Arc<AtomicU64>,
+    ticker: Ticker,
+    started: Instant,
+    _sub: zenoh::pubsub::Subscriber<()>,
+    _tokens: zenoh::pubsub::Subscriber<()>,
+    _events: zenoh::session::TransportEventsListener<()>,
+}
+
+impl Reader {
+    async fn new(
+        session: &zenoh::Session,
+        stuck: Duration,
+        on_100: impl Fn() + Send + Sync + 'static,
+    ) -> Reader {
+        let heard: Heard = Arc::default();
+        let token_seen = Arc::new(AtomicU64::new(0));
+        let token_before_stall = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (h, seen, before) = (
+            Arc::clone(&heard),
+            Arc::clone(&token_seen),
+            Arc::clone(&token_before_stall),
+        );
+        let sub = session
+            .declare_subscriber("zk2/lab/budget/budget.v1/stream/load/c0")
+            .callback(move |s| {
+                // A slow reader: zenoh's receive task waits on it.
+                let n = seq(&s.payload().to_bytes());
+                let wait = if n == 100 {
+                    before.store(seen.load(Ordering::SeqCst) > 0, Ordering::SeqCst);
+                    on_100();
+                    stuck
+                } else {
+                    Duration::from_millis(2)
+                };
+                std::thread::sleep(wait);
+                h.lock().unwrap().push(n);
+            })
+            .await
+            .unwrap();
+        let withdrawals = Arc::new(AtomicU64::new(0));
+        let (w, seen) = (Arc::clone(&withdrawals), Arc::clone(&token_seen));
+        let tokens = session
+            .liveliness()
+            .declare_subscriber("zk2/lab/budget/@zk/instance/*")
+            .callback(move |s| match s.kind() {
+                SampleKind::Put => {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                }
+                SampleKind::Delete => {
+                    w.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .await
+            .unwrap();
+        let closed = Arc::new(AtomicU64::new(0));
+        let c = Arc::clone(&closed);
+        let events = session
+            .info()
+            .transport_events_listener()
+            .callback(move |e| {
+                if e.kind() == SampleKind::Delete {
+                    c.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .await
+            .unwrap();
+        Reader {
+            heard,
+            token_before_stall,
+            withdrawals,
+            closed,
+            ticker: Ticker::start(),
+            started: Instant::now(),
+            _sub: sub,
+            _tokens: tokens,
+            _events: events,
+        }
+    }
+
+    /// Waits out a stall of `stuck`, then until a second passes with
+    /// nothing new heard, then two more for a withdrawal or a close still
+    /// on its way; what it saw.
+    async fn settle(&self, stuck: Duration) -> SlowRun {
+        tokio::time::sleep(stuck).await;
+        let mut last = usize::MAX;
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let now = self.heard.lock().unwrap().len();
+            if now == last {
+                break;
+            }
+            last = now;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        SlowRun {
+            heard: self.heard.lock().unwrap().clone(),
+            token_before_stall: self.token_before_stall.load(Ordering::SeqCst),
+            withdrawals: self.withdrawals.load(Ordering::SeqCst) as usize,
+            transports_closed: self.closed.load(Ordering::SeqCst) as usize,
+            worst_gap_ms: self.ticker.worst().as_millis() as u64,
+            took_ms: self.started.elapsed().as_millis() as u64,
+        }
+    }
+}
+
+/// The owner of §1 on `owner`: its publisher, with the QoS given, once it
+/// matches the consumer; `sent` samples of 16 KiB put on it as fast as it
+/// lets them, each numbered.
+async fn slow_owner(
+    owner: &zenoh::Session,
     reliability: Reliability,
     congestion: CongestionControl,
     sent: u32,
-    stuck: Duration,
-) -> SlowRun {
-    let r1 = spawn_router(None);
-    let r2 = spawn_router(Some(&r1.endpoint));
-    let owner = client(&r2.endpoint).await;
-    let consumer = client(&r1.endpoint).await;
-    let key = "zk2/lab/budget/budget.v1/stream/load/c0";
-    let t = Instant::now();
-    let heard: Heard = Arc::default();
-    let h = Arc::clone(&heard);
-    let _sub = consumer
-        .declare_subscriber(key)
-        .callback(move |s| {
-            // A slow reader: zenoh's receive task waits on it.
-            let n = seq(&s.payload().to_bytes());
-            let wait = if n == 100 {
-                stuck
-            } else {
-                Duration::from_millis(2)
-            };
-            std::thread::sleep(wait);
-            h.lock().unwrap().push(n);
-        })
-        .await
-        .unwrap();
-    let deletes = Arc::new(AtomicU64::new(0));
-    let d = Arc::clone(&deletes);
-    let _tokens = consumer
-        .liveliness()
-        .declare_subscriber("zk2/lab/budget/@zk/instance/*")
-        .callback(move |s| {
-            if s.kind() == SampleKind::Delete {
-                d.fetch_add(1, Ordering::SeqCst);
-            }
-        })
-        .await
-        .unwrap();
-    let _token = owner
-        .liveliness()
-        .declare_token("zk2/lab/budget/@zk/instance/1")
-        .await
-        .unwrap();
+) -> zenoh::pubsub::Publisher<'static> {
     let publisher = owner
-        .declare_publisher(key)
+        .declare_publisher("zk2/lab/budget/budget.v1/stream/load/c0")
         .reliability(reliability)
         .congestion_control(congestion)
         .await
@@ -236,34 +360,183 @@ async fn slow_reader(
         payload[..4].copy_from_slice(&n.to_le_bytes());
         publisher.put(payload.clone()).await.unwrap();
     }
-    // A stuck reader hears nothing while it is stuck.
-    tokio::time::sleep(stuck).await;
-    let mut last = usize::MAX;
-    loop {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let now = heard.lock().unwrap().len();
-        if now == last {
-            break;
+    publisher
+}
+
+async fn instance_token(owner: &zenoh::Session) -> zenoh::liveliness::LivelinessToken {
+    owner
+        .liveliness()
+        .declare_token("zk2/lab/budget/@zk/instance/1")
+        .await
+        .unwrap()
+}
+
+/// One run of §1, steps 1–3: R2 → R1 each in a process of its own; an
+/// owner, a client of R2 holding an instance token, and a consumer, a
+/// client of R1 in this process, which takes 2 ms over each sample and
+/// `stuck` over the 100th. It runs until a second passes with nothing new
+/// heard.
+async fn slow_reader(
+    reliability: Reliability,
+    congestion: CongestionControl,
+    sent: u32,
+    stuck: Duration,
+) -> SlowRun {
+    let r1 = spawn_router(None);
+    let r2 = spawn_router(Some(&r1.endpoint));
+    let owner = client(&r2.endpoint).await;
+    let consumer = client(&r1.endpoint).await;
+    let reader = Reader::new(&consumer, stuck, || {}).await;
+    let _token = instance_token(&owner).await;
+    let _publisher = slow_owner(&owner, reliability, congestion, sent).await;
+    reader.settle(stuck).await
+}
+
+/// The consumer of §1 step 4, in a process of its own: a [`Reader`] with
+/// no stall of its own, saying when the 100th sample arrives so that the
+/// test stops the process there; what it saw, as one line of JSON.
+#[test]
+#[ignore = "a consumer process, spawned by the tests of this file"]
+fn consumer_process() {
+    use std::io::Write;
+    let Ok(endpoint) = std::env::var("ZK2_CONSUMER_CONNECT") else {
+        return;
+    };
+    let stop: u64 = std::env::var("ZK2_CONSUMER_STOP_S")
+        .expect("the stop")
+        .parse()
+        .expect("seconds");
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let consumer = client(&endpoint).await;
+        let reader = Reader::new(&consumer, Duration::from_millis(2), || {
+            println!("ZK2-HEARD-100");
+            std::io::stdout().flush().unwrap();
+        })
+        .await;
+        println!("\nZK2-READY");
+        std::io::stdout().flush().unwrap();
+        // The stop happens while this waits.
+        tokio::time::sleep(Duration::from_secs(stop)).await;
+        let run = reader.settle(Duration::ZERO).await;
+        println!("ZK2-RUN {}", serde_json::to_string(&run).unwrap());
+        std::io::stdout().flush().unwrap();
+    });
+}
+
+/// The first line of `rx` that starts with `want`.
+fn line_of(rx: &std::sync::mpsc::Receiver<String>, want: &str) -> String {
+    rx.iter()
+        .find(|l| l.starts_with(want))
+        .unwrap_or_else(|| panic!("the consumer process never said {want}"))
+}
+
+/// Sends `signal` to the process `pid`.
+#[cfg(unix)]
+fn signal(signal: &str, pid: &str) {
+    let sent = std::process::Command::new("kill")
+        .args([signal, pid])
+        .status()
+        .is_ok_and(|s| s.success());
+    assert!(sent, "kill {signal} {pid}");
+}
+
+/// §1 step 4: the consumer in a process of its own, stopped (SIGSTOP) for
+/// `stopped` when the 100th sample arrives, then continued. The owner's
+/// token reaches it before the samples start.
+#[cfg(unix)]
+async fn stopped_reader(sent: u32, stopped: Duration) -> SlowRun {
+    use std::io::BufRead;
+    let r1 = spawn_router(None);
+    let r2 = spawn_router(Some(&r1.endpoint));
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["consumer_process", "--exact", "--ignored", "--nocapture"])
+        .env("ZK2_CONSUMER_CONNECT", &r1.endpoint)
+        .env("ZK2_CONSUMER_STOP_S", (stopped.as_secs() + 2).to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("a consumer process");
+    let pid = child.id().to_string();
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let out = child.stdout.take().unwrap();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(out).lines() {
+            let Ok(line) = line else { break };
+            if tx.send(line).is_err() {
+                break;
+            }
         }
-        last = now;
-    }
-    // A withdrawal still on its way.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    let heard = heard.lock().unwrap().clone();
-    SlowRun {
-        heard,
-        deletes: deletes.load(Ordering::SeqCst) as usize,
-        took: t.elapsed(),
-    }
+    });
+    let rx = tokio::task::spawn_blocking(move || {
+        line_of(&rx, "ZK2-READY");
+        rx
+    })
+    .await
+    .unwrap();
+    let owner = client(&r2.endpoint).await;
+    let _token = instance_token(&owner).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let puts = {
+        let owner = owner.clone();
+        tokio::spawn(async move {
+            slow_owner(
+                &owner,
+                Reliability::Reliable,
+                CongestionControl::Block,
+                sent,
+            )
+            .await
+        })
+    };
+    let line = tokio::task::spawn_blocking(move || {
+        line_of(&rx, "ZK2-HEARD-100");
+        signal("-STOP", &pid);
+        std::thread::sleep(stopped);
+        signal("-CONT", &pid);
+        line_of(&rx, "ZK2-RUN ")
+    })
+    .await
+    .unwrap();
+    let _publisher = puts.await.unwrap();
+    let _ = child.wait();
+    serde_json::from_str(line.strip_prefix("ZK2-RUN ").unwrap()).expect("the run, as JSON")
+}
+
+/// What a §1 run saw, for the record.
+fn report(what: &str, run: &SlowRun, sent: u32) -> (u32, bool) {
+    let (lost, ordered) = losses(&run.heard, sent);
+    eprintln!(
+        "§1 {what}: {} of {sent} heard, {lost} lost, in order: {ordered}; the owner's token held \
+         when the reader stalled: {}, withdrawn {} time(s); the reader's transports closed: {}; \
+         its ticker's worst gap {} ms; in {} ms",
+        run.heard.len(),
+        run.token_before_stall,
+        run.withdrawals,
+        run.transports_closed,
+        run.worst_gap_ms,
+        run.took_ms
+    );
+    (lost, ordered)
 }
 
 /// §1: a reliable, `block` path loses nothing to a slow reader: the queue
 /// that fills waits rather than drops, back to the owner's put, and every
 /// sample arrives in order. The same path at best effort and `drop` loses
-/// samples, and nothing the consumer receives says so. A reader stuck
-/// longer than the queue's `wait_before_close` (5 s) is the one way the
-/// reliable path loses one: its router closes the transport, and the
-/// consumer sees the owner's token withdrawn (Appendix B; 0.25).
+/// samples, and nothing the consumer receives says so.
+///
+/// A reader stalled longer than the queue's `wait_before_close` (5 s) is
+/// the one way the reliable path loses one: its router closes the
+/// transport. What the reader then sees is reported, and only the loss is
+/// asserted (0.27, #753). It saw the owner's token withdrawn only when the
+/// token had reached it before it stalled, which it had not in 4 of 27
+/// recorded runs. What core §2.7's "its reader lost none" reads instead is
+/// the reader's own: its session's transport closing, and, when its whole
+/// process stopped, its ticker's gap, which step 4 asserts (Appendix B).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_a_reliable_blocking_path_loses_nothing_to_a_slow_reader() {
     let _serial = SERIAL.lock().await;
@@ -290,33 +563,40 @@ async fn s1_a_reliable_blocking_path_loses_nothing_to_a_slow_reader() {
         ),
     ] {
         let run = slow_reader(rel, cc, SENT, stuck).await;
-        let (lost, ordered) = losses(&run.heard, SENT);
-        eprintln!(
-            "§1 {what}: {} of {SENT} heard, {lost} lost, in order: {ordered}, the owner's \
-             token withdrawn {} time(s), in {:?}",
-            run.heard.len(),
-            run.deletes,
-            run.took
-        );
+        let (lost, ordered) = report(what, &run, SENT);
         assert!(ordered, "{what}: in order");
         match (rel, stuck > slow) {
             (Reliability::Reliable, false) => {
                 assert_eq!(lost, 0, "{what}: a reliable, blocking path drops nothing");
                 assert_eq!(run.heard.len() as u32, SENT, "{what}: nor duplicates");
-                assert_eq!(run.deletes, 0, "{what}: and nothing failed");
+                assert_eq!(run.withdrawals, 0, "{what}: and nothing failed");
             }
             (Reliability::Reliable, true) => {
                 assert!(lost > 0, "{what}: the stuck reader's router gave up on it");
-                assert!(
-                    run.deletes > 0,
-                    "{what}: by closing the transport, which the consumer sees"
-                );
             }
             (Reliability::BestEffort, _) => {
                 assert!(lost > 0, "{what}: a full queue drops a droppable sample");
-                assert_eq!(run.deletes, 0, "{what}: and nothing says so");
+                assert_eq!(run.withdrawals, 0, "{what}: and nothing says so");
             }
         }
+    }
+    // Step 4: the consumer's whole process stopped for 7 s. Its ticker sees
+    // the stop on its first tick after it.
+    #[cfg(unix)]
+    {
+        let stopped = Duration::from_secs(7);
+        let what = "reliable+block, the reader's process stopped 7 s";
+        let run = stopped_reader(SENT, stopped).await;
+        let (lost, ordered) = report(what, &run, SENT);
+        assert!(ordered, "{what}: in order");
+        assert!(
+            lost > 0,
+            "{what}: the stopped reader's router gave up on it"
+        );
+        assert!(
+            run.worst_gap_ms >= stopped.as_millis() as u64,
+            "{what}: its ticker saw the stop"
+        );
     }
 }
 
