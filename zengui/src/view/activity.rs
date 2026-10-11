@@ -82,7 +82,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
                         .doctor
                         .current
                         .as_ref()
-                        .map(|r| r.findings.len().to_string()),
+                        .map(|r| r.findings().count().to_string()),
                     ActivityTab::Replay => d.replay.recording.is_some().then(|| "rec".to_string()),
                     ActivityTab::Traffic => None,
                 },

@@ -1,4 +1,5 @@
-//! The doctor panel (#71, #109): run on demand, and never invent a verdict.
+//! The doctor panel (#71, #109; zk2's since #614, FL9): run on demand, and
+//! never invent a verdict.
 //!
 //! It used to write `right_pane` directly — clicking a finding lands the user
 //! where the finding is about — and stopped when #180 made pane-landing a
@@ -8,7 +9,7 @@
 
 use iced::Task;
 
-use crate::message::{Message, RightPane, Subject, SubjectMsg, WorkspaceMsg};
+use crate::message::{DeploymentMsg, Message, RightPane, Subject, SubjectMsg, WorkspaceMsg};
 use crate::services;
 use crate::state::workspace::Verdicts;
 use crate::update::Ctx;
@@ -20,58 +21,46 @@ pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message>
             v.doctor.deep = deep;
             Task::none()
         }
-        DoctorMsg::ListenChanged(t) => {
-            v.doctor.listen = t;
+        DoctorMsg::ClocksSynced(synced) => {
+            v.doctor.clocks_synced = synced;
             Task::none()
         }
-        DoctorMsg::ReaskSchemas => {
-            // Local and immediate: the store simply forgets, and the next
-            // decode that needs a schema asks the bus. Nothing is fetched
-            // here — an explorer retrieves nothing it was not asked for
-            // (#85), and "re-ask" is a permission, not a sweep.
-            if let Some(store) = cx.dep.schema_store.as_ref() {
-                store.forget_all();
-                v.doctor.schemas_forgotten += 1;
-                // The cached payload verdicts were judged under the schemas
-                // just forgotten (#164) — the third door a schema hash can
-                // change through, and like the other two it clears.
-                v.payloads.clear();
-            }
-            Task::none()
+        DoctorMsg::Reread => {
+            // v1's "re-ask schemas", on zk2's inputs: presence and the
+            // contracts are read again — the lens's catalog, and every
+            // revision no holder served. A permission, not a sweep of the
+            // data plane (#85): what it costs is one presence read and the
+            // retrievals it owes. The deployment owns both, so the work is
+            // its message's.
+            v.doctor.rereads += 1;
+            Task::done(Message::Deployment(DeploymentMsg::RereadPresence))
         }
         DoctorMsg::Run => {
             if v.doctor.in_flight {
                 return Task::none();
             }
-            let Some(session) = cx.dep.raw.clone() else {
+            // Two sessions, as `zenctl doctor` reads (decided 2026-10-08):
+            // the deployment in its namespace, the admin space in none.
+            let (Some(session), Some(raw)) = (cx.dep.session.clone(), cx.dep.raw.clone()) else {
                 v.doctor.error = Some("no session — connect first".into());
                 return Task::none();
             };
             v.doctor.in_flight = true;
             v.doctor.error = None;
-            let base = cx.dep.namespace().to_string();
-            let timeout = cx.dep.timeout();
-            let deep = v.doctor.deep;
-            let listen = v.doctor.listen_window();
-            // No registry dirs since #614 (FL6a): the v1 doctor runs with no
-            // locals ("no registry loaded", never "a registry that declares
-            // nothing") until FL9 runs zk2's against the contracts.
-            let dirs = Vec::new();
+            let mut spec = zenkey_fleet::DoctorSpec::new(cx.dep.timeout());
+            spec.deep = v.doctor.deep;
+            spec.clocks_synced = v.doctor.clocks_synced;
             services::sweep::doctor(
                 session,
-                base,
-                dirs,
-                zenkey_fleet_v1::DoctorSpec {
-                    deep,
-                    sample: None,
-                    timeout,
-                    listen,
-                },
+                raw,
+                cx.dep.namespace().to_string(),
+                cx.dep.store.clone(),
+                spec,
             )
         }
-        DoctorMsg::Done(outcome) => {
-            let base = cx.dep.namespace().to_string();
-            v.doctor.finish(outcome, &base);
+        DoctorMsg::Done(run) => {
+            let namespace = cx.dep.namespace().to_string();
+            v.doctor.finish(run, &namespace);
             Task::none()
         }
         DoctorMsg::FindingClicked(index) => {
@@ -79,24 +68,26 @@ pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message>
                 .doctor
                 .current
                 .as_deref()
-                .and_then(|r| r.findings.get(index))
+                .and_then(|r| r.findings().nth(index))
             else {
                 return Task::none();
             };
             match crate::doctor::finding_target(finding, cx.dep.namespace()) {
                 // A concrete key: select in the tree (with the usual
-                // on-demand fetch); the right pane stays on Doctor so
-                // the finding list is not lost.
+                // on-demand fetch); the dock stays on Doctor so the finding
+                // list is not lost.
                 Some(crate::doctor::Target::Key(key)) => Task::batch([
                     Task::done(Message::Workspace(WorkspaceMsg::Reveal(key.clone()))),
                     Task::done(Message::Subject(SubjectMsg::Select(Subject::Key(key)))),
                 ]),
-                // A v1 origin subject: no zk2 address to point at, so the
-                // nodes tool is landed on alone, until FL9b's zk2 doctor
-                // names addresses.
-                Some(crate::doctor::Target::Node(_)) => Task::done(Message::Workspace(
+                // An address: point the workspace at it and land on the
+                // nodes tool, which is where an address is legible.
+                Some(crate::doctor::Target::Address(addr)) => Task::done(Message::Workspace(
                     WorkspaceMsg::PaneSelected(RightPane::Nodes),
-                )),
+                ))
+                .chain(Task::done(Message::Subject(SubjectMsg::Select(
+                    Subject::Address(addr),
+                )))),
                 None => Task::none(),
             }
         }

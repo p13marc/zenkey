@@ -1,5 +1,5 @@
-//! The admin & storage panel (#70) — routers, storages, and the coverage table
-//! RFC 09 §2's concern deserves a picture of.
+//! The admin & storage panel (#70; zk2's since #614, FL9) — routers,
+//! storages, and each storage judged against S4.
 //!
 //! **Never ambient.** An `@/**` sweep queries every reachable node, so it costs
 //! exactly one button press — the same ground rule as the doctor pane, and for
@@ -12,20 +12,24 @@
 //!
 //! The distinction the panel exists to draw is between three things that all
 //! render as "nothing here" if nobody makes them render differently: **not
-//! swept**, **swept and the admin space did not answer**, and **swept, answered,
-//! and there is genuinely nothing**. The middle one is what `declared_entities`'
-//! `Option` carries, and it is why the entity section is load-bearing rather
-//! than decoration.
+//! swept**, **swept and the admin space did not answer**, and **swept,
+//! answered, and there is genuinely nothing**.
+//!
+//! **The storage table is S4's** (D14): v1's read "this storage covers the
+//! state" as good, because its `latest` storage was the late-joiner seed.
+//! zk2's owner answers for its own state and a storage there is the finding
+//! — so each row says whether the storage answers on an owner's state in
+//! this namespace, in the doctor's `storage-on-state` words.
 
 use iced::widget::{column, row, scrollable};
 use iced::{Element, Length};
-use zenkey_fleet_v1::report::StorageList;
-use zenkey_fleet_v1::{Coverage, CoverageRow, RouterInfo, StorageInfo};
+use zenkey_fleet::DeclaredEntities;
+use zenkey_fleet::report::{RouterInfo, StorageInfo};
 
-use crate::admin::{AdminState, AdminSweep, router_row_id, storage_row_id};
+use crate::admin::{AdminState, AdminSweep, OnState, S4Row, router_row_id, storage_row_id};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
-use crate::view::theme::CoverageTone;
+use crate::view::theme::JudgementTone;
 use crate::view::tokens::Spacing;
 
 /// How many declared entities the list renders before it stops and says so.
@@ -42,16 +46,21 @@ pub enum AdminMsg {
     Done(Result<std::sync::Arc<AdminSweep>, crate::services::ServiceError>),
     /// Show or hide one row's raw admin document.
     RawToggled(String),
-    /// A coverage row's producer, sent to the tree's search box. A pane never
-    /// reimplements an action another pane owns.
-    FilterProducer(String),
 }
 
 fn msg(m: AdminMsg) -> Message {
     Message::Pane(PaneMsg::Admin(m))
 }
 
-pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
+/// The pane. `declared` is the deployment's own read of the declared
+/// entities (`Deployment::admin_declared`, the skeleton's input): `None`
+/// until an answer lands, or when no admin space answered — never "nothing
+/// declared" (O4).
+pub fn pane<'a>(
+    state: &'a AdminState,
+    declared: Option<&'a DeclaredEntities>,
+    sp: Spacing,
+) -> Element<'a, Message> {
     let run_label = if state.in_flight {
         "sweeping…"
     } else {
@@ -93,10 +102,20 @@ pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
 
     // The mesh is a tool of its own since #541; the admin pane says how big
     // it is and where it went.
+    let instances = match sweep.topology.instances.as_option() {
+        None => String::new(),
+        Some(join) => {
+            let (attached, unattached, unattributable) = join.counts();
+            format!(
+                " · {} attached, {unattached} unattached, {unattributable} unattributable",
+                kit::plural(attached, "instance")
+            )
+        }
+    };
     col = col.push(
         row![
             kit::muted(format!(
-                "topology: {} ({} answered) —",
+                "topology: {} ({} answered){instances} —",
                 kit::plural(sweep.topology.nodes.len(), "node"),
                 sweep.topology.answered
             )),
@@ -110,9 +129,9 @@ pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
         .align_y(iced::Alignment::Center),
     );
     col = col.push(routers(&sweep.routers, state, sp));
-    col = col.push(storages(&sweep.storage, state, sp));
-    col = col.push(coverage(&sweep.storage, sweep.coverage_note.as_deref(), sp));
-    col = col.push(entities(sweep, sp));
+    col = col.push(storages(&sweep.storages, state, sp));
+    col = col.push(s4_table(sweep, sp));
+    col = col.push(entities(declared, sp));
 
     scrollable(col.padding(sp.sm)).height(Length::Fill).into()
 }
@@ -146,7 +165,7 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState, sp: Spacing) -> El
                 // older doc's blank stays a blank.
                 if r.version
                     .as_deref()
-                    .is_some_and(zenkey_fleet_v1::admin_doc_omits_loopback)
+                    .is_some_and(zenkey_fleet::admin_doc_omits_loopback)
                 {
                     "no locators listed — zenoh 1.10+ may omit loopback listen endpoints \
                      from the admin doc"
@@ -168,9 +187,13 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState, sp: Spacing) -> El
     col.into()
 }
 
-fn storages<'a>(list: &'a StorageList, state: &'a AdminState, sp: Spacing) -> Element<'a, Message> {
+fn storages<'a>(
+    list: &'a [StorageInfo],
+    state: &'a AdminState,
+    sp: Spacing,
+) -> Element<'a, Message> {
     let mut col = column![kit::section_header("Storages", None)].spacing(sp.xs);
-    if list.storages.is_empty() {
+    if list.is_empty() {
         // Verbatim from `zenctl storage list`.
         col = col.push(kit::muted(
             "no storages found in the admin space — a peer-only mesh, a router without \
@@ -178,7 +201,7 @@ fn storages<'a>(list: &'a StorageList, state: &'a AdminState, sp: Spacing) -> El
         ));
         return col.into();
     }
-    for s in &list.storages {
+    for s in list {
         col = col.push(storage_row(s, state, sp));
     }
     col.into()
@@ -210,94 +233,80 @@ fn storage_row<'a>(s: &'a StorageInfo, state: &'a AdminState, sp: Spacing) -> El
     kit::card(body)
 }
 
-/// The centrepiece: declared state families against the storages that would
-/// seed them.
-///
-/// Three mutually exclusive states, and the difference between the first two is
-/// the whole point. "No registry loaded, so nothing was judged" and "judged,
-/// and nothing covers it" are different facts, and only one of them is a
-/// finding.
-fn coverage<'a>(list: &'a StorageList, note: Option<&'a str>, sp: Spacing) -> Element<'a, Message> {
-    let mut col = column![kit::section_header(
-        "declared state families vs storage coverage",
-        None
-    )]
-    .spacing(sp.xs);
-
-    if let Some(why) = note {
-        col = col.push(kit::empty(
-            kit::EmptyKind::NotAsked,
-            "coverage not judged",
-            why.to_string(),
-        ));
-        return col.into();
-    }
-    if list.coverage.is_empty() {
-        col = col.push(kit::muted(
-            "0 declared state families — the loaded registry declares no state subjects",
-        ));
-        return col.into();
-    }
-
-    let mut uncovered = 0usize;
-    for r in &list.coverage {
-        if matches!(r.coverage, Coverage::Uncovered) {
-            uncovered += 1;
+/// The centrepiece since FL9: each storage against S4 (core §4.2) — does it
+/// answer on an owner's state in this namespace? A finding, clean, or not
+/// judged, each its own row; and what S4 says instead, once.
+fn s4_table(sweep: &AdminSweep, sp: Spacing) -> Element<'_, Message> {
+    let mut col =
+        column![kit::section_header("S4: storages on owners' state", None)].spacing(sp.xs);
+    col = col.push(kit::muted(format!(
+        "judged in {} against every owner's state/** and @state/** — named apart, \
+         because * and ** never cross a verbatim chunk (core §1.3)",
+        if sweep.namespace.is_empty() {
+            "the bus root".to_string()
+        } else {
+            format!("namespace {:?}", sweep.namespace)
         }
-        col = col.push(coverage_row(r, sp));
-    }
-
-    if uncovered > 0 {
-        // RFC 09 §2's consequence, which is the visual #70 exists to add.
+    )));
+    if sweep.s4.is_empty() {
         col = col.push(kit::muted(
-            "no storage captures an uncovered family — while its producer is down, a late \
-             joiner GETs nothing: the `latest` storage is the fleet-wide late-joiner seed \
-             (RFC 09 §2)",
+            "no storage to judge — the sweep found none (above)",
+        ));
+        return col.into();
+    }
+    let findings = sweep
+        .s4
+        .iter()
+        .filter(|r| matches!(r.on_state, OnState::Finding(_)))
+        .count();
+    for r in &sweep.s4 {
+        col = col.push(s4_row(r, sp));
+    }
+    if findings > 0 {
+        // S4's consequence, in the doctor's words: the finding is what the
+        // owner's authority makes of a storage there.
+        col = col.push(kit::muted(
+            "a deployment MUST NOT run a storage on owners' state (core §4.2 S4): a late \
+             joiner seeds from the owner, and last-known state is an archive.v1's (§4.4)",
         ));
     }
-    // Verbatim from `zenctl storage list`. This is why `ttl_s` is on screen:
-    // the note is unusable unless the reader can see which families are ttl'd.
-    col = col.push(kit::muted(
-        "note: an uncovered ttl'd family is not automatically a defect — volatile-state \
-         seeding may ride the advanced-pub/sub cache (RFC 04 §3.5); storage is \
-         authoritative for durable data.",
-    ));
     col.into()
 }
 
-fn coverage_row(r: &CoverageRow, sp: Spacing) -> Element<'_, Message> {
-    // Detail strings verbatim from `zenctl storage list`.
-    let (tone, detail) = match &r.coverage {
-        Coverage::Covered(s) => (CoverageTone::Covered, format!("covered by {s}")),
-        Coverage::Partial(s) => (CoverageTone::Partial, format!("PARTIAL via {s}")),
-        Coverage::Uncovered => (CoverageTone::Uncovered, "uncovered".to_string()),
-    };
-    let ttl = match r.ttl_s {
-        Some(n) => format!("ttl {n}s"),
-        None => "no ttl".to_string(),
+fn s4_row(r: &S4Row, sp: Spacing) -> Element<'_, Message> {
+    let (tone, said, detail) = match &r.on_state {
+        OnState::Finding(on) => (
+            JudgementTone::Established,
+            "answers on owner state",
+            format!("intersects {}", on.join(", ")),
+        ),
+        OnState::Clean => (
+            JudgementTone::NotEstablished,
+            "not on owner state",
+            "no owner's state in this namespace is under it".to_string(),
+        ),
+        OnState::Unjudged(why) => (JudgementTone::Unobservable, "not judged", why.clone()),
     };
     kit::card(
         row![
-            kit::badge_coverage(tone, detail),
-            kit::ghost(kit::caption(r.producer.clone()))
-                .padding([0.0, sp.xs])
-                .on_press(msg(AdminMsg::FilterProducer(r.producer.clone()))),
-            kit::mono(r.path.clone()),
-            kit::muted(ttl),
+            kit::badge_judgement(tone, said),
+            kit::mono(r.storage.clone()),
+            kit::muted(r.key_expr.clone().unwrap_or_else(|| "-".into())),
+            kit::muted(detail),
         ]
         .spacing(sp.sm)
         .align_y(iced::Alignment::Center),
     )
 }
 
-/// Declared entities — load-bearing, not decoration: the `Option` here is the
-/// only thing separating "the admin space is reachable and empty" from "the
-/// admin space is unreachable", which is #70's explicit reachability ask.
-fn entities(sweep: &AdminSweep, sp: Spacing) -> Element<'_, Message> {
+/// Declared entities — the `Option` here is the only thing separating "the
+/// admin space answered and declared nothing" from "no answer (yet)", which
+/// is #70's explicit reachability ask.
+fn entities(declared: Option<&DeclaredEntities>, sp: Spacing) -> Element<'_, Message> {
     let mut col = column![kit::section_header("Declared entities", None)].spacing(sp.xs);
-    let Some(declared) = &sweep.declared else {
+    let Some(declared) = declared else {
         col = col.push(kit::muted(
-            "declared entities: n/a — nothing answered the admin sweep. zenoh's \
+            "declared entities: n/a — not read yet, or nothing answered. zenoh's \
              adminspace.enabled defaults to false and a peer mesh has none, so this is \
              \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4).",
         ));

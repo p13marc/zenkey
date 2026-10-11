@@ -1,86 +1,223 @@
-//! The doctor pane.
+//! The doctor pane on zk2's doctor (#614, FL9): one verdict per check, the
+//! four poles kept apart, and an empty scope never green.
+
+use std::sync::Arc;
+
+use zengui::doctor::{DoctorRun, DoctorState};
+use zengui::view::doctor::section;
+use zenkey_fleet::report::{
+    Asked, CheckId, CheckReport, DoctorFinding, DoctorPresence, DoctorReport, DoctorScope,
+    DoctorSeverity, Unjudged,
+};
 
 use super::*;
 
-/// The doctor panel (#71): never-run is not "0 findings", findings render
-/// with their check ids and RFC citations, and re-runs show deltas — all
-/// over the exact struct `zenctl doctor --format json` serializes.
-#[test]
-fn the_doctor_pane_never_invents_a_verdict() {
-    use std::sync::Arc;
-    use zengui::doctor::DoctorState;
-    use zengui::view::doctor::section;
-    use zenkey_fleet_v1::report::{DoctorFinding, DoctorReport, DoctorSeverity};
+fn scope(presence: bool) -> DoctorScope {
+    DoctorScope {
+        namespace: "spray".into(),
+        presence: if presence {
+            Asked::Asked(DoctorPresence {
+                selector: "zk2/*/*/@zk/**".into(),
+                complete: true,
+                grace_s: 2.0,
+                services: 9,
+                instances: 9,
+                tokens: 21,
+                undescribed: 0,
+                revisions: 10,
+                held: 10,
+            })
+        } else {
+            Asked::NotAsked
+        },
+        routers: Asked::Asked(1),
+        health: Asked::NotAsked,
+    }
+}
 
-    let state = DoctorState::default();
-    let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
-    assert!(
-        ui.find("no doctor run yet").is_ok(),
-        "never-run must not read as a clean fleet (O4)"
-    );
+fn finding(
+    check: CheckId,
+    severity: DoctorSeverity,
+    subject: &str,
+    evidence: &str,
+) -> DoctorFinding {
+    DoctorFinding {
+        severity,
+        check,
+        subject: subject.into(),
+        evidence: evidence.into(),
+    }
+}
 
-    let report = DoctorReport {
-        findings: vec![DoctorFinding {
-            severity: DoctorSeverity::Error,
-            check: zenkey_fleet_v1::report::CheckId::SliceSync,
-            subject: "h-3fa9c2d41b7e/sysinfo".into(),
-            evidence: "registry version differs: served 1.0, local 2.0".into(),
-            citation: Some("RFC 08 §6".into()),
-        }],
-        synced: zenkey_fleet_v1::report::Asked::NotAsked,
-        introspect_answered: 1,
-        live_producers: 1,
-        describe_served: 0,
-        describe_missing: 1,
-        routers: 0,
-        router_version: None,
-        deep: false,
-        observation: None,
+/// A report with one verdict per check: `findings` under theirs, the
+/// `deep` checks not asked, `health-stale` unobservable with a subject left
+/// undecided, and every other check clean.
+fn report(findings: Vec<DoctorFinding>) -> DoctorReport {
+    let checks = CheckId::ALL
+        .into_iter()
+        .map(|id| {
+            if id.reads_data() {
+                return CheckReport::not_asked(id);
+            }
+            let mine: Vec<DoctorFinding> =
+                findings.iter().filter(|f| f.check == id).cloned().collect();
+            let unjudged = if id == CheckId::HealthStale {
+                vec![Unjudged {
+                    subject: "host-a/sysmon".into(),
+                    reason: "a status reply's age is unobservable without --clocks-synced".into(),
+                }]
+            } else {
+                vec![]
+            };
+            CheckReport::of(id, mine, unjudged, "nothing fired")
+        })
+        .collect();
+    DoctorReport {
+        scope: scope(true),
+        checks,
         unobservable: None,
-    };
+    }
+}
+
+fn landed(report: DoctorReport) -> DoctorState {
     let mut state = DoctorState::default();
     state.finish(
-        Ok(zengui::doctor::DoctorRun {
-            report: Arc::new(report.clone()),
-            base: String::new(),
-        }),
-        "",
+        DoctorRun {
+            report: Arc::new(report),
+            namespace: "spray".into(),
+        },
+        "spray",
     );
-    let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
-    assert!(ui.find("slice-sync").is_ok(), "the stable check id renders");
-    assert!(ui.find("RFC 08 §6").is_ok(), "the citation renders");
+    state
+}
+
+/// Never-run is not "0 findings"; a run renders one verdict per check in
+/// the judgement shape — the finding, clean with its reason, unobservable
+/// with its reason, not asked — each in its own words, and the findings
+/// with their zk2 check ids and sections.
+#[test]
+fn the_doctor_pane_keeps_every_check_verdict_apart() {
+    let state = DoctorState::default();
+    let mut ui = simulator::<Message, _, _>(section(&state, "spray", sp()));
     assert!(
-        ui.find("registry version differs: served 1.0, local 2.0")
-            .is_ok(),
-        "the evidence renders"
+        ui.find("no doctor run yet").is_ok(),
+        "never-run must not read as a clean deployment (O4)"
+    );
+    drop(ui);
+
+    let state = landed(report(vec![finding(
+        CheckId::TokenMissing,
+        DoctorSeverity::Error,
+        "robot9/phantom@00000000000000aa",
+        "holds an interface token for nav.v2 and no instance token",
+    )]));
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1600.0, 3000.0),
+        section(&state, "spray", sp()),
+    );
+    assert!(
+        ui.find("token-missing: finding").is_ok(),
+        "the finding is the yes"
+    );
+    assert!(
+        ui.find("split-brain: clean").is_ok(),
+        "a clean check says clean"
+    );
+    assert!(ui.find("nothing fired").is_ok(), "with its reason");
+    assert!(
+        ui.find("health-stale: unobservable").is_ok(),
+        "a subject left undecided is unobservable, never clean"
+    );
+    assert!(
+        ui.find("host-a/sysmon: a status reply's age is unobservable without --clocks-synced")
+            .is_ok()
+    );
+    assert!(
+        ui.find("state-stamp-foreign: not asked").is_ok(),
+        "a check the run was not to ask is not asked, never \"no\""
+    );
+    assert!(
+        ui.find("token-missing").is_ok(),
+        "the stable check id renders"
+    );
+    assert!(
+        ui.find("robot9/phantom@00000000000000aa").is_ok(),
+        "the subject, as the delta keys on it"
     );
     assert!(
         ui.find("go to subject").is_ok(),
-        "an origin/producer subject offers navigation"
+        "an address subject offers navigation"
     );
+    assert!(
+        ui.find(
+            "namespace \"spray\" · 9 services · 9 instances · 21 tokens · 10 of 10 revisions held \
+             · 1 router"
+        )
+        .is_ok(),
+        "the scope makes the silences legible"
+    );
+    assert!(
+        ui.find("run: a finding at or above warning").is_ok(),
+        "the run as one judgement"
+    );
+}
 
-    drop(ui);
+/// An empty scope — no zk2 token visible — is no verdict, however clean
+/// every other check reads: a doctor pointed at the wrong namespace must not
+/// be green.
+#[test]
+fn an_empty_scope_is_no_verdict() {
+    let mut r = report(vec![]);
+    let why = "no zk2 token visible to this reader in namespace \"spray\"";
+    r.unobservable = Some(why.into());
+    for c in r.checks.iter_mut().filter(|c| c.check.reads_presence()) {
+        *c = CheckReport::unobservable(c.check, why);
+    }
+    let state = landed(r);
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1600.0, 3000.0),
+        section(&state, "spray", sp()),
+    );
+    assert!(ui.find(format!("unobservable — {why}").as_str()).is_ok());
+    assert!(
+        ui.find(format!("run: no verdict — {why}").as_str()).is_ok(),
+        "the run is no verdict"
+    );
+    assert!(
+        ui.find("run: clean — no finding at or above warning among the 17 check(s) asked")
+            .is_err(),
+        "and never clean"
+    );
+}
 
-    // Second run: the finding is fixed, a new one appears — the delta strip
-    // says exactly that.
-    let second = DoctorReport {
-        findings: vec![DoctorFinding {
-            severity: DoctorSeverity::Info,
-            check: zenkey_fleet_v1::report::CheckId::DescribeMissing,
-            subject: "fleet".into(),
-            evidence: "1 producer(s) serve no describe".into(),
-            citation: Some("RFC 08 §7".into()),
-        }],
-        ..report
-    };
+/// A second run is a delta against the first, keyed on `(check, subject)`.
+#[test]
+fn a_rerun_shows_the_delta() {
+    let mut state = landed(report(vec![finding(
+        CheckId::TokenMissing,
+        DoctorSeverity::Error,
+        "robot9/phantom@00000000000000aa",
+        "e",
+    )]));
     state.finish(
-        Ok(zengui::doctor::DoctorRun {
-            report: Arc::new(second),
-            base: String::new(),
-        }),
-        "",
+        DoctorRun {
+            report: Arc::new(report(vec![finding(
+                CheckId::StorageOnState,
+                DoctorSeverity::Error,
+                "state@z1",
+                "captures `**`",
+            )])),
+            namespace: "spray".into(),
+        },
+        "spray",
     );
-    let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1600.0, 3000.0),
+        section(&state, "spray", sp()),
+    );
     assert!(
         ui.find("vs previous run: 1 new · 1 fixed · 0 unchanged")
             .is_ok(),
@@ -90,94 +227,27 @@ fn the_doctor_pane_never_invents_a_verdict() {
         ui.find("Fixed since last run").is_ok(),
         "fixed findings stay visible, dimmed"
     );
+    assert!(ui.find("new").is_ok(), "the new finding is marked new");
 }
 
-/// #161: the listen phase's observation section renders its scope statement
-/// — window, scopes, drops, synthetic count — and a report without one shows
-/// nothing (absent, never zeroed).
+/// v1's "re-ask schemas" is zk2's "re-read presence and contracts", and it
+/// says which state it is in — a button whose effect you cannot observe is
+/// one you cannot trust (#101).
 #[test]
-fn the_doctor_pane_states_what_the_listen_phase_observed() {
-    use std::sync::Arc;
-    use zengui::doctor::DoctorState;
-    use zengui::view::doctor::section;
-    use zenkey_fleet_v1::report::{DoctorReport, ObservationSummary};
-
-    let report = DoctorReport {
-        findings: vec![],
-        synced: zenkey_fleet_v1::report::Asked::NotAsked,
-        introspect_answered: 1,
-        live_producers: 1,
-        describe_served: 0,
-        describe_missing: 1,
-        routers: 0,
-        router_version: None,
-        deep: false,
-        observation: Some(ObservationSummary {
-            window_s: 10.0,
-            scopes: vec!["v1/*/state/**".into(), "v1/*/telemetry/**".into()],
-            samples: 42,
-            keys_seen: 7,
-            dropped: 3,
-            synthetic_marked: 2,
-            field_paths_dropped: 0,
-            facts_evicted: 0,
-        }),
-        unobservable: None,
-    };
+fn the_doctor_pane_offers_the_reread_and_reports_it() {
     let mut state = DoctorState::default();
-    state.finish(
-        Ok(zengui::doctor::DoctorRun {
-            report: Arc::new(report),
-            base: String::new(),
-        }),
-        "",
-    );
+    {
+        let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
+        assert!(ui.find("re-read presence and contracts").is_ok());
+        assert!(ui.find("re-ask schemas").is_err(), "v1's words are gone");
+    }
+    state.rereads = 2;
     let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
     assert!(
         ui.find(
-            "listened 10s over 2 scopes: 42 samples on 7 keys, 3 dropped \
-                 (findings cover only what was seen — O6) · 2 synthetic-marked"
+            "presence and the contracts re-read 2 times — every revision no holder served \
+             is asked again"
         )
-        .is_ok(),
-        "the observation section states window, scope, drops, and synthetic count"
+        .is_ok()
     );
-}
-
-/// The schema cache's escape hatch (#101) is visible, and says which state it
-/// is in — a button whose effect you cannot observe is one you cannot trust.
-#[test]
-fn the_doctor_pane_offers_the_schema_re_ask_and_reports_it() {
-    use zengui::doctor::DoctorState;
-    use zengui::view::doctor::section;
-
-    let mut state = DoctorState::default();
-    {
-        let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
-        assert!(ui.find("re-ask schemas").is_ok());
-        assert!(
-            ui.find(
-                "schema cache: kept for the session; a producer that changes its \
-                 served set is read with the schemas it had at first contact"
-            )
-            .is_ok(),
-            "the standing behaviour is stated, not left to be discovered"
-        );
-    }
-
-    state.schemas_forgotten = 1;
-    {
-        let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
-        assert!(
-            ui.find("schema cache cleared 1 time — the next decode asks the bus again")
-                .is_ok()
-        );
-    }
-    state.schemas_forgotten = 3;
-    {
-        let mut ui = simulator::<Message, _, _>(section(&state, "", sp()));
-        assert!(
-            ui.find("schema cache cleared 3 times — the next decode asks the bus again")
-                .is_ok()
-        );
-    }
 }

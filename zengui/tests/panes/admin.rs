@@ -1,141 +1,150 @@
-//! The admin & storage panel's honesty surfaces (#70). The pane exists to draw
-//! three distinctions that all look like "nothing here" unless something makes
-//! them look different: not swept, swept-and-unreachable, and swept-and-empty.
+//! The admin & storage panel's honesty surfaces (#70; zk2's since #614,
+//! FL9). The pane exists to draw three distinctions that all look like
+//! "nothing here" unless something makes them look different: not swept,
+//! swept-and-unreachable, and swept-and-empty — and, since S4, a storage on
+//! an owner's state as the finding it is.
 
 use super::*;
 use std::sync::Arc;
 use zengui::admin::{AdminState, AdminSweep};
 use zengui::view::admin::pane;
-use zenkey_fleet_v1::report::StorageList;
-use zenkey_fleet_v1::{Coverage, CoverageRow, DeclaredEntities, RouterInfo, StorageInfo};
+use zenkey_fleet::DeclaredEntities;
+use zenkey_fleet::report::{
+    Asked, AttachedTo, Attachment, InstanceAttachment, InstanceJoin, RouterInfo, StorageInfo,
+    TopologyEdge, TopologyNode, TopologyReport,
+};
+
+fn topology(nodes: Vec<TopologyNode>, edges: Vec<TopologyEdge>) -> TopologyReport {
+    let answered = nodes.iter().filter(|n| n.answered).count();
+    TopologyReport {
+        nodes,
+        edges,
+        asked: "@/*/*".into(),
+        answered,
+        self_zid: "z2".into(),
+        instances: Asked::NotAsked,
+    }
+}
 
 fn sweep(
+    namespace: &str,
     routers: Vec<RouterInfo>,
     storages: Vec<StorageInfo>,
-    coverage: Vec<CoverageRow>,
-    declared: Option<DeclaredEntities>,
-    note: Option<&str>,
+    topology: TopologyReport,
 ) -> AdminState {
     let mut state = AdminState::default();
+    let s4 = zengui::admin::s4_rows(namespace, &storages);
     state.finish(
         Ok(Arc::new(AdminSweep {
             routers,
-            storage: StorageList { storages, coverage },
-            declared,
-            coverage_note: note.map(str::to_string),
-            topology: zenkey_fleet_v1::TopologyReport {
-                nodes: vec![],
-                edges: vec![],
-                asked: "@/*/*".into(),
-                answered: 0,
-                self_zid: String::new(),
-            },
-            origins: vec![],
-            base: String::new(),
+            storages,
+            s4,
+            topology,
+            namespace: namespace.into(),
         })),
-        "",
+        namespace,
     );
     state
 }
 
+fn node(zid: &str, whatami: &str, answered: bool) -> TopologyNode {
+    TopologyNode {
+        zid: zid.into(),
+        whatami: whatami.into(),
+        version: answered.then(|| "1.10.1".into()),
+        locators: if answered {
+            vec!["tcp/10.0.0.1:7447".into()]
+        } else {
+            vec![]
+        },
+        locators_via_links: vec![],
+        answered,
+    }
+}
+
+fn edge(reporter: &str, peer: &str, whatami: &str) -> TopologyEdge {
+    TopologyEdge {
+        reporter: reporter.into(),
+        peer: peer.into(),
+        whatami: whatami.into(),
+        region: None,
+        links: vec![],
+    }
+}
+
+fn instance(address: &str, attachment: Attachment) -> InstanceAttachment {
+    InstanceAttachment {
+        address: address.into(),
+        instance: "0000000000000001".into(),
+        zid: Some("ab12".into()),
+        attachment,
+    }
+}
+
 /// #118: the topology caption is the testable surface (the canvas is
-/// find-opaque) — it names the heard-of nodes, the storage hosts, and
-/// this session, and an unanswered admin space stays a reachability
-/// reading, never an empty mesh.
+/// find-opaque) — it names the heard-of nodes, the storage hosts, this
+/// session and zk2's instances joined onto the routers (#705), attached or
+/// not; and an unanswered admin space stays a reachability reading, never
+/// an empty mesh.
 #[test]
 fn the_topology_caption_carries_the_overlay_facts() {
-    let mut state = AdminState::default();
-    state.finish(
-        Ok(Arc::new(AdminSweep {
-            routers: vec![],
-            storage: StorageList {
-                storages: vec![storage("s1")],
-                coverage: vec![],
-            },
-            declared: None,
-            coverage_note: None,
-            topology: zenkey_fleet_v1::TopologyReport {
-                nodes: vec![
-                    zenkey_fleet_v1::TopologyNode {
-                        zid: "z1".into(),
-                        whatami: "router".into(),
-                        version: Some("1.9.0".into()),
-                        locators: vec!["tcp/10.0.0.1:7447".into()],
-                        locators_via_links: vec![],
-                        answered: true,
-                    },
-                    zenkey_fleet_v1::TopologyNode {
-                        zid: "z2".into(),
-                        whatami: "peer".into(),
-                        version: None,
-                        locators: vec![],
-                        locators_via_links: vec![],
-                        answered: false,
-                    },
-                ],
-                edges: vec![
-                    zenkey_fleet_v1::TopologyEdge {
-                        reporter: "z1".into(),
-                        peer: "z2".into(),
-                        whatami: "peer".into(),
-                        region: None,
-                        links: vec![],
-                    },
-                    // The same link from the other end: corroboration,
-                    // not duplication (`mesh_links`, #234).
-                    zenkey_fleet_v1::TopologyEdge {
-                        reporter: "z2".into(),
-                        peer: "z1".into(),
-                        whatami: "router".into(),
-                        region: None,
-                        links: vec![],
-                    },
-                ],
-                asked: "@/*/*".into(),
-                answered: 1,
-                self_zid: "z2".into(),
-            },
-            origins: vec![
-                zenkey_fleet_v1::OriginAttachment {
-                    origin: "h-cccccccccccc".into(),
-                    session_zid: Some("z2".into()),
-                    reporter_zid: "z1".into(),
-                    token_key: "v1/h-cccccccccccc/state/demo/alive".into(),
-                },
-                zenkey_fleet_v1::OriginAttachment {
-                    origin: "h-dddddddddddd".into(),
-                    session_zid: None,
-                    reporter_zid: "z1".into(),
-                    token_key: "v1/h-dddddddddddd/state/demo/alive".into(),
-                },
-                zenkey_fleet_v1::OriginAttachment {
-                    origin: "h-eeeeeeeeeeee".into(),
-                    session_zid: Some("z-not-drawn".into()),
-                    reporter_zid: "z9".into(),
-                    token_key: "v1/h-eeeeeeeeeeee/state/demo/alive".into(),
-                },
-            ],
-            base: String::new(),
-        })),
-        "",
+    let mut topo = topology(
+        vec![node("z1", "router", true), node("z2", "peer", false)],
+        vec![
+            edge("z1", "z2", "peer"),
+            // The same link from the other end: corroboration, not
+            // duplication (`mesh_links`, #234).
+            edge("z2", "z1", "router"),
+        ],
     );
+    topo.instances = Asked::Asked(InstanceJoin {
+        namespace: "acme".into(),
+        selector: "zk2/*/*/@zk/**".into(),
+        complete: true,
+        verified: vec!["z1".into()],
+        unverified: vec![],
+        unobservable: None,
+        instances: vec![
+            instance(
+                "robot1/nav",
+                Attachment::Attached {
+                    routers: vec![AttachedTo {
+                        router: "z1".into(),
+                        listed_as: "client".into(),
+                    }],
+                },
+            ),
+            instance(
+                "host-a/tc",
+                Attachment::Unattached {
+                    reason: "no verified router lists ab12".into(),
+                },
+            ),
+            instance(
+                "robot9/phantom",
+                Attachment::Unattributable {
+                    reason: "no descriptor read".into(),
+                },
+            ),
+        ],
+    });
+    let mut storage = storage("s1", Some("demo/**"));
+    storage.zid = "z1".into();
+    let state = sweep("acme", vec![], vec![storage], topo);
     let mut ui = simulator::<Message, _, _>(zengui::view::mesh::pane(&state, sp()));
-    // #131: the origin join's evidence distinction reaches the caption —
-    // attached-by-declaration vs reported-only vs outside the mesh.
     assert!(
         ui.find(
-            "origins: 1 attached by declaration · 1 reported-only (dotted) · 1 naming a session outside the drawn mesh (listed, not drawn)"
+            "instances: 1 attached to a verified router (drawn) · 1 unattached · 1 \
+             unattributable (no zid) · 0 on a router outside the drawing — listed, not drawn"
         )
         .is_ok(),
-        "the three evidence grades are counted out loud"
+        "every instance presence showed is counted, attached or not"
     );
     assert!(
         ui.find("drag to pan · scroll to zoom · right-click resets")
             .is_ok(),
         "the viewport controls are discoverable"
     );
-    // #234: the engine's `mesh_links` dedup keeps the evidence grade the
-    // hand-rolled one threw away, and the caption states it.
     assert!(
         ui.find(
             "1 of 1 link(s) corroborated by both ends — a link only one end mentions is weaker evidence (drawn thinner)"
@@ -157,8 +166,21 @@ fn the_topology_caption_carries_the_overlay_facts() {
         "heard-of and you-are-here ride the caption"
     );
 
+    // Without a session in the namespace the join is not asked — said so.
+    let bare = sweep(
+        "acme",
+        vec![],
+        vec![],
+        topology(vec![node("z1", "router", true)], vec![]),
+    );
+    let mut ui = simulator::<Message, _, _>(zengui::view::mesh::pane(&bare, sp()));
+    assert!(
+        ui.find("instances: not joined — no session in the namespace to read presence through")
+            .is_ok()
+    );
+
     // And the unanswered mesh stays a reading.
-    let empty = sweep(vec![], vec![], vec![], None, None);
+    let empty = sweep("acme", vec![], vec![], topology(vec![], vec![]));
     let mut ui = simulator::<Message, _, _>(zengui::view::mesh::pane(&empty, sp()));
     assert!(
         ui.find(
@@ -170,23 +192,14 @@ fn the_topology_caption_carries_the_overlay_facts() {
     );
 }
 
-fn storage(name: &str) -> StorageInfo {
+fn storage(name: &str, key_expr: Option<&str>) -> StorageInfo {
     StorageInfo {
         zid: "z1".into(),
         name: name.into(),
-        key_expr: Some("acme/v1/*/state/**".into()),
-        strip_prefix: Some("acme/v1".into()),
+        key_expr: key_expr.map(Into::into),
+        strip_prefix: Some("acme".into()),
         volume: Some("rocksdb".into()),
         raw: serde_json::json!({"volume": "rocksdb"}),
-    }
-}
-
-fn row(producer: &str, path: &str, coverage: Coverage) -> CoverageRow {
-    CoverageRow {
-        producer: producer.into(),
-        path: path.into(),
-        ttl_s: Some(60),
-        coverage,
     }
 }
 
@@ -194,7 +207,7 @@ fn row(producer: &str, path: &str, coverage: Coverage) -> CoverageRow {
 #[test]
 fn the_admin_pane_never_reports_a_sweep_it_did_not_run() {
     let state = AdminState::default();
-    let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
+    let mut ui = simulator::<Message, _, _>(pane(&state, None, sp()));
     assert!(ui.find("admin space not swept yet").is_ok());
     assert!(
         ui.find(
@@ -214,21 +227,12 @@ fn the_admin_pane_never_reports_a_sweep_it_did_not_run() {
 }
 
 /// #70's second acceptance criterion: a router-less bus shows the honest
-/// empty states, not an error — and above all not a coverage verdict.
+/// empty states, not an error — and no S4 verdict about storages it never
+/// saw.
 #[test]
 fn a_router_less_bus_says_so_four_ways() {
-    let state = sweep(
-        vec![],
-        vec![],
-        vec![],
-        None,
-        Some(
-            "no registry slices resolved, so the declared state families are unknown — \
-             this is \"not asked\", not \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, \
-             or wait for the bus registry (RFC 08 §6).",
-        ),
-    );
-    let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
+    let state = sweep("", vec![], vec![], topology(vec![], vec![]));
+    let mut ui = simulator::<Message, _, _>(pane(&state, None, sp()));
     // Verbatim from the CLI, so the two tools cannot disagree.
     assert!(
         ui.find(
@@ -244,72 +248,68 @@ fn a_router_less_bus_says_so_four_ways() {
         )
         .is_ok()
     );
-    assert!(ui.find("coverage not judged").is_ok());
+    assert!(
+        ui.find("no storage to judge — the sweep found none (above)")
+            .is_ok()
+    );
     assert!(
         ui.find(
-            "declared entities: n/a — nothing answered the admin sweep. zenoh's \
+            "declared entities: n/a — not read yet, or nothing answered. zenoh's \
              adminspace.enabled defaults to false and a peer mesh has none, so this is \
              \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4)."
         )
         .is_ok()
     );
-    // The negative that matters: an unjudged table must never render as an
-    // uncovered one.
     assert!(
-        ui.find("uncovered").is_err(),
-        "coverage that was never judged must not read as uncovered"
+        ui.find("not on owner state").is_err(),
+        "no storage, no clean row"
     );
 }
 
-/// A populated sweep: the three coverage verdicts read differently, both
-/// RFC notes are present, and the new storage fields are on screen.
+/// The S4 table (D14): a storage on an owner's state is the finding, one
+/// beside it clean, one whose document names no key expression not judged
+/// — three rows, three words and marks — and the rule said once. v1's
+/// "covered" and its late-joiner-seed sentence are gone.
 #[test]
-fn a_populated_sweep_renders_every_verdict_distinctly() {
+fn the_s4_table_reads_a_storage_on_owner_state_as_the_finding() {
     let state = sweep(
+        "acme",
         vec![RouterInfo {
             zid: "z1".into(),
-            version: Some("1.9.0".into()),
+            version: Some("1.10.1".into()),
             locators: vec!["tcp/127.0.0.1:7447".into()],
             raw: serde_json::Value::Null,
         }],
-        vec![storage("latest")],
         vec![
-            row("tc", "health", Coverage::Covered("latest@z1".into())),
-            row("tc", "config/{iface}", Coverage::Partial("one@z1".into())),
-            row("netring", "capture", Coverage::Uncovered),
+            storage("state", Some("acme/zk2/**")),
+            storage("events", Some("acme/zk2/*/*/*/events/**")),
+            storage("mystery", None),
         ],
-        Some(DeclaredEntities::default()),
-        None,
+        topology(vec![node("z1", "router", true)], vec![]),
     );
-    let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
-    assert!(ui.find("covered by latest@z1").is_ok());
-    assert!(ui.find("PARTIAL via one@z1").is_ok());
-    assert!(ui.find("uncovered").is_ok());
-    // The consequence RFC 09 §2 names, which is the visual #70 asked for.
+    let declared = DeclaredEntities::default();
+    let mut ui = simulator::<Message, _, _>(pane(&state, Some(&declared), sp()));
+    assert!(ui.find("S4: storages on owners' state").is_ok());
+    assert!(ui.find("answers on owner state").is_ok());
+    assert!(ui.find("intersects acme/zk2/*/*/*/state/**").is_ok());
+    assert!(ui.find("not on owner state").is_ok());
+    assert!(ui.find("not judged").is_ok());
+    assert!(ui.find("its admin document names no key_expr").is_ok());
     assert!(
         ui.find(
-            "no storage captures an uncovered family — while its producer is down, a \
-             late joiner GETs nothing: the `latest` storage is the fleet-wide \
-             late-joiner seed (RFC 09 §2)"
+            "a deployment MUST NOT run a storage on owners' state (core §4.2 S4): a late \
+             joiner seeds from the owner, and last-known state is an archive.v1's (§4.4)"
         )
-        .is_ok()
-    );
-    // And the counterweight, verbatim from the CLI.
-    assert!(
-        ui.find(
-            "note: an uncovered ttl'd family is not automatically a defect — \
-             volatile-state seeding may ride the advanced-pub/sub cache (RFC 04 §3.5); \
-             storage is authoritative for durable data."
-        )
-        .is_ok()
+        .is_ok(),
+        "the rule, said once"
     );
     assert!(
-        ui.find("strip acme/v1  ·  volume rocksdb").is_ok(),
-        "the fields #70 asked for reach the screen"
+        ui.find("strip acme  ·  volume rocksdb").is_ok(),
+        "the storage's own fields still reach the screen"
     );
     assert!(
-        ui.find("ttl 60s").is_ok(),
-        "the note is unusable without it"
+        ui.find("covered by latest@z1").is_err(),
+        "v1's coverage reading is gone"
     );
 }
 
@@ -317,25 +317,20 @@ fn a_populated_sweep_renders_every_verdict_distinctly() {
 /// "nothing answered".
 #[test]
 fn an_empty_admin_space_reads_differently_from_an_absent_one() {
-    let state = sweep(
-        vec![],
-        vec![],
-        vec![],
-        Some(DeclaredEntities::default()),
-        None,
-    );
-    let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
+    let state = sweep("", vec![], vec![], topology(vec![], vec![]));
+    let declared = DeclaredEntities::default();
+    let mut ui = simulator::<Message, _, _>(pane(&state, Some(&declared), sp()));
     assert!(
         ui.find("declared entities: 0 — the admin space answered and declared none")
             .is_ok()
     );
     assert!(
         ui.find(
-            "declared entities: n/a — nothing answered the admin sweep. zenoh's \
+            "declared entities: n/a — not read yet, or nothing answered. zenoh's \
              adminspace.enabled defaults to false and a peer mesh has none, so this is \
              \"not available\", never \"nothing declared\" (RFC 09 §5.1 O4)."
         )
         .is_err(),
-        "an answered sweep must not carry the unreachable sentence"
+        "an answered read must not carry the unreachable sentence"
     );
 }

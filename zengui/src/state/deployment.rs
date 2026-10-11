@@ -94,9 +94,9 @@ sub_state! {
         /// presence, descriptors, contracts. Reopened by a namespace switch.
         pub(crate) session: Option<zenoh::Session>,
         /// Process-lifetime v1 schema cache (RFC 08 §7), kept for the v1
-        /// panes still alive — why, fields and the doctor's re-ask — until
-        /// FL8 and FL9 move them (FL10 read the request form from zk2's
-        /// bundles instead).
+        /// panes still alive — why and fields — until FL8 moves them (FL10
+        /// read the request form from zk2's bundles instead, and FL9's
+        /// doctor re-reads zk2's contracts, not this).
         pub(crate) schema_store: Option<Arc<zenkey_fleet_v1::SchemaStore>>,
         /// The declared keyspace the tree starts from (#614, FL6b): zk2's
         /// contract skeleton, built from the lens's own inputs — the

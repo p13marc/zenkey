@@ -210,6 +210,18 @@ pub(crate) fn update(
                 super::bus::read_declared(dep),
             ])
         }
+        DeploymentMsg::RereadPresence => {
+            // A revision no holder served is asked again by the lens that
+            // opens next; a verified one is content-addressed and kept.
+            dep.store.forget_absences();
+            dep.recount_contracts();
+            // The link restarts over the same monitor and store: a fresh
+            // seed and a fresh lens read. What they held stays on screen
+            // until their first landing replaces it — a re-read, not a
+            // forget.
+            super::bus::restart_presence(obs);
+            Task::none()
+        }
     }
 }
 

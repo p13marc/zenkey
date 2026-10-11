@@ -1366,3 +1366,68 @@ async fn health_is_read_on_selection_from_the_sprays_sysmon() {
 
     bus.down().await;
 }
+
+/// Whether the window, drawn tall enough for a long dock, shows `text`.
+fn shows_tall(app: &zengui::app::Zengui, text: &str) -> bool {
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (2400.0, 4000.0),
+        app.view(iced::window::Id::unique()),
+    );
+    ui.find(text).is_ok()
+}
+
+/// The doctor, through the window (#614, FL9): booted against the spray,
+/// deep and with the clock's word, a run finds what `tests/spray_smoke.rs`
+/// finds through the engine — the phantom's interface token with no
+/// instance token (`token-missing`) and the squatter's foreign stamp on
+/// `host-a/tc`'s state (`state-stamp-foreign`) — and draws both as
+/// findings, each check's verdict beside them. Run again until the spray's
+/// presence has settled.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn the_windows_doctor_finds_the_sprays_phantom_and_squatter() {
+    use zengui::message::{ActivityTab, Message, PaneMsg, WorkspaceMsg};
+    use zengui::prefs::LayoutPreset;
+    use zengui::view::doctor::DoctorMsg;
+
+    let bus = Bus::up().await;
+    let mut app = booted(&bus, vec![]).await;
+    let _ = app.update(Message::Workspace(WorkspaceMsg::LayoutPreset(
+        LayoutPreset::Diagnose,
+    )));
+    let _ = app.update(Message::Workspace(WorkspaceMsg::ActivityTab(
+        ActivityTab::Doctor,
+    )));
+    let _ = app.update(Message::Pane(PaneMsg::Doctor(DoctorMsg::DeepToggled(true))));
+    let _ = app.update(Message::Pane(PaneMsg::Doctor(DoctorMsg::ClocksSynced(
+        true,
+    ))));
+
+    let phantom = format!("{}@5ca1ab1e00000001", spray::PHANTOM);
+    let (owner, iface, _) = spray::SQUATTED;
+    let squatter = format!("{owner} {iface}");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        let run = app.update(Message::Pane(PaneMsg::Doctor(DoctorMsg::Run)));
+        tokio::time::timeout(Duration::from_secs(60), drive(&mut app, run))
+            .await
+            .expect("the run lands");
+        if shows_tall(&app, &phantom) && shows_tall(&app, &squatter) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the doctor never found both: {phantom:?}, {squatter:?}"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    assert!(shows_tall(&app, "token-missing: finding"));
+    assert!(shows_tall(&app, "state-stamp-foreign: finding"));
+    assert!(
+        shows_tall(&app, "run: a finding at or above warning"),
+        "the run as one judgement"
+    );
+
+    bus.down().await;
+}

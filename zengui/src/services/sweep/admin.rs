@@ -5,73 +5,59 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use iced::Task;
-use zenkey_fleet_v1::SliceSet;
 
 use crate::message::{Message, PaneMsg};
 use crate::services::ServiceError;
 use crate::view::admin::AdminMsg;
 
-/// The admin sweep (#131): routers, storages, declared entities, the coverage
-/// join, the topology and the origin attachments, as one act the user asked
-/// for.
+/// The admin sweep (#131; zk2's since #614, FL9): routers, storages, each
+/// storage judged against S4, and the topology with zk2's instances joined
+/// onto it, as one act the user asked for.
 ///
-/// `slices` here is the app's *resolved* set — bus, dirs or the union — and
-/// deliberately not the doctor's dirs-only one: the coverage join asks "what
-/// does the registry say exists", and a dirs-only answer would empty the table
-/// on every bus-registry-only deployment. An invisible, plausible-looking
-/// wrong answer is worse than no table.
+/// The admin space is read through `raw`, the session in no namespace (a
+/// namespaced session's `@` selector is rewritten and matches nothing).
+/// The instance join reads presence and descriptors through `deployment`,
+/// the session in the namespace, as `zenctl admin graph` does
+/// (`topology_with_instances`); without one the topology is the admin
+/// space's alone and the join is "not asked". Only a verified router's
+/// session list attaches an instance (§4.2): an answer any session could
+/// have given under `@/<zid>/router` attaches nothing.
+///
+/// The declared entities are not read here: the window already holds them
+/// (`Deployment::admin_declared`, the skeleton's input), and the sweep's
+/// handler asks for them again beside this.
 pub fn admin(
-    session: zenoh::Session,
-    base: String,
-    slices: Option<Arc<SliceSet>>,
+    raw: zenoh::Session,
+    deployment: Option<zenoh::Session>,
+    namespace: String,
     timeout: Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let routers = zenkey_fleet_v1::routers(&session, timeout)
+            let routers = zenkey_fleet::routers(&raw, timeout)
                 .await
                 .context("failed to list the routers")
                 .map_err(ServiceError::of)?;
-            let storages = zenkey_fleet_v1::storages(&session, timeout)
+            let storages = zenkey_fleet::storages(&raw, timeout)
                 .await
                 .context("failed to list the storages")
                 .map_err(ServiceError::of)?;
-            let declared = zenkey_fleet_v1::declared_entities(&session, timeout)
-                .await
-                .context("failed to list the declared entities")
-                .map_err(ServiceError::of)?;
-            let (coverage, coverage_note) = match slices.as_deref() {
-                Some(set) => (zenkey_fleet_v1::state_coverage(set, &base, &storages), None),
-                None => (
-                    Vec::new(),
-                    Some(
-                        "no registry slices resolved, so the declared state \
-                         families are unknown — this is \"not asked\", not \
-                         \"uncovered\" (RFC 09 §5.1 O4). Pass --registry, \
-                         or wait for the bus registry (RFC 08 §6)."
-                            .to_string(),
-                    ),
-                ),
-            };
-            let topology = zenkey_fleet_v1::topology(&session, timeout)
-                .await
-                .context("failed to read the topology")
-                .map_err(ServiceError::of)?;
-            let origins = zenkey_fleet_v1::origin_attachments(
-                &zenkey_fleet_v1::Fleet::new(&session, &base),
-                timeout,
-            )
-            .await
-            .context("failed to read the origin attachments")
+            let topology = match &deployment {
+                Some(session) => {
+                    zenkey_fleet::topology_with_instances(&raw, session, &namespace, timeout, false)
+                        .await
+                }
+                None => zenkey_fleet::topology(&raw, timeout).await,
+            }
+            .context("failed to read the topology")
             .map_err(ServiceError::of)?;
+            let s4 = crate::admin::s4_rows(&namespace, &storages);
             Ok(Arc::new(crate::admin::AdminSweep {
                 routers,
-                storage: zenkey_fleet_v1::report::StorageList { storages, coverage },
-                declared,
-                coverage_note,
+                storages,
+                s4,
                 topology,
-                origins,
-                base,
+                namespace,
             }))
         },
         |out| Message::Pane(PaneMsg::Admin(AdminMsg::Done(out))),

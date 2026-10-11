@@ -202,6 +202,13 @@ pub enum DeploymentMsg {
     /// rewrite in front.
     CustomSelectorsApplied(Vec<String>),
     Reconnect,
+    /// Read presence and the contracts again (#614, FL9; v1's "re-ask
+    /// schemas", from the doctor): the contract store forgets every
+    /// revision no holder served, and the presence link restarts — a new
+    /// seed, a new lens over the same store, which retrieves what the
+    /// descriptors name. Here rather than under `Pane` because its body
+    /// moves the deployment and the observation, not the doctor's form.
+    RereadPresence,
 }
 
 /// What the whole workspace is looking at (#181).
@@ -457,14 +464,15 @@ pub enum ChromeMsg {
 /// nothing. The pane identity is already the variant tag.
 ///
 /// `Pane(..)` is a **provenance** tag — which surface emitted the message — not
-/// a **scope** claim about what its handler may touch. Six of them mutate
+/// a **scope** claim about what its handler may touch. Five of them mutate
 /// app-wide state today and #176 deliberately left them:
 ///
 /// * `NodesMsg::ShowInTree` — writes `expanded` and `selected`, reflattens
 /// * `DoctorMsg::FindingClicked` — opens tree prefixes and re-enters a
-///   selection, or flips `right_pane` and drives the nodes handler
-/// * `DoctorMsg::ReaskSchemas` — clears the global schema store
-/// * `AdminMsg::FilterProducer` — flips `right_pane`, re-emits a tree search
+///   selection, or flips `right_pane` and re-enters an address selection
+/// * `DoctorMsg::Reread` — raises `DeploymentMsg::RereadPresence`, which
+///   restarts the presence link (#614, FL9; it was `ReaskSchemas`, which
+///   cleared v1's schema store)
 /// * `EchoMsg::LineClicked` — flips `right_pane`, re-enters a selection
 /// * `ContextMsg::{SaveAndSelect, Isolate}` — reopens the session, rewrites
 ///   deployment settings

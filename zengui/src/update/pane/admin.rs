@@ -1,13 +1,10 @@
-//! The admin & storage panel (#70, #131): one explicit sweep, or nothing.
-//!
-//! It stopped taking `&mut RightPane` when #183 moved Echo into the Activity
-//! dock: its producer filter used to land the user on the echo pane, and the
-//! tree — which is what the filter actually drives — is always on screen.
+//! The admin & storage panel (#70, #131; zk2's since #614, FL9): one
+//! explicit sweep, or nothing.
 
 use iced::Task;
 
 use crate::admin::AdminState;
-use crate::message::{Message, WorkspaceMsg};
+use crate::message::Message;
 use crate::services;
 use crate::update::Ctx;
 use crate::view::admin::AdminMsg;
@@ -18,41 +15,32 @@ pub(crate) fn update(admin: &mut AdminState, msg: AdminMsg, cx: Ctx) -> Task<Mes
             admin.toggle_raw(id);
             Task::none()
         }
-        AdminMsg::FilterProducer(producer) => {
-            // The tree already owns "show me this": reusing its search is
-            // one behaviour, not two that can drift. It used to land on Echo
-            // as well; Echo is a dock stream now (#183), and the tree is
-            // always on screen, so there is nothing to switch to.
-            Task::done(Message::Workspace(WorkspaceMsg::TreeSearchChanged(
-                producer,
-            )))
-        }
         AdminMsg::Run => {
             if admin.in_flight {
                 return Task::none();
             }
-            let Some(session) = cx.dep.raw.clone() else {
+            let Some(raw) = cx.dep.raw.clone() else {
                 admin.error = Some("no session — connect first".into());
                 return Task::none();
             };
             admin.in_flight = true;
             admin.error = None;
-            let base = cx.dep.namespace().to_string();
-            let timeout = cx.dep.timeout();
-            // The app's *resolved* slice set — bus, dirs or the union.
-            //
-            // Deliberately NOT the doctor's `SliceSet::from_dirs`: that one
-            // is dirs-only because it diffs local against served, whereas
-            // the coverage join asks "what does the registry say exists",
-            // which is `bus.slice_set()` in zenctl. Copying the doctor here
-            // would empty the coverage table on every bus-registry-only
-            // deployment — an invisible, plausible-looking wrong answer.
-            let slices = None;
-            services::sweep::admin(session, base, slices, timeout)
+            Task::batch([
+                services::sweep::admin(
+                    raw,
+                    cx.dep.session.clone(),
+                    cx.dep.namespace().to_string(),
+                    cx.dep.timeout(),
+                ),
+                // The declared entities are the deployment's (the skeleton
+                // reads them): asked again with the sweep, landing where
+                // they always land.
+                crate::update::bus::read_declared(cx.dep),
+            ])
         }
         AdminMsg::Done(outcome) => {
-            let base = cx.dep.namespace().to_string();
-            admin.finish(outcome, &base);
+            let namespace = cx.dep.namespace().to_string();
+            admin.finish(outcome, &namespace);
             Task::none()
         }
     }
