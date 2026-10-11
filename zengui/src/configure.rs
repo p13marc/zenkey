@@ -15,9 +15,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use zenkey::config::{ConfigChange, ConfigView, Edit, ParamClass, ParamKind, ParamValue};
-use zenkey_fleet::SliceSet;
-use zenkey_fleet::report::{CallOutcome, CallReport};
+use zenkey_fleet_v1::SliceSet;
+use zenkey_fleet_v1::report::{CallOutcome, CallReport};
+use zenkey_v1::config::{ConfigChange, ConfigView, Edit, ParamClass, ParamKind, ParamValue};
 
 use crate::services::ServiceError;
 
@@ -371,11 +371,11 @@ pub fn fresh_key() -> String {
 /// The configuration resource a key is the echo of (RFC 05 §5.1:
 /// `state/<producer>/config/<resource>`), read through the key's v1 facts —
 /// the grammar's reading, never a string match on the spelling.
-pub fn config_target(facts: &zenkey_fleet::KeyFacts) -> Option<ConfigTarget> {
-    let zenkey_fleet::KeyShape::V1(v) = &facts.shape else {
+pub fn config_target(facts: &zenkey_fleet_v1::KeyFacts) -> Option<ConfigTarget> {
+    let zenkey_fleet_v1::KeyShape::V1(v) = &facts.shape else {
         return None;
     };
-    if v.class_kind != zenkey_fleet::model::facts::ClassKind::State {
+    if v.class_kind != zenkey_fleet_v1::model::facts::ClassKind::State {
         return None;
     }
     match (v.producer.as_deref(), v.subject.as_slice()) {
@@ -392,7 +392,7 @@ pub fn config_target(facts: &zenkey_fleet::KeyFacts) -> Option<ConfigTarget> {
 /// observed key read through [`config_target`]. Run on a click, never per
 /// frame: it walks the facts cache.
 pub fn observed_resources(
-    facts: &zenkey_fleet::FactsCache,
+    facts: &zenkey_fleet_v1::FactsCache,
     origin: &str,
     producer: &str,
 ) -> Vec<String> {
@@ -474,7 +474,7 @@ pub fn kind_text(kind: &ParamKind) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet::report::{CallAnswer, CallError};
+    use zenkey_fleet_v1::report::{CallAnswer, CallError};
 
     fn report(outcome: Option<CallOutcome>) -> Result<Arc<CallReport>, ServiceError> {
         Ok(Arc::new(CallReport {
@@ -496,7 +496,7 @@ mod tests {
     /// never an empty document.
     #[test]
     fn a_reply_is_read_as_what_it_is() {
-        let view = ConfigView::of("wlan0", &zenkey::config::ConfigSchema::new());
+        let view = ConfigView::of("wlan0", &zenkey_v1::config::ConfigSchema::new());
         let doc = report(Some(CallOutcome::Ok {
             value: Some(serde_json::to_value(&view).unwrap()),
             text: None,
@@ -526,7 +526,7 @@ mod tests {
     /// sent whenever it is not empty.
     #[test]
     fn a_change_carries_what_changed_typed_by_its_kind() {
-        use zenkey::config::{ConfigGroup, ConfigSchema, ParamSpec};
+        use zenkey_v1::config::{ConfigGroup, ConfigSchema, ParamSpec};
         let schema = ConfigSchema::new().with(
             ConfigGroup::new("queue", ParamClass::Hot, "q")
                 .with(ParamSpec::new(
@@ -596,7 +596,7 @@ mod tests {
     /// subject — never a string match, so a look-alike is no target.
     #[test]
     fn a_config_echo_key_names_its_resource_and_a_look_alike_does_not() {
-        use zenkey_fleet::KeyFacts;
+        use zenkey_fleet_v1::KeyFacts;
         let echo = "v1/h-3fa9c2d41b7e/state/radio/config/wlan0";
         assert_eq!(
             config_target(&KeyFacts::project("", echo)),
@@ -610,7 +610,7 @@ mod tests {
         ] {
             assert_eq!(config_target(&KeyFacts::project("", k)), None, "{k}");
         }
-        let mut facts = zenkey_fleet::FactsCache::default();
+        let mut facts = zenkey_fleet_v1::FactsCache::default();
         facts.ensure("", echo, None);
         facts.ensure("", "v1/h-3fa9c2d41b7e/state/radio/config/eth0", None);
         facts.ensure("", "v1/h-aaaaaaaaaaaa/state/radio/config/wlan9", None);

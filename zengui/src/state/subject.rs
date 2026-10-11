@@ -24,7 +24,7 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet::FetchOutcome;
+use zenkey_fleet_v1::FetchOutcome;
 
 use super::deployment::Deployment;
 use crate::message::{SlotId, Subject};
@@ -41,7 +41,7 @@ sub_state! {
         /// The slot key's observed skewed-latency summary, refreshed on the
         /// bus tick (#119) — never computed on the render path, and cleared
         /// with the selection.
-        pub(crate) selected_latency: Option<(zenkey_fleet::LatencyReport, u64)>,
+        pub(crate) selected_latency: Option<(zenkey_fleet_v1::LatencyReport, u64)>,
         /// The last on-demand fetch: (key, outcome-or-error).
         pub(crate) fetched: Option<(String, Result<Arc<FetchOutcome>, crate::services::ServiceError>)>,
         /// The decode of the last fetched value — the whole
@@ -155,7 +155,7 @@ impl SubjectSlot {
             None => crate::series::Series::new(),
         };
         let unit = match dep.facts.get(&rec.key).map(|f| &f.registration) {
-            Some(zenkey_fleet::Registration::Registered(s)) => s.unit.clone(),
+            Some(zenkey_fleet_v1::Registration::Registered(s)) => s.unit.clone(),
             _ => None,
         };
         Some(view::detail::SeriesData {

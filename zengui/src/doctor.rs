@@ -6,8 +6,8 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet::doctor_delta;
-use zenkey_fleet::report::{DoctorDelta, DoctorFinding, DoctorReport};
+use zenkey_fleet_v1::doctor_delta;
+use zenkey_fleet_v1::report::{DoctorDelta, DoctorFinding, DoctorReport};
 
 /// One finished run and the base it was judged against — the staleness
 /// guard (#109). `DoctorReport` is the engine's serde type, shared with
@@ -116,12 +116,12 @@ pub fn finding_target(finding: &DoctorFinding, base: &str) -> Option<Target> {
         return None;
     }
     // A concrete wire key parses under the configured base.
-    if zenkey::grammar::parse_full(base, subject).is_some() {
+    if zenkey_v1::grammar::parse_full(base, subject).is_some() {
         return Some(Target::Key(subject.clone()));
     }
     // `origin/producer` — the shape slice-sync/slice-parse findings use.
     if let Some((origin, _producer)) = subject.split_once('/')
-        && (zenkey::grammar::is_valid_host_origin(origin) || origin.starts_with('@'))
+        && (zenkey_v1::grammar::is_valid_host_origin(origin) || origin.starts_with('@'))
     {
         return Some(Target::Node(origin.to_string()));
     }
@@ -131,9 +131,9 @@ pub fn finding_target(finding: &DoctorFinding, base: &str) -> Option<Target> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet::report::DoctorSeverity;
+    use zenkey_fleet_v1::report::DoctorSeverity;
 
-    fn finding(check: zenkey_fleet::report::CheckId, subject: &str) -> DoctorFinding {
+    fn finding(check: zenkey_fleet_v1::report::CheckId, subject: &str) -> DoctorFinding {
         DoctorFinding {
             severity: DoctorSeverity::Error,
             check,
@@ -146,7 +146,7 @@ mod tests {
     fn report(findings: Vec<DoctorFinding>) -> DoctorReport {
         DoctorReport {
             findings,
-            synced: zenkey_fleet::report::Asked::NotAsked,
+            synced: zenkey_fleet_v1::report::Asked::NotAsked,
             introspect_answered: 0,
             live_producers: 0,
             describe_served: 0,
@@ -195,7 +195,10 @@ mod tests {
         state.finish(
             Ok(run(
                 "acme",
-                vec![finding(zenkey_fleet::report::CheckId::SliceSync, "h-1/p")],
+                vec![finding(
+                    zenkey_fleet_v1::report::CheckId::SliceSync,
+                    "h-1/p",
+                )],
             )),
             "acme",
         );
@@ -216,7 +219,10 @@ mod tests {
         state.finish(
             Ok(run(
                 "acme",
-                vec![finding(zenkey_fleet::report::CheckId::SliceSync, "h-1/p")],
+                vec![finding(
+                    zenkey_fleet_v1::report::CheckId::SliceSync,
+                    "h-1/p",
+                )],
             )),
             "acme",
         );
@@ -226,7 +232,7 @@ mod tests {
         state.finish(
             Ok(run(
                 "acme",
-                vec![finding(zenkey_fleet::report::CheckId::StaleState, "k")],
+                vec![finding(zenkey_fleet_v1::report::CheckId::StaleState, "k")],
             )),
             "other",
         );
@@ -242,14 +248,14 @@ mod tests {
     fn finding_targets_resolve_by_subject_shape() {
         assert_eq!(
             finding_target(
-                &finding(zenkey_fleet::report::CheckId::SliceSync, "fleet"),
+                &finding(zenkey_fleet_v1::report::CheckId::SliceSync, "fleet"),
                 ""
             ),
             None
         );
         assert_eq!(
             finding_target(
-                &finding(zenkey_fleet::report::CheckId::SliceSync, "mesh"),
+                &finding(zenkey_fleet_v1::report::CheckId::SliceSync, "mesh"),
                 ""
             ),
             None
@@ -257,7 +263,7 @@ mod tests {
         assert_eq!(
             finding_target(
                 &finding(
-                    zenkey_fleet::report::CheckId::StaleState,
+                    zenkey_fleet_v1::report::CheckId::StaleState,
                     "v1/h-3fa9c2d41b7e/state/p/health"
                 ),
                 ""
@@ -267,7 +273,7 @@ mod tests {
         assert_eq!(
             finding_target(
                 &finding(
-                    zenkey_fleet::report::CheckId::SliceSync,
+                    zenkey_fleet_v1::report::CheckId::SliceSync,
                     "h-3fa9c2d41b7e/sysinfo"
                 ),
                 ""
@@ -276,7 +282,10 @@ mod tests {
         );
         assert_eq!(
             finding_target(
-                &finding(zenkey_fleet::report::CheckId::SchemaDrift, "TelemetryPoint"),
+                &finding(
+                    zenkey_fleet_v1::report::CheckId::SchemaDrift,
+                    "TelemetryPoint"
+                ),
                 ""
             ),
             None,

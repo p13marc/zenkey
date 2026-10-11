@@ -172,7 +172,7 @@ the note above said it lacked. It benches the **renderer-free** half only: the
 work a `view::*` function does before it builds a widget, plus the two per-tick
 joins that feed it. The widget-shaped half (`line_view`'s borrows, the toolbar
 pickers, the media `Handle`, the two `canvas::Cache`s) is held by
-`tests/panes.rs` and by the compiler, and is deliberately not represented here
+`tests/panes/` and by the compiler, and is deliberately not represented here
 — a bench needing a GPU surface would not run in CI, and one through
 `iced_test` would measure the simulator.
 

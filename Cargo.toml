@@ -161,11 +161,9 @@ serde_yaml = "0.9"
 # sources live on the `v1` branch, which releases 0.14.x patches. zk2
 # re-creates these crate names at 0.20.0; two `zenkey` packages coexist then,
 # because 0.x minors are semver-incompatible. (v1's `zenkey-build =0.11.1`
-# left with zenwatch's v1 registry: no member generates v1 code.)
-zenkey = { version = "=0.11.1" }
-# zengui keeps the v1 engine from crates.io (#612, FJ1), the same move #615
-# made for `zenkey`; the in-tree `zenkey-fleet` is 0.20.0, being ported to
-# zk2, and zenctl and zenwatch depend on it by path.
-zenkey-fleet = { version = "=0.18.0" }
+# left with zenwatch's v1 registry: no member generates v1 code.) zengui
+# takes v1's `zenkey =0.11.1` and `zenkey-fleet =0.18.0` under renamed
+# dependencies (#614, FL5), spelled inline in `zengui/Cargo.toml` as
+# zenwatch's were in FL2, so neither pin is in this table any more.
 zenkey-explorer-config = { version = "0.1.0", path = "zenkey-explorer-config" }
 zenkey-report-fixtures = { path = "report-fixtures" }

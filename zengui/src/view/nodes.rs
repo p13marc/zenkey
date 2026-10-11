@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use iced::widget::{column, row, scrollable};
 use iced::{Element, Length};
-use zenkey_fleet::report::NodeList;
-use zenkey_fleet::{NodeInfo, SliceSet};
+use zenkey_fleet_v1::report::NodeList;
+use zenkey_fleet_v1::{NodeInfo, SliceSet};
 
 use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
 use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
@@ -101,7 +101,7 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
     let joined = d
         .roster
         .live_map()
-        .map(|m| zenkey_fleet::node_rows(&m, d.slices));
+        .map(|m| zenkey_fleet_v1::node_rows(&m, d.slices));
 
     // MD between cards (#192): the rule, not a taste — SM is for inside one.
     let mut cards = column![].spacing(sp.md);

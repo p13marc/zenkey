@@ -2,7 +2,7 @@
 //! least a server can be and still answer every procedure `zenctl config`
 //! calls (#500).
 //!
-//! The repo has the convention's types (`zenkey::config`) and its client
+//! The repo has the convention's types (`zenkey_v1::config`) and its client
 //! (`zenctl config`, the engine's `call`), and until this file nothing that
 //! *served* them — so the token round trip, the confirm window, cancel,
 //! extend and persist had never met a reply. This is that reply, built from
@@ -12,12 +12,15 @@
 //! ## Where it lives, and who includes it
 //!
 //! zengui alone, since #612's FJ9 deleted `config` from `main`'s zenctl and
-//! the v1 engine: its `spray` example and its app tests include this file by
-//! `#[path]`, and build it against the v1 engine they pin from crates.io
-//! (`zenkey-fleet =0.18.0`, `zenkey =0.11.1`) until #614 re-targets zengui.
-//! Nothing in this crate compiles it any more; it stays here so zengui's
-//! paths do not move, and leaves with zengui's port. The `v1` branch keeps
-//! the engine's lifecycle test and zenctl's live cases that drove it.
+//! the v1 engine: its `spray_v1` example and its app tests include this file
+//! by `#[path]`, and build it against the v1 engine they pin from crates.io
+//! under renamed dependencies (`zenkey-fleet-v1 = "=0.18.0"`, `zenkey-v1 =
+//! "=0.11.1"`), hence `zenkey_v1::` and `zenkey_fleet_v1::` below. It lived
+//! in `zenkey-fleet/tests/util/` until #614's FL5 moved it here: under the
+//! rename, `zenkey_fleet::` is the zk2 engine, and this file speaks v1's. It
+//! leaves with the config tool when zengui's port takes the v1 crates out
+//! (FL11). The `v1` branch keeps the engine's lifecycle test and zenctl's
+//! live cases that drove it.
 //!
 //! ## What it does
 //!
@@ -58,12 +61,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use zenkey::config::{
+use zenkey_fleet_v1::bus::producer::{BringUp, ReservedError, Responder};
+use zenkey_v1::config::{
     ConfigChange, ConfigError, ConfigGroup, ConfigSchema, ConfigView, ControlRequest, Edit,
     LastChange, ParamClass, ParamKind, ParamSpec, ParamValue, PendingChange, PendingReply,
     ValueSource,
 };
-use zenkey_fleet::bus::producer::{BringUp, ReservedError, Responder};
 use zenoh::query::Query;
 
 /// The resource the fixture schema declares.
@@ -235,7 +238,7 @@ impl ConfigServer {
         &self,
         up: &mut BringUp<'_>,
         rpc_prefix: &str,
-    ) -> zenkey_fleet::Result<()> {
+    ) -> zenkey_fleet_v1::Result<()> {
         for (path, write) in self.procedures() {
             let key = format!("{rpc_prefix}/{path}");
             if write {
@@ -589,7 +592,7 @@ impl State {
         serde_json::to_value(self.view(resource)).expect("a view serializes")
     }
 
-    /// The read-back document, built as `zenkey::config` builds it and
+    /// The read-back document, built as `zenkey_v1::config` builds it and
     /// filled from the running values.
     fn view(&self, resource: &str) -> ConfigView {
         let mut view = ConfigView::of(resource, &self.schema);
@@ -636,7 +639,7 @@ fn invalid(message: &str) -> Answer {
 
 /// Time as this producer spells it: RFC 3339, whole seconds, UTC.
 fn rfc3339(t: SystemTime) -> String {
-    zenkey_fleet::rfc3339_from_unix(
+    zenkey_fleet_v1::rfc3339_from_unix(
         t.duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),

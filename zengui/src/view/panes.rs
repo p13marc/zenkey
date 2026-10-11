@@ -12,7 +12,7 @@
 //! Every argument is shared. `view` takes `&self`, so the six sub-states are
 //! six disjoint shared borrows and borrowck never notices they came from one
 //! struct. The pane functions stay free functions over plain data — the
-//! grid composes them, which is why `tests/panes.rs` renders them with no
+//! grid composes them, which is why `tests/panes/` renders them with no
 //! window and no bus, grid or not.
 
 use iced::widget::{column, pane_grid, row};

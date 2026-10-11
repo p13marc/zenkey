@@ -88,7 +88,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
             // v1.17): fetch the descriptor and index chunks, validate
             // against the root — which the key already is — and render
             // the summary. No file, no progress stream, no cancel token.
-            if let zenkey_fleet::BlobTarget::Tree { root } = &target {
+            if let zenkey_fleet_v1::BlobTarget::Tree { root } = &target {
                 let root = root.clone();
                 blob.fetch = crate::blob::Fetch::Inspecting;
                 let base = cx.dep.base().to_string();
@@ -97,7 +97,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
             }
             let root = match blob.root_input.trim() {
                 "" => None,
-                hex => match zenkey::ContentHash::parse(hex) {
+                hex => match zenkey_v1::ContentHash::parse(hex) {
                     Ok(h) => Some(h),
                     Err(e) => {
                         blob.fetch = crate::blob::Fetch::Failed(crate::services::ServiceError::of(
@@ -108,7 +108,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
                 },
             };
 
-            let cancel = zenkey_fleet::zblob::CancelToken::new();
+            let cancel = zenkey_fleet_v1::zblob::CancelToken::new();
             blob.cancel = Some(cancel.clone());
             blob.fetch = crate::blob::Fetch::InFlight {
                 received: 0,
@@ -129,7 +129,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
                 origin,
                 target,
                 dest,
-                spec: zenkey_fleet::BlobFetchSpec {
+                spec: zenkey_fleet_v1::BlobFetchSpec {
                     timeout,
                     overwrite: true,
                     root,
@@ -138,7 +138,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
             })
         }
         BlobMsg::Progress(p, dropped) => {
-            use zenkey_fleet::report::BlobProgress;
+            use zenkey_fleet_v1::report::BlobProgress;
             // No base guard needed (#109 audit): progress only mutates
             // while Fetch::InFlight, and a base change resets the pane to
             // NotAsked via blob.clear() — stale ticks fall through. Nor does

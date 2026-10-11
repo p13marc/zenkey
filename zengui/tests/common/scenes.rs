@@ -186,8 +186,8 @@ fn live(prefs: Prefs) -> Zengui {
 
 /// Point the workspace at a key and answer the fetch it issues.
 fn select(app: &mut Zengui, key: &str) {
-    use zenkey_fleet::model::decode::{DecodedSample, Rendering};
-    use zenkey_fleet::{FetchOutcome, FetchedValue, ValueSource};
+    use zenkey_fleet_v1::model::decode::{DecodedSample, Rendering};
+    use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
 
     send(
         app,
@@ -218,7 +218,7 @@ fn select(app: &mut Zengui, key: &str) {
                     "{\n  \"value\": 64.2,\n  \"unit\": \"%\",\n  \"ts\": \"2026-10-05T09:12:44Z\"\n}"
                         .into(),
                 ),
-                verdict: zenkey::schema::validate::Verdict::Valid,
+                verdict: zenkey_v1::schema::validate::Verdict::Valid,
                 decode_error: None,
             })),
         )),
@@ -228,7 +228,7 @@ fn select(app: &mut Zengui, key: &str) {
 /// What the bounded validation batch would have answered (#164): one key
 /// of each verdict, so every badge state has a row.
 fn verdicts(app: &mut Zengui) {
-    use zenkey::schema::validate::{NotValidated, Verdict};
+    use zenkey_v1::schema::validate::{NotValidated, Verdict};
     send(
         app,
         Message::Bus(BusMsg::VerdictsChecked(vec![
@@ -338,7 +338,7 @@ fn watching(prefs: Prefs) -> Zengui {
 
 fn diagnose(theme: ThemeChoice) -> Zengui {
     use zengui::view::doctor::DoctorMsg;
-    use zenkey_fleet::report::{Asked, CheckId, DoctorFinding, DoctorReport, DoctorSeverity};
+    use zenkey_fleet_v1::report::{Asked, CheckId, DoctorFinding, DoctorReport, DoctorSeverity};
 
     let mut app = live(prefs(theme));
     preset(&mut app, LayoutPreset::Diagnose);
@@ -418,7 +418,7 @@ fn workbench_mesh(theme: ThemeChoice) -> Zengui {
 fn workbench_config(theme: ThemeChoice) -> Zengui {
     use zengui::configure::{ConfigAct, ConfigTarget};
     use zengui::view::configure::ConfigMsg;
-    use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport};
+    use zenkey_fleet_v1::report::{CallAnswer, CallOutcome, CallReport};
 
     let mut app = live(prefs(theme));
     preset(&mut app, LayoutPreset::Diagnose);
@@ -462,8 +462,8 @@ fn workbench_config(theme: ThemeChoice) -> Zengui {
 fn workbench_admin(theme: ThemeChoice) -> Zengui {
     use zengui::admin::AdminSweep;
     use zengui::view::admin::AdminMsg;
-    use zenkey_fleet::report::StorageList;
-    use zenkey_fleet::{
+    use zenkey_fleet_v1::report::StorageList;
+    use zenkey_fleet_v1::{
         Coverage, CoverageRow, OriginAttachment, RouterInfo, StorageInfo, TopologyEdge,
         TopologyNode, TopologyReport,
     };

@@ -38,9 +38,9 @@
 
 use iced::widget::{Column, column, scrollable};
 use iced::{Element, Length};
-use zenkey_fleet::model::facts::{ClassKind, KeyFacts, KeyShape, Registration};
-use zenkey_fleet::report::TopicRow;
-use zenkey_fleet::{KeyTreeSnapshot, LatencyReport, SliceSet};
+use zenkey_fleet_v1::model::facts::{ClassKind, KeyFacts, KeyShape, Registration};
+use zenkey_fleet_v1::report::TopicRow;
+use zenkey_fleet_v1::{KeyTreeSnapshot, LatencyReport, SliceSet};
 
 use super::detail::{DetailData, Fetched, SeriesData};
 use super::history::HistoryData;
@@ -82,7 +82,7 @@ pub struct InspectorData<'a> {
     pub watched: bool,
     /// The loaded `.zsnap` (#219), when one is: the History section offers
     /// a comparison against its row for the subject key.
-    pub snapshot: Option<&'a zenkey_fleet::Snapshot>,
+    pub snapshot: Option<&'a zenkey_fleet_v1::Snapshot>,
     /// Whether that comparison is showing, on this slot.
     pub compare_snapshot: bool,
     pub latency: Option<(LatencyReport, u64)>,
@@ -233,7 +233,7 @@ fn origin_sections<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Mes
     let joined = d
         .roster
         .live_map()
-        .map(|m| zenkey_fleet::node_rows(&m, d.slices));
+        .map(|m| zenkey_fleet_v1::node_rows(&m, d.slices));
     column![
         kit::section_header("Inspector", None),
         // The subject, restated in the pane. The one TITLE lives in the
@@ -285,7 +285,7 @@ fn declared_subjects<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, M
     for producer in producers.keys() {
         // Instance suffixes share the base slice (RFC 03 §1.5) — the same
         // resolution the engine's `node_rows` applies.
-        let name = zenkey::grammar::Producer::parse_chunk(producer)
+        let name = zenkey_v1::grammar::Producer::parse_chunk(producer)
             .map(|p| p.name().to_string())
             .unwrap_or_else(|_| producer.clone());
         if slices.get(&name).is_none() {

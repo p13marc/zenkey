@@ -20,18 +20,18 @@ async fn session(
     listen: Vec<String>,
     scouting: Option<bool>,
 ) -> ServiceResult<zenoh::Session> {
-    zenkey_fleet::open_reporting(zenoh_config.as_deref(), &connect, &listen, scouting)
+    zenkey_fleet_v1::open_reporting(zenoh_config.as_deref(), &connect, &listen, scouting)
         .await
         .map_err(|f| match f {
-            zenkey_fleet::OpenFailure::Config(e) => ServiceError::of(e),
-            zenkey_fleet::OpenFailure::Transport(e) => {
+            zenkey_fleet_v1::OpenFailure::Config(e) => ServiceError::of(e),
+            zenkey_fleet_v1::OpenFailure::Transport(e) => {
                 ServiceError::of(anyhow::Error::new(NeverOpened(e)))
             }
         })
 }
 
 /// A session that never opened because the transport would not come up —
-/// `zenkey_fleet::OpenFailure::Transport`, kept recognisable through the
+/// `zenkey_fleet_v1::OpenFailure::Transport`, kept recognisable through the
 /// `ServiceError` it travels in.
 ///
 /// The fork is #196's, which zenctl spends the same way: a transport failure
@@ -46,7 +46,7 @@ async fn session(
 /// Transparent: `Display` and `source()` are the engine error's own, so the
 /// link line reads exactly as it did.
 #[derive(Debug)]
-pub struct NeverOpened(pub zenkey_fleet::Error);
+pub struct NeverOpened(pub zenkey_fleet_v1::Error);
 
 impl std::fmt::Display for NeverOpened {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -104,7 +104,7 @@ pub fn discover_bases(session: &zenoh::Session, timeout: Duration) -> Task<Messa
     let session = session.clone();
     Task::perform(
         async move {
-            zenkey_fleet::discover_bases(&session, timeout)
+            zenkey_fleet_v1::discover_bases(&session, timeout)
                 .await
                 .map_err(ServiceError::of)
         },

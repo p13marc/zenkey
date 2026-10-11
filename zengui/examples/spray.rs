@@ -1,762 +1,743 @@
-//! A traffic generator for exercising zengui by hand.
+//! The zk2 demo traffic for zengui (#614, FL5): a deployment of real zk2
+//! services, and beside it the traffic no zk2 service would ever send.
 //!
-//! Neither zenkey nor zensight can produce *non-conforming* traffic — that is
-//! the whole point of them — so there was no way to test the key-agnostic path
-//! against a real bus. This publishes both kinds at once:
+//! A conforming service cannot produce *non-conforming* traffic — that is
+//! the whole point of one — so the key-agnostic path and the lens's honest
+//! rungs need a source that sends both. This is it.
 //!
-//! - keyspace-v2 keys that parse and (against `fixture-tests/registry`)
-//!   resolve to registered subjects, plus one that deliberately does not;
-//! - plain foreign keys, a `v2/` key, a key under another base, and a short
-//!   two-chunk key — one for each `KeyShape` / `UnparsedReason` arm;
-//! - a large payload, to exercise the echo ring's byte budget and the
-//!   "too large to preview" path;
-//! - **payloads that move** (issues #63/#64): a wandering numeric telemetry
-//!   subject to plot and to diff, and a state key that is retired by tombstone
-//!   and revived on a cycle. Everything else stays byte-stable, because the
-//!   tree and badge demos are about keys and a moving payload would be noise;
-//! - a `@media`-shaped key, which a `**` subscriber must *not* see (RFC 03 §4
-//!   D2) — if it shows up in the tree, the scope design is broken;
-//! - a **protobuf** subject with a producer that serves both RFC 08 halves
-//!   (`introspect` and `describe`, issue #97): the leaf decodes to named
-//!   fields with no registry directory involved, and it is the target the
-//!   publish pane can actually be pointed at. It is served from the bus rather
-//!   than added to `fixture-tests/registry` on purpose — that directory is the
-//!   codegen regression corpus, not a demo prop.
-//! - a **`@blob` artifact** served by the reference client (issue #68), and
-//!   beside it a second origin claiming the same id at a *different* content
-//!   root. Two holders that disagree is the case RFC 07 §2.1 exists for — the
-//!   id is a name and the root is the anchor — and it is the one thing a
-//!   single honest server can never demonstrate.
+//! **The owners** are real services, brought up in this process by the
+//! engine `zenctl gen` runs (`zenkey_fleet::run_gen`): each a descriptor,
+//! its bundles served on the bus (core §8.4, so a viewer retrieves the
+//! contracts with no `--contracts`), its tokens, and every stream, state
+//! and event of its contracts published through the runtime's writers,
+//! which keep the contract's QoS and `Encoding` and the owner's stamps, and
+//! keep core §2.7: a templated resource stays within its cardinality and an
+//! event within its rate. Payloads are synthesized per (seed, tick); every
+//! operation is served. All on one session, in the deployment namespace
+//! (`--namespace`, `spray` by default), over `examples/zk2/walkthrough` and
+//! `examples/zk2/tcgui`:
+//!
+//! | address | implements | what it shows |
+//! |---|---|---|
+//! | `robot1/nav`, `robot2/nav` | `nav.v2` | a protobuf stream, state with a freshness ttl, `set_origin`, and `reset` behind a capability |
+//! | `robot1/camera` | `camera.v1` | an explicit `@stream`: no `**` reaches it |
+//! | `robot1/perception` | `detections.v1` | a required role, `input`, bound to `robot1/camera` |
+//! | `robot1/teleop` | `twist_cmd.v1` | a best-effort, express, real-time stream |
+//! | `robot1/thrusters` | `thruster.v1` | operations, and a required role, `cmd`, bound to `robot1/teleop` |
+//! | `fleet/planner` | `mission_plan.v1` | `plans/{vehicle}`, two members of a bound of 1000 |
+//! | `host-a/tc` | `tc.netif.v1`, `tc.netem.v1` | JSON Schema, templated `{ns}/{iface}`, an event at rate `low` |
+//! | `host-a/sysmon` | `health.v1` only | a status cycling OK → DEGRADED → OK |
+//!
+//! An event's rate caps it per run, so each owner runs in **terms** of an
+//! hour (`TERM`): at the end of one its service is closed and brought up
+//! again, as a new instance. A long session sees that restart once an hour.
+//!
+//! **The non-conforming traffic** comes from a second session, in no
+//! namespace, as a stranger to the deployment would send it:
+//!
+//! - an **interface token with no instance token** under `robot9/phantom`
+//!   — the doctor's `token-missing`;
+//! - a **second answerer** on `host-a/tc`'s `namespaces` state, stamped by
+//!   this session's clock — `zenctl doctor --deep`'s `state-stamp-foreign`,
+//!   and a stamp that is not the owner's to any reader (O7);
+//! - **garbage on an owned key**, `robot1/nav`'s `position` stream, stamped
+//!   by this session's clock: undecodable, and not the owner's stamp;
+//! - an **unowned zk2 key**, `robot1/ghost`'s `position`: no provider;
+//! - a zk2 key **in another namespace**, `elsewhere/zk2/…`: not in this one;
+//! - **foreign keys**: plain ones, a CBOR payload, a two-chunk key, a 512
+//!   KiB payload, a v1 key (foreign to zk2) whose `value` wanders, a key
+//!   retired by tombstone and revived on a cycle, and `--keys N` more under
+//!   `soak/`.
+//!
+//! One process, no router to install: with `-l` the owners' session is a
+//! router listening there, with the admin space on, and everything else,
+//! zengui and zenctl included, connects to it as a client. With `-c` it
+//! joins a router as a client. Two sprays on one bus are two writers of
+//! every key: run one.
 //!
 //! ```text
-//! cargo run -p zengui --example spray -- -l tcp/127.0.0.1:7449   # listen, no router
+//! cargo run -p zengui --example spray -- -l tcp/127.0.0.1:7449   # listen: no router needed
 //! cargo run -p zengui --example spray -- -c tcp/127.0.0.1:7447   # or join one
+//! cargo run -p zenctl -- service list --namespace spray -c tcp/127.0.0.1:7449
+//! cargo run -p zenctl -- doctor --namespace spray --deep --clocks-synced -c tcp/127.0.0.1:7449
 //! ```
+//!
+//! Today's zengui still reads v1 (#614 ports it pane by pane), so it shows
+//! every key here as a foreign key — counts, rates and structural payloads,
+//! unlabelled rather than mislabelled — which is the key-agnostic core's
+//! promise. The v1 demo traffic is `spray_v1`.
 
-/// The RFC 05 §5.1 config double (#481), shared with the test suites.
-#[path = "../../zenkey-fleet/tests/util/config_server.rs"]
-mod config_server;
-
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use zenkey::health::Level;
+use zenkey::{ServiceBuilder, ServiceConfig};
+use zenkey_fleet::report::GenReport;
+use zenkey_fleet::{ContractSet, GenPattern, GenSpec, MemberArg, Revision};
+use zenkey_model::grammar::{Addr, IfaceId, InstanceId, KindToken, alive_key, data_key};
+use zenoh::Wait as _;
 
-#[derive(Parser)]
-#[command(about = "publish mixed conforming and foreign traffic for zengui")]
-struct Args {
-    /// Endpoint to connect to, repeatable.
+#[derive(Parser, Debug, Clone)]
+#[command(about = "a zk2 deployment and the traffic no zk2 service would send, for zengui")]
+pub struct Args {
+    /// A router to join as a client, repeatable.
     #[arg(long, short = 'c')]
-    connect: Vec<String>,
-    /// Endpoint to listen on, repeatable.
-    ///
-    /// Listening lets zengui connect straight to this process, so the demo
-    /// needs no router: two cargo commands and nothing else installed.
+    pub connect: Vec<String>,
+    /// An endpoint to listen on, repeatable: the owners' session is then a
+    /// router, and the demo needs nothing else running.
     #[arg(long, short = 'l')]
-    listen: Vec<String>,
-    /// Deployment base for the conforming keys. Empty = the bus root.
-    #[arg(long, default_value = "")]
-    base: String,
-    /// Publications per second, per key.
+    pub listen: Vec<String>,
+    /// The deployment namespace the owners run in. Empty is the bus root.
+    #[arg(long, default_value = "spray")]
+    pub namespace: String,
+    /// Publications per second of each raw key (the owners publish at their
+    /// contracts' pace: a stream at 1 Hz, a state at 0.5 Hz, an event within
+    /// its rate).
     #[arg(long, default_value_t = 5.0)]
-    hz: f64,
-    /// Extra synthetic telemetry keys (`v1/<host>/telemetry/synth/g<n>/k<i>`,
-    /// grouped in hundreds) — the big-tree soak for issue #65. Each publishes
-    /// once at startup so the tree fills, then a rotating slice refreshes on
-    /// every tick so freshness dots keep moving.
+    pub hz: f64,
+    /// Extra foreign keys, `soak/g<n>/k<i>` in groups of a hundred: each put
+    /// once at start, then a rotating slice refreshed every tick.
     #[arg(long, default_value_t = 0)]
-    keys: usize,
+    pub keys: usize,
+    /// Drives every owner's synthesized payloads: the same seed is the same
+    /// demo.
+    #[arg(long, default_value_t = 42)]
+    pub seed: u64,
+    /// The directory holding the `walkthrough` and `tcgui` example
+    /// contracts.
+    #[arg(long, default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/zk2"))]
+    pub contracts: PathBuf,
 }
 
-/// The `probe` producer's introspect slice: one subject, declared protobuf.
-const PROBE_SLICE: &str = r#"
-[registry]
-version = "1.0"
-app = "spray"
-convention = 1
-
-[producer]
-name = "probe"
-description = "demo producer serving a protobuf-encoded subject (#97)"
-
-[[subject]]
-path = "reading"
-class = "telemetry"
-type = "Reading"
-encoding = "application/protobuf"
-since = "1.0"
-description = "a protobuf payload — decodable only via the served descriptor set"
-
-# What this producer serves on the @blob plane (RFC 08 §2, v1.8). `push` and
-# `fanout` are omitted because spray serves neither: a slice states capability,
-# and claiming one it does not have would be the lie the plane is modelled to
-# prevent.
-# The configuration convention (RFC 05 §5.1), served by the config double
-# below (#481) — RFC 09 §3's worked slice, so zengui's Config tool offers
-# this producer and the nodes pane links to it.
-[[procedure]]
-path = "config/{device}"
-kind = "read"
-reply = "ConfigView"
-idempotent = true
-since = "1.0"
-description = "the read-back: the served schema beside every running value (RFC 05 §5.1)"
-
-[[procedure]]
-path = "config/{device}/{group}/set"
-kind = "write"
-fanout = "forbidden"
-request = "ConfigChange"
-reply = "ConfigView"
-since = "1.0"
-description = "one group's change; hot answers the read-back, reach {token, apply_at}"
-
-[[procedure]]
-path = "config/{device}/confirm"
-kind = "write"
-fanout = "forbidden"
-request = "ControlRequest"
-reply = "ConfigView"
-since = "1.0"
-description = "make the pending change permanent"
-
-[[procedure]]
-path = "config/{device}/cancel"
-kind = "write"
-fanout = "forbidden"
-request = "ControlRequest"
-reply = "ConfigView"
-since = "1.0"
-description = "undo the pending change now"
-
-[[procedure]]
-path = "config/{device}/extend"
-kind = "write"
-fanout = "forbidden"
-request = "ControlRequest"
-reply = "ConfigView"
-since = "1.0"
-description = "move the pending change's deadline"
-
-[[procedure]]
-path = "config/{device}/persist"
-kind = "write"
-fanout = "forbidden"
-request = "ControlRequest"
-reply = "ConfigView"
-since = "1.0"
-description = "write the pending change, or the last one, into the persisted layer"
-
-[[blob]]
-tier = "artifact"
-endpoints = ["manifest", "slice", "have"]
-reference = "BlobReference"
-encoding = "application/octet-stream"
-since = "1.8"
-description = "a demo artifact, so the blob pane has something to probe"
-"#;
-
-/// The demo artifact's id. **Lowercase**, and the example is where that is
-/// documented: RFC 07 §2.2 calls the id a ULID, canonical ULIDs are uppercase
-/// Crockford base32, and RFC 03 §2 chunks have no uppercase spelling. An
-/// uppercase id here would produce a key nothing in this convention can parse.
-const BLOB_ID: &str = "01jqz3demo0001";
-
-/// The `parallax` producer's introspect slice: the media declarations
-/// (RFC 08 §2/§6, v1.16) the zengui media pane discovers off the bus.
-/// The preview rung is a real, decodable stream (PNG frames below); the
-/// video rung is declared and *published as noise* — a viewer that cannot
-/// decode h264 must say so instead of pretending (issue #69).
-const PARALLAX_SLICE: &str = r#"
-[registry]
-version = "1.3"
-app = "spray"
-convention = 1
-
-[producer]
-name = "parallax"
-description = "demo media producer (issue #69)"
-
-[[media]]
-path = "{stream}/preview/png"
-encoding = "image/png"
-attachment = "FrameMeta"
-cardinality = 16
-since = "1.0"
-description = "the decodable preview rung"
-
-[[media]]
-path = "{stream}/video/{codec}/{tier}"
-encoding = "video/*"
-attachment = "FrameMeta"
-cardinality = 128
-since = "1.3"
-description = "video rungs — declared, shown as metadata only"
-"#;
-
-/// A minimal PNG encoder for the demo stream: truecolor 8-bit, no filter,
-/// zlib *stored* blocks — ~40 lines instead of an image-crate dependency
-/// the fixture does not otherwise need. Fine at 64×64; do not reuse for
-/// anything that cares about size.
-fn png(width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
-    fn crc32(data: &[u8]) -> u32 {
-        let mut crc = 0xffff_ffffu32;
-        for &b in data {
-            crc ^= b as u32;
-            for _ in 0..8 {
-                crc = if crc & 1 != 0 {
-                    0xedb8_8320 ^ (crc >> 1)
-                } else {
-                    crc >> 1
-                };
-            }
-        }
-        !crc
-    }
-    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], body: &[u8]) {
-        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
-        out.extend_from_slice(kind);
-        out.extend_from_slice(body);
-        let mut crc_input = kind.to_vec();
-        crc_input.extend_from_slice(body);
-        out.extend_from_slice(&crc32(&crc_input).to_be_bytes());
-    }
-    // Raw scanlines, each with filter byte 0.
-    let mut raw = Vec::with_capacity((width as usize * 3 + 1) * height as usize);
-    for y in 0..height as usize {
-        raw.push(0);
-        raw.extend_from_slice(&rgb[y * width as usize * 3..(y + 1) * width as usize * 3]);
-    }
-    // zlib: header + stored deflate blocks + adler32.
-    let mut idat = vec![0x78, 0x01];
-    for (i, block) in raw.chunks(65_535).enumerate() {
-        let last = (i + 1) * 65_535 >= raw.len();
-        idat.push(u8::from(last));
-        idat.extend_from_slice(&(block.len() as u16).to_le_bytes());
-        idat.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
-        idat.extend_from_slice(block);
-    }
-    let (mut a, mut b) = (1u32, 0u32);
-    for &byte in &raw {
-        a = (a + byte as u32) % 65_521;
-        b = (b + a) % 65_521;
-    }
-    idat.extend_from_slice(&((b << 16) | a).to_be_bytes());
-
-    let mut ihdr = Vec::new();
-    ihdr.extend_from_slice(&width.to_be_bytes());
-    ihdr.extend_from_slice(&height.to_be_bytes());
-    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]); // 8-bit, truecolor
-    let mut out = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-    chunk(&mut out, b"IHDR", &ihdr);
-    chunk(&mut out, b"IDAT", &idat);
-    chunk(&mut out, b"IEND", &[]);
-    out
+/// One owner: an address, the interfaces it implements, its role bindings,
+/// and the members of its templated resources (`zenctl gen --member`).
+struct Owner {
+    address: &'static str,
+    interfaces: &'static [&'static str],
+    bindings: &'static [(&'static str, &'static [&'static str])],
+    members: &'static [&'static str],
 }
 
-/// One preview frame: a moving diagonal band over a gradient, so motion is
-/// obvious at a glance and every frame differs.
-fn preview_frame(tick: u64) -> Vec<u8> {
-    const W: u32 = 64;
-    const H: u32 = 64;
-    let mut rgb = Vec::with_capacity((W * H * 3) as usize);
-    let band = (tick % u64::from(W)) as i64;
-    for y in 0..H as i64 {
-        for x in 0..W as i64 {
-            let on_band = ((x + y) % i64::from(W) - band).abs() < 4;
-            if on_band {
-                rgb.extend_from_slice(&[0xff, 0xd0, 0x20]);
-            } else {
-                rgb.extend_from_slice(&[(x * 3) as u8, 0x30, (y * 3) as u8]);
-            }
-        }
-    }
-    png(W, H, &rgb)
-}
+/// The deployment, in bring-up order: a provider before the role that
+/// binds it.
+const OWNERS: &[Owner] = &[
+    Owner {
+        address: "robot1/nav",
+        interfaces: &["nav.v2"],
+        bindings: &[],
+        members: &[],
+    },
+    Owner {
+        address: "robot2/nav",
+        interfaces: &["nav.v2"],
+        bindings: &[],
+        members: &[],
+    },
+    Owner {
+        address: "robot1/camera",
+        interfaces: &["camera.v1"],
+        bindings: &[],
+        members: &[],
+    },
+    Owner {
+        address: "robot1/perception",
+        interfaces: &["detections.v1"],
+        bindings: &[("input", &["robot1/camera"])],
+        members: &[],
+    },
+    Owner {
+        address: "robot1/teleop",
+        interfaces: &["twist_cmd.v1"],
+        bindings: &[],
+        members: &[],
+    },
+    Owner {
+        address: "robot1/thrusters",
+        interfaces: &["thruster.v1"],
+        bindings: &[("cmd", &["robot1/teleop"])],
+        members: &[],
+    },
+    Owner {
+        address: "fleet/planner",
+        interfaces: &["mission_plan.v1"],
+        bindings: &[],
+        members: &["plans/{vehicle}=robot1,robot2"],
+    },
+    Owner {
+        address: "host-a/tc",
+        interfaces: &["tc.netif.v1", "tc.netem.v1"],
+        bindings: &[],
+        members: &[
+            "interfaces/{ns}/{iface}=default/eth0,default/wlan0",
+            "bandwidth/{ns}/{iface}=default/eth0,default/wlan0",
+            "config/{ns}/{iface}=default/eth0,default/wlan0",
+            "qdisc/{ns}/{iface}=default/eth0,default/wlan0",
+            "plug/{ns}/{iface}=default/eth0,default/wlan0",
+        ],
+    },
+];
 
-/// The origin the *disagreeing* holder answers under — a second claimant for
-/// `BLOB_ID`, serving different bytes.
-const ROGUE_ORIGIN: &str = "h-bbbbbbbbbbbb";
+/// The service implementing only `health.v1`, its status cycling.
+pub const SYSMON: &str = "host-a/sysmon";
 
-/// Deterministic artifact bytes, so two runs of the demo agree about the root.
-fn artifact_bytes(len: usize, seed: u64) -> Vec<u8> {
-    let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-    (0..len)
-        .map(|_| {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-            (state >> 33) as u8
-        })
-        .collect()
-}
+/// How long a status holds before the next one in the cycle.
+const HEALTH_PHASE: Duration = Duration::from_secs(30);
 
-/// `package demo; message Reading { double value = 1; string label = 2; }`,
-/// built through prost-types so the fixture reads as the schema it is.
-fn probe_descriptor_set() -> Vec<u8> {
-    use prost_reflect::prost::Message as _;
-    use prost_reflect::prost_types::{
-        DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
-        field_descriptor_proto,
-    };
-    let field = |name: &str, number: i32, ty: field_descriptor_proto::Type| FieldDescriptorProto {
-        name: Some(name.to_string()),
-        number: Some(number),
-        label: Some(field_descriptor_proto::Label::Optional as i32),
-        r#type: Some(ty as i32),
-        json_name: Some(name.to_string()),
-        ..Default::default()
-    };
-    FileDescriptorSet {
-        file: vec![FileDescriptorProto {
-            name: Some("demo.proto".into()),
-            package: Some("demo".into()),
-            message_type: vec![DescriptorProto {
-                name: Some("Reading".into()),
-                field: vec![
-                    field("value", 1, field_descriptor_proto::Type::Double),
-                    field("label", 2, field_descriptor_proto::Type::String),
-                ],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }],
-    }
-    .encode_to_vec()
-}
+/// One owner's run: an event's rate caps its occurrences per run, so an
+/// owner closes and comes up again every term (the module doc).
+const TERM: Duration = Duration::from_secs(3600);
 
-/// The `describe` reply (RFC 08 §7).
-fn probe_schema_set() -> String {
-    zenkey::schema::SchemaSet::builder("spray")
-        .entry(
-            "Reading",
-            zenkey::schema::TypeSchema::protobuf("demo.Reading", &probe_descriptor_set()),
-        )
-        .build()
-        .to_json()
-}
+/// The address holding an interface token and no instance token.
+pub const PHANTOM: &str = "robot9/phantom";
 
-/// One `Reading`, on the wire. Deliberately *not* JSON: every sniff a generic
-/// tool has renders this as bytes, which is the point of serving a schema.
-fn probe_sample(value: f64) -> Vec<u8> {
-    use prost_reflect::prost::Message as _;
-    let pool = prost_reflect::DescriptorPool::decode(probe_descriptor_set().as_slice())
-        .expect("fixture descriptor set");
-    let desc = pool
-        .get_message_by_name("demo.Reading")
-        .expect("fixture message");
-    let mut msg = prost_reflect::DynamicMessage::new(desc);
-    msg.set_field_by_name("value", prost_reflect::Value::F64(value));
-    msg.set_field_by_name("label", prost_reflect::Value::String("probe".into()));
-    msg.encode_to_vec()
-}
+/// The owner, interface and resource the squatter answers for.
+pub const SQUATTED: (&str, &str, &str) = ("host-a/tc", "tc.netif.v1", "namespaces");
 
-/// How a plan entry's payload is produced on each tick.
-///
-/// Most of the fixture is byte-stable, because the tree, badge and scope demos
-/// are about *keys* and a moving payload would only be noise. The three that
-/// move exist for #63/#64: a diff of two identical payloads shows nothing, and
-/// a sparkline of a constant is a flat line — neither demonstrates anything.
+/// How many ticks one retire/revive cycle takes; its last is the tombstone.
+const CYCLE: u64 = 20;
+
+/// A raw key's payload on each tick.
 enum Payload {
-    /// Identical every tick.
+    /// The same bytes every tick.
     Fixed(Vec<u8>),
-    /// A JSON document whose `value` wanders — the plotting subject.
+    /// A JSON document whose `value` wanders: something to plot and diff.
     Wander,
-    /// The protobuf `Reading`, wandering too: proof that the codec path is
-    /// live, and the thing that shows a schema-decoded leaf offers no chart.
-    Reading,
-    /// A state key that is periodically **retired and revived**: puts, then a
-    /// tombstone, then puts again. The only way to see RFC 04 §1.2's
-    /// distinction by hand.
+    /// Puts, then a tombstone on the cycle's last tick, then puts again.
     Cycle,
 }
 
-/// How many ticks one retire/revive cycle takes; the last tick of each is the
-/// tombstone.
-const CYCLE: u64 = 20;
-
-/// A deterministic wander in `[lo, hi]` — a fixture should look the same on
-/// every run, so this is a sine of the tick, not a random number.
-fn wander(tick: u64, lo: f64, hi: f64) -> f64 {
-    let t = (tick as f64) * 0.37;
-    let unit = (t.sin() + 1.0) / 2.0;
-    // One decimal: enough movement to see, few enough digits to read in a diff.
-    ((lo + unit * (hi - lo)) * 10.0).round() / 10.0
-}
-
 impl Payload {
-    /// The bytes for this tick, or `None` to publish a tombstone instead.
+    /// The bytes for this tick, or `None` for a tombstone.
     fn bytes(&self, tick: u64) -> Option<Vec<u8>> {
         match self {
             Payload::Fixed(b) => Some(b.clone()),
             Payload::Wander => Some(
                 format!(
-                    r#"{{"value":{},"unit":"percent","inodes":{}}}"#,
-                    wander(tick, 20.0, 90.0),
-                    1000 + tick % 7,
+                    r#"{{"value":{},"unit":"percent"}}"#,
+                    wander(tick, 20.0, 90.0)
                 )
                 .into_bytes(),
             ),
-            Payload::Reading => Some(probe_sample(wander(tick, 5.0, 25.0))),
-            Payload::Cycle => (tick % CYCLE != CYCLE - 1).then(|| {
-                format!(
-                    r#"{{"status":"ok","checks":{},"epoch":{}}}"#,
-                    tick % CYCLE,
-                    tick / CYCLE,
-                )
-                .into_bytes()
-            }),
+            Payload::Cycle => (tick % CYCLE != CYCLE - 1)
+                .then(|| format!(r#"{{"status":"ok","epoch":{}}}"#, tick / CYCLE).into_bytes()),
         }
+    }
+}
+
+/// A deterministic wander in `[lo, hi]`: a sine of the tick, so the demo
+/// looks the same on every run.
+fn wander(tick: u64, lo: f64, hi: f64) -> f64 {
+    let unit = (((tick as f64) * 0.37).sin() + 1.0) / 2.0;
+    ((lo + unit * (hi - lo)) * 10.0).round() / 10.0
+}
+
+/// One raw key: where, what, how often, and whether it carries this
+/// session's stamp.
+struct Raw {
+    key: String,
+    payload: Payload,
+    /// Published every `every` ticks.
+    every: u64,
+    stamped: bool,
+    why: &'static str,
+}
+
+/// A running spray. [`Spray::stop`] takes it down.
+pub struct Spray {
+    /// Where to connect: the owners' router's own locators when it
+    /// listens, else the routers it joined.
+    pub endpoints: Vec<String>,
+    /// Each owner's instance, as its first term came up.
+    pub instances: BTreeMap<String, String>,
+    owners: zenoh::Session,
+    raw: zenoh::Session,
+    tasks: tokio::task::JoinSet<()>,
+    _phantom: zenoh::liveliness::LivelinessToken,
+    _squatter: zenoh::query::Queryable<()>,
+}
+
+/// The contracts the owners implement, under `examples/zk2`: the files by
+/// name, since `tcgui/` also holds a bindings file, which is no contract.
+const CONTRACTS: &[&str] = &[
+    "walkthrough/nav.v2.toml",
+    "walkthrough/camera.v1.toml",
+    "walkthrough/detections.v1.toml",
+    "walkthrough/twist_cmd.v1.toml",
+    "walkthrough/thruster.v1.toml",
+    "walkthrough/mission_plan.v1.toml",
+    "tcgui/tc.netif.v1.toml",
+    "tcgui/tc.netem.v1.toml",
+];
+
+/// Every file of [`CONTRACTS`] under `root`, loaded; a file that does not
+/// load stops the demo, with what was wrong.
+fn load(root: &Path) -> anyhow::Result<ContractSet> {
+    let files: Vec<PathBuf> = CONTRACTS.iter().map(|f| root.join(f)).collect();
+    let (set, problems) = ContractSet::load_files(&files);
+    if !problems.is_empty() {
+        let said: Vec<String> = problems
+            .iter()
+            .map(|p| format!("{}: {}", p.at, p.message))
+            .collect();
+        anyhow::bail!(
+            "the example contracts did not load (pass --contracts <examples/zk2>):\n{}",
+            said.join("\n")
+        );
+    }
+    Ok(set)
+}
+
+/// The one revision of `iface` the examples hold.
+fn revision(set: &ContractSet, iface: &str) -> anyhow::Result<Arc<Revision>> {
+    let id: IfaceId = iface.parse()?;
+    set.of_iface(&id)
+        .next()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("the examples hold no revision of {iface}"))
+}
+
+fn endpoint_list(endpoints: &[String]) -> anyhow::Result<String> {
+    Ok(serde_json::to_string(endpoints)?)
+}
+
+/// The owners' session: a router when it listens, a client of the routers
+/// it joins otherwise, in the deployment namespace.
+fn owners_config(args: &Args) -> anyhow::Result<zenoh::Config> {
+    anyhow::ensure!(
+        !args.listen.is_empty() || !args.connect.is_empty(),
+        "say where: -l <endpoint> to listen (no router needed), or -c <endpoint> to join one"
+    );
+    let mut c = zenoh::Config::default();
+    let set = |c: &mut zenoh::Config, k: &str, v: &str| {
+        c.insert_json5(k, v)
+            .map_err(|e| anyhow::anyhow!("{k} = {v}: {e}"))
+    };
+    set(&mut c, "scouting/multicast/enabled", "false")?;
+    if args.listen.is_empty() {
+        set(&mut c, "mode", "\"client\"")?;
+        // Core §4.3: a session that serves state runs its HLC.
+        set(&mut c, "timestamping/enabled", "true")?;
+    } else {
+        set(&mut c, "mode", "\"router\"")?;
+        set(&mut c, "listen/endpoints", &endpoint_list(&args.listen)?)?;
+        // So `zenctl admin` and the doctor's router checks have a router
+        // to read.
+        set(&mut c, "adminspace/enabled", "true")?;
+    }
+    if !args.connect.is_empty() {
+        set(&mut c, "connect/endpoints", &endpoint_list(&args.connect)?)?;
+    }
+    if !args.namespace.is_empty() {
+        zenkey_fleet::check_namespace(&args.namespace)?;
+        set(
+            &mut c,
+            "namespace",
+            &serde_json::to_string(&args.namespace)?,
+        )?;
+    }
+    Ok(c)
+}
+
+/// The stranger's session: a client of the owners' router, in no namespace.
+async fn raw_session(endpoints: &[String]) -> anyhow::Result<zenoh::Session> {
+    let mut c = zenoh::Config::default();
+    c.insert_json5("scouting/multicast/enabled", "false")
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    c.insert_json5("mode", "\"client\"")
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    c.insert_json5("connect/endpoints", &endpoint_list(endpoints)?)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    zenoh::open(c).await.map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// One owner's terms, forever. The first term's instance, or why it did not
+/// come up, goes to `up`; later terms are said on stdout.
+async fn own(
+    session: zenoh::Session,
+    spec: GenSpec,
+    up: tokio::sync::oneshot::Sender<Result<String, String>>,
+) {
+    let mut up = Some(up);
+    loop {
+        let plan = match zenkey_fleet::gen_plan(&spec) {
+            Ok(p) => p,
+            Err(e) => {
+                if let Some(tx) = up.take() {
+                    let _ = tx.send(Err(e.to_string()));
+                }
+                return;
+            }
+        };
+        let ran = zenkey_fleet::run_gen(&session, &spec, &plan, |instance| match up.take() {
+            Some(tx) => {
+                let _ = tx.send(Ok(instance.to_owned()));
+            }
+            None => println!("{}: a new term, as instance {instance}", spec.address),
+        })
+        .await;
+        match ran {
+            Ok(GenReport {
+                sent,
+                failed,
+                calls,
+                first_errors,
+                ..
+            }) => {
+                println!(
+                    "{}: term over — {sent} sent, {failed} failed, {calls} call(s) answered",
+                    spec.address
+                );
+                for e in first_errors {
+                    println!("  {e}");
+                }
+            }
+            Err(e) => {
+                if let Some(tx) = up.take() {
+                    let _ = tx.send(Err(e.to_string()));
+                    return;
+                }
+                eprintln!("{}: {e}; trying again in 5 s", spec.address);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
+
+/// `host-a/sysmon`: a service implementing `health.v1` and nothing else,
+/// its status cycling OK → DEGRADED → OK every [`HEALTH_PHASE`].
+async fn sysmon(
+    session: &zenoh::Session,
+) -> anyhow::Result<(zenkey::Service, zenkey::health::Health)> {
+    let addr: Addr = SYSMON.parse()?;
+    let mut b = ServiceBuilder::new(session, ServiceConfig::new(addr));
+    let health = b.health().await?;
+    // Before the tokens (health.v1 §2.3), so a GET made the moment they
+    // appear finds a level.
+    health.set_status(Level::Ok, "nominal").await?;
+    let svc = b.start().await?;
+    Ok((svc, health))
+}
+
+impl Spray {
+    /// Brings every owner up and starts the raw traffic. Returns once every
+    /// owner's first term is up, or the first that could not come up.
+    pub async fn start(args: &Args) -> anyhow::Result<Spray> {
+        let contracts = load(&args.contracts)?;
+
+        // Every plan before anything is brought up: a contract that will
+        // not plan stops the demo with nothing declared.
+        let mut specs = Vec::new();
+        for (i, o) in OWNERS.iter().enumerate() {
+            let spec = GenSpec {
+                address: o.address.parse()?,
+                revisions: o
+                    .interfaces
+                    .iter()
+                    .map(|iface| revision(&contracts, iface))
+                    .collect::<anyhow::Result<_>>()?,
+                members: o
+                    .members
+                    .iter()
+                    .map(|m| MemberArg::parse(m))
+                    .collect::<Result<_, _>>()?,
+                bindings: o
+                    .bindings
+                    .iter()
+                    .map(|(role, providers)| {
+                        (
+                            (*role).to_owned(),
+                            providers.iter().map(|p| (*p).to_owned()).collect(),
+                        )
+                    })
+                    .collect(),
+                rate_hz: None,
+                pattern: GenPattern::Steady,
+                duration: TERM,
+                seed: args.seed.wrapping_add(i as u64),
+                tool: "zengui spray".into(),
+            };
+            zenkey_fleet::gen_plan(&spec).map_err(|e| anyhow::anyhow!("{}: {e}", o.address))?;
+            specs.push(spec);
+        }
+
+        let owners = zenoh::open(owners_config(args)?)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let endpoints: Vec<String> = if args.listen.is_empty() {
+            args.connect.clone()
+        } else {
+            owners
+                .info()
+                .locators()
+                .await
+                .into_iter()
+                .map(|l| l.to_string())
+                .collect()
+        };
+        anyhow::ensure!(!endpoints.is_empty(), "the router listens nowhere");
+        let raw = raw_session(&endpoints).await?;
+
+        let mut tasks = tokio::task::JoinSet::new();
+        let mut ups = Vec::new();
+        for spec in specs {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            ups.push((spec.address.to_string(), rx));
+            tasks.spawn(own(owners.clone(), spec, tx));
+        }
+        let mut instances = BTreeMap::new();
+        for (address, rx) in ups {
+            let came = tokio::time::timeout(Duration::from_secs(60), rx)
+                .await
+                .map_err(|_| anyhow::anyhow!("{address} did not come up within 60 s"))?
+                .map_err(|_| anyhow::anyhow!("{address}'s task ended"))?
+                .map_err(|e| anyhow::anyhow!("{address}: {e}"))?;
+            instances.insert(address, came);
+        }
+
+        let (svc, health) = sysmon(&owners).await?;
+        instances.insert(SYSMON.to_owned(), svc.instance().to_string());
+        tasks.spawn(async move {
+            let _svc = svc;
+            let mut degraded = false;
+            loop {
+                tokio::time::sleep(HEALTH_PHASE).await;
+                degraded = !degraded;
+                let set = if degraded {
+                    health
+                        .set_status(Level::Degraded, "demo: /var/log is 91% full")
+                        .await
+                } else {
+                    health.set_status(Level::Ok, "nominal").await
+                };
+                if let Err(e) = set {
+                    eprintln!("{SYSMON}: {e}");
+                }
+            }
+        });
+
+        let ns = args.namespace.as_str();
+        let in_ns = |k: &zenkey_model::grammar::Key| zenkey_fleet::with_namespace(ns, k.as_str());
+
+        // The phantom: an interface token under an address no instance
+        // token names (core §8.1), naming nav.v2's revision.
+        let nav = revision(&contracts, "nav.v2")?;
+        let phantom = in_ns(&alive_key(
+            &PHANTOM.parse()?,
+            nav.iface(),
+            &InstanceId::from_u64(0x5ca1_ab1e_0000_0001),
+            &nav.fingerprint().hex().fp16(),
+        )?);
+        let _phantom = raw
+            .liveliness()
+            .declare_token(phantom.clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("token {phantom}: {e}"))?;
+
+        // The squatter: a second answerer on an owner's state, with this
+        // session's stamp (core §4.2 S1).
+        let (owner, iface, resource) = SQUATTED;
+        let squatted = in_ns(&data_key(
+            &owner.parse()?,
+            &iface.parse()?,
+            KindToken::State,
+            &[resource],
+        )?);
+        let stamper = raw.clone();
+        let reply_key = squatted.clone();
+        let _squatter = raw
+            .declare_queryable(squatted.clone())
+            .callback(move |q| {
+                let _ = q
+                    .reply(
+                        reply_key.clone(),
+                        r#"{"namespaces":["default","squatted"]}"#,
+                    )
+                    .timestamp(stamper.new_timestamp())
+                    .wait();
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("queryable {squatted}: {e}"))?;
+
+        let nav_position = |addr: &str| -> anyhow::Result<zenkey_model::grammar::Key> {
+            Ok(data_key(
+                &addr.parse()?,
+                nav.iface(),
+                KindToken::Stream,
+                &["position"],
+            )?)
+        };
+        let per_second = (args.hz.max(0.1).round() as u64).max(1);
+        let raws = vec![
+            Raw {
+                key: in_ns(&nav_position("robot1/nav")?),
+                payload: Payload::Fixed(b"\xff\xfe not a nav.v2.Position".to_vec()),
+                every: per_second,
+                stamped: true,
+                why: "garbage on an owned key, with a stamp not the owner's",
+            },
+            Raw {
+                key: in_ns(&nav_position("robot1/ghost")?),
+                payload: Payload::Fixed(vec![0x09, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]),
+                every: 1,
+                stamped: false,
+                why: "an unowned zk2 key: no provider",
+            },
+            Raw {
+                key: zenkey_fleet::with_namespace(
+                    "elsewhere",
+                    nav_position("robot9/nav")?.as_str(),
+                ),
+                payload: Payload::Fixed(br#"{"another":"deployment"}"#.to_vec()),
+                every: 1,
+                stamped: false,
+                why: "a zk2 key in another namespace",
+            },
+            Raw {
+                key: "demo/example/foo".into(),
+                payload: Payload::Fixed(b"just a plain string".to_vec()),
+                every: 1,
+                stamped: false,
+                why: "foreign",
+            },
+            Raw {
+                key: "demo/cbor".into(),
+                payload: Payload::Fixed(vec![0xA1, 0x61, 0x61, 0x01]),
+                every: 1,
+                stamped: false,
+                why: "foreign, CBOR",
+            },
+            Raw {
+                key: "two/chunks".into(),
+                payload: Payload::Fixed(b"{}".to_vec()),
+                every: 1,
+                stamped: false,
+                why: "foreign, two chunks",
+            },
+            Raw {
+                key: "demo/huge".into(),
+                payload: Payload::Fixed(vec![b'x'; 512 * 1024]),
+                every: 1,
+                stamped: false,
+                why: "foreign, 512 KiB",
+            },
+            Raw {
+                key: "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used".into(),
+                payload: Payload::Wander,
+                every: 1,
+                stamped: false,
+                why: "a v1 key, foreign to zk2; its value wanders",
+            },
+            Raw {
+                key: "demo/cycle".into(),
+                payload: Payload::Cycle,
+                every: 1,
+                stamped: false,
+                why: "foreign, retired by tombstone and revived",
+            },
+        ];
+        let soak: Vec<String> = (0..args.keys)
+            .map(|i| format!("soak/g{}/k{i}", i / 100))
+            .collect();
+        for key in &soak {
+            let _ = raw.put(key, b"1".to_vec()).await;
+        }
+
+        println!(
+            "non-conforming, from a session in no namespace:\n  {phantom}\n      an interface \
+             token and no instance token (doctor: token-missing)\n  {squatted}\n      a second \
+             answerer, stamped by another clock (doctor --deep: state-stamp-foreign)"
+        );
+        for r in &raws {
+            println!("  {}\n      {}", r.key, r.why);
+        }
+        if !soak.is_empty() {
+            println!(
+                "  soak/g*/k* ({} keys)\n      foreign, the big-tree soak",
+                soak.len()
+            );
+        }
+
+        let publisher = raw.clone();
+        let period = Duration::from_secs_f64(1.0 / args.hz.max(0.1));
+        let refresh = (args.keys / 1000).max(1);
+        tasks.spawn(async move {
+            let mut ticker = tokio::time::interval(period);
+            let (mut tick, mut cursor) = (0u64, 0usize);
+            loop {
+                ticker.tick().await;
+                for r in raws.iter().filter(|r| tick.is_multiple_of(r.every)) {
+                    match r.payload.bytes(tick) {
+                        Some(bytes) if r.stamped => {
+                            let _ = publisher
+                                .put(&r.key, bytes)
+                                .timestamp(publisher.new_timestamp())
+                                .await;
+                        }
+                        Some(bytes) => {
+                            let _ = publisher.put(&r.key, bytes).await;
+                        }
+                        None => {
+                            let _ = publisher.delete(&r.key).await;
+                        }
+                    }
+                }
+                for _ in 0..refresh.min(soak.len()) {
+                    let _ = publisher
+                        .put(&soak[cursor % soak.len()], b"1".to_vec())
+                        .await;
+                    cursor += 1;
+                }
+                tick = tick.wrapping_add(1);
+            }
+        });
+
+        Ok(Spray {
+            endpoints,
+            instances,
+            owners,
+            raw,
+            tasks,
+            _phantom,
+            _squatter,
+        })
+    }
+
+    /// Stops every task and closes both sessions: the owners' tokens and
+    /// queryables go with theirs.
+    pub async fn stop(mut self) {
+        self.tasks.shutdown().await;
+        let _ = self.raw.close().await;
+        let _ = self.owners.close().await;
     }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-
-    let mut config = zenoh::Config::default();
-    config
-        .insert_json5("scouting/multicast/enabled", "false")
-        .ok();
-    let json_list = |v: &[String]| {
-        let items: Vec<String> = v.iter().map(|e| format!("{e:?}")).collect();
-        format!("[{}]", items.join(","))
+    let spray = Spray::start(&args).await?;
+    let ns = if args.namespace.is_empty() {
+        "the bus root".to_owned()
+    } else {
+        format!("namespace {:?}", args.namespace)
     };
-    if !args.connect.is_empty() {
-        config
-            .insert_json5("connect/endpoints", &json_list(&args.connect))
-            .ok();
+    println!("owners, in {ns}:");
+    for (address, instance) in &spray.instances {
+        println!("  {address:<18} instance {instance}");
     }
-    if !args.listen.is_empty() {
-        config
-            .insert_json5("listen/endpoints", &json_list(&args.listen))
-            .ok();
-    }
-    let session = zenoh::open(config)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let with_base = |k: &str| zenkey::grammar::with_base(&args.base, k);
-    let host = "h-3fa9c2d41b7e";
-
-    // (key, payload source) pairs, one publisher each.
-    let plan: Vec<(String, Payload)> = vec![
-        // Conforming, and registered in fixture-tests/registry. This one
-        // moves: it is the sparkline and payload-diff subject (#63/#64).
-        (
-            with_base(&format!("v1/{host}/telemetry/sysinfo/disk/var-log/used")),
-            Payload::Wander,
-        ),
-        // State, retired and revived on a cycle — the tombstone demo.
-        (
-            with_base(&format!("v1/{host}/state/sysinfo/health")),
-            Payload::Cycle,
-        ),
-        // Conforming, but NOT registered — must read "unregistered", not
-        // "no slice", and certainly not "registered".
-        (
-            with_base(&format!("v1/{host}/telemetry/sysinfo/not/a/real/subject")),
-            Payload::Fixed(br#"{"value":1}"#.to_vec()),
-        ),
-        // A service origin: `**` cannot reach this (D4), so it is the check
-        // that the Deployment scope's explicit @catalog selector works.
-        (
-            with_base("v1/@catalog/state/entity/h-3fa9c2d41b7e"),
-            Payload::Fixed(br#"{"entity":"host-a"}"#.to_vec()),
-        ),
-        // Foreign traffic — the key-agnostic path.
-        (
-            "demo/example/foo".to_string(),
-            Payload::Fixed(b"just a plain string".to_vec()),
-        ),
-        (
-            "demo/cbor".to_string(),
-            Payload::Fixed(vec![0xA1, 0x61, 0x61, 0x01]),
-        ),
-        ("two/chunks".to_string(), Payload::Fixed(b"{}".to_vec())),
-        (
-            format!("v2/{host}/telemetry/sysinfo/cpu"),
-            Payload::Fixed(b"a v2 key: not this convention".to_vec()),
-        ),
-        (
-            format!("someotherbase/v1/{host}/state/sysinfo/health"),
-            Payload::Fixed(br#"{"status":"another deployment"}"#.to_vec()),
-        ),
-        // Exercises the ring's byte budget and the no-preview path.
-        (
-            "demo/huge".to_string(),
-            Payload::Fixed(vec![b'x'; 512 * 1024]),
-        ),
-        // Must NOT appear under a `**` subscription (RFC 03 §4 D2).
-        (
-            with_base(&format!("v1/{host}/@media/parallax/cam0/video/h264/hi")),
-            Payload::Fixed(vec![0u8; 4096]),
-        ),
-        // A protobuf payload (#97). Opaque to every sniff — it decodes only
-        // because `probe` serves its descriptor set on `describe` below.
-        (
-            with_base(&format!("v1/{host}/telemetry/probe/reading")),
-            Payload::Reading,
-        ),
-    ];
-
-    // The `probe` producer's RFC 08 §6/§7 halves. Served from the bus, so the
-    // protobuf leaf decodes with `--registry` pointing anywhere (or nowhere):
-    // the union takes served-wins, and this producer is only served.
-    let mut described = Vec::new();
-    // A slice reply declares its spelling (RFC 08 §6, v1.44): one that
-    // declares nothing is only sniffed.
-    let toml = Some(zenkey::SliceFormat::Toml.media_type());
-    for (producer, procedure, payload, encoding) in [
-        ("probe", "introspect", PROBE_SLICE.to_string(), toml),
-        ("probe", "describe", probe_schema_set(), None),
-        ("parallax", "introspect", PARALLAX_SLICE.to_string(), toml),
-    ] {
-        let key = with_base(&format!("v1/{host}/@rpc/{producer}/{procedure}"));
-        println!("serving: {key}");
-        let reply_key = key.clone();
-        described.push(
-            session
-                .declare_queryable(&key)
-                .callback(move |query| {
-                    let q = query.clone();
-                    let reply_key = reply_key.clone();
-                    let payload = payload.clone();
-                    tokio::spawn(async move {
-                        let reply = q.reply(reply_key, payload);
-                        let _ = match encoding {
-                            Some(e) => reply.encoding(e).await,
-                            None => reply.await,
-                        };
-                    });
-                })
-                .await
-                .map_err(|e| anyhow::anyhow!("queryable {key}: {e}"))?,
-        );
-    }
-
-    // ── RFC 05 §5.1, served (#481) ───────────────────────────────────────
-    //
-    // The configuration test double — the same file zenkey-fleet's
-    // lifecycle test, zenctl's live suite and zengui's app tests serve — as
-    // `probe`'s configuration, so the Config tool has a resource to read,
-    // change, arm and roll back. No alive token of its own: probe's is
-    // declared below with the others.
-    let config = config_server::ConfigServer::fixture("probe");
-    let mut up = zenkey_fleet::bus::producer::BringUp::new(&session);
-    config
-        .declare(&mut up, &with_base(&format!("v1/{host}/@rpc/probe")))
-        .await
-        .map_err(|e| anyhow::anyhow!("config procedures: {e}"))?;
-    let _config_served: Vec<_> = up
-        .without_alive()
-        .into_iter()
-        .map(|r| config.spawn(r))
-        .collect();
     println!(
-        "serving: {} (config/{} — RFC 05 §5.1)",
-        with_base(&format!("v1/{host}/@rpc/probe/config/**")),
-        config_server::RESOURCE
+        "{} {}",
+        if args.listen.is_empty() {
+            "joined"
+        } else {
+            "listening on"
+        },
+        spray.endpoints.join(", ")
     );
-
-    // ── the @blob plane (#68) ────────────────────────────────────────────
-    //
-    // A real artifact, served by the RFC 07 reference client under this host's
-    // tier-1 prefix; and beside it a second origin claiming the same id at a
-    // different root. Both are needed: one server proves a probe→fetch round
-    // trip works, and only two disagreeing ones prove the explorer *reports*
-    // the disagreement instead of trusting whoever answered first (§2.1).
-    let blob_prefix = with_base(
-        zenkey::grammar::blob_tier_prefix(
-            &zenkey::grammar::Origin::Host(zenkey::HostId::parse(host)?),
-            zenkey::grammar::BlobTier::Artifact,
-        )
-        .as_str(),
-    );
-    let blob_data = artifact_bytes(1 << 20, 42);
-    let blob_server = zenkey_fleet::zblob::BlobServer::new(
-        &session,
-        zenkey_fleet::zblob::ServePrefix::new(blob_prefix.clone())
-            .map_err(|e| anyhow::anyhow!("blob prefix: {e}"))?,
-    );
-    let manifest = blob_server
-        .register_source(
-            zenkey_fleet::zblob::BlobSpec::new(BLOB_ID).filename("demo-bundle.bin"),
-            std::sync::Arc::new(zenkey_fleet::zblob::MemoryBlobSource::new(blob_data)),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("register blob: {e}"))?;
-    // The serve loop owns its queryable and lives in its own task, so the
-    // handle is only a stop switch — and this fixture stops with the process.
-    let _blob_handle = blob_server
-        .spawn()
-        .await
-        .map_err(|e| anyhow::anyhow!("spawn blob server: {e}"))?;
-    println!(
-        "serving: {blob_prefix}/{BLOB_ID}/**  root {}",
-        manifest.root
-    );
-
-    // The rogue: same id, a manifest with a different root, and an
-    // availability bitfield claiming the lot. It serves no slices — it does
-    // not need to, because a fetch from it with the honest root pinned must
-    // fail before a byte reaches disk, naming this origin.
-    let rogue_prefix = with_base(
-        zenkey::grammar::blob_tier_prefix(
-            &zenkey::grammar::Origin::Host(zenkey::HostId::parse(ROGUE_ORIGIN)?),
-            zenkey::grammar::BlobTier::Artifact,
-        )
-        .as_str(),
-    );
-    let rogue_manifest = zenkey_fleet::zblob::Manifest {
-        version: zenkey_fleet::zblob::wire::WIRE_VERSION,
-        id: zenkey_fleet::zblob::BlobId::new(BLOB_ID)
-            .map_err(|e| anyhow::anyhow!("rogue id: {e}"))?,
-        filename: Some("demo-bundle.bin".into()),
-        total_len: manifest.total_len,
-        chunk_size: manifest.chunk_size,
-        root: zenkey_fleet::zblob::Hash::of(b"a different artifact entirely"),
-        created_ms: 0,
-        ext: zenkey_fleet::zblob::wire::Ext::default(),
-    };
-    println!(
-        "serving: {rogue_prefix}/{BLOB_ID}/**  root {}  (the disagreeing holder)",
-        rogue_manifest.root
-    );
-    let chunk_count = manifest.total_len.div_ceil(manifest.chunk_size as u64) as u32;
-    let rogue_replies: std::collections::HashMap<
-        String,
-        (Vec<u8>, &'static zenkey_fleet::zblob::wire::WireTag),
-    > = std::collections::HashMap::from([
-        (
-            zenkey_fleet::zblob::keys::manifest_key(&rogue_prefix, BLOB_ID),
-            (
-                zenkey_fleet::zblob::wire::encode(&rogue_manifest)
-                    .map_err(|e| anyhow::anyhow!("encode rogue manifest: {e}"))?,
-                &zenkey_fleet::zblob::wire::ENC_MANIFEST,
-            ),
-        ),
-        (
-            zenkey_fleet::zblob::keys::availability_key(&rogue_prefix, BLOB_ID),
-            (
-                zenkey_fleet::zblob::wire::encode(&zenkey_fleet::zblob::wire::Availability::full(
-                    chunk_count,
-                ))
-                .map_err(|e| anyhow::anyhow!("encode rogue availability: {e}"))?,
-                &zenkey_fleet::zblob::wire::ENC_AVAIL,
-            ),
-        ),
-    ]);
-    let _rogue = session
-        .declare_queryable(format!("{rogue_prefix}/**"))
-        .callback(move |query| {
-            // Replies go on the responder's own concrete key, as a real server
-            // does — which is what lets a `*`-origin probe attribute them.
-            for (key, (payload, encoding)) in &rogue_replies {
-                if !query.key_expr().intersects(
-                    &zenoh::key_expr::KeyExpr::try_from(key.as_str()).expect("valid key"),
-                ) {
-                    continue;
-                }
-                let q = query.clone();
-                let key = key.clone();
-                let payload = payload.clone();
-                let encoding = *encoding;
-                tokio::spawn(async move {
-                    let _ = q.reply(key, payload).encoding(encoding).await;
-                });
-            }
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("rogue queryable: {e}"))?;
-
-    // Liveliness tokens (RFC 04 §5): the roster the node views feed on.
-    // Killing this process retracts them — that is the suspect-on-retraction
-    // demo for `zenctl node list --watch` and the zengui node dashboard.
-    let tokens = [
-        with_base(&format!("v1/{host}/state/sysinfo/alive")),
-        with_base(&format!("v1/{host}/state/probe/alive")),
-        with_base(&format!("v1/{host}/state/parallax/alive")),
-        with_base("v1/@catalog/state/alive"),
-    ];
-    let mut held = Vec::new();
-    for key in tokens {
-        println!("liveliness token: {key}");
-        let t = session
-            .liveliness()
-            .declare_token(key.clone())
-            .await
-            .map_err(|e| anyhow::anyhow!("token {key}: {e}"))?;
-        held.push(t);
-    }
-
-    println!("publishing {} keys at {} Hz each:", plan.len(), args.hz);
-    let mut publishers = Vec::new();
-    for (key, payload) in plan {
-        println!("  {key}");
-        let p = session
-            .declare_publisher(key.clone())
-            .await
-            .map_err(|e| anyhow::anyhow!("declare {key}: {e}"))?;
-        publishers.push((p, payload));
-    }
-    // The synthetic fan: bulk keys via ad-hoc puts (this is a test fixture,
-    // not a conforming producer — 50k declared publishers would prove
-    // nothing about the tree).
-    let synth: Vec<String> = (0..args.keys)
-        .map(|i| with_base(&format!("v1/{host}/telemetry/synth/g{}/k{i}", i / 100)))
-        .collect();
-    if !synth.is_empty() {
-        println!("seeding {} synthetic keys…", synth.len());
-        for key in &synth {
-            let _ = session.put(key, b"1".to_vec()).await;
-        }
-        println!("…seeded.");
-    }
     println!("\nCtrl-C to stop.");
-
-    // The media preview stream (issue #69): PNG frames on the exact key the
-    // registry declares the shape of, metadata on the attachment (RFC 07
-    // §1), published through a declared publisher at the demo rate.
-    let preview_key = with_base(&format!("v1/{host}/@media/parallax/cam0/preview/png"));
-    println!("publishing media preview: {preview_key}");
-    let preview = session
-        .declare_publisher(preview_key)
-        .await
-        .map_err(|e| anyhow::anyhow!("preview publisher: {e}"))?;
-
-    let period = Duration::from_secs_f64(1.0 / args.hz.max(0.1));
-    let mut ticker = tokio::time::interval(period);
-    let refresh_per_tick = (args.keys / 1000).max(1);
-    let mut cursor = 0usize;
-    let mut tick: u64 = 0;
-    loop {
-        ticker.tick().await;
-        for (p, payload) in &publishers {
-            match payload.bytes(tick) {
-                Some(bytes) => {
-                    let _ = p.put(bytes).await;
-                }
-                // A tombstone, not an empty put — the whole point of the
-                // cycle (RFC 04 §1.2).
-                None => {
-                    let _ = p.delete().await;
-                }
-            }
-        }
-        {
-            let frame = preview_frame(tick);
-            let meta = format!(r#"{{"seq":{tick},"keyframe":true,"width":64,"height":64}}"#);
-            let _ = preview
-                .put(frame)
-                .encoding("image/png")
-                .attachment(meta.into_bytes())
-                .await;
-        }
-        tick = tick.wrapping_add(1);
-        if !synth.is_empty() {
-            for _ in 0..refresh_per_tick {
-                let key = &synth[cursor % synth.len()];
-                let _ = session.put(key, b"1".to_vec()).await;
-                cursor += 1;
-            }
-        }
-    }
+    tokio::signal::ctrl_c().await?;
+    spray.stop().await;
+    Ok(())
 }

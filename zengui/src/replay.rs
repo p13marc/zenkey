@@ -4,7 +4,7 @@
 //! The seam is the tick: everything downstream of
 //! [`crate::message::BusTick`] already renders whatever it is handed, so
 //! replay synthesizes ticks from a **session-less**
-//! [`zenkey_fleet::MonitorCore`] — the same stats table, the same tree
+//! [`zenkey_fleet_v1::MonitorCore`] — the same stats table, the same tree
 //! builder, the same bounded counters as live — and the panes cannot tell
 //! the difference. Nothing here can publish: there is no session in this
 //! module at all, which is the RFC 09 §5.2 pane-replay posture made
@@ -17,8 +17,8 @@
 //! offsets — and the UI says so. Scrubbing backwards is a rebuild: LWW
 //! folding is not invertible, so `scrub_to` re-ingests from the top into a
 //! fresh core, which stays cheap because a capture is bounded by
-//! construction (a file by [`zenkey_fleet::RecordBounds`], the ring by its
-//! [`zenkey_fleet::RetentionBudget`]). The rebuild feeds
+//! construction (a file by [`zenkey_fleet_v1::RecordBounds`], the ring by its
+//! [`zenkey_fleet_v1::RetentionBudget`]). The rebuild feeds
 //! [`MonitorCore::ingest_at`] on the capture clock, so the fold — EWMA
 //! rates included — is deterministic in the rows alone, which is what lets
 //! a retained scrub and a file replay of the same traffic yield
@@ -28,7 +28,7 @@ use std::io::BufRead;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::{MonitorCore, RetentionStats, SampleView, ZrecHeader, ZrecItem, ZrecReader};
+use zenkey_fleet_v1::{MonitorCore, RetentionStats, SampleView, ZrecHeader, ZrecItem, ZrecReader};
 
 use crate::message::BusTick;
 
@@ -126,7 +126,7 @@ pub struct ReplayState {
     /// Version-2 trigger records, at their capture-clock position (the
     /// `t` of the last observed row before each): what fired, so the
     /// scrubber can mark where.
-    pub triggers: Vec<(u64, zenkey_fleet::Transition)>,
+    pub triggers: Vec<(u64, zenkey_fleet_v1::Transition)>,
     /// The playhead, on the capture clock, µs.
     pub position_us: u64,
     /// The capture's span (the last row's `t`).
@@ -162,7 +162,7 @@ fn axes(
     zenoh::qos::Reliability,
     bool,
 ) {
-    match qos.and_then(zenkey::qos::QosProfile::from_name) {
+    match qos.and_then(zenkey_v1::qos::QosProfile::from_name) {
         Some(p) => (
             p.priority(),
             p.congestion_control(),

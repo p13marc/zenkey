@@ -190,7 +190,7 @@ pub(crate) fn update(
             // every session open — launch and each reconnect — sat a disk
             // access on a frame. Its answer lands on `ContextMsg::Refreshed`.
             let contexts = services::context::refresh();
-            dep.schema_store = Some(Arc::new(zenkey_fleet::SchemaStore::new(
+            dep.schema_store = Some(Arc::new(zenkey_fleet_v1::SchemaStore::new(
                 dep.base(),
                 dep.timeout(),
             )));
@@ -325,12 +325,12 @@ pub(crate) fn update(
 /// any of it. The keys go in the order the bus delivered them, and only the
 /// payload each carries is the newest one the tick holds.
 fn validation_batch(
-    samples: &[Arc<zenkey_fleet::SampleView>],
+    samples: &[Arc<zenkey_fleet_v1::SampleView>],
     cache: &crate::verdict::VerdictCache,
 ) -> Vec<(String, String, zenoh::bytes::ZBytes)> {
     // Newest per key, in first-arrival key order: `newest` supersedes,
     // `order` remembers when the key first showed up.
-    let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet::SampleView>> =
+    let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet_v1::SampleView>> =
         std::collections::HashMap::new();
     let mut order: Vec<&str> = Vec::new();
     for sample in samples {
@@ -440,13 +440,13 @@ pub(crate) fn refresh_blob_list(dep: &Deployment, work: &mut Workspace) {
         return;
     };
     let source = match dep.slice_source {
-        view::status::SliceSource::Union { .. } => zenkey_fleet::report::BlobListSource::Union,
+        view::status::SliceSource::Union { .. } => zenkey_fleet_v1::report::BlobListSource::Union,
         view::status::SliceSource::Dirs { .. } => {
-            zenkey_fleet::report::BlobListSource::RegistryDirs
+            zenkey_fleet_v1::report::BlobListSource::RegistryDirs
         }
-        _ => zenkey_fleet::report::BlobListSource::Bus,
+        _ => zenkey_fleet_v1::report::BlobListSource::Bus,
     };
-    work.verdicts.blob.list = Some(zenkey_fleet::blob_list(
+    work.verdicts.blob.list = Some(zenkey_fleet_v1::blob_list(
         slices.slices(),
         work.verdicts.roster.live_map().as_ref(),
         source,
@@ -511,7 +511,7 @@ mod tests {
             history_entries: 10,
             max_keys: 1000,
         });
-        let discovered = |base: &str| zenkey_fleet::DiscoveredBase {
+        let discovered = |base: &str| zenkey_fleet_v1::DiscoveredBase {
             base: base.into(),
             origins: Default::default(),
             producers: Default::default(),
@@ -541,8 +541,8 @@ mod tests {
         );
     }
 
-    fn sample(key: &str, payload: &[u8]) -> Arc<zenkey_fleet::SampleView> {
-        Arc::new(zenkey_fleet::SampleView {
+    fn sample(key: &str, payload: &[u8]) -> Arc<zenkey_fleet_v1::SampleView> {
+        Arc::new(zenkey_fleet_v1::SampleView {
             key: key.to_string(),
             payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
             encoding: "application/json".to_string(),
@@ -590,7 +590,7 @@ mod tests {
         );
 
         for (key, _, _) in &first {
-            cache.record(key, zenkey_fleet::Verdict::Valid);
+            cache.record(key, zenkey_fleet_v1::Verdict::Valid);
         }
         let second = validation_batch(&samples, &cache);
         assert_eq!(

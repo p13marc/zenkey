@@ -9,7 +9,7 @@
 //! Everything that touches the bus goes through [`crate::services::write`],
 //! which goes through the engine: `prepare_publish` for the body (#97's
 //! encode ladder), `declare_publication` for the write (P7 — a declared
-//! publisher, never an ad-hoc put), and `zenkey_fleet::call` for the RPC. No
+//! publisher, never an ad-hoc put), and `zenkey_fleet_v1::call` for the RPC. No
 //! codec logic on this side of the seam.
 
 use std::sync::Arc;
@@ -179,14 +179,14 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
         SendMsg::KeyChanged(k) => {
             // Classify as you type, through the same ladder the tree uses.
             bench.send_form.facts = (!k.trim().is_empty()).then(|| {
-                zenkey_fleet::describe_key(cx.dep.base(), &k, cx.dep.slices.as_deref()).facts
+                zenkey_fleet_v1::describe_key(cx.dep.base(), &k, cx.dep.slices.as_deref()).facts
             });
             // #158: the declared profile drives the picker until the user
             // takes it over — and stops driving it the moment they do.
             if !bench.send_form.qos_touched {
                 let declared = view::send::declared_qos(bench.send_form.facts.as_ref());
                 bench.send_form.qos =
-                    view::send::QosChoice(declared.unwrap_or(zenkey::qos::QosProfile::Sampled));
+                    view::send::QosChoice(declared.unwrap_or(zenkey_v1::qos::QosProfile::Sampled));
             }
             bench.send_form.key = k;
             Task::none()
@@ -249,7 +249,7 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             let stop = update(bench, SendMsg::Stop, cx);
             // The engine is the judge (check_retire, RFC 04 §1.2 v1.12);
             // the pane's checkbox only arms the force.
-            if let Err(e) = zenkey_fleet::check_retire(
+            if let Err(e) = zenkey_fleet_v1::check_retire(
                 cx.dep.base(),
                 &key,
                 cx.dep.slices.as_deref(),
@@ -280,9 +280,9 @@ pub(crate) fn update(bench: &mut Workbench, msg: SendMsg, cx: Ctx) -> Task<Messa
             let qos = form.qos.0;
             let encoding = form.encoding.trim().to_string();
             let mode = if form.raw {
-                zenkey_fleet::PrepareMode::Raw
+                zenkey_fleet_v1::PrepareMode::Raw
             } else {
-                zenkey_fleet::PrepareMode::Encode
+                zenkey_fleet_v1::PrepareMode::Encode
             };
             let base = cx.dep.base().to_string();
             let slices = cx.dep.slices.clone();

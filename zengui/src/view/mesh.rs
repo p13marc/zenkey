@@ -168,7 +168,7 @@ fn topology<'a>(
     // the per-reporter edges by unordered zid pair and marks reciprocal
     // reports as corroboration — a distinction the hand-rolled dedup this
     // replaces used to throw away.
-    let links = zenkey_fleet::mesh_links(report);
+    let links = zenkey_fleet_v1::mesh_links(report);
     let edges: Vec<(usize, usize, bool)> = links
         .iter()
         .filter_map(|l| Some((index_of(&l.a)?, index_of(&l.b)?, l.corroborated)))

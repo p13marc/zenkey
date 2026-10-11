@@ -106,7 +106,7 @@ pub(crate) fn update(
             // itself rather than by omission (#164, #246).
             let decode_task = match (&outcome, &dep.session, &dep.schema_store) {
                 (Ok(out), Some(session), Some(store)) => {
-                    if let zenkey_fleet::FetchOutcome::Value(v) = out.as_ref() {
+                    if let zenkey_fleet_v1::FetchOutcome::Value(v) = out.as_ref() {
                         services::value::decode(services::value::Decode {
                             store: Arc::clone(store),
                             session: session.clone(),
@@ -226,7 +226,7 @@ fn toggle_watch(dep: &Deployment, obs: &mut Observation, path: String) -> Task<M
     // Watching seeds (issue #92): current state arrives before live
     // traffic, through the same merge discipline as everything else.
     let selector = scope::subtree_selector(&path);
-    let policy = zenkey_fleet::SeedPolicy {
+    let policy = zenkey_fleet_v1::SeedPolicy {
         timeout: dep.timeout(),
         ..Default::default()
     };

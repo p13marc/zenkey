@@ -413,18 +413,40 @@ pub fn rank<T>(items: &[T], query: &str, label: impl Fn(&T) -> &str) -> Vec<usiz
     scored.into_iter().take(MAX_ROWS).map(|(_, i)| i).collect()
 }
 
+/// [`rank`] for the jump-to overlay's keys, ties broken by the key itself
+/// rather than its index: the keys come from a hash map, whose order moves
+/// from process to process, so an index tie-break drew a different list
+/// each run (the `keys` shot, FL5). Only the `MAX_ROWS` drawn are sorted:
+/// selecting them first is O(n), cheaper than sorting every match.
+pub fn rank_keys(keys: &[&str], query: &str) -> Vec<usize> {
+    let mut scored: Vec<(usize, usize)> = keys
+        .iter()
+        .enumerate()
+        .filter_map(|(i, key)| fuzzy(key, query).map(|s| (s, i)))
+        .collect();
+    let order = |a: &(usize, usize), b: &(usize, usize)| {
+        a.0.cmp(&b.0)
+            .then_with(|| keys[a.1].cmp(keys[b.1]))
+            .then(a.1.cmp(&b.1))
+    };
+    if scored.len() > MAX_ROWS {
+        scored.select_nth_unstable_by(MAX_ROWS, order);
+        scored.truncate(MAX_ROWS);
+    }
+    scored.sort_by(order);
+    scored.into_iter().map(|(_, i)| i).collect()
+}
+
 /// Render the open overlay, if any.
 ///
 /// `keys` is consumed only by the jump-to overlay, and only the rows
 /// actually drawn (≤ `MAX_ROWS`, a private bound) are cloned into the
 /// element — opening
 /// the overlay costs what it draws, not the cache's population, and any
-/// other overlay state never touches the iterator (#110). One deliberate
-/// non-change: `rank` breaks score ties by index, and the indices now come
-/// from the cache's iteration order — but so did the old per-frame snapshot,
-/// so tie jitter across cache mutations is pre-existing, and a full sort of
-/// 50k borrowed keys per frame would reintroduce O(n log n) to cure a
-/// cosmetic.
+/// other overlay state never touches the iterator (#110). The keys are
+/// ranked by [`rank_keys`], which breaks score ties by the key, so the list
+/// does not move with the cache's iteration order, and sorts only the rows
+/// drawn.
 pub fn overlay<'a>(
     state: &'a PaletteState,
     form: &'a crate::view::contexts::ContextForm,
@@ -474,7 +496,7 @@ pub fn overlay<'a>(
         Overlay::Keys => {
             // Fat pointers only — no key bytes are copied to rank (#110).
             let keys: Vec<&str> = keys.collect();
-            let order = rank(&keys, &state.query, |k| *k);
+            let order = rank_keys(&keys, &state.query);
             Some(list(
                 state,
                 (kit::Icon::Keys, "Jump to key"),
@@ -901,6 +923,33 @@ mod tests {
     }
 
     /// The pane list is generated, so a pane added anywhere shows up here.
+    /// The jump-to list is the same whatever order the cache yields its
+    /// keys in (a hash map's order moves between processes), with or
+    /// without a query, and bounded.
+    #[test]
+    fn the_key_ranking_does_not_follow_iteration_order() {
+        let mut keys: Vec<String> = (0..60)
+            .map(|i| format!("demo/k{:02}", (i * 37) % 60))
+            .collect();
+        let forward: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let ranked = |ks: &[&str], q: &str| -> Vec<String> {
+            rank_keys(ks, q)
+                .into_iter()
+                .map(|i| ks[i].to_owned())
+                .collect()
+        };
+        let a = ranked(&forward, "");
+        let a_q = ranked(&forward, "k1");
+        keys.reverse();
+        let backward: Vec<&str> = keys.iter().map(String::as_str).collect();
+        assert_eq!(a, ranked(&backward, ""));
+        assert_eq!(a_q, ranked(&backward, "k1"));
+        assert_eq!(a.len(), MAX_ROWS);
+        let mut sorted = a.clone();
+        sorted.sort();
+        assert_eq!(a, sorted, "equal scores fall back to the key's order");
+    }
+
     #[test]
     fn the_palette_covers_every_pane_without_being_told() {
         let items = actions(&[]);

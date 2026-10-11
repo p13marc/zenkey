@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use zenkey_fleet::{DiscoveredBase, Skeleton, SliceSet};
+use zenkey_fleet_v1::{DiscoveredBase, Skeleton, SliceSet};
 
 use crate::config::Settings;
 use crate::view::status::SliceSource;
@@ -28,7 +28,7 @@ sub_state! {
         pub(crate) settings: Settings,
         pub(crate) session: Option<zenoh::Session>,
         /// Process-lifetime schema cache (RFC 08 §7), rebuilt on base change.
-        pub(crate) schema_store: Option<Arc<zenkey_fleet::SchemaStore>>,
+        pub(crate) schema_store: Option<Arc<zenkey_fleet_v1::SchemaStore>>,
         pub(crate) skeleton: Option<Arc<Skeleton>>,
         pub(crate) slices: Option<Arc<SliceSet>>,
         pub(crate) slice_source: SliceSource,
@@ -41,7 +41,7 @@ sub_state! {
         /// not a "no selection" placeholder.
         pub(crate) base_options: Vec<crate::config::BaseChoice>,
         /// Bounded, and it says what the bound costs (#107).
-        pub(crate) facts: zenkey_fleet::FactsCache,
+        pub(crate) facts: zenkey_fleet_v1::FactsCache,
     }
 }
 
@@ -62,7 +62,7 @@ impl Deployment {
             // The projection cache takes the *same* bound as the engine's key
             // table: it cannot usefully outgrow the table it shadows, and one
             // number keeps that one sentence (#107).
-            facts: zenkey_fleet::FactsCache::with_capacity(max_keys),
+            facts: zenkey_fleet_v1::FactsCache::with_capacity(max_keys),
         }
     }
 

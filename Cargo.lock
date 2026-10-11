@@ -8657,8 +8657,11 @@ dependencies = [
  "tracing-subscriber",
  "ttf-parser",
  "zenkey 0.11.1",
+ "zenkey 0.20.0",
  "zenkey-explorer-config",
  "zenkey-fleet 0.18.0",
+ "zenkey-fleet 0.20.0",
+ "zenkey-model",
  "zenoh",
 ]
 

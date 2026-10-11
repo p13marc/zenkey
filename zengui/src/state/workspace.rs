@@ -312,7 +312,7 @@ pub(crate) fn torn_settings(
 /// What an armed repeating publication resends each tick: the declaration,
 /// the prepared bytes, and the attachment that rode the first send (#117).
 pub(crate) struct RepeatLoad {
-    pub(crate) publication: Arc<zenkey_fleet::Publication>,
+    pub(crate) publication: Arc<zenkey_fleet_v1::Publication>,
     pub(crate) bytes: Arc<Vec<u8>>,
     pub(crate) attachment: Option<Arc<Vec<u8>>>,
 }
@@ -454,7 +454,7 @@ sub_state! {
         /// A loaded `.zsnap` (#219): the moment the Inspector's history
         /// section can compare the selected key against. Read, never
         /// published — it feeds no pane and enters no mode.
-        pub(crate) snapshot: Option<std::sync::Arc<zenkey_fleet::Snapshot>>,
+        pub(crate) snapshot: Option<std::sync::Arc<zenkey_fleet_v1::Snapshot>>,
         /// The snapshot open row's path input; `None` = row hidden.
         pub(crate) snapshot_open: Option<String>,
         /// A `.zsnap` parse in flight: the path being loaded (O4 — loading

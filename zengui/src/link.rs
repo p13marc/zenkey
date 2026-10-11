@@ -24,7 +24,7 @@
 use std::sync::Arc;
 
 use iced::Subscription;
-use zenkey_fleet::{FleetEvent, Monitor, StreamItem};
+use zenkey_fleet_v1::{FleetEvent, Monitor, StreamItem};
 
 use crate::message::{BusMsg, BusTick, LinkState, Message};
 

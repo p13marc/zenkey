@@ -7,7 +7,7 @@
 
 use iced::widget::{column, row, scrollable};
 use iced::{Element, Length};
-use zenkey_fleet::report::{DoctorFinding, DoctorSeverity};
+use zenkey_fleet_v1::report::{DoctorFinding, DoctorSeverity};
 
 use crate::doctor::{DoctorState, finding_target};
 use crate::message::{Message, PaneMsg};

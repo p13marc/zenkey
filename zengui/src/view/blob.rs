@@ -20,7 +20,7 @@
 
 use iced::Element;
 use iced::widget::{Column, column, row};
-use zenkey_fleet::report::{BlobHolder, BlobList, BlobProbeReport};
+use zenkey_fleet_v1::report::{BlobHolder, BlobList, BlobProbeReport};
 
 use crate::blob::{BlobState, Fetch, Probe};
 use crate::message::{Message, PaneMsg};
@@ -51,11 +51,11 @@ pub enum BlobMsg {
     /// so far (#344, RFC 13 §3 O6): the event carries absolutes, so nothing
     /// the bar shows was lost — but a reader assuming one update per chunk
     /// would be wrong, and the count is what says so.
-    Progress(zenkey_fleet::report::BlobProgress, u64),
+    Progress(zenkey_fleet_v1::report::BlobProgress, u64),
     FetchDone(
         String,
         Result<
-            std::sync::Arc<zenkey_fleet::report::BlobFetchReport>,
+            std::sync::Arc<zenkey_fleet_v1::report::BlobFetchReport>,
             crate::services::ServiceError,
         >,
     ),
@@ -64,7 +64,7 @@ pub enum BlobMsg {
     InspectDone(
         String,
         Result<
-            std::sync::Arc<zenkey_fleet::report::BlobTreeIndexReport>,
+            std::sync::Arc<zenkey_fleet_v1::report::BlobTreeIndexReport>,
             crate::services::ServiceError,
         >,
     ),

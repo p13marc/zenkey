@@ -108,13 +108,13 @@ pub struct Status<'a> {
     /// Active watch selectors (coverage, O5).
     pub watched: &'a [String],
     /// What fed the skeleton, when one was built.
-    pub skeleton: Option<zenkey_fleet::SkeletonCoverage>,
+    pub skeleton: Option<zenkey_fleet_v1::SkeletonCoverage>,
     /// Keys retired because their watch was released (O6's third counter).
     pub keys_unwatched: u64,
     /// The last on-demand value fetch, for the selection.
     pub fetched: Option<&'a (
         String,
-        Result<std::sync::Arc<zenkey_fleet::FetchOutcome>, crate::services::ServiceError>,
+        Result<std::sync::Arc<zenkey_fleet_v1::FetchOutcome>, crate::services::ServiceError>,
     )>,
     /// The scope's short name.
     pub scope_label: &'a str,
@@ -153,7 +153,7 @@ pub struct Status<'a> {
     /// the bound by hitting it. `None` before a monitor exists (O4), and
     /// suppressed while replaying (the ring describes a bus the panes are
     /// not showing).
-    pub retention: Option<zenkey_fleet::RetentionStats>,
+    pub retention: Option<zenkey_fleet_v1::RetentionStats>,
 }
 
 impl<'a> Status<'a> {
@@ -241,7 +241,7 @@ pub fn facts_text(cached: usize, evicted: u64) -> String {
 /// has bitten — its own eviction count. A **fourth** number beside
 /// [`keys_text`], `facts_text` and the unwatch line, never folded into any
 /// of them: each bound reports its own cost (RFC 09 §5.1 O6; v1.18 R1).
-pub fn retention_text(r: &zenkey_fleet::RetentionStats) -> String {
+pub fn retention_text(r: &zenkey_fleet_v1::RetentionStats) -> String {
     let mut label = format!(
         "retained: {:.0}s held · budget {}",
         r.span.as_secs_f64(),
@@ -366,14 +366,14 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     if let Some((key, outcome)) = s.fetched {
         let label = match outcome {
             Ok(out) => match out.as_ref() {
-                zenkey_fleet::FetchOutcome::Value(v) => {
+                zenkey_fleet_v1::FetchOutcome::Value(v) => {
                     format!(
                         "fetched {key}: {} bytes via {}",
                         v.payload.len(),
                         crate::view::detail::source_word(v.source)
                     )
                 }
-                zenkey_fleet::FetchOutcome::None { attempted } => format!(
+                zenkey_fleet_v1::FetchOutcome::None { attempted } => format!(
                     "no value for {key} — asked {} (not a verdict)",
                     attempted.join(", ")
                 ),
@@ -516,8 +516,8 @@ mod tests {
     /// appears as its own number, never inside the key count's (O6).
     #[test]
     fn the_retained_window_states_its_budget_and_its_own_cost() {
-        let mut r = zenkey_fleet::RetentionStats {
-            budget: zenkey_fleet::RetentionBudget::default(),
+        let mut r = zenkey_fleet_v1::RetentionStats {
+            budget: zenkey_fleet_v1::RetentionBudget::default(),
             retained: 10,
             retained_bytes: 4096,
             span: std::time::Duration::from_secs(85),

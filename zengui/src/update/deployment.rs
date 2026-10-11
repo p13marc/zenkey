@@ -202,7 +202,7 @@ fn repoint(
     work: &mut Workspace,
 ) -> Task<Message> {
     forget(dep, obs, tree, work);
-    dep.schema_store = Some(Arc::new(zenkey_fleet::SchemaStore::new(
+    dep.schema_store = Some(Arc::new(zenkey_fleet_v1::SchemaStore::new(
         dep.base(),
         dep.timeout(),
     )));
@@ -302,7 +302,7 @@ pub(crate) fn watch_scope(dep: &Deployment, obs: &Observation) -> Task<Message> 
         .selectors(dep.base(), &dep.settings.selectors);
     // Scope watches seed too (issue #92) — the eager preset is "observe
     // this scope", and current state is part of observing it.
-    let policy = zenkey_fleet::SeedPolicy {
+    let policy = zenkey_fleet_v1::SeedPolicy {
         timeout: dep.timeout(),
         ..Default::default()
     };

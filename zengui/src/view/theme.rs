@@ -470,7 +470,7 @@ impl ThemeColors<'_> {
     }
 
     /// The payload-conformance verdict scale (#164) — the GUI face of
-    /// [`zenkey::schema::validate::Verdict`]'s three states.
+    /// [`zenkey_v1::schema::validate::Verdict`]'s three states.
     pub fn verdict(&self, kind: VerdictTone) -> Color {
         self.tone(kind.tone())
     }
@@ -580,8 +580,8 @@ impl SeverityTone {
     /// A doctor finding's severity as its tone (#564) — the one mapping the
     /// doctor, the Fields section and the finding card share, where each
     /// used to keep its own copy.
-    pub fn of(severity: zenkey_fleet::report::DoctorSeverity) -> Self {
-        use zenkey_fleet::report::DoctorSeverity;
+    pub fn of(severity: zenkey_fleet_v1::report::DoctorSeverity) -> Self {
+        use zenkey_fleet_v1::report::DoctorSeverity;
         match severity {
             DoctorSeverity::Error => SeverityTone::Error,
             DoctorSeverity::Warning => SeverityTone::Warning,

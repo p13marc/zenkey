@@ -22,7 +22,7 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use zenkey_fleet::SampleView;
+use zenkey_fleet_v1::SampleView;
 
 /// Payloads larger than this get no structural value — a multi-megabyte
 /// document parsed per sample to feed a diff nobody asked for would burn the
@@ -62,7 +62,7 @@ pub struct HistoryEntry {
     pub reliability: zenoh::qos::Reliability,
     pub express: bool,
     /// The publishing entity, when SourceInfo rode the sample.
-    pub source: Option<zenkey_fleet::SampleSource>,
+    pub source: Option<zenkey_fleet_v1::SampleSource>,
     /// The structural document, when the bytes carry one — the diff's
     /// field-level side. `None` means plain text or opaque bytes, and the
     /// diff falls back to bytes rather than inventing fields.
@@ -77,14 +77,14 @@ impl HistoryEntry {
         let is_delete = view.kind == zenoh::sample::SampleKind::Delete;
         let bytes = view.payload.to_bytes();
         let value = (!is_delete && len <= DECODE_LIMIT)
-            .then(|| zenkey_fleet::structural_value(&bytes))
+            .then(|| zenkey_fleet_v1::structural_value(&bytes))
             .flatten();
         let preview = if is_delete {
             "<delete>".to_string()
         } else if len > DECODE_LIMIT {
             format!("<{len} bytes — too large to preview>")
         } else {
-            truncate(zenkey_fleet::structural(&bytes))
+            truncate(zenkey_fleet_v1::structural(&bytes))
         };
         HistoryEntry {
             seq,
@@ -109,7 +109,7 @@ impl HistoryEntry {
     /// sample through the same code. `seq` is 0 and `received` is *now* —
     /// neither is a fact about the snapshot, and the caption the panel
     /// draws over this entry names the snapshot's moment and span instead.
-    pub fn from_snapshot_row(row: &zenkey_fleet::SnapshotRow) -> HistoryEntry {
+    pub fn from_snapshot_row(row: &zenkey_fleet_v1::SnapshotRow) -> HistoryEntry {
         let bytes = row.payload().unwrap_or_default();
         let view = SampleView {
             key: row.key.clone(),
@@ -467,7 +467,7 @@ mod tests {
     /// stamp rides as the file's string, and a delete row is a tombstone.
     #[test]
     fn a_snapshot_row_becomes_a_diffable_entry() {
-        let row = zenkey_fleet::SnapshotRow {
+        let row = zenkey_fleet_v1::SnapshotRow {
             key: "v1/h-0123456789ab/state/p/a".into(),
             delete: false,
             bytes: Some("eyJ2YWx1ZSI6NDEuMH0=".into()),
@@ -476,11 +476,11 @@ mod tests {
             stamper: None,
             source: None,
             source_zid: None,
-            registration: zenkey_fleet::report::RegistrationWire::RegistryNotLoaded,
-            verdict: zenkey_fleet::report::VerdictWire::NotValidated {
+            registration: zenkey_fleet_v1::report::RegistrationWire::RegistryNotLoaded,
+            verdict: zenkey_fleet_v1::report::VerdictWire::NotValidated {
                 reason: "no_registry".into(),
             },
-            holder: zenkey_fleet::report::Holder::Unattributed {
+            holder: zenkey_fleet_v1::report::Holder::Unattributed {
                 reason: "roster not asked".into(),
             },
         };
@@ -490,7 +490,7 @@ mod tests {
         assert_eq!(e.len, 14);
         assert!(!e.is_delete);
 
-        let gone = zenkey_fleet::SnapshotRow {
+        let gone = zenkey_fleet_v1::SnapshotRow {
             delete: true,
             bytes: None,
             ..row

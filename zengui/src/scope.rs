@@ -1,7 +1,7 @@
 //! What zengui subscribes to, and how it says so honestly.
 //!
 //! Selectors are **never** built with `format!`. Base-relative selectors come
-//! from `zenkey::selector`'s typed builders and are lifted to the wire with
+//! from `zenkey_v1::selector`'s typed builders and are lifted to the wire with
 //! `grammar::with_base` — the same path `zenctl` takes. That is a convention of
 //! this repo, and here it is also load-bearing: the D4 trap below is exactly
 //! the kind of thing a hand-written string gets wrong.
@@ -23,9 +23,9 @@
 //!   liveliness token being named explicitly in every roster.
 
 use anyhow::{Result, bail};
-use zenkey::grammar::with_base;
-use zenkey::origin::ServiceOrigin;
-use zenkey::selector::{self, Scope};
+use zenkey_v1::grammar::with_base;
+use zenkey_v1::origin::ServiceOrigin;
+use zenkey_v1::selector::{self, Scope};
 
 /// The base placeholder used before the deployment base is known.
 ///
@@ -128,15 +128,15 @@ impl ScopePreset {
 
 /// The `@catalog` state subtree, base-relative.
 ///
-/// `zenkey::selector` has no builder for a service origin's whole state subtree
+/// `zenkey_v1::selector` has no builder for a service origin's whole state subtree
 /// (only `service_alive` and `service_rpc`), so this is assembled from the
 /// crate's own reserved tokens rather than a literal.
 fn catalog_subtree() -> String {
     format!(
         "{}/{}/{}/**",
-        zenkey::grammar::VERSION_CHUNK,
+        zenkey_v1::grammar::VERSION_CHUNK,
         ServiceOrigin::catalog().as_str(),
-        zenkey::grammar::CLASS_STATE,
+        zenkey_v1::grammar::CLASS_STATE,
     )
 }
 

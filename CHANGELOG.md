@@ -122,9 +122,10 @@ when the GUI form (#481) was planned. **`zenkey` 0.11.1 — additive**:
 - `PendingReply {token, apply_at}`: a reach `set`'s reply, typed.
 - A read-back from before v1.50 still deserializes (no `last_change`).
 
-The config test double (`zenkey-fleet/tests/util/config_server.rs`) serves
-all of it; RFC 09 §3's worked slice says `persist` answers the read-back
-(errata — it has since v1.47).
+The config test double (`zenkey-fleet/tests/util/config_server.rs` then,
+`zengui/tests/util/config_server.rs` since #614's FL5) serves all of it;
+RFC 09 §3's worked slice says `persist` answers the read-back (errata — it
+has since v1.47).
 
 ### User principals, and principals on a face (#529, RFC v1.49)
 

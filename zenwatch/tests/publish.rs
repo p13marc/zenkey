@@ -182,6 +182,10 @@ async fn the_daemon_is_a_zk2_service_the_fleet_reads() {
     // 1. Through the fleet: present, and its descriptor lists both
     // interfaces at the revisions it serves; the doctor, not configured,
     // is unavailable for that cause; freshness.v1 is a profile it follows.
+    // `start` returns once the tokens are declared, not once the router
+    // has carried them to the tool's session: wait for that first (it
+    // read no instance once under the gate's load, FL5).
+    zk2::tokens(&tool, "zk2/ops-1/zenwatch/@zk/instance/*", 1).await;
     let observed = zenkey_fleet::observe_presence(&tool, &PresenceScope::service(&at), zk2::T)
         .await
         .unwrap();

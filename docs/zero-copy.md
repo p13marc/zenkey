@@ -199,7 +199,7 @@ iteration — release only, and slow even there.
 `view::*` function does before it builds a widget, plus the per-tick joins that
 feed it. A bench needing a GPU surface would not run in CI, and one through
 `iced_test` would measure the simulator — so the widget-shaped half is held by
-`zengui/tests/panes.rs` and by the compiler instead. Saying which was measured
+`zengui/tests/panes/` and by the compiler instead. Saying which was measured
 beats a harness that implies both.
 
 The O6 counter ledger (`zenkey-fleet/tests/ledger.rs`) is the other half of

@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::KeyTreeSnapshot;
+use zenkey_fleet_v1::KeyTreeSnapshot;
 use zenoh::key_expr::keyexpr;
 
 /// One producer's presence on one origin.
@@ -73,7 +73,7 @@ impl NodeRoster {
     /// the token existed, whatever we missed before.
     pub fn apply_transitions(&mut self, base: &str, transitions: &[(String, bool)], now: Instant) {
         for (key, up) in transitions {
-            let Some(parsed) = zenkey::grammar::parse_full(base, key) else {
+            let Some(parsed) = zenkey_v1::grammar::parse_full(base, key) else {
                 continue;
             };
             self.seeded = true;
@@ -114,7 +114,7 @@ impl NodeRoster {
         // pair, and *borrowed*: `keyexpr::new(&str)` validates without
         // allocating, where `KeyExpr::new(String)` builds an `OwnedKeyExpr`
         // — an `Arc<str>` copy — per selector per producer per tick.
-        // `zenkey_fleet::merge` was deliberately fixed this way
+        // `zenkey_fleet_v1::merge` was deliberately fixed this way
         // (`docs/zero-copy.md`) and this site was missed (#178).
         let watched: Vec<&keyexpr> = watched
             .iter()
@@ -168,7 +168,7 @@ impl NodeRoster {
         self.nodes.get(origin)
     }
 
-    /// Origin → live producers, in the shape `zenkey_fleet::bus::roster` returns —
+    /// Origin → live producers, in the shape `zenkey_fleet_v1::bus::roster` returns —
     /// for joins that need "who is actually up".
     ///
     /// `None` while unseeded, and that is the whole point of the method: a
@@ -229,7 +229,7 @@ fn write_state_subtree(out: &mut String, base: &str, origin: &str, producer: &st
         let _ = write!(tail, "v1/{origin}/state/{producer}/**");
     }
     out.clear();
-    out.push_str(&zenkey::grammar::with_base(base, tail));
+    out.push_str(&zenkey_v1::grammar::with_base(base, tail));
 }
 
 #[cfg(test)]
