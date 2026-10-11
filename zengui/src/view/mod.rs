@@ -15,10 +15,12 @@
 //! nested inside a scrollable scrolls neither well, so exactly one caller owns
 //! the scroll and the pieces are columns.
 //!
-//! `detail`, `history`, `blob` and `media` were panes until #182 and are
-//! sections now. Nothing they *say* changed — every honesty assertion about
-//! them survived with a one-line call-site edit — which is the test that the
-//! collapse was composition rather than a rewrite.
+//! `detail` and `history` were panes until #182 and are sections now.
+//! Nothing they *say* changed — every honesty assertion about them survived
+//! with a one-line call-site edit — which is the test that the collapse was
+//! composition rather than a rewrite. (`blob` and `media` were the other two.
+//! They were deleted in #614 (FL11), because no zk2 profile serves either
+//! plane yet, #613.)
 //!
 //! A **`dock`** (`activity::dock`) is a region that holds streams rather
 //! than a subject, and it owns its own tab strip. `location::bar`/`overlay`/
@@ -91,8 +93,6 @@
 
 pub mod activity;
 pub mod admin;
-pub mod blob;
-pub mod configure;
 pub mod consumers;
 pub mod contexts;
 pub mod detail;
@@ -104,7 +104,6 @@ pub mod history;
 pub mod inspector;
 pub mod kit;
 pub mod location;
-pub mod media;
 pub mod mesh;
 pub mod nodes;
 pub mod palette;

@@ -72,7 +72,9 @@ pub enum Icon {
     Nodes,
     Admin,
     Mesh,
-    /// The Config tool (#481): a producer's served configuration.
+    /// The Config tool's (#481). No surface draws it since #614 (FL11)
+    /// deleted the tool; the glyph stays in the cut until the font is next
+    /// re-cut (scripts/subset-icons.py), with `Check`, the blob browser's.
     Config,
     // Layout presets.
     Explore,

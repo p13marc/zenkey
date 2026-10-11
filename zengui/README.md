@@ -60,13 +60,11 @@ send log that reports what it dropped), the node dashboard (#61 — liveliness
 roster, suspect-on-retraction, lazy `node_info` detail), and the
 schema-decoded payload inspector with the selection detail pane. A doctor
 panel (#71) renders the same typed findings as `zenctl doctor --format json`,
-run on demand with run-over-run deltas. A **blob browser** (#68) walks RFC 07
-§2.5's sequence — probe wide, choose one holder, fetch from it — and has no
-origin input at all, because the only origin a fetch can name is one a probe
-reported. An **admin & storage panel** (#70) sweeps the Zenoh admin space on
-demand and renders the coverage table RFC 09 §2's late-joiner concern calls
-for: declared state families against the storages that would seed them, with
-"not judged" kept firmly distinct from "uncovered".
+run on demand with run-over-run deltas. An **admin & storage panel** (#70)
+sweeps the Zenoh admin space on demand and renders the coverage table RFC 09
+§2's late-joiner concern calls for: declared state families against the
+storages that would seed them, with "not judged" kept firmly distinct from
+"uncovered".
 
 Phase 2 of the epic is complete: a **connect pane** (#67) selects and edits the
 named contexts `zenctl` shares, and spends three lines on what RFC 09 §0.1
@@ -78,16 +76,13 @@ parse; and a **command palette** (#75) — Ctrl+P for actions, Ctrl+K for observ
 keys, `?` for the shortcut map, which is rendered from the same table that
 dispatches it.
 
-A **Config tool** (#481) reads and changes a producer's configuration through
-RFC 05 §5.1 — the schema is the one the producer serves, so it works against a
-producer this build has never heard of. A `hot` group applies at once; a
-`reach` group, which can cut the link, leaves only with a rollback window and
-a person's yes, and is then driven — confirm, extend, cancel — with the
-producer's deadline shown verbatim beside this window's own count; a change
-made while one is pending joins it by its token (RFC v1.50), and `persist` is
-its own button because it is its own grant. Everything the producer did not
-say is drawn as not said: a value not read back is *unknown*, a sensitive one
-*write-only*, and silence after a write is *unknown outcome*, never a failure.
+**Removed in #614 (FL11): the Config tool (#481), the blob browser (#68) and
+the media viewer (#69).** They spoke v1's planes — RFC 05 §5.1's configuration
+calls, RFC 07 §2's `@blob` and RFC 07 §1's `@media` — and zk2 has no profile
+for any of them yet: `config.v1`, `blob.v1` and `media.v1` would come from
+#613, and each surface comes back with its profile, not before. There are no
+stub controls in the meantime, because a control that does nothing is a
+promise the window cannot keep.
 
 No codec logic lives here. The publish form hands its body to
 `zenkey_fleet_v1::prepare_publish` and renders what comes back — encoded, sent as
@@ -142,21 +137,6 @@ gui-demo-v1`, `just spray-v1`; it goes at FL11). What to look at there:
   and the rows must match `zenctl storage list`.
 - `just gui-demo-no-contracts` holds nothing offline: the status strip counts
   every revision as retrieved from the spray's own holders (spec §8.4).
-- Select a key on `spray_v1`'s `@blob` plane and the Inspector grows a
-  **Blobs** section. `spray_v1` serves a 1 MiB artifact *and* a second
-  origin claiming the same id at a different content root, so probing
-  `01jqz3demo0001` lists two holders and flags the disagreement. Fetching from
-  the second one with the first one's root pinned aborts naming that origin,
-  with nothing written: RFC 07 §2.1 verifies before disk, not after transfer.
-  The tier table above it is filled before any of that — a registry
-  declaration is a capability, and the pane says so.
-
-- The **config** tool (the Workbench's "config", or "configure" on `probe`
-  in the nodes pane). Read `wlan0`: `spray_v1` serves the RFC 05 §5.1 test
-  double — the same server zengui's app tests talk to — with a group of each
-  class. Change `queue` and it applies at once; change `link`
-  and it asks for a window and a yes, then waits armed: confirm it, or let
-  the window run out and watch the read-back roll it back.
 
 The sprays exist because no conforming service can emit non-conforming
 traffic — that is the point of one — so they are the only way to exercise

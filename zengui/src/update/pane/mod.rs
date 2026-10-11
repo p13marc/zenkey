@@ -14,15 +14,12 @@ use crate::state::{Deployment, Observation, SubjectState, Workspace};
 use crate::update::Ctx;
 
 pub(crate) mod admin;
-pub(crate) mod blob;
-pub(crate) mod configure;
 pub(crate) mod consumers;
 pub(crate) mod context;
 pub(crate) mod detail;
 pub(crate) mod doctor;
 pub(crate) mod echo;
 pub(crate) mod fields;
-pub(crate) mod media;
 pub(crate) mod mesh;
 pub(crate) mod nodes;
 pub(crate) mod replay;
@@ -49,11 +46,8 @@ pub(crate) fn update(
         PaneMsg::Send(msg) => send::update(&mut work.bench, work.replay.replay.is_some(), msg, cx),
         PaneMsg::Nodes(msg) => nodes::update(&mut work.verdicts, msg, cx),
         PaneMsg::Doctor(msg) => doctor::update(&mut work.verdicts, msg, cx),
-        PaneMsg::Blob(msg) => blob::update(&mut work.verdicts.blob, msg, cx),
-        PaneMsg::Media(msg) => media::update(&mut work.bench.media, msg, cx),
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
         PaneMsg::Mesh(msg) => mesh::update(&work.verdicts.admin, msg),
-        PaneMsg::Config(msg) => configure::update(&mut work.bench.config_form, msg, cx),
         PaneMsg::Traffic(msg) => traffic::update(&mut work.activity.traffic, msg, cx),
         // The four subject-slot sections (#257): the SlotId names which
         // Inspector spoke — the docked one is the follow slot, a pinned

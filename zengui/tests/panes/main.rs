@@ -96,14 +96,11 @@ fn render(keys: &[&str], presence: bool) -> (tree::Flattened, IdentityIndex) {
 }
 
 mod admin;
-mod blob;
 mod chrome;
-mod config;
 mod detail;
 mod doctor;
 mod echo;
 mod history;
-mod media;
 mod nodes;
 mod replay;
 mod sections;
