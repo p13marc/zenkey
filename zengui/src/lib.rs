@@ -5,12 +5,13 @@
 //! missing type is a zenkey-fleet issue, not a zengui workaround").
 //!
 //! **Key-agnostic by construction.** zengui is a useful explorer on *any* Zenoh
-//! bus; the keyspace-v2 convention is an enrichment overlay that lights up when
-//! a key parses, never a precondition. That is the grain of the engine already:
+//! bus; zk2's grammar is an enrichment overlay that lights up when a key
+//! parses, never a precondition. That is the grain of the engine already:
 //! [`zenkey_fleet::KeyTreeSnapshot`] groups on a plain `split('/')` with no
-//! grammar knowledge, and `zenkey_v1::grammar::parse_full` returns `Option` rather
-//! than `Result` because for an observer "does not parse" is an answer, not an
-//! error. The overlay lives in exactly one module, [`keyfacts`].
+//! grammar knowledge, and the lens gives every key an identity — the rung its
+//! ladder reached — because for an observer "not a zk2 key" is an answer, not
+//! an error (O1). The overlay's reading lives in one module, [`keyfacts`]
+//! (#614, FL7: zk2's identity rungs, where v1's facts ladder stood).
 //!
 //! **Two sessions** since #614 (FL6a), as zenctl and zenwatch run: the data
 //! pump watches on a session in **no** namespace (RFC 09 §5) — zengui spells

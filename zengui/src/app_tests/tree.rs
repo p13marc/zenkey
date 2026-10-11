@@ -372,3 +372,213 @@ fn the_shape_trigger_reads_every_rung() {
         &a
     ));
 }
+
+/// A tick whose tree holds `keys`, under one `**` watch.
+fn tick_with(keys: &[&str], watched: &Arc<[String]>) -> BusTick {
+    let mut stats = zenkey_fleet::StatsTable::new();
+    let now = std::time::Instant::now();
+    for k in keys {
+        stats.record(k, 8, None, now, None, None);
+    }
+    BusTick {
+        tree: Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats)),
+        samples: Vec::new(),
+        lagged: 0,
+        coalesced: 0,
+        keys: keys.len(),
+        keys_evicted: 0,
+        keys_unwatched: 0,
+        watched: Arc::clone(watched),
+        seeded: Vec::new(),
+        totals: Default::default(),
+    }
+}
+
+const POSITION: &str = "zk2/robot1/nav/nav.v2/stream/position";
+const ROBOT2: &str = "zk2/robot2/nav/nav.v2/stream/position";
+const ETH0: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+
+/// The tree's top-level chunks as the window drew them.
+fn tops(app: &Zengui) -> Vec<String> {
+    let flat = &app.tree.flat;
+    flat.rows
+        .iter()
+        .filter(|r| r.depth == 0)
+        .map(|r| flat.arena.chunk_str(r.chunk).to_string())
+        .collect()
+}
+
+/// #614 (FL7): the pivots regroup the window's own tree by zk2's
+/// positions — by system, by address, by interface and by kind — each
+/// expansion namespaced `pivot:<key>:`, and a v1 key, foreign since the
+/// port, under "(foreign)" in every one.
+#[test]
+fn the_pivots_regroup_the_tree_by_zk2_positions() {
+    use crate::message::WorkspaceMsg;
+    use crate::view::tree::Pivot;
+
+    let mut app = test_app();
+    let watched: Arc<[String]> = Arc::from(["**".to_string()]);
+    let v1 = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu";
+    tick_into(
+        &mut app,
+        &tick_with(&[POSITION, ROBOT2, ETH0, v1], &watched),
+    );
+    assert_eq!(tops(&app), ["v1", "zk2"], "chunk order: the wire as it is");
+
+    for (pivot, want) in [
+        (
+            Pivot::System,
+            vec!["(foreign)", "host-a", "robot1", "robot2"],
+        ),
+        (
+            Pivot::Address,
+            vec!["(foreign)", "host-a/tc", "robot1/nav", "robot2/nav"],
+        ),
+        (Pivot::Iface, vec!["(foreign)", "nav.v2", "tc.netif.v1"]),
+        (Pivot::Kind, vec!["(foreign)", "state", "stream"]),
+    ] {
+        let _ = app.update(Message::Workspace(WorkspaceMsg::PivotSelected(pivot)));
+        assert_eq!(tops(&app), want, "{pivot}");
+        let first = app.tree.flat.arena.display(app.tree.flat.rows[0].path);
+        assert!(
+            first.starts_with(&format!("pivot:{}:", pivot.key())),
+            "{pivot}: {first}"
+        );
+    }
+}
+
+/// #614 (FL7): the Diagnose preset pivots the Locator by address — v1's
+/// origin pivot, on zk2's positions — so "why is this service silent?"
+/// opens on the services side by side.
+#[test]
+fn the_diagnose_preset_pivots_by_address() {
+    use crate::message::WorkspaceMsg;
+    use crate::prefs::LayoutPreset;
+    use crate::view::tree::Pivot;
+
+    let mut app = test_app();
+    let watched: Arc<[String]> = Arc::from(["**".to_string()]);
+    tick_into(&mut app, &tick_with(&[POSITION, ETH0], &watched));
+    let _ = app.update(Message::Workspace(WorkspaceMsg::LayoutPreset(
+        LayoutPreset::Diagnose,
+    )));
+    assert_eq!(app.tree.pivot, Pivot::Address);
+    assert_eq!(tops(&app), ["host-a/tc", "robot1/nav"]);
+}
+
+/// The catalog a presence read of `robot1/nav` serving `nav.v2` makes, its
+/// interface token's revision named by no descriptor.
+fn undescribed_catalog() -> Arc<zenkey_fleet::Catalog> {
+    use zenkey_model::grammar::{Addr, IfaceId, InstanceId, Sha256Hex, alive_key, instance_key};
+    let addr: Addr = "robot1/nav".parse().expect("an address");
+    let iface: IfaceId = "nav.v2".parse().expect("an interface");
+    let instance = InstanceId::from_u64(1);
+    let fp = Sha256Hex::new(&"ab".repeat(32))
+        .expect("a fingerprint")
+        .fp16();
+    let keys = vec![
+        instance_key(&addr, &instance).expect("a key").to_string(),
+        alive_key(&addr, &iface, &instance, &fp)
+            .expect("a key")
+            .to_string(),
+    ];
+    let observed = zenkey_fleet::model::catalog::Observed::from_keys("zk2/*/*/@zk/**", &keys, true);
+    Arc::new(zenkey_fleet::Catalog::new(&observed))
+}
+
+/// #614 (FL7): a lens move resolves every identity the cache holds again,
+/// at once — not on each key's next sample, which a state published once
+/// may never send. Before any presence read a zk2 key stops at "presence
+/// not read"; once the presence link lands a catalog, the same key reads
+/// where the read puts it, with no tick in between, and the cache counts
+/// what it dropped as invalidated, apart from its bound.
+#[test]
+fn a_lens_move_resolves_every_identity_again() {
+    use crate::message::BusMsg;
+    use crate::presence_link::PresenceUpdate;
+    use zenkey_fleet::report::Unresolved;
+
+    let mut app = test_app();
+    let ghost = "zk2/robot9/nav/nav.v2/stream/position";
+    app.dep.ensure_identity(POSITION);
+    app.dep.ensure_identity(ghost);
+    let rung = |app: &Zengui, key: &str| {
+        app.dep
+            .identity
+            .get(key)
+            .and_then(|r| r.identity.unresolved.clone())
+    };
+    assert_eq!(rung(&app, POSITION), Some(Unresolved::PresenceNotRead));
+
+    let landing = Arc::new(PresenceUpdate {
+        presence: Arc::new(zenkey_fleet::LivePresence::new(
+            zenkey_fleet::PresenceScope::all(),
+        )),
+        moved: Vec::new(),
+        catalog: Some(undescribed_catalog()),
+        generation: app.dep.lens_generation + 1,
+        seed: zenkey_fleet::SeedOutcome::Complete,
+    });
+    let epoch = app.obs.presence_epoch;
+    let _ = app.update(Message::Bus(BusMsg::Presence(epoch, landing)));
+    assert_eq!(
+        rung(&app, POSITION),
+        Some(Unresolved::NoRevision),
+        "a provider is present now, and no descriptor names its revision"
+    );
+    assert_eq!(rung(&app, ghost), Some(Unresolved::NoProvider));
+    assert_eq!(app.dep.identity.invalidated(), 2, "both resolved again");
+    assert_eq!(
+        app.dep.identity.evicted(),
+        0,
+        "a lens move is not the bound"
+    );
+}
+
+/// #614 (FL7): a selection resolves its key at once — a declared key nobody
+/// has published has an identity the moment it is selected — and a
+/// symbolic skeleton path, which is no key, resolves nothing.
+#[test]
+fn selecting_a_key_resolves_it_at_once() {
+    let mut app = test_app();
+    let declared = "zk2/host-a/tc/tc.netif.v1/state/namespaces";
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        declared.into(),
+    ))));
+    assert!(app.dep.identity.get(declared).is_some());
+    let symbolic = "zk2/host-a/tc/tc.netif.v1/state/interfaces/{ns}/{iface}";
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        symbolic.into(),
+    ))));
+    assert!(app.dep.identity.get(symbolic).is_none());
+}
+
+/// #614 (FL7): the budget window's two observations ride the live tick —
+/// when each watch was first seen, kept while the watch is, and the gap
+/// between ticks.
+#[test]
+fn live_ticks_note_when_each_watch_began() {
+    let mut app = test_app();
+    let one: Arc<[String]> = Arc::from(["**".to_string()]);
+    tick_into(&mut app, &tick_with(&[POSITION], &one));
+    let began = *app.obs.watch_since.get("**").expect("seen");
+    let two: Arc<[String]> = Arc::from(["**".to_string(), "zk2/robot1/**".to_string()]);
+    tick_into(&mut app, &tick_with(&[POSITION], &two));
+    assert_eq!(
+        app.obs.watch_since.get("**"),
+        Some(&began),
+        "a watch kept keeps when it began"
+    );
+    assert!(app.obs.watch_since.contains_key("zk2/robot1/**"));
+    let only: Arc<[String]> = Arc::from(["zk2/robot1/**".to_string()]);
+    tick_into(&mut app, &tick_with(&[POSITION], &only));
+    assert!(
+        !app.obs.watch_since.contains_key("**"),
+        "a released watch goes"
+    );
+    assert!(
+        app.obs.tick_gap.longest(std::time::Instant::now()) < std::time::Duration::from_secs(5),
+        "three ticks in a row are no stall"
+    );
+}

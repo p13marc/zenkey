@@ -154,11 +154,20 @@ pub(crate) fn update(
 /// the tree speaking, and the tree drives slot 0. The pinned slots are
 /// exactly the subjects a selection must not touch.
 fn select(
-    dep: &Deployment,
+    dep: &mut Deployment,
     subs: &mut SubjectState,
     work: &mut Workspace,
     subject: Subject,
 ) -> Task<Message> {
+    // The selection's identity, at once (#614, FL7): a declared key nobody
+    // has published resolves when it is selected, not never. Live only, as
+    // on the tick — and never a symbolic skeleton path, which is no key.
+    if let Subject::Key(key) = &subject
+        && !key.contains('{')
+        && work.replay.replay.is_none()
+    {
+        dep.ensure_identity(key);
+    }
     let sub = &mut subs.follow;
     sub.current = subject;
     // The old key's latency summary is not evidence about the new one —

@@ -114,11 +114,22 @@ pub fn status_chip<'a, M: 'a>(
     )
 }
 
-/// A registration badge, theme-resolved. The glyph comes from the tone
-/// (#193): passing a pre-resolved `Color` would bake in one theme's palette,
-/// and passing a glyph would let two states share one.
+/// An identity badge (#614, FL7: the rung zk2's ladder stopped at),
+/// theme-resolved. The glyph comes from the tone (#193): passing a
+/// pre-resolved `Color` would bake in one theme's palette, and passing a
+/// glyph would let two states share one.
 pub fn tone_badge<'a, M: 'a>(
-    tone: crate::view::theme::RegistrationTone,
+    tone: crate::view::theme::IdentityTone,
+    label: impl Into<String>,
+) -> Element<'a, M> {
+    glyph_badge(tone.glyph(), label, tone.tone())
+}
+
+/// A population budget badge (#614, FL7; core §2.7) — theme-resolved like
+/// [`tone_badge`], glyph from the tone, so "unobservable" can never wear
+/// the swatch of "within".
+pub fn badge_budget<'a, M: 'a>(
+    tone: crate::view::theme::BudgetTone,
     label: impl Into<String>,
 ) -> Element<'a, M> {
     glyph_badge(tone.glyph(), label, tone.tone())

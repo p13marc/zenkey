@@ -5,7 +5,7 @@
 //! open `v1/h-…/state/sysinfo`, collapse `v1`, and four entries stay for the
 //! rest of the session. Pivot views multiply that by four, because the same
 //! wire node is namespaced by string concatenation once per pivot
-//! (`pivot:origin:…`, `view/tree.rs`).
+//! (`pivot:address:…`, `view/tree.rs`).
 //!
 //! It also survived a deployment change. `App::forget_deployment` cleared ten
 //! collections and not this one, so switching base left expansion state keyed
@@ -136,14 +136,14 @@ mod tests {
     #[test]
     fn a_pivot_subtree_collapses_like_any_other() {
         let mut e = Expansion::new();
-        e.open("pivot:origin:h-3fa9c2d41b7e");
-        e.open("pivot:origin:h-3fa9c2d41b7e/state");
-        e.open("pivot:producer:sysinfo");
-        e.toggle("pivot:origin:h-3fa9c2d41b7e");
+        e.open("pivot:system:robot1");
+        e.open("pivot:system:robot1/nav");
+        e.open("pivot:address:robot1/nav");
+        e.toggle("pivot:system:robot1");
         let left: Vec<&String> = e.iter().collect();
         assert_eq!(
             left,
-            ["pivot:producer:sysinfo"],
+            ["pivot:address:robot1/nav"],
             "the other pivot's copy of the same wire node is untouched"
         );
     }

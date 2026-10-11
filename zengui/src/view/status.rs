@@ -130,13 +130,10 @@ pub struct Status<'a> {
     pub keys: usize,
     /// Keys retired to stay within the table's bound.
     pub keys_evicted: u64,
-    /// Key projections held by the facts cache (issue #107).
-    pub facts_cached: usize,
-    /// Projections retired to stay within the *cache's* bound — a separate
-    /// number from `keys_evicted` on purpose, see [`facts_text`].
-    pub facts_evicted: u64,
     /// zk2 identities held by the identity cache, and those its bound
-    /// retired (#614, FL6a) — its own pair, beside the facts cache's.
+    /// retired (#614, FL6a; the successor of v1's facts cache since FL7) —
+    /// a separate pair from `keys_evicted` on purpose, see
+    /// [`identity_text`].
     pub identity: (usize, u64),
     pub totals: crate::message::WatchedTotals,
     /// The contracts in hand (#614, FL6a).
@@ -188,8 +185,6 @@ impl<'a> Status<'a> {
             keys: obs.keys,
             keys_evicted: obs.keys_evicted,
             keys_unwatched: obs.keys_unwatched,
-            facts_cached: dep.facts.len(),
-            facts_evicted: dep.facts.evicted(),
             identity: (dep.identity.len(), dep.identity.evicted()),
             watched: &obs.watched,
             // A replay's own skeleton while one runs (#614, FL10b): the
@@ -304,18 +299,19 @@ pub fn keys_text(keys: usize, evicted: u64) -> String {
 /// The projection cache's population, and what its bound cost (issue #107).
 ///
 /// A **second** number beside [`keys_text`], never folded into it. The engine's
-/// key table and the projection cache have different bounds and different
-/// populations — the cache also holds liveliness-token keys, which never enter
-/// the table — so one figure over both would answer neither question. O6 asks
-/// what each bound cost, not what the bounds cost between them.
-pub fn facts_text(cached: usize, evicted: u64) -> String {
-    format!("facts: {cached} cached (+{evicted} projections retired — cache bound reached)")
+/// key table and the identity cache have different bounds and different
+/// populations — the cache also holds the keys a selection resolved, which
+/// may never enter the table, and it outlives a key the table retired — so
+/// one figure over both would answer neither question. O6 asks what each
+/// bound cost, not what the bounds cost between them.
+pub fn identity_text(cached: usize, evicted: u64) -> String {
+    format!("identities: {cached} cached (+{evicted} retired — cache bound reached)")
 }
 
 /// The retained window's strip line (#217): the budget stated in the
 /// resting state, the span actually held, and — only once the byte bound
 /// has bitten — its own eviction count. A **fourth** number beside
-/// [`keys_text`], `facts_text` and the unwatch line, never folded into any
+/// [`keys_text`], `identity_text` and the unwatch line, never folded into any
 /// of them: each bound reports its own cost (RFC 09 §5.1 O6; v1.18 R1).
 pub fn retention_text(r: &zenkey_fleet::RetentionStats) -> String {
     let mut label = format!(
@@ -426,25 +422,15 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             kit::muted(label)
         });
     }
-    // Only once the bound has actually bitten: the key count already states
-    // the population, so a quiet cache has nothing to disclose. Warning tone,
-    // like every other bound that is costing something.
-    if s.facts_evicted > 0 {
-        r = r.push(kit::status_chip(
-            Tone::Caution,
-            facts_text(s.facts_cached, s.facts_evicted),
-        ));
-    }
-    // The identity cache's bound (#614, FL6a), the same way: said once it
-    // has cost something, as its own number.
+    // The identity cache's bound (#614, FL6a), only once it has actually
+    // bitten: the key count already states the population, so a quiet cache
+    // has nothing to disclose. Warning tone, like every other bound that is
+    // costing something, and its own number.
     let (identities, identities_evicted) = s.identity;
     if identities_evicted > 0 {
         r = r.push(kit::status_chip(
             Tone::Caution,
-            format!(
-                "identities: {identities} cached (+{identities_evicted} retired — cache \
-                 bound reached)"
-            ),
+            identity_text(identities, identities_evicted),
         ));
     }
     if let Some((key, outcome)) = s.fetched {

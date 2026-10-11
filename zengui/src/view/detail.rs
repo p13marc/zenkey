@@ -3,9 +3,9 @@
 //!
 //! Three sections, each stating its provenance:
 //!
-//! - **Key facts** — the RFC 09 §5.1 ladder verdict, worded per rung;
-//! - **Registry** — the declared metadata, when the subject is registered
-//!   (fields absent are absent, never defaulted);
+//! - **Identity** — where zk2's O2 ladder got for the key (#614, FL7): the
+//!   address, interface, kind and resource it resolved to, or the rung it
+//!   stopped at and why (fields absent are absent, never defaulted);
 //! - **Value** — the on-demand fetch (which rung answered), rendered **hex
 //!   beside decoded**: the decoded side is contract-decoded named fields when
 //!   the lens resolves the key (#614, FL6a), and the honest ladder otherwise — tagged with *how*
@@ -22,12 +22,13 @@ use iced::{Element, Length};
 
 use zenkey_fleet_v1::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
+use crate::keyfacts::{KeyGroup, Resolution, Rung, Unresolved};
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::{NumericLeaves, Series};
 use crate::value::DecodedValue;
 use crate::view::kit;
 use crate::view::spark;
-use crate::view::theme::{RegistrationTone, SeriesTone};
+use crate::view::theme::{IdentityTone, SeriesTone};
 use crate::view::tokens::{Spacing, face};
 
 /// How much payload the hex view shows before truncating (with a note).
@@ -130,7 +131,13 @@ pub struct DetailData<'a> {
     /// emits carries it home.
     pub slot: SlotId,
     pub key: &'a str,
-    pub facts: Option<&'a KeyFacts>,
+    /// The key's zk2 identity, as the identity cache holds it (#614, FL7);
+    /// `None` until the key is observed live or selected.
+    pub identity: Option<&'a Resolution>,
+    /// The Config tool's target, when the key is the v1 echo of a
+    /// configuration resource (#481) — read off its v1 facts on demand,
+    /// until FL11 removes the tool.
+    pub config: Option<crate::configure::ConfigTarget>,
     pub fetched: Fetched<'a>,
     /// The decode of the fetched value, when it has completed — the whole
     /// [`DecodedValue`]: rendering, verdict, the decode error behind an
@@ -206,10 +213,9 @@ pub fn qos_verdict(
 
 /// The declared-vs-observed QoS lines, when there is anything to say.
 fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
-    let declared = data.facts.and_then(|f| match &f.registration {
-        zenkey_fleet_v1::Registration::Registered(s) => s.qos.clone(),
-        _ => None,
-    });
+    // Nothing declares a v1 profile since the registry went (#614, FL6a);
+    // FL8a reads the declared axes off the lens (`Lens::declared_qos`).
+    let declared: Option<zenkey_v1::Declared<zenkey_v1::QosProfile>> = None;
     let observed = data.observed;
     if declared.is_none() && observed.is_none() {
         return None;
@@ -344,15 +350,16 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
     // is answered now — so this line is a key value, not a page title.
     col = col.push(kit::emphasis(data.key).font(face::MONO));
 
-    // — Key facts: the ladder verdict, worded per rung.
-    match data.facts {
+    // — Identity: zk2's ladder, worded per rung (#614, FL7).
+    match data.identity {
         None => {
             col = col.push(kit::muted(
-                "no projection yet — facts appear once the key is observed or fetched",
+                "no identity yet — a key is resolved through the lens once it is \
+                 observed live or selected",
             ));
         }
-        Some(f) => {
-            col = col.push(facts_section(f, sp));
+        Some(r) => {
+            col = col.push(identity_section(r, data.config.clone(), sp));
         }
     }
     if let Some(qos) = qos_section(&data) {
@@ -541,6 +548,89 @@ fn series_section<'a>(
     Some(col.into())
 }
 
+/// The key's identity (#614, FL7): where zk2's ladder got, worded per rung.
+///
+/// The badge names the rung — the tree's own badge, so the two never read
+/// differently — then the reason when the ladder stopped short, then the
+/// facts as fields (#539): the address, interface, kind and resource a key
+/// resolved to, its template's values, and the type and revision a contract
+/// gave it. A field appears only when its fact exists, so absent stays
+/// absent rather than becoming a blank box. v1's facts ladder stood here;
+/// a v1 key is foreign now, and reads "not zk2" like any other.
+pub(crate) fn identity_section(
+    resolution: &Resolution,
+    config: Option<crate::configure::ConfigTarget>,
+    sp: Spacing,
+) -> Element<'_, Message> {
+    let identity = &resolution.identity;
+    let rung = Rung::of(identity);
+    let mut col = Column::new().spacing(sp.sm);
+    col = col.push(kit::tone_badge(rung.tone(), rung.label()));
+    if let Some(why) = &identity.unresolved {
+        col = col.push(kit::muted(why_line(why)));
+    }
+    let mut grid: Vec<Element<'_, Message>> = Vec::new();
+    match &identity.group {
+        KeyGroup::Resource {
+            address,
+            iface,
+            token,
+            resource,
+        } => {
+            grid.push(kit::field("ADDRESS", kit::mono(address.clone())));
+            grid.push(kit::field("IFACE", kit::mono(iface.clone())));
+            grid.push(kit::field("KIND", kit::mono(token.clone())));
+            if let Some(r) = resource {
+                grid.push(kit::field("RESOURCE", kit::mono(r.clone())));
+            }
+        }
+        KeyGroup::Control { address, form } => {
+            if let Some(a) = address {
+                grid.push(kit::field("ADDRESS", kit::mono(a.clone())));
+            }
+            grid.push(kit::field("CONTROL", kit::mono(format!("@zk/{form}"))));
+        }
+        KeyGroup::NotInNamespace | KeyGroup::NotZk2 => {}
+    }
+    if let Some(r) = &resolution.resolved {
+        grid.push(kit::field("TYPE", kit::mono(crate::keyfacts::type_name(r))));
+        grid.push(kit::field(
+            "REVISION",
+            kit::mono(short_fingerprint(&r.revision.fingerprint().to_string())),
+        ));
+    }
+    // The echo of a v1 configuration resource (RFC 05 §5.1): the form that
+    // reads and changes it is one click away (#481), until FL11.
+    if let Some(t) = config {
+        let label = format!("configure {}", t.resource);
+        grid.push(
+            kit::secondary(kit::labelled(kit::Icon::Config, label))
+                .padding([0.0, sp.xs])
+                .on_press(Message::Pane(PaneMsg::Config(
+                    crate::view::configure::ConfigMsg::Goto(t),
+                )))
+                .into(),
+        );
+    }
+    if !grid.is_empty() {
+        col = col.push(kit::fields(grid));
+    }
+    if !identity.values.is_empty() {
+        col = col.push(kit::muted(
+            identity
+                .values
+                .iter()
+                .map(|(k, v)| format!("{k} = {}", v.join("/")))
+                .collect::<Vec<_>>()
+                .join(" · "),
+        ));
+    }
+    col.into()
+}
+
+/// v1's facts ladder for one key — kept for the send form's as-you-type
+/// feedback alone, which reads v1 facts on demand until FL10 moves it (#614,
+/// FL7). The Inspector draws [`identity_section`]; nothing else draws this.
 pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
     let mut col = Column::new().spacing(sp.sm);
     // The facts as fields (#539): an eyebrow over each value, wrapping to the
@@ -594,7 +684,7 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
     let mut after: Vec<Element<'_, Message>> = Vec::new();
     match &f.registration {
         Registration::Registered(s) => {
-            col = col.push(kit::tone_badge(RegistrationTone::Registered, "registered"));
+            col = col.push(kit::tone_badge(IdentityTone::Resolved, "registered"));
             grid.push(kit::field("SUBJECT", kit::mono(s.path.to_string())));
             grid.push(kit::field("TYPE", kit::mono(s.type_name.to_string())));
             if let Some(u) = &s.unit {
@@ -636,17 +726,14 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
             }
         }
         Registration::Unregistered => {
-            col = col.push(kit::tone_badge(
-                RegistrationTone::Unregistered,
-                "unregistered",
-            ));
+            col = col.push(kit::tone_badge(IdentityTone::Short, "unregistered"));
         }
         Registration::NoSliceForProducer => {
-            col = col.push(kit::tone_badge(RegistrationTone::NoSlice, "no slice"));
+            col = col.push(kit::tone_badge(IdentityTone::Broken, "no slice"));
         }
         Registration::Unknown => {
             col = col.push(kit::tone_badge(
-                RegistrationTone::Unknown,
+                IdentityTone::NotAsked,
                 "registry not asked",
             ));
         }
@@ -659,6 +746,27 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
         col = col.push(e);
     }
     col.into()
+}
+
+/// Why the ladder stopped, as a sentence: the engine's words for the rung,
+/// and for the two rungs that are facts about the key rather than about
+/// the deployment, that they are no error (O1).
+fn why_line(why: &Unresolved) -> String {
+    match why {
+        Unresolved::NotZk2 { .. } | Unresolved::NotInNamespace { .. } => {
+            format!("{} — a fact, not an error (O1)", why.words())
+        }
+        _ => why.words(),
+    }
+}
+
+/// `sha256:` and sixteen hex digits — the engine's own short form.
+fn short_fingerprint(fp: &str) -> String {
+    let hex = fp.strip_prefix("sha256:").unwrap_or(fp);
+    match hex.get(..16) {
+        Some(head) if hex.len() > 16 => format!("sha256:{head}…"),
+        _ => fp.to_owned(),
+    }
 }
 
 /// The hex side: offset + bytes, bounded, truncation stated.
@@ -749,7 +857,7 @@ fn decoded_pane<'a>(
             match &checked.rendering.rendered {
                 Rendered::Value { declared, .. } => {
                     col = col.push(kit::tone_badge(
-                        RegistrationTone::Registered,
+                        IdentityTone::Resolved,
                         format!("contract-decoded <{declared}>"),
                     ));
                     col = col.push(kit::mono(shown.to_string()));

@@ -416,6 +416,45 @@ impl World {
             )
     }
 
+    /// A key's identity through the lens the window resolves with once
+    /// connected (#614, FL7) — what its identity cache holds for the key.
+    pub fn resolve(&self, key: &str) -> zenkey_fleet::Resolution {
+        zenkey_fleet::Lens::new("", Some(&self.catalog), &*self.contracts.set)
+            .offline(&self.contracts.set)
+            .resolve(key)
+    }
+
+    /// `keys`' identities through this world's lens over `namespace`, held
+    /// as the window's identity cache holds them (#614, FL7). The catalog is
+    /// namespace-relative, so the same deployment reads under any namespace.
+    pub fn identities(&self, namespace: &str, keys: &[&str]) -> zenkey_fleet::IdentityCache {
+        let lens = zenkey_fleet::Lens::new(namespace, Some(&self.catalog), &*self.contracts.set)
+            .offline(&self.contracts.set);
+        let mut cache = zenkey_fleet::IdentityCache::default();
+        for key in keys {
+            cache.ensure(&lens, key);
+        }
+        cache
+    }
+
+    /// The presence read the lens resolves addresses through.
+    pub fn catalog(&self) -> Arc<zenkey_fleet::Catalog> {
+        Arc::clone(&self.catalog)
+    }
+
+    /// The presence projection, seeded when the world was built.
+    pub fn presence(&self) -> Arc<zenkey_fleet::LivePresence> {
+        Arc::clone(&self.presence)
+    }
+
+    /// A contract store seeded with the world's contracts, as the window's
+    /// is once they load (§8.5).
+    pub fn store(&self) -> zenkey_fleet::BundleStore {
+        let store = zenkey_fleet::BundleStore::new(Duration::from_secs(1));
+        store.seed(&self.contracts.set);
+        store
+    }
+
     /// The declared keyspace the window builds once connected (#614, FL6b):
     /// zk2's contract skeleton over the same lens [`World::check`] resolves
     /// with, and no admin space — what `Deployment::refresh_skeleton` makes

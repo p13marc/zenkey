@@ -23,16 +23,15 @@ use common::slices;
 
 use iced_test::simulator;
 use zengui::history::HistoryRecorder;
-use zengui::keyfacts::KeyFacts;
 use zengui::message::Message;
 use zengui::view::tokens::Spacing;
-use zengui::view::tree::{self, FactsIndex};
+use zengui::view::tree::{self, IdentityIndex};
 use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::StatsTable;
 use zenkey_fleet_v1::SliceSet;
+use zenkey_fleet_v1::model::facts::KeyFacts;
 
 const REGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
-const UNREGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/no/such/thing";
 const FOREIGN: &str = "demo/example/foo";
 
 fn snapshot(keys: &[&str]) -> zenkey_fleet::MergedNode {
@@ -73,19 +72,27 @@ fn expand_all(keys: &[&str]) -> BTreeSet<String> {
     set
 }
 
-fn index(keys: &[&str], with_slices: bool) -> FactsIndex {
-    let slices = slices();
-    let mut cache = FactsIndex::default();
+/// Every key's identity through the world's lens (#614, FL7), as the
+/// window's cache holds them once connected — or, with no presence read,
+/// through a lens with none: every zk2 key then stops at "presence not
+/// read".
+fn identities(keys: &[&str], presence: bool) -> IdentityIndex {
+    if presence {
+        return common::World::new().identities("", keys);
+    }
+    let none = zenkey_fleet::ContractSet::new();
+    let lens = zenkey_fleet::Lens::new("", None, &none);
+    let mut cache = IdentityIndex::default();
     for k in keys {
-        cache.ensure("", k, with_slices.then_some(&slices));
+        cache.ensure(&lens, k);
     }
     cache
 }
 
-fn render(keys: &[&str], with_slices: bool) -> (tree::Flattened, FactsIndex) {
+fn render(keys: &[&str], presence: bool) -> (tree::Flattened, IdentityIndex) {
     let snap = snapshot(keys);
     let flat = tree::flatten(&snap, "", &expand_all(keys), 500, std::time::Instant::now());
-    (flat, index(keys, with_slices))
+    (flat, identities(keys, presence))
 }
 
 mod admin;

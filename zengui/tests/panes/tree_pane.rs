@@ -1,62 +1,69 @@
-//! The key tree: the registration badges, a narrow tree, density, unresolved
-//! and foreign keys, the empty tree, the projection cache's bound and the
-//! budget join.
+//! The key tree: the identity rung badges, a narrow tree, density, keys the
+//! lens stops short of and foreign keys, the empty tree, the identity
+//! cache's bound, the budget badges and the contract skeleton (#614, FL7:
+//! zk2's identity ladder where v1's registration badges stood).
 
 use super::*;
 
-/// #193's acceptance: the five `Registration` states render five *distinct*
-/// glyph + word pairs. The glyph comes from the tone type — no call site can
-/// omit it or give two states the same one — so colour is structurally never
-/// the only carrier.
-#[test]
-fn the_five_registration_states_render_five_distinct_glyph_word_pairs() {
-    use zengui::keyfacts::{Registration, SubjectFacts};
-    use zengui::view::tree::{registration_label, tone};
+use zengui::keyfacts::Rung;
 
-    let states = [
-        Registration::Registered(Box::new(SubjectFacts {
-            path: "disk/{mount}/used".into(),
-            type_name: "TelemetryPoint".into(),
-            vars: vec![],
-            unit: None,
-            kind: None,
-            buckets: None,
-            qos: None,
-            encoding: None,
-            when: None,
-            gate_note: None,
-            exposure: None,
-            ttl_s: None,
-            rate: None,
-            cardinality: None,
-            since: None,
-            description: None,
-        })),
-        Registration::Unregistered,
-        Registration::NoSliceForProducer,
-        Registration::Unknown,
-        Registration::NotApplicable,
-    ];
+/// The tree pane over `flat`, with `identities` and `budgets`, at the
+/// comfortable grid — the one call shape the tests below share.
+fn pane<'a>(
+    flat: &'a tree::Flattened,
+    identities: &'a IdentityIndex,
+    namespace: &'a str,
+    budgets: Option<&'a zengui::budget::BudgetBadges>,
+) -> iced::Element<'a, Message> {
+    let watches: &'static BTreeSet<String> = Box::leak(Box::default());
+    let verdicts: &'static zengui::verdict::VerdictCache = Box::leak(Box::default());
+    tree::pane(tree::TreeData {
+        sp: sp(),
+        flat,
+        pivot: tree::Pivot::Chunks,
+        search: "",
+        viewport: Default::default(),
+        identities,
+        namespace,
+        verdicts,
+        budgets,
+        watches: tree::Watches {
+            mine: watches,
+            seeding: watches,
+        },
+        selected: None,
+    })
+}
 
-    let pairs: Vec<(&str, &str)> = states
+/// Every rung's word, for asserting that none is drawn.
+fn any_rung_word(ui: &mut iced_test::Simulator<'_, Message>) -> Option<&'static str> {
+    Rung::ALL
         .iter()
-        .map(|r| (tone(r).glyph(), registration_label(r)))
+        .map(|r| r.label())
+        .find(|w| ui.find(*w).is_ok())
+}
+
+/// #193's acceptance on zk2's ladder (#614, FL7): every rung renders a
+/// *distinct* glyph + word pair. The glyph comes from the tone type — no
+/// call site can omit it — so colour is structurally never the only
+/// carrier, and the word names the rung where the glyph names its class.
+#[test]
+fn every_identity_rung_renders_a_distinct_glyph_word_pair() {
+    let pairs: Vec<(&str, &str)> = Rung::ALL
+        .iter()
+        .map(|r| (r.tone().glyph(), r.label()))
         .collect();
     for (i, a) in pairs.iter().enumerate() {
         for b in &pairs[i + 1..] {
-            assert_ne!(
-                a, b,
-                "two registration states render the same glyph + word pair"
-            );
+            assert_ne!(a, b, "two rungs render the same glyph + word pair");
         }
     }
-
     // …and each pair actually reaches the screen, through the same
     // `tone_badge` every pane uses.
     let badges = iced::widget::Column::with_children(
-        states
+        Rung::ALL
             .iter()
-            .map(|r| zengui::view::kit::tone_badge::<Message>(tone(r), registration_label(r))),
+            .map(|r| zengui::view::kit::tone_badge::<Message>(r.tone(), r.label())),
     );
     let mut ui = simulator::<Message, _, _>(badges);
     for &(glyph, word) in &pairs {
@@ -68,52 +75,130 @@ fn the_five_registration_states_render_five_distinct_glyph_word_pairs() {
     }
 }
 
-/// The registration tri-state must actually reach the screen, and its states
-/// must read differently (RFC 09 §5.1 O4).
+/// #614 (FL7): the rungs on resolutions the lens really made, each key
+/// drawn alone so nothing else on screen can answer for it. Under the
+/// namespace `spray`: an owned stream resolves; an address nobody provides
+/// stops at "no provider"; a stream the contract does not declare at "no
+/// resource"; an address's instance token is a control key; a `v1/…` key
+/// in the namespace reads "not zk2"; another deployment's zk2 key "not in
+/// namespace" — and another application's key is drawn plainly, no badge
+/// and no role.
 #[test]
-fn the_tree_renders_the_registration_state() {
-    let keys = [REGISTERED, UNREGISTERED, FOREIGN];
-    let (flat, facts) = render(&keys, true);
-    let watches = BTreeSet::new();
-    let verdicts = zengui::verdict::VerdictCache::default();
-    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
-        sp: sp(),
-        flat: &flat,
-        pivot: tree::Pivot::Chunks,
-        search: "",
-        viewport: Default::default(),
-        facts: &facts,
-        verdicts: &verdicts,
-        budgets: None,
-        watches: tree::Watches {
-            mine: &watches,
-            seeding: &watches,
-        },
-        selected: None,
-    }));
+fn the_tree_badges_the_rung_each_key_reached() {
+    let world = common::World::new();
+    let cases: [(&str, Option<Rung>); 7] = [
+        (
+            "spray/zk2/robot1/nav/nav.v2/stream/position",
+            Some(Rung::Resolved),
+        ),
+        (
+            "spray/zk2/robot9/nav/nav.v2/stream/position",
+            Some(Rung::NoProvider),
+        ),
+        (
+            "spray/zk2/robot1/nav/nav.v2/stream/nowhere",
+            Some(Rung::NoResource),
+        ),
+        (
+            "spray/zk2/robot1/nav/@zk/instance/0000000000000001",
+            Some(Rung::Control),
+        ),
+        (
+            "spray/v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load",
+            Some(Rung::NotZk2),
+        ),
+        (
+            "elsewhere/zk2/robot1/nav/nav.v2/stream/position",
+            Some(Rung::NotInNamespace),
+        ),
+        ("demo/example/foo", None),
+    ];
+    for (key, want) in cases {
+        let identities = world.identities("spray", &[key]);
+        let snap = snapshot(&[key]);
+        let flat = tree::flatten(&snap, "spray", &expand_all(&[key]), 500, Instant::now());
+        let mut ui = simulator::<Message, _, _>(pane(&flat, &identities, "spray", None));
+        assert_eq!(any_rung_word(&mut ui), want.map(Rung::label), "{key}");
+    }
+}
 
+/// #614 (FL7): what only a read can answer is "not asked" until one is
+/// made. Without a presence read every zk2 key stops at "presence not
+/// read"; with presence and no contract in hand, at "contract not held" —
+/// neither ever reads as resolved or as "no provider", and the positions
+/// are still labelled.
+#[test]
+fn an_unread_tree_claims_neither_way() {
+    let key = common::POSITION;
+    let (flat, identities) = render(&[key], false);
+    let mut ui = simulator::<Message, _, _>(pane(&flat, &identities, "", None));
+    assert_eq!(any_rung_word(&mut ui), Some("presence not read"));
     assert!(
-        ui.find("registered").is_ok(),
-        "a registered subject should be badged"
+        ui.find("system").is_ok(),
+        "the positions are labelled whatever was read"
     );
-    assert!(
-        ui.find("unregistered").is_ok(),
-        "an unregistered subject should be badged differently"
+
+    let world = common::World::new();
+    let catalog = world.catalog();
+    let none = zenkey_fleet::ContractSet::new();
+    let lens = zenkey_fleet::Lens::new("", Some(&catalog), &none);
+    let mut identities = IdentityIndex::default();
+    identities.ensure(&lens, key);
+    let mut ui = simulator::<Message, _, _>(pane(&flat, &identities, "", None));
+    assert_eq!(any_rung_word(&mut ui), Some("contract not held"));
+}
+
+/// The positions reach the screen: a zk2 key's chunks wear zk2's roles at
+/// a pane wide enough for them, and a foreign key's wear none — no
+/// invented labels, and no rung badge either.
+#[test]
+fn zk2_roles_reach_the_screen_and_foreign_keys_wear_none() {
+    let (flat, identities) = render(&[common::ETH0], true);
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1400.0, 800.0),
+        pane(&flat, &identities, "", None),
     );
-    // The registry-declared type name is the payoff of the whole overlay.
-    assert!(
-        ui.find("TelemetryPoint").is_ok(),
-        "the declared type should be shown"
-    );
-    // The positional labels for the conforming subtree.
-    for role in ["version", "origin", "class", "producer", "subject"] {
+    for role in ["grammar", "system", "service", "iface", "kind", "resource"] {
         assert!(ui.find(role).is_ok(), "missing role label {role:?}");
+    }
+    assert!(ui.find("resolved").is_ok());
+
+    let (flat, identities) = render(&[FOREIGN], true);
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1400.0, 800.0),
+        pane(&flat, &identities, "", None),
+    );
+    for role in ["grammar", "system", "service", "iface", "kind", "resource"] {
+        assert!(
+            ui.find(role).is_err(),
+            "a foreign key must not be labelled {role:?}"
+        );
+    }
+    assert_eq!(any_rung_word(&mut ui), None, "nor badged");
+}
+
+/// #614 (FL7): v1 keys are foreign since the port — a `v1/…` key reads
+/// "not zk2", and wears no v1 role: no v1 overlay.
+#[test]
+fn a_v1_key_reads_not_zk2() {
+    let (flat, identities) = render(&[REGISTERED], true);
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1400.0, 800.0),
+        pane(&flat, &identities, "", None),
+    );
+    assert!(ui.find("not zk2").is_ok());
+    for role in [
+        "version", "origin", "class", "producer", "subject", "system", "service",
+    ] {
+        assert!(ui.find(role).is_err(), "a v1 key wears no {role:?}");
     }
 }
 
 /// #557: a narrow Locator shows less of a row, never two rows at once. At
-/// 240px (300px since #566 halved a narrow pane's indent, and gave the
-/// badge its room back) the deep leaves are in the narrow tier — the counts collapse to the
+/// 240px the deep leaves are in the narrow tier — the counts collapse to the
 /// rate, on one line, inside the pane — and a badge with no room is left
 /// out whole and *counted* (`+1`), never cut and never silently gone. At the
 /// default width the whole row is back.
@@ -121,7 +206,7 @@ fn the_tree_renders_the_registration_state() {
 fn a_narrow_tree_keeps_each_row_on_its_line() {
     use zengui::view::tokens::CAPTION_LINE;
 
-    let keys = [REGISTERED, UNREGISTERED];
+    let keys = [common::POSITION, common::NAV_STATUS];
     let mut stats = StatsTable::new();
     let t0 = Instant::now();
     for k in &keys {
@@ -143,11 +228,11 @@ fn a_narrow_tree_keeps_each_row_on_its_line() {
     let snap =
         zenkey_fleet::merge_skeleton(&skel, &KeyTreeSnapshot::build(&stats), &["**".to_string()]);
     let flat = tree::flatten(&snap, "", &expand_all(&keys), 500, Instant::now());
-    let facts = index(&keys, true);
+    let identities = identities(&keys, true);
     let leaf = (0..flat.rows.len())
         .map(|i| flat.row(i))
-        .find(|r| r.target.as_deref() == Some(REGISTERED))
-        .expect("the registered leaf is a row");
+        .find(|r| r.target.as_deref() == Some(common::POSITION))
+        .expect("the position leaf is a row");
     let rate = zengui::view::kit::human_rate(leaf.rate_hz);
     let wide = format!(
         "{} · {} · {rate}",
@@ -159,29 +244,11 @@ fn a_narrow_tree_keeps_each_row_on_its_line() {
         "the leaf must carry a rate for this test to mean anything"
     );
 
-    let watches = BTreeSet::new();
-    let verdicts = zengui::verdict::VerdictCache::default();
-    let data = tree::TreeData {
-        sp: sp(),
-        flat: &flat,
-        pivot: tree::Pivot::Chunks,
-        search: "",
-        viewport: Default::default(),
-        facts: &facts,
-        verdicts: &verdicts,
-        budgets: None,
-        watches: tree::Watches {
-            mine: &watches,
-            seeding: &watches,
-        },
-        selected: None,
-    };
-
     let width = 240.0;
     let mut ui = iced_test::Simulator::with_size(
         iced::Settings::default(),
         (width, 600.0),
-        tree::pane(data),
+        pane(&flat, &identities, "", None),
     );
     let counts = ui
         .find(rate.as_str())
@@ -198,11 +265,7 @@ fn a_narrow_tree_keeps_each_row_on_its_line() {
     );
     assert!(ui.find(wide.as_str()).is_err(), "the bytes go first");
     assert!(
-        ui.find("TelemetryPoint").is_err(),
-        "the type name is the lowest priority"
-    );
-    assert!(
-        ui.find("registered").is_err() && ui.find("unregistered").is_err(),
+        ui.find("resolved").is_err(),
         "no room for a badge at this depth"
     );
     assert!(
@@ -210,13 +273,12 @@ fn a_narrow_tree_keeps_each_row_on_its_line() {
         "…so it is counted, not silently dropped (an absent badge reads as not asked)"
     );
 
-    let mut ui = simulator::<Message, _, _>(tree::pane(data));
+    let mut ui = simulator::<Message, _, _>(pane(&flat, &identities, "", None));
     assert!(
         ui.find(wide.as_str()).is_ok(),
         "the default width is the whole row"
     );
-    assert!(ui.find("registered").is_ok());
-    assert!(ui.find("unregistered").is_ok());
+    assert!(ui.find("resolved").is_ok());
     assert!(ui.find("+1").is_err(), "nothing is held back when it fits");
 }
 
@@ -229,8 +291,8 @@ fn a_narrow_tree_keeps_each_row_on_its_line() {
 fn density_changes_the_grid_never_the_claims() {
     use zengui::prefs::Density;
 
-    let keys = [REGISTERED, UNREGISTERED, FOREIGN];
-    let (flat, facts) = render(&keys, true);
+    let keys = [common::POSITION, REGISTERED, FOREIGN];
+    let (flat, identities) = render(&keys, true);
     let watches = BTreeSet::new();
     for density in Density::ALL {
         let verdicts = zengui::verdict::VerdictCache::default();
@@ -240,7 +302,8 @@ fn density_changes_the_grid_never_the_claims() {
             pivot: tree::Pivot::Chunks,
             search: "",
             viewport: Default::default(),
-            facts: &facts,
+            identities: &identities,
+            namespace: "",
             verdicts: &verdicts,
             budgets: None,
             watches: tree::Watches {
@@ -249,7 +312,7 @@ fn density_changes_the_grid_never_the_claims() {
             },
             selected: None,
         }));
-        for claim in ["registered", "unregistered", "TelemetryPoint"] {
+        for claim in ["resolved", "not zk2"] {
             assert!(
                 ui.find(claim).is_ok(),
                 "{claim:?} must survive {} density",
@@ -259,96 +322,13 @@ fn density_changes_the_grid_never_the_claims() {
     }
 }
 
-/// Before a registry is loaded, nothing may be badged either way — that would
-/// report a verdict never obtained (RFC 09 §5.1 O4).
-#[test]
-fn an_unresolved_tree_claims_neither_way() {
-    let keys = [REGISTERED];
-    let (flat, facts) = render(&keys, false);
-    let watches = BTreeSet::new();
-    let verdicts = zengui::verdict::VerdictCache::default();
-    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
-        sp: sp(),
-        flat: &flat,
-        pivot: tree::Pivot::Chunks,
-        search: "",
-        viewport: Default::default(),
-        facts: &facts,
-        verdicts: &verdicts,
-        budgets: None,
-        watches: tree::Watches {
-            mine: &watches,
-            seeding: &watches,
-        },
-        selected: None,
-    }));
-
-    assert!(
-        ui.find("unregistered").is_err(),
-        "a key we never checked must not read as unregistered"
-    );
-    assert!(ui.find("registered").is_err(), "…nor as registered");
-    // It is still a fully labelled conforming key — only the registry verdict
-    // is withheld.
-    assert!(ui.find("producer").is_ok());
-}
-
-/// A foreign key is rendered, and rendered *plainly* — no invented labels.
-#[test]
-fn foreign_keys_render_without_convention_labels() {
-    let keys = [FOREIGN];
-    let (flat, facts) = render(&keys, true);
-    let watches = BTreeSet::new();
-    let verdicts = zengui::verdict::VerdictCache::default();
-    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
-        sp: sp(),
-        flat: &flat,
-        pivot: tree::Pivot::Chunks,
-        search: "",
-        viewport: Default::default(),
-        facts: &facts,
-        verdicts: &verdicts,
-        budgets: None,
-        watches: tree::Watches {
-            mine: &watches,
-            seeding: &watches,
-        },
-        selected: None,
-    }));
-
-    for role in ["version", "origin", "class", "producer", "subject"] {
-        assert!(
-            ui.find(role).is_err(),
-            "a foreign key must not be labelled {role:?}"
-        );
-    }
-    // …and no registry verdict is invented for it either.
-    assert!(ui.find("unregistered").is_err());
-}
-
 /// The empty tree must explain itself rather than implying the bus is quiet
 /// (RFC 05 §3.1).
 #[test]
 fn the_empty_tree_explains_itself() {
     let flat = tree::Flattened::empty();
-    let facts = FactsIndex::default();
-    let watches = BTreeSet::new();
-    let verdicts = zengui::verdict::VerdictCache::default();
-    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
-        sp: sp(),
-        flat: &flat,
-        pivot: tree::Pivot::Chunks,
-        search: "",
-        viewport: Default::default(),
-        facts: &facts,
-        verdicts: &verdicts,
-        budgets: None,
-        watches: tree::Watches {
-            mine: &watches,
-            seeding: &watches,
-        },
-        selected: None,
-    }));
+    let identities = IdentityIndex::default();
+    let mut ui = simulator::<Message, _, _>(pane(&flat, &identities, "", None));
 
     assert!(ui.find("Nothing observed yet").is_ok());
     // Selectors match a widget's whole text, so this is the full disclaimer.
@@ -362,31 +342,23 @@ fn the_empty_tree_explains_itself() {
     );
 }
 
-/// #107's "the bound is not a silent one": the projection cache's retirement
-/// count reaches the strip, and reads as its own number rather than being
-/// folded into the key count. Two bounds, two populations, two sentences (O6).
-#[test]
-fn the_projection_cache_discloses_its_bound() {
-    use zengui::prefs::Prefs;
+fn strip(identity: (usize, u64), keys: (usize, u64)) -> iced::Element<'static, Message> {
     use zengui::view::status::{self, Status};
-
-    let _ = Prefs::default();
-    let link = zengui::message::LinkState::Pumping;
-    let watched: Vec<String> = vec![];
-    let mut ui = simulator::<Message, _, _>(status::strip(Status {
-        link: &link,
+    let link: &'static zengui::message::LinkState =
+        Box::leak(Box::new(zengui::message::LinkState::Pumping));
+    let watched: &'static Vec<String> = Box::leak(Box::default());
+    status::strip(Status {
+        link,
         namespace_label: "acme",
-        watched: &watched,
+        watched,
         skeleton: None,
         keys_unwatched: 0,
         fetched: None,
         scope_label: "all",
         scope_coverage: "",
-        keys: 120,
-        keys_evicted: 7,
-        facts_cached: 118,
-        facts_evicted: 312,
-        identity: (0, 0),
+        keys: keys.0,
+        keys_evicted: keys.1,
+        identity,
         totals: Default::default(),
         contracts: Default::default(),
         presence: None,
@@ -397,9 +369,20 @@ fn the_projection_cache_discloses_its_bound() {
         prefs_note: None,
         replaying: false,
         retention: None,
-    }));
+    })
+}
+
+/// #107's "the bound is not a silent one", on zk2's identity cache (#614,
+/// FL7): its retirement count reaches the strip, and reads as its own
+/// number rather than being folded into the key count. Two bounds, two
+/// populations, two sentences (O6).
+#[test]
+fn the_identity_cache_discloses_its_bound() {
+    use zengui::view::status;
+
+    let mut ui = simulator::<Message, _, _>(strip((118, 312), (120, 7)));
     assert!(
-        ui.find(status::facts_text(118, 312).as_str()).is_ok(),
+        ui.find(status::identity_text(118, 312).as_str()).is_ok(),
         "the cache's bound must be visible, not merely enforced"
     );
     assert!(
@@ -407,7 +390,7 @@ fn the_projection_cache_discloses_its_bound() {
         "and the key table's own count is still its own"
     );
     assert_ne!(
-        status::facts_text(118, 312),
+        status::identity_text(118, 312),
         status::keys_text(118, 312),
         "the two bounds must not read as one number"
     );
@@ -417,100 +400,110 @@ fn the_projection_cache_discloses_its_bound() {
 /// population, so an untripped bound must not add a line.
 #[test]
 fn an_untripped_cache_bound_says_nothing() {
-    use zengui::view::status::{self, Status};
+    use zengui::view::status;
 
-    let link = zengui::message::LinkState::Pumping;
-    let watched: Vec<String> = vec![];
-    let mut ui = simulator::<Message, _, _>(status::strip(Status {
-        link: &link,
-        namespace_label: "acme",
-        watched: &watched,
-        skeleton: None,
-        keys_unwatched: 0,
-        fetched: None,
-        scope_label: "all",
-        scope_coverage: "",
-        keys: 12,
-        keys_evicted: 0,
-        facts_cached: 12,
-        facts_evicted: 0,
-        identity: (0, 0),
-        totals: Default::default(),
-        contracts: Default::default(),
-        presence: None,
-        seeding: 0,
-        seeded_watches: 0,
-        seed_totals: Default::default(),
-        unreachable: false,
-        prefs_note: None,
-        replaying: false,
-        retention: None,
-    }));
-    assert!(ui.find(status::facts_text(12, 0).as_str()).is_err());
+    let mut ui = simulator::<Message, _, _>(strip((12, 0), (12, 0)));
+    assert!(ui.find(status::identity_text(12, 0).as_str()).is_err());
 }
 
-/// #221: the tree badges an over-budget `{var}` family on its subtree row
-/// with the numbers; under-declared draws nothing; a `{path...}` family is
-/// exempt and says so — never a silent pass.
+/// #614 (FL7): the tree badges the core judge's population answer on the
+/// family's subtree row (core §2.7). Through the real judge over the
+/// world's deployment, the two answers a GUI window mostly gets: a
+/// best-effort stream is lossy, and a state is no window's to count. Then
+/// every other answer, drawn as the judge would hand it over: within and
+/// exceeds with their numbers, and unobservable with its reason — the owner
+/// absent, the window too short — never a pass.
 #[test]
-fn the_tree_badges_the_budget_join() {
-    use zengui::budget;
-    use zenkey_fleet::StatsTable;
+fn the_tree_badges_the_budget_judgement() {
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime};
+    use zengui::budget::{BudgetBadge, BudgetBadges, BudgetInputs, ReaderLoss, badges};
+    use zenkey_model::budget::{Bound, Judged, Reason, Verdict};
 
-    // A registry that declares a tight budget (2) on the disk family and a
-    // rest-variable family beside it.
-    let subject = |path: &str, class: &str, cardinality: Option<i64>| {
-        let mut d = zenkey_v1::slice::SubjectDecl::new(path, zenkey_v1::Declared::parse(class));
-        d.type_name = "T".into();
-        d.cardinality = cardinality;
-        d
-    };
-    let mut tight_slice = zenkey_v1::slice::RegistrySlice::new("1.0", "t", "sysinfo");
-    tight_slice.subjects = vec![
-        subject("disk/{mount}/used", "telemetry", Some(2)),
-        subject("log/{path...}", "events", Some(1)),
-    ];
-    let tight = SliceSet::from_slices(vec![tight_slice]);
-
-    let over = [
-        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/used",
-        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var/used",
-        "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/tmp/used",
-        "v1/h-3fa9c2d41b7e/events/sysinfo/log/var/log/syslog",
-    ];
+    let world = common::World::new();
+    let bandwidth = "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
+    let keys = [bandwidth, common::ETH0, common::WLAN0];
     let mut stats = StatsTable::new();
-    let now = std::time::Instant::now();
-    for k in &over {
-        stats.record(k, 1, None, now, None, None);
+    let start = Instant::now();
+    for k in &keys {
+        stats.record(k, 8, None, start + Duration::from_secs(1), None, None);
     }
-    let badges = budget::badges("", &tight, &KeyTreeSnapshot::build(&stats));
+    let judged = badges(&BudgetInputs {
+        namespace: String::new(),
+        catalog: Some(world.catalog()),
+        store: world.store(),
+        presence: Some(world.presence()),
+        observed: Arc::new(KeyTreeSnapshot::build(&stats)),
+        watches: vec![("**".into(), start)],
+        reader: ReaderLoss::default(),
+        timeout: Duration::from_secs(2),
+        now: start + Duration::from_secs(120),
+        wall: SystemTime::now() + Duration::from_secs(120),
+    });
+    let snap = snapshot(&keys);
+    let flat = tree::flatten(&snap, "", &expand_all(&keys), 500, Instant::now());
+    let identities = identities(&keys, true);
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1400.0, 800.0),
+        pane(&flat, &identities, "", Some(&judged)),
+    );
+    assert!(
+        ui.find("budget unobservable (lossy)").is_ok(),
+        "a best-effort stream is lossy by declaration: {judged:?}"
+    );
+    assert!(
+        ui.find("budget unobservable (a window does not count state)")
+            .is_ok(),
+        "a state's members are an owner GET's to count"
+    );
 
-    let (flat, facts) = render(&over, true);
-    let watches = BTreeSet::new();
-    let verdicts = zengui::verdict::VerdictCache::default();
-    let mut ui = simulator::<Message, _, _>(tree::pane(tree::TreeData {
-        flat: &flat,
-        pivot: tree::Pivot::Chunks,
-        search: "",
-        viewport: Default::default(),
-        facts: &facts,
-        verdicts: &verdicts,
-        budgets: Some(&badges),
-        watches: tree::Watches {
-            mine: &watches,
-            seeding: &watches,
+    let badge = |verdict, reason, counted| BudgetBadge {
+        bound: Bound::Of(1024),
+        judged: Judged {
+            verdict,
+            reason,
+            counted,
         },
-        selected: None,
-        sp: sp(),
-    }));
-    assert!(
-        ui.find("over budget: observed 3 of 2 declared").is_ok(),
-        "the offending family's subtree carries the numbers"
+    };
+    let rows = [
+        (
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth",
+            badge(Verdict::Within, Reason::Complete, 2),
+        ),
+        (
+            "zk2/host-a/tc/tc.netif.v1/state/interfaces",
+            badge(Verdict::Exceeds, Reason::OverBound, 1025),
+        ),
+        (
+            "zk2/host-a/tc/tc.netif.v1/state/interfaces/default",
+            badge(Verdict::Unobservable, Reason::OwnerAbsent, 2),
+        ),
+        (
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default",
+            badge(Verdict::Unobservable, Reason::WindowTooShort, 1),
+        ),
+    ];
+    let drawn: BudgetBadges = rows.iter().map(|(p, b)| ((*p).to_owned(), *b)).collect();
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (1400.0, 800.0),
+        pane(&flat, &identities, "", Some(&drawn)),
     );
-    assert!(
-        ui.find("exempt: rest-variable").is_ok(),
-        "a rest-variable family is exempt and says so, never a silent pass"
-    );
+    for word in [
+        "within budget: 2 of 1024",
+        "exceeds budget: 1025 of 1024",
+        "budget unobservable (owner absent)",
+        "budget unobservable (window too short)",
+    ] {
+        assert!(ui.find(word).is_ok(), "{word:?} must reach the screen");
+    }
+    // Each answer wears its own glyph: the finding, the kept budget and the
+    // reading that could not say never look alike.
+    use zengui::view::theme::BudgetTone;
+    assert_eq!(rows[0].1.tone(), BudgetTone::Within);
+    assert_eq!(rows[1].1.tone(), BudgetTone::Exceeds);
+    assert_eq!(rows[2].1.tone(), BudgetTone::Unobservable);
 }
 
 /// Every path the world's contracts declare for its addresses, as the
@@ -537,7 +530,7 @@ fn declared_paths() -> Vec<(String, zenkey_model::authoring::Kind)> {
 /// of every address the world's presence names is a node before a byte of
 /// it arrives — declared, and placed — and reads "declared" while nothing
 /// watches it; a declared operation's leaf is marked as one, and nothing
-/// else is.
+/// else is. Since FL7 the declared nodes wear zk2's roles too.
 #[test]
 fn the_tree_shows_the_contract_skeleton() {
     use zenkey_fleet::NodeStatus;
@@ -572,6 +565,11 @@ fn the_tree_shows_the_contract_skeleton() {
             "{path}: only an operation's leaf is marked as one"
         );
         assert!(row.decl_type.is_some(), "{path} carries its declared type");
+        assert_eq!(
+            row.role,
+            Some(tree::Role::Resource),
+            "{path}: a declared leaf is a resource chunk"
+        );
     }
     assert!(
         paths
@@ -614,24 +612,28 @@ fn explicit_leaves_stay_declared_only_under_an_ambient_watch() {
         500,
         Instant::now(),
     );
-    let status = |path: &str| {
+    let at = |path: &str| {
         let i = flat
             .rows
             .iter()
             .position(|r| flat.arena.display(r.path) == path)
             .unwrap_or_else(|| panic!("no node at {path}"));
-        flat.row(i).status
+        flat.row(i)
     };
     for explicit in [&frames, &calibration] {
         assert!(
-            matches!(status(explicit), NodeStatus::DeclaredOnly(_)),
+            matches!(at(explicit).status, NodeStatus::DeclaredOnly(_)),
             "{explicit}: `**` cannot reach it, so no watch covers it"
         );
     }
     assert!(
-        matches!(status(&reading), NodeStatus::WatchedQuiet(_)),
+        matches!(at(&reading).status, NodeStatus::WatchedQuiet(_)),
         "a plain resource is covered by `**`, and quiet is an observation"
     );
+    // The symbolic address holds its positions (#614, FL7).
+    assert_eq!(at("zk2/{system}").role, Some(tree::Role::System));
+    assert_eq!(at("zk2/{system}/{service}").role, Some(tree::Role::Service));
+    assert_eq!(at(&format!("{base}/@stream")).role, Some(tree::Role::Kind));
 }
 
 /// A contract with an explicit stream and an explicit state beside a plain
@@ -680,13 +682,13 @@ fn an_operation_row_offers_no_watch_control() {
         500,
         Instant::now(),
     );
-    let facts = FactsIndex::default();
+    let identities = IdentityIndex::default();
     let verdicts = zengui::verdict::VerdictCache::default();
     let seeding = BTreeSet::new();
     let eye = Icon::Watched.codepoint().to_string();
     fn draw<'a>(
         flat: &'a tree::Flattened,
-        facts: &'a FactsIndex,
+        identities: &'a IdentityIndex,
         verdicts: &'a zengui::verdict::VerdictCache,
         mine: &'a BTreeSet<String>,
         seeding: &'a BTreeSet<String>,
@@ -696,7 +698,8 @@ fn an_operation_row_offers_no_watch_control() {
             pivot: tree::Pivot::Chunks,
             search: "",
             viewport: Default::default(),
-            facts,
+            identities,
+            namespace: "",
             verdicts,
             budgets: None,
             watches: tree::Watches { mine, seeding },
@@ -705,7 +708,7 @@ fn an_operation_row_offers_no_watch_control() {
         }))
     }
     let held_on_reset = BTreeSet::from([reset.clone(), format!("{nav}/@op")]);
-    let mut ui = draw(&flat, &facts, &verdicts, &held_on_reset, &seeding);
+    let mut ui = draw(&flat, &identities, &verdicts, &held_on_reset, &seeding);
     assert!(ui.find("reset").is_ok(), "the operation's leaf is drawn");
     assert!(
         ui.find(eye.as_str()).is_err(),
@@ -720,7 +723,7 @@ fn an_operation_row_offers_no_watch_control() {
         );
     }
     let held_on_position = BTreeSet::from([position.clone()]);
-    let mut ui = draw(&flat, &facts, &verdicts, &held_on_position, &seeding);
+    let mut ui = draw(&flat, &identities, &verdicts, &held_on_position, &seeding);
     assert!(
         ui.find(eye.as_str()).is_ok(),
         "a stream's row does, and shows the watch held"

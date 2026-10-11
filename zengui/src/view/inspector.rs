@@ -20,12 +20,14 @@
 //!
 //! ## Plane conditionality comes from the classification seam
 //!
-//! Whether a key is on the `@blob` or `@media` plane is
-//! [`ClassKind`], read off the projected
-//! [`KeyFacts`] — never a `key.contains("@blob")`. `keyfacts` is the single
-//! seam where a key becomes convention-aware (this crate's whole
-//! key-agnostic-core claim), and a second, string-shaped classifier here
-//! would be the thing that claim forbids.
+//! Which plane a key sits on is read off its classification — a zk2 key's
+//! kind token, from its identity (#614, FL7), or a v1 key's [`ClassKind`],
+//! from its v1 facts projected on demand — never a `key.contains("@blob")`.
+//! `keyfacts` is the single seam where a key becomes convention-aware (this
+//! crate's whole key-agnostic-core claim), and a second, string-shaped
+//! classifier here would be the thing that claim forbids. The `@blob` and
+//! `@media` sections are v1's planes, foreign keys' since the port, until
+//! FL11 removes them: no zk2 kind token opens one.
 //!
 //! ## Three of the issue's six rows are not here
 //!
@@ -41,6 +43,8 @@ use iced::{Element, Length};
 use zenkey_fleet::{KeyTreeSnapshot, LatencyReport};
 use zenkey_fleet_v1::SliceSet;
 use zenkey_fleet_v1::model::facts::{ClassKind, KeyFacts, KeyShape, Registration};
+
+use crate::keyfacts::{KeyGroup, Resolution};
 use zenkey_fleet_v1::report::TopicRow;
 
 use super::detail::{DetailData, Fetched, SeriesData};
@@ -69,9 +73,14 @@ pub struct InspectorData<'a> {
     /// slots never speak into each other's state.
     pub slot: SlotId,
     pub subject: &'a Subject,
-    /// The projected facts for a key subject — the plane classifier, and the
-    /// facts ladder the Detail section renders.
-    pub facts: Option<&'a KeyFacts>,
+    /// The key subject's zk2 identity (#614, FL7): the identity line the
+    /// Detail section renders, and a zk2 key's plane.
+    pub identity: Option<&'a Resolution>,
+    /// The key subject's v1 facts, projected on demand
+    /// ([`crate::keyfacts::v1_facts`]): a v1 key's blob and media planes,
+    /// the Config tool's target and the registry's type vocabulary, until
+    /// FL11 removes them.
+    pub v1: Option<KeyFacts>,
     pub fetched: Fetched<'a>,
     pub decoded: Option<&'a crate::value::DecodedValue>,
     pub series: Option<&'a SeriesData>,
@@ -111,14 +120,32 @@ pub struct InspectorData<'a> {
 }
 
 /// Which plane a key sits on, when it sits on one at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Plane {
+    /// A zk2 data key, placed by its kind token (#614, FL7). No kind token
+    /// opens a plane section: `@stream` and `@state` are read like any
+    /// other stream and state.
+    Zk2,
+    /// A v1 key's class — foreign since the port, and the only keys the
+    /// `@blob` and `@media` sections still read, until FL11.
+    V1(ClassKind),
+}
+
+/// Which plane a key sits on: a zk2 key's kind token first, else a v1
+/// key's class.
 ///
-/// `None` for anything the grammar did not place: an unparsed key, a key
-/// outside the base, or no projection yet. "We have not classified it" and
-/// "it is on the ordinary planes" render the same way here, which is correct —
-/// neither adds a blob section.
-fn plane(facts: Option<&KeyFacts>) -> Option<ClassKind> {
-    match &facts?.shape {
-        KeyShape::V1(f) => Some(f.class_kind),
+/// `None` for anything neither grammar placed: an unparsed key, a key
+/// outside the namespace, or no identity yet. "We have not classified it"
+/// and "it is on the ordinary planes" render the same way here, which is
+/// correct — neither adds a plane section.
+fn plane(identity: Option<&Resolution>, v1: Option<&KeyFacts>) -> Option<Plane> {
+    if let Some(KeyGroup::Resource { token, .. }) = identity.map(|r| &r.identity.group)
+        && token.parse::<zenkey_model::grammar::KindToken>().is_ok()
+    {
+        return Some(Plane::Zk2);
+    }
+    match &v1?.shape {
+        KeyShape::V1(f) => Some(Plane::V1(f.class_kind)),
         _ => None,
     }
 }
@@ -175,7 +202,8 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     let mut col = detail::section(DetailData {
         slot: d.slot,
         key,
-        facts: d.facts,
+        identity: d.identity,
+        config: d.v1.as_ref().and_then(crate::configure::config_target),
         fetched: d.fetched,
         decoded: d.decoded,
         series: d.series,
@@ -193,14 +221,14 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
 
     // The plane sections, when the key is on one. Order matters: the plane is
     // the more specific fact, so it reads after the general one.
-    match plane(d.facts) {
-        Some(ClassKind::Blob) => {
+    match plane(d.identity, d.v1.as_ref()) {
+        Some(Plane::V1(ClassKind::Blob)) => {
             col = col.push(blob::section(d.blob, d.slices.is_some(), d.sp));
         }
-        Some(ClassKind::Media) => {
+        Some(Plane::V1(ClassKind::Media)) => {
             col = col.push(media::section(d.media, d.slices, d.sp));
         }
-        _ => {}
+        Some(Plane::Zk2 | Plane::V1(_)) | None => {}
     }
 
     // The bounded field observation (#223) and the why ladder (#214): both
@@ -412,7 +440,7 @@ fn subject_observed(
 /// engine's projections, consumed rather than re-derived from the slices.
 fn type_section<'a>(d: &InspectorData<'a>) -> Option<Column<'a, Message>> {
     let slices = d.slices?;
-    let Registration::Registered(subject) = &d.facts?.registration else {
+    let Registration::Registered(subject) = &d.v1.as_ref()?.registration else {
         return None;
     };
     let type_name = subject.type_name.as_str();

@@ -240,7 +240,7 @@ fn palette_row_count(chrome: &Chrome, dep: &Deployment, work: &Workspace) -> usi
             // Observed keys only — never a guess (O4): the jump-to
             // overlay offers what is on the bus, not what a registry
             // says could be.
-            let keys: Vec<&str> = dep.facts.keys().collect();
+            let keys: Vec<&str> = dep.identity.keys().collect();
             rank_keys(&keys, &chrome.palette.query).len()
         }
         _ => 0,
@@ -264,7 +264,7 @@ fn palette_row(
             order.get(index).map(|i| items[*i].message.clone())
         }
         Overlay::Keys => {
-            let keys: Vec<&str> = dep.facts.keys().collect();
+            let keys: Vec<&str> = dep.identity.keys().collect();
             let order = rank_keys(&keys, &chrome.palette.query);
             order
                 .get(index)

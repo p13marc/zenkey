@@ -263,7 +263,8 @@ fn locator<'a>(
         pivot: tree.pivot,
         search: &tree.tree_search,
         viewport: tree.tree_scroll,
-        facts: &dep.facts,
+        identities: &dep.identity,
+        namespace: dep.namespace(),
         verdicts: &work.verdicts.payloads,
         budgets: obs.budgets.as_deref(),
         watches: view::tree::Watches {
@@ -285,7 +286,13 @@ fn inspector<'a>(
     view::inspector::pane(view::inspector::InspectorData {
         slot: slot.id,
         subject: &slot.current,
-        facts: slot.current.key().and_then(|k| dep.facts.get(k)),
+        identity: slot.current.key().and_then(|k| dep.identity.get(k)),
+        // A key parse per frame, for the selected key alone: the v1 panes'
+        // classification, on demand (#614, FL7).
+        v1: slot
+            .current
+            .key()
+            .map(|k| crate::keyfacts::v1_facts(dep.namespace(), k)),
         fetched: match slot.fetched.as_ref() {
             None => view::detail::Fetched::NotAsked,
             Some((k, o)) if Some(k.as_str()) == slot.current.key() => {

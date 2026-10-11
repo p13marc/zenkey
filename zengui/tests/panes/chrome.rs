@@ -37,8 +37,6 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         scope_coverage: "",
         keys: 0,
         keys_evicted: 0,
-        facts_cached: 0,
-        facts_evicted: 0,
         identity: (0, 0),
         totals: Default::default(),
         contracts: Default::default(),
@@ -177,7 +175,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             false,
             scope(&scope_form),
             settings(&cfg, &settings_form),
-            keys.iter().map(String::as_str),
+            keys.iter().map(|k| (k.as_str(), None)),
         )
         .expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
@@ -206,7 +204,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             false,
             scope(&scope_form),
             settings(&cfg, &settings_form),
-            keys.iter().map(String::as_str),
+            keys.iter().map(|k| (k.as_str(), None)),
         )
         .expect("commands overlay");
         let mut ui = simulator::<Message, _, _>(element);
@@ -228,7 +226,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             false,
             scope(&scope_form),
             settings(&cfg, &settings_form),
-            keys.iter().map(String::as_str),
+            keys.iter().map(|k| (k.as_str(), None)),
         )
         .expect("keys overlay");
         let mut ui = simulator::<Message, _, _>(element);
@@ -250,7 +248,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             false,
             scope(&scope_form),
             settings(&cfg, &settings_form),
-            keys.iter().map(String::as_str),
+            keys.iter().map(|k| (k.as_str(), None)),
         )
         .expect("help overlay");
         let mut ui = simulator::<Message, _, _>(element);
@@ -282,7 +280,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             false,
             scope(&scope_form),
             settings(&cfg, &settings_form),
-            keys.iter().map(String::as_str),
+            keys.iter().map(|k| (k.as_str(), None)),
         )
         .expect("connect overlay");
         let mut ui = simulator::<Message, _, _>(element);
@@ -302,7 +300,7 @@ fn the_palette_offers_the_apps_own_actions_and_the_help_lists_the_real_map() {
             false,
             scope(&scope_form),
             settings(&cfg, &settings_form),
-            keys.iter().map(String::as_str)
+            keys.iter().map(|k| (k.as_str(), None))
         )
         .is_none()
     );
