@@ -11,7 +11,7 @@
 //!   deleted key standing;
 //! - **the state leg is S4's GET** on the watched selector, target `All`
 //!   and consolidation `Latest` set explicitly
-//!   ([`crate::bus::query::state_get`]): addressed to the owners' keys,
+//!   (`bus::query::state_get`, the crate's one state GET): addressed to the owners' keys,
 //!   since each key it matches has one owner (P3), and answered for a
 //!   foreign key by whatever holds it. A storage on an owner's state is a
 //!   deployment fault (S4), never this seed's source;
@@ -21,7 +21,7 @@
 //!   verbatim chunk a late *publisher* is never found (§2.5), and a
 //!   publisher that is gone took its cache with it;
 //! - **replies and live samples merge per key by the owner's stamp**
-//!   ([`Merge`]): the newer wins whichever path brought it, a `reply_del` is
+//!   (one merge for both phases): the newer wins whichever path brought it, a `reply_del` is
 //!   a deletion with its stamp, and one mutation both paths carried is kept
 //!   once.
 //!

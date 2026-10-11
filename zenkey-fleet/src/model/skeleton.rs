@@ -9,7 +9,8 @@
 //!   services run at which addresses, which interfaces each provides, and at
 //!   which revision; a tokenless interface (U22) is found by its descriptor
 //!   alone;
-//! - **the revisions in hand** ([`Contracts`], an offline [`ContractSet`])
+//! - **the revisions in hand** ([`Contracts`](crate::model::catalog::Contracts),
+//!   an offline [`ContractSet`](crate::model::catalog::ContractSet))
 //!   → what each revision declares: its resources by kind token and
 //!   template, with each `{p}` and `{p...}` kept symbolic;
 //! - **admin-space declared entities** ([`crate::declared_entities`]) →
