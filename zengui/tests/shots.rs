@@ -79,6 +79,37 @@ fn every_scene_renders() {
     }
 }
 
+/// The world's owners ride their declared QoS (#614, FL12): every scene
+/// whose Inspector shows `eth0`'s newest sample reads a match, as a window
+/// on a real owner writing through the runtime would. The mismatch is one
+/// scene's, a stranger's raw put, named axis by axis.
+#[test]
+fn live_scenes_read_the_declared_qos() {
+    const MATCH: &str = "observed axes match the declared QoS";
+    const DIFFER: &str = "observed axes differ from the declared QoS";
+    for scene in ALL {
+        let expect = match scene.name {
+            "explore"
+            | "watch"
+            | "compact-watch"
+            | "narrow"
+            | "skeleton"
+            | "inspector-last-known" => Some(true),
+            "inspector-qos-mismatch" => Some(false),
+            _ => None,
+        };
+        let Some(matches) = expect else { continue };
+        simulate(scene, ThemeChoice::Dark, |ui| {
+            assert_eq!(
+                (ui.find(MATCH).is_ok(), ui.find(DIFFER).is_ok()),
+                (matches, !matches),
+                "scene `{}`",
+                scene.name
+            );
+        });
+    }
+}
+
 #[test]
 #[ignore = "writes PNGs — run through `just shots`"]
 fn shots() {
