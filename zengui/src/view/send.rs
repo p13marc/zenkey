@@ -270,6 +270,9 @@ pub struct CallShape {
     pub key: String,
     /// The template's parameters, in order.
     pub params: Vec<String>,
+    /// The params box's example, from those parameters (`ns=…;iface=…`);
+    /// empty when the template has none, so no example suggests one.
+    pub params_example: String,
     pub request: String,
     pub response: String,
     pub error: Option<String>,
@@ -294,6 +297,7 @@ impl CallShape {
             return Err(format!("{operation} is not an operation"));
         };
         let view = |t| declared(&zenkey_fleet::type_view(t));
+        let params: Vec<String> = r.template.params().map(|(n, _)| n.to_owned()).collect();
         Ok(CallShape {
             name: resource_name(r),
             key: format!(
@@ -301,7 +305,12 @@ impl CallShape {
                 revision.iface(),
                 resource_name(r)
             ),
-            params: r.template.params().map(|(n, _)| n.to_owned()).collect(),
+            params_example: params
+                .iter()
+                .map(|p| format!("{p}=…"))
+                .collect::<Vec<_>>()
+                .join(";"),
+            params,
             request: view(&op.request),
             response: view(&op.response),
             error: op.error.as_ref().map(view),
@@ -1083,8 +1092,15 @@ fn matching_sentence(matching: Option<bool>) -> String {
 /// Split out of the pane so verifying a publish does not mean leaving the
 /// form. The form asks a question; the log is what came back, and those are
 /// two different regions of the workspace.
+///
+/// In a scrollable of its own: the dock is a fixed height, and a log bounded
+/// at [`LOG_LINES`] is longer than it — without one its rows shared the
+/// dock's height between them, and the ones past it were clipped (#614,
+/// FL10; the first scene with lines in it showed both).
 pub fn log_section(form: &SendForm, sp: Spacing) -> Element<'_, Message> {
-    log_view(form, sp)
+    iced::widget::scrollable(log_view(form, sp))
+        .height(Length::Fill)
+        .into()
 }
 
 fn log_view(form: &SendForm, sp: Spacing) -> Element<'_, Message> {
@@ -1207,10 +1223,15 @@ fn call_body<'a>(
     };
     col = col.push(kit::form_field(
         "PARAMS",
-        kit::input("ns=default;iface=eth0", &form.params)
-            .on_input(|t| msg(SendMsg::ParamsChanged(t)))
-            .font(face::MONO)
-            .size(font::CAPTION),
+        kit::input(
+            form.shape
+                .as_ref()
+                .map_or("name=value;…", |s| s.params_example.as_str()),
+            &form.params,
+        )
+        .on_input(|t| msg(SendMsg::ParamsChanged(t)))
+        .font(face::MONO)
+        .size(font::CAPTION),
         Some(params_help),
     ));
     let body_help = match &form.request {
@@ -1399,7 +1420,13 @@ pub fn call_summary(report: &OperationReport) -> String {
 
 /// A rendered payload as text: the declared type's decode, or what it is
 /// instead — opaque, undecodable, or structural with the rung it stopped at.
-fn rendering<'a>(p: &PayloadRendering, sp: Spacing) -> Element<'a, Message> {
+/// `lead` is a chip drawn before the type's, on its row: what the reply was
+/// ("value"), when the caller says it.
+fn rendering<'a>(
+    p: &PayloadRendering,
+    lead: Option<Element<'a, Message>>,
+    sp: Spacing,
+) -> Element<'a, Message> {
     let (chip, body): (Element<'a, Message>, Option<String>) = match &p.rendered {
         Rendered::Value { declared, value } => (
             kit::data_chip(declared.clone()),
@@ -1421,7 +1448,13 @@ fn rendering<'a>(p: &PayloadRendering, sp: Spacing) -> Element<'a, Message> {
             Some(text.clone()),
         ),
     };
-    let mut col = column![chip].spacing(sp.xs);
+    let chips = match lead {
+        Some(lead) => row![lead, chip]
+            .spacing(sp.sm)
+            .align_y(iced::Alignment::Center),
+        None => row![chip],
+    };
+    let mut col = column![chips].spacing(sp.xs);
     if let Some(body) = body {
         col = col.push(kit::inset(kit::caption(body).font(face::MONO)).width(Length::Fill));
     }
@@ -1479,7 +1512,7 @@ fn replies_view<'a>(r: &RepliesView, timeout_s: f64, sp: Spacing) -> Element<'a,
             ));
         }
         for reply in replier.replies.iter().chain(&replier.summaries) {
-            card = card.push(rendering(reply, sp));
+            card = card.push(rendering(reply, None, sp));
         }
         col = col.push(kit::card(card));
     }
@@ -1547,13 +1580,11 @@ fn outcome_view<'a>(
         report.timeout_s
     )));
     col = col.push(match &report.answer {
-        OperationAnswer::Value { reply } => kit::card(
-            column![
-                kit::status_chip(Tone::Positive, "value"),
-                rendering(reply, sp)
-            ]
-            .spacing(sp.xs),
-        ),
+        OperationAnswer::Value { reply } => kit::card(rendering(
+            reply,
+            Some(kit::status_chip(Tone::Positive, "value")),
+            sp,
+        )),
         OperationAnswer::Refused { envelope } => envelope_card(envelope, sp),
         OperationAnswer::Malformed { malformed } => kit::card(
             column![

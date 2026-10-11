@@ -506,8 +506,18 @@ fn origin_value() -> zenkey_fleet::report::OperationAnswer {
 /// hand picked, the declared shape and request form read from it, the
 /// address `robot1/nav`, and the value it answered.
 fn workbench_call(theme: ThemeChoice) -> Zengui {
+    use zengui::prefs::DockRole;
     use zengui::view::send::{RevisionChoice, SendMode, SendMsg};
     let mut app = workbench(theme, RightPane::Send);
+    // The tool given the window, as the traffic scene gives its tab: the
+    // answer sits under the form, and a third of the width would push it
+    // below the fold.
+    for role in [DockRole::Locator, DockRole::Inspector] {
+        send(
+            &mut app,
+            Message::Workspace(WorkspaceMsg::DockToggled(role)),
+        );
+    }
     send_msg(&mut app, SendMsg::ModeSelected(SendMode::Call));
     let nav = super::contracts()
         .set
