@@ -406,6 +406,10 @@ class Owner:
         self.events_put: list[tuple[str, bytes]] = []
         #: called with (held, offset in ns) on each of the guard's transitions
         self.on_guard: Any = None
+        #: a test's hold on state GETs (state.md §10): when set, a state
+        #: query is handed to it, and answered when it calls
+        #: :meth:`answer_state` with what :meth:`state_answer` made
+        self.state_hold: Any = None
 
     # -- keys -------------------------------------------------------------
 
@@ -897,15 +901,34 @@ class Owner:
         """S2: "every matching live key, plus a reply_del for each matching
         key it deleted within the window", each with its mutation's
         timestamp (S2, S3)."""
+        if self.state_hold is not None:
+            self.state_hold(query)
+            return
+        self.answer_state(query, self.state_answer(query), finish=False)
+
+    def state_answer(self, query: zenoh.Query) -> list[tuple[str, _Held]]:
+        """The answer to a state GET, made now: each matching live key, and
+        each key deleted within the window."""
         asked = zenoh.KeyExpr(str(query.key_expr))
         now = time.monotonic()
+        out = []
         for key, held in list(self._held.items()):
             if not asked.intersects(zenoh.KeyExpr(key)):
                 continue
+            if held.payload is not None or now - held.at <= TOMBSTONE_WINDOW_S:
+                out.append((key, held))
+        return out
+
+    def answer_state(self, query: zenoh.Query, answer: list[tuple[str, _Held]], finish: bool = True) -> None:
+        """Send an answer :meth:`state_answer` made, and, for a held query,
+        end it (its final reply)."""
+        for key, held in answer:
             if held.payload is not None:
                 query.reply(key, held.payload, encoding=held.encoding, timestamp=held.stamp)
-            elif now - held.at <= TOMBSTONE_WINDOW_S:
+            else:
                 query.reply_del(key, timestamp=held.stamp)
+        if finish:
+            query.drop()
 
     def _unavailable_handler(self, r: dict[str, Any], cause: str):
         enc = envelope.envelope_encoding(r)

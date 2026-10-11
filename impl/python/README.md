@@ -420,7 +420,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 319 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
+Result: `live interop: 326 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
 
@@ -625,9 +625,9 @@ described below.
   retention), or an occurrence beyond its rate, raises `BudgetExceeded`.
   `cardinality=` lowers the bound in the descriptor, `budget=False` makes a
   test owner that breaks the rule, and `occur()` publishes an event.
-- **`python -m zk2py.budget_scenarios`** runs `scenarios/budget.md`, 38 of
-  38. zk2py writes nothing outside `impl/python/`, so it has no `just`
-  recipe.
+- **`just py-budget`** (`python -m zk2py.budget_scenarios`) runs
+  `scenarios/budget.md`, 38 of 38. Pass `--owner <exe>` for the Rust owner
+  example; it defaults to `target/debug/examples/owner`.
   - §1 to §3 are the measurements, from Python. §1 runs routers in
     processes of their own (`zk2py.proc`), §2 uses relays that close and
     stall, and §3 uses `zenoh.ext`'s miss detection.
@@ -647,6 +647,34 @@ described below.
     owner example's event window is `complete`, its stream window too
     short, and a window whose owner left within the watched lease is
     `owner_absent`.
+
+## A late joiner's seed (core §4.2, 0.26)
+
+```bash
+python -m zk2py.state_scenarios      # a `py-state` recipe is requested
+```
+
+- **`zk2py.seed.LateJoiner`** subscribes first, then makes S4's GET
+  (`All` + `Latest`). It merges the two per key by stamp, compared as
+  `Latest` compares replies: a newer live put or delete replaces a reply, a
+  newer reply replaces a live sample, a `reply_del` is a deletion, and
+  equal stamps are one mutation, kept once. Each arrival is recorded as
+  kept, the same mutation, or dropped.
+  - A GET that ran to its timeout seeds possibly incompletely, and an owner
+    absent seeds nothing, which is silence.
+  - `order="get-first"` is state.md §10's control.
+- **The owner** lets a test hold a state GET: `state_hold` takes it,
+  `state_answer` makes the answer, and `answer_state` sends it.
+- **`python -m zk2py.state_scenarios`** runs state.md §10 against zk2py's
+  owner, plus the timeout and absent-owner cases, 10 of 10.
+- **Across the two implementations** (the live runner's `--only seed`, 7
+  checks), over the owner example's `budget.v1` items:
+  - a put between the subscription and the GET is kept once;
+  - a stale reply loses to a newer live put. The runner holds the GET open
+    with a queryable of its own, which answers nothing;
+  - a delete reaches the merge as the owner's `reply_del`;
+  - a GET that runs to its timeout, with the owner stopped, is possibly
+    incomplete.
 
 ## What it does not cover
 
@@ -745,9 +773,11 @@ impl/python/
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7: the measurements, and the owner keeping its budget
+    seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp
+    state_scenarios.py §4.2     scenarios/state.md §10 against zk2py's owner
     proc.py                     helper processes for the measurements: a router, a publisher
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order, order_b, budget; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1;
+                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 
