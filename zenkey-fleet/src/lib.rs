@@ -44,10 +44,12 @@
 //! ```
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
-//!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, and
-//!   zk2's `presence` (its `PresenceFeed` keeps `model::presence_live`
+//!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed` (a late
+//!   joiner's: subscribe, then S4's GET, merged by stamp, core §4.2 0.26),
+//!   and zk2's `presence` (its `PresenceFeed` keeps `model::presence_live`
 //!   current from a monitor, #614), `contracts`, `operation`, `consume`,
-//!   `lens`, `why`
+//!   `lens` (its `LensFeed` follows presence moves and re-reads when
+//!   nudged, #614 FL4), `why`
 //!   (the reads a silence is explained from, #702), `conform` (a
 //!   service's suite, #703) and `health` (a `health.v1` reading, #721). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
@@ -79,7 +81,9 @@
 //!   `lens` (a raw observer's key resolved rung by rung, its payload
 //!   checked, its stamp attributed), `presence_live` (each address up, down
 //!   or unobservable, from a seed and the liveliness events after it, with
-//!   every move a value, #614), `timeline`, `snapshot` and
+//!   every move a value, #614), `skeleton` (the declared keyspace a tree
+//!   starts from, merged with what was observed, #614 FL4), `identity`
+//!   (each key's resolution, kept and bounded), `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
 //!   schema reaches fall to, `stats`, `tree` and `diff`, plus the two
@@ -276,6 +280,15 @@ pub use model::lens::{
     Checked, Lens, Resolution, Resolved, check_payload, conformance, declared_qos, observed_qos,
     qos_mismatch,
 };
+// A tree's model (#614, FL4): the declared keyspace from the lens, merged
+// with the observed snapshot and the watch set; and each key's identity,
+// resolved once. `merge` keeps a name of its own at the root, as `diff`
+// does: alone it would read as the crate's.
+pub use model::identity::IdentityCache;
+pub use model::skeleton::{
+    DeclBasis, DeclRef, Evidence, MergedNode, NodeStats, NodeStatus, Skeleton, SkeletonChunk,
+    SkeletonCoverage, SkeletonNode, merge as merge_skeleton,
+};
 // zk2's acts and reads through a contract (#612, FJ5): planned and refused
 // without a session (`model::target`), then made through the runtime's
 // `Client`, `Fleet` and `Consumer` (`bus::operation`, `bus::consume`).
@@ -323,7 +336,7 @@ pub use report::{
     BenchReport, ConformReport, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport,
     EntityKind, ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HealthReport,
     HelloView, Judgement, LatencyReport, LatencySummary, MeshLink, RecordReport, ReplayReport,
-    RouterInfo, SampleRow, SeedCoverage, ServeSummary, ServedCall, Snapshot, SnapshotDiff,
+    RouterInfo, SampleRow, SeedCoverage, SeedLeg, ServeSummary, ServedCall, Snapshot, SnapshotDiff,
     SnapshotReport, SnapshotRow, StorageInfo, TimelineReport, TopologyEdge, TopologyNode,
     TopologyReport, WhyReport, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
@@ -396,6 +409,14 @@ const _: () = {
             std::time::Duration::ZERO,
         ));
         is_send(&feed.next());
+    }
+
+    /// A lens feed following presence (#614, FL4) holds its read's lock, a
+    /// session and the store across its descriptor GETs and retrievals.
+    #[allow(dead_code)]
+    fn lens_feed_futures_are_send(feed: &crate::LensFeed, moved: &[crate::PresenceTransition]) {
+        fn is_send<T: Send>(_: &T) {}
+        is_send(&feed.on_presence(moved));
     }
 
     /// The zk2 futures (#612, FJ3): a presence read holds a session and a

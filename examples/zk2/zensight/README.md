@@ -201,15 +201,15 @@ interfaces from presence and contracts, then subscribes per interface.
 | GUI derived plan `v1/*/telemetry/<producer>/<path>` (`view/plan.rs:86-206`) | `zk2/*/*/<iface>/stream/<template with *>`. The interface chunk also fixes v1's miss of `netring-2`: the plan spells the producer's base name. |
 | `v1/*/state/**` (GUI `subscription.rs:146`) | `zk2/*/*/*/state/**`, exact, but it now also carries the fleet catalog and desired populations (G7) |
 | `v1/*/events/**` (GUI `subscription.rs:160`, OTel `subscriber.rs:180`, historian `timeline.rs:53`, storage `configs/router-events-storage.json5:95`) | **No exact selector** (G6). Per interface: `zk2/*/*/zs.snmp.v1/stream/traps/*` and `zk2/*/*/zs.snmp_poller.v1/stream/strays/**`. |
-| `v1/*/state/*/alert/*` (GUI `subscription.rs:359`, Prometheus `subscriber.rs:186`, OTel `subscriber.rs:158`, historian `timeline.rs:123`, correlator `subscriber.rs:84`, zenwatch `rules.rs:244`) | `zk2/*/*/alarms.v1/state/alarms/*`, exact, one major per subscription |
-| `v1/*/state/*/alive` liveliness (GUI `subscription.rs:281`, Prometheus `:235`, OTel `:204`, correlator `:122`, zenwatch `engine.rs:610`, `rules.rs:245`) | every instance: `zk2/*/*/@zk/instance/*`. "Is the owner of these alarms present" (S6): `zk2/*/*/@zk/alive/alarms.v1/**`. |
+| `v1/*/state/*/alert/*` (GUI `subscription.rs:359`, Prometheus `subscriber.rs:186`, OTel `subscriber.rs:158`, historian `timeline.rs:123`, correlator `subscriber.rs:84`, zenwatch `rules.rs:244` on branch `v1`) | `zk2/*/*/alarms.v1/state/alarms/*`, exact, one major per subscription |
+| `v1/*/state/*/alive` liveliness (GUI `subscription.rs:281`, Prometheus `:235`, OTel `:204`, correlator `:122`, zenwatch `engine.rs:610`, `rules.rs:245` on branch `v1`) | every instance: `zk2/*/*/@zk/instance/*`. "Is the owner of these alarms present" (S6): `zk2/*/*/@zk/alive/alarms.v1/**`. |
 | `v1/*/state/*/device/*/alive` (GUI `subscription.rs:333`; hand-spelled at `zensight-common/src/keyexpr.rs:875`) | `zk2/*/*/@zk/alive/zs.snmp.v1/**`, and the same for zs.modbus.v1, zs.gnmi.v1, zs.netflow.v1, zs.bmc.v1, zs.container.v1. An instance change is the counter discontinuity. |
 | `v1/*/state/*/evidence/**` + `…/evidence/names/*` (correlator `subscriber.rs:45`, `:55`; hand-spelled `keyexpr.rs:373`) | `zk2/*/*/zs.evidence.v1/state/**` and `…/state/names/*`. The correlator's two overlapping subscriptions collapse into one. Storage `router-evidence-storage.json5` → the same selector. |
 | `v1/*/state/*/health` (rerun; `keyexpr.rs:336`) | `zk2/*/*/health.v1/state/**` |
 | `v1/*/@rpc/*/introspect` + `v1/@catalog/@rpc/introspect` (GUI `app.rs:8446`, `:8451`) | liveliness `zk2/*/*/@zk/instance/*`, then a descriptor GET (on `zk2/*/*/@zk/instance/*`), then contracts by sha256. The catalog needs no special case, because `fleet` is a plain system. |
 | `v1/*/@rpc/<p>/describe` (GUI `app.rs:6602`) | deleted: the schemas are in the bundles |
 | `v1/*/@rpc/*/views` (GUI `app.rs:8455`) | GET `zk2/*/*/views.v1/state/views` |
-| `v1/@catalog/state/{entity,edge,incident,ack,silence,alias,assertion}/*` (GUI `subscription.rs:220-475`, Prometheus `:203-217`, OTel `:129`, desired `main.rs:361`, `fleet.rs:38`; zenwatch `discipline/inhibit.rs:31-33`) | `zk2/fleet/catalog/zs.catalog.v1/state/{entities,edges,incidents,silences,aliases,assertions}/*` and `…/state/acks/*/*/*` |
+| `v1/@catalog/state/{entity,edge,incident,ack,silence,alias,assertion}/*` (GUI `subscription.rs:220-475`, Prometheus `:203-217`, OTel `:129`, desired `main.rs:361`, `fleet.rs:38`; zenwatch `discipline/inhibit.rs:31-33` on branch `v1`) | `zk2/fleet/catalog/zs.catalog.v1/state/{entities,edges,incidents,silences,aliases,assertions}/*` and `…/state/acks/*/*/*` |
 | `v1/@catalog/state/alive`, `v1/@desired/state/alive` (GUI `subscription.rs:311`) | `zk2/fleet/catalog/@zk/alive/zs.catalog.v1/**`, `zk2/fleet/desired/@zk/alive/zs.desired.v1/**` |
 | `v1/@catalog/state/claim/*`, `v1/@desired/state/claim/*` (`service_guard.rs:228`; hand-built `keyexpr.rs:724-745`) | `zk2/fleet/catalog/@zk/instance/*`, `zk2/fleet/desired/@zk/instance/*`: the instance tokens are the claim set |
 | `v1/*/@rpc/historian/range`, `…/timeline` (GUI `app.rs:8047`, `:1972`) | `zk2/*/*/zs.historian.v1/@op/range`, `…/timeline` (target All, consolidation None) |
@@ -219,7 +219,7 @@ interfaces from presence and contracts, then subscribes per interface.
 | `v1/@catalog/state/pdns/**` storage (`router-pdns-influxdb-storage.json5:76`) | `zk2/fleet/catalog/zs.catalog.v1/state/pdns/**`; under r4 the history capture is an archive, recording, never answering on the catalog's keys |
 | web `v1/*/state/parallax/alive` (`web/src/origins.ts:28`, `keys.ts:68-74`) | `zk2/*/*/@zk/alive/zs.parallax.v1/**` |
 | web `v1/<origin>/state/parallax/stream/*` (`catalogue.ts:45`) | `zk2/<host>/*/zs.parallax.v1/state/streams/*` |
-| zenwatch's own state (`zenwatch/src/publish.rs:557-565`: health, `firing/{rule}`, describe) | `health.v1` + a zenwatch interface of its own; describe is deleted |
+| zenwatch's own state (`zenwatch/src/publish.rs:557-565` on branch `v1`: health, `firing/{rule}`, describe) | `health.v1` + `zenwatch.v1`, an interface of its own (`zenwatch/contracts/zenwatch.v1.toml`, since #614's FL3); describe is deleted |
 
 ## Migration debt
 

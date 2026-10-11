@@ -18,7 +18,11 @@
 //! ([`structural`]). One read of presence and the liveliness events after
 //! it become each address's live presence — up, down or unobservable, and
 //! every instance, interface and member move as a value
-//! ([`presence_live`], #614).
+//! ([`presence_live`], #614). For a tree (#614, FL4): the deployment's
+//! declared keyspace, from the same lens, merged with what was observed and
+//! what is watched into one typed tree ([`skeleton`]), and each wire key's
+//! identity resolved once, bounded and dropped when the lens's inputs move
+//! ([`identity`]).
 //!
 //! The rest is generation-neutral: a stream of samples becomes rates and
 //! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
@@ -31,8 +35,10 @@
 //! lists become each instance's attachment ([`attach`], #705).
 //!
 //! v1's half of this layer — the described key (`facts`), the registry
-//! slice set (`registry`), the skeleton tree, the schema-aware decode seam
-//! and the exporter — left at #612's FJ9; the `v1` branch keeps it.
+//! slice set (`registry`), v1's skeleton tree, the schema-aware decode seam
+//! and the exporter — left at #612's FJ9; the `v1` branch keeps it. The
+//! skeleton and the facts cache came back for zk2 at FL4, as [`skeleton`]
+//! and [`identity`].
 //!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
@@ -57,12 +63,14 @@ pub mod compat;
 pub mod diff;
 pub mod examples;
 pub mod health;
+pub mod identity;
 pub mod jsonschema;
 pub mod lens;
 pub mod namespace;
 pub mod presence_live;
 pub mod render;
 pub mod retain;
+pub mod skeleton;
 pub mod snapshot;
 pub mod snapshot_diff;
 pub mod stats;

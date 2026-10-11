@@ -13,7 +13,9 @@
 //! - [`grammar`]: the zk2 key grammar. Data keys, instance and interface
 //!   tokens, member tokens and contract keys, as typed values over
 //!   `zenoh_keyexpr::OwnedKeyExpr`, with a parser that refuses anything
-//!   outside the grammar.
+//!   outside the grammar; and §1.3's selectors: the ambient one, the exact
+//!   kind selectors, and the verbatim chunks a selector cannot reach
+//!   ([`grammar::blind_spots`], #614 FL4).
 //! - [`template`]: resource templates, with build, match, overlap and the
 //!   most-literal-first precedence (r3.3 D1).
 //! - [`authoring`]: the TOML authoring format, draft 1, as serde types;

@@ -36,7 +36,17 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   key-tree snapshots, and live per-address presence (`model::presence_live`:
   up, down or unobservable, every token move a value; kept current from a
   `Monitor` by `bus::presence::PresenceFeed`, re-seeded after `Dropped(n)`,
-  #614 FL1). It depends on the zk2 runtime as plain `zenkey` (by
+  #614 FL1; each instance's `since`, FL4). For zengui's tree (#614, FL4):
+  `model::skeleton` (the declared keyspace from the lens, merged with the
+  observed snapshot and the watch set into typed `NodeStatus`es),
+  `model::identity::IdentityCache` (each key's resolution, bounded, dropped
+  when the lens's generation moves), the seeded watch as core §4.2's late
+  joiner (0.26: subscribe, then S4's `All`+`Latest` GET through
+  `bus::query::state_get`, merged by the owner's stamp, plus the `@adv`
+  history leg; no storage is a seed), and a `LensFeed` that follows
+  presence moves (`on_presence`, `generation`), so an appearing instance,
+  its tokenless interfaces included, resolves without the 5 s re-read. It
+  depends on the zk2 runtime as plain `zenkey` (by
   path) and has no feature axes: v1's registry slice sets, introspection,
   roster, schema-decode seam and codec features, v1 judges and the
   profile-backed features left at FJ9 (#612). **Five layers**, and `lib.rs`'s doc-map is the normative statement of
@@ -341,8 +351,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   pin `zenkey`/`zenkey-build` `=0.11.1` from crates.io until each one is
   ported. zk2 reuses the crate names at 0.20.0. `zenkey-model` is new.
 - **`zenkey-model/`** (MIT, unpublished until #606) is zk2's session-free
-  half (#608): keys, templates, the authoring format (draft 1) and its
-  lints with stable codes (`diag::CODES`), the canonical form, fingerprints,
+  half (#608): keys, templates, §1.3's kind selectors and what a selector
+  cannot see (`grammar::blind_spots`, #614 FL4), the authoring format
+  (draft 1) and its lints with stable codes (`diag::CODES`), the canonical
+  form, fingerprints,
   bundles and `.history`, and the compatibility classifier (`compat`,
   #618). It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
@@ -451,7 +463,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.25 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.26 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

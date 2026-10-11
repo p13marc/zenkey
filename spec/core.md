@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.25** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.26** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -20,8 +20,10 @@ vocabulary a profile publishes, `freshness.v1`'s, with a re-put, in
 needed: a clock ahead reported by a stream, and the first standard
 contract a profile publishes, in 0.24 the population budget: what a
 member and a live member are, what `rate` bounds, and what a tool
-concludes, and in 0.25 a window's "lost no delivery" established from
-what its reader can see, with the owner keeping its budget).
+concludes, in 0.25 a window's "lost no delivery" established from
+what its reader can see, with the owner keeping its budget, and in 0.26
+a late joiner's seed: subscribe, then S4's GET, merged by the owner's
+stamp).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -875,6 +877,42 @@ other: it carries a timestamp the owner set (S1), minted above every stamp
 it issued (§4.3), and the owner's GET answers carry that stamp from then
 on (S2). A reply represents the member's latest put, not its latest change.
 `[Sc: profiles/freshness/scenarios.md §1]`
+
+**A late joiner's seed** (0.26). A consumer or a tool that wants an
+owner's current state and every change after it, a **late joiner**, seeds
+from S4's GET and follows a subscription.
+- **The order.** A late joiner MUST declare its subscription first, then
+  make S4's GET. In the other order, a mutation the owner makes after it
+  answers the GET and before the subscription reaches it is lost, and a
+  lost delete leaves a deleted key standing. `[Sc: state.md §10]`
+- **The merge.** A late joiner MUST merge the GET's replies and the
+  subscription's samples per key by the owner's stamp (S1, S2), whichever
+  path brought each one, and keep the newer. `[Sc: state.md §10]`
+  - A live put or delete newer than a reply replaces it, and a reply newer
+    than a live sample replaces that.
+  - A `reply_del` is a deletion with its stamp (S3), merged as a live
+    delete is.
+  - Two samples with equal stamps are the same mutation, kept once.
+  - Stamps compare as `Latest` compares replies (§4.1), and within one
+    timestamp id that is by time (§4.3). Two ids for one key within one
+    seed mean the owner started a new epoch inside the seed's window: a
+    value of the old epoch that arrives after one of the new is §4.3's
+    residual risk.
+- **A selector over several owners.** A GET on a selector that matches
+  several owners' keys is addressed to the owner's keys, as S4 requires,
+  when each key it matches has one owner (P3, §6): `Latest` then
+  consolidates each key over that owner's answers. The keys it matches
+  that no zk2 owner has, foreign keys (§1.7), are outside S4, and a storage
+  may answer them.
+- **What a seed cannot know.**
+  - A GET that ran to its timeout seeds possibly incompletely. §8.1's
+    reading of a liveliness GET applies to a state GET: in zenoh 1.10.1, a
+    GET that reached its timeout ends with an error reply (Appendix B).
+  - An owner absent at the GET seeds nothing for its keys. That is O5's
+    silence, never "no state", and the subscription shows its keys as
+    they change from then on.
+  - A seed is current state, the owner's answer (S6). Last-known state is
+    still read from an archive, explicitly (S5).
 
 A **tool** checks S4 against the routers' storage admin space. A consumer
 cannot tell under `Latest` which replier answered.
@@ -2927,7 +2965,7 @@ Appendix B. These are the ones the rules above cite:
 | `conformance/budget/` | §2.7 (0.24; `lossless.json` 0.25) |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4 |
+| `scenarios/state.md` | §4; §10 a late joiner's seed (0.26) |
 | `scenarios/operations.md` | §5, §6 |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2 |
 | `scenarios/bindings.md` | §3.2 |

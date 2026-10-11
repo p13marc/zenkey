@@ -144,6 +144,13 @@ pub struct LiveInstance {
     /// held is a shape §8.2's order passes through briefly (and a doctor's
     /// to judge if it lasts): shown as found.
     pub instance_token: bool,
+    /// Since when its instance token is held, as this projection learned
+    /// it (#614, FL4): the time of the fold that heard it declared, or of
+    /// the seed that found it held — a seed only says it was declared at or
+    /// before that time, so an "up since" drawn from a seed is a lower
+    /// bound on the uptime it shows. Kept across later seeds that still find
+    /// it; `None` while the instance token is not held.
+    pub since: Option<SystemTime>,
     /// Its interface tokens: the fingerprint prefix of each. One per
     /// interface on a conforming instance; a set, so a second is shown
     /// rather than overwritten.
@@ -410,12 +417,12 @@ impl LivePresence {
         self.ignored.not_zk2 += seed.unparsed.len() as u64;
         for key in &seed.tokens {
             if let Some((addr, token)) = self.presence_token(key.clone()) {
-                apply(entry(&mut next, &addr, at), &token, true);
+                apply(entry(&mut next, &addr, at), &token, true, at);
             }
         }
         for (wire, held) in then {
             if let Some((addr, token)) = self.classify_wire(wire) {
-                apply(entry(&mut next, &addr, at), &token, held);
+                apply(entry(&mut next, &addr, at), &token, held, at);
             }
         }
         next.retain(|_, a| a.holds_any());
@@ -434,10 +441,20 @@ impl LivePresence {
                 .entry(addr.clone())
                 .or_insert_with(|| LiveAddress::new(unheard, at));
             let new = next.remove(&addr);
-            let (instances, members) = match new {
+            let (mut instances, members) = match new {
                 Some(n) => (n.instances, n.members),
                 None => (BTreeMap::new(), BTreeMap::new()),
             };
+            // An instance token the projection already held keeps the time
+            // it was first learned; one the seed found is held since the
+            // seed, at the latest.
+            for (id, i) in &mut instances {
+                i.since = match record.instances.get(id) {
+                    _ if !i.instance_token => None,
+                    Some(was) if was.instance_token => was.since.or(i.since),
+                    _ => i.since.or(Some(at)),
+                };
+            }
             for change in diff(record, &instances, &members) {
                 out.push(PresenceTransition {
                     at,
@@ -467,7 +484,7 @@ impl LivePresence {
             .addresses
             .entry(addr.clone())
             .or_insert_with(|| LiveAddress::new(unheard, at));
-        let mut out: Vec<PresenceTransition> = apply(record, &token, held)
+        let mut out: Vec<PresenceTransition> = apply(record, &token, held, at)
             .into_iter()
             .map(|change| PresenceTransition {
                 at,
@@ -638,9 +655,14 @@ fn entry<'m>(
         .or_insert_with(|| LiveAddress::new(AddressStatus::Unobservable, at))
 }
 
-/// Fold one token into an address's holdings, returning what moved (the
-/// status aside: that is the caller's, from the basis).
-fn apply(record: &mut LiveAddress, token: &Token, held: bool) -> Vec<PresenceChange> {
+/// Fold one token into an address's holdings at `at`, returning what moved
+/// (the status aside: that is the caller's, from the basis).
+fn apply(
+    record: &mut LiveAddress,
+    token: &Token,
+    held: bool,
+    at: SystemTime,
+) -> Vec<PresenceChange> {
     let mut out = Vec::new();
     match token {
         Token::Instance(instance) => {
@@ -648,6 +670,7 @@ fn apply(record: &mut LiveAddress, token: &Token, held: bool) -> Vec<PresenceCha
                 let i = record.instances.entry(instance.clone()).or_default();
                 if !i.instance_token {
                     i.instance_token = true;
+                    i.since = Some(at);
                     out.push(PresenceChange::InstanceAppeared {
                         instance: instance.clone(),
                     });
@@ -655,6 +678,7 @@ fn apply(record: &mut LiveAddress, token: &Token, held: bool) -> Vec<PresenceCha
             } else if let Some(i) = record.instances.get_mut(instance) {
                 if i.instance_token {
                     i.instance_token = false;
+                    i.since = None;
                     out.push(PresenceChange::InstanceGone {
                         instance: instance.clone(),
                     });
@@ -860,6 +884,51 @@ mod tests {
     }
 
     use AddressStatus::{Down, Unobservable, Up};
+
+    /// Each instance carries since when its instance token is held: from the
+    /// seed that found it, or the event that declared it; kept by a later
+    /// seed that still finds it, and cleared when the token goes while the
+    /// instance's interface tokens stay (#614, FL4).
+    #[test]
+    fn an_instance_carries_since_its_token_is_held() {
+        let mut p = LivePresence::new(Scope::all());
+        p.seed(&seed(&[instance("h1/tc", 1)], true), at(1));
+        let since = |p: &LivePresence, i: u64| {
+            p.address(&addr("h1/tc"))
+                .and_then(|a| a.instances.get(&inst(i)))
+                .map(|i| i.since)
+        };
+        assert_eq!(since(&p, 1), Some(Some(at(1))), "the seed's time");
+
+        p.token(&instance("h1/tc", 2), true, at(5));
+        p.token(&alive("h1/tc", "tc.netif.v1", 2, 7), true, at(5));
+        assert_eq!(since(&p, 2), Some(Some(at(5))), "the event's time");
+
+        let both = [
+            instance("h1/tc", 1),
+            instance("h1/tc", 2),
+            alive("h1/tc", "tc.netif.v1", 2, 7),
+        ];
+        p.seed(&seed(&both, true), at(9));
+        assert_eq!(since(&p, 1), Some(Some(at(1))), "kept across a seed");
+        assert_eq!(since(&p, 2), Some(Some(at(5))), "kept across a seed");
+
+        // The instance token goes, its interface token stays: the instance
+        // is still a record, held since never.
+        p.token(&instance("h1/tc", 2), false, at(12));
+        assert_eq!(since(&p, 2), Some(None), "cleared when the token goes");
+        // Declared again: held since then.
+        p.token(&instance("h1/tc", 2), true, at(14));
+        assert_eq!(since(&p, 2), Some(Some(at(14))));
+        // A seed that finds an instance the projection did not hold dates
+        // it to the seed.
+        p.seed(
+            &seed(&[instance("h1/tc", 1), instance("h1/tc", 3)], true),
+            at(20),
+        );
+        assert_eq!(since(&p, 3), Some(Some(at(20))));
+        assert_eq!(since(&p, 2), None, "gone with the complete seed");
+    }
 
     /// The seed's three poles: present in a complete read is up, absent from
     /// a complete read is down, absent from a read possibly incomplete is

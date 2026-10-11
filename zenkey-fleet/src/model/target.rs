@@ -382,8 +382,13 @@ mod tests {
     use super::*;
     use crate::report::ContractSource;
 
+    /// One directory per call: the tests run in parallel, and a shared one
+    /// let one test rewrite `m.proto` while another read it.
     fn revision() -> Revision {
-        let dir = std::env::temp_dir().join(format!("zenkey-fleet-target-{}", std::process::id()));
+        static CALL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = CALL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("zenkey-fleet-target-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         std::fs::write(
             dir.join("m.proto"),

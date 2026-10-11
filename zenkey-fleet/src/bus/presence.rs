@@ -166,6 +166,18 @@ pub async fn describe_where(
         .into_iter()
         .filter(|(a, i)| keep(a, i))
         .collect();
+    observed.descriptors = Some(describe_each(session, wanted, timeout).await);
+}
+
+/// The descriptor of each instance in `wanted` (§3.3), at most
+/// [`DESCRIBE_CONCURRENCY`] GETs in flight, each bounded by `timeout`; every
+/// answer recorded, silence and a failed GET included. What [`describe`]
+/// and a [`crate::LensFeed`] following presence both run.
+pub(crate) async fn describe_each(
+    session: &Session,
+    wanted: Vec<(Addr, zenkey_model::grammar::InstanceId)>,
+    timeout: Duration,
+) -> BTreeMap<(Addr, zenkey_model::grammar::InstanceId), DescriptorRead> {
     let mut pending = wanted.into_iter();
     let mut tasks = tokio::task::JoinSet::new();
     let mut found = BTreeMap::new();
@@ -192,7 +204,7 @@ pub async fn describe_where(
             None => break,
         }
     }
-    observed.descriptors = Some(found);
+    found
 }
 
 /// [`read_tokens`], then [`describe`]: what every zk2 view starts from.

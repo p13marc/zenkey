@@ -1,27 +1,41 @@
-//! Correct state seeding — RFC 04 §3.2 as an engine helper (issue #42; the
-//! repo's old #20).
+//! A late joiner's seed — core §4.2 (0.26) as an engine helper (#614, FL4;
+//! issue #42 before it, which carried v1's RFC 04 §3.2).
 //!
-//! The discipline is normative and subtle, and every state-showing pane
-//! would otherwise reimplement (or skip) it:
+//! A pane that shows state wants what is there now and every change after
+//! it. The rule is normative and subtle, and every state-showing pane would
+//! otherwise reimplement (or skip) it:
 //!
-//! - the subscriber is declared **before** any seed GET — "GET-then-subscribe
-//!   is forbidden: a transition published in the gap is silently dropped, and
-//!   a dropped delete is a resurrected key";
-//! - seed replies and live samples **merge per key by HLC timestamp** (LWW,
-//!   RFC 04 §1.2) — a stale seed must never overwrite a newer live sample;
-//! - the two seed paths differ in **coverage** and both are needed: the
-//!   history GET (`<selector>/@adv/**`) reaches *live* publishers' caches
-//!   (dies with the publisher), the plain GET on the selector is answered by
-//!   *router storages* — the crashed-producer case a UI must include. "What
-//!   no consumer may do: assume a plain GET reaches publisher caches, or
-//!   that a history query reaches storages."
+//! - **the subscription is declared first**, and the seed GETs after it: in
+//!   the other order a mutation the owner makes after it answers and before
+//!   the subscription reaches it is lost, and a lost delete leaves a
+//!   deleted key standing;
+//! - **the state leg is S4's GET** on the watched selector, target `All`
+//!   and consolidation `Latest` set explicitly
+//!   (`bus::query::state_get`, the crate's one state GET): addressed to the owners' keys,
+//!   since each key it matches has one owner (P3), and answered for a
+//!   foreign key by whatever holds it. A storage on an owner's state is a
+//!   deployment fault (S4), never this seed's source;
+//! - **the history leg** asks the `@adv` caches of the advanced publishers
+//!   present (`<selector>/@adv/**`, spec §2.5), for resources that declare
+//!   `history` — streams among them, which no state GET reaches. Under a
+//!   verbatim chunk a late *publisher* is never found (§2.5), and a
+//!   publisher that is gone took its cache with it;
+//! - **replies and live samples merge per key by the owner's stamp**
+//!   (one merge for both phases): the newer wins whichever path brought it, a `reply_del` is
+//!   a deletion with its stamp, and one mutation both paths carried is kept
+//!   once.
 //!
-//! Both seed paths are queries **this module issues itself** rather than
+//! Both legs are queries **this module issues itself**, rather than
 //! zenoh-ext's `history()` replay: the boundary ([`SeedItem::SeedComplete`])
-//! must not fire until every seed path has resolved, and only a query we own
-//! has an awaitable end. Coverage is **reported, never assumed**:
-//! [`SeedCoverage`] says which paths ran and what each yielded, and its
-//! zeros are observations, not verdicts.
+//! must not fire until every leg has resolved, and only a query we own has
+//! an awaitable end. Coverage is **reported, never assumed**:
+//! [`SeedCoverage`] says which legs ran, what each yielded and whether it
+//! ran to its final reply, and its zeros are observations, not verdicts.
+//! An owner absent at the GET seeds nothing for its keys (O5's silence,
+//! never "no state"); its keys appear as they change.
+//!
+//! No events leg: an occurrence is replayed from union storages, bounded by
+//! its retention (§2.6), and a seed of state does not reach it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -31,21 +45,25 @@ use crate::Result;
 use zenoh::Session;
 
 use crate::bus::monitor::SampleView;
-use crate::report::SeedCoverage;
+use crate::report::{Asked, SeedCoverage, SeedLeg};
 
-/// Which seed paths to run. Default: both — per-path opt-out exists because
-/// a deployment may *know* it has no storages (or no advanced publishers),
-/// not because skipping is free.
+/// Which seed legs to run. Default: both — a per-leg opt-out exists because
+/// a pane may *know* its selector holds no state (or no advanced
+/// publishers), not because skipping is free.
 #[derive(Debug, Clone, Copy)]
 pub struct SeedPolicy {
-    /// Query live publishers' `@adv` caches (`<selector>/@adv/**`) — the
-    /// same rung `fetch_value` uses; reaches only publishers that are alive.
+    /// Ask the `@adv` caches of the advanced publishers present
+    /// (`<selector>/@adv/**`, spec §2.5): what a resource declaring
+    /// `history` keeps, streams included. Reaches only publishers that are
+    /// alive.
     pub history: bool,
-    /// GET the selector itself (answered by router storages — the only path
-    /// that still has state from *crashed* producers).
-    pub storage: bool,
+    /// S4's GET on the selector (core §4.2): every owner's current state
+    /// under it, its deletions within the window as `reply_del`s, and
+    /// whatever answers a foreign key.
+    pub state: bool,
     /// Bound on each seed GET (they run concurrently, so this bounds the
-    /// whole seed phase too).
+    /// whole seed phase too). A GET that reaches it seeds possibly
+    /// incompletely, and its leg says so ([`SeedLeg::complete`]).
     pub timeout: Duration,
 }
 
@@ -53,7 +71,7 @@ impl Default for SeedPolicy {
     fn default() -> Self {
         SeedPolicy {
             history: true,
-            storage: true,
+            state: true,
             timeout: Duration::from_secs(3),
         }
     }
@@ -203,10 +221,24 @@ impl futures_core::Stream for SeededSubscriber {
     }
 }
 
-/// The shared LWW merge: one entry per key, latest HLC wins; stamped beats
-/// unstamped; unstamped-vs-unstamped passes through (nothing to compare — a
-/// deployment without timestamping has opted out of LWW, RFC 04 §4, and
-/// suppressing would be guessing).
+/// The late joiner's merge (core §4.2, 0.26): one entry per key, and a
+/// sample is admitted only when its stamp is newer than the one held,
+/// whichever path — reply or live — brought either.
+///
+/// - Stamps compare as zenoh's `Latest` compares replies (§4.1): by time,
+///   which within one timestamp id is the owner's order (§4.3). Two ids for
+///   one key inside one seed are §4.3's residual risk, not resolved here.
+/// - Equal stamps are one mutation: the second copy is suppressed.
+/// - A deletion (a live delete, or a `reply_del` with the deletion's stamp,
+///   S3) is a sample like any other, and merges the same way: never
+///   dropped, never mistaken for an absence.
+/// - Stamped beats unstamped; unstamped against unstamped passes through.
+///   An owner stamps every mutation (S1), so an unstamped sample is no
+///   conforming owner's: a foreign key's, on a deployment without
+///   timestamping that has opted out of last-writer-wins, where
+///   suppressing would be guessing.
+///
+/// Every suppression is counted ([`SeedCoverage::superseded`]).
 ///
 /// `pub(crate)`: [`crate::Monitor::watch_seeded`] runs the same merge over
 /// its seed phase (issue #92) — one discipline, not two.
@@ -251,49 +283,110 @@ pub(crate) fn view_of(sample: &zenoh::sample::Sample) -> SampleView {
     SampleView::of(sample)
 }
 
-/// Run one seed GET; every reply passes the merge; admitted samples go to
-/// `deliver`; returns the reply count.
-pub(crate) async fn seed_get(
-    session: &Session,
-    selector: &str,
-    timeout: Duration,
-    merge: &Merge,
-    mut deliver: impl FnMut(SampleView),
-) -> usize {
-    let mut n = 0usize;
-
-    // `accept_any`: cache replies arrive on the sample's own key, outside an
-    // `@adv`-suffixed selector — without it they are dropped.
-    let opts = crate::bus::query::GetOpts::new(timeout).accept_any();
-    if let Ok(replies) = crate::bus::query::disciplined_get(session, selector, &opts).await {
-        while let Ok(reply) = replies.recv_async().await {
-            let Ok(sample) = reply.result() else { continue };
-            n += 1;
-            let view = view_of(sample);
-            if merge.admit(&view) {
-                deliver(view);
-            }
-        }
-    }
-    n
+/// Which GET a leg makes.
+#[derive(Debug, Clone, Copy)]
+enum Leg {
+    History,
+    State,
 }
 
-/// The history-path selector for a data selector (the `fetch_value` cache
-/// rung, applied to a whole subtree).
-pub(crate) fn cache_selector(selector: &str) -> String {
+/// Run one leg's GET: every reply passes the merge, and admitted samples go
+/// to `deliver`. A GET that could not be put on the bus seeded nothing and
+/// is not complete; an error reply (a timeout's included) is counted out of
+/// the replies and makes the leg incomplete.
+async fn run_leg(
+    session: &Session,
+    selector: &str,
+    leg: Leg,
+    timeout: Duration,
+    merge: &Merge,
+    deliver: &(impl Fn(SampleView) + Sync),
+) -> SeedLeg {
+    let opts = crate::bus::query::GetOpts::new(timeout);
+    let replies = match leg {
+        // `accept_any`: cache replies arrive on the sample's own key, outside
+        // an `@adv`-suffixed selector — without it they are dropped.
+        Leg::History => {
+            crate::bus::query::disciplined_get(
+                session,
+                &cache_selector(selector),
+                &opts.accept_any(),
+            )
+            .await
+        }
+        Leg::State => crate::bus::query::state_get(session, selector, &opts).await,
+    };
+    let Ok(replies) = replies else {
+        return SeedLeg {
+            replies: 0,
+            complete: false,
+        };
+    };
+    let mut out = SeedLeg {
+        replies: 0,
+        complete: true,
+    };
+    while let Ok(reply) = replies.recv_async().await {
+        let Ok(sample) = reply.result() else {
+            out.complete = false;
+            continue;
+        };
+        out.replies += 1;
+        let view = view_of(sample);
+        if merge.admit(&view) {
+            deliver(view);
+        }
+    }
+    out
+}
+
+/// The legs `policy` asks for, concurrently, through one merge; the
+/// coverage once every one of them has resolved.
+pub(crate) async fn run_legs(
+    session: &Session,
+    selector: &str,
+    policy: SeedPolicy,
+    merge: &Merge,
+    deliver: impl Fn(SampleView) + Sync,
+) -> SeedCoverage {
+    let leg = |on: bool, leg: Leg| {
+        let deliver = &deliver;
+        async move {
+            if on {
+                Asked::Asked(run_leg(session, selector, leg, policy.timeout, merge, deliver).await)
+            } else {
+                Asked::NotAsked
+            }
+        }
+    };
+    let (history, state) = tokio::join!(
+        leg(policy.history, Leg::History),
+        leg(policy.state, Leg::State)
+    );
+    SeedCoverage {
+        history,
+        state,
+        superseded: merge.superseded(),
+    }
+}
+
+/// The history leg's selector for a data selector: every advanced
+/// publisher's cache queryable under it (spec §2.5).
+fn cache_selector(selector: &str) -> String {
     format!("{selector}/@adv/**")
 }
 
-/// Subscribe with a correct seed phase (RFC 04 §3.2).
+/// Subscribe as a late joiner (core §4.2, 0.26).
 ///
 /// Order of operations is the contract: the subscriber is declared first;
-/// the seed GETs (history `@adv` + storage) run after, concurrently; every
-/// delivery — cached, stored, or live — passes one per-key LWW merge, so a
-/// transition published in the seed window lands exactly once and a stale
-/// seed cannot resurrect or regress a key. Deletes ride through as tombstone
-/// samples ([`zenoh::sample::SampleKind::Delete`]) subject to the same merge — never
-/// dropped. [`SeedItem::SeedComplete`] is sent only once **both** paths have
-/// resolved.
+/// the seed legs (S4's state GET, and the `@adv` history) run after,
+/// concurrently; every delivery — a reply or a live sample — passes one
+/// per-key merge by the owner's stamp, so a mutation published in the seed
+/// window lands exactly once and a stale reply cannot resurrect or regress
+/// a key. Deletions ride through as tombstone samples
+/// ([`zenoh::sample::SampleKind::Delete`]) — a live delete and a
+/// `reply_del` alike — subject to the same merge, never dropped.
+/// [`SeedItem::SeedComplete`] is sent only once **every** leg has resolved.
 pub async fn seed_subscribe(
     session: &Session,
     selector: &str,
@@ -320,45 +413,18 @@ pub async fn seed_subscribe(
     )
     .await?;
 
-    // 2) The seed GETs, AFTER — and the completion boundary once both
-    //    (or their opt-outs) resolve.
+    // 2) The seed legs, AFTER — and the completion boundary once every one
+    //    (or its opt-out) resolves.
     let task = {
         let session = session.clone();
         let selector = selector.to_string();
         let merge = Arc::clone(&merge);
         tokio::spawn(async move {
-            let history = async {
-                if policy.history {
-                    let sel = cache_selector(&selector);
-                    Some(
-                        seed_get(&session, &sel, policy.timeout, &merge, |view| {
-                            tx.send_sample(view);
-                        })
-                        .await,
-                    )
-                } else {
-                    None
-                }
-            };
-            let storage = async {
-                if policy.storage {
-                    Some(
-                        seed_get(&session, &selector, policy.timeout, &merge, |view| {
-                            tx.send_sample(view);
-                        })
-                        .await,
-                    )
-                } else {
-                    None
-                }
-            };
-            let (history_replies, storage_replies) = tokio::join!(history, storage);
-            tx.send_boundary(SeedCoverage {
-                history_replies,
-                storage_replies,
-                superseded: merge.superseded(),
+            let coverage = run_legs(&session, &selector, policy, &merge, |view| {
+                tx.send_sample(view);
             })
             .await;
+            tx.send_boundary(coverage).await;
         })
     };
 
@@ -427,8 +493,14 @@ mod tests {
         }
         let boundary = tokio::spawn(async move {
             tx.send_boundary(SeedCoverage {
-                history_replies: Some(0),
-                storage_replies: Some(0),
+                history: Asked::Asked(SeedLeg {
+                    replies: 0,
+                    complete: true,
+                }),
+                state: Asked::Asked(SeedLeg {
+                    replies: 0,
+                    complete: true,
+                }),
                 superseded: 0,
             })
             .await;

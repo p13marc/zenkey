@@ -47,6 +47,7 @@ pub struct Lens<'a> {
     contracts: &'a (dyn Contracts + Sync),
     offline: Option<&'a ContractSet>,
     held: usize,
+    generation: u64,
 }
 
 /// A key resolved down to its resource (rungs 1–6).
@@ -106,6 +107,7 @@ impl<'a> Lens<'a> {
             contracts,
             offline: None,
             held: 0,
+            generation: 0,
         }
     }
 
@@ -124,9 +126,36 @@ impl<'a> Lens<'a> {
         self
     }
 
+    /// The generation of what the lens resolves with (#614, FL4): a number
+    /// that moves whenever its presence read or the revisions in hand do,
+    /// such as [`crate::LensFeed::generation`]. An
+    /// [`IdentityCache`](crate::model::identity::IdentityCache) drops what it
+    /// resolved under another generation, so a key that resolved short of a
+    /// provider resolves again once one appears. Zero unless set: a lens
+    /// over inputs that never move.
+    pub fn at_generation(mut self, generation: u64) -> Lens<'a> {
+        self.generation = generation;
+        self
+    }
+
+    /// The generation set by [`Lens::at_generation`].
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// The namespace this lens strips; empty for the bus root.
-    pub fn namespace(&self) -> &str {
+    pub fn namespace(&self) -> &'a str {
         self.namespace
+    }
+
+    /// Where the lens finds a revision by fingerprint.
+    pub(crate) fn contracts(&self) -> &'a (dyn Contracts + Sync) {
+        self.contracts
+    }
+
+    /// The revisions known offline, when a set was given.
+    pub(crate) fn offline_set(&self) -> Option<&'a ContractSet> {
+        self.offline
     }
 
     /// The presence read behind the lens, when one was made.

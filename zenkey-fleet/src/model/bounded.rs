@@ -159,4 +159,10 @@ impl<K: std::hash::Hash + Eq + Clone, V> BoundedLru<K, V> {
     {
         self.entries.remove(key)
     }
+
+    /// Drop every entry; the bound stays. The holder counts what it dropped,
+    /// as it does for [`admit`](Self::admit).
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+    }
 }
