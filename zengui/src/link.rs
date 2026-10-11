@@ -53,15 +53,21 @@ impl std::hash::Hash for LinkKey {
 /// Note `run_with`'s builder is a plain `fn` pointer, not a closure — nothing
 /// can be captured, so everything the stream needs rides in [`LinkKey`].
 pub fn subscribe(key: LinkKey) -> Subscription<Message> {
-    Subscription::run_with(key, |key| pump(key.clone()))
+    Subscription::run_with(key, |key| stream(key.clone()))
 }
 
-fn pump(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
+/// The pump itself: what [`subscribe`] runs, public — as
+/// `presence_link::stream` is — so a live test can drive the window's own
+/// pump against a real bus without a window (#614, FL6b).
+pub fn stream(key: LinkKey) -> impl iced::futures::Stream<Item = Message> {
     async_stream::stream! {
         let monitor = key.monitor;
+        // Subscribed before the pump says it is pumping (#614, FL6b): an
+        // event the monitor sends between that word and the next poll — a
+        // seed boundary, a watch change — is in this receiver, not lost.
+        let mut events = monitor.events();
         yield Message::Bus(BusMsg::Link(LinkState::Pumping));
 
-        let mut events = monitor.events();
         let mut samples = Vec::with_capacity(BATCH_CAP);
         let mut seeded = Vec::new();
         let (mut lagged, mut coalesced) = (0u64, 0u64);

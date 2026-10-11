@@ -2,8 +2,8 @@
 //!
 //! **Kept as `spray_v1` (#614, FL5)** while zengui still reads v1: the
 //! registry, blob, config and media demos (`just spray-v1`, `just
-//! gui-demo-v1` and the other v1 demos) need it, and the live tests
-//! (`just test-live`) run against it until FL6b rewrites them. It builds on
+//! gui-demo-v1` and the other v1 demos) need it; the live tests moved onto
+//! the zk2 spray in FL6b, and no test reads this one. It builds on
 //! the renamed v1 dependencies (`zenkey_v1::`, `zenkey_fleet_v1::`). The
 //! zk2 demo traffic is `examples/spray.rs`; FL11 deletes this one.
 //!

@@ -19,8 +19,10 @@
 # lens on a session in the namespace, every key checked through its
 # contract — valid, invalid (the squatter's), undecodable (the garbage),
 # not checked with the rung it stopped at (the unowned key, the other
-# namespace, the foreign keys). Its tree is still v1's until FL6b, so the
-# zk2 keys are unlabelled rows wearing those badges. zenctl reads the same
+# namespace, the foreign keys). Its tree starts from zk2's contract
+# skeleton since FL6b — every resource of every address presence names, a
+# declared row before a byte arrives — and its role labels are still v1's
+# until FL7, so the zk2 keys are unlabelled rows. zenctl reads the same
 # deployment resolved:
 #
 #   just ctl service list --namespace spray -c tcp/127.0.0.1:7449
@@ -145,7 +147,7 @@ _demo port example flags max_keys:
 spray port=port:
     cargo run -p zengui --example spray -- -l tcp/127.0.0.1:{{port}}
 
-# Just the v1 traffic (`spray_v1`, until FL11): what `test-live` reads.
+# Just the v1 traffic (`spray_v1`, until FL11): what `gui-demo-v1` runs.
 spray-v1 port=port:
     cargo run -p zengui --example spray_v1 -- -l tcp/127.0.0.1:{{port}}
 
@@ -181,13 +183,14 @@ gui port=port namespace="spray":
 ctl *ARGS:
     cargo run -p zenctl -- {{ARGS}}
 
-# They read v1 traffic, so they stay on `spray_v1` until FL6b rewrites
-# them. The zk2 spray's own check is not here: `zengui/tests/spray_smoke.rs`
-# brings the example up in process on an ephemeral port and runs in the
-# ordinary suite, and `just smoke-spray` runs the real binaries.
-# The live-bus tests. Needs `just spray-v1` running in another terminal.
-test-live port=port:
-    ZENGUI_TEST_ENDPOINT=tcp/127.0.0.1:{{port}} \
+# The live-bus tests, against the zk2 spray (#614, FL6b). Needs `just spray`
+# running in another terminal; with no `ZENGUI_TEST_ENDPOINT` the same tests
+# bring the spray up in process on an ephemeral port instead
+# (`cargo test -p zengui --test live_bus -- --ignored`). The spray's own
+# check is not here: `zengui/tests/spray_smoke.rs` runs in the ordinary
+# suite, and `just smoke-spray` runs the real binaries.
+test-live port=port namespace="spray":
+    ZENGUI_TEST_ENDPOINT=tcp/127.0.0.1:{{port}} ZENGUI_TEST_NAMESPACE={{namespace}} \
         cargo test -p zengui --test live_bus -- --ignored --nocapture
 
 # The ordinary test suite.

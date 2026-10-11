@@ -198,17 +198,26 @@ impl Zengui {
         })
     }
 
-    pub fn subscription(&self) -> Subscription<Message> {
-        let mut subs = Vec::new();
+    /// The data link this window runs now, when it runs one: a monitor
+    /// exists and no replay replaces it. The one place the pump's key is
+    /// built — [`Zengui::subscription`] runs it, and a live test drives the
+    /// same stream (`link::stream`) without a window (#614, FL6b).
+    pub fn data_link(&self) -> Option<LinkKey> {
         // Replay mode replaces the link (#74): while a `.zrec` feeds the
         // panes, the live pump is not built at all — the mode cannot leak.
-        if self.work.replay.replay.is_none()
-            && let Some(monitor) = self.obs.monitor.clone()
-        {
-            subs.push(link::subscribe(LinkKey {
-                monitor,
-                epoch: self.obs.epoch,
-            }));
+        if self.work.replay.replay.is_some() {
+            return None;
+        }
+        Some(LinkKey {
+            monitor: self.obs.monitor.clone()?,
+            epoch: self.obs.epoch,
+        })
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        let mut subs = Vec::new();
+        if let Some(key) = self.data_link() {
+            subs.push(link::subscribe(key));
         }
         // The presence link (#614, FL6a): presence and the lens, from their
         // own monitor on the session in the namespace. Not suspended by
