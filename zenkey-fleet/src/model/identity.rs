@@ -107,6 +107,14 @@ impl IdentityCache {
         self.entries.get(wire).map(|e| &e.resolution)
     }
 
+    /// Every wire key held, in no particular order (#614, FL7): what a
+    /// frontend lists as "observed so far" — a jump-to list, or the keys it
+    /// re-resolves when its lens moves. Pure, like [`IdentityCache::get`]:
+    /// listing touches no recency.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(String::as_str)
+    }
+
     /// The generation the held resolutions were made under.
     pub fn generation(&self) -> u64 {
         self.generation
@@ -223,6 +231,10 @@ mod tests {
         assert_eq!(cache.evicted(), 0, "a generation is not the bound");
         assert!(cache.get(&key(0)).is_none());
         assert_eq!(cache.len() as u64 + cache.invalidated(), cache.inserted());
+
+        let mut held: Vec<&str> = cache.keys().collect();
+        held.sort_unstable();
+        assert_eq!(held, ["elsewhere/x"], "keys lists what is held, no more");
 
         cache.clear();
         assert!(cache.is_empty());
