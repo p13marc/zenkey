@@ -248,9 +248,11 @@ fn bench_expansion(c: &mut Criterion) {
 fn bench_tree(c: &mut Criterion) {
     const TREE_KEYS: usize = 50_000;
 
+    /// zk2 keys (#614, FL7), so the pivot walks real coordinates rather
+    /// than the foreign path every key took once v1 keys became foreign.
     fn keys(n: usize) -> Vec<String> {
         (0..n)
-            .map(|i| format!("v1/{HOST}/telemetry/synth/g{}/k{i}", i / 100))
+            .map(|i| format!("zk2/host-a/synth/synth.v1/stream/g{}/k{i}", i / 100))
             .collect()
     }
 
@@ -392,12 +394,12 @@ fn bench_tree(c: &mut Criterion) {
 
     // The pivot cold path — three full materialisations of the same data, and
     // the number that sizes the arena follow-up.
-    group.bench_function("pivot_50k_producer", |b| {
+    group.bench_function("pivot_50k_address", |b| {
         b.iter(|| {
             black_box(zengui::view::tree::pivot_flatten(
                 black_box(&merged),
                 "",
-                zengui::view::tree::Pivot::Producer,
+                zengui::view::tree::Pivot::Address,
                 black_box(&expanded),
                 "",
                 60_000,

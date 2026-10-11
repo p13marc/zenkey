@@ -285,8 +285,9 @@ pub enum LayoutPreset {
     /// Locator + Inspector over a tall Activity dock (40% height) — watching
     /// the streams while the subject stays on screen.
     Watch,
-    /// Like Watch, but the Locator pivots by origin and the Activity dock
-    /// opens on the doctor — "why is this node silent?".
+    /// Like Watch, but the Locator pivots by address (v1's origin pivot,
+    /// on zk2's positions since #614, FL7) and the Activity dock opens on
+    /// the doctor — "why is this service silent?".
     Diagnose,
 }
 

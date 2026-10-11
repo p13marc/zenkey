@@ -50,7 +50,7 @@ mod tests {
     use super::*;
     use crate::view::kit::Icon;
     use crate::view::theme::{
-        CoverageTone, PresenceTone, RegistrationTone, RungTone, SeverityTone, VerdictTone,
+        BudgetTone, CoverageTone, IdentityTone, PresenceTone, RungTone, SeverityTone, VerdictTone,
     };
 
     fn face_of(bytes: &[u8]) -> ttf_parser::Face<'_> {
@@ -118,7 +118,8 @@ mod tests {
     #[test]
     fn inter_carries_every_badge_glyph() {
         let mut glyphs = String::new();
-        glyphs.extend(RegistrationTone::ALL.map(|t| t.glyph()));
+        glyphs.extend(IdentityTone::ALL.map(|t| t.glyph()));
+        glyphs.extend(BudgetTone::ALL.map(|t| t.glyph()));
         glyphs.extend(PresenceTone::ALL.map(|t| t.glyph()));
         glyphs.extend(SeverityTone::ALL.map(|t| t.glyph()));
         glyphs.extend(CoverageTone::ALL.map(|t| t.glyph()));

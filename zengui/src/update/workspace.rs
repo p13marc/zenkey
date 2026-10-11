@@ -319,14 +319,15 @@ pub(crate) fn update(
             sub.drop_pins();
             // A preset is a stance, not just a shape (epic #172): Watch
             // opens on the echo stream, Diagnose pivots the locator by
-            // origin and opens on the doctor.
+            // address — v1's origin pivot, on zk2's positions (#614, FL7) —
+            // and opens on the doctor.
             match preset {
                 LayoutPreset::Explore => {}
                 LayoutPreset::Watch => work.activity.tab = crate::message::ActivityTab::Echo,
                 LayoutPreset::Diagnose => {
                     work.activity.tab = crate::message::ActivityTab::Doctor;
-                    if tree.pivot != crate::view::tree::Pivot::Origin {
-                        tree.pivot = crate::view::tree::Pivot::Origin;
+                    if tree.pivot != crate::view::tree::Pivot::Address {
+                        tree.pivot = crate::view::tree::Pivot::Address;
                         tree.tree_scroll = tree.tree_scroll.to_top();
                         tree.reflatten(dep, obs);
                     }

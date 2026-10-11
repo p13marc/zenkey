@@ -15,11 +15,11 @@ fn the_detail_pane_tags_decode_provenance() {
     use zengui::view::detail::{DetailData, Fetched, section};
     use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
 
-    let slices = slices();
     let key = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
-    let mut facts = KeyFacts::project("", key);
-    facts.resolve(&slices);
     let world = common::World::new();
+    // The key's identity, as the window's identity cache holds it (#614,
+    // FL7): a v1 key is foreign since the port.
+    let identity: &'static zenkey_fleet::Resolution = Box::leak(Box::new(world.resolve(key)));
 
     let fetched: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
         Ok(Arc::new(FetchOutcome::Value(FetchedValue {
@@ -35,7 +35,8 @@ fn the_detail_pane_tags_decode_provenance() {
             slot: zengui::message::SlotId::FOLLOW,
             sp: sp(),
             key,
-            facts: Some(Box::leak(Box::new(facts.clone()))),
+            identity: Some(identity),
+            config: None,
             fetched: Fetched::Landed(Box::leak(Box::new(fetched.clone()))),
             decoded: Some(decoded),
             series: None,
@@ -54,7 +55,10 @@ fn the_detail_pane_tags_decode_provenance() {
     // A v1 key is foreign to the lens: structural, with the rung it
     // stopped at — never dressed as a decode.
     let mut ui = render(decode(key, br#"{"value":42.0}"#, "application/json"));
-    assert!(ui.find("registered").is_ok(), "the facts section renders");
+    assert!(
+        ui.find("not zk2").is_ok(),
+        "the identity section renders: a v1 key is foreign since the port"
+    );
     assert!(
         ui.find("contract-decoded <json:NetworkInterface>").is_err(),
         "a sniff never wears a decode's tag"
@@ -107,7 +111,8 @@ fn the_detail_pane_tags_decode_provenance() {
         slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key,
-        facts: Some(&facts),
+        identity: Some(identity),
+        config: None,
         fetched: Fetched::Landed(&none),
         decoded: None,
         series: None,
@@ -139,7 +144,8 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
         slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key,
-        facts: None,
+        identity: None,
+        config: None,
         fetched,
         decoded: None,
         series: None,
@@ -218,7 +224,8 @@ fn the_inspector_follows_the_subject_and_its_plane() {
             slot: zengui::message::SlotId::FOLLOW,
             sp: sp(),
             subject,
-            facts,
+            identity: None,
+            v1: facts.cloned(),
             fetched: Fetched::NotAsked,
             decoded: None,
             series: None,
@@ -357,7 +364,8 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: FOREIGN,
-        facts: None,
+        identity: None,
+        config: None,
         fetched: Fetched::NotAsked,
         decoded: None,
         series: Some(&series),
@@ -402,7 +410,8 @@ fn the_detail_pane_labels_the_series_it_plots() {
         slot: zengui::message::SlotId::FOLLOW,
         sp: sp(),
         key: REGISTERED,
-        facts: None,
+        identity: None,
+        config: None,
         fetched: Fetched::NotAsked,
         decoded: None,
         series: Some(&series),
@@ -488,7 +497,8 @@ fn projection_inspector<'a>(
     zengui::view::inspector::InspectorData {
         slot: zengui::message::SlotId::FOLLOW,
         subject,
-        facts,
+        identity: None,
+        v1: facts.cloned(),
         fetched: zengui::view::detail::Fetched::NotAsked,
         decoded: None,
         series: None,
@@ -638,7 +648,8 @@ fn the_decoded_pane_keeps_the_four_conformance_poles_apart() {
             simulator::<Message, _, _>(section(DetailData {
                 slot: zengui::message::SlotId::FOLLOW,
                 key,
-                facts: None,
+                identity: None,
+                config: None,
                 fetched: Fetched::Landed(fetched),
                 decoded: Some(decoded),
                 series: None,
@@ -709,5 +720,71 @@ fn the_decoded_pane_keeps_the_four_conformance_poles_apart() {
         ui.find("not checked (no provider of this address in presence)")
             .is_err(),
         "the two silences must not merge"
+    );
+}
+
+/// #614 (FL7): the Inspector's facts line for a zk2 key is its identity,
+/// not "not a keyspace-v2 key": the rung, the address, interface, kind and
+/// resource it resolved to, the template's values, its type and revision.
+/// A key the ladder stopped short of says where and why, and a foreign key
+/// that it is no zk2 key — a fact, not an error (O1).
+#[test]
+fn the_detail_pane_states_a_keys_identity() {
+    use zengui::view::detail::{DetailData, Fetched, section};
+
+    let world = common::World::new();
+    let draw = |key: &'static str| {
+        let identity: &'static zenkey_fleet::Resolution = Box::leak(Box::new(world.resolve(key)));
+        simulator::<Message, _, _>(section(DetailData {
+            slot: zengui::message::SlotId::FOLLOW,
+            sp: sp(),
+            key,
+            identity: Some(identity),
+            config: None,
+            fetched: Fetched::NotAsked,
+            decoded: None,
+            series: None,
+            history_entries: None,
+            observed: None,
+            latency: None,
+        }))
+    };
+
+    let mut ui = draw(common::ETH0);
+    for said in [
+        "resolved",
+        "ADDRESS",
+        "host-a/tc",
+        "IFACE",
+        "tc.netif.v1",
+        "KIND",
+        "state",
+        "RESOURCE",
+        "state/interfaces/{ns}/{iface}",
+        "TYPE",
+        "REVISION",
+        "iface = eth0 · ns = default",
+    ] {
+        assert!(ui.find(said).is_ok(), "{said:?} must be on screen");
+    }
+
+    let mut ui = draw("zk2/robot9/nav/nav.v2/stream/position");
+    assert!(ui.find("no provider").is_ok());
+    assert!(ui.find("no provider of this address in presence").is_ok());
+    assert!(ui.find("robot9/nav").is_ok(), "the address it names");
+
+    let mut ui = draw(FOREIGN);
+    assert!(ui.find("not zk2").is_ok());
+    let why = world
+        .resolve(FOREIGN)
+        .identity
+        .unresolved
+        .expect("a foreign key stops at a rung")
+        .words();
+    assert!(why.starts_with("not a zk2 data key"), "{why}");
+    assert!(
+        ui.find(format!("{why} — a fact, not an error (O1)"))
+            .is_ok(),
+        "the rung's own words, and that it is no error"
     );
 }

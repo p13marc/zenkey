@@ -231,6 +231,7 @@ pub(crate) fn update(
             // tree and refills the cache; the scrollback must not mix file
             // lines into it.
             tree.replay_skeleton = None;
+            tree.replay_namespace = None;
             work.verdicts.payloads.clear();
             work.echo.echo.clear();
             Task::none()
@@ -385,6 +386,7 @@ fn open(
         dep.contracts.as_ref().map(|c| Arc::clone(&c.set)),
     );
     tree.replay_skeleton = Some(Arc::clone(&state.lens.skeleton));
+    tree.replay_namespace = Some(state.lens.namespace.clone());
     work.verdicts.payloads.clear();
     let tick = match edge {
         Edge::Start => state.scrub_to(0),

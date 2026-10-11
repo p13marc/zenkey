@@ -139,7 +139,9 @@ mod tests {
                     "catalog",
                     "lens_generation",
                     "identity",
-                    "facts",
+                    // FL7: the identity cache's own generation, bumped at
+                    // every door the lens's inputs move through.
+                    "identity_epoch",
                 ],
             ),
             // What the bus said, and what we asked it to keep saying.
@@ -176,6 +178,11 @@ mod tests {
                     // under the loaded registry — cleared with the coverage,
                     // because it described the departing fleet's keys.
                     "budgets",
+                    // FL7: when each watch was first seen and the longest
+                    // gap between live ticks — the budget window's start
+                    // and its reader's stall, observed like the rest.
+                    "watch_since",
+                    "tick_gap",
                 ],
             ),
             // The subjects: the follow slot the tree drives, plus one slot
@@ -239,6 +246,10 @@ mod tests {
                     // from its offline lens — a merge input, invalidated by
                     // the replay opening and closing, never by the bus.
                     "replay_skeleton",
+                    // FL7: the namespace a replay's positions are read in,
+                    // its offline lens's — with the skeleton, the tree's
+                    // replay-scoped half.
+                    "replay_namespace",
                 ],
             ),
             (
@@ -374,7 +385,10 @@ mod tests {
         // Then FL6a-ii: presence, the lens feed, its catalog and generation,
         // the identity cache, and the presence monitor with its epoch — 90.
         // Then FL6b: the skeleton's inputs and the admin space's answer — 92.
-        // Then FL10b: the replay's skeleton — 93.
-        assert_eq!(leaves, 93, "the split must place every field exactly once");
+        // Then FL10b: the replay's skeleton — 93. Then FL7: v1's facts cache
+        // went, the identity cache's epoch came, and the budget window's two
+        // observations — 95; and the replay's namespace beside its
+        // skeleton — 96.
+        assert_eq!(leaves, 96, "the split must place every field exactly once");
     }
 }

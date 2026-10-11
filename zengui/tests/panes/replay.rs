@@ -129,8 +129,6 @@ fn the_strip_reports_replay_over_the_link() {
         scope_coverage: "",
         keys: 3,
         keys_evicted: 0,
-        facts_cached: 3,
-        facts_evicted: 0,
         identity: (0, 0),
         totals: Default::default(),
         contracts: Default::default(),

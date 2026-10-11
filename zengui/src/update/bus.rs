@@ -69,6 +69,21 @@ pub(crate) fn apply_tick(
         &tick.tree,
         work.activity.tab == crate::message::ActivityTab::Traffic,
     );
+    // The budget window's two observations (#614, FL7), on live ticks only:
+    // when each watch was first seen — read before `watched` is replaced
+    // below, so an unchanged set costs one pointer compare — and the gap
+    // since the last tick.
+    if work.replay.replay.is_none() {
+        let now = std::time::Instant::now();
+        obs.tick_gap.tick(now);
+        if !Arc::ptr_eq(&obs.watched, &tick.watched) {
+            obs.watch_since
+                .retain(|sel, _| tick.watched.iter().any(|w| w == sel));
+            for sel in tick.watched.iter() {
+                obs.watch_since.entry(sel.clone()).or_insert(now);
+            }
+        }
+    }
     obs.keys = tick.keys;
     obs.keys_evicted = tick.keys_evicted;
     obs.keys_unwatched = tick.keys_unwatched;
@@ -99,7 +114,6 @@ pub(crate) fn apply_tick(
         }
     }
     for sample in &tick.samples {
-        ensure_facts(dep, &sample.key);
         // Each key's zk2 identity, through the lens (#614, FL6a) — on live
         // ticks only: a replayed key resolved through the live lens would put
         // one world's presence under another's keys (FL10b reads replay
@@ -161,14 +175,6 @@ pub(crate) fn apply_tick(
         tree.shape_rebuilt += 1;
         tree.reflatten(dep, obs);
     }
-}
-
-pub(crate) fn ensure_facts(dep: &mut Deployment, key: &str) {
-    // One line, and the bound lives in the engine with the counter that
-    // reports it (#107). This is still the single insert point. No slices
-    // since #614 (FL6a): the v1 projection reads "not asked" until FL7.
-    let namespace = dep.namespace().to_string();
-    dep.facts.ensure(&namespace, key, None);
 }
 
 /// Everything the world answered — a task landing or a `link.rs` yield.
@@ -366,10 +372,14 @@ pub(crate) fn update(
             apply_tick(dep, obs, sub, tree, work, &tick);
             // Live ticks only, deliberately: replay feeds `apply_tick` from
             // a file (`update/pane/replay.rs`) and never reaches this arm —
-            // validating file data against a live bus would put one world's
-            // verdicts under the other's data (O4 in miniature). A replay
-            // validates through its own offline lens instead (FL10b).
-            schedule_validation(dep, work, &tick)
+            // validating file data against a live bus, or judging a live
+            // budget under file keys, would put one world's verdicts under
+            // the other's data (O4 in miniature). A replay validates through
+            // its own offline lens instead (FL10b).
+            Task::batch([
+                schedule_validation(dep, work, &tick),
+                schedule_budget(dep, obs, work),
+            ])
         }
         BusMsg::VerdictsChecked(batch) => {
             // A live batch landing while a replay runs is the live world's
@@ -444,6 +454,49 @@ fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Ta
     services::value::validate(dep.lens_inputs(), batch)
 }
 
+/// Every this-many ticks (~4 s), judge the budgets again (#221; zk2's since
+/// #614, FL7). Throttled: the judgement walks every placed family's subtree,
+/// and a population does not explode per frame. Only with a presence read
+/// — without one no owner can be present, and `obs.budgets` keeps what it
+/// last said, or `None`, which draws no badge.
+const BUDGET_EVERY_TICKS: u64 = 16;
+
+fn schedule_budget(dep: &Deployment, obs: &Observation, work: &Workspace) -> Task<Message> {
+    // The verdict cache's logical clock is the tick count — one counter,
+    // advanced in `apply_tick`, shared by both throttles.
+    if work.verdicts.payloads.tick_count() % BUDGET_EVERY_TICKS != 1 {
+        return Task::none();
+    }
+    let Some(catalog) = dep.catalog.clone() else {
+        return Task::none();
+    };
+    let now = std::time::Instant::now();
+    let dropped = obs.monitor.as_ref().map_or(0, |m| m.core().dropped());
+    services::sweep::budget(crate::budget::BudgetInputs {
+        namespace: dep.namespace().to_string(),
+        catalog: Some(catalog),
+        store: dep.store.clone(),
+        presence: dep.presence.as_ref().map(|u| Arc::clone(&u.presence)),
+        observed: Arc::clone(&obs.observed),
+        watches: obs
+            .watch_since
+            .iter()
+            .map(|(sel, since)| (sel.clone(), *since))
+            .collect(),
+        reader: crate::budget::ReaderLoss {
+            // What the reader lost (core §2.7, 0.25): the broadcast's drops
+            // and the key table's evictions, since the monitor started — a
+            // superset of what any one window lost, which is the side a
+            // "lossless" must err on.
+            lost: dropped + obs.keys_evicted,
+            gap: obs.tick_gap.longest(now),
+        },
+        timeout: dep.timeout(),
+        now,
+        wall: std::time::SystemTime::now(),
+    })
+}
+
 /// Whether two contract sets hold the same revisions, by `(iface,
 /// fingerprint)`: a bundle is content-addressed, so equal keys are equal
 /// contracts.
@@ -470,9 +523,9 @@ fn same_catalog(
 }
 
 /// The lens moved (#614, FL6a): a new catalog, or new answers in the store.
-/// Every identity and every verdict judged before is due again — the
-/// identity cache sees the generation itself, and the verdict cache keeps
-/// each badge on screen as the last true reading until its recheck lands.
+/// Every identity and every verdict judged before is due again — every
+/// identity is resolved again now (FL7), and the verdict cache keeps each
+/// badge on screen as the last true reading until its recheck lands.
 /// The skeleton is rebuilt from the moved lens (FL6b) — the one door it is
 /// rebuilt through besides the contracts and the admin space — and `true`
 /// says it was, so a landing that no tick follows can redraw the tree.
@@ -484,6 +537,7 @@ fn adopt_lens(
 ) -> bool {
     dep.catalog = catalog;
     dep.lens_generation = generation;
+    dep.reresolve_identities();
     work.verdicts.payloads.invalidate();
     dep.recount_contracts();
     dep.refresh_skeleton()

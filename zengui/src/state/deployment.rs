@@ -151,12 +151,17 @@ sub_state! {
         pub(crate) lens_generation: u64,
         /// Each wire key's resolution through the lens, kept and bounded by
         /// the data pump's own key bound, every drop counted (O6). Fed per
-        /// sample; FL7 draws its badges from it.
+        /// live sample and per selection; the tree's rung badges, the
+        /// Inspector's identity line and the jump-to list all read it
+        /// (#614, FL7) — the successor of v1's facts cache.
         pub(crate) identity: IdentityCache,
-        /// Bounded, and it says what the bound costs (#107). v1's projection
-        /// cache, fed no slices since #614 (FL6a): its badges read "not
-        /// asked" until FL7 replaces it with zk2's identity cache.
-        pub(crate) facts: zenkey_fleet_v1::FactsCache,
+        /// The generation [`Self::identity`] resolves under (#614, FL7):
+        /// bumped at every door the lens's inputs move through — a catalog
+        /// or a generation adopted, a store reseeded — so the cache drops
+        /// what it resolved under the old inputs. Its own counter, not the
+        /// feed's generation: a reseeded store restarts the feed, whose
+        /// generation may come round to the number already held.
+        pub(crate) identity_epoch: u64,
     }
 }
 
@@ -181,11 +186,11 @@ impl Deployment {
             lens_feed: None,
             catalog: None,
             lens_generation: 0,
-            // Both caches take the *same* bound as the engine's key table:
-            // neither can usefully outgrow the table it shadows, and one
-            // number keeps that one sentence (#107).
+            // The cache takes the *same* bound as the engine's key table: it
+            // cannot usefully outgrow the table it shadows, and one number
+            // keeps that one sentence (#107).
             identity: IdentityCache::with_capacity(max_keys),
-            facts: zenkey_fleet_v1::FactsCache::with_capacity(max_keys),
+            identity_epoch: 0,
         };
         dep.rebuild_namespace_options();
         dep
@@ -241,6 +246,7 @@ impl Deployment {
         self.lens_feed = None;
         self.catalog = None;
         self.recount_contracts();
+        self.reresolve_identities();
         // The lens's inputs moved — no catalog, maybe other contracts — and
         // the declared keyspace is built from exactly those.
         self.refresh_skeleton();
@@ -326,12 +332,31 @@ impl Deployment {
             self.catalog.as_deref(),
             &self.store,
         )
-        .at_generation(self.lens_generation);
+        .at_generation(self.identity_epoch);
         let lens = match &self.contracts {
             Some(c) => lens.offline(&c.set),
             None => lens,
         };
         self.identity.ensure(&lens, wire);
+    }
+
+    /// The lens's inputs moved (#614, FL7): every identity the cache holds
+    /// is resolved again under the new ones, now — not on each key's next
+    /// sample, which for a state published once may never come — so no
+    /// badge goes on saying "no provider" beside a provider that appeared.
+    ///
+    /// The cache sees a new generation and drops what it held (counted as
+    /// invalidated, apart from the bound's evictions), then each key is
+    /// resolved again. One resolution per held key, at most `max_keys`,
+    /// paid per lens move — a presence change, a retrieval landing, a
+    /// contracts load — and never per tick: v1's facts cache re-resolved
+    /// the same way on every registry load.
+    pub(crate) fn reresolve_identities(&mut self) {
+        self.identity_epoch += 1;
+        let held: Vec<String> = self.identity.keys().map(str::to_owned).collect();
+        for key in &held {
+            self.ensure_identity(key);
+        }
     }
 
     /// The namespace picker's options, after a listing landed or the

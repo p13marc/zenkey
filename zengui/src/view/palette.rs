@@ -16,7 +16,9 @@
 //! keys *actually observed*, and selecting one emits the ordinary
 //! [`SubjectMsg::Select`](crate::message::SubjectMsg::Select). It offers
 //! nothing it has not seen, which keeps the overlay from inventing a keyspace (O4 — a suggestion is not an observation,
-//! and these are only ever the latter).
+//! and these are only ever the latter). Each row names the rung its key's
+//! zk2 identity reached (#614, FL7) — the tree's badge word, and none for a
+//! foreign key, as the tree draws it.
 
 use iced::widget::{Column, column, row};
 use iced::{Element, Length, Padding};
@@ -439,7 +441,9 @@ pub fn rank_keys(keys: &[&str], query: &str) -> Vec<usize> {
 
 /// Render the open overlay, if any.
 ///
-/// `keys` is consumed only by the jump-to overlay, and only the rows
+/// `keys` is each observed key with the rung its identity badges
+/// ([`crate::keyfacts::badged`]), consumed only by the jump-to overlay, and
+/// only the rows
 /// actually drawn (≤ `MAX_ROWS`, a private bound) are cloned into the
 /// element — opening
 /// the overlay costs what it draws, not the cache's population, and any
@@ -453,7 +457,7 @@ pub fn overlay<'a>(
     unreachable: bool,
     scope: crate::view::scope_editor::ScopeEditorData<'a>,
     settings: crate::view::settings::SettingsData<'a>,
-    keys: impl Iterator<Item = &'a str>,
+    keys: impl Iterator<Item = (&'a str, Option<crate::keyfacts::Rung>)>,
 ) -> Option<Element<'a, Message>> {
     match state.overlay {
         Overlay::None => None,
@@ -495,7 +499,7 @@ pub fn overlay<'a>(
         }
         Overlay::Keys => {
             // Fat pointers only — no key bytes are copied to rank (#110).
-            let keys: Vec<&str> = keys.collect();
+            let (keys, rungs): (Vec<&str>, Vec<Option<crate::keyfacts::Rung>>) = keys.unzip();
             let order = rank_keys(&keys, &state.query);
             Some(list(
                 state,
@@ -510,7 +514,7 @@ pub fn overlay<'a>(
                         mono: true,
                         keys: None,
                         header: None,
-                        trailing: None,
+                        trailing: rungs[*i].map(crate::keyfacts::Rung::label),
                     })
                     .collect(),
             ))
@@ -528,7 +532,8 @@ struct ListRow {
     keys: Option<&'static str>,
     /// A section eyebrow drawn above this row — the unfiltered palette.
     header: Option<&'static str>,
-    /// The section as a trailing word — the ranked palette.
+    /// A trailing word: the section, on the ranked palette; the rung a
+    /// key's identity reached, on the jump-to list (#614, FL7).
     trailing: Option<&'static str>,
 }
 
@@ -812,9 +817,10 @@ mod tests {
             if let Some(o) = open {
                 state.open(o);
             }
-            let poisoned = std::iter::from_fn(|| -> Option<&str> {
-                panic!("this overlay must not read the keys")
-            });
+            let poisoned =
+                std::iter::from_fn(|| -> Option<(&str, Option<crate::keyfacts::Rung>)> {
+                    panic!("this overlay must not read the keys")
+                });
             let form = crate::view::contexts::ContextForm::default();
             let scope_form = crate::view::scope_editor::ScopeForm::default();
             let settings = test_settings();

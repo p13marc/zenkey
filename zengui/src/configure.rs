@@ -389,16 +389,18 @@ pub fn config_target(facts: &zenkey_fleet_v1::KeyFacts) -> Option<ConfigTarget> 
 }
 
 /// The resources an origin's producer has been seen echoing — every
-/// observed key read through [`config_target`]. Run on a click, never per
-/// frame: it walks the facts cache.
-pub fn observed_resources(
-    facts: &zenkey_fleet_v1::FactsCache,
+/// observed key read through [`config_target`], its v1 facts projected on
+/// demand (#614, FL7: the facts cache went; `keys` are the identity cache's,
+/// the window's observed keys). Run on a click, never per frame: it walks
+/// every observed key.
+pub fn observed_resources<'k>(
+    keys: impl Iterator<Item = &'k str>,
+    namespace: &str,
     origin: &str,
     producer: &str,
 ) -> Vec<String> {
-    let mut out: Vec<String> = facts
-        .keys()
-        .filter_map(|k| facts.get(k).and_then(config_target))
+    let mut out: Vec<String> = keys
+        .filter_map(|k| config_target(&crate::keyfacts::v1_facts(namespace, k)))
         .filter(|t| t.origin == origin && t.producer == producer)
         .map(|t| t.resource)
         .collect();
@@ -610,12 +612,13 @@ mod tests {
         ] {
             assert_eq!(config_target(&KeyFacts::project("", k)), None, "{k}");
         }
-        let mut facts = zenkey_fleet_v1::FactsCache::default();
-        facts.ensure("", echo, None);
-        facts.ensure("", "v1/h-3fa9c2d41b7e/state/radio/config/eth0", None);
-        facts.ensure("", "v1/h-aaaaaaaaaaaa/state/radio/config/wlan9", None);
+        let keys = [
+            echo,
+            "v1/h-3fa9c2d41b7e/state/radio/config/eth0",
+            "v1/h-aaaaaaaaaaaa/state/radio/config/wlan9",
+        ];
         assert_eq!(
-            observed_resources(&facts, "h-3fa9c2d41b7e", "radio"),
+            observed_resources(keys.into_iter(), "", "h-3fa9c2d41b7e", "radio"),
             ["eth0", "wlan0"]
         );
     }

@@ -3,20 +3,25 @@
 //! The snapshot it walks is grammar-blind — `KeyTreeSnapshot` groups on a plain
 //! `split('/')` — so an arbitrary bus renders as an ordinary chunk tree with
 //! counts and rates. On top of that this module lays the *positional* overlay:
-//! when a subtree turns out to be keyspace-v2, its chunks are labelled origin /
-//! class / producer / subject.
+//! when a subtree turns out to be zk2's, its chunks are labelled by their
+//! positions in zk2's grammar (#614, FL7) — `zk2`, then system, service,
+//! interface, kind token and resource chunks, or `@zk` and the control
+//! chunks below it.
 //!
-//! The overlay is resolved **relative to the base, never by absolute index**
-//! (RFC 03 §1.1) — a multi-chunk base like `acme/fleet-a` is legal — and the
-//! producer-or-subject question at position 5 is decided by the origin chunk
-//! alone (RFC 03 §1.5). If the chunk where `v1` should be is not `v1`, the
-//! whole subtree is left unlabelled rather than mislabelled.
+//! The overlay is resolved **relative to the namespace, never by absolute
+//! index** — a multi-chunk namespace like `acme/fleet-a` is legal — and every
+//! position is checked with the grammar's own types (`zenkey_model::grammar`:
+//! a name, an interface chunk, a kind token), the ones its `parse` uses. If a
+//! chunk is not what its position must be — the namespace's own chunk, `zk2`,
+//! a valid name — the whole subtree is left unlabelled rather than
+//! mislabelled. A `v1/…` key is foreign since the port, and wears no role.
 //!
 //! Tree v2 (issue #65) adds three things on top:
 //!
-//! - **Pivots**: the same entries re-grouped by origin / producer / class.
+//! - **Pivots**: the same entries re-grouped by system, by address, by
+//!   interface or by kind (#614, FL7; v1's were origin, producer and class).
 //!   The re-keying happens here, on the flattened entries — the hot
-//!   `TreeNode` stays registry-blind (the §15 amendment's ruling).
+//!   `TreeNode` stays contract-blind (the §15 amendment's ruling).
 //! - **Find-in-tree**: a fuzzy filter over real key paths. A filtered tree is
 //!   a partial view, so it says what it hides ("showing N of M") — O5's
 //!   spirit applied to a local filter.
@@ -32,12 +37,12 @@ use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
 use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::{DeclRef, MergedNode, NodeStats, NodeStatus};
+use zenkey_model::grammar::{CONTROL, GRAMMAR, IfaceId, KindToken, Name};
 
-use crate::keyfacts::Registration;
 use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
 use crate::patharena::{ChunkId, PathArena, PathId};
 use crate::view::kit::{self, human_bytes, human_rate};
-use crate::view::theme::{RegistrationTone, Tone, colors};
+use crate::view::theme::{Tone, colors};
 use crate::view::tokens::{Spacing, face, font};
 
 /// Fixed row height — what makes the scroll window arithmetic exact. The
@@ -45,47 +50,84 @@ use crate::view::tokens::{Spacing, face, font};
 /// so density scales the rows and the window arithmetic together.
 pub const ROW_HEIGHT: f32 = 24.0;
 
-/// What a chunk means, when the subtree is conforming.
+/// What a chunk means, when the subtree is zk2's (#614, FL7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
-    Version,
-    Origin,
-    Class,
-    Producer,
-    BlobTier,
-    Subject,
+    /// The grammar's own first chunk, `zk2`.
+    Grammar,
+    System,
+    Service,
+    /// `<system>/<service>` as one group — the address pivot's first level.
+    Address,
+    /// The interface chunk, `<name>.v<major>`.
+    Iface,
+    /// The kind token: `stream`, `@stream`, `state`, `@state`, `events`,
+    /// `@op`.
+    Kind,
+    /// A resource chunk below the kind token: the template's.
+    Resource,
+    /// `@zk` and everything under it: tokens, descriptors, bundles.
+    Control,
 }
 
 impl Role {
     pub fn label(self) -> &'static str {
         match self {
-            Role::Version => "version",
-            Role::Origin => "origin",
-            Role::Class => "class",
-            Role::Producer => "producer",
-            Role::BlobTier => "tier",
-            Role::Subject => "subject",
+            Role::Grammar => "grammar",
+            Role::System => "system",
+            Role::Service => "service",
+            Role::Address => "address",
+            Role::Iface => "iface",
+            Role::Kind => "kind",
+            Role::Resource => "resource",
+            Role::Control => "control",
         }
     }
 }
 
-/// How the tree groups its entries (issue #65).
+/// The role of every chunk of `path`, under `namespace` — the tree's own
+/// overlay, for the surfaces that show one path (the location trail).
+/// `None` at every chunk of a path that is not zk2's under the namespace.
+pub fn roles_of(path: &str, namespace: &str) -> Vec<Option<Role>> {
+    let base: Vec<&str> = namespace.split('/').filter(|c| !c.is_empty()).collect();
+    let mut expect = start_expect(&base);
+    path.split('/')
+        .map(|chunk| {
+            let (role, next) = classify(chunk, expect, &base);
+            expect = next;
+            role
+        })
+        .collect()
+}
+
+/// How the tree groups its entries (issue #65; zk2's positions since #614,
+/// FL7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Pivot {
     /// Raw chunk order — the wire as it is.
     #[default]
     Chunks,
-    /// Origin first (service origins like `@catalog` are first-class groups).
-    Origin,
-    /// Producer first (service-origin keys group under their `@…` origin,
-    /// which *is* the service; foreign keys under "(foreign)").
-    Producer,
-    /// Class/plane first.
-    Class,
+    /// System first: `system / service / iface / kind / resource…`, every
+    /// level one contiguous wire subtree.
+    System,
+    /// Address first: each `system/service` one group, the services of a
+    /// deployment side by side.
+    Address,
+    /// Interface first: every address providing it under it — a group
+    /// that spans addresses, so it offers no one-click watch.
+    Iface,
+    /// Kind first (`stream`, `@state`, …), then interface, then address.
+    Kind,
 }
 
 impl Pivot {
-    pub const ALL: [Pivot; 4] = [Pivot::Chunks, Pivot::Origin, Pivot::Producer, Pivot::Class];
+    pub const ALL: [Pivot; 5] = [
+        Pivot::Chunks,
+        Pivot::System,
+        Pivot::Address,
+        Pivot::Iface,
+        Pivot::Kind,
+    ];
 
     /// Short stable token: expansion paths are namespaced per pivot, so a
     /// path opened under one pivot never accidentally opens a group that
@@ -93,9 +135,10 @@ impl Pivot {
     pub fn key(self) -> &'static str {
         match self {
             Pivot::Chunks => "chunks",
-            Pivot::Origin => "origin",
-            Pivot::Producer => "producer",
-            Pivot::Class => "class",
+            Pivot::System => "system",
+            Pivot::Address => "address",
+            Pivot::Iface => "iface",
+            Pivot::Kind => "kind",
         }
     }
 }
@@ -104,9 +147,10 @@ impl std::fmt::Display for Pivot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Pivot::Chunks => "chunks",
-            Pivot::Origin => "by origin",
-            Pivot::Producer => "by producer",
-            Pivot::Class => "by class",
+            Pivot::System => "by system",
+            Pivot::Address => "by address",
+            Pivot::Iface => "by iface",
+            Pivot::Kind => "by kind",
         })
     }
 }
@@ -166,10 +210,11 @@ pub struct RowShape {
     /// Traffic landed on exactly this key. Structural despite being derived
     /// from a count — see the type docs.
     pub is_leaf: bool,
-    /// `None` for any chunk outside a recognised v1 subtree.
+    /// `None` for any chunk outside a recognised zk2 subtree.
     pub role: Option<Role>,
-    /// The registry-declared payload type, when the skeleton knows one.
-    /// Interned like a chunk: type names repeat across every row of a slice.
+    /// The contract-declared payload type, when the skeleton knows one.
+    /// Interned like a chunk: type names repeat across every row of a
+    /// revision.
     pub decl_type: Option<ChunkId>,
     /// A declared operation's leaf (`…/@op/<name>`), or a row under an `@op`
     /// chunk (#614, FL6b): a queryable carries no samples, and a watch's
@@ -233,9 +278,9 @@ pub struct TreeRow {
     /// Seconds since the newest sample in this subtree (the freshness dot);
     /// `None` when nothing was ever seen here.
     pub age_s: Option<f32>,
-    /// `None` for any chunk outside a recognised v1 subtree.
+    /// `None` for any chunk outside a recognised zk2 subtree.
     pub role: Option<Role>,
-    /// The registry-declared payload type, when the skeleton knows one.
+    /// The contract-declared payload type, when the skeleton knows one.
     pub decl_type: Option<String>,
     /// A declared operation's leaf: no watch control (see
     /// [`RowShape::operation`]).
@@ -382,8 +427,8 @@ fn is_entry(node: &MergedNode) -> bool {
 
 /// Flatten a snapshot into display rows.
 ///
-/// `base` is the active deployment base, used only to know how many leading
-/// chunks to skip before looking for `v1`. `expanded` holds the paths the user
+/// `base` is the deployment namespace: its chunks must lead a key for the
+/// key to be read as zk2's (#614, FL7). `expanded` holds the paths the user
 /// has opened; everything else collapses.
 pub fn flatten(
     merged: &MergedNode,
@@ -392,6 +437,7 @@ pub fn flatten(
     max_rows: usize,
     now: Instant,
 ) -> Flattened {
+    let base = namespace_chunks(base);
     let mut rows = Vec::new();
     let mut stats = Vec::new();
     let mut arena = PathArena::new();
@@ -401,6 +447,7 @@ pub fn flatten(
     walk(
         merged,
         &mut Ctx {
+            base: &base,
             expanded,
             max_rows,
             rows: &mut rows,
@@ -412,7 +459,7 @@ pub fn flatten(
         },
         None,
         0,
-        start_expect(base),
+        start_expect(&base),
     );
     Flattened {
         rows,
@@ -431,15 +478,22 @@ pub fn flatten(
     }
 }
 
-fn start_expect(base: &str) -> Expect {
+/// The namespace's chunks, the empty namespace none.
+fn namespace_chunks(base: &str) -> Vec<&str> {
+    base.split('/').filter(|c| !c.is_empty()).collect()
+}
+
+fn start_expect(base: &[&str]) -> Expect {
     if base.is_empty() {
-        Expect::Version
+        Expect::Grammar
     } else {
-        Expect::Base(base.split('/').count())
+        Expect::Base(0)
     }
 }
 
 struct Ctx<'a> {
+    /// The namespace's chunks, which must lead a zk2 key (#614, FL7).
+    base: &'a [&'a str],
     expanded: &'a BTreeSet<String>,
     max_rows: usize,
     rows: &'a mut Vec<RowShape>,
@@ -460,25 +514,25 @@ struct Ctx<'a> {
 /// What the *next* chunk down this branch is expected to be.
 ///
 /// A state machine rather than arithmetic on depth, because depth alone cannot
-/// distinguish "we have not reached the origin position yet" from "this branch
-/// is not conforming at all" — and conflating them labels a foreign chunk
-/// `origin`, which is worse than saying nothing.
+/// distinguish "we have not reached the system position yet" from "this
+/// branch is not zk2's at all" — and conflating them labels a foreign chunk
+/// `system`, which is worse than saying nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expect {
-    /// `n` base chunks still to consume before the convention starts.
+    /// The namespace's chunk at this index comes next.
     Base(usize),
-    Version,
-    Origin,
-    /// `host` is what decides whether position 5 is a producer (RFC 03 §1.5).
-    Class {
-        host: bool,
-    },
-    Producer {
-        host: bool,
-    },
-    BlobTier,
-    Subject,
-    /// This branch is not keyspace-v2. Nothing below it is labelled.
+    /// `zk2`.
+    Grammar,
+    /// A system name, or `@zk` (the bundles, `zk2/@zk/contract/…`).
+    System,
+    Service,
+    /// An interface chunk, or `@zk` (an address's tokens and descriptor).
+    Iface,
+    Kind,
+    Resource,
+    /// Under `@zk`: every chunk is a control chunk.
+    Control,
+    /// This branch is not zk2's. Nothing below it is labelled.
     Foreign,
 }
 
@@ -495,7 +549,7 @@ fn walk(
             ctx.probe.push('/');
         }
         ctx.probe.push_str(chunk);
-        let (role, next_expect) = classify(chunk, expect);
+        let (role, next_expect) = classify(chunk, expect, ctx.base);
         if is_entry(child) {
             *ctx.total_keys += 1;
         }
@@ -555,47 +609,44 @@ fn count_entries(node: &MergedNode, total: &mut usize) {
     }
 }
 
-/// The role of one chunk, and what to expect below it.
-fn classify(chunk: &str, expect: Expect) -> (Option<Role>, Expect) {
+/// The role of one chunk, and what to expect below it (#614, FL7).
+///
+/// Each position is checked with the grammar's own types — what
+/// `zenkey_model::grammar::parse` checks a whole key with — chunk by chunk,
+/// because the tree labels interior nodes, which are no keys. A skeleton's
+/// symbolic `{system}` and `{service}` (no presence read) hold their
+/// positions.
+fn classify(chunk: &str, expect: Expect, base: &[&str]) -> (Option<Role>, Expect) {
+    let named = |what| chunk.starts_with('{') || Name::new(what, chunk).is_ok();
     match expect {
-        // The convention says nothing about how a deployment spells its own
-        // base, so base chunks carry no role.
-        Expect::Base(n) if n > 1 => (None, Expect::Base(n - 1)),
-        Expect::Base(_) => (None, Expect::Version),
-        Expect::Version => {
-            if chunk == zenkey_v1::grammar::VERSION_CHUNK {
-                (Some(Role::Version), Expect::Origin)
+        // The grammar says nothing about how a deployment spells its own
+        // namespace, so its chunks carry no role — but they must be its
+        // chunks: another deployment's zk2 keys are not this one's.
+        Expect::Base(i) if base.get(i) == Some(&chunk) => (
+            None,
+            if i + 1 < base.len() {
+                Expect::Base(i + 1)
             } else {
-                // Not a v1 subtree. Leave the whole branch unlabelled rather
-                // than guess — mislabelling is worse than not labelling.
-                (None, Expect::Foreign)
-            }
+                Expect::Grammar
+            },
+        ),
+        Expect::Base(_) => (None, Expect::Foreign),
+        // Not a zk2 subtree (a `v1/…` key among them, foreign since the
+        // port): the whole branch stays unlabelled rather than guessed at —
+        // mislabelling is worse than not labelling.
+        Expect::Grammar if chunk == GRAMMAR => (Some(Role::Grammar), Expect::System),
+        Expect::Grammar => (None, Expect::Foreign),
+        Expect::System if chunk == CONTROL => (Some(Role::Control), Expect::Control),
+        Expect::System if named("system") => (Some(Role::System), Expect::Service),
+        Expect::Service if named("service") => (Some(Role::Service), Expect::Iface),
+        Expect::Iface if chunk == CONTROL => (Some(Role::Control), Expect::Control),
+        Expect::Iface if chunk.parse::<IfaceId>().is_ok() => (Some(Role::Iface), Expect::Kind),
+        Expect::Kind if chunk.parse::<KindToken>().is_ok() => (Some(Role::Kind), Expect::Resource),
+        Expect::Resource => (Some(Role::Resource), Expect::Resource),
+        Expect::Control => (Some(Role::Control), Expect::Control),
+        Expect::System | Expect::Service | Expect::Iface | Expect::Kind | Expect::Foreign => {
+            (None, Expect::Foreign)
         }
-        Expect::Origin => {
-            // RFC 03 §1.3 licenses tooling to use this shape, and §1.5 makes it
-            // the sole discriminator for the producer position. A *symbolic*
-            // origin (`{origin}`) exists only for host slices — the skeleton
-            // never symbolizes a service origin (those are literal `@x`) — so
-            // it classifies as host-like.
-            let host = zenkey_v1::grammar::is_valid_host_origin(chunk) || chunk.starts_with('{');
-            (Some(Role::Origin), Expect::Class { host })
-        }
-        Expect::Class { host } => {
-            // Under `@blob` position 5 is a tier token, not a producer.
-            let next = if chunk == zenkey_v1::grammar::PLANE_BLOB {
-                Expect::BlobTier
-            } else {
-                Expect::Producer { host }
-            };
-            (Some(Role::Class), next)
-        }
-        // A service origin omits the producer chunk entirely; position 5 is
-        // already subject (RFC 03 §1.5).
-        Expect::Producer { host: true } => (Some(Role::Producer), Expect::Subject),
-        Expect::Producer { host: false } => (Some(Role::Subject), Expect::Subject),
-        Expect::BlobTier => (Some(Role::BlobTier), Expect::Subject),
-        Expect::Subject => (Some(Role::Subject), Expect::Subject),
-        Expect::Foreign => (None, Expect::Foreign),
     }
 }
 
@@ -626,6 +677,7 @@ pub fn search_flatten(
     // and that `docs/zero-copy.md` §2 names — and one `bool` per node in
     // pre-order. Pass two walks the identical order and builds only what it
     // keeps, honouring the cap *during* the walk exactly as `flatten` does.
+    let base = namespace_chunks(base);
     let mut keep: Vec<Mark> = Vec::new();
     let mut shown = 0usize;
     let mut total = 0usize;
@@ -633,7 +685,7 @@ pub fn search_flatten(
     search_mark(
         merged,
         &mut probe,
-        start_expect(base),
+        (start_expect(&base), &base),
         query,
         &mut keep,
         &mut shown,
@@ -649,7 +701,7 @@ pub fn search_flatten(
         merged,
         None,
         0,
-        start_expect(base),
+        (start_expect(&base), &base),
         &keep,
         &mut at,
         &mut Emit {
@@ -708,7 +760,7 @@ struct Emit<'a> {
 fn search_mark(
     node: &MergedNode,
     probe: &mut String,
-    expect: Expect,
+    (expect, base): (Expect, &[&str]),
     query: &str,
     keep: &mut Vec<Mark>,
     shown: &mut usize,
@@ -721,7 +773,7 @@ fn search_mark(
             probe.push('/');
         }
         probe.push_str(chunk);
-        let (_, next_expect) = classify(chunk, expect);
+        let (_, next_expect) = classify(chunk, expect, base);
         let entry = is_entry(child);
         if entry {
             *total += 1;
@@ -736,7 +788,7 @@ fn search_mark(
         // dropped branch in O(1) instead of walking it to find out.
         let at = keep.len();
         keep.push(Mark::default());
-        let below = search_mark(child, probe, next_expect, query, keep, shown, total);
+        let below = search_mark(child, probe, (next_expect, base), query, keep, shown, total);
         keep[at] = Mark {
             keep: self_match || below,
             slots: keep.len() - at - 1,
@@ -755,13 +807,13 @@ fn search_emit(
     node: &MergedNode,
     parent: Option<PathId>,
     depth: usize,
-    expect: Expect,
+    (expect, base): (Expect, &[&str]),
     keep: &[Mark],
     at: &mut usize,
     ctx: &mut Emit<'_>,
 ) {
     for (chunk, child) in &node.children {
-        let (role, next_expect) = classify(chunk, expect);
+        let (role, next_expect) = classify(chunk, expect, base);
         let mark = keep[*at];
         *at += 1;
         if !mark.keep {
@@ -794,7 +846,15 @@ fn search_emit(
             });
             ctx.stats.push(child.stats);
         }
-        search_emit(child, Some(path), depth + 1, next_expect, keep, at, ctx);
+        search_emit(
+            child,
+            Some(path),
+            depth + 1,
+            (next_expect, base),
+            keep,
+            at,
+            ctx,
+        );
     }
 }
 
@@ -802,56 +862,76 @@ fn search_emit(
 // Pivots
 // ---------------------------------------------------------------------------
 
-/// One concrete entry, with its grammar coordinates extracted.
+/// One concrete entry, with its zk2 coordinates extracted (#614, FL7).
 ///
 /// All ids into the pivot's arena (#251): the walk that collects 50,000 of
 /// these used to spell a `String` path, up to three coordinate `String`s and
 /// a `Vec<String>` tail for every one.
 struct PivotEntry {
     real_path: PathId,
-    origin: Option<ChunkId>,
-    class: Option<ChunkId>,
-    producer: Option<ChunkId>,
-    /// Everything after the extracted coordinates (subject chunks, blob
-    /// tiers…) — or the whole path for foreign keys.
-    tail: Vec<ChunkId>,
+    /// Whether the path is zk2's under the namespace: its `zk2` chunk was
+    /// read where the grammar puts it. Every other entry is foreign.
+    zk2: bool,
+    /// System, service, interface, kind token — in the real path's order,
+    /// which is what a group's wire target is reconstructed from.
+    coords: [Option<ChunkId>; 4],
+    /// Everything after the coordinates: resource chunks, or `@zk` and the
+    /// control chunks below it.
+    tail: Vec<(ChunkId, Role)>,
     status: NodeStatus,
     stats: Option<NodeStats>,
     decl: Option<DeclRef>,
 }
 
+/// Where a coordinate sits in [`PivotEntry::coords`], by role.
+fn coord_of(role: Role) -> Option<usize> {
+    match role {
+        Role::System => Some(0),
+        Role::Service => Some(1),
+        Role::Iface => Some(2),
+        Role::Kind => Some(3),
+        Role::Grammar | Role::Address | Role::Resource | Role::Control => None,
+    }
+}
+
+/// The walk's position: what the next chunk is expected to be, and the
+/// namespace's chunks it is checked against.
+type At<'a> = (Expect, &'a [&'a str]);
+
 fn collect_entries(
     node: &MergedNode,
     parent: Option<PathId>,
-    expect: Expect,
-    coords: (Option<ChunkId>, Option<ChunkId>, Option<ChunkId>),
-    tail: &[ChunkId],
+    (expect, base): At<'_>,
+    (zk2, coords): (bool, [Option<ChunkId>; 4]),
+    tail: &[(ChunkId, Role)],
     arena: &mut PathArena,
     out: &mut Vec<PivotEntry>,
 ) {
     for (chunk, child) in &node.children {
         let chunk_id = arena.chunk(chunk);
         let child_path = arena.node(parent, chunk_id);
-        let (role, next_expect) = classify(chunk, expect);
-        let (mut origin, mut class, mut producer) = coords;
+        let (role, next_expect) = classify(chunk, expect, base);
+        let (mut zk2, mut coords) = (zk2, coords);
         // The per-node cost this walk was indicted for (#251): a `Vec`
         // allocation plus a deep clone of every `String` in it, at every
         // child, before knowing whether the chunk contributes. Ids make the
         // copy a memcpy of `u32`s.
         let mut next_tail = tail.to_vec();
         match role {
-            Some(Role::Origin) => origin = Some(chunk_id),
-            Some(Role::Class) => class = Some(chunk_id),
-            Some(Role::Producer) => producer = Some(chunk_id),
-            Some(Role::Version) => {}
-            Some(Role::Subject) | Some(Role::BlobTier) | None => next_tail.push(chunk_id),
+            Some(Role::Grammar) => zk2 = true,
+            Some(r) => match coord_of(r) {
+                Some(i) => coords[i] = Some(chunk_id),
+                None => next_tail.push((chunk_id, r)),
+            },
+            // A namespace chunk, or a foreign one: a foreign entry is drawn
+            // by its real path, and a namespace chunk is in every target.
+            None => {}
         }
         if is_entry(child) {
             out.push(PivotEntry {
                 real_path: child_path,
-                origin,
-                class,
-                producer,
+                zk2,
+                coords,
                 tail: next_tail.clone(),
                 status: child.status,
                 stats: child.stats,
@@ -861,8 +941,8 @@ fn collect_entries(
         collect_entries(
             child,
             Some(child_path),
-            next_expect,
-            (origin, class, producer),
+            (next_expect, base),
+            (zk2, coords),
             &next_tail,
             arena,
             out,
@@ -906,16 +986,22 @@ fn fold_status(a: Option<NodeStatus>, b: NodeStatus) -> NodeStatus {
     if rank(&b) > rank(&a) { b } else { a }
 }
 
-/// Group the tree's entries by origin / producer / class (issue #65).
+/// Group the tree's entries by system / address / interface / kind (issue
+/// #65; zk2's positions since #614, FL7).
 ///
 /// The re-key per entry:
-/// - **Origin**: `origin / class / [producer] / subject…`
-/// - **Producer**: `producer / origin / class / subject…` — a service-origin
-///   key has no producer chunk, so its origin (`@catalog`) is the group,
-///   which *is* the service (RFC 03 §1.5);
-/// - **Class**: `class / origin / [producer] / subject…`
+/// - **System**: `system / service / iface / kind / resource…` — every level
+///   one contiguous wire subtree;
+/// - **Address**: `system/service / iface / kind / resource…` — the address
+///   one group, so a deployment's services sit side by side;
+/// - **Iface**: `iface / address / kind / resource…` — every provider of an
+///   interface under it;
+/// - **Kind**: `kind / iface / address / resource…`.
 ///
-/// Foreign keys group under `(foreign)` with their raw path below — present,
+/// A coordinate a key does not have is skipped (a control key has no
+/// interface), and its `@zk` chunks ride in the tail. Foreign keys — a
+/// `v1/…` key among them, foreign since the port, and another namespace's
+/// zk2 keys — group under `(foreign)` with their raw path below: present,
 /// unlabelled, never silently dropped. An optional `query` filters entries
 /// by real path (groups auto-expand while filtering).
 pub fn pivot_flatten(
@@ -927,13 +1013,14 @@ pub fn pivot_flatten(
     max_rows: usize,
     now: Instant,
 ) -> Flattened {
+    let base = namespace_chunks(base);
     let mut arena = PathArena::new();
     let mut entries = Vec::new();
     collect_entries(
         merged,
         None,
-        start_expect(base),
-        (None, None, None),
+        (start_expect(&base), &base),
+        (false, [None; 4]),
         &[],
         &mut arena,
         &mut entries,
@@ -951,13 +1038,9 @@ pub fn pivot_flatten(
     }
     let shown_keys = entries.len();
 
-    // Chunks before the origin position in a conforming real path (base +
-    // the `v1` chunk) — what group targets are reconstructed relative to.
-    let skip = if base.is_empty() {
-        1
-    } else {
-        base.split('/').count() + 1
-    };
+    // Chunks before the system position in a zk2 real path (the namespace +
+    // the `zk2` chunk) — what group targets are reconstructed relative to.
+    let skip = base.len() + 1;
     let mut root = PNode::default();
     for e in &entries {
         let chunks = pivot_chunks(e, pivot, skip, &mut arena);
@@ -1021,102 +1104,97 @@ pub fn pivot_flatten(
 ///
 /// The target is the **real wire-path prefix** the pivot node stands for,
 /// present exactly when the node's constraint set is contiguous on the wire
-/// (issue #93): coordinates accumulated so far must form a prefix of
-/// `origin / class / producer`, and subject chunks require every coordinate
-/// the entry has. Groups that genuinely span a wildcard (a producer group
-/// across origins, a class group across origins) get `None` — offering a
-/// watch there would hide a fleet-wide cost behind one click.
+/// (issue #93): the coordinates fixed so far must be a prefix of `system /
+/// service / iface / kind`, and tail chunks require every coordinate the
+/// entry has. Groups that genuinely span a wildcard (an interface across
+/// addresses, a kind across interfaces) get `None` — offering a watch there
+/// would hide a fleet-wide cost behind one click.
 fn pivot_chunks(
     e: &PivotEntry,
     pivot: Pivot,
     skip: usize,
     arena: &mut PathArena,
 ) -> Vec<(ChunkId, Option<Role>, Option<PathId>)> {
-    let (origin, class, producer) = (e.origin, e.class, e.producer);
-    let foreign = origin.is_none() && class.is_none();
-    if foreign {
+    if !e.zk2 {
         // Foreign keys keep their raw order, so every level below the
         // "(foreign)" group is a real prefix — the ancestor chain of the
         // real path, which the arena already holds (#251).
         let mut out: Vec<(ChunkId, Option<Role>, Option<PathId>)> =
             vec![(arena.chunk("(foreign)"), None, None)];
-        out.extend(
-            e.tail
-                .iter()
-                .enumerate()
-                .map(|(i, c)| (*c, None, Some(arena.ancestor_at(e.real_path, i + 1)))),
-        );
+        out.extend((1..=arena.len_of(e.real_path)).map(|i| {
+            let at = arena.ancestor_at(e.real_path, i);
+            (arena.chunk_of(at), None, Some(at))
+        }));
         return out;
     }
 
-    // (chunk, role) first, targets derived below from the constraint chain.
-    let mut chunks: Vec<(ChunkId, Option<Role>)> = Vec::new();
-    let push = |out: &mut Vec<(ChunkId, Option<Role>)>, v: Option<ChunkId>, role: Role| {
-        if let Some(v) = v {
-            out.push((v, Some(role)));
+    // (chunk, role, the coordinates it fixes as bits in real order) first,
+    // targets derived below from the constraint chain.
+    let [system, service, iface, kind] = e.coords;
+    let one = |c: Option<ChunkId>, role: Role, bit: u8| c.map(|c| (c, role, bit));
+    let address = match (system, service) {
+        (Some(sys), Some(svc)) => {
+            let spelled = format!("{}/{}", arena.chunk_str(sys), arena.chunk_str(svc));
+            Some((arena.chunk(&spelled), Role::Address, 0b0011))
         }
+        (Some(sys), None) => Some((sys, Role::System, 0b0001)),
+        _ => None,
     };
-    match pivot {
+    let levels: Vec<(ChunkId, Role, u8)> = match pivot {
         Pivot::Chunks => unreachable!("chunk order uses flatten()"),
-        Pivot::Origin => {
-            push(&mut chunks, origin, Role::Origin);
-            push(&mut chunks, class, Role::Class);
-            push(&mut chunks, producer, Role::Producer);
-        }
-        Pivot::Producer => {
-            // The producer when there is one; the service origin otherwise —
-            // for a service origin the service IS the producer (RFC 03 §1.5).
-            match (producer, origin) {
-                (Some(p), _) => chunks.push((p, Some(Role::Producer))),
-                (None, Some(o)) => chunks.push((o, Some(Role::Origin))),
-                (None, None) => chunks.push((arena.chunk("(no producer)"), None)),
-            }
-            if producer.is_some() {
-                push(&mut chunks, origin, Role::Origin);
-            }
-            push(&mut chunks, class, Role::Class);
-        }
-        Pivot::Class => {
-            push(&mut chunks, class, Role::Class);
-            push(&mut chunks, origin, Role::Origin);
-            push(&mut chunks, producer, Role::Producer);
-        }
+        Pivot::System => vec![
+            one(system, Role::System, 0b0001),
+            one(service, Role::Service, 0b0010),
+            one(iface, Role::Iface, 0b0100),
+            one(kind, Role::Kind, 0b1000),
+        ],
+        Pivot::Address => vec![
+            address,
+            one(iface, Role::Iface, 0b0100),
+            one(kind, Role::Kind, 0b1000),
+        ],
+        Pivot::Iface => vec![
+            one(iface, Role::Iface, 0b0100),
+            address,
+            one(kind, Role::Kind, 0b1000),
+        ],
+        Pivot::Kind => vec![
+            one(kind, Role::Kind, 0b1000),
+            one(iface, Role::Iface, 0b0100),
+            address,
+        ],
     }
-    chunks.extend(e.tail.iter().map(|c| (*c, Some(Role::Subject))));
-    if chunks.is_empty() {
-        // An entry that *is* one of the coordinates (e.g. a declared class
-        // position with no subject below it yet).
-        chunks.push((arena.chunk("(…)"), None));
-    }
+    .into_iter()
+    .flatten()
+    .collect();
 
-    // Constraint chain → target per level.
-    let coords_in_entry = usize::from(origin.is_some())
-        + usize::from(class.is_some())
-        + usize::from(producer.is_some());
-    let (mut has_o, mut has_c, mut has_p, mut tail_len) = (false, false, false, 0usize);
-    chunks
-        .into_iter()
-        .map(|(chunk, role)| {
-            match role {
-                Some(Role::Origin) => has_o = true,
-                Some(Role::Class) => has_c = true,
-                Some(Role::Producer) => has_p = true,
-                Some(Role::Subject) | Some(Role::BlobTier) => tail_len += 1,
-                Some(Role::Version) | None => tail_len += 1,
-            }
-            let present = usize::from(has_o) + usize::from(has_c) + usize::from(has_p);
-            let contiguous = if tail_len > 0 {
-                present == coords_in_entry
-            } else {
-                has_o && (!has_c || has_o) && (!has_p || has_c)
-            };
-            // The prefix `real[..n].join("/")` used to allocate; `ancestor_at`
-            // clamps to the path's length exactly as the slice did (#251).
-            let target = (contiguous && present > 0)
-                .then(|| arena.ancestor_at(e.real_path, skip + present + tail_len));
-            (chunk, role, target)
-        })
-        .collect()
+    let entry_mask = levels.iter().fold(0u8, |m, (_, _, bit)| m | bit);
+    let mut out: Vec<(ChunkId, Option<Role>, Option<PathId>)> =
+        Vec::with_capacity(levels.len() + e.tail.len());
+    let mut mask = 0u8;
+    // A mask fixes a prefix of the real order when it is all ones from the
+    // bottom bit up: `0b0011` does, `0b0100` (an interface across every
+    // address) does not.
+    let prefix = |m: u8| m & m.wrapping_add(1) == 0;
+    for (chunk, role, bit) in levels {
+        mask |= bit;
+        let present = mask.count_ones() as usize;
+        // The prefix `real[..n].join("/")` used to allocate; `ancestor_at`
+        // clamps to the path's length exactly as the slice did (#251).
+        let target = prefix(mask).then(|| arena.ancestor_at(e.real_path, skip + present));
+        out.push((chunk, Some(role), target));
+    }
+    let present = mask.count_ones() as usize;
+    for (i, (chunk, role)) in e.tail.iter().enumerate() {
+        let target = (mask == entry_mask && prefix(mask))
+            .then(|| arena.ancestor_at(e.real_path, skip + present + i + 1));
+        out.push((*chunk, Some(*role), target));
+    }
+    if out.is_empty() {
+        // An entry that *is* the grammar's chunk, with nothing below it.
+        out.push((arena.chunk("(…)"), None, None));
+    }
+    out
 }
 
 /// The pivot walk's invariants, and where it writes (#250).
@@ -1247,42 +1325,14 @@ fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, parent: Option<PathId>, d
 // Rendering
 // ---------------------------------------------------------------------------
 
-/// Which tone a leaf's registration should read as.
-pub fn tone(reg: &Registration) -> RegistrationTone {
-    match reg {
-        Registration::Registered(_) => RegistrationTone::Registered,
-        Registration::Unregistered => RegistrationTone::Unregistered,
-        Registration::NoSliceForProducer => RegistrationTone::NoSlice,
-        Registration::Unknown => RegistrationTone::Unknown,
-        Registration::NotApplicable => RegistrationTone::NotApplicable,
-    }
-}
-
-/// The badge text for a registration state.
-///
-/// The five-state is only useful if the words differ: "—" (not asked) must
-/// not read like "unregistered" (asked, and the answer was no), and "n/a"
-/// (no question exists) like neither. The tree deliberately draws no badge
-/// for `NotApplicable` — a foreign key answering a question nobody asked is
-/// noise — but the word exists so every state *has* a distinct glyph + word
-/// pair (#193).
-pub fn registration_label(reg: &Registration) -> &'static str {
-    match reg {
-        Registration::Registered(_) => "registered",
-        Registration::Unregistered => "unregistered",
-        Registration::NoSliceForProducer => "no slice",
-        Registration::Unknown => "—",
-        Registration::NotApplicable => "n/a",
-    }
-}
-
-/// Registration lookup by wire key. The engine's bounded projection cache
-/// rather than a plain map (issue #107): a `HashMap` here grew one entry per
-/// distinct key *ever* observed, shadowing a key table that has been bounded
-/// and counting its evictions since the bootstrap. Aliased so every pane and
-/// row signature below reads the same, and so `facts.get(key)` stays a pure
-/// `&self` read from the render path.
-pub type FactsIndex = zenkey_fleet_v1::FactsCache;
+/// Identity lookup by wire key (#614, FL7): the engine's bounded,
+/// generation-tagged identity cache rather than a plain map (issue #107's
+/// rule, kept from v1's facts cache): a `HashMap` here grew one entry per
+/// distinct key *ever* observed, shadowing a key table that is bounded and
+/// counts its evictions. Aliased so every pane and row signature below reads
+/// the same, and so `identities.get(key)` stays a pure `&self` read from the
+/// render path. The badge itself is [`crate::keyfacts::badged`]'s.
+pub type IdentityIndex = crate::keyfacts::IdentityCache;
 
 /// The tree's two watch sets — same type, opposite meanings (#250).
 ///
@@ -1334,14 +1384,17 @@ pub struct TreeData<'a> {
     /// The virtual window: where the list is scrolled to and how much of it
     /// is on screen (#360).
     pub viewport: crate::view::kit::Viewport,
-    /// Per-key projections, for the row badges.
-    pub facts: &'a FactsIndex,
+    /// Per-key zk2 identities, for the rung badges (#614, FL7).
+    pub identities: &'a IdentityIndex,
+    /// The deployment namespace: which keys are this deployment's, for the
+    /// badges' foreign-key rule ([`crate::keyfacts::badged`]).
+    pub namespace: &'a str,
     /// Per-key payload-conformance verdicts (#164) — the cache the tick's
     /// bounded validation batches fill, looked up here, never computed here.
     pub verdicts: &'a crate::verdict::VerdictCache,
-    /// Per-subtree budget badges (#221): `None` = no registry loaded (or the
-    /// join has not run) — with no declarations there is no budget to be
-    /// over, and no badge claims otherwise.
+    /// Per-subtree budget badges (#221; zk2's since #614, FL7): `None` =
+    /// the judgement has not run (no presence read yet), which draws no
+    /// badge — never a pass.
     pub budgets: Option<&'a crate::budget::BudgetBadges>,
     /// The pair this struct exists for.
     pub watches: Watches<'a>,
@@ -1439,7 +1492,8 @@ fn rows_view<'a>(d: TreeData<'a>, width: f32) -> Element<'a, Message> {
                 r,
                 RowContext {
                     arena: &flat.arena,
-                    facts: d.facts,
+                    identities: d.identities,
+                    namespace: d.namespace,
                     verdicts: d.verdicts,
                     budgets: d.budgets,
                     selected: d.selected,
@@ -1487,9 +1541,9 @@ const SCROLLBAR: f32 = 10.0;
 /// carries the numbers, joined against this tick's snapshot.
 ///
 /// Neither is borrowed by the returned `Element`: every use below is a clone or
-/// a `Copy` field, and the one that looks like a borrow (`facts.get`) borrows
-/// `facts`. That is what lets `tree_view` hand these in as per-frame
-/// temporaries.
+/// a `Copy` field, and the one that looks like a borrow (`identities.get`)
+/// borrows `identities`. That is what lets `tree_view` hand these in as
+/// per-frame temporaries.
 /// What every row reads besides its own shape and numbers — the lookup
 /// tables and the selection, one `Copy` bundle so `row_view` stays under the
 /// argument lint the same way [`TreeData`] keeps `tree_view` there (#250's
@@ -1498,10 +1552,12 @@ const SCROLLBAR: f32 = 10.0;
 #[derive(Clone, Copy)]
 struct RowContext<'a> {
     arena: &'a PathArena,
-    facts: &'a FactsIndex,
+    /// Per-key zk2 identities (#614, FL7) — looked up, never resolved here.
+    identities: &'a IdentityIndex,
+    namespace: &'a str,
     /// Per-key payload verdicts (#164) — looked up, never computed here.
     verdicts: &'a crate::verdict::VerdictCache,
-    /// Per-subtree budget badges (#221); `None` = no registry loaded.
+    /// Per-subtree budget badges (#221, FL7); `None` = not judged yet.
     budgets: Option<&'a crate::budget::BudgetBadges>,
     selected: Option<&'a str>,
     watches: Watches<'a>,
@@ -1523,12 +1579,13 @@ struct RowContext<'a> {
 /// narrow Locator would be all numbers and no names. The tiers are what it
 /// gives up, lowest priority first: the declared type, the bytes and the
 /// verdict's parenthetical, then the role word and the sample count. The
-/// registration and verdict badges are the last to go — they are findings —
-/// and below the narrowest tier `fit` drops them whole and counts them
+/// identity and verdict badges are the last to go — they are findings, and
+/// a resolved rung, the expected answer, yields to the verdict (#614, FL7)
+/// — and below the narrowest tier `fit` drops them whole and counts them
 /// (`+N`) rather than let the right half take the name past `NAME_FLOOR`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RowTier {
-    /// Name, age, status | rate, registration, verdict.
+    /// Name, age, status | rate, identity, verdict.
     Narrow,
     /// Adds the role word and the sample count.
     Medium,
@@ -1591,8 +1648,9 @@ fn chip_width(s: &str) -> f32 {
 
 /// One cell of a row's right half (#557).
 struct RightCell<'a> {
-    /// Lower keeps longer: the numbers, then registration, then the
-    /// verdict, then the type name.
+    /// Lower keeps longer: the numbers, then a rung that stopped short (a
+    /// finding), then the verdict, then a resolved rung (the expected
+    /// answer, #614, FL7), then the type name.
     rank: u8,
     /// Estimated, see [`SANS_W`].
     width: f32,
@@ -1663,7 +1721,8 @@ const INDENT: f32 = 14.0;
 fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a, Message> {
     let RowContext {
         arena,
-        facts,
+        identities,
+        namespace,
         verdicts,
         budgets,
         selected,
@@ -1750,21 +1809,17 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
     if let Some((tone, word)) = status {
         line = line.push(kit::status_chip(tone, word));
     }
+    let declared = r.decl_type.is_some();
     if let Some(ty) = r.decl_type.filter(|_| tier == RowTier::Wide) {
         line = line.push(kit::cell(ty));
     }
 
-    // The key-population budget (#221), on the offending family's subtree
-    // row. Over-declared is a warning with its numbers; a `{path...}` family
-    // is exempt and says so (never a silent pass); under-declared draws
-    // nothing — a window proves a lower bound, not the population (O4/O6).
-    // `budgets` is `None` with no registry loaded: no declarations, no badge.
+    // The population budget (#221; core §2.7 since #614, FL7), on the
+    // family's subtree row: the core judge's answer with its numbers or its
+    // reason — "unobservable" says why, and is never a pass. `budgets` is
+    // `None` until the first judgement lands: no badge, no claim.
     if let Some(b) = budgets.and_then(|b| b.get(r.target.as_deref().unwrap_or(&r.path))) {
-        let severity = match b {
-            crate::budget::BudgetBadge::Over { .. } => crate::view::theme::SeverityTone::Warning,
-            crate::budget::BudgetBadge::Exempt => crate::view::theme::SeverityTone::Info,
-        };
-        line = line.push(kit::badge_severity(severity, b.label()));
+        line = line.push(kit::badge_budget(b.tone(), b.label()));
     }
 
     // A collapsed node reports its whole subtree; an expanded leaf reports
@@ -1778,22 +1833,39 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
         });
     }
     if r.is_leaf {
-        if let Some(f) = r.target.as_deref().and_then(|t| facts.get(t)) {
-            // No badge for `NotApplicable`: the registry question does not
-            // exist for a foreign key, so a badge would only be noise.
-            if !matches!(f.registration, Registration::NotApplicable) {
-                let word = registration_label(&f.registration);
+        if let Some((t, res)) = r
+            .target
+            .as_deref()
+            .and_then(|t| identities.get(t).map(|res| (t, res)))
+        {
+            // The rung the key's identity reached (#614, FL7) — none for a
+            // foreign key, which answers a question nobody asked of it.
+            if let Some(rung) = crate::keyfacts::badged(t, namespace, &res.identity) {
+                let word = rung.label();
                 right.push(RightCell {
-                    rank: 1,
+                    // A resolved key is the expected answer: with no room,
+                    // it gives way to the verdict, which may be a finding.
+                    rank: if rung == crate::keyfacts::Rung::Resolved {
+                        3
+                    } else {
+                        1
+                    },
                     width: badge_width(word),
-                    el: kit::tone_badge(tone(&f.registration), word),
+                    el: kit::tone_badge(rung.tone(), word),
                 });
             }
-            if let Some(ty) = f.type_name().filter(|_| tier == RowTier::Wide) {
+            // The type the contract gives a resolved key — unless the
+            // skeleton already drew it on the left.
+            if let Some(ty) = res
+                .resolved
+                .as_ref()
+                .filter(|_| tier == RowTier::Wide && !declared)
+                .map(crate::keyfacts::type_name)
+            {
                 right.push(RightCell {
-                    rank: 3,
-                    width: text_width(ty),
-                    el: kit::cell(ty.to_string()).into(),
+                    rank: 4,
+                    width: text_width(&ty),
+                    el: kit::cell(ty).into(),
                 });
             }
         }
@@ -1960,6 +2032,14 @@ mod tests {
     use super::*;
     use zenkey_fleet::StatsTable;
 
+    /// `robot1/nav`'s position stream, and keys beside it in the same and
+    /// another service, for the pivots.
+    const POSITION: &str = "zk2/robot1/nav/nav.v2/stream/position";
+    const STATUS: &str = "zk2/robot1/nav/nav.v2/state/status";
+    const ROBOT2: &str = "zk2/robot2/nav/nav.v2/stream/position";
+    const ETH0: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    const V1: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu";
+
     fn snapshot(keys: &[&str]) -> MergedNode {
         let mut stats = StatsTable::new();
         let now = Instant::now();
@@ -1979,6 +2059,22 @@ mod tests {
         paths.iter().map(|s| s.to_string()).collect()
     }
 
+    /// Every prefix of every key, so leaves are visible.
+    fn expand_all(keys: &[&str]) -> BTreeSet<String> {
+        let mut set = BTreeSet::new();
+        for k in keys {
+            let mut acc = String::new();
+            for chunk in k.split('/') {
+                if !acc.is_empty() {
+                    acc.push('/');
+                }
+                acc.push_str(chunk);
+                set.insert(acc.clone());
+            }
+        }
+        set
+    }
+
     fn flat_now(
         snap: &MergedNode,
         base: &str,
@@ -1986,6 +2082,18 @@ mod tests {
         max: usize,
     ) -> Flattened {
         flatten(snap, base, expanded, max, Instant::now())
+    }
+
+    fn pivot(snap: &MergedNode, base: &str, p: Pivot, query: &str) -> Flattened {
+        pivot_flatten(
+            snap,
+            base,
+            p,
+            &BTreeSet::new(),
+            query,
+            10_000,
+            Instant::now(),
+        )
     }
 
     // Shapes carry ids (#251); tests that reason about spellings resolve
@@ -2010,104 +2118,145 @@ mod tests {
         find_path(flat, path).and_then(|r| r.role)
     }
 
-    #[test]
-    fn collapsed_by_default_and_expands_on_demand() {
-        let snap = snapshot(&["v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage"]);
-        let flat = flat_now(&snap, "", &BTreeSet::new(), 100);
-        assert_eq!(flat.rows.len(), 1, "only the root chunk shows");
-        assert_eq!(chunk_of(&flat, &flat.rows[0]), "v1");
-        assert!(flat.rows[0].has_children);
-
-        let flat = flat_now(&snap, "", &expand(&["v1"]), 100);
-        assert_eq!(flat.rows.len(), 2);
-        assert_eq!(chunk_of(&flat, &flat.rows[1]), "h-3fa9c2d41b7e");
+    fn row_by_chunk<'a>(flat: &'a Flattened, chunk: &str) -> &'a RowShape {
+        flat.rows
+            .iter()
+            .find(|r| chunk_of(flat, r) == chunk)
+            .unwrap_or_else(|| panic!("no row {chunk}"))
     }
 
-    /// RFC 03 §1.1: the overlay is resolved relative to the base. The same
-    /// subject under a one-chunk and a two-chunk base must label identically.
+    fn tops(flat: &Flattened) -> Vec<&str> {
+        flat.rows
+            .iter()
+            .filter(|r| r.depth == 0)
+            .map(|r| chunk_of(flat, r))
+            .collect()
+    }
+
     #[test]
-    fn roles_are_resolved_relative_to_the_base() {
-        let key = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu";
+    fn collapsed_by_default_and_expands_on_demand() {
+        let snap = snapshot(&[POSITION]);
+        let flat = flat_now(&snap, "", &BTreeSet::new(), 100);
+        assert_eq!(flat.rows.len(), 1, "only the root chunk shows");
+        assert_eq!(chunk_of(&flat, &flat.rows[0]), "zk2");
+        assert!(flat.rows[0].has_children);
+
+        let flat = flat_now(&snap, "", &expand(&["zk2"]), 100);
+        assert_eq!(flat.rows.len(), 2);
+        assert_eq!(chunk_of(&flat, &flat.rows[1]), "robot1");
+    }
+
+    /// #614 (FL7): zk2's positions label a zk2 key — `zk2`, system,
+    /// service, interface, kind token, resource — resolved relative to the
+    /// namespace: the same key under a one-chunk and a two-chunk namespace
+    /// labels identically, and the namespace's own chunks wear no role.
+    #[test]
+    fn zk2_roles_are_resolved_relative_to_the_namespace() {
         for (base, prefix) in [
             ("", ""),
-            ("zensight", "zensight/"),
+            ("spray", "spray/"),
             ("acme/fleet-a", "acme/fleet-a/"),
         ] {
-            let full = format!("{prefix}{key}");
+            let full = format!("{prefix}{ETH0}");
             let snap = snapshot(&[&full]);
-            // Expand the whole path.
-            let mut paths = Vec::new();
-            let mut acc = String::new();
-            for chunk in full.split('/') {
-                acc = if acc.is_empty() {
-                    chunk.to_string()
-                } else {
-                    format!("{acc}/{chunk}")
-                };
-                paths.push(acc.clone());
+            let flat = flat_now(&snap, base, &expand_all(&[&full]), 100);
+            let at = |rel: &str| role_of(&flat, &format!("{prefix}{rel}"));
+            assert_eq!(at("zk2"), Some(Role::Grammar), "base {base:?}");
+            assert_eq!(at("zk2/host-a"), Some(Role::System));
+            assert_eq!(at("zk2/host-a/tc"), Some(Role::Service));
+            assert_eq!(at("zk2/host-a/tc/tc.netif.v1"), Some(Role::Iface));
+            assert_eq!(at("zk2/host-a/tc/tc.netif.v1/state"), Some(Role::Kind));
+            for rel in [
+                "zk2/host-a/tc/tc.netif.v1/state/interfaces",
+                "zk2/host-a/tc/tc.netif.v1/state/interfaces/default",
+                ETH0,
+            ] {
+                assert_eq!(at(rel), Some(Role::Resource), "{rel}");
             }
-            let set: BTreeSet<String> = paths.into_iter().collect();
-            let flat = flat_now(&snap, base, &set, 100);
-
-            assert_eq!(role_of(&flat, &format!("{prefix}v1")), Some(Role::Version));
-            assert_eq!(
-                role_of(&flat, &format!("{prefix}v1/h-3fa9c2d41b7e")),
-                Some(Role::Origin)
-            );
-            assert_eq!(
-                role_of(&flat, &format!("{prefix}v1/h-3fa9c2d41b7e/telemetry")),
-                Some(Role::Class)
-            );
-            assert_eq!(
-                role_of(
-                    &flat,
-                    &format!("{prefix}v1/h-3fa9c2d41b7e/telemetry/sysinfo")
-                ),
-                Some(Role::Producer),
-                "base {base:?}"
-            );
+            if let Some(first) = base.split('/').next().filter(|c| !c.is_empty()) {
+                assert_eq!(role_of(&flat, first), None, "a namespace chunk has no role");
+            }
         }
     }
 
-    /// RFC 03 §1.5: under a service origin position 5 is already subject.
+    /// A zk2 key under another namespace is not this deployment's, and is
+    /// not labelled by position (O3): another deployment's keys are foreign
+    /// here, however zk2 they look.
     #[test]
-    fn a_service_origin_has_no_producer_position() {
-        let snap = snapshot(&["v1/@catalog/state/entity/x"]);
-        let set = expand(&[
-            "v1",
-            "v1/@catalog",
-            "v1/@catalog/state",
-            "v1/@catalog/state/entity",
-        ]);
-        let flat = flat_now(&snap, "", &set, 100);
-        assert_eq!(role_of(&flat, "v1/@catalog"), Some(Role::Origin));
-        assert_eq!(role_of(&flat, "v1/@catalog/state"), Some(Role::Class));
+    fn another_namespaces_zk2_keys_are_left_unlabelled() {
+        let key = format!("elsewhere/{POSITION}");
+        let snap = snapshot(&[&key]);
+        let flat = flat_now(&snap, "spray", &expand_all(&[&key]), 100);
+        for r in &flat.rows {
+            assert_eq!(r.role, None, "{} must not be labelled", path_of(&flat, r));
+        }
+    }
+
+    /// `@zk` and everything under it are control chunks, at the address's
+    /// position and at the grammar's (the bundles); a verbatim kind token
+    /// is a kind like any other.
+    #[test]
+    fn control_chunks_and_verbatim_kinds() {
+        let keys = [
+            "zk2/robot1/nav/@zk/instance/0000000000000001",
+            "zk2/@zk/contract/nav.v2/abc",
+            "zk2/robot1/camera/camera.v1/@stream/image",
+        ];
+        let snap = snapshot(&keys);
+        let flat = flat_now(&snap, "", &expand_all(&keys), 100);
+        assert_eq!(role_of(&flat, "zk2/robot1/nav/@zk"), Some(Role::Control));
         assert_eq!(
-            role_of(&flat, "v1/@catalog/state/entity"),
-            Some(Role::Subject),
-            "`entity` is subject, not a producer"
+            role_of(&flat, "zk2/robot1/nav/@zk/instance"),
+            Some(Role::Control)
+        );
+        assert_eq!(role_of(&flat, "zk2/@zk"), Some(Role::Control));
+        assert_eq!(
+            role_of(&flat, "zk2/@zk/contract/nav.v2"),
+            Some(Role::Control)
+        );
+        assert_eq!(
+            role_of(&flat, "zk2/robot1/camera/camera.v1/@stream"),
+            Some(Role::Kind)
         );
     }
 
-    /// Under `@blob` position 5 is a tier token, not a producer (RFC 03 §1.5).
+    /// A chunk that breaks its position — an interface chunk that is no
+    /// `<name>.v<major>`, a kind that is no kind token — leaves the subtree
+    /// unlabelled from there down, never guessed at.
     #[test]
-    fn a_blob_tier_is_not_labelled_a_producer() {
-        let snap = snapshot(&["v1/h-3fa9c2d41b7e/@blob/store/sha256/abcdef01"]);
-        let set = expand(&[
-            "v1",
-            "v1/h-3fa9c2d41b7e",
-            "v1/h-3fa9c2d41b7e/@blob",
-            "v1/h-3fa9c2d41b7e/@blob/store",
-        ]);
-        let flat = flat_now(&snap, "", &set, 100);
-        assert_eq!(role_of(&flat, "v1/h-3fa9c2d41b7e/@blob"), Some(Role::Class));
+    fn a_chunk_that_breaks_its_position_stops_the_labels() {
+        let keys = [
+            "zk2/robot1/nav/NotAnIface/stream/x",
+            "zk2/robot1/nav/nav.v2/telemetry/x",
+        ];
+        let snap = snapshot(&keys);
+        let flat = flat_now(&snap, "", &expand_all(&keys), 100);
+        assert_eq!(role_of(&flat, "zk2/robot1/nav"), Some(Role::Service));
+        assert_eq!(role_of(&flat, "zk2/robot1/nav/NotAnIface"), None);
+        assert_eq!(role_of(&flat, "zk2/robot1/nav/NotAnIface/stream"), None);
+        assert_eq!(role_of(&flat, "zk2/robot1/nav/nav.v2"), Some(Role::Iface));
+        assert_eq!(role_of(&flat, "zk2/robot1/nav/nav.v2/telemetry"), None);
+        assert_eq!(role_of(&flat, "zk2/robot1/nav/nav.v2/telemetry/x"), None);
+    }
+
+    /// The location trail reads the same overlay, chunk by chunk.
+    #[test]
+    fn roles_of_one_path() {
         assert_eq!(
-            role_of(&flat, "v1/h-3fa9c2d41b7e/@blob/store"),
-            Some(Role::BlobTier)
+            roles_of(&format!("spray/{POSITION}"), "spray"),
+            [
+                None,
+                Some(Role::Grammar),
+                Some(Role::System),
+                Some(Role::Service),
+                Some(Role::Iface),
+                Some(Role::Kind),
+                Some(Role::Resource),
+            ]
         );
-        assert_eq!(
-            role_of(&flat, "v1/h-3fa9c2d41b7e/@blob/store/sha256"),
-            Some(Role::Subject)
+        assert!(
+            roles_of(V1, "").iter().all(Option::is_none),
+            "v1 is foreign"
         );
     }
 
@@ -2132,13 +2281,13 @@ mod tests {
         assert_eq!(flat.row(i).count, 1);
     }
 
-    /// A subtree whose version chunk is not `v1` must not be labelled by
-    /// position — that would attach convention meanings to foreign chunks.
+    /// #614 (FL7): v1 keys are foreign since the port — no v1 overlay: a
+    /// `v1/…` subtree is labelled by no position at all.
     #[test]
-    fn a_non_v1_subtree_is_left_unlabelled() {
-        let snap = snapshot(&["v2/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
-        let set = expand(&["v2", "v2/h-3fa9c2d41b7e", "v2/h-3fa9c2d41b7e/telemetry"]);
-        let flat = flat_now(&snap, "", &set, 100);
+    fn a_v1_subtree_is_left_unlabelled() {
+        let snap = snapshot(&[V1]);
+        let flat = flat_now(&snap, "", &expand_all(&[V1]), 100);
+        assert!(flat.rows.len() > 3);
         for r in &flat.rows {
             assert_eq!(r.role, None, "{} must not be labelled", path_of(&flat, r));
         }
@@ -2148,13 +2297,9 @@ mod tests {
     /// user reads understates the traffic by exactly the invisible part.
     #[test]
     fn collapsed_rows_report_subtree_totals() {
-        let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
-            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-        ]);
+        let snap = snapshot(&[POSITION, STATUS, ETH0]);
         let flat = flat_now(&snap, "", &BTreeSet::new(), 100);
-        assert_eq!(chunk_of(&flat, &flat.rows[0]), "v1");
+        assert_eq!(chunk_of(&flat, &flat.rows[0]), "zk2");
         assert!(!flat.rows[0].expanded);
         let root = flat.row(0);
         assert_eq!(root.subtree_count, 3);
@@ -2181,33 +2326,14 @@ mod tests {
         assert_eq!(flat.total_keys, 50, "the denominator ignores the cap");
     }
 
-    /// The three "we know nothing" states must not read alike.
-    #[test]
-    fn registration_labels_distinguish_not_asked_from_not_registered() {
-        assert_eq!(registration_label(&Registration::Unknown), "—");
-        assert_eq!(registration_label(&Registration::NotApplicable), "n/a");
-        assert_eq!(
-            registration_label(&Registration::Unregistered),
-            "unregistered"
-        );
-        assert_eq!(
-            registration_label(&Registration::NoSliceForProducer),
-            "no slice"
-        );
-        assert_ne!(
-            tone(&Registration::Unknown),
-            tone(&Registration::Unregistered)
-        );
-    }
-
     // --- Tree v2 (issue #65) -------------------------------------------
 
     #[test]
     fn fuzzy_match_is_ordered_subsequence_case_insensitive() {
-        assert!(fuzzy_match("v1/h-abc/telemetry/sysinfo/cpu", "cpu"));
-        assert!(fuzzy_match("v1/h-abc/telemetry/sysinfo/cpu", "TELcpu"));
+        assert!(fuzzy_match(POSITION, "position"));
+        assert!(fuzzy_match(POSITION, "NAVpos"));
         assert!(fuzzy_match("anything", ""));
-        assert!(!fuzzy_match("v1/h-abc/telemetry", "cpu"));
+        assert!(!fuzzy_match("zk2/robot1/nav", "position"));
         assert!(!fuzzy_match("abc", "acb"));
     }
 
@@ -2215,12 +2341,8 @@ mod tests {
     /// and matching keys render with their full ancestor chain expanded.
     #[test]
     fn search_shows_matches_with_ancestors_and_counts_the_rest() {
-        let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
-            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-        ]);
-        let flat = search_flatten(&snap, "", "cpu", 1000, Instant::now());
+        let snap = snapshot(&[POSITION, STATUS, ETH0]);
+        let flat = search_flatten(&snap, "", "position", 1000, Instant::now());
         assert!(flat.filtered);
         assert_eq!(flat.shown_keys, 1);
         assert_eq!(flat.total_keys, 3);
@@ -2228,14 +2350,17 @@ mod tests {
         assert_eq!(
             paths,
             [
-                "v1",
-                "v1/h-3fa9c2d41b7e",
-                "v1/h-3fa9c2d41b7e/telemetry",
-                "v1/h-3fa9c2d41b7e/telemetry/sysinfo",
-                "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+                "zk2",
+                "zk2/robot1",
+                "zk2/robot1/nav",
+                "zk2/robot1/nav/nav.v2",
+                "zk2/robot1/nav/nav.v2/stream",
+                POSITION,
             ],
             "the match renders under its expanded ancestors, nothing else"
         );
+        // …labelled as the chunk-order walk labels them.
+        assert_eq!(role_of(&flat, "zk2/robot1/nav/nav.v2"), Some(Role::Iface));
         // A query matching nothing keeps the honest counts.
         let none = search_flatten(&snap, "", "zzz", 1000, Instant::now());
         assert_eq!(none.rows.len(), 0);
@@ -2250,11 +2375,7 @@ mod tests {
     /// for a result of zero rows. The two-pass walk decides first.
     #[test]
     fn a_search_that_matches_nothing_builds_no_rows() {
-        let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
-            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-        ]);
+        let snap = snapshot(&[POSITION, STATUS, ETH0]);
         // A cap of zero: under the old code the walk built every row before
         // the post-hoc truncate could look, so this could only pass by never
         // building one.
@@ -2276,7 +2397,7 @@ mod tests {
     #[test]
     fn the_row_cap_bounds_a_search_that_matches_everything() {
         let keys: Vec<String> = (0..200)
-            .map(|i| format!("v1/h-3fa9c2d41b7e/telemetry/sysinfo/k{i}"))
+            .map(|i| format!("zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/k{i}"))
             .collect();
         let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let snap = snapshot(&refs);
@@ -2314,9 +2435,9 @@ mod tests {
     /// not do.
     #[test]
     fn an_empty_query_is_not_a_filter() {
-        let snap = snapshot(&["v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
+        let snap = snapshot(&[POSITION]);
         assert!(!search_flatten(&snap, "", "", 100, Instant::now()).filtered);
-        assert!(search_flatten(&snap, "", "cpu", 100, Instant::now()).filtered);
+        assert!(search_flatten(&snap, "", "position", 100, Instant::now()).filtered);
     }
 
     /// #249: a capped pivot reports the rows it did not build, and still
@@ -2324,12 +2445,19 @@ mod tests {
     #[test]
     fn a_capped_pivot_reports_the_rows_it_did_not_build() {
         let keys: Vec<String> = (0..50)
-            .map(|i| format!("v1/h-3fa9c2d41b7e/telemetry/p{i}/leaf"))
+            .map(|i| format!("zk2/h{i}/tc/tc.netif.v1/state/namespaces"))
             .collect();
         let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let snap = snapshot(&refs);
-        let all = expand(&[]);
-        let capped = pivot_flatten(&snap, "", Pivot::Producer, &all, "", 5, Instant::now());
+        let capped = pivot_flatten(
+            &snap,
+            "",
+            Pivot::Address,
+            &expand(&[]),
+            "",
+            5,
+            Instant::now(),
+        );
         assert_eq!(capped.rows.len(), 5);
         assert!(capped.truncated > 0);
         assert_eq!(
@@ -2338,80 +2466,118 @@ mod tests {
         );
     }
 
-    /// Pivot by producer: host keys group under the producer; a service
-    /// origin (no producer chunk) groups under the `@…` origin, which is the
-    /// service (RFC 03 §1.5); foreign keys under "(foreign)".
+    /// #614 (FL7): pivot by address — each `system/service` one group, a
+    /// deployment's services side by side; foreign keys, a v1 key among
+    /// them, under "(foreign)".
     #[test]
-    fn producer_pivot_groups_hosts_services_and_foreigners() {
-        let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
-            "v1/h-9fa9c2d41b70/telemetry/sysinfo/cpu",
-            "v1/@catalog/state/entity/x",
-            "demo/example/foo",
-        ]);
-        let flat = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Producer,
-            &BTreeSet::new(),
-            "",
-            10_000,
-            Instant::now(),
+    fn address_pivot_groups_services_and_foreigners() {
+        let snap = snapshot(&[POSITION, STATUS, ROBOT2, ETH0, V1, "demo/example/foo"]);
+        let flat = pivot(&snap, "", Pivot::Address, "");
+        assert_eq!(
+            tops(&flat),
+            ["(foreign)", "host-a/tc", "robot1/nav", "robot2/nav"]
         );
-        let tops: Vec<&str> = flat
-            .rows
-            .iter()
-            .filter(|r| r.depth == 0)
-            .map(|r| chunk_of(&flat, r))
-            .collect();
-        assert_eq!(tops, ["(foreign)", "@catalog", "sysinfo"]);
-        // The sysinfo group aggregates both origins' traffic.
         let i = flat
             .rows
             .iter()
-            .position(|r| chunk_of(&flat, r) == "sysinfo")
+            .position(|r| chunk_of(&flat, r) == "robot1/nav")
             .unwrap();
-        let sysinfo = flat.row(i);
-        assert_eq!(sysinfo.subtree_count, 2);
-        assert_eq!(sysinfo.subtree_keys, 2);
-        assert!(
-            sysinfo.target.is_none(),
-            "a pivot group has no wire subtree"
+        let nav = flat.row(i);
+        assert_eq!(nav.role, Some(Role::Address));
+        assert_eq!(nav.subtree_count, 2, "both of robot1/nav's keys");
+        assert_eq!(
+            target_of(&flat, &flat.rows[i]).as_deref(),
+            Some("zk2/robot1/nav"),
+            "an address is one contiguous wire subtree"
         );
-        assert_eq!(flat.total_keys, 4);
+        assert_eq!(flat.total_keys, 6);
+        assert!(
+            row_by_chunk(&flat, "(foreign)").target.is_none(),
+            "the foreign group has no wire subtree"
+        );
     }
 
-    /// Pivot by origin: the service origin is a first-class group next to
-    /// hosts (the issue's acceptance criterion).
+    /// #614 (FL7): pivot by system — every level one contiguous wire
+    /// subtree, and the selector built from a system group is exactly that
+    /// system's subtree.
     #[test]
-    fn origin_pivot_promotes_service_origins() {
-        let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
-            "v1/@catalog/state/entity/x",
-        ]);
-        let flat = pivot_flatten(
+    fn system_pivot_groups_target_their_real_prefix() {
+        let snap = snapshot(&[POSITION, ROBOT2, ETH0]);
+        let flat = pivot(&snap, "", Pivot::System, "position");
+        assert_eq!(tops(&flat), ["robot1", "robot2"]);
+        let system = row_by_chunk(&flat, "robot1");
+        assert_eq!(system.role, Some(Role::System));
+        let target = target_of(&flat, system);
+        assert_eq!(target.as_deref(), Some("zk2/robot1"));
+        assert_eq!(
+            crate::scope::subtree_selector(target.as_deref().unwrap()),
+            "zk2/robot1/**",
+            "watching the group declares exactly the system's subtree"
+        );
+        let service = flat
+            .rows
+            .iter()
+            .find(|r| chunk_of(&flat, r) == "nav" && r.role == Some(Role::Service))
+            .expect("a service group");
+        assert!(target_of(&flat, service).is_some_and(|t| t.ends_with("/nav")));
+    }
+
+    /// #614 (FL7): pivot by interface — every provider of `nav.v2` under
+    /// it. The interface group spans addresses, so it offers no one-click
+    /// watch; the address under it closes the chain.
+    #[test]
+    fn iface_pivot_spans_addresses_and_stays_untargeted() {
+        let snap = snapshot(&[POSITION, ROBOT2, ETH0]);
+        let flat = pivot(&snap, "", Pivot::Iface, "position");
+        assert_eq!(tops(&flat), ["nav.v2"]);
+        let group = row_by_chunk(&flat, "nav.v2");
+        assert_eq!(group.role, Some(Role::Iface));
+        assert!(
+            group.target.is_none(),
+            "spans addresses — no one-click watch"
+        );
+        let address = row_by_chunk(&flat, "robot2/nav");
+        assert_eq!(
+            target_of(&flat, address).as_deref(),
+            Some("zk2/robot2/nav/nav.v2"),
+            "address under interface is contiguous"
+        );
+        let leaf = row_by_chunk(&flat, "position");
+        assert!(
+            target_of(&flat, leaf).is_some_and(|t| t == POSITION || t == ROBOT2),
+            "a leaf acts on its real key"
+        );
+    }
+
+    /// #614 (FL7): pivot by kind — a kind group spans every interface, an
+    /// interface under it every address; only the address closes the chain.
+    #[test]
+    fn kind_pivot_groups_by_token_and_targets_only_the_closed_chain() {
+        let snap = snapshot(&[POSITION, STATUS, ETH0]);
+        let flat = pivot(&snap, "", Pivot::Kind, "");
+        assert_eq!(tops(&flat), ["state", "stream"]);
+        assert!(row_by_chunk(&flat, "state").target.is_none());
+        let all = pivot_flatten(
             &snap,
             "",
-            Pivot::Origin,
+            Pivot::Kind,
             &BTreeSet::new(),
-            "",
+            "eth0",
             10_000,
             Instant::now(),
         );
-        let tops: Vec<&str> = flat
-            .rows
-            .iter()
-            .filter(|r| r.depth == 0)
-            .map(|r| chunk_of(&flat, r))
-            .collect();
-        assert_eq!(tops, ["@catalog", "h-3fa9c2d41b7e"]);
+        assert!(
+            row_by_chunk(&all, "tc.netif.v1").target.is_none(),
+            "spans addresses"
+        );
         assert_eq!(
-            flat.rows
-                .iter()
-                .filter(|r| r.depth == 0)
-                .map(|r| r.role)
-                .collect::<Vec<_>>(),
-            [Some(Role::Origin), Some(Role::Origin)]
+            target_of(&all, row_by_chunk(&all, "host-a/tc")).as_deref(),
+            Some("zk2/host-a/tc/tc.netif.v1/state"),
+            "kind, interface and address fixed: one subtree"
+        );
+        assert_eq!(
+            target_of(&all, row_by_chunk(&all, "eth0")).as_deref(),
+            Some(ETH0)
         );
     }
 
@@ -2419,25 +2585,11 @@ mod tests {
     /// select/watch built from a pivot row acts on the real subtree.
     #[test]
     fn pivot_leaves_target_their_real_path() {
-        let snap = snapshot(&["v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
-        let flat = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Producer,
-            &BTreeSet::new(),
-            "cpu", // filter also auto-expands
-            10_000,
-            Instant::now(),
-        );
-        let leaf = flat
-            .rows
-            .iter()
-            .find(|r| chunk_of(&flat, r) == "cpu")
-            .expect("leaf");
-        assert_eq!(
-            target_of(&flat, leaf).as_deref(),
-            Some("v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu")
-        );
+        let snap = snapshot(&[ETH0]);
+        let flat = pivot(&snap, "", Pivot::Address, "eth0");
+        let leaf = row_by_chunk(&flat, "eth0");
+        assert_eq!(target_of(&flat, leaf).as_deref(), Some(ETH0));
+        assert_eq!(leaf.role, Some(Role::Resource));
         assert_eq!((flat.shown_keys, flat.total_keys), (1, 1));
     }
 
@@ -2446,188 +2598,61 @@ mod tests {
     #[test]
     fn a_prefix_key_with_children_is_its_own_entry() {
         let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/state/tc/iface",
-            "v1/h-3fa9c2d41b7e/state/tc/iface/eth0",
+            "zk2/host-a/tc/tc.netif.v1/state/iface",
+            "zk2/host-a/tc/tc.netif.v1/state/iface/eth0",
         ]);
-        let flat = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Origin,
-            &BTreeSet::new(),
-            "",
-            10_000,
-            Instant::now(),
-        );
+        let flat = pivot(&snap, "", Pivot::System, "");
         assert_eq!(flat.total_keys, 2, "prefix key and deep key both count");
     }
 
-    /// Issue #93: origin-pivot groups stand for exactly contiguous wire
-    /// subtrees, so they carry real targets — and the selector built from
-    /// one is exactly the subtree selector (the acceptance criterion).
+    /// Control keys pivot too: their `@zk` chunks ride in the tail, under
+    /// whatever coordinates they have, every level a real prefix.
     #[test]
-    fn origin_pivot_groups_target_their_real_prefix() {
-        let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
-            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-            "v1/@catalog/state/entity/x",
-        ]);
-        let flat = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Origin,
-            &BTreeSet::new(),
-            "x", // filter irrelevant to targets; auto-expands everything
-            10_000,
-            Instant::now(),
-        );
-        let by_chunk = |c: &str| {
-            flat.rows
-                .iter()
-                .find(|r| chunk_of(&flat, r) == c)
-                .unwrap_or_else(|| panic!("row {c}"))
-        };
+    fn control_keys_pivot_under_their_address() {
+        let instance = "zk2/robot1/nav/@zk/instance/0000000000000001";
+        let snap = snapshot(&[instance, POSITION]);
+        let flat = pivot(&snap, "", Pivot::Address, "instance");
+        let zk = row_by_chunk(&flat, "@zk");
+        assert_eq!(zk.role, Some(Role::Control));
+        assert_eq!(target_of(&flat, zk).as_deref(), Some("zk2/robot1/nav/@zk"));
         assert_eq!(
-            target_of(&flat, by_chunk("@catalog")).as_deref(),
-            Some("v1/@catalog")
-        );
-        let host = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Origin,
-            &BTreeSet::new(),
-            "cpu",
-            10_000,
-            Instant::now(),
-        );
-        let origin = host
-            .rows
-            .iter()
-            .find(|r| chunk_of(&host, r) == "h-3fa9c2d41b7e")
-            .expect("origin group");
-        let origin_target = target_of(&host, origin);
-        assert_eq!(origin_target.as_deref(), Some("v1/h-3fa9c2d41b7e"));
-        assert_eq!(
-            crate::scope::subtree_selector(origin_target.as_deref().unwrap()),
-            "v1/h-3fa9c2d41b7e/**",
-            "watching the group declares exactly the origin subtree"
-        );
-        let class = host
-            .rows
-            .iter()
-            .find(|r| chunk_of(&host, r) == "telemetry")
-            .expect("class group");
-        assert_eq!(
-            target_of(&host, class).as_deref(),
-            Some("v1/h-3fa9c2d41b7e/telemetry")
+            target_of(&flat, row_by_chunk(&flat, "0000000000000001")).as_deref(),
+            Some(instance)
         );
     }
 
-    /// Issue #93: a base-relative deployment keeps the base in the target —
-    /// the selector still spells the wire, never a bare convention path.
+    /// Issue #93: a namespaced deployment keeps the namespace in the target
+    /// — the selector still spells the wire, never a bare grammar path.
     #[test]
-    fn pivot_targets_carry_the_base() {
-        let snap = snapshot(&["zs/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
-        let flat = pivot_flatten(
-            &snap,
-            "zs",
-            Pivot::Origin,
-            &BTreeSet::new(),
-            "cpu",
-            10_000,
-            Instant::now(),
-        );
-        let origin = flat
-            .rows
-            .iter()
-            .find(|r| chunk_of(&flat, r) == "h-3fa9c2d41b7e")
-            .expect("origin group");
+    fn pivot_targets_carry_the_namespace() {
+        let key = format!("spray/{POSITION}");
+        let snap = snapshot(&[&key]);
+        let flat = pivot(&snap, "spray", Pivot::Address, "position");
         assert_eq!(
-            target_of(&flat, origin).as_deref(),
-            Some("zs/v1/h-3fa9c2d41b7e")
+            target_of(&flat, row_by_chunk(&flat, "robot1/nav")).as_deref(),
+            Some("spray/zk2/robot1/nav")
         );
-    }
-
-    /// Issue #93: groups that genuinely span a wildcard stay untargeted —
-    /// a producer group across origins is a fleet-wide watch, not one click.
-    #[test]
-    fn wildcard_spanning_groups_stay_untargeted() {
-        let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
-            "v1/h-9fa9c2d41b70/telemetry/sysinfo/cpu",
-        ]);
-        let prod = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Producer,
-            &BTreeSet::new(),
-            "cpu",
-            10_000,
-            Instant::now(),
-        );
-        let group = prod
-            .rows
-            .iter()
-            .find(|r| chunk_of(&prod, r) == "sysinfo")
-            .unwrap();
-        assert!(group.target.is_none(), "spans origins — no one-click watch");
-        // …but one level down the constraint chain closes: origin under
-        // producer means v1/<origin>/<class>/<producer> is NOT contiguous
-        // (class is still free), so it stays None too…
-        let origin = prod
-            .rows
-            .iter()
-            .find(|r| chunk_of(&prod, r) == "h-3fa9c2d41b7e")
-            .unwrap();
-        assert!(origin.target.is_none(), "class position still wildcarded");
-        // …and the class level (origin+class+producer all fixed) targets
-        // the full contiguous prefix — producer chunk included, because the
-        // node means "this producer's telemetry", not "all telemetry".
-        let class = prod
-            .rows
-            .iter()
-            .filter(|r| chunk_of(&prod, r) == "telemetry")
-            .find(|r| r.target.is_some())
-            .expect("a targeted class row");
         assert_eq!(
-            target_of(&prod, class).as_deref(),
-            Some("v1/h-3fa9c2d41b7e/telemetry/sysinfo")
+            target_of(&flat, row_by_chunk(&flat, "position")).as_deref(),
+            Some(key.as_str())
         );
-
-        let by_class = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Class,
-            &BTreeSet::new(),
-            "cpu",
-            10_000,
-            Instant::now(),
-        );
-        let top = by_class.rows.iter().find(|r| r.depth == 0).unwrap();
-        assert_eq!(chunk_of(&by_class, top), "telemetry");
-        assert!(top.target.is_none(), "spans origins");
+        // …and under another namespace the same key is foreign.
+        let other = pivot(&snap, "acme", Pivot::Address, "");
+        assert_eq!(tops(&other), ["(foreign)"]);
     }
 
     /// Issue #93: the press split — a concrete key that is also a prefix of
     /// deeper keys stays selectable; its marker (alone) expands.
     #[test]
     fn a_prefix_key_row_selects_and_its_marker_expands() {
-        let snap = snapshot(&[
-            "v1/h-3fa9c2d41b7e/state/tc/iface",
-            "v1/h-3fa9c2d41b7e/state/tc/iface/eth0",
-        ]);
-        let set = expand(&[
-            "v1",
-            "v1/h-3fa9c2d41b7e",
-            "v1/h-3fa9c2d41b7e/state",
-            "v1/h-3fa9c2d41b7e/state/tc",
-        ]);
+        let prefix_key = "zk2/host-a/tc/tc.netif.v1/state/iface";
+        let snap = snapshot(&[prefix_key, "zk2/host-a/tc/tc.netif.v1/state/iface/eth0"]);
+        let set = expand_all(&["zk2/host-a/tc/tc.netif.v1/state"]);
         let flat = flat_now(&snap, "", &set, 100);
-        let prefix = find_path(&flat, "v1/h-3fa9c2d41b7e/state/tc/iface").expect("prefix row");
+        let prefix = find_path(&flat, prefix_key).expect("prefix row");
         assert!(prefix.is_leaf && prefix.has_children);
         match row_press(prefix, &flat.arena) {
-            Message::Subject(SubjectMsg::Select(Subject::Key(k))) => {
-                assert_eq!(k, "v1/h-3fa9c2d41b7e/state/tc/iface")
-            }
+            Message::Subject(SubjectMsg::Select(Subject::Key(k))) => assert_eq!(k, prefix_key),
             other => panic!("body must select, got {other:?}"),
         }
         assert!(
@@ -2638,7 +2663,7 @@ mod tests {
             "the marker is the expand affordance"
         );
         // A plain group row still toggles on body click.
-        let group = find_path(&flat, "v1/h-3fa9c2d41b7e/state").expect("group row");
+        let group = find_path(&flat, "zk2/host-a/tc/tc.netif.v1/state").expect("group row");
         assert!(matches!(
             row_press(group, &flat.arena),
             Message::Workspace(WorkspaceMsg::ToggleNode(_))
@@ -2649,27 +2674,14 @@ mod tests {
     /// pivots cannot resurrect an expansion that meant something else.
     #[test]
     fn pivot_expansion_paths_are_namespaced() {
-        let snap = snapshot(&["v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu"]);
-        let by_origin = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Origin,
-            &BTreeSet::new(),
-            "",
-            10_000,
-            Instant::now(),
-        );
-        let by_producer = pivot_flatten(
-            &snap,
-            "",
-            Pivot::Producer,
-            &BTreeSet::new(),
-            "",
-            10_000,
-            Instant::now(),
-        );
-        assert!(path_of(&by_origin, &by_origin.rows[0]).starts_with("pivot:origin:"));
-        assert!(path_of(&by_producer, &by_producer.rows[0]).starts_with("pivot:producer:"));
+        let snap = snapshot(&[POSITION]);
+        for p in [Pivot::System, Pivot::Address, Pivot::Iface, Pivot::Kind] {
+            let flat = pivot(&snap, "", p, "");
+            assert!(
+                path_of(&flat, &flat.rows[0]).starts_with(&format!("pivot:{}:", p.key())),
+                "{p}"
+            );
+        }
     }
 
     /// The soak numbers behind issue #65's acceptance: flatten, search and
@@ -2679,23 +2691,17 @@ mod tests {
     #[ignore = "soak bench — run explicitly, read the printed numbers"]
     fn soak_flatten_50k_keys() {
         let keys: Vec<String> = (0..50_000)
-            .map(|i| format!("v1/h-3fa9c2d41b7e/telemetry/synth/g{}/k{i}", i / 100))
+            .map(|i| {
+                format!(
+                    "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/g{}/k{i}",
+                    i / 100
+                )
+            })
             .collect();
         let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let snap = snapshot(&refs);
         // Everything expanded — the worst case the virtual window renders.
-        let mut all = BTreeSet::new();
-        for k in &refs {
-            let mut acc = String::new();
-            for chunk in k.split('/') {
-                acc = if acc.is_empty() {
-                    chunk.to_string()
-                } else {
-                    format!("{acc}/{chunk}")
-                };
-                all.insert(acc.clone());
-            }
-        }
+        let all = expand_all(&refs);
         let now = Instant::now();
 
         let t = Instant::now();
@@ -2717,9 +2723,9 @@ mod tests {
         );
 
         let t = Instant::now();
-        let piv = pivot_flatten(&snap, "", Pivot::Producer, &all, "", 60_000, now);
+        let piv = pivot_flatten(&snap, "", Pivot::Address, &all, "", 60_000, now);
         println!(
-            "pivot (producer):  {} rows in {:?}",
+            "pivot (address):   {} rows in {:?}",
             piv.rows.len(),
             t.elapsed()
         );

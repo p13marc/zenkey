@@ -45,13 +45,19 @@ pub struct LocationData<'a> {
     pub subject: &'a Subject,
 }
 
-/// One breadcrumb segment: what it says, and what clicking it selects.
+/// One breadcrumb segment: what it says, what clicking it selects, and what
+/// its chunk is.
 ///
 /// `select` is `None` for the final segment — the place the window already is
 /// — and `Some(Subject::Prefix(..))` for every ancestor.
 pub struct Segment {
     pub label: String,
     pub select: Option<Subject>,
+    /// The chunk's position in zk2's grammar (#614, FL7) — the tree's own
+    /// overlay ([`crate::view::tree::roles_of`]), so the trail and the tree
+    /// never name a chunk differently. `None` outside a zk2 path: a foreign
+    /// key, a v1 key, the namespace's own chunks.
+    pub role: Option<crate::view::tree::Role>,
 }
 
 /// The subject as breadcrumb segments. Pure, so the model is testable without
@@ -67,10 +73,11 @@ pub fn segments(subject: &Subject, namespace: &str) -> Vec<Segment> {
         Subject::Origin(o) => crate::scope::origin_display_path(namespace, o),
     };
     let chunks: Vec<&str> = path.split('/').collect();
+    let roles = crate::view::tree::roles_of(&path, namespace);
     let last = chunks.len() - 1;
     let mut out = Vec::with_capacity(chunks.len());
     let mut prefix = String::new();
-    for (i, chunk) in chunks.iter().enumerate() {
+    for (i, (chunk, role)) in chunks.iter().zip(roles).enumerate() {
         if !prefix.is_empty() {
             prefix.push('/');
         }
@@ -80,6 +87,7 @@ pub fn segments(subject: &Subject, namespace: &str) -> Vec<Segment> {
             // An ancestor selects its subtree — a Prefix, never a Key: a
             // breadcrumb click must not put a fetch on the wire (#85).
             select: (i < last).then(|| Subject::Prefix(prefix.clone())),
+            role,
         });
     }
     out
@@ -162,11 +170,20 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
                 trail = trail.push(kit::muted("/"));
             }
             trail = trail.push(match seg.select {
-                Some(subtree) => Element::from(
-                    kit::link(kit::caption(seg.label).font(face::MONO))
-                        .on_press(Message::Subject(SubjectMsg::Select(subtree)))
-                        .padding([0.0, space::XS]),
-                ),
+                Some(subtree) => {
+                    // The tip names the control: the chunk's zk2 position
+                    // and what a click selects (#614, FL7).
+                    let tip = match seg.role {
+                        Some(role) => format!("select {} {}'s subtree", role.label(), seg.label),
+                        None => format!("select {}'s subtree", seg.label),
+                    };
+                    kit::tip(
+                        kit::link(kit::caption(seg.label).font(face::MONO))
+                            .on_press(Message::Subject(SubjectMsg::Select(subtree)))
+                            .padding([0.0, space::XS]),
+                        tip,
+                    )
+                }
                 // The final chunk: where the window is — the one TITLE (#191).
                 None => kit::title(seg.label).font(face::MONO).into(),
             });
@@ -499,15 +516,15 @@ mod tests {
     /// breadcrumb click must not fetch (#85).
     #[test]
     fn ancestors_select_their_subtree_and_the_leaf_selects_nothing() {
-        let subject = Subject::Key("v1/h-a/telemetry/sysinfo/disk".into());
+        let subject = Subject::Key("zk2/robot1/nav/nav.v2/stream/position".into());
         let segs = segments(&subject, "");
         assert_eq!(
             segs.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(),
-            ["v1", "h-a", "telemetry", "sysinfo", "disk"]
+            ["zk2", "robot1", "nav", "nav.v2", "stream", "position"]
         );
         assert_eq!(
             segs[2].select,
-            Some(Subject::Prefix("v1/h-a/telemetry".into())),
+            Some(Subject::Prefix("zk2/robot1/nav".into())),
             "an ancestor selects the subtree up to itself"
         );
         assert!(
@@ -524,10 +541,44 @@ mod tests {
     /// A prefix subject reads the same way — its own last chunk is the place.
     #[test]
     fn a_prefix_subject_is_its_own_final_segment() {
-        let segs = segments(&Subject::Prefix("v1/h-a/state".into()), "");
+        let segs = segments(&Subject::Prefix("zk2/robot1/nav".into()), "");
         assert_eq!(segs.len(), 3);
         assert!(segs[2].select.is_none());
-        assert_eq!(segs[2].label, "state");
+        assert_eq!(segs[2].label, "nav");
+    }
+
+    /// #614 (FL7): the trail names each chunk's zk2 position, as the tree
+    /// does — the namespace's chunks and a foreign key's none.
+    #[test]
+    fn the_trail_carries_zk2_roles_and_foreign_keys_none() {
+        use crate::view::tree::Role;
+        let key = "spray/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+        let roles: Vec<_> = segments(&Subject::Key(key.into()), "spray")
+            .into_iter()
+            .map(|s| s.role)
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                None,
+                Some(Role::Grammar),
+                Some(Role::System),
+                Some(Role::Service),
+                Some(Role::Iface),
+                Some(Role::Kind),
+                Some(Role::Resource),
+                Some(Role::Resource),
+                Some(Role::Resource),
+            ]
+        );
+        for foreign in ["demo/example/foo", "v1/h-a/telemetry/sysinfo/disk"] {
+            assert!(
+                segments(&Subject::Key(foreign.into()), "")
+                    .iter()
+                    .all(|s| s.role.is_none()),
+                "{foreign} is labelled by nothing"
+            );
+        }
     }
 
     /// An origin is placed through the tree's own click-through path (#61),

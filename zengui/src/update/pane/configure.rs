@@ -44,7 +44,8 @@ pub(crate) fn update(form: &mut ConfigForm, msg: ConfigMsg, cx: Ctx<'_>) -> Task
         ConfigMsg::Goto(mut target) => {
             if target.resource.is_empty() {
                 let seen = crate::configure::observed_resources(
-                    &cx.dep.facts,
+                    cx.dep.identity.keys(),
+                    cx.dep.namespace(),
                     &target.origin,
                     &target.producer,
                 );
@@ -135,7 +136,8 @@ pub(crate) fn update(form: &mut ConfigForm, msg: ConfigMsg, cx: Ctx<'_>) -> Task
 /// The RESOURCE picker's offer for the current origin and producer.
 fn refresh_resources(form: &mut ConfigForm, cx: Ctx<'_>) {
     form.resources = crate::configure::observed_resources(
-        &cx.dep.facts,
+        cx.dep.identity.keys(),
+        cx.dep.namespace(),
         form.target.origin.trim(),
         form.target.producer.trim(),
     );

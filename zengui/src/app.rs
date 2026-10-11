@@ -411,7 +411,22 @@ impl Zengui {
                     .map(|r| (r.ring.len(), r.ring.evicted())),
                 keys: (self.obs.keys, self.obs.keys_evicted),
             },
-            self.dep.facts.keys(),
+            // Each observed key with its identity's rung (#614, FL7) —
+            // lazy, so only the jump-to overlay pays for the lookups — and
+            // a replay's own keys, resolved offline, while one runs.
+            {
+                let (identities, namespace) = self
+                    .work
+                    .replay
+                    .identities()
+                    .unwrap_or((&self.dep.identity, self.dep.namespace()));
+                identities.keys().map(move |k| {
+                    let rung = identities
+                        .get(k)
+                        .and_then(|r| crate::keyfacts::badged(k, namespace, &r.identity));
+                    (k, rung)
+                })
+            },
         ) {
             None => layout.into(),
             // Over a scrim (#537): the window dims behind the overlay, and

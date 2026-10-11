@@ -417,9 +417,15 @@ impl ThemeColors<'_> {
         }
     }
 
-    /// The registration badge scale (see [`crate::keyfacts::Registration`]).
-    /// The tri-state is only honest if the three states *look* different.
-    pub fn registration(&self, kind: RegistrationTone) -> Color {
+    /// The identity rung scale (#614, FL7; see [`crate::keyfacts::Rung`]):
+    /// resolved, short of it, broken, not asked and not applicable must
+    /// *look* different, or the ladder is one badge in five colours.
+    pub fn identity(&self, kind: IdentityTone) -> Color {
+        self.tone(kind.tone())
+    }
+
+    /// The population budget scale (#614, FL7; core §2.7).
+    pub fn budget(&self, kind: BudgetTone) -> Color {
         self.tone(kind.tone())
     }
 
@@ -488,7 +494,7 @@ impl ThemeColors<'_> {
 /// does not apply"), structurally its own slot — so an unanswered question can
 /// never borrow the swatch of "asked, and the answer was no". RFC 05 §3.1
 /// forbids exactly that false verdict, and the whole five-state
-/// [`crate::keyfacts::Registration`] exists to prevent it.
+/// identity ladder ([`crate::keyfacts::Rung`]) exists to prevent it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     /// A positive verdict, obtained: registered, alive, covered.
@@ -611,54 +617,110 @@ impl SeverityTone {
     }
 }
 
-/// How a registration state should read at a glance.
+/// How a key's identity should read at a glance (#614, FL7): the class of
+/// the rung zk2's ladder stopped at (O2), five of them for fourteen rungs —
+/// the word on the badge names the rung, the glyph and swatch its class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegistrationTone {
-    Registered,
-    Unregistered,
-    NoSlice,
-    Unknown,
-    NotApplicable,
+pub enum IdentityTone {
+    /// Resolved down to a resource of the contract: a "yes" obtained.
+    Resolved,
+    /// Asked, and resolution stopped short — no provider in presence, no
+    /// revision named, two named, no such member: a "no" obtained.
+    Short,
+    /// Asked, and what answered is broken — the contract unavailable or
+    /// unreadable, or no resource of it matching the key.
+    Broken,
+    /// Not asked: no presence read, the contract not looked for yet, the
+    /// decode switched off.
+    NotAsked,
+    /// The question does not apply: not a zk2 data key, or not this
+    /// deployment's.
+    Inapplicable,
 }
 
-impl RegistrationTone {
+impl IdentityTone {
     /// Every state of the scale, for the uniqueness tests.
     pub const ALL: [Self; 5] = [
-        Self::Registered,
-        Self::Unregistered,
-        Self::NoSlice,
-        Self::Unknown,
-        Self::NotApplicable,
+        Self::Resolved,
+        Self::Short,
+        Self::Broken,
+        Self::NotAsked,
+        Self::Inapplicable,
     ];
 
     /// The swatch this state resolves through. "Not asked" and "not
     /// applicable" are [`Tone::Neutral`] — never a verdict's swatch.
     pub fn tone(self) -> Tone {
         match self {
-            Self::Registered => Tone::Positive,
-            Self::Unregistered => Tone::Caution,
-            Self::NoSlice => Tone::Negative,
-            Self::Unknown | Self::NotApplicable => Tone::Neutral,
+            Self::Resolved => Tone::Positive,
+            Self::Short => Tone::Caution,
+            Self::Broken => Tone::Negative,
+            Self::NotAsked | Self::Inapplicable => Tone::Neutral,
         }
     }
 
     /// The badge glyph, carried by the type (#193): a filled dot is a "yes"
-    /// obtained, a hollow one a "no" obtained, ✗ a broken registry claim, and
-    /// the two non-verdicts get the CLI's not-asked marks — no call site can
+    /// obtained, a hollow one a "no" obtained, ✗ a broken answer, and the
+    /// two non-verdicts get the CLI's not-asked marks — no call site can
     /// omit a glyph or give two states the same one.
     pub fn glyph(self) -> &'static str {
         match self {
-            Self::Registered => "●",
-            Self::Unregistered => "○",
-            Self::NoSlice => "✗",
-            Self::Unknown => "·",
-            Self::NotApplicable => "—",
+            Self::Resolved => "●",
+            Self::Short => "○",
+            Self::Broken => "✗",
+            Self::NotAsked => "·",
+            Self::Inapplicable => "—",
+        }
+    }
+}
+
+/// How a population budget judgement should read (#614, FL7; core §2.7):
+/// the four answers `zenkey_model::budget` gives, never a boolean. The
+/// finding is the yes (`Exceeds`), and `Unobservable` — asked, and the
+/// window could not answer — is [`Tone::Neutral`] beside `NotAsked`, with
+/// a glyph of its own: neither is a verdict, and neither is the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetTone {
+    Exceeds,
+    Within,
+    Unobservable,
+    NotAsked,
+}
+
+impl BudgetTone {
+    /// Every state of the scale, for the uniqueness tests.
+    pub const ALL: [Self; 4] = [
+        Self::Exceeds,
+        Self::Within,
+        Self::Unobservable,
+        Self::NotAsked,
+    ];
+
+    /// The swatch this state resolves through: the finding a caution, as
+    /// the tree's over-budget badge always was.
+    pub fn tone(self) -> Tone {
+        match self {
+            Self::Exceeds => Tone::Caution,
+            Self::Within => Tone::Positive,
+            Self::Unobservable | Self::NotAsked => Tone::Neutral,
+        }
+    }
+
+    /// The badge glyph, carried by the type (#193): the CLI's ⚠ for the
+    /// finding, ✓ for a budget shown kept, `~` for a reading that could not
+    /// say, `·` for a question with no premise.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Self::Exceeds => "⚠",
+            Self::Within => "✓",
+            Self::Unobservable => "~",
+            Self::NotAsked => "·",
         }
     }
 }
 
 /// How a payload-conformance verdict should read (#164) — the same
-/// discipline as [`RegistrationTone`]: never a boolean, and `NotChecked` is
+/// discipline as [`IdentityTone`]: never a boolean, and `NotChecked` is
 /// [`Tone::Neutral`] because "not checked" must never wear an answer's
 /// swatch (RFC 09 §5.1 O4).
 ///
@@ -745,7 +807,7 @@ impl RungTone {
 }
 
 /// How a liveliness presence should read (#61) — same discipline as
-/// [`RegistrationTone`]: "unknown" must not look like a verdict.
+/// [`IdentityTone`]: "unknown" must not look like a verdict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresenceTone {
     Alive,
@@ -758,7 +820,7 @@ impl PresenceTone {
     pub const ALL: [Self; 3] = [Self::Alive, Self::Suspect, Self::Unknown];
 
     /// The swatch this state resolves through — "unknown" is
-    /// [`Tone::Neutral`], the same discipline as registration.
+    /// [`Tone::Neutral`], the same discipline as identity.
     pub fn tone(self) -> Tone {
         match self {
             Self::Alive => Tone::Positive,
@@ -805,17 +867,24 @@ mod tests {
         assert_eq!(mix(a, b, -1.0), a);
     }
 
-    /// The tri-state is only honest if the states are visually distinct.
+    /// The ladder is only honest if its classes are visually distinct.
     #[test]
-    fn registration_tones_are_distinguishable() {
+    fn identity_tones_are_distinguishable() {
         let theme = iced::Theme::Dark;
         let c = colors(&theme);
-        let registered = c.registration(RegistrationTone::Registered);
-        let unregistered = c.registration(RegistrationTone::Unregistered);
-        let unknown = c.registration(RegistrationTone::Unknown);
-        assert_ne!(registered, unregistered);
-        assert_ne!(unregistered, unknown);
-        assert_ne!(registered, unknown);
+        let resolved = c.identity(IdentityTone::Resolved);
+        let short = c.identity(IdentityTone::Short);
+        let broken = c.identity(IdentityTone::Broken);
+        let not_asked = c.identity(IdentityTone::NotAsked);
+        for (a, b) in [
+            (resolved, short),
+            (short, broken),
+            (resolved, broken),
+            (short, not_asked),
+            (resolved, not_asked),
+        ] {
+            assert_ne!(a, b);
+        }
     }
 
     /// #193's second acceptance: within one scale, no two states may share a
@@ -829,10 +898,8 @@ mod tests {
                 }
             }
         }
-        all_distinct(
-            "registration",
-            &RegistrationTone::ALL.map(RegistrationTone::glyph),
-        );
+        all_distinct("identity", &IdentityTone::ALL.map(IdentityTone::glyph));
+        all_distinct("budget", &BudgetTone::ALL.map(BudgetTone::glyph));
         all_distinct("presence", &PresenceTone::ALL.map(PresenceTone::glyph));
         all_distinct("severity", &SeverityTone::ALL.map(SeverityTone::glyph));
         all_distinct("coverage", &CoverageTone::ALL.map(CoverageTone::glyph));
@@ -869,8 +936,9 @@ mod tests {
     }
 
     /// "Not asked" must not share a swatch with any verdict (#193): `Neutral`
-    /// is its own slot in [`Tone`], and both not-asked registration states
-    /// resolve there — never to `Unregistered`'s caution.
+    /// is its own slot in [`Tone`], and both non-verdict identity classes
+    /// resolve there — never to `Short`'s caution — as does a budget the
+    /// window could not judge.
     #[test]
     fn not_asked_never_shares_a_swatch_with_a_verdict() {
         for theme in [iced::Theme::Light, iced::Theme::Dark] {
@@ -878,12 +946,20 @@ mod tests {
             for verdict in [Tone::Positive, Tone::Caution, Tone::Negative] {
                 assert_ne!(c.tone(Tone::Neutral), c.tone(verdict));
             }
-            for not_asked in [RegistrationTone::Unknown, RegistrationTone::NotApplicable] {
+            for not_asked in [IdentityTone::NotAsked, IdentityTone::Inapplicable] {
                 assert_eq!(not_asked.tone(), Tone::Neutral);
                 assert_ne!(
-                    c.registration(not_asked),
-                    c.registration(RegistrationTone::Unregistered),
+                    c.identity(not_asked),
+                    c.identity(IdentityTone::Short),
                     "not asked must not read as 'asked, and the answer was no'"
+                );
+            }
+            for unanswered in [BudgetTone::Unobservable, BudgetTone::NotAsked] {
+                assert_eq!(unanswered.tone(), Tone::Neutral);
+                assert_ne!(
+                    c.budget(unanswered),
+                    c.budget(BudgetTone::Within),
+                    "a budget nobody could judge must not read as kept"
                 );
             }
         }

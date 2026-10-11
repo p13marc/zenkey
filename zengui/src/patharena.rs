@@ -232,10 +232,10 @@ mod tests {
     #[test]
     fn a_synthetic_pivot_chunk_displays_verbatim() {
         let mut arena = PathArena::new();
-        let root = arena.chunk("pivot:origin:@catalog");
+        let root = arena.chunk("pivot:address:robot1/nav");
         let state = arena.chunk("state");
         let top = arena.node(None, root);
         let deep = arena.node(Some(top), state);
-        assert_eq!(arena.display(deep), "pivot:origin:@catalog/state");
+        assert_eq!(arena.display(deep), "pivot:address:robot1/nav/state");
     }
 }
