@@ -233,9 +233,10 @@ impl futures_core::Stream for SeededSubscriber {
 ///   S3) is a sample like any other, and merges the same way: never
 ///   dropped, never mistaken for an absence.
 /// - Stamped beats unstamped; unstamped against unstamped passes through.
-///   An owner stamps every mutation (S1), so an unstamped sample is a
-///   foreign key's, and a deployment without timestamping has opted out of
-///   last-writer-wins: suppressing would be guessing.
+///   An owner stamps every mutation (S1), so an unstamped sample is no
+///   conforming owner's: a foreign key's, on a deployment without
+///   timestamping that has opted out of last-writer-wins, where
+///   suppressing would be guessing.
 ///
 /// Every suppression is counted ([`SeedCoverage::superseded`]).
 ///
