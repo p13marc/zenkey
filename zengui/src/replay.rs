@@ -23,14 +23,108 @@
 //! rates included — is deterministic in the rows alone, which is what lets
 //! a retained scrub and a file replay of the same traffic yield
 //! byte-identical panes (#217's acceptance).
+//!
+//! **A replay resolves through an offline lens** (#614, FL10b; the tooling
+//! guide's O4): the capture's namespace and the contracts held offline, and
+//! no presence read. The live catalog describes the world the window is
+//! connected to now, not the one the capture was taken in — so the tree's
+//! declared half, the payload verdicts and an exported row's identity are
+//! all read through [`ReplayLens`], never through the deployment's lens.
+//!
+//! **What a row did not record is not shown as observed.** A version-1 or
+//! -2 `.zrec` row named a v1 QoS profile, which zk2 does not read; such a
+//! row carries no wire axes, and the panes say "QoS not recorded" for it
+//! rather than showing the defaults its view must carry.
 
+use std::collections::HashSet;
 use std::io::BufRead;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::{MonitorCore, RetentionStats, SampleView, ZrecHeader, ZrecItem, ZrecReader};
+use zenkey_fleet::{
+    BundleStore, ContractSet, MonitorCore, RetentionStats, SampleView, Skeleton, WireQos,
+    ZrecHeader, ZrecItem, ZrecReader,
+};
 
 use crate::message::BusTick;
+
+/// What a replay resolves keys through (#614, FL10b): its own namespace and
+/// the contracts held offline, with **no** presence read — a lens over
+/// another world than the live one (O4). Its skeleton is the tree's
+/// declared half while the replay runs.
+#[derive(Clone)]
+pub struct ReplayLens {
+    /// The capture's namespace (a file's header `base`), or the live one
+    /// for the retained window, which is this deployment's own traffic.
+    pub namespace: String,
+    /// The revisions held offline (`--contracts`); empty when none are.
+    pub contracts: Arc<ContractSet>,
+    /// Never consulted: without a presence read the lens resolves each
+    /// interface by the one revision held offline. A lens is built over a
+    /// store all the same.
+    store: BundleStore,
+    /// The declared keyspace from this lens alone — every revision held
+    /// under a symbolic `{system}/{service}`, nothing placed by presence.
+    pub skeleton: Arc<Skeleton>,
+}
+
+impl std::fmt::Debug for ReplayLens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplayLens")
+            .field("namespace", &self.namespace)
+            .field("contracts", &self.contracts.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ReplayLens {
+    /// The offline lens over `namespace` and `contracts`, and its skeleton.
+    pub fn offline(namespace: &str, contracts: Option<Arc<ContractSet>>) -> ReplayLens {
+        let contracts: Arc<ContractSet> = contracts.unwrap_or_default();
+        let store = BundleStore::new(Duration::from_secs(1));
+        // The admin space is the live world's too: not an input here.
+        let skeleton = Arc::new(Skeleton::build(
+            &zenkey_fleet::Lens::new(namespace, None, &store)
+                .offline(&contracts)
+                .held(contracts.len()),
+            None,
+        ));
+        ReplayLens {
+            namespace: namespace.to_owned(),
+            contracts,
+            store,
+            skeleton,
+        }
+    }
+
+    /// The lens: catalog `None`, the offline contracts.
+    pub fn lens(&self) -> zenkey_fleet::Lens<'_> {
+        zenkey_fleet::Lens::new(&self.namespace, None, &self.store)
+            .offline(&self.contracts)
+            .held(self.contracts.len())
+    }
+
+    /// The same lens, owned, for a task: no catalog, no feed to nudge.
+    pub fn inputs(&self) -> crate::services::value::LensInputs {
+        crate::services::value::LensInputs {
+            namespace: self.namespace.clone(),
+            catalog: None,
+            store: self.store.clone(),
+            contracts: Some(Arc::clone(&self.contracts)),
+            generation: 0,
+            feed: None,
+        }
+    }
+}
+
+/// What the panes say of a replayed row that recorded no wire axes (#614,
+/// FL10b): a version-1 or -2 `.zrec` named a v1 profile, which zk2 does
+/// not read — so nothing was recorded a zk2 reader can show.
+pub const QOS_NOT_RECORDED: &str = "QoS not recorded";
+
+/// Mints each replay's id: a verdict batch carries it home, so a batch
+/// checked for one replay lands in no other, and none after the replay ends.
+static NEXT_REPLAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// How many samples one synthesized tick hands the panes — the same cap as
 /// the live pump, for the same reason (an echo pane cannot render 10k
@@ -41,6 +135,10 @@ const BATCH_CAP: usize = 512;
 pub struct ReplayRow {
     pub t_us: u64,
     pub view: Arc<SampleView>,
+    /// Whether the row recorded its wire axes (`.zrec` v3's `qos_axes`).
+    /// When it did not, the view's axes are zenoh's defaults and are never
+    /// shown as observed (#614, FL10b).
+    pub qos_recorded: bool,
 }
 
 /// A parsed [`ReplayState`] in transit from the load task to its handler
@@ -149,30 +247,28 @@ pub struct ReplayState {
     /// different "now" from each rebuild's HLCs (RFC 09 §5.2's two-clocks
     /// rule, applied to the second clock).
     wall_epoch: std::time::SystemTime,
+    /// This replay's id ([`NEXT_REPLAY`]): what its verdict batches carry.
+    pub(crate) id: u64,
+    /// What this replay resolves keys through (#614, FL10b): offline, no
+    /// presence read. Built with no contracts at load; the landing gives it
+    /// the window's ([`ReplayState::resolve_offline`]).
+    pub lens: ReplayLens,
+    /// Rows that recorded no wire axes — a version-1 or -2 file's, whose v1
+    /// profile names zk2 does not read: "QoS not recorded", counted.
+    pub qos_unrecorded: u64,
+    /// The views of those rows, by allocation: the replay holds every row's
+    /// `Arc` for its whole life, so an address names one row exactly. What
+    /// [`ReplayState::qos_recorded`] answers from.
+    unrecorded: HashSet<usize>,
 }
 
-/// A row's recorded wire axes (`.zrec` v3's `qos_axes`, #614), for display
-/// in the panes. A row that recorded none — every version-1 and -2 row,
-/// whose v1 profile name zk2 does not read — shows the middle of the road:
-/// the panes render what the file knows, and the file said nothing a zk2
-/// reader can use (FL10b names it "QoS not recorded").
-fn axes(
-    qos: Option<zenkey_fleet::WireQos>,
-) -> (
-    zenoh::qos::Priority,
-    zenoh::qos::CongestionControl,
-    zenoh::qos::Reliability,
-    bool,
-) {
-    match qos {
-        Some(q) => (q.priority, q.congestion, q.reliability, q.express),
-        None => (
-            zenoh::qos::Priority::Data,
-            zenoh::qos::CongestionControl::Drop,
-            zenoh::qos::Reliability::BestEffort,
-            false,
-        ),
-    }
+/// A row's recorded wire axes (`.zrec` v3's `qos_axes`, #614). A row that
+/// recorded none — every version-1 and -2 row, whose v1 profile name zk2
+/// does not read — carries zenoh's defaults in its view, because a view
+/// must carry some; the row is marked, and the panes say "QoS not recorded"
+/// for it (FL10b), never these.
+fn axes(qos: Option<WireQos>) -> WireQos {
+    qos.unwrap_or(WireQos::DEFAULT)
 }
 
 impl ReplayState {
@@ -213,11 +309,13 @@ impl ReplayState {
             if preamble {
                 preamble_rows += 1;
             }
-            let (priority, congestion_control, reliability, express) = axes(row.qos_axes);
+            let qos_recorded = row.qos_axes.is_some();
+            let q = axes(row.qos_axes);
             // A row without `t` (hand-piped ndjson) sits at the
             // previous row's instant: no pacing claim invented.
             let t_prev = rows.last().map_or(0, |r: &ReplayRow| r.t_us);
             rows.push(ReplayRow {
+                qos_recorded,
                 t_us: t_us.unwrap_or(t_prev),
                 view: Arc::new(SampleView {
                     key: row.key,
@@ -235,17 +333,26 @@ impl ReplayState {
                     timestamp: None,
                     stamped_by: None,
                     attachment: row.attachment.map(zenoh::bytes::ZBytes::from),
-                    priority,
-                    congestion_control,
-                    reliability,
-                    express,
+                    priority: q.priority,
+                    congestion_control: q.congestion,
+                    reliability: q.reliability,
+                    express: q.express,
                     source: None,
                     received: loaded_at,
                 }),
             });
         }
         let span_us = rows.last().map_or(0, |r| r.t_us);
+        let unrecorded: HashSet<usize> = rows
+            .iter()
+            .filter(|r| !r.qos_recorded)
+            .map(|r| Arc::as_ptr(&r.view) as usize)
+            .collect();
         Ok(ReplayState {
+            id: NEXT_REPLAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            lens: ReplayLens::offline(&header.base, None),
+            qos_unrecorded: unrecorded.len() as u64,
+            unrecorded,
             watched: Arc::from(header.selectors.clone()),
             source: ReplaySource::File {
                 path: path.to_string(),
@@ -306,10 +413,18 @@ impl ReplayState {
                 t_us: u64::try_from(view.received.saturating_duration_since(epoch).as_micros())
                     .unwrap_or(u64::MAX),
                 view: Arc::clone(view),
+                // Live traffic: zenoh stamps every sample with its axes.
+                qos_recorded: true,
             })
             .collect();
         let span_us = rows.last().map_or(0, |r| r.t_us);
         ReplayState {
+            id: NEXT_REPLAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            // The live namespace and no contracts until the landing gives
+            // the window's (`resolve_offline`).
+            lens: ReplayLens::offline("", None),
+            qos_unrecorded: 0,
+            unrecorded: HashSet::new(),
             watched,
             source: ReplaySource::Retained { taken },
             rows,
@@ -414,6 +529,24 @@ impl ReplayState {
     pub fn clock(&self) -> (f64, f64) {
         (self.position_us as f64 / 1e6, self.span_us as f64 / 1e6)
     }
+
+    /// Resolve this replay offline (#614, FL10b): through the contracts the
+    /// window holds, in the capture's namespace — a file's header `base`, or
+    /// `live_namespace` for the retained window — and no presence read.
+    pub fn resolve_offline(&mut self, live_namespace: &str, contracts: Option<Arc<ContractSet>>) {
+        let namespace = match &self.source {
+            ReplaySource::File { header, .. } => header.base.clone(),
+            ReplaySource::Retained { .. } => live_namespace.to_owned(),
+        };
+        self.lens = ReplayLens::offline(&namespace, contracts);
+    }
+
+    /// Whether `view`'s row recorded its wire axes: `false` for a row a
+    /// version-1 or -2 file wrote, whose axes the panes must not show as
+    /// observed. Any view this replay did not load answers `true`.
+    pub fn qos_recorded(&self, view: &Arc<SampleView>) -> bool {
+        !self.unrecorded.contains(&(Arc::as_ptr(view) as usize))
+    }
 }
 
 #[cfg(test)]
@@ -480,6 +613,72 @@ mod tests {
         let _ = state.advance(std::time::Duration::from_secs(1));
         assert!(!state.playing, "4s of capture in a 1s step at 4x = done");
         assert_eq!(state.position_us, state.span_us);
+    }
+
+    /// A version-1 or -2 row named a v1 profile, which zk2 does not read: it
+    /// recorded no wire axes, and the replay says so of it by row — while a
+    /// version-3 row's `qos_axes` ride its view (#614, FL10b).
+    #[test]
+    fn a_row_without_wire_axes_is_qos_not_recorded() {
+        let v1 = fixture();
+        let state = ReplayState::load("f.zrec", v1.as_bytes()).unwrap();
+        assert_eq!(state.qos_unrecorded, 4, "no v1 row recorded wire axes");
+        assert!(state.rows.iter().all(|r| !r.qos_recorded));
+        assert!(state.rows.iter().all(|r| !state.qos_recorded(&r.view)));
+
+        let v3 = [
+            r#"{"zrec":3,"selectors":["**"],"base":"","captured_at":"x","excluded":["@stream"]}"#,
+            r#"{"key":"demo/a","t":0,"bytes":"MQ==","qos_axes":"real_time/block/reliable+express"}"#,
+            r#"{"key":"demo/b","t":1,"bytes":"Mg=="}"#,
+        ]
+        .join("\n");
+        let state = ReplayState::load("g.zrec", v3.as_bytes()).unwrap();
+        assert_eq!(state.qos_unrecorded, 1, "the hand-piped row recorded none");
+        let a = &state.rows[0];
+        assert!(a.qos_recorded && state.qos_recorded(&a.view));
+        assert_eq!(a.view.priority, zenoh::qos::Priority::RealTime);
+        assert!(a.view.express);
+        assert!(!state.qos_recorded(&state.rows[1].view));
+        // A view the replay never loaded is not one of its rows.
+        let stranger = Arc::new((*a.view).clone());
+        assert!(state.qos_recorded(&stranger));
+    }
+
+    /// A replay resolves offline (#614, FL10b): no presence read behind its
+    /// lens or its skeleton, the capture's own namespace, the contracts the
+    /// window holds — every revision under a symbolic `{system}/{service}`.
+    #[test]
+    fn a_replay_resolves_through_an_offline_lens() {
+        let f = [
+            r#"{"zrec":3,"selectors":["**"],"base":"spray","captured_at":"x","excluded":[]}"#,
+            r#"{"key":"spray/zk2/robot1/nav/nav.v2/stream/position","t":0,"bytes":"","qos_axes":"data/drop/reliable"}"#,
+        ]
+        .join("\n");
+        let mut state = ReplayState::load("h.zrec", f.as_bytes()).unwrap();
+        assert!(state.lens.lens().catalog().is_none());
+        assert_eq!(
+            state.lens.skeleton.coverage.revisions, 0,
+            "no contracts yet"
+        );
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+        let (set, _) = ContractSet::load_path(&dir);
+        let held = set.len();
+        state.resolve_offline("live-namespace", Some(Arc::new(set)));
+        assert_eq!(state.lens.namespace, "spray", "the capture's namespace");
+        assert!(state.lens.lens().catalog().is_none());
+        let coverage = &state.lens.skeleton.coverage;
+        assert!(coverage.presence.is_none(), "no presence read");
+        assert_eq!(coverage.revisions, held);
+        assert_eq!(
+            coverage.admin_entities, None,
+            "the admin space is not asked"
+        );
+        let identity = state
+            .lens
+            .lens()
+            .identity("spray/zk2/robot1/nav/nav.v2/stream/position");
+        assert!(identity.unresolved.is_none(), "{identity:?}");
     }
 
     /// A malformed line is counted, and the rest of the file still loads.

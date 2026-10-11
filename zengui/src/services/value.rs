@@ -130,6 +130,19 @@ pub fn validate(
     lens: LensInputs,
     batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
 ) -> Task<Message> {
+    validate_then(lens, batch, |out| {
+        Message::Bus(crate::message::BusMsg::VerdictsChecked(out))
+    })
+}
+
+/// [`validate`], landing wherever `land` says: a replay checks its ticks
+/// through its own offline lens and lands them on its own message, keyed by
+/// the replay (#614, FL10b), so neither world's verdicts land in the other.
+pub fn validate_then(
+    lens: LensInputs,
+    batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
+    land: impl FnOnce(Vec<(String, zenkey_fleet::report::Conformance)>) -> Message + Send + 'static,
+) -> Task<Message> {
     Task::perform(
         async move {
             let over = lens.lens();
@@ -143,7 +156,7 @@ pub fn validate(
             }
             out
         },
-        |out| Message::Bus(crate::message::BusMsg::VerdictsChecked(out)),
+        land,
     )
 }
 

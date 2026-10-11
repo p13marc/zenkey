@@ -33,8 +33,9 @@ pub(crate) fn apply_tick(
     // rung beside `shape_held`'s two (#614, FL6b): the skeleton the shape
     // was merged from — a declared-only node is shape, and a lens move
     // rebuilds the skeleton without moving a single key.
+    // The skeleton is a replay's own while one runs (FL10b).
     let held = shape_held((&*obs).into(), tick.into(), &obs.watched, &tick.watched)
-        && tree.merged_from(dep.skeleton.as_ref());
+        && tree.merged_from(tree.skeleton(dep));
     // Per tick, not per frame: one bounded lock per *slot* for its key's
     // latency summary (#119, #257 — the fan-out is bounded by the pin
     // count, not the bus). None when unselected, unobserved, or unstamped.
@@ -107,6 +108,13 @@ pub(crate) fn apply_tick(
             dep.ensure_identity(&sample.key);
         }
         work.echo.echo.push(sample);
+        // A replayed row that recorded no wire axes (a version-1/2 `.zrec`,
+        // FL10b) is recorded as such: its view's axes are not observed.
+        let qos_recorded = work
+            .replay
+            .replay
+            .as_ref()
+            .is_none_or(|r| r.qos_recorded(sample));
         // History is per-key and costs no subscription of its own: these
         // samples are already flowing for an existing watch (issue #63).
         // Every slot's recorder is fed from this one stream (#257) — a pin
@@ -114,7 +122,7 @@ pub(crate) fn apply_tick(
         // recorder keeps only its own key's samples.
         for slot in sub.all_mut() {
             if let Some(rec) = slot.history.as_mut() {
-                rec.observe(sample);
+                rec.observe_qos(sample, qos_recorded);
             }
         }
         // The media viewer's frames arrive on the exact key it watches
@@ -359,10 +367,17 @@ pub(crate) fn update(
             // Live ticks only, deliberately: replay feeds `apply_tick` from
             // a file (`update/pane/replay.rs`) and never reaches this arm —
             // validating file data against a live bus would put one world's
-            // verdicts under the other's data (O4 in miniature).
+            // verdicts under the other's data (O4 in miniature). A replay
+            // validates through its own offline lens instead (FL10b).
             schedule_validation(dep, work, &tick)
         }
         BusMsg::VerdictsChecked(batch) => {
+            // A live batch landing while a replay runs is the live world's
+            // (FL10b): the cache holds the capture's verdicts, checked
+            // offline, and lands those on the replay's own message.
+            if work.replay.replay.is_some() {
+                return Task::none();
+            }
             // The bounded validation batch lands (#164): render paths only
             // ever look these up.
             for (key, verdict) in batch {
@@ -391,7 +406,7 @@ pub(crate) fn update(
 /// the badges filled in a different order every launch, and no test could pin
 /// any of it. The keys go in the order the bus delivered them, and only the
 /// payload each carries is the newest one the tick holds.
-fn validation_batch(
+pub(crate) fn validation_batch(
     samples: &[Arc<zenkey_fleet::SampleView>],
     cache: &crate::verdict::VerdictCache,
 ) -> Vec<(String, String, zenoh::bytes::ZBytes)> {

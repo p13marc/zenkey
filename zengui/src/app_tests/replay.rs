@@ -80,7 +80,7 @@ fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
     }
     let mut app_a = test_app();
     app_a.obs.watched = StdArc::clone(&watched);
-    update::pane::replay::enter_retained(
+    let _ = update::pane::replay::enter_retained(
         &mut app_a.dep,
         &mut app_a.obs,
         &mut app_a.sub,
@@ -288,7 +288,7 @@ fn the_retained_window_is_replay_mode_with_all_its_locks() {
         core.ingest(v, None);
     }
     let mut app = test_app();
-    update::pane::replay::enter_retained(
+    let _ = update::pane::replay::enter_retained(
         &mut app.dep,
         &mut app.obs,
         &mut app.sub,
@@ -339,7 +339,7 @@ fn replay_forbids_publishing_and_recording_in_every_window() {
     let _ = app.update(Message::Workspace(WorkspaceMsg::LayoutPreset(
         LayoutPreset::Watch,
     )));
-    update::pane::replay::enter_retained(
+    let _ = update::pane::replay::enter_retained(
         &mut app.dep,
         &mut app.obs,
         &mut app.sub,
@@ -371,6 +371,43 @@ fn replay_forbids_publishing_and_recording_in_every_window() {
         app.work.replay.recording.is_none(),
         "replay has nothing live to capture, whichever window asks"
     );
+
+    // Publishing is the same lock (#614, FL10): a publish, a tombstone and a
+    // call from the Send pane — reachable from a torn Workbench too — are
+    // refused, the form says why, and no task is started.
+    use crate::message::PaneMsg;
+    use crate::view::send::{REPLAY_LOCK, SendMsg};
+    let _ = app.update(Message::Workspace(WorkspaceMsg::PaneSelected(
+        crate::message::RightPane::Send,
+    )));
+    let _ = app.update(Message::Workspace(WorkspaceMsg::TearOff(
+        DockRole::Workbench,
+    )));
+    app.work.bench.send_form.key = "demo/example/foo".into();
+    app.work.bench.send_form.retire_i_know = true;
+    for msg in [SendMsg::Send, SendMsg::Retire] {
+        let task = app.update(Message::Pane(PaneMsg::Send(msg.clone())));
+        assert_eq!(task.units(), 0, "{msg:?}: nothing was started in replay");
+        let form = &app.work.bench.send_form;
+        assert!(!form.in_flight, "{msg:?}");
+        assert_eq!(
+            form.error.as_ref().map(ToString::to_string),
+            Some(format!("refused: {REPLAY_LOCK}")),
+            "{msg:?}"
+        );
+    }
+    let task = app.update(Message::Pane(PaneMsg::Send(SendMsg::Submit)));
+    assert_eq!(task.units(), 0, "a call starts nothing in replay");
+    // The pane says so in the torn Workbench window.
+    let bench = app.work.windows.window_of(DockRole::Workbench).unwrap();
+    {
+        use iced_test::simulator;
+        let mut ui = simulator::<Message, _, _>(app.view(bench));
+        assert!(
+            ui.find(REPLAY_LOCK).is_ok(),
+            "the lock is said where the send is"
+        );
+    }
 
     // And the banner that says so renders in the torn window too: a replayed
     // Echo stream on the second monitor must not look live.
@@ -410,4 +447,237 @@ fn a_recording_is_a_status_not_an_alarm() {
         .is_ok(),
         "the Replay tab says where it is writing"
     );
+}
+
+/// Open `file` as a replay, through the landing the load task sends; the
+/// task it returns is the first tick's offline check.
+fn open_replay(app: &mut Zengui, file: &[u8]) -> iced::Task<Message> {
+    use crate::view::replay::ReplayMsg;
+    let state = crate::replay::ReplayState::load("t.zrec", file).expect("a capture");
+    app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Loaded("t.zrec".into(), Ok(crate::replay::LoadedReplay::new(state))),
+    )))
+}
+
+/// Scrub the replay to `t_us`.
+fn scrub(app: &mut Zengui, t_us: u64) -> iced::Task<Message> {
+    app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        crate::view::replay::ReplayMsg::Scrubbed(t_us),
+    )))
+}
+
+/// A version-1 or -2 row named a v1 QoS profile, which zk2 does not read
+/// (#614, FL10b): the Inspector says "QoS not recorded" of it where FL6b
+/// showed default axes, and draws no verdict — while a version-3 row's
+/// recorded axes are shown as observed.
+#[test]
+fn a_v1_or_v2_file_reads_qos_not_recorded() {
+    use iced_test::simulator;
+    let select = |app: &mut Zengui, key: &str| {
+        let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+            key.into(),
+        ))));
+    };
+
+    let v2 = [
+        r#"{"zrec":2,"selectors":["demo/**"],"base":"","captured_at":"x"}"#,
+        r#"{"key":"demo/a","t":0,"bytes":"MQ==","qos":"sampled"}"#,
+        r#"{"key":"demo/a","t":500000,"bytes":"Mg==","qos":"sampled"}"#,
+    ]
+    .join("\n");
+    let mut app = test_app();
+    let _ = open_replay(&mut app, v2.as_bytes());
+    // The recorder starts at the selection: the next row feeds it.
+    select(&mut app, "demo/a");
+    let _ = scrub(&mut app, 500_000);
+    let entry = app
+        .sub
+        .follow
+        .history
+        .as_ref()
+        .unwrap()
+        .ring
+        .newest()
+        .cloned();
+    assert!(
+        entry.as_ref().is_some_and(|e| !e.qos_recorded),
+        "the row recorded no axes"
+    );
+    let mut ui = simulator::<Message, _, _>(app.view(iced::window::Id::unique()));
+    assert!(ui.find(crate::replay::QOS_NOT_RECORDED).is_ok());
+    assert!(
+        ui.find(zenkey_fleet::WireQos::DEFAULT.token().as_str())
+            .is_err(),
+        "the view's default axes are not shown as observed"
+    );
+
+    let v3 = [
+        r#"{"zrec":3,"selectors":["demo/**"],"base":"","captured_at":"x","excluded":["@stream","@state","@op","@zk","@adv"]}"#,
+        r#"{"key":"demo/a","t":0,"bytes":"MQ==","qos_axes":"real_time/block/reliable"}"#,
+        r#"{"key":"demo/a","t":500000,"bytes":"Mg==","qos_axes":"real_time/block/reliable"}"#,
+    ]
+    .join("\n");
+    let mut app = test_app();
+    let _ = open_replay(&mut app, v3.as_bytes());
+    select(&mut app, "demo/a");
+    let _ = scrub(&mut app, 500_000);
+    let mut ui = simulator::<Message, _, _>(app.view(iced::window::Id::unique()));
+    assert!(ui.find("real_time/block/reliable").is_ok());
+    assert!(ui.find(crate::replay::QOS_NOT_RECORDED).is_err());
+}
+
+/// A replay resolves offline, never through the live catalog (#614, FL10b;
+/// O4). The window's catalog names `robot1/nav` as a provider of `nav.v2`
+/// from its tokens alone — no descriptor names a revision — so the live lens
+/// stops a `robot1/nav` key at `NoRevision`. A capture of that key replays
+/// through the offline lens instead: the tree merges against a skeleton with
+/// no presence read, the live verdict is dropped, the replayed tick is
+/// checked through the one revision held offline and lands valid, a live
+/// batch landing meanwhile is not recorded, and leaving gives the tree back
+/// to the deployment's skeleton.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replay_resolves_offline_never_through_the_live_catalog() {
+    use zenkey_fleet::report::Conformance;
+    use zenkey_model::grammar::{Addr, IfaceId, InstanceId, alive_key, instance_key};
+
+    let mut app = test_app();
+    let walkthrough =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+    let loaded = crate::services::contracts::load_all(&[walkthrough]);
+    let iface: IfaceId = "nav.v2".parse().unwrap();
+    let revision = loaded.set.of_iface(&iface).next().unwrap().clone();
+    let _ = app.update(Message::Bus(crate::message::BusMsg::ContractsLoaded(
+        Arc::new(loaded),
+    )));
+
+    // The live world: robot1/nav's tokens, no descriptor.
+    let addr: Addr = "robot1/nav".parse().unwrap();
+    let instance = InstanceId::from_u64(1);
+    let keys = vec![
+        instance_key(&addr, &instance).unwrap().to_string(),
+        alive_key(
+            &addr,
+            &iface,
+            &instance,
+            &revision.fingerprint().hex().fp16(),
+        )
+        .unwrap()
+        .to_string(),
+    ];
+    let observed = zenkey_fleet::model::catalog::Observed::from_keys("zk2/*/*/@zk/**", &keys, true);
+    app.dep.catalog = Some(Arc::new(zenkey_fleet::Catalog::new(&observed)));
+    app.dep.refresh_skeleton();
+
+    let key = "zk2/robot1/nav/nav.v2/stream/position";
+    let resource = revision
+        .contract()
+        .resources
+        .iter()
+        .find(|r| r.template.as_str() == "position")
+        .unwrap();
+    let payload = zenkey_fleet::Synth::new(7)
+        .sample(&revision, resource, zenkey_fleet::Member::Type, 0)
+        .unwrap()
+        .bytes;
+    let live = app.dep.lens_inputs().lens().check(
+        key,
+        zenkey_fleet::Member::Type,
+        Some("application/protobuf"),
+        &payload,
+    );
+    assert_eq!(
+        live.identity.unresolved,
+        Some(zenkey_fleet::report::Unresolved::NoRevision),
+        "the live lens stops at the catalog"
+    );
+    app.work
+        .verdicts
+        .payloads
+        .record(key, live.conformance.clone());
+
+    // The capture: that key's sample, saved as a version-3 file.
+    let epoch = std::time::Instant::now();
+    let view = Arc::new(zenkey_fleet::SampleView {
+        key: key.into(),
+        payload: zenoh::bytes::ZBytes::from(payload.clone()),
+        encoding: "application/protobuf".into(),
+        kind: zenoh::sample::SampleKind::Put,
+        timestamp: None,
+        stamped_by: None,
+        attachment: None,
+        priority: zenoh::qos::Priority::DEFAULT,
+        congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+        reliability: zenoh::qos::Reliability::DEFAULT,
+        express: false,
+        source: None,
+        received: epoch,
+    });
+    let mut file = Vec::new();
+    crate::services::record::write_window(
+        &[view],
+        epoch,
+        vec!["**".into()],
+        String::new(),
+        &mut file,
+    )
+    .unwrap();
+    let check = open_replay(&mut app, &file);
+
+    // The tree merges against the replay's own skeleton: no presence read.
+    let skeleton = app.tree.replay_skeleton.clone().expect("a replay skeleton");
+    assert!(skeleton.coverage.presence.is_none(), "no presence read");
+    assert!(
+        app.dep
+            .skeleton
+            .as_ref()
+            .is_some_and(|s| s.coverage.presence.is_some()),
+        "the live skeleton read presence"
+    );
+    assert!(app.tree.merged_from(Some(&skeleton)));
+    assert!(
+        app.work.verdicts.payloads.get(key).is_none(),
+        "the live verdict describes another world, and went"
+    );
+    {
+        use iced_test::simulator;
+        let mut ui = simulator::<Message, _, _>(app.view(iced::window::Id::unique()));
+        assert!(
+            ui.find(crate::view::status::skeleton_text(Some(&skeleton.coverage)).as_str())
+                .is_ok(),
+            "the strip states the replay's skeleton"
+        );
+        let note = crate::view::replay::lens_note(app.work.replay.replay.as_ref().unwrap());
+        assert!(
+            note.starts_with("resolved offline: 7 revisions held"),
+            "{note}"
+        );
+        assert!(
+            ui.find(note.as_str()).is_ok(),
+            "the banner says how the replay resolves"
+        );
+    }
+
+    // The replayed tick is checked offline, and lands valid.
+    drive(&mut app, check).await;
+    assert_eq!(
+        app.work.verdicts.payloads.get(key).map(|v| &v.verdict),
+        Some(&Conformance::Valid),
+        "resolved through the one revision held offline, never the catalog"
+    );
+    // A live batch landing meanwhile is the live world's: not recorded.
+    let _ = app.update(Message::Bus(crate::message::BusMsg::VerdictsChecked(vec![
+        (key.into(), live.conformance.clone()),
+    ])));
+    assert_eq!(
+        app.work.verdicts.payloads.get(key).map(|v| &v.verdict),
+        Some(&Conformance::Valid)
+    );
+
+    // Leaving hands the tree back to the deployment's skeleton, and the
+    // capture's verdicts go.
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        crate::view::replay::ReplayMsg::Exit,
+    )));
+    assert!(app.tree.replay_skeleton.is_none());
+    assert!(app.work.verdicts.payloads.get(key).is_none());
 }

@@ -174,6 +174,15 @@ pub const ALL: &[Scene] = &[
         build: publish_log,
         landmark: "send log — 4 entries",
     },
+    // A version-2 capture replayed (#614, FL10b): its rows named v1 QoS
+    // profiles, which zk2 does not read — "QoS not recorded", in the banner
+    // and in the Inspector, where FL6b showed default axes.
+    Scene {
+        name: "replay-v2",
+        size: DESKTOP,
+        build: replay_v2,
+        landmark: "QoS not recorded — its rows name v1 profiles, which zk2 does not read",
+    },
 ];
 
 fn prefs(theme: ThemeChoice) -> Prefs {
@@ -758,4 +767,47 @@ fn settings(theme: ThemeChoice) -> Zengui {
 
 fn connect(theme: ThemeChoice) -> Zengui {
     overlay(theme, Overlay::Connect)
+}
+
+/// A version-2 capture of v1 traffic, replayed (#614, FL10b): its rows name
+/// v1 profiles (`qos`), which zk2 does not read, so the banner counts them
+/// "QoS not recorded" and the Inspector says so of the selected key, where
+/// FL6b showed default axes — and it states nothing about what was
+/// excluded, because a version-2 file never did.
+fn replay_v2(theme: ThemeChoice) -> Zengui {
+    use zengui::replay::{LoadedReplay, ReplayState};
+    use zengui::view::replay::ReplayMsg;
+    const LOAD: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load";
+    let file = [
+        r#"{"zrec":2,"selectors":["v1/**"],"base":"","captured_at":"2026-08-12T03:00:00Z"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load","t":0,"bytes":"eyJ2YWx1ZSI6MC40MiwidW5pdCI6ImxvYWQifQ==","encoding":"application/json","qos":"sampled"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","t":250000,"bytes":"eyJzdGF0ZSI6Im9rIn0=","encoding":"application/json","qos":"transition"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load","t":1000000,"bytes":"eyJ2YWx1ZSI6MC41NywidW5pdCI6ImxvYWQifQ==","encoding":"application/json","qos":"sampled"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load","t":2000000,"bytes":"eyJ2YWx1ZSI6MC42MSwidW5pdCI6ImxvYWQifQ==","encoding":"application/json","qos":"sampled"}"#,
+    ]
+    .join("\n");
+    let state = ReplayState::load("legacy.zrec", file.as_bytes()).expect("a valid capture");
+    let mut app = watching(prefs(theme));
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::ActivityTab(ActivityTab::Replay)),
+    );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::Loaded(
+            "legacy.zrec".into(),
+            Ok(LoadedReplay::new(state)),
+        ))),
+    );
+    // Selected inside the replay, then played to its end: the recorder
+    // keeps the rows that follow.
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(LOAD.into()))),
+    );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::Scrubbed(2_000_000))),
+    );
+    app
 }

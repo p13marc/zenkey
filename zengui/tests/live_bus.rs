@@ -924,3 +924,144 @@ async fn a_foreign_publish_reaches_the_echo() {
 
     bus.down().await;
 }
+
+/// A recorded window replays through the offline lens (#614, FL10b; O4): a
+/// capture of the spray's traffic (`.zrec` v3, recorded as the window's own
+/// recorder does) opened in a window whose presence link has read the live
+/// deployment. While it replays, the tree merges against a skeleton with no
+/// presence read — the strip says so where it said the live addresses — the
+/// banner states the capture's exclusions and that it resolves offline.
+/// Leaving gives the live skeleton back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn a_recorded_window_replays_through_the_offline_lens() {
+    use iced::futures::StreamExt as _;
+    use zengui::message::{ActivityTab, Message, WorkspaceMsg};
+    use zengui::view::replay::ReplayMsg;
+
+    let bus = Bus::up().await;
+
+    // The capture: `**` in no namespace for a few seconds, through the
+    // fleet's recorder, into a scratch file.
+    let path = std::env::temp_dir().join(format!("zengui-fl10-{}.zrec", std::process::id()));
+    {
+        let session = bus.raw().await;
+        let selectors = ScopePreset::Everything.selectors("", &[]);
+        let monitor = Monitor::start(
+            &session,
+            MonitorSpec {
+                selectors: selectors.clone(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("start monitor");
+        let header = zenkey_fleet::ZrecHeader {
+            zrec: zenkey_fleet::ZREC_VERSION,
+            excluded: Some(zenkey_fleet::zrec_excluded(&selectors)),
+            selectors,
+            base: bus.namespace.clone(),
+            captured_at: zenkey_fleet::rfc3339_now(),
+            preamble: None,
+            pre_roll: None,
+        };
+        let file = std::fs::File::create(&path).expect("a scratch file");
+        let sink = zenkey_fleet::ZrecSink::spawn(std::io::BufWriter::new(file), &header)
+            .await
+            .expect("the sink");
+        let mut events = monitor.events();
+        zenkey_fleet::record(
+            &mut events,
+            &sink,
+            zenkey_fleet::RecordBounds {
+                max_samples: None,
+                max_duration: Some(SETTLE),
+            },
+            |_, _| {},
+        )
+        .await
+        .expect("the capture");
+        let counts = sink.finish().await.expect("the trailer");
+        assert!(counts.samples > 0, "the spray's traffic was captured");
+        println!("captured {} samples to {}", counts.samples, path.display());
+        let _ = monitor.shutdown().await;
+        let _ = session.close().await;
+    }
+
+    // What the replay's skeleton will say: every revision held, no presence.
+    let offline = zengui::view::status::skeleton_text(Some(
+        &zengui::replay::ReplayLens::offline(
+            &bus.namespace,
+            Some(zengui::services::contracts::load_all(&example_contracts()).set),
+        )
+        .skeleton
+        .coverage,
+    ));
+    assert!(offline.contains("no presence read"), "{offline}");
+
+    // The window, with the live deployment read through its presence link.
+    let mut app = booted(&bus, example_contracts()).await;
+    let presence = app.presence_link().expect("a presence link after the boot");
+    let mut presence = Box::pin(zengui::presence_link::stream(presence));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let message = tokio::time::timeout_at(deadline, presence.next())
+            .await
+            .expect("presence lands")
+            .expect("the link runs");
+        let landed = matches!(
+            &message,
+            Message::Bus(zengui::message::BusMsg::Presence(..))
+        );
+        let task = app.update(message);
+        drive(&mut app, task).await;
+        if landed {
+            break;
+        }
+    }
+    assert!(
+        !shows(&app, &offline),
+        "the live skeleton is placed by presence, not this: {offline}"
+    );
+
+    // Open the capture through the window's own load path.
+    let replay = |m| Message::Workspace(WorkspaceMsg::Replay(m));
+    let _ = app.update(replay(ReplayMsg::OpenToggled));
+    let _ = app.update(replay(ReplayMsg::PathChanged(path.display().to_string())));
+    let open = app.update(replay(ReplayMsg::Open));
+    tokio::time::timeout(Duration::from_secs(20), drive(&mut app, open))
+        .await
+        .expect("the load and its offline check settle");
+    let _ = app.update(Message::Workspace(WorkspaceMsg::ActivityTab(
+        ActivityTab::Replay,
+    )));
+    assert!(
+        shows(&app, &offline),
+        "the strip states the replay's own skeleton: {offline}"
+    );
+    assert!(
+        shows(
+            &app,
+            "excluded: @stream, @state, @op, @zk, @adv — no selector names them, so no sample \
+             under them is in this file"
+        ),
+        "the banner states what the capture could not contain"
+    );
+    assert!(
+        shows(
+            &app,
+            "resolved offline: 10 revisions held, no presence read — the live catalog \
+             describes another world"
+        ),
+        "the banner says the replay resolves offline"
+    );
+
+    let _ = app.update(replay(ReplayMsg::Exit));
+    assert!(
+        !shows(&app, &offline),
+        "leaving gives the tree back to the live skeleton"
+    );
+
+    let _ = std::fs::remove_file(&path);
+    bus.down().await;
+}

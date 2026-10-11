@@ -83,7 +83,7 @@ pub(crate) fn update(
             Some(slot) => consumers::update(slot, dep, msg),
             None => Task::none(),
         },
-        PaneMsg::Echo(msg) => echo::update(&mut work.echo, msg, cx),
+        PaneMsg::Echo(msg) => echo::update(&mut work.echo, work.replay.replay.as_ref(), msg, cx),
         PaneMsg::Context(msg) => context::update(&mut work.bench.context_form, msg),
         PaneMsg::Scope(msg) => scope_editor::update(&mut work.bench.scope_form, msg, cx),
         PaneMsg::Settings(msg) => settings::update(&mut work.bench.settings_form, msg),

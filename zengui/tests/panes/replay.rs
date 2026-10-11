@@ -36,6 +36,24 @@ fn the_replay_banner_says_everything() {
     );
     assert!(ui.find("exit replay").is_ok());
     assert!(ui.find("live link off").is_ok());
+    // A version-1 file (#614, FL10b): what it excluded it never said, its
+    // rows named v1 profiles zk2 does not read, and the replay resolves
+    // offline — through no contract here, and no presence read.
+    assert!(
+        ui.find("excluded: not stated — a version-1 file predates the statement")
+            .is_ok()
+    );
+    assert!(
+        ui.find("QoS not recorded — its rows name v1 profiles, which zk2 does not read")
+            .is_ok()
+    );
+    assert!(
+        ui.find(
+            "resolved offline: 0 revisions held, no presence read — the live catalog describes \
+             another world"
+        )
+        .is_ok()
+    );
     // The transport moved to the Activity dock's Replay tab (#183). The
     // banner stayed put, and it stayed put for a reason — a mode indicator
     // behind a tab is one that can lie about what the panes are showing.
@@ -50,6 +68,46 @@ fn the_replay_banner_says_everything() {
         "the scrubber axis names which clock it plots"
     );
     assert!(ui.find("play").is_ok(), "paused replay offers play");
+}
+
+/// A version-3 capture states what its selectors excluded (#614, FL10b; the
+/// tooling guide's O5), and a row it carried without wire axes is counted
+/// as "QoS not recorded" by row, never the whole file.
+#[test]
+fn a_version_three_banner_states_its_exclusions() {
+    use zengui::replay::ReplayState;
+    let file = [
+        r#"{"zrec":3,"selectors":["**"],"base":"","captured_at":"2026-10-05T03:00:00Z","excluded":["@stream","@state","@op","@zk","@adv"]}"#,
+        r#"{"key":"demo/a","t":0,"bytes":"MQ==","qos_axes":"data/drop/reliable"}"#,
+        r#"{"key":"demo/b","t":1,"bytes":"Mg=="}"#,
+    ]
+    .join("\n");
+    let state = ReplayState::load("v3.zrec", file.as_bytes()).expect("load");
+    let mut ui = simulator::<Message, _, _>(zengui::view::replay::banner(&state));
+    assert!(
+        ui.find(
+            "excluded: @stream, @state, @op, @zk, @adv — no selector names them, so no sample \
+             under them is in this file"
+        )
+        .is_ok()
+    );
+    assert!(ui.find("QoS not recorded on 1 of 2 rows").is_ok());
+
+    let every = [
+        r#"{"zrec":3,"selectors":["**","@stream/**","@state/**","@op/**","@zk/**","@adv/**"],"base":"","captured_at":"x","excluded":[]}"#,
+        r#"{"key":"demo/a","t":0,"bytes":"MQ==","qos_axes":"data/drop/reliable"}"#,
+    ]
+    .join("\n");
+    let state = ReplayState::load("all.zrec", every.as_bytes()).expect("load");
+    let mut ui = simulator::<Message, _, _>(zengui::view::replay::banner(&state));
+    assert!(
+        ui.find("excluded: nothing — the selectors name every verbatim chunk")
+            .is_ok()
+    );
+    assert!(
+        ui.find("QoS not recorded on 1 of 2 rows").is_err(),
+        "every row recorded its axes"
+    );
 }
 
 /// While replaying, the status strip must not describe the link it is not
