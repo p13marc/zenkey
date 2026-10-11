@@ -227,7 +227,7 @@ fn repoint(
     let presence = obs
         .presence_monitor
         .take()
-        .map(services::watch::shutdown_presence)
+        .map(services::watch::shutdown)
         .unwrap_or_else(Task::none);
     obs.presence_epoch += 1;
     forget(dep, obs, tree, work);
@@ -322,7 +322,7 @@ fn reopen_session(dep: &mut Deployment, obs: &mut Observation) -> Task<Message> 
     let presence = obs
         .presence_monitor
         .take()
-        .map(services::watch::shutdown_presence)
+        .map(services::watch::shutdown)
         .unwrap_or_else(Task::none);
     obs.presence_epoch += 1;
     dep.raw = None;
@@ -347,7 +347,7 @@ pub(crate) fn watch_scope(dep: &Deployment, obs: &Observation) -> Task<Message> 
         .selectors(dep.namespace(), &dep.settings.selectors);
     // Scope watches seed too (issue #92) — the eager preset is "observe
     // this scope", and current state is part of observing it.
-    let policy = zenkey_fleet_v1::SeedPolicy {
+    let policy = zenkey_fleet::SeedPolicy {
         timeout: dep.timeout(),
         ..Default::default()
     };

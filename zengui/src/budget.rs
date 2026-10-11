@@ -23,8 +23,9 @@
 
 use std::collections::BTreeMap;
 
+use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet_v1::BudgetObservation;
-use zenkey_fleet_v1::{KeyTreeSnapshot, SliceSet};
+use zenkey_fleet_v1::SliceSet;
 
 /// One family's badge, at one origin's subtree path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +77,7 @@ impl BudgetBadges {
 /// on. The engine's observation wants wire keys; the tree stores them as
 /// chunk paths, so this is the inverse walk of `KeyTreeSnapshot::build`.
 pub fn observed_keys(tree: &KeyTreeSnapshot) -> Vec<String> {
-    fn walk(prefix: &str, node: &zenkey_fleet_v1::TreeNode, out: &mut Vec<String>) {
+    fn walk(prefix: &str, node: &zenkey_fleet::TreeNode, out: &mut Vec<String>) {
         for (chunk, child) in &node.children {
             let path = if prefix.is_empty() {
                 chunk.clone()
@@ -157,7 +158,7 @@ pub fn badges(base: &str, slices: &SliceSet, tree: &KeyTreeSnapshot) -> BudgetBa
 mod tests {
     use super::*;
     use std::time::Instant;
-    use zenkey_fleet_v1::StatsTable;
+    use zenkey_fleet::StatsTable;
 
     fn subject(path: &str, class: &str, cardinality: Option<i64>) -> zenkey_v1::slice::SubjectDecl {
         let mut d = zenkey_v1::slice::SubjectDecl::new(path, zenkey_v1::Declared::parse(class));

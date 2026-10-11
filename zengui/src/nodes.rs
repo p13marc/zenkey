@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use zenkey_fleet_v1::KeyTreeSnapshot;
+use zenkey_fleet::KeyTreeSnapshot;
 use zenoh::key_expr::keyexpr;
 
 /// One producer's presence on one origin.
@@ -114,7 +114,7 @@ impl NodeRoster {
         // pair, and *borrowed*: `keyexpr::new(&str)` validates without
         // allocating, where `KeyExpr::new(String)` builds an `OwnedKeyExpr`
         // — an `Arc<str>` copy — per selector per producer per tick.
-        // `zenkey_fleet_v1::merge` was deliberately fixed this way
+        // `zenkey_fleet::merge_skeleton` was deliberately fixed this way
         // (`docs/zero-copy.md`) and this site was missed (#178).
         let watched: Vec<&keyexpr> = watched
             .iter()

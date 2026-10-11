@@ -21,7 +21,8 @@ use std::time::Duration;
 use zengui::keyfacts::{KeyFacts, KeyShape, Registration};
 use zengui::scope::ScopePreset;
 use zengui::view::tree;
-use zenkey_fleet_v1::{Monitor, MonitorSpec, SliceSet};
+use zenkey_fleet::{Monitor, MonitorSpec};
+use zenkey_fleet_v1::SliceSet;
 
 /// Where the traffic is. `just gui-demo` uses 7449; override with
 /// `ZENGUI_TEST_ENDPOINT` to point these at an existing bus instead.
@@ -30,8 +31,8 @@ fn endpoint() -> String {
 }
 const SETTLE: Duration = Duration::from_secs(3);
 
-async fn watch(selectors: Vec<String>) -> (zenkey_fleet_v1::KeyTreeSnapshot, Vec<String>) {
-    let session = zenkey_fleet_v1::bus::session::open(&[endpoint()], &[], false)
+async fn watch(selectors: Vec<String>) -> (zenkey_fleet::KeyTreeSnapshot, Vec<String>) {
+    let session = zenkey_fleet::open(&[endpoint()], &[], false)
         .await
         .expect("open session");
     let monitor = Monitor::start(
@@ -197,7 +198,7 @@ async fn the_overlay_classifies_real_traffic_correctly() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs a live bus; see the module docs"]
 async fn a_bounded_observer_reports_what_it_retired() {
-    let session = zenkey_fleet_v1::bus::session::open(&[endpoint()], &[], false)
+    let session = zenkey_fleet::open(&[endpoint()], &[], false)
         .await
         .expect("open session");
     let monitor = Monitor::start(
@@ -233,13 +234,11 @@ async fn the_tree_carries_foreign_traffic() {
     let expanded: BTreeSet<String> = ["demo".to_string(), "demo/example".to_string()]
         .into_iter()
         .collect();
-    let skel = zenkey_fleet_v1::Skeleton::build(
-        "",
-        &zenkey_fleet_v1::SliceSet::default(),
-        &std::collections::BTreeMap::new(),
+    let skel = zenkey_fleet::Skeleton::build(
+        &zenkey_fleet::Lens::new("", None, &zenkey_fleet::ContractSet::new()),
         None,
     );
-    let merged = zenkey_fleet_v1::model::skeleton::merge(&skel, &snapshot, &["**".to_string()]);
+    let merged = zenkey_fleet::merge_skeleton(&skel, &snapshot, &["**".to_string()]);
     let flat = tree::flatten(&merged, "", &expanded, 500, std::time::Instant::now());
 
     // `rows` carries the shape; the numbers are joined by `row` (#177), and
@@ -276,7 +275,7 @@ async fn the_tree_carries_foreign_traffic() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
     use std::time::Instant;
-    use zenkey_fleet_v1::{FleetEvent, StreamItem};
+    use zenkey_fleet::{FleetEvent, StreamItem};
 
     // A port the OS has just said is free, released the instant its number is
     // known: a hard-coded one collides with a second `cargo test` run.
@@ -285,14 +284,12 @@ async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
         let port = held.local_addr().expect("local addr").port();
         format!("tcp/127.0.0.1:{port}")
     };
-    let producer_side =
-        zenkey_fleet_v1::bus::session::open(&[], std::slice::from_ref(&endpoint), false)
-            .await
-            .expect("producer session");
-    let observer_side =
-        zenkey_fleet_v1::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
-            .await
-            .expect("observer session");
+    let producer_side = zenkey_fleet::open(&[], std::slice::from_ref(&endpoint), false)
+        .await
+        .expect("producer session");
+    let observer_side = zenkey_fleet::open(std::slice::from_ref(&endpoint), &[], false)
+        .await
+        .expect("observer session");
 
     let monitor = Monitor::start(
         &observer_side,
@@ -312,7 +309,7 @@ async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
     // Bounded wait for the matching liveliness event, applied in order.
     async fn apply_next(
         roster: &mut zengui::nodes::NodeRoster,
-        events: &mut zenkey_fleet_v1::EventStream,
+        events: &mut zenkey_fleet::EventStream,
         want_up: bool,
     ) {
         loop {
@@ -378,9 +375,9 @@ async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
 async fn history_records_a_real_tombstone_and_a_plottable_series() {
     use zengui::history::HistoryRecorder;
     use zengui::series::value_series;
-    use zenkey_fleet_v1::{FleetEvent, StreamItem};
+    use zenkey_fleet::{FleetEvent, StreamItem};
 
-    let session = zenkey_fleet_v1::bus::session::open(&[endpoint()], &[], false)
+    let session = zenkey_fleet::open(&[endpoint()], &[], false)
         .await
         .expect("open session");
     let monitor = Monitor::start(

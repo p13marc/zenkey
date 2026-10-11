@@ -27,14 +27,15 @@ use zengui::keyfacts::KeyFacts;
 use zengui::message::Message;
 use zengui::view::tokens::Spacing;
 use zengui::view::tree::{self, FactsIndex};
-use zenkey_fleet_v1::model::stats::StatsTable;
-use zenkey_fleet_v1::{KeyTreeSnapshot, SliceSet};
+use zenkey_fleet::KeyTreeSnapshot;
+use zenkey_fleet::StatsTable;
+use zenkey_fleet_v1::SliceSet;
 
 const REGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
 const UNREGISTERED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/no/such/thing";
 const FOREIGN: &str = "demo/example/foo";
 
-fn snapshot(keys: &[&str]) -> zenkey_fleet_v1::model::skeleton::MergedNode {
+fn snapshot(keys: &[&str]) -> zenkey_fleet::MergedNode {
     let mut stats = StatsTable::new();
     let now = Instant::now();
     for k in keys {
@@ -42,8 +43,11 @@ fn snapshot(keys: &[&str]) -> zenkey_fleet_v1::model::skeleton::MergedNode {
     }
     let observed = KeyTreeSnapshot::build(&stats);
     // Pane tests watch everything: rows read Observed, as the bootstrap did.
-    let skel = zenkey_fleet_v1::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
-    zenkey_fleet_v1::model::skeleton::merge(&skel, &observed, &["**".to_string()])
+    let skel = zenkey_fleet::Skeleton::build(
+        &zenkey_fleet::Lens::new("", None, &zenkey_fleet::ContractSet::new()),
+        None,
+    );
+    zenkey_fleet::merge_skeleton(&skel, &observed, &["**".to_string()])
 }
 
 /// The comfortable grid — panes render the same claims at either density

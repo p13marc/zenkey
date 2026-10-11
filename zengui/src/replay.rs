@@ -4,7 +4,7 @@
 //! The seam is the tick: everything downstream of
 //! [`crate::message::BusTick`] already renders whatever it is handed, so
 //! replay synthesizes ticks from a **session-less**
-//! [`zenkey_fleet_v1::MonitorCore`] — the same stats table, the same tree
+//! [`zenkey_fleet::MonitorCore`] — the same stats table, the same tree
 //! builder, the same bounded counters as live — and the panes cannot tell
 //! the difference. Nothing here can publish: there is no session in this
 //! module at all, which is the RFC 09 §5.2 pane-replay posture made
@@ -17,8 +17,8 @@
 //! offsets — and the UI says so. Scrubbing backwards is a rebuild: LWW
 //! folding is not invertible, so `scrub_to` re-ingests from the top into a
 //! fresh core, which stays cheap because a capture is bounded by
-//! construction (a file by [`zenkey_fleet_v1::RecordBounds`], the ring by its
-//! [`zenkey_fleet_v1::RetentionBudget`]). The rebuild feeds
+//! construction (a file by [`zenkey_fleet::RecordBounds`], the ring by its
+//! [`zenkey_fleet::RetentionBudget`]). The rebuild feeds
 //! [`MonitorCore::ingest_at`] on the capture clock, so the fold — EWMA
 //! rates included — is deterministic in the rows alone, which is what lets
 //! a retained scrub and a file replay of the same traffic yield
@@ -28,7 +28,7 @@ use std::io::BufRead;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use zenkey_fleet_v1::{MonitorCore, RetentionStats, SampleView, ZrecHeader, ZrecItem, ZrecReader};
+use zenkey_fleet::{MonitorCore, RetentionStats, SampleView, ZrecHeader, ZrecItem, ZrecReader};
 
 use crate::message::BusTick;
 
@@ -126,7 +126,7 @@ pub struct ReplayState {
     /// Version-2 trigger records, at their capture-clock position (the
     /// `t` of the last observed row before each): what fired, so the
     /// scrubber can mark where.
-    pub triggers: Vec<(u64, zenkey_fleet_v1::Transition)>,
+    pub triggers: Vec<(u64, zenkey_fleet::Transition)>,
     /// The playhead, on the capture clock, µs.
     pub position_us: u64,
     /// The capture's span (the last row's `t`).
@@ -151,24 +151,21 @@ pub struct ReplayState {
     wall_epoch: std::time::SystemTime,
 }
 
-/// A qos profile name back to wire axes, for display in the panes.
-/// Rows that recorded no profile show the middle of the road — the panes
-/// render what the file knows, and the file said nothing.
+/// A row's recorded wire axes (`.zrec` v3's `qos_axes`, #614), for display
+/// in the panes. A row that recorded none — every version-1 and -2 row,
+/// whose v1 profile name zk2 does not read — shows the middle of the road:
+/// the panes render what the file knows, and the file said nothing a zk2
+/// reader can use (FL10b names it "QoS not recorded").
 fn axes(
-    qos: Option<&str>,
+    qos: Option<zenkey_fleet::WireQos>,
 ) -> (
     zenoh::qos::Priority,
     zenoh::qos::CongestionControl,
     zenoh::qos::Reliability,
     bool,
 ) {
-    match qos.and_then(zenkey_v1::qos::QosProfile::from_name) {
-        Some(p) => (
-            p.priority(),
-            p.congestion_control(),
-            p.reliability(),
-            p.express(),
-        ),
+    match qos {
+        Some(q) => (q.priority, q.congestion, q.reliability, q.express),
         None => (
             zenoh::qos::Priority::Data,
             zenoh::qos::CongestionControl::Drop,
@@ -216,7 +213,7 @@ impl ReplayState {
             if preamble {
                 preamble_rows += 1;
             }
-            let (priority, congestion_control, reliability, express) = axes(row.qos.as_deref());
+            let (priority, congestion_control, reliability, express) = axes(row.qos_axes);
             // A row without `t` (hand-piped ndjson) sits at the
             // previous row's instant: no pacing claim invented.
             let t_prev = rows.last().map_or(0, |r: &ReplayRow| r.t_us);
@@ -402,7 +399,6 @@ impl ReplayState {
             samples,
             lagged: 0,
             coalesced,
-            nodes: Vec::new(),
             keys,
             keys_evicted,
             keys_unwatched,

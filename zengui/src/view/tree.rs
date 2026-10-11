@@ -30,8 +30,8 @@ use std::time::Instant;
 
 use iced::widget::{Column, column, row, text};
 use iced::{Element, Length};
-use zenkey_fleet_v1::KeyTreeSnapshot;
-use zenkey_fleet_v1::model::skeleton::{DeclRef, MergedNode, NodeStats, NodeStatus};
+use zenkey_fleet::KeyTreeSnapshot;
+use zenkey_fleet::{DeclRef, MergedNode, NodeStats, NodeStatus};
 
 use crate::keyfacts::Registration;
 use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
@@ -118,7 +118,7 @@ impl std::fmt::Display for Pivot {
 ///
 /// The claim this whole cache rests on is that a row's **shape does not depend
 /// on any live number**, and it is checkable rather than plausible.
-/// `zenkey_fleet_v1::merge_nodes` computes `status` from *set
+/// `zenkey_fleet::merge_skeleton` computes `status` from *set
 /// membership* — does an observed node exist, is it covered by a watch — never
 /// from a magnitude; and the child-name set it walks is the union of the
 /// skeleton's names and the observed ones. Depth, chunk, path, target, role and
@@ -1925,7 +1925,7 @@ pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet_v1::StatsTable;
+    use zenkey_fleet::StatsTable;
 
     fn snapshot(keys: &[&str]) -> MergedNode {
         let mut stats = StatsTable::new();
@@ -1933,15 +1933,13 @@ mod tests {
         for k in keys {
             stats.record(k, 8, None, now, None, None);
         }
-        let observed = zenkey_fleet_v1::KeyTreeSnapshot::build(&stats);
+        let observed = zenkey_fleet::KeyTreeSnapshot::build(&stats);
         // Tests watch everything: every observed node reads Observed.
-        let skel = zenkey_fleet_v1::Skeleton::build(
-            "",
-            &zenkey_fleet_v1::SliceSet::default(),
-            &std::collections::BTreeMap::new(),
+        let skel = zenkey_fleet::Skeleton::build(
+            &zenkey_fleet::Lens::new("", None, &zenkey_fleet::ContractSet::new()),
             None,
         );
-        zenkey_fleet_v1::merge(&skel, &observed, &["**".to_string()])
+        zenkey_fleet::merge_skeleton(&skel, &observed, &["**".to_string()])
     }
 
     fn expand(paths: &[&str]) -> BTreeSet<String> {

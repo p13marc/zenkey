@@ -26,12 +26,10 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet_v1::{FetchOutcome, KeyTreeSnapshot, Monitor, SampleView, Skeleton, WatchId};
+use zenkey_fleet::{KeyTreeSnapshot, Monitor, SampleView, WatchId};
+use zenkey_fleet_v1::FetchOutcome;
 
 use crate::scope::ScopePreset;
-
-/// The engine roster's shape: origin → live producer names.
-pub type LiveRoster = std::collections::BTreeMap<String, Vec<String>>;
 
 /// One of the workspace's subject slots (#257).
 ///
@@ -99,10 +97,9 @@ pub enum BusMsg {
     ),
     /// The monitor started (lazily — no data-plane watches yet unless eager).
     MonitorStarted(Result<Arc<Monitor>, crate::services::ServiceError>),
-    /// The declared-keyspace skeleton was (re)built, with the liveliness
-    /// roster the build task gathered anyway (#61 seeds the node roster
-    /// from it instead of throwing it away).
-    SkeletonBuilt(Result<(Arc<Skeleton>, Arc<LiveRoster>), crate::services::ServiceError>),
+    /// The declared-keyspace skeleton was (re)built (#614: zk2's, from the
+    /// admin space's declared entities alone until the lens feeds it).
+    SkeletonBuilt(Result<Arc<zenkey_fleet::Skeleton>, crate::services::ServiceError>),
     /// The namespace listing landed (#614, FL6a): which namespaces hold
     /// zk2 instance tokens, read on the session in no namespace. An empty
     /// list is *not* a verdict (RFC 05 §3.1), and a read that ran to its
@@ -729,8 +726,6 @@ pub struct BusTick {
     /// Samples *we* dropped because the per-tick batch was full. Distinct from
     /// `lagged`: this is our own cap, and it is reported rather than hidden.
     pub coalesced: u64,
-    /// Liveliness transitions: `(token key, is_up)`.
-    pub nodes: Vec<(String, bool)>,
     /// Distinct keys the monitor is *currently* tracking. Not cumulative:
     /// the table is bounded, and the counters below say what that costs.
     pub keys: usize,
@@ -748,7 +743,7 @@ pub struct BusTick {
     pub watched: Arc<[String]>,
     /// Seed boundaries that fired during this tick (issue #92): each seeded
     /// watch's id and what its seed paths contributed.
-    pub seeded: Vec<(WatchId, zenkey_fleet_v1::SeedCoverage)>,
+    pub seeded: Vec<(WatchId, zenkey_fleet::SeedCoverage)>,
     /// Across everything watched. Named, because two of the three are `u64`
     /// and the doc comment `(samples, bytes, rate_hz)` was the only thing
     /// saying which was which (#357).

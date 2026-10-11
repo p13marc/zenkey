@@ -19,7 +19,7 @@ use super::*;
 fn canonical(app: &Zengui) -> String {
     use std::fmt::Write;
     let mut out = String::new();
-    fn node(out: &mut String, path: &str, n: &zenkey_fleet_v1::TreeNode) {
+    fn node(out: &mut String, path: &str, n: &zenkey_fleet::TreeNode) {
         writeln!(
             out,
             "{path} c={} b={} r={:016x} sc={} sb={} sr={:016x} sk={}",
@@ -74,7 +74,7 @@ fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
     let watched: StdArc<[String]> = StdArc::from(["v1/**".to_string()]);
 
     // Route one: the live monitor's ring, entered through the toggle's seam.
-    let core = zenkey_fleet_v1::MonitorCore::new(1024);
+    let core = zenkey_fleet::MonitorCore::new(1024);
     for v in &views {
         core.ingest(v.clone(), None);
     }
@@ -90,7 +90,7 @@ fn a_retained_scrub_matches_a_zrec_replay_byte_for_byte() {
     );
 
     // Route two: the same window saved as a `.zrec` and opened from disk.
-    let rows: Vec<StdArc<zenkey_fleet_v1::SampleView>> =
+    let rows: Vec<StdArc<zenkey_fleet::SampleView>> =
         views.iter().cloned().map(StdArc::new).collect();
     let mut bytes = Vec::new();
     let samples = crate::services::record::write_window(
@@ -283,7 +283,7 @@ fn the_retained_window_is_replay_mode_with_all_its_locks() {
     use crate::view::replay::ReplayMsg;
 
     let epoch = std::time::Instant::now();
-    let core = zenkey_fleet_v1::MonitorCore::new(64);
+    let core = zenkey_fleet::MonitorCore::new(64);
     for v in traffic(epoch) {
         core.ingest(v, None);
     }
@@ -331,7 +331,7 @@ fn replay_forbids_publishing_and_recording_in_every_window() {
     use crate::view::replay::ReplayMsg;
 
     let epoch = std::time::Instant::now();
-    let core = zenkey_fleet_v1::MonitorCore::new(64);
+    let core = zenkey_fleet::MonitorCore::new(64);
     for v in traffic(epoch) {
         core.ingest(v, None);
     }

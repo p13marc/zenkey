@@ -223,7 +223,7 @@ fn toggle_watch(dep: &Deployment, obs: &mut Observation, path: String) -> Task<M
     // Watching seeds (issue #92): current state arrives before live
     // traffic, through the same merge discipline as everything else.
     let selector = scope::subtree_selector(&path);
-    let policy = zenkey_fleet_v1::SeedPolicy {
+    let policy = zenkey_fleet::SeedPolicy {
         timeout: dep.timeout(),
         ..Default::default()
     };

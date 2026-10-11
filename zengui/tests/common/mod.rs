@@ -18,8 +18,9 @@ use zengui::app::Zengui;
 use zengui::config::Settings;
 use zengui::message::{BusMsg, BusTick, LinkState, Message, WatchedTotals};
 use zengui::prefs::Prefs;
-use zenkey_fleet_v1::model::stats::StatsTable;
-use zenkey_fleet_v1::{KeyTreeSnapshot, SampleView, SliceSet};
+use zenkey_fleet::StatsTable;
+use zenkey_fleet::{KeyTreeSnapshot, SampleView};
+use zenkey_fleet_v1::SliceSet;
 
 /// The ZenSight registry snapshot `fixture-tests/` compiles — v1's declared
 /// world, still what the v1 panes' own tests render against until each
@@ -461,9 +462,6 @@ impl World {
             samples,
             lagged: 0,
             coalesced: 0,
-            // No v1 alive tokens since #614 (FL6a): presence is zk2's, and
-            // arrives through the presence link (`connect`).
-            nodes: Vec::new(),
             keys: feeds,
             keys_evicted: 0,
             keys_unwatched: 0,

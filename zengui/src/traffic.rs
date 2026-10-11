@@ -9,8 +9,8 @@
 
 use std::time::Instant;
 
-use zenkey_fleet_v1::KeyTreeSnapshot;
-use zenkey_fleet_v1::TreeNode;
+use zenkey_fleet::KeyTreeSnapshot;
+use zenkey_fleet::TreeNode;
 
 /// How many rows the table keeps. The disclosure says "top N of M" whenever
 /// more keys carried traffic than this.
@@ -150,7 +150,7 @@ pub fn share(part: f64, total: f64) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey_fleet_v1::model::stats::StatsTable;
+    use zenkey_fleet::StatsTable;
 
     fn snapshot(rows: &[(&str, usize)]) -> KeyTreeSnapshot {
         let mut stats = StatsTable::new();

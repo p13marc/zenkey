@@ -8,7 +8,7 @@ use super::*;
 fn recording(key: &str, max_entries: usize, samples: &[(&[u8], bool)]) -> HistoryRecorder {
     let mut rec = HistoryRecorder::new(key, max_entries);
     for (payload, is_delete) in samples {
-        rec.observe(&zenkey_fleet_v1::SampleView {
+        rec.observe(&zenkey_fleet::SampleView {
             key: key.to_string(),
             payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
             encoding: "application/json".to_string(),

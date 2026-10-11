@@ -66,10 +66,8 @@ fn switching_base_keeps_what_the_user_typed() {
 #[test]
 fn a_forgotten_deployment_needs_no_merge_cache_reset() {
     let mut app = test_app();
-    app.dep.skeleton = Some(Arc::new(zenkey_fleet_v1::Skeleton::build(
-        "",
-        &zenkey_fleet_v1::SliceSet::default(),
-        &std::collections::BTreeMap::new(),
+    app.dep.skeleton = Some(Arc::new(zenkey_fleet::Skeleton::build(
+        &zenkey_fleet::Lens::new("", None, &zenkey_fleet::ContractSet::new()),
         None,
     )));
     let with_skeleton = app.tree.merged(&app.dep, &app.obs);
@@ -182,8 +180,8 @@ fn a_presentation_change_does_not_re_merge_the_tree() {
 
     // A new observed snapshot is a different tree, and must not be served
     // from the cache.
-    let stats = zenkey_fleet_v1::StatsTable::new();
-    app.obs.observed = Arc::new(zenkey_fleet_v1::KeyTreeSnapshot::build(&stats));
+    let stats = zenkey_fleet::StatsTable::new();
+    app.obs.observed = Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats));
     app.tree.reflatten(&app.dep, &app.obs);
     assert!(
         !Arc::ptr_eq(

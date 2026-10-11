@@ -18,7 +18,7 @@ use crate::message::{BusMsg, Message};
 pub fn budget(
     base: String,
     slices: Arc<SliceSet>,
-    observed: Arc<zenkey_fleet_v1::KeyTreeSnapshot>,
+    observed: Arc<zenkey_fleet::KeyTreeSnapshot>,
 ) -> Task<Message> {
     Task::perform(
         async move { Arc::new(crate::budget::badges(&base, &slices, &observed)) },

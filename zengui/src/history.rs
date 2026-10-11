@@ -22,7 +22,7 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use zenkey_fleet_v1::SampleView;
+use zenkey_fleet::SampleView;
 
 /// Payloads larger than this get no structural value — a multi-megabyte
 /// document parsed per sample to feed a diff nobody asked for would burn the
@@ -62,7 +62,7 @@ pub struct HistoryEntry {
     pub reliability: zenoh::qos::Reliability,
     pub express: bool,
     /// The publishing entity, when SourceInfo rode the sample.
-    pub source: Option<zenkey_fleet_v1::SampleSource>,
+    pub source: Option<zenkey_fleet::SampleSource>,
     /// The structural document, when the bytes carry one — the diff's
     /// field-level side. `None` means plain text or opaque bytes, and the
     /// diff falls back to bytes rather than inventing fields.
@@ -77,14 +77,14 @@ impl HistoryEntry {
         let is_delete = view.kind == zenoh::sample::SampleKind::Delete;
         let bytes = view.payload.to_bytes();
         let value = (!is_delete && len <= DECODE_LIMIT)
-            .then(|| zenkey_fleet_v1::structural_value(&bytes))
+            .then(|| zenkey_fleet::structural_value(&bytes))
             .flatten();
         let preview = if is_delete {
             "<delete>".to_string()
         } else if len > DECODE_LIMIT {
             format!("<{len} bytes — too large to preview>")
         } else {
-            truncate(zenkey_fleet_v1::structural(&bytes))
+            truncate(zenkey_fleet::structural(&bytes))
         };
         HistoryEntry {
             seq,

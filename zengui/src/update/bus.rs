@@ -74,8 +74,8 @@ pub(crate) fn apply_tick(
             if let Some(path) = path {
                 obs.seeding_paths.remove(&path);
             }
-            obs.seed_totals.history += coverage.history_replies.unwrap_or(0);
-            obs.seed_totals.storage += coverage.storage_replies.unwrap_or(0);
+            obs.seed_totals.history += coverage.history.get().map_or(0, |l| l.replies);
+            obs.seed_totals.storage += coverage.state.get().map_or(0, |l| l.replies);
             obs.seed_totals.superseded += coverage.superseded;
             obs.seeded_watches += 1;
         }
@@ -123,15 +123,10 @@ pub(crate) fn apply_tick(
             v.on_frame(sample);
         }
     }
-    for (key, _up) in &tick.nodes {
-        ensure_facts(dep, key);
-    }
-    // The node dashboard (#61): transitions in arrival order (flap-
-    // correct), then the zero-cost watched-freshness join.
+    // The node dashboard (#61): the zero-cost watched-freshness join. Its
+    // token transitions came off the data pump's liveliness, which carries
+    // none since #614 (FL6a): presence is zk2's, on its own monitor.
     let now = std::time::Instant::now();
-    work.verdicts
-        .roster
-        .apply_transitions(dep.namespace(), &tick.nodes, now);
     work.verdicts
         .roster
         .refresh(&tick.tree, dep.namespace(), &tick.watched, now);
@@ -251,12 +246,12 @@ pub(crate) fn update(
             // Started for a namespace the window has left, or a session that
             // has since gone: shut down, never driven.
             if namespace != dep.namespace() || dep.session.is_none() {
-                return services::watch::shutdown_presence(monitor);
+                return services::watch::shutdown(monitor);
             }
             let old = obs.presence_monitor.replace(monitor);
             // A new monitor is a new link: the epoch is its identity.
             obs.presence_epoch += 1;
-            old.map(services::watch::shutdown_presence)
+            old.map(services::watch::shutdown)
                 .unwrap_or_else(Task::none)
         }
         BusMsg::PresenceStarted(namespace, Err(e)) => {
@@ -297,13 +292,8 @@ pub(crate) fn update(
             obs.link = LinkState::Failed(e);
             Task::none()
         }
-        BusMsg::SkeletonBuilt(Ok((skeleton, roster))) => {
+        BusMsg::SkeletonBuilt(Ok(skeleton)) => {
             dep.skeleton = Some(skeleton);
-            // The build task gathered the roster anyway — seed the node
-            // dashboard from it instead of throwing it away (#61). Empty
-            // since #614 (FL6a): presence is zk2's, and the nodes pane
-            // reads it from FL9.
-            work.verdicts.roster.seed(&roster);
             tree.reflatten(dep, obs);
             Task::none()
         }
@@ -390,12 +380,12 @@ pub(crate) fn update(
 /// any of it. The keys go in the order the bus delivered them, and only the
 /// payload each carries is the newest one the tick holds.
 fn validation_batch(
-    samples: &[Arc<zenkey_fleet_v1::SampleView>],
+    samples: &[Arc<zenkey_fleet::SampleView>],
     cache: &crate::verdict::VerdictCache,
 ) -> Vec<(String, String, zenoh::bytes::ZBytes)> {
     // Newest per key, in first-arrival key order: `newest` supersedes,
     // `order` remembers when the key first showed up.
-    let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet_v1::SampleView>> =
+    let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet::SampleView>> =
         std::collections::HashMap::new();
     let mut order: Vec<&str> = Vec::new();
     for sample in samples {
@@ -489,7 +479,7 @@ pub(crate) fn start_presence(dep: &Deployment, obs: &mut Observation) -> Task<Me
     let old = obs
         .presence_monitor
         .take()
-        .map(services::watch::shutdown_presence)
+        .map(services::watch::shutdown)
         .unwrap_or_else(Task::none);
     obs.presence_epoch += 1;
     let Some(session) = dep.session.clone() else {
@@ -533,7 +523,7 @@ pub(crate) fn start_monitor(dep: &Deployment) -> Task<Message> {
     // No liveliness on the data pump since #614 (FL6a): presence is zk2's
     // instance and interface tokens, read on the session in the namespace,
     // and v1's alive tokens describe nothing a zk2 bus carries.
-    services::watch::start_monitor(raw, Vec::new(), dep.settings.max_keys)
+    services::watch::start_monitor(raw, dep.settings.max_keys)
 }
 
 /// A contracts (re)load invalidates everything judged under the old ones:
@@ -592,8 +582,8 @@ mod tests {
         );
     }
 
-    fn sample(key: &str, payload: &[u8]) -> Arc<zenkey_fleet_v1::SampleView> {
-        Arc::new(zenkey_fleet_v1::SampleView {
+    fn sample(key: &str, payload: &[u8]) -> Arc<zenkey_fleet::SampleView> {
+        Arc::new(zenkey_fleet::SampleView {
             key: key.to_string(),
             payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
             encoding: "application/json".to_string(),

@@ -25,8 +25,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use zenkey_fleet::Skeleton;
 use zenkey_fleet::{BundleStore, Catalog, IdentityCache, NamespaceListing};
-use zenkey_fleet_v1::Skeleton;
 
 use crate::config::{NamespaceChoice, Settings};
 use crate::presence_link::{LensHandle, PresenceUpdate};

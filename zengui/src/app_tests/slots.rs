@@ -4,8 +4,8 @@
 use super::*;
 
 /// One sample on one key, for the slot fan-out tests (#257).
-fn sample_on(key: &str, payload: &[u8]) -> Arc<zenkey_fleet_v1::SampleView> {
-    Arc::new(zenkey_fleet_v1::SampleView {
+fn sample_on(key: &str, payload: &[u8]) -> Arc<zenkey_fleet::SampleView> {
+    Arc::new(zenkey_fleet::SampleView {
         key: key.to_string(),
         payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
         encoding: "application/json".to_string(),

@@ -111,7 +111,7 @@ pub struct Status<'a> {
     /// Active watch selectors (coverage, O5).
     pub watched: &'a [String],
     /// What fed the skeleton, when one was built.
-    pub skeleton: Option<zenkey_fleet_v1::SkeletonCoverage>,
+    pub skeleton: Option<&'a zenkey_fleet::SkeletonCoverage>,
     /// Keys retired because their watch was released (O6's third counter).
     pub keys_unwatched: u64,
     /// The last on-demand value fetch, for the selection.
@@ -162,7 +162,7 @@ pub struct Status<'a> {
     /// the bound by hitting it. `None` before a monitor exists (O4), and
     /// suppressed while replaying (the ring describes a bus the panes are
     /// not showing).
-    pub retention: Option<zenkey_fleet_v1::RetentionStats>,
+    pub retention: Option<zenkey_fleet::RetentionStats>,
 }
 
 impl<'a> Status<'a> {
@@ -193,7 +193,7 @@ impl<'a> Status<'a> {
             facts_evicted: dep.facts.evicted(),
             identity: (dep.identity.len(), dep.identity.evicted()),
             watched: &obs.watched,
-            skeleton: dep.skeleton.as_deref().map(|s| s.coverage),
+            skeleton: dep.skeleton.as_deref().map(|s| &s.coverage),
             fetched: sub.follow.fetched.as_ref(),
             totals: obs.totals,
             contracts: ContractsStatus {
@@ -211,22 +211,42 @@ impl<'a> Status<'a> {
         }
     }
 }
-/// What the tree's declared half was built from. Since #614 (FL6a) no v1
-/// slice and no v1 roster feed it — `--registry` is refused and presence is
-/// zk2's — so the cell says the tree is the observed keys, plus whatever the
-/// admin space declared, rather than counting slices that cannot exist.
-pub fn skeleton_text(skeleton: Option<zenkey_fleet_v1::SkeletonCoverage>) -> String {
-    match skeleton {
-        None => "skeleton: not built".to_string(),
-        Some(c) => format!(
-            "skeleton: observed keys · admin {}",
-            match c.admin_entities {
-                // Not asked / not available is not a zero (O4).
-                None => "n/a".to_string(),
-                Some(n) => n.to_string(),
-            }
+/// What the tree's declared half was built from (#614, FL6b): zk2's
+/// skeleton, the O5 coverage statement typed — how many revisions placed
+/// resources, at how many addresses presence named, what was named and not
+/// held, and whether the admin space answered. A zero is an observation;
+/// "n/a" is an admin space not asked or not answering, never a zero (O4).
+pub fn skeleton_text(skeleton: Option<&zenkey_fleet::SkeletonCoverage>) -> String {
+    let Some(c) = skeleton else {
+        return "skeleton: not built".to_string();
+    };
+    let placed = match &c.presence {
+        // Without a presence read the revisions sit under a symbolic
+        // `{system}/{service}`: declared, not placed.
+        None => "no presence read".to_string(),
+        Some(p) if p.complete => kit::plural(c.addresses, "address"),
+        Some(_) => format!(
+            "{} (presence possibly incomplete)",
+            kit::plural(c.addresses, "address")
         ),
+    };
+    let mut text = format!(
+        "skeleton: {} · {placed}",
+        kit::plural(c.revisions, "revision")
+    );
+    if c.unheld > 0 {
+        text.push_str(&format!(" · {} not held", c.unheld));
     }
+    if c.ambiguous > 0 {
+        text.push_str(&format!(" · {} ambiguous", c.ambiguous));
+    }
+    text.push_str(" · admin ");
+    match c.admin_entities {
+        // Not asked / not available is not a zero (O4).
+        None => text.push_str("n/a"),
+        Some(n) => text.push_str(&n.to_string()),
+    }
+    text
 }
 
 /// The key count, and — if the table has evicted — what that count omits.
@@ -272,7 +292,7 @@ pub fn facts_text(cached: usize, evicted: u64) -> String {
 /// has bitten — its own eviction count. A **fourth** number beside
 /// [`keys_text`], `facts_text` and the unwatch line, never folded into any
 /// of them: each bound reports its own cost (RFC 09 §5.1 O6; v1.18 R1).
-pub fn retention_text(r: &zenkey_fleet_v1::RetentionStats) -> String {
+pub fn retention_text(r: &zenkey_fleet::RetentionStats) -> String {
     let mut label = format!(
         "retained: {:.0}s held · budget {}",
         r.span.as_secs_f64(),
@@ -610,8 +630,8 @@ mod tests {
     /// appears as its own number, never inside the key count's (O6).
     #[test]
     fn the_retained_window_states_its_budget_and_its_own_cost() {
-        let mut r = zenkey_fleet_v1::RetentionStats {
-            budget: zenkey_fleet_v1::RetentionBudget::default(),
+        let mut r = zenkey_fleet::RetentionStats {
+            budget: zenkey_fleet::RetentionBudget::default(),
             retained: 10,
             retained_bytes: 4096,
             span: std::time::Duration::from_secs(85),

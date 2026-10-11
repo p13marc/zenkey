@@ -46,13 +46,12 @@ fn tick_into(app: &mut Zengui, tick: &BusTick) {
 
 /// A tick that changes nothing about the key set or the watch set.
 fn tick(keys: usize, evicted: u64, unwatched: u64, watched: &Arc<[String]>) -> BusTick {
-    let stats = zenkey_fleet_v1::StatsTable::new();
+    let stats = zenkey_fleet::StatsTable::new();
     BusTick {
-        tree: Arc::new(zenkey_fleet_v1::KeyTreeSnapshot::build(&stats)),
+        tree: Arc::new(zenkey_fleet::KeyTreeSnapshot::build(&stats)),
         samples: Vec::new(),
         lagged: 0,
         coalesced: 0,
-        nodes: Vec::new(),
         keys,
         keys_evicted: evicted,
         keys_unwatched: unwatched,
@@ -65,12 +64,12 @@ fn tick(keys: usize, evicted: u64, unwatched: u64, watched: &Arc<[String]>) -> B
 /// Synthetic traffic for the retained-window tests (#217): ~88 s of
 /// watched keys with an LWW update, a tombstone, an attachment and one
 /// key that is not this convention at all (O1 — a window curates nothing).
-fn traffic(epoch: std::time::Instant) -> Vec<zenkey_fleet_v1::SampleView> {
+fn traffic(epoch: std::time::Instant) -> Vec<zenkey_fleet::SampleView> {
     use std::time::Duration;
     use zenoh::sample::SampleKind;
     let view =
         |t_s: u64, key: &str, payload: &[u8], encoding: &str, kind, attachment: Option<&[u8]>| {
-            zenkey_fleet_v1::SampleView {
+            zenkey_fleet::SampleView {
                 key: key.to_string(),
                 payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
                 encoding: encoding.to_string(),

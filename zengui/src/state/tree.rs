@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet_v1::{KeyTreeSnapshot, MergedNode, Skeleton, SliceSet};
+use zenkey_fleet::{KeyTreeSnapshot, MergedNode, Skeleton};
 
 use super::deployment::Deployment;
 use super::observation::Observation;
@@ -124,16 +124,13 @@ impl TreeState {
         let skeleton = match &dep.skeleton {
             Some(s) => s.as_ref(),
             None => {
-                empty_skeleton = Skeleton::build(
-                    dep.namespace(),
-                    &SliceSet::default(),
-                    &std::collections::BTreeMap::new(),
-                    None,
-                );
+                let none = zenkey_fleet::ContractSet::new();
+                empty_skeleton =
+                    Skeleton::build(&zenkey_fleet::Lens::new(dep.namespace(), None, &none), None);
                 &empty_skeleton
             }
         };
-        let merged = Arc::new(zenkey_fleet_v1::merge(
+        let merged = Arc::new(zenkey_fleet::merge_skeleton(
             skeleton,
             &obs.observed,
             &obs.watched,

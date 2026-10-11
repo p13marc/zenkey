@@ -136,12 +136,12 @@ fn a_narrow_tree_keeps_each_row_on_its_line() {
             );
         }
     }
-    let skel = zenkey_fleet_v1::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
-    let snap = zenkey_fleet_v1::model::skeleton::merge(
-        &skel,
-        &KeyTreeSnapshot::build(&stats),
-        &["**".to_string()],
+    let skel = zenkey_fleet::Skeleton::build(
+        &zenkey_fleet::Lens::new("", None, &zenkey_fleet::ContractSet::new()),
+        None,
     );
+    let snap =
+        zenkey_fleet::merge_skeleton(&skel, &KeyTreeSnapshot::build(&stats), &["**".to_string()]);
     let flat = tree::flatten(&snap, "", &expand_all(&keys), 500, Instant::now());
     let facts = index(&keys, true);
     let leaf = (0..flat.rows.len())
@@ -455,7 +455,7 @@ fn an_untripped_cache_bound_says_nothing() {
 #[test]
 fn the_tree_badges_the_budget_join() {
     use zengui::budget;
-    use zenkey_fleet_v1::model::stats::StatsTable;
+    use zenkey_fleet::StatsTable;
 
     // A registry that declares a tight budget (2) on the disk family and a
     // rest-variable family beside it.
