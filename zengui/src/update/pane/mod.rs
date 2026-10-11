@@ -66,15 +66,15 @@ pub(crate) fn update(
         // Two more windows onto a slot (#223, #214) — like Detail and
         // History they take the slot and the deployment, not `cx`.
         PaneMsg::Fields(id, msg) => match sub.slot_mut(id) {
-            Some(slot) => fields::update(slot, dep, msg),
+            Some(slot) => fields::update(slot, dep, work.replay.replay.is_some(), msg),
             None => Task::none(),
         },
         PaneMsg::Why(id, msg) => match sub.slot_mut(id) {
-            Some(slot) => why::update(slot, dep, msg),
+            Some(slot) => why::update(slot, dep, work.replay.replay.is_some(), msg),
             None => Task::none(),
         },
         PaneMsg::Consumers(id, msg) => match sub.slot_mut(id) {
-            Some(slot) => consumers::update(slot, dep, msg),
+            Some(slot) => consumers::update(slot, dep, work.replay.replay.is_some(), msg),
             None => Task::none(),
         },
         PaneMsg::Echo(msg) => echo::update(&mut work.echo, work.replay.replay.as_ref(), msg, cx),

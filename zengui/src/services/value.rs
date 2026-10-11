@@ -404,30 +404,31 @@ pub fn validate_then(
     )
 }
 
-/// One bounded field-observation window on the subject key (#223).
+/// One bounded field-observation window on the subject key (#223; zk2's
+/// since #614, FL8b).
 ///
 /// The Inspector's "observe fields" button — an explicit, costed act, never
-/// ambient: `run_field` declares one subscriber on exactly this key, holds it
-/// for the window, and provably releases it. The per-path table is bounded
-/// by the engine's `DEFAULT_MAX_PATHS` and the report states its drops (O6).
+/// ambient: `run_field` declares one subscriber on exactly this key, on the
+/// session in no namespace, holds it for the window, and provably releases
+/// it. Each payload is decoded through the lens — a decoded value's paths
+/// judged against its declared type, a key no contract resolves observed
+/// structurally — and the per-path table is bounded by the engine's
+/// `DEFAULT_MAX_PATHS`, the report stating its drops (O6).
 pub fn field(
     slot: crate::message::SlotId,
-    session: zenoh::Session,
-    base: String,
-    slices: Option<Arc<zenkey_fleet_v1::SliceSet>>,
-    store: Arc<zenkey_fleet_v1::SchemaStore>,
+    raw: zenoh::Session,
+    lens: LensInputs,
     key: String,
-    window: std::time::Duration,
+    window: Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet_v1::FieldSpec {
+            let spec = zenkey_fleet::FieldSpec {
                 selector: key,
                 window,
-                max_paths: zenkey_fleet_v1::DEFAULT_MAX_PATHS,
+                max_paths: zenkey_fleet::DEFAULT_MAX_PATHS,
             };
-            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
-            zenkey_fleet_v1::run_field(&fleet, slices.as_deref(), &store, &spec)
+            zenkey_fleet::run_field(&raw, &lens.lens(), &spec)
                 .await
                 .map(Arc::new)
                 .map_err(ServiceError::of)
@@ -443,33 +444,36 @@ pub fn field(
     )
 }
 
-/// The why ladder for one key (#214), at its frugal default.
+/// How long the why ladder listens on a stream key for a sample: `zenctl
+/// why`'s default `--for`, so the two explorers ask the same question.
+pub const WHY_WINDOW: Duration = Duration::from_secs(3);
+
+/// zk2's why ladder (#214; zk2's since #614, FL8b, `zenctl why`'s engine,
+/// #702) for a key or a service, on the session **in** the namespace.
 ///
-/// Control-plane only (the RFC v1.18 frugality note): the liveliness sweep,
-/// the admin sweeps and one bounded GET on the asked key — no subscriber, so
-/// the `wire-heard` rung lands `NotAsked` and says so rather than "silent".
+/// Only what the ladder reaches is read: presence, the descriptors, the
+/// contracts they name, and the key's answer as its kind is read — S4's GET
+/// for state, a subscription of [`WHY_WINDOW`] for a stream, a bounded GET
+/// for an event — then, after an owner's silence, the archives (S6). An
+/// operation is never called; the caller refuses `@op` before this.
 pub fn why(
     slot: crate::message::SlotId,
     session: zenoh::Session,
-    base: String,
-    slices: Option<Arc<zenkey_fleet_v1::SliceSet>>,
-    key: String,
-    timeout: std::time::Duration,
+    store: zenkey_fleet::BundleStore,
+    namespace: String,
+    target: zenkey_fleet::WhyTarget,
+    timeout: Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = zenkey_fleet_v1::WhySpec {
+            let spec = zenkey_fleet::WhySpec {
                 timeout,
-                listen: None,
+                window: WHY_WINDOW,
             };
-            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
-            zenkey_fleet_v1::run_why(&fleet, &key, slices.as_deref(), &spec)
-                .await
-                .map(Arc::new)
-                .map_err(ServiceError::of)
+            Arc::new(zenkey_fleet::run_why(&session, &store, &namespace, target, spec).await)
         },
         // The asking slot's id rides the landing (#257).
-        move |out| Message::Pane(PaneMsg::Why(slot, crate::view::why::WhyMsg::Done(out))),
+        move |out| Message::Pane(PaneMsg::Why(slot, crate::view::why::WhyMsg::Done(Ok(out)))),
     )
 }
 

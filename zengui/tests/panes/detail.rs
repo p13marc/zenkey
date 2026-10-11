@@ -420,11 +420,12 @@ fn a_qos_mismatch_is_named_per_axis() {
         "the fact, as the recorder spells it"
     );
     assert!(
-        ui.find(
-            "observed axes differ from the declared QoS — the wire is the fact, the contract the \
-             claim (§2.4)"
-        )
-        .is_ok()
+        ui.find("observed axes differ from the declared QoS")
+            .is_ok()
+    );
+    assert!(
+        ui.find("the wire is the fact, the contract the claim (§2.4)")
+            .is_ok()
     );
     assert!(
         ui.find(format!(
@@ -458,11 +459,8 @@ fn a_qos_mismatch_is_named_per_axis() {
     assert!(ui.find("QoS not recorded").is_ok());
     assert!(ui.find("observed axes match the declared QoS").is_err());
     assert!(
-        ui.find(
-            "observed axes differ from the declared QoS — the wire is the fact, the contract the \
-             claim (§2.4)"
-        )
-        .is_err(),
+        ui.find("observed axes differ from the declared QoS")
+            .is_err(),
         "no verdict from axes a row never recorded"
     );
 }
@@ -879,4 +877,98 @@ fn the_detail_pane_states_a_keys_identity() {
             .is_ok(),
         "the rung's own words, and that it is no error"
     );
+}
+
+/// #614 (FL8a): the status strip's fetched cell names the zk2 read — "owner
+/// GET (S4)", "silent", "raw GET" — and an archive's answer beside it,
+/// "last-known from <archive> — not current", never in its place.
+#[test]
+fn the_strip_names_the_zk2_read_and_last_known_beside_it() {
+    use zengui::view::detail::LastKnown;
+    use zengui::view::status::{self, Status};
+
+    type Read = (
+        String,
+        Result<Arc<ValueRead>, zengui::services::ServiceError>,
+    );
+    fn shows(fetched: &Read, last_known: Option<&LastKnown>, text: &str) -> bool {
+        let link = zengui::message::LinkState::Pumping;
+        let watched: Vec<String> = vec![];
+        let mut ui = simulator::<Message, _, _>(status::strip(Status {
+            link: &link,
+            namespace_label: "(bus root)",
+            watched: &watched,
+            skeleton: None,
+            keys_unwatched: 0,
+            fetched: Some(fetched),
+            last_known,
+            scope_label: "all",
+            scope_coverage: "",
+            keys: 0,
+            keys_evicted: 0,
+            identity: (0, 0),
+            totals: Default::default(),
+            contracts: Default::default(),
+            presence: None,
+            seeding: 0,
+            seeded_watches: 0,
+            seed_totals: Default::default(),
+            unreachable: false,
+            prefs_note: None,
+            replaying: false,
+            retention: None,
+        }));
+        ui.find(text).is_ok()
+    }
+
+    let world = common::World::new();
+    let key = common::ETH0;
+    let body = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#;
+    let answered: Read = (
+        key.to_string(),
+        Ok(Arc::new(ValueRead::Owner(world.state_read(
+            key,
+            Some(body),
+            None,
+        )))),
+    );
+    assert!(shows(
+        &answered,
+        None,
+        &format!("fetched {key}: owner GET (S4): 60 B")
+    ));
+
+    let silent: Read = (
+        key.to_string(),
+        Ok(Arc::new(ValueRead::Owner(
+            world.state_read(key, None, None),
+        ))),
+    );
+    let lk = LastKnown {
+        key: key.to_string(),
+        archive: "ground/archive".parse().expect("an address"),
+        answer: Some(Ok(Arc::new(world.state_read(
+            key,
+            Some(body),
+            Some("ground/archive"),
+        )))),
+    };
+    assert!(shows(
+        &silent,
+        Some(&lk),
+        &format!(
+            "fetched {key}: silent — owner GET (S4) unanswered in 5s (not a verdict) · \
+             last-known from ground/archive — not current"
+        )
+    ));
+
+    let foreign: Read = (
+        FOREIGN.to_string(),
+        Ok(Arc::new(raw(FOREIGN, b"hello", "text/plain"))),
+    );
+    assert!(shows(
+        &foreign,
+        None,
+        &format!("fetched {FOREIGN}: raw GET: 5 B")
+    ));
 }

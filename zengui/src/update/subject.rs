@@ -253,10 +253,13 @@ fn select(
     // empty, and stop being fed when it goes away.
     sub.rate_series = crate::series::RateSampler::new();
     sub.series_leaf = None;
-    // The field observation (#223) and the why ladder (#214) explained the
-    // old key; their window inputs survive, their reports do not.
+    // The field observation (#223), the why ladder (#214) and the roles
+    // bound to the subject (#224) explained the old subject; their window
+    // inputs survive, their reports do not. The bindings are computed on
+    // the press (#614, FL8b), so nothing in flight guards them.
     sub.fields.forget_subject();
     sub.why.forget_subject();
+    sub.consumers.forget_subject();
     sub.refresh_series(dep);
 
     match &sub.current {

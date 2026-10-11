@@ -3,11 +3,13 @@
 //!
 //! Validation is per-sample and per-key stats are about arrival; between
 //! them sits the field that stopped moving while both stayed green. The
-//! engine's [`zenkey_fleet_v1::judge::field`] observation is the judge; this section
-//! is its GUI face, and it follows the doctor's cost posture: **run on
-//! demand, never ambient** — the button declares one subscriber on exactly
-//! the subject key, holds it for the stated window, and provably releases
-//! it (`services::value::field`).
+//! engine's [`zenkey_fleet::judge::field`] observation is the judge (zk2's
+//! since #614, FL8b: each payload decoded through the lens, a path judged
+//! against the paths its declared type declares); this section is its GUI
+//! face, and it follows the doctor's cost posture: **run on demand, never
+//! ambient** — the button declares one subscriber on exactly the subject
+//! key, holds it for the stated window, and provably releases it
+//! (`services::value::field`).
 //!
 //! Every bound reports its cost (RFC 09 §5.1 O6): the path table states its
 //! cap and names what it refused; the observer states its drops; the window
@@ -18,7 +20,7 @@
 use std::sync::Arc;
 
 use iced::widget::{Column, row};
-use zenkey_fleet_v1::report::FieldReport;
+use zenkey_fleet::report::FieldReport;
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::Series;
@@ -160,7 +162,7 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
     // bound's cost.
     col = col.push(kit::muted(format!(
         "watched {} for {:.0}s: {} on {} · {} dropped · {} without a \
-         structural document",
+         document",
         report.selector,
         report.window_s,
         kit::plural(report.samples as usize, "sample"),
@@ -168,6 +170,12 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
         report.dropped,
         report.undocumented,
     )));
+    if report.unread > 0 {
+        col = col.push(kit::muted(format!(
+            "{} past the observation limit, never read (O6)",
+            kit::plural(report.unread as usize, "sample"),
+        )));
+    }
     col = col.push(kit::muted(format!(
         "{} tracked (bound {}) · {} refused for the bound{}",
         kit::plural(report.paths, "path"),
@@ -179,16 +187,42 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
             format!(" — e.g. {}", report.paths_dropped_examples.join(", "))
         },
     )));
-    if !report.registry_loaded {
-        col = col.push(kit::muted(
-            "no registry loaded — declared ttl_s and types are unknown, so \
-             field-stuck and field-new are unjudgeable here (O4), not clean",
-        ));
+    // What the payloads were decoded with (#614, FL8b): the lens's scope,
+    // and the samples no contract resolved — observed structurally, judged
+    // for nothing a declared type would need, never "clean" (O4).
+    col = col.push(kit::muted(format!(
+        "decoded through the lens: namespace {} · {} · {} held",
+        if report.lens.namespace.is_empty() {
+            "(the bus root)".to_string()
+        } else {
+            report.lens.namespace.clone()
+        },
+        match &report.lens.presence {
+            None => "no presence read".to_string(),
+            Some(p) if p.complete =>
+                format!("presence read ({})", kit::plural(p.services, "service")),
+            Some(p) => format!(
+                "presence read, possibly incomplete ({})",
+                kit::plural(p.services, "service")
+            ),
+        },
+        kit::plural(report.lens.contracts, "revision"),
+    )));
+    if report.unresolved > 0 {
+        col = col.push(kit::muted(format!(
+            "{} on keys no contract resolved — observed structurally, and \
+             field-new unjudgeable for them (O4), not clean",
+            kit::plural(report.unresolved as usize, "sample"),
+        )));
     }
+    col = col.push(kit::muted(
+        "field-stuck is not asked — it judges against a declared freshness, \
+         freshness.v1's (#613)",
+    ));
 
     for f in &report.findings {
         col = col.push(kit::finding(
-            SeverityTone::of_v1(f.severity),
+            SeverityTone::of(f.severity),
             f.check.as_str(),
             f.subject.clone(),
             f.evidence.clone(),
@@ -208,6 +242,13 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
             r.documents,
             r.kinds.join("|"),
         );
+        // Whether the declared type accounts for the path; absent when no
+        // declared surface could be had, which is not "undeclared" (O4).
+        match r.declared {
+            Some(true) => line.push_str(" · declared"),
+            Some(false) => line.push_str(" · undeclared"),
+            None => {}
+        }
         match r.last_change_s {
             Some(at) => {
                 line.push_str(&format!(" · {} changes, last at {at:.1}s", r.changes));

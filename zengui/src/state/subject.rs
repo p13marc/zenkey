@@ -88,11 +88,12 @@ sub_state! {
         /// demand, dropped with the subject — its report is evidence about
         /// one key's window.
         pub(crate) fields: view::fields::FieldsState,
-        /// The why ladder's state for the slot key (#214): run on demand
-        /// at the frugal default, dropped with the subject.
+        /// The why ladder's state for the slot's key or service (#214;
+        /// zk2's since #614, FL8b): run on demand, dropped with the subject.
         pub(crate) why: view::why::WhyState,
-        /// The declared readers of the slot's subject (#224): one admin
-        /// sweep per click, never ambient, dropped with the subject.
+        /// The roles bound to the slot's subject (#224; R3 edges from
+        /// descriptors since #614, FL8b): one press, read from the presence
+        /// read in hand, dropped with the subject.
         pub(crate) consumers: view::consumers::ConsumersState,
         /// Compare the key's newest sample against the loaded `.zsnap`'s
         /// row for it (#219), when one is loaded and carries the key.
@@ -166,9 +167,8 @@ impl SubjectSlot {
             Some(p) => crate::series::value_series(&rec.ring, p),
             None => crate::series::Series::new(),
         };
-        // No unit (#614, FL7): a zk2 contract declares none, so the axis
-        // says nothing rather than guess — v1's registry was the only
-        // source, and no slice has been loaded since FL6a.
+        // No unit (#614, FL7, FL8a): a zk2 contract declares none, so the
+        // axis says so rather than guess.
         let unit: Option<String> = None;
         Some(view::detail::SeriesData {
             leaves,

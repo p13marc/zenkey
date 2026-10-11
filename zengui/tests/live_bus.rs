@@ -1431,3 +1431,182 @@ async fn the_windows_doctor_finds_the_sprays_phantom_and_squatter() {
 
     bus.down().await;
 }
+
+// ── the Inspector on zk2 (#614, FL8) ───────────────────────────────────────
+
+/// A session **in** the bus's namespace, as a resolved verb opens one.
+async fn in_namespace(bus: &Bus) -> zenoh::Session {
+    zenkey_fleet::open_in_namespace(
+        &bus.namespace,
+        None,
+        std::slice::from_ref(&bus.endpoint),
+        &[],
+        Some(false),
+    )
+    .await
+    .expect("a session in the namespace")
+}
+
+/// zk2's why, through the window (#614, FL8b; #702): an owned key the spray
+/// answers reads healthy all the way down, and the ghost — a key under an
+/// address no instance holds — is explained at presence. Each through the
+/// Inspector's own run, held against the engine's reading of the same key.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn why_explains_an_owned_key_and_a_ghost_through_the_window() {
+    use zengui::message::{Message, PaneMsg, SlotId, Subject, SubjectMsg};
+    use zengui::view::why::WhyMsg;
+    use zenkey_fleet::{WhySpec, WhyTarget};
+
+    let bus = Bus::up().await;
+    let mut app = booted(&bus, example_contracts()).await;
+    let session = in_namespace(&bus).await;
+    let store = zenkey_fleet::BundleStore::new(Duration::from_secs(2));
+    store.seed(&zengui::services::contracts::load_all(&example_contracts()).set);
+    let spec = WhySpec {
+        timeout: Duration::from_secs(2),
+        window: zengui::services::value::WHY_WINDOW,
+    };
+
+    for (rel, healthy) in [
+        ("zk2/robot1/nav/nav.v2/state/status", true),
+        ("zk2/robot1/ghost/nav.v2/stream/position", false),
+    ] {
+        let key = bus.wire(rel);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let engine = zenkey_fleet::run_why(
+                &session,
+                &store,
+                &bus.namespace,
+                WhyTarget::Key(key.clone()),
+                spec,
+            )
+            .await;
+            let expected = format!(
+                "why {} — {}",
+                engine.target,
+                zengui::view::why::headline(&engine)
+            );
+            let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+                key.clone(),
+            ))));
+            let run = app.update(Message::Pane(PaneMsg::Why(SlotId::FOLLOW, WhyMsg::Run)));
+            tokio::time::timeout(Duration::from_secs(30), drive(&mut app, run))
+                .await
+                .expect("the ladder lands");
+            let settled = if healthy {
+                matches!(
+                    engine.verdict,
+                    zenkey_fleet::report::Judgement::NotEstablished { .. }
+                )
+            } else {
+                engine.stopped_at == Some(zenkey_fleet::report::RungId::Presence)
+            };
+            if settled && shows_tall(&app, &expected) {
+                println!("{expected}");
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{rel}: the window never read {expected:?}"
+            );
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    let _ = session.close().await;
+    bus.down().await;
+}
+
+/// Last-known from an archive, through the window (#614, FL8a; S5, S6).
+/// The spray runs no archive, so the test brings one up beside it —
+/// `ground/archive`, recording `host-a/tc`'s interfaces — and once it holds
+/// a key, the Inspector's button reads it: labelled last-known, never
+/// current, confirmed by alignment, beside the owner's own answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn last_known_reads_an_archive_through_the_window_and_never_as_current() {
+    use zengui::message::{Message, PaneMsg, SlotId, Subject, SubjectMsg};
+    use zengui::view::detail::DetailMsg;
+    use zenkey::archive::{Archive, ArchiveConfig, Recorded};
+
+    let bus = Bus::up().await;
+    let archiving = in_namespace(&bus).await;
+    let archive = Archive::start(
+        &archiving,
+        ArchiveConfig {
+            service: zenkey::ServiceConfig::new("ground/archive".parse().expect("an address")),
+            records: vec![Recorded {
+                owner: "host-a/tc".parse().expect("an address"),
+                selector: "zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*".to_owned(),
+                implementation: zenkey::Implementation::new(held("tc.netif.v1").contract().clone()),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .expect("an archive");
+
+    // A member the owner published, as the wire spells it.
+    let raw = bus.raw().await;
+    let sub = raw
+        .declare_subscriber(bus.wire("zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*"))
+        .await
+        .expect("a subscriber");
+    let sample = tokio::time::timeout(Duration::from_secs(20), sub.recv_async())
+        .await
+        .expect("host-a/tc publishes an interface")
+        .expect("a sample");
+    let wire = sample.key_expr().as_str().to_owned();
+    let origin = zenkey_fleet::strip_namespace(&bus.namespace, &wire)
+        .expect("in the namespace")
+        .to_owned();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while archive.confirmed(&origin).is_none() && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        archive.confirmed(&origin).is_some(),
+        "the archive holds {origin}"
+    );
+
+    let mut app = booted(&bus, example_contracts()).await;
+    let read = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        wire.clone(),
+    ))));
+    tokio::time::timeout(Duration::from_secs(20), drive(&mut app, read))
+        .await
+        .expect("the owner GET lands");
+    assert!(
+        shows_tall(&app, "via owner GET (S4)"),
+        "the owner's own answer"
+    );
+    let ask = app.update(Message::Pane(PaneMsg::Detail(
+        SlotId::FOLLOW,
+        DetailMsg::LastKnown("ground/archive".parse().expect("an address")),
+    )));
+    tokio::time::timeout(Duration::from_secs(20), drive(&mut app, ask))
+        .await
+        .expect("the archive's answer lands");
+    assert!(shows_tall(
+        &app,
+        "last-known from ground/archive — not current (S5, S6)"
+    ));
+    assert!(
+        shows_tall(&app, "confirmed by alignment (§4.4)")
+            || shows_tall(&app, "not confirmed by alignment (§4.4)"),
+        "alignment stated either way"
+    );
+    assert!(
+        shows_tall(&app, "via owner GET (S4)"),
+        "beside the owner's answer, never in its place"
+    );
+
+    drop(sub);
+    let _ = raw.close().await;
+    drop(archive);
+    let _ = archiving.close().await;
+    bus.down().await;
+}

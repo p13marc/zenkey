@@ -88,16 +88,11 @@ sub_state! {
     pub(crate) struct Deployment {
         pub(crate) settings: Settings,
         /// The session in **no** namespace (#614, FL6a): the data pump, the
-        /// wire selectors, the admin space — and every v1 pane still on it.
+        /// wire selectors, the admin space, a foreign key's raw read.
         pub(crate) raw: Option<zenoh::Session>,
         /// The session **in** the deployment's namespace (#614, FL6a):
         /// presence, descriptors, contracts. Reopened by a namespace switch.
         pub(crate) session: Option<zenoh::Session>,
-        /// Process-lifetime v1 schema cache (RFC 08 §7), kept for the v1
-        /// panes still alive — why and fields — until FL8 moves them (FL10
-        /// read the request form from zk2's bundles instead, and FL9's
-        /// doctor re-reads zk2's contracts, not this).
-        pub(crate) schema_store: Option<Arc<zenkey_fleet_v1::SchemaStore>>,
         /// The declared keyspace the tree starts from (#614, FL6b): zk2's
         /// contract skeleton, built from the lens's own inputs — the
         /// namespace, the catalog, the store and the contracts held offline
@@ -173,7 +168,6 @@ impl Deployment {
             settings,
             raw: None,
             session: None,
-            schema_store: None,
             skeleton: None,
             skeleton_inputs: None,
             admin_declared: None,
@@ -211,8 +205,8 @@ impl Deployment {
     /// Forget this fleet, keeping only what points at the *next* one.
     ///
     /// Carried forward: the settings (whose `namespace` the caller has
-    /// already rewritten), the two sessions, the v1 schema store and the
-    /// contracts — none of which is evidence *about* a fleet, all of which
+    /// already rewritten), the two sessions and the contracts — none of
+    /// which is evidence *about* a fleet, all of which
     /// is machinery for reaching one, or the user's own input. The contract
     /// store is not carried: what it retrieved came off the departing
     /// deployment's holders, and a fresh one is seeded from the contracts.
@@ -221,13 +215,11 @@ impl Deployment {
     pub(crate) fn pointed_at(&mut self) {
         let raw = self.raw.take();
         let session = self.session.take();
-        let schema_store = self.schema_store.take();
         let contracts = self.contracts.take();
         let settings = self.settings.clone();
         *self = Deployment::new(settings);
         self.raw = raw;
         self.session = session;
-        self.schema_store = schema_store;
         self.contracts = contracts;
         self.reseed_store();
     }

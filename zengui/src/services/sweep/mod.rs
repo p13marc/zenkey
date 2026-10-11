@@ -14,14 +14,12 @@
 
 mod admin;
 mod budget;
-mod consumers;
 mod declared;
 mod doctor;
 mod nodes;
 
 pub use admin::admin;
 pub use budget::budget;
-pub use consumers::consumers_of;
 pub use declared::declared;
 pub use doctor::doctor;
 pub use nodes::{HEALTH_GRACE, health};

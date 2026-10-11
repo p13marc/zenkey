@@ -89,7 +89,7 @@ pub struct InspectorData<'a> {
     pub watched: bool,
     /// The loaded `.zsnap` (#219), when one is: the History section offers
     /// a comparison against its row for the subject key.
-    pub snapshot: Option<&'a zenkey_fleet_v1::Snapshot>,
+    pub snapshot: Option<&'a zenkey_fleet::Snapshot>,
     /// Whether that comparison is showing, on this slot.
     pub compare_snapshot: bool,
     pub latency: Option<(LatencyReport, u64)>,
@@ -101,9 +101,9 @@ pub struct InspectorData<'a> {
     pub nodes: &'a NodesState,
     /// The bounded field observation on the subject key (#223).
     pub fields: &'a super::fields::FieldsState,
-    /// The why ladder's state for the subject key (#214).
+    /// The why ladder's state for the subject key or service (#214).
     pub why: &'a super::why::WhyState,
-    /// The declared readers of the subject (#224).
+    /// The roles bound to the subject (#224; R3 since #614, FL8b).
     pub consumers: &'a super::consumers::ConsumersState,
     /// The dock's resolved spacing grid (#192) — Comfortable by default: a
     /// form wants air.
@@ -152,8 +152,8 @@ fn prefix_sections<'a>(prefix: &'a str, d: &InspectorData<'a>) -> Column<'a, Mes
             "Nothing was fetched, because a prefix names no value any producer \
              publishes. Expand it and select a leaf.",
         ),
-        // A subtree has readers even though it has no value (#224): the
-        // sweep relates declarations to `<prefix>/**`.
+        // A subtree has readers even though it has no value (#224): a
+        // service's or an interface's subtree names whom the R3 edges bind.
         super::consumers::section(d.consumers, d.slot, d.sp),
     ]
 }
@@ -186,8 +186,8 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     // both spend the dock's resolved grid (#192).
     col = col.push(super::fields::section(d.fields, d.slot, d.sp));
     col = col.push(super::why::section(d.why, d.slot, d.sp));
-    // The declared readers (#224): one admin sweep per click, never
-    // ambient — and never worded as matching status (RFC 12 §9).
+    // The roles bound to it (#224; R3 since #614, FL8b): one press, read
+    // from the presence read in hand — never worded as matching status.
     col = col.push(super::consumers::section(d.consumers, d.slot, d.sp));
 
     col.push(history::section(HistoryData {
@@ -206,7 +206,9 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
 
 /// An address names a service, and a service has presence, instances and a
 /// health — no value, no decode, no chart (#614, FL9; D10). The sections are
-/// the nodes pane's own, called unchanged: one claim, one wording.
+/// the nodes pane's own, called unchanged: one claim, one wording. Since
+/// FL8b it also has a silence to explain (why, for a service) and roles
+/// bound to it (its R3 edges).
 fn address_sections<'a>(
     addr: &'a zenkey_model::grammar::Addr,
     d: &InspectorData<'a>,
@@ -217,6 +219,8 @@ fn address_sections<'a>(
         // location bar since #185.
         kit::emphasis(addr.to_string()).font(face::MONO),
         nodes::address_sections(addr, d.presence, d.nodes, d.sp),
+        super::why::section(d.why, d.slot, d.sp),
+        super::consumers::section(d.consumers, d.slot, d.sp),
     ]
 }
 

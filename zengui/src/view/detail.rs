@@ -107,17 +107,21 @@ pub(crate) fn read_summary(read: &ValueRead) -> String {
             ),
             Some(StateValue::Deleted) => "owner GET (S4): deleted".to_string(),
             Some(StateValue::Value { payload }) => {
-                format!("{} bytes via owner GET (S4)", payload.size)
+                format!("owner GET (S4): {}", kit::human_bytes(payload.size as u64))
             }
         },
         ValueRead::Replies(r) => match r.replies.first() {
-            None => format!("no reply to the {} (not a verdict)", r.kind.word()),
-            Some(reply) => format!("{} bytes via {}", reply.payload.len(), r.kind.word()),
+            None => format!("{}: no reply (not a verdict)", r.kind.word()),
+            Some(reply) => format!(
+                "{}: {}",
+                r.kind.word(),
+                kit::human_bytes(reply.payload.len() as u64)
+            ),
         },
         ValueRead::Recorded { reply, t_us, .. } => format!(
-            "{} bytes, the recorded row at {:.3}s — nothing asked of the bus",
-            reply.payload.len(),
-            *t_us as f64 / 1e6
+            "the recorded row at {:.3}s, {} — nothing asked of the bus",
+            *t_us as f64 / 1e6,
+            kit::human_bytes(reply.payload.len() as u64)
         ),
     }
 }
@@ -266,6 +270,11 @@ pub fn declared_qos(identity: Option<&Resolution>) -> Result<QosAxes, String> {
         (Some(resolved), _) => zenkey_fleet::declared_qos(resolved.resource()).ok_or_else(|| {
             "an operation declares no QoS — its replies ride the caller's".to_string()
         }),
+        // A foreign key's rung is a fact about the key (O1), said once in
+        // the identity above; here it is only why nothing declares QoS.
+        (None, Some(Unresolved::NotZk2 { .. } | Unresolved::NotInNamespace { .. })) => {
+            Err("a foreign key — no contract declares its QoS".to_string())
+        }
         (None, Some(why)) => Err(format!("nothing declares it — {}", why.words())),
         (None, None) => Err("a control key — no contract types it, so nothing declares \
                              its QoS"
@@ -355,8 +364,10 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
                     Some(mismatch) => {
                         col = col.push(kit::badge_severity(
                             crate::view::theme::SeverityTone::Warning,
-                            "observed axes differ from the declared QoS — the wire is the \
-                             fact, the contract the claim (§2.4)",
+                            "observed axes differ from the declared QoS",
+                        ));
+                        col = col.push(kit::muted(
+                            "the wire is the fact, the contract the claim (§2.4)",
                         ));
                         for axis in &mismatch.differs {
                             let (d, o) = match axis.as_str() {
@@ -1366,10 +1377,10 @@ mod tests {
         let lens = zenkey_fleet::Lens::new("", None, &set);
         let foreign = lens.resolve("demo/example/foo");
         let why = declared_qos(Some(&foreign)).expect_err("a foreign key declares nothing");
-        assert!(
-            why.starts_with("nothing declares it — not a zk2 data key"),
-            "{why}"
-        );
+        assert_eq!(why, "a foreign key — no contract declares its QoS");
+        let ghost = lens.resolve("zk2/robot9/nav/nav.v2/state/status");
+        let why = declared_qos(Some(&ghost)).expect_err("a ghost declares nothing");
+        assert!(why.starts_with("nothing declares it — "), "{why}");
         assert!(declared_qos(None).is_err());
     }
 

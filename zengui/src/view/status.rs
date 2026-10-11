@@ -452,6 +452,13 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         // "silent", "raw GET" — and an archive's answer beside it, never
         // as it (S6).
         let mut label = match outcome {
+            // A replay's value is the capture's: replayed, not fetched.
+            Ok(read) if read.is_recorded() => {
+                format!(
+                    "replayed {key}: {}",
+                    crate::view::detail::read_summary(read)
+                )
+            }
             Ok(read) => format!("fetched {key}: {}", crate::view::detail::read_summary(read)),
             Err(e) => format!("fetch {key} failed: {e}"),
         };

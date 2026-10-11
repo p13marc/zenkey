@@ -1,33 +1,36 @@
-//! The Inspector's Why section (#214): why is this key silent — the
-//! non-verdict, itemised.
+//! The Inspector's Why section (#214): why is this key — or this service —
+//! silent, the non-verdict itemised. zk2's ladder since #614 (FL8b): the
+//! engine's [`zenkey_fleet::run_why`], the one `zenctl why` prints (#702).
 //!
 //! "Silence is never a verdict" (RFC 05 §3.1) is correct and it is also
-//! where the user is abandoned; the why ladder ([`zenkey_fleet_v1::judge::why`]) turns
-//! the refusal into rungs over facts the engine already holds. This section
-//! renders the same ladder `zenctl why` prints — same rung ids, same three
-//! answers — and its one law is O4's: a rung whose input was not fetched
-//! renders **"not asked"**, never "no". A ladder that prints `No` where it
-//! means `NotAsked` becomes the exact thing it was built to replace.
+//! where the user is abandoned; the ladder turns the refusal into rungs —
+//! namespace, key, presence, descriptor, contract, answer, last-known — each
+//! asking whether the silence is caused *there*, so a rung's finding is the
+//! yes: a cause. Its one law is O4's: a rung the ladder never reached
+//! renders **"not asked"**, and a rung whose observation could not be had
+//! **"unobservable"** — never "no", and never each other.
 //!
-//! Cost posture: the frugal default, always. One button, one control-plane
-//! run (liveliness + admin sweeps + one bounded GET); no subscriber is ever
-//! declared from here, so `wire-heard` reads "not asked" and says so. The
-//! opt-in listen window stays a `zenctl why --for` affair.
+//! Cost posture: one button, one run. Only what the ladder reaches is read
+//! — presence, the descriptors, the contracts, then the key's answer as its
+//! kind is read (S4's GET for state, a short subscription for a stream, a
+//! bounded GET for an event) and, after an owner's silence only, the
+//! archives (S6). An operation is never called, and nothing runs under
+//! `@op` or during a replay.
 
 use std::sync::Arc;
 
 use iced::widget::{Column, row};
-use zenkey_fleet_v1::report::{RungAnswer, WhyReport, WhyVerdict};
+use zenkey_fleet::report::{Judgement, WhyReport, WhyRung};
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::view::kit;
-use crate::view::theme::{RungTone, Tone};
+use crate::view::theme::{JudgementTone, Tone};
 use crate::view::tokens::Spacing;
 
 /// The section's interactions.
 #[derive(Debug, Clone)]
 pub enum WhyMsg {
-    /// The "why?" button — and the palette's entry. Runs on the subject key.
+    /// The "why?" button — and the palette's entry. Runs on the subject.
     Run,
     /// A ladder finished.
     Done(Result<Arc<WhyReport>, crate::services::ServiceError>),
@@ -37,14 +40,14 @@ pub enum WhyMsg {
 #[derive(Default)]
 pub struct WhyState {
     pub in_flight: bool,
-    /// The key the running (or landed) ladder was asked about — the
+    /// What the running (or landed) ladder was asked about — the
     /// staleness guard.
     pub asked: Option<String>,
     pub report: Option<Result<Arc<WhyReport>, crate::services::ServiceError>>,
 }
 
 impl WhyState {
-    /// A new subject: the old ladder explained the old key.
+    /// A new subject: the old ladder explained the old one.
     pub fn forget_subject(&mut self) {
         self.in_flight = false;
         self.asked = None;
@@ -56,33 +59,45 @@ fn msg(slot: SlotId, m: WhyMsg) -> Message {
     Message::Pane(PaneMsg::Why(slot, m))
 }
 
-/// The tone one rung's answer reads as — the single mapping, so no rung can
-/// wear another answer's swatch.
-pub fn rung_tone(answer: &RungAnswer) -> RungTone {
-    match answer {
-        RungAnswer::Established => RungTone::Established,
-        RungAnswer::NotEstablished { .. } => RungTone::NotEstablished,
-        // Both unestablished poles of the RFC 13 (v1.24) core wear the
-        // "absence of an answer" tone — an uncarriable observation is not a
-        // milder `✗`.
-        RungAnswer::NotAsked | RungAnswer::Unobservable { .. } => RungTone::NotAsked,
+/// The badge word for one rung's answer, `zenctl why`'s own: a cause, a
+/// healthy rung, one that could not be observed, one never reached. "not
+/// asked" is spelled out — the whole section exists so it never reads as
+/// "no" (O4).
+pub fn rung_label(verdict: &Judgement) -> &'static str {
+    match verdict {
+        Judgement::Established => "cause",
+        Judgement::NotEstablished { .. } => "healthy",
+        Judgement::Unobservable { .. } => "unobservable",
+        Judgement::NotAsked => "not asked",
     }
 }
 
-/// The badge word for one rung's answer. "not asked" is spelled out — the
-/// whole section exists so it never reads as "no" (O4).
-pub fn rung_label(answer: &RungAnswer) -> &'static str {
-    match answer {
-        RungAnswer::Established => "established",
-        RungAnswer::NotEstablished { .. } => "not established",
-        RungAnswer::NotAsked => "not asked",
-        RungAnswer::Unobservable { .. } => "unobservable",
+/// The ladder's reading in one sentence, `zenctl why`'s headline: a cause
+/// at its rung, every rung healthy, or no verdict and why.
+pub fn headline(report: &WhyReport) -> String {
+    match (&report.verdict, report.stopped_at) {
+        (Judgement::Established, Some(at)) => match report.cause() {
+            Some((_, cause)) => format!("a cause, at {at}: {cause}"),
+            None => format!("a cause, at {at}"),
+        },
+        (Judgement::NotEstablished { .. }, _) => {
+            "every rung healthy, and the key answers".to_string()
+        }
+        (Judgement::Unobservable { reason }, Some(at)) => {
+            format!("no verdict, at {at} — {reason}")
+        }
+        (Judgement::NotAsked, _) => {
+            "no verdict: the answer was not asked — why calls nothing".to_string()
+        }
+        (Judgement::Unobservable { reason }, None) => format!("no verdict — {reason}"),
+        (Judgement::Established, None) => "a cause".to_string(),
     }
 }
 
-/// The Why section for a key subject. `slot` is the subject slot the
-/// surface is bound to (#257) — `Run` carries it home. `sp` is the dock's
-/// resolved spacing grid (#192): a section spends it, it never resolves one.
+/// The Why section for a key or an address subject. `slot` is the subject
+/// slot the surface is bound to (#257) — `Run` carries it home. `sp` is the
+/// dock's resolved spacing grid (#192): a section spends it, it never
+/// resolves one.
 pub fn section(state: &WhyState, slot: SlotId, sp: Spacing) -> Column<'_, Message> {
     let mut col = Column::new().spacing(sp.sm);
 
@@ -96,9 +111,10 @@ pub fn section(state: &WhyState, slot: SlotId, sp: Spacing) -> Column<'_, Messag
     let Some(report) = &state.report else {
         // Never-run is not a ladder of "no" (O4).
         col = col.push(kit::muted(
-            "not asked yet — \"why?\" runs the silence ladder on this key: \
-             control-plane sweeps and one bounded GET, no subscriber \
-             (RFC v1.18 frugality)",
+            "not asked yet — \"why?\" runs zk2's silence ladder here: presence, the \
+             descriptor, the contract, then the answer as the key's kind is read (S4's \
+             GET, a short listen, a bounded GET) and, after an owner's silence, the \
+             archives — nothing is called",
         ));
         return col;
     };
@@ -109,78 +125,91 @@ pub fn section(state: &WhyState, slot: SlotId, sp: Spacing) -> Column<'_, Messag
         }
     };
 
-    // The overall reading first — the same three-way verdict the CLI exits
-    // with, worded so "healthy" never over-claims.
-    let causes = report.causes();
-    // A callout in the reading's tone (#564): a cause is a finding (Caution),
-    // healthy is commentary (Info), impaired is the outline of a question
-    // that could not be asked (Neutral).
+    // The overall reading first — the verdict the CLI exits with. A callout
+    // in its tone (#564): a cause is a finding (Caution), every rung
+    // healthy is commentary (Info), no verdict is the outline of a question
+    // that could not be answered (Neutral).
     let tone = match report.verdict {
-        WhyVerdict::Explained => Tone::Caution,
-        WhyVerdict::Healthy => Tone::Info,
-        WhyVerdict::Impaired => Tone::Neutral,
+        Judgement::Established => Tone::Caution,
+        Judgement::NotEstablished { .. } => Tone::Info,
+        Judgement::Unobservable { .. } | Judgement::NotAsked => Tone::Neutral,
     };
     col = col.push(kit::callout(
         tone,
-        kit::caption(match report.verdict {
-            WhyVerdict::Explained => format!(
-                "explained — cause established by: {}",
-                causes
-                    .iter()
-                    .map(|c| c.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            WhyVerdict::Healthy => "no cause established, and everything checked looks healthy \
-             (\"declared, alive, never published\" lands here on purpose — \
-             publishers declare lazily, RFC 08 §6.1)"
-                .to_string(),
-            WhyVerdict::Impaired => "no cause established, and the observation was impaired — \
-             \"healthy\" cannot be claimed over questions that could not be \
-             asked"
-                .to_string(),
-        }),
+        kit::caption(format!("why {} — {}", report.target, headline(report))),
     ));
-    if !report.impairments.is_empty() {
-        col = col.push(
-            iced::widget::Row::from_iter(
-                report
-                    .impairments
-                    .iter()
-                    .map(|i| kit::status_chip(Tone::Neutral, format!("impaired: {i}"))),
-            )
-            .spacing(sp.xs)
-            .wrap()
-            .vertical_spacing(sp.xs),
-        );
+    // What the ladder put to the bus, and no wider (O5).
+    if report.asked.is_empty() {
+        col = col.push(kit::muted(
+            "asked the bus nothing — the key alone decided where the ladder stopped",
+        ));
+    } else {
+        col = col.push(kit::muted(format!("asked {}", report.asked.join(" · "))));
     }
-    if let Some(s) = report.listened_s {
-        col = col.push(kit::muted(format!("listened {s:.0}s (opt-in window)")));
+    if let Some(s) = report.window_s {
+        col = col.push(kit::muted(format!(
+            "listened {s:.0}s for a sample on the stream"
+        )));
     }
 
     // The ladder, a rung a row with echo's leading edge (#564): the badge
-    // carries the answer, the reason and the evidence sit under the rung
-    // they belong to — grouped by the row, not by leading spaces.
+    // carries the answer, its reason or cause sits under the rung it
+    // belongs to.
     for rung in &report.rungs {
-        let mut body = Column::new().spacing(sp.xs).push(
-            row![
-                kit::badge_rung(rung_tone(&rung.answer), rung_label(&rung.answer)),
-                kit::mono(rung.id.to_string()),
-                kit::muted(rung.question),
-            ]
-            .spacing(sp.sm)
-            .align_y(iced::Alignment::Center),
-        );
-        if let RungAnswer::NotEstablished { reason } = &rung.answer {
-            body = body.push(kit::caption(format!("— {reason}")));
-        }
-        for evidence in &rung.evidence {
-            body = body.push(kit::muted(format!("· {evidence}")));
-        }
-        col = col.push(kit::edge_row(
-            kit::Edge::Put,
-            iced::widget::container(body).padding(iced::Padding::ZERO.left(sp.sm)),
+        col = col.push(rung_row(rung, sp));
+    }
+
+    // What an archive still holds after an owner's silence: last-known,
+    // never current, and no explanation of the silence (S6).
+    if let Some(lk) = &report.last_known {
+        col = col.push(kit::callout(
+            Tone::Info,
+            kit::caption(format!(
+                "{} still holds a last-known value of {} ({}): last-known, never current — \
+                 the owner's silence is not explained by it (S6)",
+                lk.archive,
+                lk.key,
+                if lk.confirmed {
+                    "confirmed by alignment"
+                } else {
+                    "not confirmed by alignment"
+                }
+            )),
+        ));
+    }
+    if report.verdict.is_not_asked() {
+        col = col.push(kit::muted(
+            "an operation's answer is not asked: why calls nothing — the Workbench's call \
+             asks it, and its silence is attributed through presence",
         ));
     }
     col
+}
+
+/// One rung: its answer's badge, its id and the core section it reads, the
+/// question it asks — then the cause it established or the reason behind a
+/// healthy or unobservable answer.
+fn rung_row<'a>(rung: &'a WhyRung, sp: Spacing) -> iced::Element<'a, Message> {
+    let mut body = Column::new().spacing(sp.xs).push(
+        row![
+            kit::badge_judgement(JudgementTone::of(&rung.verdict), rung_label(&rung.verdict)),
+            kit::mono(format!("{} ({})", rung.rung, rung.section)),
+            kit::muted(rung.rung.question()),
+        ]
+        .spacing(sp.sm)
+        .align_y(iced::Alignment::Center),
+    );
+    match (&rung.verdict, &rung.cause) {
+        (Judgement::Established, Some(cause)) => {
+            body = body.push(kit::caption(format!("— {cause}")));
+        }
+        (Judgement::NotEstablished { reason }, _) | (Judgement::Unobservable { reason }, _) => {
+            body = body.push(kit::caption(format!("— {reason}")));
+        }
+        _ => {}
+    }
+    kit::edge_row(
+        kit::Edge::Put,
+        iced::widget::container(body).padding(iced::Padding::ZERO.left(sp.sm)),
+    )
 }
