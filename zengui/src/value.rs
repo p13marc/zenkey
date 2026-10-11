@@ -32,7 +32,7 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet::report::{Provenance, Rendered, Stamp, StateReport, StateValue};
+use zenkey_fleet::report::{Provenance, Rendered, Stamp, StateReport, StateRow, StateValue};
 use zenkey_fleet::{Resolution, SampleView};
 
 /// A checked sample and the document the Detail pane draws from it.
@@ -73,11 +73,11 @@ impl DecodedValue {
         DecodedValue { checked, document }
     }
 
-    /// A rendering a state read handed back with no bytes beside it (#614,
-    /// FL8a): S4's GET and an archive's answer render through the contract
-    /// in the fleet, and keep no wire bytes. An undecodable one has nothing
-    /// to sniff, so its document is empty and the pane says its byte count
-    /// beside the decode error.
+    /// A rendering handed back with no bytes beside it (#614, FL8a): a
+    /// state row that kept none, which since #765 is only one built by
+    /// hand — the fleet keeps S4's and an archive's bytes on the row. An
+    /// undecodable one has nothing to sniff, so its document is empty and
+    /// the pane says its byte count beside the decode error.
     pub fn rendered(checked: zenkey_fleet::Checked) -> DecodedValue {
         let document = rendered_document(&checked.rendering.rendered);
         DecodedValue { checked, document }
@@ -189,21 +189,34 @@ impl StateAnswer {
     /// against `resolution`'s revision (§7.2, §7.3), and the row's stamp
     /// attributed through `provenance` — the lens's
     /// [`provenance`](zenkey_fleet::Lens::provenance), bound to the owner.
+    /// The row's bytes (#765) are what an undecodable rendering is sniffed
+    /// from, as a GET's reply is.
     pub fn new(
         report: StateReport,
         resolution: &Resolution,
         provenance: impl Fn(&str) -> Provenance,
     ) -> StateAnswer {
         let row = report.rows.first();
-        let decoded = match (row.map(|r| &r.value), &resolution.resolved) {
-            (Some(StateValue::Value { payload }), Some(resolved)) => {
+        let decoded = match (row, &resolution.resolved) {
+            (
+                Some(StateRow {
+                    value: StateValue::Value { payload },
+                    bytes,
+                    ..
+                }),
+                Some(resolved),
+            ) => {
                 let rendering = (**payload).clone();
                 let conformance = zenkey_fleet::conformance(&resolved.revision, &rendering);
-                Some(Arc::new(DecodedValue::rendered(zenkey_fleet::Checked {
+                let checked = zenkey_fleet::Checked {
                     identity: resolution.identity.clone(),
                     rendering,
                     conformance,
-                })))
+                };
+                Some(Arc::new(match bytes {
+                    Some(bytes) => DecodedValue::new(checked, &bytes.to_bytes()),
+                    None => DecodedValue::rendered(checked),
+                }))
             }
             _ => None,
         };
@@ -218,7 +231,7 @@ impl StateAnswer {
     }
 
     /// The first row: the one key a resolved key's read names.
-    pub fn row(&self) -> Option<&zenkey_fleet::report::StateRow> {
+    pub fn row(&self) -> Option<&StateRow> {
         self.report.rows.first()
     }
 }
@@ -282,7 +295,8 @@ impl ValueRead {
 
     /// The reply the value section shows and the lens decodes: the newest a
     /// GET answered, or the recorded row. A state read has none — its
-    /// rendering came back decoded ([`StateAnswer::decoded`]).
+    /// rendering came back decoded ([`StateAnswer::decoded`]), its bytes on
+    /// the row.
     pub fn shown(&self) -> Option<&Reply> {
         match self {
             ValueRead::Owner(_) => None,

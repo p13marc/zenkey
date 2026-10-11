@@ -725,7 +725,8 @@ fn stamp_line<'a>(stamp: Option<&Stamp>) -> Option<Element<'a, Message>> {
 }
 
 /// S4's answer (#614, FL8a): the owner's value decoded through its
-/// contract, its deletion, or its silence — never "no value" (S6).
+/// contract, its bytes in hex beside it (#765), its deletion, or its
+/// silence — never "no value" (S6).
 fn owner_value<'a>(answer: &'a StateAnswer, data: &DetailData<'a>) -> Element<'a, Message> {
     let sp = data.sp;
     let mut col = Column::new().spacing(sp.xs);
@@ -764,18 +765,17 @@ fn owner_value<'a>(answer: &'a StateAnswer, data: &DetailData<'a>) -> Element<'a
             ));
         }
         Some(size) => {
-            col = col.push(
-                row![
-                    no_bytes_pane(
-                        "no hex — S4's read hands back the owner's reply decoded through \
-                         its contract, as `zenctl get state` does; its wire bytes are not \
-                         kept",
-                        sp
-                    ),
-                    decoded_pane(answer.decoded.as_deref(), size, sp)
-                ]
-                .spacing(sp.md),
-            );
+            // The owner's reply as it arrived, kept on the row (#765): its
+            // hex beside the decode, as a GET's reply is shown.
+            let left = match &row.bytes {
+                Some(bytes) => hex_pane(&bytes.to_bytes(), sp),
+                None => no_bytes_pane(
+                    "no hex — this read handed back its rendering with no bytes beside it",
+                    sp,
+                ),
+            };
+            col = col
+                .push(row![left, decoded_pane(answer.decoded.as_deref(), size, sp)].spacing(sp.md));
         }
     }
     if answer.report.rows.len() > 1 {
@@ -868,12 +868,17 @@ fn recorded_value<'a>(reply: &'a Reply, t_us: u64, data: &DetailData<'a>) -> Ele
         .into()
 }
 
-/// A reply's facts as chips (#563): its size, where it came from, its
-/// encoding and whose clock stamped it.
+/// A reply's facts as chips (#563): its size — or, for a tombstone, that it
+/// is one, never "0 B" (#765) — where it came from, its encoding and whose
+/// clock stamped it.
 fn reply_chips<'a>(reply: &Reply, source: String, sp: Spacing) -> Element<'a, Message> {
     row![
         kit::eyebrow("VALUE"),
-        kit::data_chip(kit::human_bytes(reply.payload.len() as u64)),
+        if reply.delete {
+            kit::retired_chip("DELETE (tombstone)")
+        } else {
+            kit::data_chip(kit::human_bytes(reply.payload.len() as u64))
+        },
         kit::data_chip(source),
         kit::data_chip(if reply.encoding.is_empty() {
             "encoding unset".to_string()
