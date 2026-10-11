@@ -13,7 +13,9 @@
 //! data pump's wire selectors and the admin space; `session`, in the
 //! deployment's namespace, reads presence, descriptors and contracts the way
 //! the deployment's own consumers do. A namespace switch reopens only the
-//! second.
+//! second — and with it the presence projection, the lens feed and its
+//! catalog, which live here because they are what the window knows *about*
+//! the deployment it points at.
 //!
 //! [`Deployment::pointed_at`] is the reset, and it is a struct *replacement*
 //! rather than a list of assignments. That inverts #179's and #194's failure
@@ -23,11 +25,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use zenkey_fleet::{BundleStore, NamespaceListing};
+use zenkey_fleet::{BundleStore, Catalog, IdentityCache, NamespaceListing};
 use zenkey_fleet_v1::Skeleton;
 
 use crate::config::{NamespaceChoice, Settings};
+use crate::presence_link::{LensHandle, PresenceUpdate};
 use crate::services::contracts::LoadedContracts;
+use crate::services::value::LensInputs;
 
 /// What the contract store holds, counted when it can change rather than per
 /// frame — the status strip's contracts cell (#614, FL6a).
@@ -64,10 +68,10 @@ sub_state! {
         /// switch, reloaded on every session open.
         pub(crate) contracts: Option<Arc<LoadedContracts>>,
         /// The contract store (spec §8.4): seeded with `contracts`, filled
-        /// by retrieval. Rebuilt whenever the contracts or the namespaced
-        /// session change, so a revision dropped from `--contracts` does not
-        /// linger.
-        pub(crate) store: Option<BundleStore>,
+        /// by the lens feed's retrievals. Rebuilt whenever the contracts or
+        /// the namespaced session change, so a revision dropped from
+        /// `--contracts` does not linger.
+        pub(crate) store: BundleStore,
         /// `store` counted, for the strip.
         pub(crate) contract_counts: ContractCounts,
         /// The namespace listing (`zenkey_fleet::namespace_listing`), read
@@ -78,6 +82,26 @@ sub_state! {
         /// is a deployment — displayed by its label, never as a blank row
         /// (#185) — not a "no selection" placeholder.
         pub(crate) namespace_options: Vec<NamespaceChoice>,
+        /// The last presence landing (#614, FL6a): each address up, down or
+        /// unobservable, on the basis its seed allows. `None` = presence not
+        /// read yet, never "nobody there" (O4).
+        pub(crate) presence: Option<Arc<PresenceUpdate>>,
+        /// The lens feed, once the presence link opened it: what a check
+        /// nudges, and what each tick polls for a catalog a background
+        /// re-read swapped in.
+        pub(crate) lens_feed: Option<LensHandle>,
+        /// The catalog the lens resolves addresses through — the feed's
+        /// latest, pointer-compared each tick. `None` = no presence read
+        /// stands, and every zk2 key says so at its rung.
+        pub(crate) catalog: Option<Arc<Catalog>>,
+        /// The generation `catalog` and `store` are at
+        /// (`LensFeed::generation`): an identity or a verdict judged under
+        /// another one is due again.
+        pub(crate) lens_generation: u64,
+        /// Each wire key's resolution through the lens, kept and bounded by
+        /// the data pump's own key bound, every drop counted (O6). Fed per
+        /// sample; FL7 draws its badges from it.
+        pub(crate) identity: IdentityCache,
         /// Bounded, and it says what the bound costs (#107). v1's projection
         /// cache, fed no slices since #614 (FL6a): its badges read "not
         /// asked" until FL7 replaces it with zk2's identity cache.
@@ -88,6 +112,7 @@ sub_state! {
 impl Deployment {
     pub(crate) fn new(settings: Settings) -> Deployment {
         let max_keys = settings.max_keys;
+        let timeout = settings.timeout();
         let mut dep = Deployment {
             settings,
             raw: None,
@@ -95,13 +120,18 @@ impl Deployment {
             schema_store: None,
             skeleton: None,
             contracts: None,
-            store: None,
+            store: BundleStore::new(timeout),
             contract_counts: ContractCounts::default(),
             namespaces: None,
             namespace_options: Vec::new(),
-            // The projection cache takes the *same* bound as the engine's key
-            // table: it cannot usefully outgrow the table it shadows, and one
+            presence: None,
+            lens_feed: None,
+            catalog: None,
+            lens_generation: 0,
+            // Both caches take the *same* bound as the engine's key table:
+            // neither can usefully outgrow the table it shadows, and one
             // number keeps that one sentence (#107).
+            identity: IdentityCache::with_capacity(max_keys),
             facts: zenkey_fleet_v1::FactsCache::with_capacity(max_keys),
         };
         dep.rebuild_namespace_options();
@@ -128,6 +158,8 @@ impl Deployment {
     /// is machinery for reaching one, or the user's own input. The contract
     /// store is not carried: what it retrieved came off the departing
     /// deployment's holders, and a fresh one is seeded from the contracts.
+    /// Neither is presence, the lens or its catalog: they described the
+    /// deployment the window is leaving.
     pub(crate) fn pointed_at(&mut self) {
         let raw = self.raw.take();
         let session = self.session.take();
@@ -144,32 +176,79 @@ impl Deployment {
 
     /// A fresh contract store, seeded with the contracts held offline
     /// (§8.5): what a contracts load and every namespace move start from.
+    /// The lens over the old store goes with it — its feed retrieves into
+    /// the store it was opened on — and the presence link that opens the
+    /// next one is restarted by the caller.
     pub(crate) fn reseed_store(&mut self) {
         let store = BundleStore::new(self.timeout());
         if let Some(c) = &self.contracts {
             store.seed(&c.set);
         }
-        self.store = Some(store);
+        self.store = store;
+        self.lens_feed = None;
+        self.catalog = None;
         self.recount_contracts();
     }
 
     /// Count what the store holds, for the strip. Cheap enough per change
-    /// (a bounded store, at most `DEFAULT_MAX_CONTRACTS` entries), and never
-    /// per frame.
+    /// (a bounded store, at most `DEFAULT_MAX_CONTRACTS` entries, and the
+    /// catalog's wanted revisions), and never per frame.
     pub(crate) fn recount_contracts(&mut self) {
         use zenkey_fleet::report::ContractSource;
+        use zenkey_fleet::{ContractState, Contracts as _};
         let offline = self.contracts.as_ref().map_or(0, |c| c.set.len());
-        let retrieved = self.store.as_ref().map_or(0, |s| {
-            s.held()
-                .iter()
-                .filter(|r| r.source() == ContractSource::Bus)
-                .count()
-        });
+        let retrieved = self
+            .store
+            .held()
+            .iter()
+            .filter(|r| r.source() == ContractSource::Bus)
+            .count();
+        let (mut unavailable, mut unreadable) = (0, 0);
+        if let Some(catalog) = &self.catalog {
+            for (iface, fp) in catalog.wanted() {
+                match self.store.state(&iface, &fp) {
+                    Some(ContractState::Unavailable { .. }) => unavailable += 1,
+                    Some(ContractState::Unreadable { .. }) => unreadable += 1,
+                    _ => {}
+                }
+            }
+        }
         self.contract_counts = ContractCounts {
             offline,
             retrieved,
-            ..self.contract_counts
+            unavailable,
+            unreadable,
         };
+    }
+
+    /// What a lens is built from, owned, for a task (#614, FL6a).
+    pub(crate) fn lens_inputs(&self) -> LensInputs {
+        LensInputs {
+            namespace: self.settings.namespace.clone(),
+            catalog: self.catalog.clone(),
+            store: self.store.clone(),
+            contracts: self.contracts.as_ref().map(|c| Arc::clone(&c.set)),
+            generation: self.lens_generation,
+            feed: self.lens_feed.as_ref().map(|h| h.0.clone()),
+        }
+    }
+
+    /// Resolve `wire` into the identity cache, through the lens over this
+    /// deployment's inputs — the cache's one insert point. Split borrows:
+    /// the lens reads the catalog, the store and the contracts while the
+    /// cache is written.
+    pub(crate) fn ensure_identity(&mut self, wire: &str) {
+        let lens = zenkey_fleet::Lens::new(
+            &self.settings.namespace,
+            self.catalog.as_deref(),
+            &self.store,
+        )
+        .at_generation(self.lens_generation);
+        let lens = match &self.contracts {
+            Some(c) => lens.offline(&c.set),
+            None => lens,
+        };
+        self.identity.ensure(&lens, wire);
     }
 
     /// The namespace picker's options, after a listing landed or the

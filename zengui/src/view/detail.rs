@@ -7,8 +7,8 @@
 //! - **Registry** — the declared metadata, when the subject is registered
 //!   (fields absent are absent, never defaulted);
 //! - **Value** — the on-demand fetch (which rung answered), rendered **hex
-//!   beside decoded**: the decoded side is schema-decoded named fields when
-//!   RFC 08 §7 resolves, and the honest ladder otherwise — tagged with *how*
+//!   beside decoded**: the decoded side is contract-decoded named fields when
+//!   the lens resolves the key (#614, FL6a), and the honest ladder otherwise — tagged with *how*
 //!   it was produced, because schema-decoded and sniffed must never look
 //!   alike.
 //! - **Series** (issue #64) — sparklines for a numeric leaf and for the
@@ -19,7 +19,7 @@
 
 use iced::widget::{Column, row};
 use iced::{Element, Length};
-use zenkey_fleet_v1::Rendering;
+
 use zenkey_fleet_v1::{FetchOutcome, KeyFacts, KeyShape, Registration};
 
 use crate::message::{Message, PaneMsg, SlotId};
@@ -703,88 +703,104 @@ fn hex_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
 const VIOLATION_ROWS: usize = 8;
 
 /// The decoded side, tagged with how it was produced — and with the payload's
-/// conformance verdict (#164): three states, never a boolean, and each
-/// not-validated *reason* spelled (`NoRegistry`'s "nobody looked" never wears
-/// `NoSchema`'s "asked, and the type has none" — #246).
+/// conformance (#164) through the lens (#614, FL6a): four poles, never a
+/// boolean, and a "not checked" always names the rung that stopped it
+/// ("no provider of this address in presence" never wears "not a zk2 data
+/// key"'s words — #246).
 fn decoded_pane<'a>(
     decoded: Option<&'a DecodedValue>,
     payload_len: usize,
     sp: Spacing,
 ) -> Element<'a, Message> {
+    use zenkey_fleet::report::{Conformance, Rendered};
+
     let mut col = Column::new().spacing(sp.xs);
     match decoded {
         None => {
             col = col.push(kit::muted("decoding…"));
         }
         Some(value) => {
-            let sample = &value.sample;
-            // The document was rendered once, in the decode task (#345); all
-            // this pane decides is how much of it to draw.
+            let checked = &value.checked;
+            // The document was rendered once, in the check's task (#345);
+            // all this pane decides is how much of it to draw.
             let (shown, elided) = clamp_document(&value.document);
-            match &sample.rendering {
-                Rendering::Typed(d) => {
+            let body = |shown: &str| {
+                if shown.is_empty() {
+                    format!("<{payload_len} bytes>")
+                } else {
+                    shown.to_string()
+                }
+            };
+            match &checked.rendering.rendered {
+                Rendered::Value { declared, .. } => {
                     col = col.push(kit::tone_badge(
                         RegistrationTone::Registered,
-                        format!(
-                            "schema-decoded <{}>",
-                            sample.type_name.as_deref().unwrap_or("?")
-                        ),
+                        format!("contract-decoded <{declared}>"),
                     ));
                     col = col.push(kit::mono(shown.to_string()));
-                    for note in &d.notes {
-                        col = col.push(kit::muted(format!("note: {note}")));
-                    }
                 }
-                Rendering::Structural(_) => {
-                    // The honest ladder: typed-but-undecoded vs plain structural.
-                    let tag = match &sample.type_name {
-                        Some(t) => format!("<{t}?> structural (schema did not decode)"),
-                        None => "structural (no schema resolves — RFC 08 §7's fallback)".into(),
-                    };
-                    col = col.push(kit::muted(tag));
-                    col = col.push(kit::mono(if shown.is_empty() {
-                        format!("<{payload_len} bytes>")
-                    } else {
-                        shown.to_string()
-                    }));
+                Rendered::Structural { why, .. } => {
+                    // The honest ladder: the rung the lens stopped at, then
+                    // the structural sniff.
+                    col = col.push(kit::muted(format!("structural — {}", why.words())));
+                    col = col.push(kit::mono(body(shown)));
+                }
+                Rendered::Undecodable { declared, .. } => {
+                    col = col.push(kit::muted(format!(
+                        "<{declared}?> structural (the bytes did not decode as their \
+                         declared type)"
+                    )));
+                    col = col.push(kit::mono(body(shown)));
+                }
+                Rendered::Opaque { media_type } => {
+                    // A raw type: the contract says these bytes are not this
+                    // tool's to read, so only their size is (§7.1).
+                    col = col.push(kit::muted(format!(
+                        "raw {media_type} — the contract declares no structure to render"
+                    )));
+                    col = col.push(kit::mono(format!("<{payload_len} bytes>")));
                 }
             }
             if elided > 0 {
                 col = col.push(kit::muted(format!("… {elided} more bytes not shown")));
             }
+            // Where the key resolved to, when it did: the interface, the
+            // resource and the revision a reader would hold.
+            if let Some(r) = &checked.rendering.resource {
+                col = col.push(kit::muted(format!(
+                    "resolved: {} · {} · {}",
+                    r.iface, r.resource, r.fingerprint
+                )));
+            }
             // The verdict, glyph and word (#164/#193).
             col = col.push(kit::badge_verdict(
-                crate::verdict::tone(&sample.verdict),
-                crate::verdict::label(&sample.verdict),
+                crate::verdict::tone(&checked.conformance),
+                crate::verdict::label(&checked.conformance),
             ));
-            match &sample.verdict {
-                zenkey_v1::schema::validate::Verdict::Invalid(errors) => {
-                    for e in errors.iter().take(VIOLATION_ROWS) {
+            match &checked.conformance {
+                Conformance::Invalid { violations } => {
+                    for e in violations.iter().take(VIOLATION_ROWS) {
                         col = col.push(kit::muted(format!("violation: {e}")));
                     }
-                    if errors.len() > VIOLATION_ROWS {
+                    if violations.len() > VIOLATION_ROWS {
                         col = col.push(kit::muted(format!(
                             "+{} more not shown (display bound)",
-                            errors.len() - VIOLATION_ROWS
+                            violations.len() - VIOLATION_ROWS
                         )));
                     }
                 }
-                zenkey_v1::schema::validate::Verdict::NotValidated(reason) => {
-                    // The full sentence under the compact badge, so the
-                    // reason is never only a parenthetical.
-                    col = col.push(kit::muted(reason.to_string()));
+                Conformance::Undecodable { reason, .. } => {
+                    col = col.push(kit::muted(format!("decode error: {reason}")));
                 }
-                zenkey_v1::schema::validate::Verdict::Valid => {}
-            }
-            if let Some(e) = &sample.decode_error {
-                col = col.push(kit::muted(format!("decode error: {e}")));
+                // The rung is in the badge's parenthetical already, and a
+                // valid value needs no sentence.
+                Conformance::NotChecked { .. } | Conformance::Valid => {}
             }
         }
     }
     // Set into the panel as an inset well (#539).
     kit::inset(col).width(Length::FillPortion(1)).into()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

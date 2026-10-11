@@ -52,6 +52,7 @@ pub mod message;
 pub mod nodes;
 pub mod patharena;
 pub mod prefs;
+pub mod presence_link;
 pub mod replay;
 pub mod scope;
 pub mod series;

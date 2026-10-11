@@ -2,18 +2,19 @@
 
 use super::*;
 
-/// #164: echo rows badge the *cached* verdict — a lookup, never a decode —
-/// and a key never checked renders the third state in words: "not validated
-/// (not yet checked)", never a blank that could read as fine and never a
-/// borrowed verdict.
+/// #164, on zk2's four poles (#614, FL6a): echo rows badge the *cached*
+/// conformance — a lookup, never a decode — each pole in its own words, and
+/// a key the cache never checked renders the cache's own state: "not yet
+/// checked", never a blank that could read as fine, never a borrowed
+/// verdict, and never the "not checked" a check that ran can answer.
 #[test]
-fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
+fn the_echo_rows_badge_four_poles_and_admit_the_unchecked() {
     use std::time::Instant;
     use zengui::echo::EchoRing;
     use zengui::verdict::VerdictCache;
     use zengui::view::echo::{EchoView, section};
+    use zenkey_fleet::report::Conformance;
     use zenkey_fleet_v1::SampleView;
-    use zenkey_v1::schema::validate::Verdict;
 
     let sample = |key: &str| SampleView {
         key: key.to_string(),
@@ -30,14 +31,36 @@ fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
         source: None,
         received: Instant::now(),
     };
+    let valid = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    let invalid = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/wlan0";
+    let undecodable = "zk2/robot1/nav/nav.v2/state/origin";
+    let not_checked = "zk2/robot1/ghost/nav.v2/stream/position";
+    let unchecked = "zk2/robot1/nav/nav.v2/state/status";
     let mut ring = EchoRing::new(10);
-    ring.push(&sample("v1/h-3fa9c2d41b7e/state/sysinfo/health"));
-    ring.push(&sample("v1/h-3fa9c2d41b7e/state/sysinfo/unchecked"));
+    for key in [valid, invalid, undecodable, not_checked, unchecked] {
+        ring.push(&sample(key));
+    }
 
     let mut verdicts = VerdictCache::default();
+    verdicts.record(valid, Conformance::Valid);
     verdicts.record(
-        "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-        Verdict::Invalid(vec!["/v: wrong type".into()]),
+        invalid,
+        Conformance::Invalid {
+            violations: vec!["/is_up: \"yes\" is not of type \"boolean\"".into()],
+        },
+    );
+    verdicts.record(
+        undecodable,
+        Conformance::Undecodable {
+            declared: "nav.v2.Origin".into(),
+            reason: "buffer underflow".into(),
+        },
+    );
+    verdicts.record(
+        not_checked,
+        Conformance::NotChecked {
+            reason: "no provider of this address in presence".into(),
+        },
     );
 
     let view = EchoView::new();
@@ -51,16 +74,29 @@ fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
         zengui::prefs::ThemeChoice::Dark,
         sp(),
     ))));
+    for (word, why) in [
+        ("valid", "checked and passed"),
+        (
+            "invalid (1 violation)",
+            "checked, decoded, and failed its schema",
+        ),
+        (
+            "undecodable (as nav.v2.Origin)",
+            "not the declared type at all",
+        ),
+        (
+            "not checked (no provider of this address in presence)",
+            "a check that stopped at a rung, and says which",
+        ),
+        (
+            zengui::verdict::UNCHECKED_LABEL,
+            "a key the cache never checked — the cache's own state",
+        ),
+    ] {
+        assert!(ui.find(word).is_ok(), "{why}: {word:?} not on screen");
+    }
     assert!(
-        ui.find("invalid (1 violation)").is_ok(),
-        "the checked key wears its cached verdict"
-    );
-    assert!(
-        ui.find("not validated (not yet checked)").is_ok(),
-        "an unchecked key says so — the third state, never a blank"
-    );
-    assert!(
-        ui.find("verdicts: 1 key checked (each badge is the key's most recently checked sample)")
+        ui.find("verdicts: 4 keys checked (each badge is the key's most recently checked sample)")
             .is_ok(),
         "the strip scopes what a badge claims"
     );

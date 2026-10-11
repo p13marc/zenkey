@@ -184,6 +184,20 @@ impl Zengui {
         }
     }
 
+    /// The presence link this window runs now (#614, FL6a), when it runs
+    /// one: a session in the namespace and its presence monitor exist. The
+    /// one place the link's key is built — [`Zengui::subscription`] runs it,
+    /// and a live test drives the same stream without a window.
+    pub fn presence_link(&self) -> Option<crate::presence_link::PresenceKey> {
+        Some(crate::presence_link::PresenceKey {
+            epoch: self.obs.presence_epoch,
+            session: self.dep.session.clone()?,
+            monitor: self.obs.presence_monitor.clone()?,
+            store: self.dep.store.clone(),
+            timeout: self.dep.timeout(),
+        })
+    }
+
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = Vec::new();
         // Replay mode replaces the link (#74): while a `.zrec` feeds the
@@ -195,6 +209,14 @@ impl Zengui {
                 monitor,
                 epoch: self.obs.epoch,
             }));
+        }
+        // The presence link (#614, FL6a): presence and the lens, from their
+        // own monitor on the session in the namespace. Not suspended by
+        // replay — it feeds no pane data, only what the deployment is — and
+        // keyed by its epoch, so a namespace switch, a new monitor or a new
+        // contract store is a new stream.
+        if let Some(key) = self.presence_link() {
+            subs.push(crate::presence_link::subscribe(key));
         }
         // The play clock, only while actually playing (a paused replay
         // costs nothing) — the same cadence as the live stats tick, so the

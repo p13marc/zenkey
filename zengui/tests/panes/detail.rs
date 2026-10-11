@@ -5,19 +5,21 @@
 use super::*;
 
 /// The detail pane (§6.4 item 5 + #66): the decoded side is tagged with HOW
-/// it was produced — schema-decoded and sniffed must never look alike — and
-/// the empty fetch renders the non-verdict sentence.
+/// it was produced — contract-decoded and sniffed must never look alike —
+/// and the empty fetch renders the non-verdict sentence. Since #614 (FL6a)
+/// the decode is the lens's: a zk2 key resolved to its resource decodes as
+/// its declared type, and a key the lens stops short of says at which rung.
 #[test]
 fn the_detail_pane_tags_decode_provenance() {
     use std::sync::Arc;
     use zengui::view::detail::{DetailData, Fetched, section};
-    use zenkey_fleet_v1::model::decode::Rendering;
     use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
 
     let slices = slices();
     let key = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
     let mut facts = KeyFacts::project("", key);
     facts.resolve(&slices);
+    let world = common::World::new();
 
     let fetched: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
         Ok(Arc::new(FetchOutcome::Value(FetchedValue {
@@ -28,36 +30,63 @@ fn the_detail_pane_tags_decode_provenance() {
             attachment: None,
             source: ValueSource::Storage,
         })));
+    let render = |decoded: &'static zengui::value::DecodedValue| {
+        simulator::<Message, _, _>(section(DetailData {
+            slot: zengui::message::SlotId::FOLLOW,
+            sp: sp(),
+            key,
+            facts: Some(Box::leak(Box::new(facts.clone()))),
+            fetched: Fetched::Landed(Box::leak(Box::new(fetched.clone()))),
+            decoded: Some(decoded),
+            series: None,
+            history_entries: None,
+            observed: None,
+            latency: None,
+        }))
+    };
+    let decode = |key: &str, body: &[u8], encoding: &str| -> &'static zengui::value::DecodedValue {
+        Box::leak(Box::new(zengui::value::DecodedValue::new(
+            world.check(key, body, encoding),
+            body,
+        )))
+    };
 
-    // Structural fallback with a declared type: the honest <T?> tag — and
-    // the verdict rides the sample now (#164): an undecodable payload under
-    // a present schema is `NotValidated(Undecodable)`, worded as itself.
-    let decoded = zengui::value::DecodedValue::new(zenkey_fleet_v1::model::decode::DecodedSample {
-        type_name: Some("TelemetryPoint".to_string()),
-        rendering: Rendering::Structural(r#"{"value":42.0}"#.to_string()),
-        verdict: zenkey_v1::schema::validate::Verdict::NotValidated(
-            zenkey_v1::schema::validate::NotValidated::Undecodable,
-        ),
-        decode_error: Some("wrong wire kind".to_string()),
-    });
-    let mut ui = simulator::<Message, _, _>(section(DetailData {
-        slot: zengui::message::SlotId::FOLLOW,
-        sp: sp(),
-        key,
-        facts: Some(&facts),
-        fetched: Fetched::Landed(&fetched),
-        decoded: Some(&decoded),
-        series: None,
-        history_entries: None,
-        observed: None,
-        latency: None,
-    }));
+    // A v1 key is foreign to the lens: structural, with the rung it
+    // stopped at — never dressed as a decode.
+    let mut ui = render(decode(key, br#"{"value":42.0}"#, "application/json"));
     assert!(ui.find("registered").is_ok(), "the facts section renders");
     assert!(
-        ui.find("<TelemetryPoint?> structural (schema did not decode)")
+        ui.find("contract-decoded <json:NetworkInterface>").is_err(),
+        "a sniff never wears a decode's tag"
+    );
+    let sniffed = world.check(key, br#"{"value":42.0}"#, "application/json");
+    let zenkey_fleet::report::Rendered::Structural { why, .. } = &sniffed.rendering.rendered else {
+        panic!("a v1 key renders structurally")
+    };
+    assert!(
+        ui.find(format!("structural — {}", why.words())).is_ok(),
+        "where the ladder stopped is said"
+    );
+
+    // A zk2 key the lens resolves decodes as its declared type, and says
+    // which resource of which revision it resolved to.
+    let eth0 = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#;
+    let mut ui = render(decode(common::ETH0, eth0, "application/json"));
+    assert!(
+        ui.find("contract-decoded <json:NetworkInterface>").is_ok(),
+        "contract-decoded says so"
+    );
+    assert!(ui.find("valid").is_ok());
+
+    // Bytes that are not their declared type: the undecodable pole, the
+    // sniff beside it tagged as what it is.
+    let mut ui = render(decode(common::NAV_ORIGIN, &[0x0a, 0xff, 0xff, 0xff], ""));
+    assert!(
+        ui.find("<nav.v2.Origin?> structural (the bytes did not decode as their declared type)")
             .is_ok(),
         "typed-but-undecoded must say so"
     );
+    let mut ui = render(decode(key, br#"{"value":42.0}"#, "application/json"));
     assert!(ui.find("hex").is_ok(), "the hex side is present");
     // #563: the value's facts as chips — the ladder's rung in words, never
     // the enum's `Debug` name.
@@ -575,77 +604,110 @@ fn the_inspector_places_a_registered_type_in_the_vocabulary() {
     );
 }
 
-/// #164: the decoded pane renders the verdict in three states, never a
-/// boolean — and the two silences keep their own words: `NoRegistry`'s
-/// "nobody looked" must not wear `NoSchema`'s "asked, and the type has none"
-/// (#246; RFC 09 §5.1 O4).
+/// #164, on zk2's four poles (#614, FL6a): the decoded pane renders the
+/// conformance of a real check through the lens — valid, invalid with each
+/// violation a sentence, undecodable with its decode error, and not checked
+/// with the rung that stopped it — never a boolean, and never one pole in
+/// another's words. The two silences keep theirs (#246; RFC 09 §5.1 O4):
+/// "no provider of this address in presence" (asked, nobody serves it) is
+/// not "not a zk2 data key" (nothing to ask).
 #[test]
-fn the_decoded_pane_renders_three_verdict_states_and_keeps_the_silences_apart() {
+fn the_decoded_pane_keeps_the_four_conformance_poles_apart() {
     use std::sync::Arc;
     use zengui::view::detail::{DetailData, Fetched, section};
-    use zenkey_fleet_v1::model::decode::{DecodedSample, Rendering};
     use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
-    use zenkey_v1::schema::validate::{NotValidated, Verdict};
 
-    let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
-    let fetched: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
-        Ok(Arc::new(FetchOutcome::Value(FetchedValue {
-            key: key.to_string(),
-            payload: zenoh::bytes::ZBytes::from(br#"{"status":"ok"}"#.to_vec()),
-            encoding: "application/json".into(),
-            timestamp: None,
-            attachment: None,
-            source: ValueSource::Storage,
-        })));
-    let render = |verdict: Verdict| {
+    let world = common::World::new();
+    let render = |key: &'static str, body: &'static [u8], encoding: &str| {
+        let fetched: &'static Result<Arc<FetchOutcome>, zengui::services::ServiceError> =
+            Box::leak(Box::new(Ok(Arc::new(FetchOutcome::Value(FetchedValue {
+                key: key.to_string(),
+                payload: zenoh::bytes::ZBytes::from(body.to_vec()),
+                encoding: encoding.into(),
+                timestamp: None,
+                attachment: None,
+                source: ValueSource::Storage,
+            })))));
         // Leaked so the simulator may outlive the block — a test-only cost,
-        // bounded by the four calls below.
-        let decoded: &'static zengui::value::DecodedValue =
-            Box::leak(Box::new(zengui::value::DecodedValue::new(DecodedSample {
-                type_name: None,
-                rendering: Rendering::Structural(r#"{"status":"ok"}"#.to_string()),
-                verdict,
-                decode_error: None,
-            })));
-        simulator::<Message, _, _>(section(DetailData {
-            slot: zengui::message::SlotId::FOLLOW,
-            key,
-            facts: None,
-            fetched: Fetched::Landed(&fetched),
-            decoded: Some(decoded),
-            series: None,
-            history_entries: None,
-            observed: None,
-            latency: None,
-            sp: sp(),
-        }))
+        // bounded by the calls below.
+        let decoded: &'static zengui::value::DecodedValue = Box::leak(Box::new(
+            zengui::value::DecodedValue::new(world.check(key, body, encoding), body),
+        ));
+        (
+            decoded,
+            simulator::<Message, _, _>(section(DetailData {
+                slot: zengui::message::SlotId::FOLLOW,
+                key,
+                facts: None,
+                fetched: Fetched::Landed(fetched),
+                decoded: Some(decoded),
+                series: None,
+                history_entries: None,
+                observed: None,
+                latency: None,
+                sp: sp(),
+            })),
+        )
     };
 
-    let mut ui = render(Verdict::Valid);
+    let (_, mut ui) = render(
+        common::ETH0,
+        br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#,
+        "application/json",
+    );
     assert!(ui.find("valid").is_ok(), "checked-and-passed says so");
 
-    let mut ui = render(Verdict::Invalid(vec![
-        "/status: not a number".into(),
-        "/extra: unexpected".into(),
-    ]));
-    assert!(ui.find("invalid (2 violations)").is_ok());
-    assert!(
-        ui.find("violation: /status: not a number").is_ok(),
-        "each violation is a sentence with its path"
+    let (decoded, mut ui) = render(
+        common::WLAN0,
+        br#"{"name":"wlan0","index":-1,"namespace":"default","is_up":"yes"}"#,
+        "application/json",
     );
+    let zenkey_fleet::report::Conformance::Invalid { violations } = &decoded.checked.conformance
+    else {
+        panic!("the schema refuses wlan0's value")
+    };
+    assert!(
+        ui.find(format!("invalid ({} violations)", violations.len()))
+            .is_ok()
+    );
+    for v in violations {
+        assert!(
+            ui.find(format!("violation: {v}")).is_ok(),
+            "each violation is a sentence with its path"
+        );
+    }
+    assert!(ui.find("valid").is_err(), "invalid never reads as valid");
 
-    // The two silences: distinct badge words AND the full reason sentence.
-    let mut ui = render(Verdict::NotValidated(NotValidated::NoRegistry));
-    assert!(ui.find("not validated (no registry)").is_ok());
+    let (decoded, mut ui) = render(common::NAV_ORIGIN, &[0x0a, 0xff, 0xff, 0xff], "");
+    let zenkey_fleet::report::Conformance::Undecodable { reason, .. } =
+        &decoded.checked.conformance
+    else {
+        panic!("those bytes are no nav.v2.Origin")
+    };
+    assert!(ui.find("undecodable (as nav.v2.Origin)").is_ok());
+    assert!(ui.find(format!("decode error: {reason}")).is_ok());
+
+    // The two silences: distinct badge words, each the engine's own.
+    let (_, mut ui) = render("zk2/robot1/ghost/nav.v2/stream/position", &[0x08, 0x01], "");
     assert!(
-        ui.find("no registry loaded, so no type was looked up")
+        ui.find("not checked (no provider of this address in presence)")
             .is_ok(),
-        "NoRegistry is 'nobody looked', spelled out"
+        "no provider is 'asked, and nobody serves it', spelled out"
     );
-    let mut ui = render(Verdict::NotValidated(NotValidated::NoSchema));
-    assert!(ui.find("not validated (no schema served)").is_ok());
+    let (decoded, mut ui) = render(
+        "v1/h-3fa9c2d41b7e/state/sysinfo/health",
+        br#"{"status":"ok"}"#,
+        "application/json",
+    );
+    let label = zengui::verdict::label(&decoded.checked.conformance);
     assert!(
-        ui.find("no schema served for this type").is_ok(),
-        "NoSchema is 'asked, and the type has none', spelled out"
+        label.starts_with("not checked (not a zk2 data key"),
+        "{label}"
+    );
+    assert!(ui.find(label.as_str()).is_ok());
+    assert!(
+        ui.find("not checked (no provider of this address in presence)")
+            .is_err(),
+        "the two silences must not merge"
     );
 }

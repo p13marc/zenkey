@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 use zengui::app::Zengui;
 use zengui::message::{
-    ActivityTab, BusMsg, ChromeMsg, Message, PaneMsg, RightPane, Subject, SubjectMsg, WorkspaceMsg,
+    ActivityTab, ChromeMsg, Message, PaneMsg, RightPane, Subject, SubjectMsg, WorkspaceMsg,
 };
 use zengui::prefs::{Density, LayoutPreset, Prefs, ThemeChoice};
 use zengui::view::palette::{Overlay, PaletteMsg};
 
-use super::{HEALTH, ORIGIN_A, ORIGIN_B, USED, World, send, window};
+use super::{ETH0, HEALTH, ORIGIN_A, ORIGIN_B, POSITION, USED, World, send, window};
 
 pub struct Scene {
     pub name: &'static str,
@@ -63,7 +63,9 @@ pub const ALL: &[Scene] = &[
         name: "workbench-nodes",
         size: DESKTOP,
         build: workbench_nodes,
-        landmark: "sysinfo: alive",
+        // The nodes pane reads v1 alive tokens, which a zk2 deployment does
+        // not hold (#614, FL6a): it says so until it reads zk2 presence.
+        landmark: "v1 presence not asked",
     },
     Scene {
         name: "workbench-admin",
@@ -157,8 +159,9 @@ fn prefs(theme: ThemeChoice) -> Prefs {
     }
 }
 
-/// A window on a live-looking bus: registry loaded, the pump running, a
-/// few seconds of traffic, the tree opened down to the leaves.
+/// A window on a live-looking bus: contracts loaded and presence read
+/// (#614, FL6a), the pump running, a few seconds of traffic, the tree
+/// opened down to the leaves.
 fn live(prefs: Prefs) -> Zengui {
     let mut app = window(prefs);
     let mut world = World::new();
@@ -170,6 +173,8 @@ fn live(prefs: Prefs) -> Zengui {
         "v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load",
         "v1/h-9c04d2e1a7f3/telemetry/sysinfo/no/such/thing",
         "demo/example/foo",
+        POSITION,
+        ETH0,
     ] {
         send(
             &mut app,
@@ -177,23 +182,25 @@ fn live(prefs: Prefs) -> Zengui {
         );
     }
     // Selected before the rest of the traffic, so the history ring and the
-    // series fill the way they would for a user who clicked early.
-    select(&mut app, USED);
+    // series fill the way they would for a user who clicked early. A zk2
+    // state key the lens resolves (#614, FL6a), JSON with numbers in it:
+    // the Inspector has a contract decode to show and a leaf to plot.
+    select(&mut app, &world, ETH0);
     world.ticks(&mut app, 30);
-    verdicts(&mut app);
+    world.verdicts(&mut app);
     app
 }
 
-/// Point the workspace at a key and answer the fetch it issues.
-fn select(app: &mut Zengui, key: &str) {
-    use zenkey_fleet_v1::model::decode::{DecodedSample, Rendering};
+/// Point the workspace at a key and answer the fetch it issues — and the
+/// check through the lens that follows it, as the window's own task would.
+fn select(app: &mut Zengui, world: &World, key: &str) {
     use zenkey_fleet_v1::{FetchOutcome, FetchedValue, ValueSource};
 
     send(
         app,
         Message::Subject(SubjectMsg::Select(Subject::Key(key.into()))),
     );
-    let body = br#"{"value":64.20,"unit":"%","ts":"2026-10-05T09:12:44Z"}"#;
+    let body = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true,"is_oper_up":true,"has_tc_qdisc":false,"interface_type":"ether","addresses":["10.0.4.7/24"],"link_speed_mbps":1000}"#;
     send(
         app,
         Message::Subject(SubjectMsg::ValueFetched(
@@ -212,40 +219,11 @@ fn select(app: &mut Zengui, key: &str) {
         app,
         Message::Subject(SubjectMsg::ValueDecoded(
             key.into(),
-            Arc::new(zengui::value::DecodedValue::new(DecodedSample {
-                type_name: Some("TelemetryPoint".into()),
-                rendering: Rendering::Structural(
-                    "{\n  \"value\": 64.2,\n  \"unit\": \"%\",\n  \"ts\": \"2026-10-05T09:12:44Z\"\n}"
-                        .into(),
-                ),
-                verdict: zenkey_v1::schema::validate::Verdict::Valid,
-                decode_error: None,
-            })),
+            Arc::new(zengui::value::DecodedValue::new(
+                world.check(key, body, "application/json"),
+                body,
+            )),
         )),
-    );
-}
-
-/// What the bounded validation batch would have answered (#164): one key
-/// of each verdict, so every badge state has a row.
-fn verdicts(app: &mut Zengui) {
-    use zenkey_v1::schema::validate::{NotValidated, Verdict};
-    send(
-        app,
-        Message::Bus(BusMsg::VerdictsChecked(vec![
-            (USED.into(), Verdict::Valid),
-            (
-                "v1/h-3fa9c2d41b7e/telemetry/sysinfo/system/load".into(),
-                Verdict::Valid,
-            ),
-            (
-                "v1/h-9c04d2e1a7f3/telemetry/sysinfo/system/load".into(),
-                Verdict::Invalid(vec!["/value: not a number".into()]),
-            ),
-            (
-                "v1/h-9c04d2e1a7f3/telemetry/sysinfo/no/such/thing".into(),
-                Verdict::NotValidated(NotValidated::NoSchema),
-            ),
-        ])),
     );
 }
 

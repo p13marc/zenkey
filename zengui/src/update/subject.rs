@@ -99,29 +99,26 @@ pub(crate) fn update(
                 sub.follow.fetched = Some((key, outcome));
                 return Task::none();
             }
-            // One decode however many slots the answer landed in (#257): the
-            // decode is keyed by the key, and `ValueDecoded` fans out again.
-            // It runs with or without a registry: `slices: None` yields
-            // `NotValidated(NoRegistry)` — "nobody looked" rendered as
-            // itself rather than by omission (#164, #246).
-            let decode_task = match (&outcome, &dep.raw, &dep.schema_store) {
-                (Ok(out), Some(session), Some(store)) => {
-                    if let zenkey_fleet_v1::FetchOutcome::Value(v) = out.as_ref() {
+            // One check however many slots the answer landed in (#257): the
+            // check is keyed by the key, and `ValueDecoded` fans out again.
+            // Through the lens (#614, FL6a), which needs no session: a key
+            // no contract reaches is checked too, and says at which rung it
+            // stopped — "nobody looked" rendered as itself rather than by
+            // omission (#164, #246).
+            let decode_task = match &outcome {
+                Ok(out) => match out.as_ref() {
+                    zenkey_fleet_v1::FetchOutcome::Value(v) => {
                         services::value::decode(services::value::Decode {
-                            store: Arc::clone(store),
-                            session: session.clone(),
-                            slices: None,
-                            base: dep.namespace().to_string(),
+                            lens: dep.lens_inputs(),
                             fetched_key: key.clone(),
                             wire_key: v.key.clone(),
                             encoding: v.encoding.clone(),
                             bytes: v.payload.clone(),
                         })
-                    } else {
-                        Task::none()
                     }
-                }
-                _ => Task::none(),
+                    zenkey_fleet_v1::FetchOutcome::None { .. } => Task::none(),
+                },
+                Err(_) => Task::none(),
             };
             Task::batch([reveal, decode_task])
         }
@@ -131,7 +128,7 @@ pub(crate) fn update(
             // not about the selection.
             work.verdicts
                 .payloads
-                .record(&key, value.sample.verdict.clone());
+                .record(&key, value.checked.conformance.clone());
             // Stale guard, per slot (#257): the decode lands in every slot
             // still showing its key, and in none that moved on.
             for slot in sub.all_mut() {

@@ -65,6 +65,45 @@ impl ContractsStatus<'_> {
     }
 }
 
+/// The presence cell (#614, FL6a): how many addresses the projection holds
+/// up, down and unobservable — on the basis its seed allows, which the cell
+/// names when it is not complete. "Down" exists only under a complete seed
+/// (§8.1), and a loss since makes every address unobservable at once: the
+/// cell says so as a caution, never as everything down. `None` presence is
+/// "not read", which is not "nobody there" (O4).
+///
+/// Returns the words, and whether they are worth a caution chip.
+pub fn presence_text(p: Option<&crate::presence_link::PresenceUpdate>) -> (String, bool) {
+    use zenkey_fleet::{AddressStatus, PresenceBasis};
+    let Some(p) = p else {
+        return ("presence: not read".to_string(), false);
+    };
+    let (mut up, mut down, mut unobservable) = (0usize, 0usize, 0usize);
+    for (_, a) in p.presence.addresses() {
+        match a.status {
+            AddressStatus::Up => up += 1,
+            AddressStatus::Down => down += 1,
+            AddressStatus::Unobservable => unobservable += 1,
+        }
+    }
+    let counts = format!("{up} up · {down} down · {unobservable} unobservable");
+    match p.presence.basis() {
+        PresenceBasis::Unseeded => ("presence: not seeded yet".to_string(), false),
+        PresenceBasis::Incomplete => (
+            format!("presence: {counts} — the seed was possibly incomplete (§8.1)"),
+            false,
+        ),
+        PresenceBasis::Complete => (format!("presence: {counts}"), false),
+        PresenceBasis::Lost { dropped } => (
+            format!(
+                "presence: {dropped} events lost — every address unobservable until a \
+                 complete re-read"
+            ),
+            true,
+        ),
+    }
+}
+
 /// Everything the strip reports.
 pub struct Status<'a> {
     pub link: &'a LinkState,
@@ -96,9 +135,14 @@ pub struct Status<'a> {
     /// Projections retired to stay within the *cache's* bound — a separate
     /// number from `keys_evicted` on purpose, see [`facts_text`].
     pub facts_evicted: u64,
+    /// zk2 identities held by the identity cache, and those its bound
+    /// retired (#614, FL6a) — its own pair, beside the facts cache's.
+    pub identity: (usize, u64),
     pub totals: crate::message::WatchedTotals,
     /// The contracts in hand (#614, FL6a).
     pub contracts: ContractsStatus<'a>,
+    /// The last presence landing (#614, FL6a); `None` = not read.
+    pub presence: Option<&'a crate::presence_link::PresenceUpdate>,
     /// Watches whose seed phase has not resolved yet (issue #92).
     pub seeding: usize,
     /// Seed phases that have completed since connect.
@@ -147,6 +191,7 @@ impl<'a> Status<'a> {
             keys_unwatched: obs.keys_unwatched,
             facts_cached: dep.facts.len(),
             facts_evicted: dep.facts.evicted(),
+            identity: (dep.identity.len(), dep.identity.evicted()),
             watched: &obs.watched,
             skeleton: dep.skeleton.as_deref().map(|s| s.coverage),
             fetched: sub.follow.fetched.as_ref(),
@@ -155,6 +200,7 @@ impl<'a> Status<'a> {
                 loaded: dep.contracts.as_deref(),
                 counts: dep.contract_counts,
             },
+            presence: dep.presence.as_deref(),
             seeding: obs.seeding.len(),
             seeded_watches: obs.seeded_watches,
             seed_totals: obs.seed_totals,
@@ -275,6 +321,10 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     } else {
         kit::muted(s.contracts.label())
     };
+    let presence: Element<'a, Message> = match presence_text(s.presence) {
+        (text, true) => kit::status_chip(Tone::Caution, text),
+        (text, false) => kit::muted(text),
+    };
     let mut r = row![
         link,
         kit::muted(format!("namespace: {}", s.namespace_label)),
@@ -290,6 +340,7 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             human_rate(rate)
         )),
         contracts,
+        presence,
         kit::muted(skeleton_text(s.skeleton)),
     ]
     .spacing(space::MD)
@@ -339,6 +390,18 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         r = r.push(kit::status_chip(
             Tone::Caution,
             facts_text(s.facts_cached, s.facts_evicted),
+        ));
+    }
+    // The identity cache's bound (#614, FL6a), the same way: said once it
+    // has cost something, as its own number.
+    let (identities, identities_evicted) = s.identity;
+    if identities_evicted > 0 {
+        r = r.push(kit::status_chip(
+            Tone::Caution,
+            format!(
+                "identities: {identities} cached (+{identities_evicted} retired — cache \
+                 bound reached)"
+            ),
         ));
     }
     if let Some((key, outcome)) = s.fetched {
@@ -499,6 +562,49 @@ mod tests {
         assert!(label.contains("1 load problem"), "{label}");
         assert!(s.troubled(), "a problem is a caution chip");
     }
+    /// The presence cell (#614, FL6a): "not read" is not "nobody there", a
+    /// complete seed counts up and down, and a loss since is a caution that
+    /// says every address is unobservable — never everything down.
+    #[test]
+    fn the_presence_cell_keeps_not_read_complete_and_lost_apart() {
+        use std::sync::Arc;
+        use zenkey_fleet::{LivePresence, ObservedPresence, PresenceScope, SeedOutcome};
+
+        assert_eq!(
+            presence_text(None),
+            ("presence: not read".to_string(), false)
+        );
+
+        let keys = vec![
+            "zk2/robot1/nav/@zk/instance/0123456789abcdef".to_string(),
+            "zk2/host-a/tc/@zk/instance/fedcba9876543210".to_string(),
+        ];
+        let observed = ObservedPresence::from_keys("zk2/*/*/@zk/**", &keys, true);
+        let mut live = LivePresence::new(PresenceScope::all());
+        let at = std::time::SystemTime::now();
+        let moved = live.seed(&observed, at);
+        let update = |live: &LivePresence| crate::presence_link::PresenceUpdate {
+            presence: Arc::new(live.clone()),
+            moved: moved.clone(),
+            catalog: None,
+            generation: 0,
+            seed: SeedOutcome::Complete,
+        };
+        assert_eq!(
+            presence_text(Some(&update(&live))),
+            (
+                "presence: 2 up · 0 down · 0 unobservable".to_string(),
+                false
+            )
+        );
+
+        live.dropped(3, at);
+        let (text, caution) = presence_text(Some(&update(&live)));
+        assert!(caution, "a loss is a caution chip");
+        assert!(text.contains("3 events lost"), "{text}");
+        assert!(!text.contains("down"), "a loss is never 'down': {text}");
+    }
+
     /// #217: the budget is visible in the resting state — an operator should
     /// not discover the bound by hitting it — and the ring's eviction count
     /// appears as its own number, never inside the key count's (O6).

@@ -97,6 +97,13 @@ pub(crate) fn apply_tick(
     }
     for sample in &tick.samples {
         ensure_facts(dep, &sample.key);
+        // Each key's zk2 identity, through the lens (#614, FL6a) — on live
+        // ticks only: a replayed key resolved through the live lens would put
+        // one world's presence under another's keys (FL10b reads replay
+        // through an offline lens).
+        if work.replay.replay.is_none() {
+            dep.ensure_identity(&sample.key);
+        }
         work.echo.echo.push(sample);
         // History is per-key and costs no subscription of its own: these
         // samples are already flowing for an existing watch (issue #63).
@@ -186,7 +193,7 @@ pub(crate) fn update(
                 namespace: _,
             } = sessions;
             dep.raw = Some(raw.clone());
-            dep.session = Some(session);
+            dep.session = Some(session.clone());
             dep.reseed_store();
             // The context list is read from the shared file, not cached at
             // launch: `zenctl context create` on the other side of the
@@ -204,6 +211,7 @@ pub(crate) fn update(
                 listing,
                 contexts,
                 start_monitor(dep),
+                start_presence(dep, obs),
                 build_skeleton(dep),
                 load_contracts(dep),
             ])
@@ -230,13 +238,51 @@ pub(crate) fn update(
             }
             dep.session = Some(session);
             dep.reseed_store();
-            Task::none()
+            start_presence(dep, obs)
         }
         BusMsg::NamespacedOpened(namespace, Err(e)) => {
             if namespace != dep.namespace() {
                 return Task::none();
             }
             obs.link = LinkState::Failed(e);
+            Task::none()
+        }
+        BusMsg::PresenceStarted(namespace, Ok(monitor)) => {
+            // Started for a namespace the window has left, or a session that
+            // has since gone: shut down, never driven.
+            if namespace != dep.namespace() || dep.session.is_none() {
+                return services::watch::shutdown_presence(monitor);
+            }
+            let old = obs.presence_monitor.replace(monitor);
+            // A new monitor is a new link: the epoch is its identity.
+            obs.presence_epoch += 1;
+            old.map(services::watch::shutdown_presence)
+                .unwrap_or_else(Task::none)
+        }
+        BusMsg::PresenceStarted(namespace, Err(e)) => {
+            if namespace == dep.namespace() {
+                tracing::warn!("the presence monitor would not start: {e}");
+            }
+            Task::none()
+        }
+        BusMsg::Presence(epoch, update) => {
+            // A landing from a link the window has since restarted describes
+            // a session, monitor or store that is gone.
+            if epoch != obs.presence_epoch {
+                return Task::none();
+            }
+            let catalog = update.catalog.clone();
+            let generation = update.generation;
+            dep.presence = Some(update);
+            if generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog) {
+                adopt_lens(dep, work, catalog, generation);
+            }
+            Task::none()
+        }
+        BusMsg::LensOpened(epoch, handle) => {
+            if epoch == obs.presence_epoch {
+                dep.lens_feed = Some(handle);
+            }
             Task::none()
         }
         BusMsg::MonitorStarted(Ok(monitor)) => {
@@ -279,9 +325,23 @@ pub(crate) fn update(
             // linger in a store seeded from the old list, so the store is
             // rebuilt from this one (§8.5), and everything judged under the
             // old contracts goes with it.
+            // The same revisions as held (every session open reloads them):
+            // the store, the lens and every verdict stand, and only the
+            // load's own account — its paths and problems — is replaced.
+            let unchanged = dep
+                .contracts
+                .as_ref()
+                .is_some_and(|held| same_revisions(&held.set, &loaded.set));
             dep.contracts = Some(loaded);
+            if unchanged {
+                dep.recount_contracts();
+                return Task::none();
+            }
             dep.reseed_store();
             forget_judgements(obs, work);
+            // The lens feed retrieves into the store it was opened on: the
+            // presence link restarts over the new one.
+            restart_presence(obs);
             Task::none()
         }
         BusMsg::Link(state) => {
@@ -289,6 +349,10 @@ pub(crate) fn update(
             Task::none()
         }
         BusMsg::Tick(tick) => {
+            // The lens first (#614, FL6a): a background re-read a nudge set
+            // off swaps the feed's catalog without a presence move, and the
+            // samples below resolve through whatever it holds now.
+            poll_lens(dep, work);
             apply_tick(dep, obs, sub, tree, work, &tick);
             // Live ticks only, deliberately: replay feeds `apply_tick` from
             // a file (`update/pane/replay.rs`) and never reaches this arm —
@@ -354,14 +418,97 @@ fn validation_batch(
 }
 
 fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Task<Message> {
-    let (Some(raw), Some(store)) = (dep.raw.clone(), dep.schema_store.clone()) else {
-        return Task::none();
-    };
     let batch = validation_batch(&tick.samples, &work.verdicts.payloads);
     if batch.is_empty() {
         return Task::none();
     }
-    services::value::validate(store, raw, None, dep.namespace().to_string(), batch)
+    // Through the lens (#614, FL6a): session-free, so a check needs no
+    // session of its own — only what the lens resolves with.
+    services::value::validate(dep.lens_inputs(), batch)
+}
+
+/// Whether two contract sets hold the same revisions, by `(iface,
+/// fingerprint)`: a bundle is content-addressed, so equal keys are equal
+/// contracts.
+fn same_revisions(a: &zenkey_fleet::ContractSet, b: &zenkey_fleet::ContractSet) -> bool {
+    let keys = |s: &zenkey_fleet::ContractSet| {
+        s.iter()
+            .map(|r| (r.iface().clone(), r.fingerprint().clone()))
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    keys(a) == keys(b)
+}
+
+/// Whether two catalog handles are the same catalog — the feed swaps an
+/// `Arc`, so identity is the cheap and exact question.
+fn same_catalog(
+    a: &Option<Arc<zenkey_fleet::Catalog>>,
+    b: &Option<Arc<zenkey_fleet::Catalog>>,
+) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// The lens moved (#614, FL6a): a new catalog, or new answers in the store.
+/// Every identity and every verdict judged before is due again — the
+/// identity cache sees the generation itself, and the verdict cache keeps
+/// each badge on screen as the last true reading until its recheck lands.
+fn adopt_lens(
+    dep: &mut Deployment,
+    work: &mut Workspace,
+    catalog: Option<Arc<zenkey_fleet::Catalog>>,
+    generation: u64,
+) {
+    dep.catalog = catalog;
+    dep.lens_generation = generation;
+    work.verdicts.payloads.invalidate();
+    dep.recount_contracts();
+}
+
+/// Each tick, ask the lens feed whether it moved without presence moving
+/// (a background re-read a nudge set off, a retrieval landing): its catalog
+/// pointer-compared, its generation read (#614, FL4's note for FL6a).
+fn poll_lens(dep: &mut Deployment, work: &mut Workspace) {
+    let Some(feed) = dep.lens_feed.as_ref() else {
+        return;
+    };
+    let catalog = feed.0.catalog();
+    let generation = feed.0.generation();
+    if generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog) {
+        adopt_lens(dep, work, catalog, generation);
+    }
+}
+
+/// Start the presence monitor on the session in the namespace (#614,
+/// FL6a), shutting down the one before it: its landing bumps the presence
+/// epoch, which is what starts the presence link.
+pub(crate) fn start_presence(dep: &Deployment, obs: &mut Observation) -> Task<Message> {
+    let old = obs
+        .presence_monitor
+        .take()
+        .map(services::watch::shutdown_presence)
+        .unwrap_or_else(Task::none);
+    obs.presence_epoch += 1;
+    let Some(session) = dep.session.clone() else {
+        return old;
+    };
+    Task::batch([
+        old,
+        services::watch::start_presence(session, dep.namespace().to_string()),
+    ])
+}
+
+/// Restart the presence link over the same monitor (#614, FL6a): the
+/// contract store under the lens was rebuilt, or the deployment forgot what
+/// the link had told it. A new epoch is a new stream, reseeded. With no
+/// presence monitor there is no link to restart, and the epoch stays.
+pub(crate) fn restart_presence(obs: &mut Observation) {
+    if obs.presence_monitor.is_some() {
+        obs.presence_epoch += 1;
+    }
 }
 
 /// (Re)build the skeleton (#614, FL6a: from no slices, the admin space's
@@ -494,7 +641,7 @@ mod tests {
         );
 
         for (key, _, _) in &first {
-            cache.record(key, zenkey_fleet_v1::Verdict::Valid);
+            cache.record(key, zenkey_fleet::report::Conformance::Valid);
         }
         let second = validation_batch(&samples, &cache);
         assert_eq!(

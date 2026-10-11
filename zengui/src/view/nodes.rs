@@ -76,20 +76,26 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
         ),
     });
 
+    // This pane's roster is v1's — alive tokens by origin — and since #614
+    // (FL6a) nothing feeds it: presence is zk2's instance tokens, read on
+    // the session in the namespace and counted in the status strip, until
+    // this pane reads them itself. Both empty states say so, rather than
+    // reading a zk2 deployment as a fleet with nobody in it.
     if !d.roster.is_seeded() {
         col = col.push(kit::empty(
             kit::EmptyKind::NotAsked,
-            "no presence asked yet",
-            "the roster seeds on connect from liveliness tokens (RFC 04 §5)",
+            "v1 presence not asked",
+            "this roster reads v1 alive tokens, which zk2 services do not hold — \
+             zk2 presence is the status strip's presence cell",
         ));
         return col.into();
     }
     if d.roster.is_empty() {
         col = col.push(kit::empty(
             kit::EmptyKind::Silent,
-            "no liveliness tokens observed",
-            "producers may be down, unreachable, or holding no tokens — \
-             silence is not a verdict (RFC 05 §3.1)",
+            "no v1 liveliness tokens observed",
+            "zk2 services hold instance tokens, counted in the status strip's \
+             presence cell — and silence is not a verdict (RFC 05 §3.1)",
         ));
         return col.into();
     }

@@ -113,10 +113,26 @@ pub enum BusMsg {
     /// that is not there or loads nothing is a problem by where it was
     /// named, and what did load is held.
     ContractsLoaded(Arc<crate::services::contracts::LoadedContracts>),
+    /// The presence monitor started on the session in the namespace it
+    /// names (#614, FL6a), or could not; a landing for a namespace the
+    /// window has left is dropped.
+    PresenceStarted(
+        String,
+        Result<Arc<zenkey_fleet::Monitor>, crate::services::ServiceError>,
+    ),
+    /// One presence landing from the presence link, of the epoch it names
+    /// (#614, FL6a): the projection, its moves, and the lens's catalog
+    /// after folding them. An older epoch's landing is dropped.
+    Presence(u64, Arc<crate::presence_link::PresenceUpdate>),
+    /// The lens feed opened, in the presence link of the epoch it names
+    /// (#614, FL6a): held for the nudges a check makes, and polled each
+    /// tick for a catalog a background re-read swapped in.
+    LensOpened(u64, crate::presence_link::LensHandle),
     /// One bounded validation batch finished (#164): per checked key, the
-    /// payload-conformance verdict of its newest sample. Lands in the
-    /// verdict cache; the render paths only look up.
-    VerdictsChecked(Vec<(String, zenkey_v1::schema::validate::Verdict)>),
+    /// conformance of its newest sample through the lens (#614, FL6a) —
+    /// one of four poles. Lands in the verdict cache; the render paths only
+    /// look up.
+    VerdictsChecked(Vec<(String, zenkey_fleet::report::Conformance)>),
     /// The throttled budget join finished (#221): declared `cardinality`
     /// against the observed tree, keyed by subtree display path.
     BudgetJoined(Arc<crate::budget::BudgetBadges>),
@@ -298,10 +314,10 @@ pub enum SubjectMsg {
         String,
         Result<Arc<FetchOutcome>, crate::services::ServiceError>,
     ),
-    /// The fetched value's schema decode finished (§6.4 item 5's inspector):
-    /// (key, the whole decoded sample — rendering, verdict and the decode
-    /// error behind an `Undecodable`, #164 — with the document text rendered
-    /// from it in the same task rather than on every redraw, #345).
+    /// The fetched value's check through the lens finished (#614, FL6a):
+    /// (key, the whole check — identity, rendering and the conformance, one
+    /// of four poles, #164 — with the document text rendered from it in the
+    /// same task rather than on every redraw, #345).
     ValueDecoded(String, Arc<crate::value::DecodedValue>),
     /// Point the whole workspace at something (#181).
     ///

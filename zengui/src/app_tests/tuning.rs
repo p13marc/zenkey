@@ -162,7 +162,7 @@ fn a_tuning_apply_resizes_live_keeps_the_counters_and_reloads_contracts() {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
     app.work.verdicts.payloads.record(
         "zk2/robot1/nav/nav.v2/stream/position",
-        zenkey_v1::schema::validate::Verdict::Valid,
+        zenkey_fleet::report::Conformance::Valid,
     );
     tune(
         &mut app,

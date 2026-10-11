@@ -199,6 +199,10 @@ pub(crate) fn update(
         }
         DeploymentMsg::Reconnect => {
             forget(dep, obs, tree, work);
+            // The forget dropped what the presence link told the deployment
+            // (its projection, the lens, the store): the link restarts over
+            // the same presence monitor, reseeded.
+            super::bus::restart_presence(obs);
             super::bus::start_monitor(dep)
         }
     }
@@ -217,8 +221,15 @@ fn repoint(
 ) -> Task<Message> {
     // The departing namespace's session goes before the forget, so nothing
     // carries it across: presence and contracts read through it describe
-    // the deployment the window is leaving.
+    // the deployment the window is leaving. Its presence monitor goes with
+    // it, and the epoch moves, so the link over them stops.
     dep.session = None;
+    let presence = obs
+        .presence_monitor
+        .take()
+        .map(services::watch::shutdown_presence)
+        .unwrap_or_else(Task::none);
+    obs.presence_epoch += 1;
     forget(dep, obs, tree, work);
     dep.schema_store = Some(Arc::new(zenkey_fleet_v1::SchemaStore::new(
         dep.namespace(),
@@ -239,6 +250,7 @@ fn repoint(
         Task::none()
     };
     Task::batch([
+        presence,
         super::bus::start_monitor(dep),
         super::bus::build_skeleton(dep),
         reopen,
@@ -306,10 +318,18 @@ fn reopen_session(dep: &mut Deployment, obs: &mut Observation) -> Task<Message> 
         .take()
         .map(services::watch::shutdown)
         .unwrap_or_else(Task::none);
+    // The presence monitor rides the session in the namespace, which goes.
+    let presence = obs
+        .presence_monitor
+        .take()
+        .map(services::watch::shutdown_presence)
+        .unwrap_or_else(Task::none);
+    obs.presence_epoch += 1;
     dep.raw = None;
     dep.session = None;
     Task::batch([
         teardown,
+        presence,
         services::link::reopen(
             dep.namespace().to_string(),
             services::link::Transport::of(&dep.settings),

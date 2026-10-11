@@ -125,6 +125,14 @@ mod tests {
                     "contract_counts",
                     "namespaces",
                     "namespace_options",
+                    // FL6a-ii: the presence projection, the lens feed, its
+                    // catalog and generation, and each key's identity under
+                    // them — all of it about the deployment pointed at.
+                    "presence",
+                    "lens_feed",
+                    "catalog",
+                    "lens_generation",
+                    "identity",
                     "facts",
                 ],
             ),
@@ -135,6 +143,10 @@ mod tests {
                     "monitor",
                     "epoch",
                     "link",
+                    // The presence monitor and its link's epoch (#614,
+                    // FL6a): a pump like `monitor`, on the other session.
+                    "presence_monitor",
+                    "presence_epoch",
                     "observed",
                     "watched",
                     "my_watches",
@@ -349,6 +361,8 @@ mod tests {
         // tool's form, 81. Then #614 (FL6a-i): `slices`, `slice_source`,
         // `bases` and `base_options` went, `raw`, `contracts`, `store`,
         // `contract_counts`, `namespaces` and `namespace_options` came — 83.
-        assert_eq!(leaves, 83, "the split must place every field exactly once");
+        // Then FL6a-ii: presence, the lens feed, its catalog and generation,
+        // the identity cache, and the presence monitor with its epoch — 90.
+        assert_eq!(leaves, 90, "the split must place every field exactly once");
     }
 }

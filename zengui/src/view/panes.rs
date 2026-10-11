@@ -343,7 +343,6 @@ fn activity<'a>(
         doctor: &work.verdicts.doctor,
         base: dep.namespace(),
         replay: &work.replay,
-        slices: None,
         retention: obs.retention,
         theme,
         traffic: view::traffic::TrafficData {

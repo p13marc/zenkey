@@ -90,12 +90,19 @@ pub fn edge_row<'a, M: 'a>(edge: Edge, content: impl Into<Element<'a, M>>) -> El
 /// find a preview on screen — and a preview nothing can read is one nothing
 /// pins. With no spans (prose, a tombstone, an oversize note) it is the
 /// plain muted text alone.
+///
+/// One line, never wrapped: a preview is a glance, and its row (echo's
+/// fixed-height window) clips — a long JSON document wrapped onto a second
+/// line was drawn half-cut under the first (#614, FL6a's zk2 payloads were
+/// the first long enough to show it). The whole payload is the Inspector's.
 pub fn code<'a, M: 'a>(
     preview: &'a str,
     spans: &'a [SyntaxSpan],
     choice: ThemeChoice,
 ) -> Element<'a, M> {
-    let plain = caption(preview).font(face::MONO);
+    let plain = caption(preview)
+        .font(face::MONO)
+        .wrapping(iced::widget::text::Wrapping::None);
     if spans.is_empty() {
         return plain
             .style(|theme: &iced::Theme| text::Style {
@@ -117,6 +124,7 @@ pub fn code<'a, M: 'a>(
             color: Some(iced::Color::TRANSPARENT),
         }),
         rich_text::<(), _, _, _>(runs)
+            .wrapping(iced::widget::text::Wrapping::None)
             .font(face::MONO)
             .size(font::CAPTION),
     ]
