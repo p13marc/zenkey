@@ -389,7 +389,7 @@ impl Zengui {
 }
 
 #[cfg(test)]
-#[path = "app_tests.rs"]
+#[path = "app_tests/mod.rs"]
 mod tests;
 
 /// The settings a bus-less test window runs under (#175, #186).
