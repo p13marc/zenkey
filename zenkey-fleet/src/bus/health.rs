@@ -626,12 +626,8 @@ async fn archived(
         .await
         .map_err(|e| crate::one_line(&e))?;
     let archive = IfaceId::from_str(ARCHIVE).expect("archive.v1 is an interface id");
-    let catalog = Catalog::new(&all);
     let origin = status_key(owner);
-    for a in catalog
-        .addresses()
-        .filter(|a| catalog.provides(a, &archive))
-    {
+    for a in &Catalog::new(&all).providers_of(&archive) {
         let got = zenkey::archive::last_known(session, a, &origin, timeout)
             .await
             .map_err(|e| e.to_string())?;

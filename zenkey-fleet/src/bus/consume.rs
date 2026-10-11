@@ -32,7 +32,7 @@ use zenoh::Session;
 use zenoh::sample::{Sample, SampleKind};
 
 use crate::model::catalog::Revision;
-use crate::model::lens::{conformance, declared_qos, observed_qos, qos_mismatch};
+use crate::model::lens::{Resolved, conformance, declared_qos, observed_qos, qos_mismatch};
 use crate::model::render::{Member, render_with};
 use crate::model::target::Target;
 use crate::report::{
@@ -50,6 +50,24 @@ pub struct StateRead<'a> {
     /// wildcard.
     pub values: &'a Bindings,
     pub timeout: Duration,
+}
+
+impl<'a> StateRead<'a> {
+    /// The read of the one member a resolved key names (#614, FL8a): its
+    /// owner, the revision the lens resolved it through, its resource and
+    /// every template value the key carries — so a frontend that selected a
+    /// wire key asks S4's GET of exactly that key, or the archive of it, and
+    /// nothing wider. Whether the resource is state is the caller's to
+    /// check: a GET on another kind is not S4's.
+    pub fn from_resolved(resolved: &'a Resolved, timeout: Duration) -> StateRead<'a> {
+        StateRead {
+            revision: &resolved.revision,
+            owner: &resolved.address,
+            resource: resolved.resource(),
+            values: &resolved.values,
+            timeout,
+        }
+    }
 }
 
 /// A timestamp and whose clock issued it (§4.1).
@@ -470,5 +488,37 @@ impl Watch {
     /// does not make its record incomplete.
     pub fn subscription(&self) -> &zenkey::consumer::Subscription {
         &self.sub
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A resolved key's read is its own member's (#614, FL8a): the owner
+    /// the key names, the revision the lens resolved it through, its
+    /// resource, and every template value — so S4's GET is put on that one
+    /// key ([`all_bound`]), never on the resource's pattern.
+    #[test]
+    fn a_resolved_keys_read_names_its_one_member() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/tcgui");
+        let (set, _) = crate::model::catalog::ContractSet::load_path(&dir);
+        let lens = crate::model::lens::Lens::new("", None, &set).offline(&set);
+        let key = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+        let resolved = lens.resolve(key).resolved.expect("resolves offline");
+        let read = StateRead::from_resolved(&resolved, Duration::from_secs(2));
+        assert_eq!(read.owner.to_string(), "host-a/tc");
+        assert_eq!(read.revision.iface().to_string(), "tc.netif.v1");
+        assert_eq!(
+            zenkey::implementation::resource_name(read.resource),
+            "state/interfaces/{ns}/{iface}"
+        );
+        assert_eq!(read.values.get("iface"), Some(&vec!["eth0".to_owned()]));
+        assert!(all_bound(read.resource, read.values), "one member");
+        assert_eq!(
+            member_key(read.owner, read.revision, read.resource, read.values).expect("a key"),
+            key
+        );
+        assert_eq!(read.timeout, Duration::from_secs(2));
     }
 }

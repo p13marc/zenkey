@@ -1227,6 +1227,18 @@ impl Catalog {
         })
     }
 
+    /// Every address some instance of which provides `iface`, by token or
+    /// by descriptor, sorted (#614, FL8a): the `archive.v1` providers a
+    /// reader may ask for last-known state (§4.4, S5), among others. Empty
+    /// is what this read showed — whether it was complete is
+    /// [`Catalog::complete`]'s to say, never this list's.
+    pub fn providers_of(&self, iface: &IfaceId) -> Vec<Addr> {
+        self.addresses()
+            .filter(|addr| self.provides(addr, iface))
+            .cloned()
+            .collect()
+    }
+
     /// Every interface some instance of `addr` provides, by token or by
     /// descriptor, sorted. A tokenless interface (U22, `"token": false`) is
     /// here by its descriptor alone.
@@ -2098,6 +2110,53 @@ mod tests {
                 fingerprint: NETIF_FP.parse().expect("a sha256"),
             }),
             "a contract key is not a token"
+        );
+    }
+
+    /// The providers of an interface, by token or by descriptor alone
+    /// (#614, FL8a): what a reader offers to ask for last-known state is
+    /// every `archive.v1` provider this read showed, sorted — an address
+    /// providing something else is not among them.
+    #[test]
+    fn providers_of_an_interface_by_token_or_descriptor() {
+        let (a, b) = ("8f3a5c2e9b1d4f70", "0000000000000002");
+        let mut o = observed(&[
+            &format!("zk2/ground/archive/@zk/instance/{a}"),
+            &format!(
+                "zk2/ground/archive/@zk/alive/archive.v1/{a}/{}",
+                &NETIF_FP[..16]
+            ),
+            &format!("zk2/host-a/tc/@zk/instance/{b}"),
+            &format!(
+                "zk2/host-a/tc/@zk/alive/tc.netif.v1/{b}/{}",
+                &NETIF_FP[..16]
+            ),
+            &format!("zk2/air/archive/@zk/instance/{b}"),
+        ]);
+        o.descriptors = Some(BTreeMap::from([(
+            ("air/archive".parse().expect("addr"), b.parse().expect("id")),
+            DescriptorRead::Served(Box::new(descriptor(
+                "air/archive",
+                b,
+                json!({"interfaces": [
+                    {"iface": "archive.v1", "contract": format!("sha256:{NETIF_FP}"), "minor": 0, "token": false},
+                ]}),
+            ))),
+        )]));
+        let catalog = Catalog::new(&o);
+        let archive: IfaceId = "archive.v1".parse().expect("an interface");
+        assert_eq!(
+            catalog.providers_of(&archive),
+            [
+                "air/archive".parse::<Addr>().expect("addr"),
+                "ground/archive".parse().expect("addr"),
+            ],
+            "by descriptor alone, and by token"
+        );
+        assert!(
+            catalog
+                .providers_of(&"nav.v2".parse().expect("an interface"))
+                .is_empty()
         );
     }
 }

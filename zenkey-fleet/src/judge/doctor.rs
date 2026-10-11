@@ -490,11 +490,9 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
 /// descriptor.
 fn archives_in(observed: &Observed) -> BTreeSet<Addr> {
     let archive = IfaceId::from_str(ARCHIVE).expect("archive.v1 is an interface id");
-    let catalog = Catalog::new(observed);
-    catalog
-        .addresses()
-        .filter(|a| catalog.provides(a, &archive))
-        .cloned()
+    Catalog::new(observed)
+        .providers_of(&archive)
+        .into_iter()
         .collect()
 }
 
