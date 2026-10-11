@@ -53,11 +53,14 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 iced_test = { workspace = true }
 ttf-parser = { workspace = true }
-# The `spray` example serves a protobuf descriptor set (#97) so the demo has a
-# subject only a served schema can decode.
+# The `spray_v1` example serves a protobuf descriptor set (#97) so the demo
+# has a subject only a served schema can decode.
 prost-reflect = { workspace = true }
-# v1's `schema` feature: the spray serves a v1 `describe` (RFC 08 §7).
+# v1's `schema` feature: `spray_v1` serves a v1 `describe` (RFC 08 §7).
 zenkey-v1 = { package = "zenkey", version = "=0.11.1", features = ["schema"] }
+# The zk2 runtime: the `spray` example's `host-a/sysmon` is a service of its
+# own, brought up with `ServiceBuilder` and `health.v1` (#614, FL5).
+zenkey = { path = "../zenkey" }
 criterion = { workspace = true }
 
 [[bench]]

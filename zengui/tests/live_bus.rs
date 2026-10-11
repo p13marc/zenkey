@@ -1,9 +1,11 @@
 //! End-to-end checks against a real bus. Ignored by default — they need the
-//! `spray` example publishing. No router: `spray` listens and these connect
-//! straight to it.
+//! `spray_v1` example publishing. No router: `spray_v1` listens and these
+//! connect straight to it. They read v1 traffic, so they run against
+//! `spray_v1`, not the zk2 `spray` (#614, FL5), until FL6b rewrites them;
+//! "`spray`" below means `spray_v1`.
 //!
 //! ```text
-//! just spray                 # or: cargo run -p zengui --example spray -- -l tcp/127.0.0.1:7449
+//! just spray-v1              # or: cargo run -p zengui --example spray_v1 -- -l tcp/127.0.0.1:7449
 //! just test-live             # or: cargo test -p zengui --test live_bus -- --ignored --nocapture
 //! ```
 //!
