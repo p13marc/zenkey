@@ -425,6 +425,26 @@ async fn a_selection_during_a_replay_asks_the_bus_nothing() {
         Some((key.to_string(), ReadKind::Raw)),
         "and the live read is a raw GET, labelled raw"
     );
+
+    // A key the capture never carried: silence during the replay, a live
+    // read once it ends.
+    let state = ReplayState::load("capture.zrec", file.as_bytes()).expect("a capture");
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Loaded("capture.zrec".into(), Ok(LoadedReplay::new(state))),
+    )));
+    let quiet = "demo/example/bar";
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        quiet.to_string(),
+    ))));
+    assert!(app.sub.follow.fetched.is_none() && app.sub.follow.asked.is_none());
+    let _ = app.update(Message::Workspace(crate::message::WorkspaceMsg::Replay(
+        ReplayMsg::Exit,
+    )));
+    assert_eq!(
+        app.sub.follow.asked,
+        Some((quiet.to_string(), ReadKind::Raw)),
+        "the capture's silence stays with the file too"
+    );
 }
 
 /// #614 (FL8a; S5, S6): last-known is asked by the button, of the archive

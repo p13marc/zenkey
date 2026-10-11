@@ -410,17 +410,18 @@ pub(crate) fn recorded_values(subs: &mut SubjectState, work: &Workspace) -> Task
     )
 }
 
-/// Leaving a replay (#614, FL8a): every slot showing a recorded row reads
-/// its key live again, resolved through the live lens — the capture's
-/// evidence is not the bus's, and stays with the file.
+/// Leaving a replay (#614, FL8a): every slot that showed a recorded row —
+/// or the capture's silence about its key — reads its key live again,
+/// resolved through the live lens: the capture's evidence is not the bus's,
+/// and stays with the file.
 pub(crate) fn live_values(dep: &mut Deployment, subs: &mut SubjectState) -> Task<Message> {
     let mut tasks = Vec::new();
     for slot in subs.all_mut() {
-        let recorded = slot
+        let from_the_file = slot
             .fetched
             .as_ref()
-            .is_some_and(|(_, o)| o.as_ref().is_ok_and(|r| r.is_recorded()));
-        if !recorded {
+            .is_none_or(|(_, o)| o.as_ref().is_ok_and(|r| r.is_recorded()));
+        if !from_the_file {
             continue;
         }
         slot.fetched = None;
