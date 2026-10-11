@@ -187,7 +187,7 @@ pickers, the media `Handle`, the two `canvas::Cache`s) is held by
 | echo/admits_2k_keyexpr | frame | 190 µs |
 | echo/admits_2k_substring | frame | 102 µs |
 | hex/dump_1k | frame | 3.86 µs |
-| roster/refresh_40p_8w | tick | 28.0 µs |
+| nodes/refresh_40a_8w † | tick | 28.0 µs |
 | series/numeric_leaves | tick | 146 ns |
 | series/value_series_600 | tick | 10.2 µs |
 | expansion/collapse_1k_of_10k | click | 319 µs |
@@ -198,7 +198,13 @@ pickers, the media `Handle`, the two `canvas::Cache`s) is held by
 | Bench | Before | After | Change |
 |---|---|---|---|
 | echo/admits_2k_keyexpr | 344 µs | 190 µs | **−46%** |
-| roster/refresh_40p_8w | 39.3 µs | 28.0 µs | **−29%** |
+| nodes/refresh_40a_8w † | 39.3 µs | 28.0 µs | **−29%** |
+
+† Measured as `roster/refresh_40p_8w`: v1's roster join, forty producers
+against eight watches. #614 (FL9) renamed it `nodes/refresh_40a_8w` with the
+join it measures, now forty addresses read from presence. Both figures
+predate the rename and the new code, so they are no baseline for it:
+re-measure at the next baseline.
 
 `echo/admits_2k_keyexpr` is the one worth reading twice. It was parsing the
 *filter* and the *line's key* inside the per-line loop — 4,000 key-expression
@@ -236,7 +242,7 @@ tree rows four times a second", was a count and never a duration.
 | tree/flatten_50k_expanded | tick | 22.08 ms |
 | tree/search_50k_no_match | keystroke | 33.08 ms |
 | tree/search_50k_all_match | keystroke | 36.92 ms |
-| tree/pivot_50k_producer | tick | 93.35 ms |
+| tree/pivot_50k_address ‡ | tick | 93.35 ms |
 
 **What that means against a 250 ms tick.** In the default `Pivot::Chunks` view,
 `reflatten` is 24.97 + 22.08 ≈ **47 ms, or 19% of the tick interval**, spent on
@@ -247,10 +253,16 @@ producer pivot it is 24.97 + 93.35 ≈ **118 ms — 47% of the interval**.
 because `Message::TreeSearchChanged` reflattens, and almost all of it is building
 rows the walk then discards (#249).
 
-`pivot_50k_producer` at nearly 4× the plain flatten is the number that sizes the
+`pivot_50k_address` ‡ at nearly 4× the plain flatten is the number that sizes the
 `PathArena` follow-up: `collect_entries` deep-copies a `Vec<String>` tail at
 every child node, then a second `BTreeMap`-keyed tree is built, then the rows.
 Three full materialisations of the same data.
+
+‡ Measured as `tree/pivot_50k_producer`, over v1's producer pivot. #614 (FL7)
+renamed it `tree/pivot_50k_address` with the pivot it measures, zk2's
+address pivot. Every pivot figure from here to the end of the #251 section
+predates the rename and the new code, so none is a baseline for it:
+re-measure at the next baseline.
 
 ### After the row-cap fix (#249)
 
@@ -258,7 +270,7 @@ Three full materialisations of the same data.
 |---|---|---|---|
 | tree/search_50k_no_match | 33.08 ms | 24.06 ms | **−27%** |
 | tree/search_50k_all_match | 36.92 ms | 29.33 ms | **−21%** |
-| tree/pivot_50k_producer | 93.35 ms | 83.45 ms | **−11%** |
+| tree/pivot_50k_address ‡ | 93.35 ms | 83.45 ms | **−11%** |
 
 The no-match search is the one a user feels, and the remaining 24 ms is not
 waste: deciding that nothing matches means looking at every key, and pass one
@@ -333,7 +345,7 @@ tick losing 47 ms. That is the whole trade.
 
 | Bench | After #249 | After #251, run 1 | run 2 |
 |---|---|---|---|
-| tree/pivot_50k_producer | 83.45 ms | 41.10 ms [40.2, 42.2] | 44.27 ms [43.6, 45.4] |
+| tree/pivot_50k_address ‡ | 83.45 ms | 41.10 ms [40.2, 42.2] | 44.27 ms [43.6, 45.4] |
 | tree/flatten_50k_expanded | 22.08 ms | 25.45 ms [24.6, 26.0] | 25.53 ms [24.1, 26.2] |
 | tree/search_50k_no_match *(control)* | 24.06 ms | 30.38 ms [29.7, 30.9] | 33.61 ms [30.7, 36.1] |
 

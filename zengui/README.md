@@ -5,23 +5,63 @@ over the same engine ([`zenkey-fleet`](../zenkey-fleet)).
 
 **Key-agnostic by construction.** zengui is a useful explorer on *any* Zenoh bus.
 It groups, counts and renders whatever keys it observes, with no assumption that
-they follow any convention. The [keyspace-v2 convention](../rfcs) is an
-*enrichment overlay*: when a key parses as `v1/<origin>/<class>/<producer>/<subject…>`
-it gains origin/class/producer facets, a registry-resolved type name, and a
-registration badge. When it does not, it is still a first-class node in the tree
-with counts, rates and structural payload rendering — "does not parse" is an
-answer, not an error.
+they follow any convention. [zk2](../docs/zk2/README.md) is an *overlay*: a key
+that resolves through the deployment's presence and contracts gains its
+address, interface and resource, a contract-typed decode and a conformance
+badge. A key that does not resolve is still a first-class node in the tree,
+with counts, rates and structural payload rendering, and it says where
+resolution stopped. "Does not resolve" is an answer, not an error.
 
-zengui runs **two sessions** since #614 (FL6a), as zenctl and zenwatch do: the
-data pump watches on a session in **no** namespace (RFC 09 §5), spelling full
-wire keys — which is what lets it see traffic a namespaced application is blind
-to — and presence, descriptors and contracts are read on a session **in** the
-deployment's namespace. Every zk2 key is checked through the contract its
-provider's descriptor names: valid, invalid, undecodable, or not checked with
-the rung where resolution stopped. The empty namespace is legal and is the
-default — an explorer that cannot see and name the bus-root deployment is blind
-to the common case. (The port is in progress: the tree, the nodes pane and the
-v1 panes still read v1 until the chunks after FL6a move them.)
+zengui runs on zk2 since #614 ([CHANGELOG](CHANGELOG.md) has the old→new
+tables). v1's zengui, which read the keyspace-v2 grammar
+(`v1/<origin>/<class>/<producer>/…`) through registry slices, is on the `v1`
+branch; on this one a `v1/…` key is a foreign key.
+
+## Two sessions, one namespace
+
+zengui opens **two sessions**, as zenctl and zenwatch do:
+
+- the **raw** session, in **no** namespace, runs the data pump, the wire
+  selectors and the admin space. It spells full wire keys, which is what lets
+  it see traffic a namespaced application is blind to (RFC 09 §5);
+- the **namespaced** session, **in** the deployment's namespace, reads
+  presence, descriptors and contracts the way the deployment's consumers do,
+  and asks every resolved question: an owner's state, health, why, a call.
+
+The namespace resolves `--namespace` (alias `--base`) > the one picked last >
+`ZENGUI_BASE` > the context's `base` > empty. The empty namespace is legal and
+is the default: an explorer that cannot see and name the bus-root deployment
+is blind to the common case. Namespaces in use are listed on connect
+(`zenkey_fleet::namespace_listing`) and offered in the location bar's picker,
+so `--namespace` is a shortcut, not a requirement. A switch reopens the
+namespaced session, the presence monitor and the lens, and forgets what they
+held.
+
+**Contracts** come from `--contracts <PATH>` (repeatable: an authoring file, a
+directory of them, or a `.history` root, loaded as `zenctl --contracts` loads
+them) or from the Settings overlay, which remembers them in zengui's own
+preferences, never in the shared context. They seed the contract store; every
+other revision a descriptor names is retrieved by fingerprint from the
+holders that serve it (spec §8.4). `--registry` is v1's, and is refused by
+name.
+
+## The lens and presence
+
+**Presence** runs on a monitor of its own on the namespaced session, so the
+pump's `Dropped(n)` cannot knock it to lost: each address up, down or
+unobservable, since when, its instances and members. Unobservable is never
+down, and "presence not read" is never an empty deployment.
+
+**The lens** is what a raw key resolves through: the namespace, the catalog
+presence and descriptors build, and the contracts in hand. Each key reads as
+one of fourteen **identity rungs** — `resolved` to a resource of the
+contract, or the rung where resolution stopped (`not in namespace`, `not
+zk2`, `presence not read`, `no provider`, `no revision`, `contract not held`,
+`contract unavailable`, `no resource`, `no member`, …) — held in a bounded
+identity cache that resolves again whenever the lens moves. A resolved key's
+payload is checked against its contract: **valid**, **invalid**,
+**undecodable**, or **not checked** with the rung. The verdict cache's own
+"not yet checked" is never a verdict.
 
 ## Usage
 
@@ -29,14 +69,11 @@ v1 panes still read v1 until the chunks after FL6a move them.)
 zengui -c tcp/127.0.0.1:7447                         # the bus-root deployment
 zengui -c tcp/127.0.0.1:7447 --namespace spray       # a named deployment (--base is its alias)
 zengui -c … --scope deployment                       # the namespace's ambient zk2/**
+zengui -c … --scope streams                          # its ambient streams (`telemetry` still reads as this)
 zengui -c … --scope explicit                         # its explicit @stream and @state, named
 zengui -c … --selector 'demo/**'                     # your own key expressions
 zengui -c … --contracts examples/zk2/.history        # contracts held offline (repeatable)
 ```
-
-Namespaces in use are listed on connect (`zenkey_fleet::namespace_listing`)
-and offered in a picker; `--namespace` is a shortcut, not a requirement.
-`--registry` is v1's, and is refused by name in favour of `--contracts`.
 
 ### A note on `**`
 
@@ -48,46 +85,104 @@ than by policy — but it equally cannot see `@op` or the `@zk` control keys.
 the `explicit` scope names the verbatim kinds, and every selector says which
 verbatim chunks it cannot see.
 
-## Status
+## What the window shows
 
-The §6.4 checklist is delivered: key tree (with pivots, find-in-tree and
-virtualized rendering), live echo, the call and publish panes (#60 — typed
-targets, per-origin outcomes with the alive-but-silent origins named, request
-forms scaffolded from the served schema; and a publish form that encodes for
-the wire through the engine's ladder, with a QoS picker that *is* the closed
-enum, a repeat/interval stream carrying the #38 matching badge, and a bounded
-send log that reports what it dropped), the node dashboard (#61 — liveliness
-roster, suspect-on-retraction, lazy `node_info` detail), and the
-schema-decoded payload inspector with the selection detail pane. A doctor
-panel (#71) renders the same typed findings as `zenctl doctor --format json`,
-run on demand with run-over-run deltas. An **admin & storage panel** (#70)
-sweeps the Zenoh admin space on demand and renders the coverage table RFC 09
-§2's late-joiner concern calls for: declared state families against the
-storages that would seed them, with "not judged" kept firmly distinct from
-"uncovered".
+**The Locator** is the key tree, with find-in-tree and virtualized rows. It
+starts from the **contract skeleton**: every resource of every address
+presence names, declared before a byte of it arrives, templates symbolic. A
+declared `@op` row offers no watch, because a GET under `@op` is a call. Each
+chunk carries its zk2 role (`zk2`, system, service, iface, kind, resource,
+`@zk` control), and the tree **pivots** by system, by address, by interface
+or by kind. A templated family under a watch wears a **budget badge** from
+the core §2.7 judge: `within budget: n of b`, `exceeds budget: n of b`, or, mostly,
+`budget unobservable (…)` with why — a window too short, lossy, the owner
+absent, or state, which a window does not count.
 
-Phase 2 of the epic is complete: a **connect pane** (#67) selects and edits the
-named contexts `zenctl` shares, and spends three lines on what RFC 09 §0.1
-actually says about scouting; **echo v2** (#72) pauses without lying about the
-gap, filters by key expression *and* substring, drills through to the inspector
-and exports the CLI's ndjson rows; **preferences** (#73) persist theme, zoom,
-geometry and scope, degrading loudly rather than silently when the file will not
-parse; and a **command palette** (#75) — Ctrl+P for actions, Ctrl+K for observed
-keys, `?` for the shortcut map, which is rendered from the same table that
-dispatches it.
+**The Inspector** follows the selection, and every further subject is a pin:
+a key, a subtree, or an address. It shows the key's identity (address,
+interface, kind, resource, type, revision and the template's values), its
+declared type, and **the value, read by what the key is**:
 
-**Removed in #614 (FL11): the Config tool (#481), the blob browser (#68) and
-the media viewer (#69).** They spoke v1's planes — RFC 05 §5.1's configuration
+- a zk2 **state** key: S4's owner GET, `via owner GET (S4)`; no answer reads
+  "silent", never "no value";
+- **last-known**: behind one button per `archive.v1` provider presence shows,
+  "last-known from <archive> — not current (S5, S6)";
+- a **stream** with `history`: the owner's `@adv` cache; without history,
+  nothing is read, and the pane says why;
+- an **event**: replayed on a button press, bounded by its retention;
+- a **foreign** or control key: a raw GET, labelled raw;
+- under `@op`, on a symbolic path, or a zk2 key the lens stopped short of:
+  nothing, and why.
+
+Beside it: the declared QoS against the axes the newest sample rode, each
+differing axis named with both sides; the history ring and its series (no
+unit: zk2 contracts carry none); **why** (zk2's ladder, on a key or an
+address; `not_asked` is never "no"); **fields**, over a stated window and
+bounds; and **consumers**, the R3 edges descriptors declare, never a matching
+status. Stamps are attributed through the lens (O7).
+
+**The Activity dock** holds the session's parallel streams: echo (pause
+without lying about the gap, filter by key expression and substring, drill
+through to the Inspector, export zk2's NDJSON rows with each key's
+`identity`), the publish log, doctor verdicts, replay transport, and traffic.
+
+**The Workbench** is the tools:
+
+- **Send.** *Publish* writes a **foreign** key only, as bytes — the text as
+  typed, or hex — on the wire QoS axes you pick (priority, congestion,
+  reliability, express), with the `Encoding` you name. A key a zk2 service
+  owns is refused as you type it (P3), and so is a wildcard; a tombstone of
+  any concrete key needs `--i-know`. A repeat stream carries the matching
+  badge, and the send log is bounded and says what it dropped. *Call* is a
+  contract call on `@op`: an interface whose revision declares the
+  operation, an address from the providers presence lists, a request form
+  built from the operation's type. A forbidden fan-out is refused before
+  anything is sent (O2), and a value, an error envelope, a malformed reply
+  and silence render apart (O5).
+- **Nodes.** One card per address, from presence: up, down or unobservable,
+  its instances, its descriptor's facts, a `hostid.v1` chip only when the
+  descriptor's `profiles` lists it, and the watched-freshness join. Health
+  (`health.v1`) is read once per selection, never polled, with a "clocks
+  synced" toggle; without it an age reads "age unobservable".
+- **Doctor.** zk2's nineteen checks, the same typed findings as `zenctl
+  doctor --format json`, run on demand with run-over-run deltas: findings by
+  severity, then every check's verdict (finding, clean, unobservable, not
+  asked), then what was not judged and what was fixed. `deep` and "clocks
+  synced" are toggles; "re-read presence and contracts" restarts the
+  presence link and forgets the store's absences. An empty scope is no
+  verdict.
+- **Admin & storage.** Routers, storages and the topology, swept from the
+  admin space on demand, and one S4 row per storage: `answers on owner state`
+  is the finding, because a late joiner seeds from the owner and last-known
+  state is an archive's (§4.4). "Not judged" is kept apart from clean.
+- **Mesh.** The router graph, with attached instances beside their router.
+
+**Replay** loads a `.zrec` (versions 1 to 3) or scrubs the retained window,
+and resolves through an **offline lens**: no catalog, the offline contracts,
+and the capture's namespace, because the live catalog describes another
+world. The tree merges against the offline skeleton, verdicts are checked
+offline, and a v1 or v2 row reads "QoS not recorded". While a replay runs,
+publishing, calling, recording, why, fields and consumers are refused in
+every window. `record` writes `.zrec` version 3; the History section compares
+against a loaded `.zsnap` version 2.
+
+Beside them: a **connect pane** that selects and edits the named contexts
+`zenctl` shares; **preferences** that persist theme, zoom, geometry, density,
+scope and the named layouts, degrading loudly rather than silently when the
+file will not parse; torn-off windows; and a **command palette** — Ctrl+P for
+actions, Ctrl+K for observed keys, `?` for the shortcut map, which is
+rendered from the same table that dispatches it.
+
+**Removed in #614: the Config tool (#481), the blob browser (#68) and the
+media viewer (#69).** They spoke v1's planes — RFC 05 §5.1's configuration
 calls, RFC 07 §2's `@blob` and RFC 07 §1's `@media` — and zk2 has no profile
 for any of them yet: `config.v1`, `blob.v1` and `media.v1` would come from
 #613, and each surface comes back with its profile, not before. There are no
 stub controls in the meantime, because a control that does nothing is a
 promise the window cannot keep.
 
-No codec logic lives here. The publish form hands its body to
-`zenkey_fleet_v1::prepare_publish` and renders what comes back — encoded, sent as
-typed, or sent raw — because a payload that shipped unencoded must never look
-like one that did not.
+No codec logic lives here: every decode, check and encode is the engine's,
+through the contract that declares the type.
 
 ## Try it
 
@@ -96,40 +191,40 @@ just gui-demo
 ```
 
 That is the whole thing: it builds, starts a traffic generator, and opens the
-GUI against it. No router and nothing else to install — `spray` listens and
-zengui connects straight to it. Ctrl-C stops both.
+GUI against it with `--namespace spray --contracts examples/zk2/.history`. No
+router and nothing else to install — `spray` listens and zengui connects
+straight to it. Ctrl-C stops both.
 
-`spray` (`examples/spray.rs`, #614 FL5) is a zk2 deployment in namespace
-`spray` — nav, camera, perception, teleop, thrusters, a planner and a tc
-backend, real services serving their contracts from `examples/zk2/`, and a
-service implementing `health.v1` alone — beside the traffic no zk2 service
-would send: an interface token with no instance token, a second answerer on
-an owner's state, garbage on an owned key, an unowned key, a key in another
-namespace, and foreign keys. `just gui-demo` opens zengui with `--namespace
-spray`, so since FL6a each of those keys is checked through its contract and
-badged with what the check found — valid, invalid, undecodable, or not checked
-with the rung where resolution stopped. The tree still reads v1 while #614
-ports it pane by pane, so the zk2 keys are unlabelled rather than mislabelled
-rows. `just smoke-spray` reads the same deployment through zenctl's `service
-list` and `doctor`.
+`spray` (`examples/spray.rs`) is a zk2 deployment in namespace `spray` —
+nav, camera, perception, teleop, thrusters, a planner and a tc backend, real
+services serving their contracts from `examples/zk2/`, and a service
+implementing `health.v1` alone — beside the traffic no zk2 service would
+send: an interface token with no instance token, a second answerer on an
+owner's state, garbage on an owned key, an unowned key, a key in another
+namespace, and foreign keys. Each of those reads what it is: the owners' keys
+resolved and valid, the squatter's invalid, the garbage undecodable, the
+unowned key at `no provider`, the other namespace's at `not in namespace`.
+`just smoke-spray` reads the same deployment through zenctl's `service list`
+and `doctor`.
 
 What else to look at:
 
+- The **Doctor** (the Diagnose layout, or the palette's "run doctor"): with
+  `deep` on, it finds the spray's phantom token (`token-missing`) and its
+  state squatter (`state-stamp-foreign`).
+- **Nodes**: select `host-a/sysmon` for its `health.v1` reading. Its status
+  cycles OK → DEGRADED → OK, so "read again" moves it.
+- **Send → get / call**: `nav.v2`'s `set_origin` at `robot1/nav`.
 - `just gui-demo-bounded` trips both bounds immediately, so the status strip
   reads `N keys (+M retired — bound reached)` **and**
   `identities: N cached (+M retired — cache bound reached)`. Two
   bounds over two different populations, so two sentences (#107).
-- The **admin** tool (the Workbench dock, or the palette's "go to admin
-  pane"). Against the demo's peer-only bus every section
-  should say *why* it is empty — "a peer-only mesh, or the admin space is
-  disabled" — and the coverage table should read "coverage not judged"
-  without a registry, never "uncovered". Point it at a router with storages
-  and the rows must match `zenctl storage list`.
+- The **admin** tool. The spray's own session is a router with the admin
+  space on, so the pane lists that router, and says why each empty section is
+  empty. Point it at a router with storages and the rows must match `zenctl
+  storage list`.
 - `just gui-demo-no-contracts` holds nothing offline: the status strip counts
   every revision as retrieved from the spray's own holders (spec §8.4).
-
-The v1 demo traffic (`spray_v1`) was deleted in #614 (FL11), with the
-Config tool, the blob browser and the media viewer it was kept for.
 
 The spray exists because no conforming service can emit non-conforming
 traffic — that is the point of one — so it is the only way to exercise
@@ -138,7 +233,7 @@ the key-agnostic path for real.
 ## Development
 
 ```bash
-cargo test -p zengui        # unit, registry-overlay, pane-rendering and spray tests
+cargo test -p zengui        # unit, pane-rendering, scene and spray tests
 just spray                  # the zk2 spray in one terminal…
 just test-live              # …live-bus tests in another (or, with nothing running:
                             #  cargo test -p zengui --test live_bus -- --ignored)

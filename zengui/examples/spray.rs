@@ -62,10 +62,13 @@
 //! cargo run -p zenctl -- doctor --namespace spray --deep --clocks-synced -c tcp/127.0.0.1:7449
 //! ```
 //!
-//! Today's zengui still reads v1 (#614 ports it pane by pane), so it shows
-//! every key here as a foreign key — counts, rates and structural payloads,
-//! unlabelled rather than mislabelled — which is the key-agnostic core's
-//! promise.
+//! zengui reads it on zk2 (#614): `just gui-demo` opens it with
+//! `--namespace spray`, and each key here resolves through presence and the
+//! contracts to its rung — the owners' keys resolved and checked valid, the
+//! squatter's invalid, the garbage undecodable, the unowned key at "no
+//! provider", the other namespace's at "not in namespace" — while the
+//! foreign keys keep their counts, rates and structural payloads, which is
+//! the key-agnostic core's promise.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
