@@ -68,7 +68,8 @@ case name. It exits with:
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes, against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
-| budget | §2.7 (0.24, 0.25) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25). An unknown file there fails. |
+| budget | §2.7 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
+| seed | §4.2 (0.27) | `seed` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not). An unknown file there fails. |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
@@ -78,7 +79,7 @@ case name. It exits with:
 The result at the time of writing:
 
 ```text
-layout         12 passed     0 failed
+layout         13 passed     0 failed
 keys           55 passed     0 failed
 slugs          42 passed     0 failed
 templates      11 passed     0 failed
@@ -89,17 +90,19 @@ history        10 passed     0 failed
 descriptors    42 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
-budget         81 passed     0 failed
+budget         95 passed     0 failed
+seed           20 passed     0 failed
 examples       99 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
-total         875 passed     0 failed
+total         910 passed     0 failed
 ```
 
-The figures are against `core.md` 0.25, `hostid.v1` 0.4, `freshness.v1`
-0.2 and `health.v1` 0.3. 0.22 added `contracts/e002-two-majors`, 0.24
-the `budget/` family, and 0.25 its `lossless.json`. `freshness.v1` 0.2 added `clock-trust.json` and four
+The figures are against `core.md` 0.27, `hostid.v1` 0.5, `freshness.v1`
+0.2 and `health.v1` 0.4. 0.22 added `contracts/e002-two-majors`, 0.24
+the `budget/` family, 0.25 its `lossless.json`, which 0.27 reshaped, and
+0.27 the `seed/` family. `freshness.v1` 0.2 added `clock-trust.json` and four
 judgement cases. `health.v1` 0.1 added three fixture files, and 0.3
 `clock.json`. Five earlier releases added descriptor
 fixtures:
@@ -111,12 +114,12 @@ fixtures:
 
 - Amendments 0.5 to 0.18 resolved F-01 to F-93. `hostid.v1` 0.2 resolved
   F-94 to F-97, core 0.22 F-98, `hostid.v1` 0.3 F-99, `freshness.v1` 0.2
-  F-100 to F-102, `health.v1` 0.2 F-103 and F-104, and core 0.25 F-105.
-  None is open.
+  F-100 to F-102, `health.v1` 0.2 F-103 and F-104, core 0.25 F-105, and
+  core 0.27 F-106. None is open.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
-  one (F-98), `freshness.v1` 0.2 two (F-101, F-102), and `health.v1` 0.2 one
-  (F-104).
+  one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
+  (F-104), and core 0.27 one, the order of ids at one time (F-106).
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
 - 0.8 makes `["null"]` a null schema too, and compares a recursive `$ref`
@@ -333,7 +336,8 @@ user, with:
 - the services it inspects;
 - whether it reads the admin space.
 
-A principal with no service is the Tool shape. `acl.generate(principals,
+A principal with no service is a pure tool; since 0.27 Tool is a role,
+which a principal owning a service may hold too. `acl.generate(principals,
 "deny" | "allow")` returns zenoh's `access_control` block:
 - **under `deny`**, allow rules, one per (principal, key set), carrying
   §11.2's message and flow pairs (0.15's table, which zk2py measured
@@ -342,7 +346,12 @@ A principal with no service is the Tool shape. `acl.generate(principals,
   deployment's own keys (§11.2, 0.15), with a `complement_partial` warning
   for an R2-narrowed grant;
 - **fan-in:** a provider's egress and ingress `reply` carry every reader
-  selector that intersects its keys;
+  selector that intersects its keys. A presence selector (an inspector's,
+  the doctor's wildcards) joins the egress alone (0.27), since "a
+  descriptor is answered with a value, checked against its own key".
+  `presence_egress=False` leaves it out, for security.md §2's check;
+- **shapes compose** (0.27): Tool is a role. A principal holds the union
+  of its grants, so one that owns a service and inspects others gets both;
 - **the `@/**` queryable deny** is a rule in each principal's own policy
   under `allow`, never a catch-all subject's;
 - **the Tool's admin read** (0.15): `query` on `@/*/router` and
@@ -370,7 +379,16 @@ router of its own. It shows:
   - under `allow`, an ungranted wildcard GET gets nothing back, while a
     wildcard call to a `fanout = "allowed"` operation still executes;
   - presence grants read the descriptor;
-- §11.3's link refusal of an unauthenticated session.
+- §11.3's link refusal of an unauthenticated session;
+- **a tool's `inspects`** (0.27): a tool inspecting `*/tc`, binding and
+  calling nothing, reads both backends' tokens and descriptors on the
+  doctor's wildcard selectors, none of their data, and no presence it
+  does not inspect. Without the presence selectors in the providers'
+  egress, its descriptor read gets nothing while its liveliness read
+  still holds the tokens;
+- **one principal, both roles** (0.27): `ops/both` owns a service and
+  inspects `*/tc` with the admin read. It puts under its own prefix and
+  not on h1's key, and reads `*/tc`'s presence and the admin space.
 
 S4's storages read keeps only answers whose key the selector includes,
 ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
@@ -420,7 +438,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 326 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
+Result: `live interop: 329 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
 
@@ -607,15 +625,27 @@ described below.
   - the Rust `consume` example reads zk2py's health status, and stops at
     its operation step, since `health.v1` has none.
 
-## The population budget (core §2.7, 0.24 and 0.25)
+## The population budget (core §2.7, 0.24, 0.25 and 0.27)
 
 - **The `budget` conformance family:** `bounds.json`, `population.json`,
-  `rate.json` and `lossless.json`, 81 of 81.
+  `rate.json` and `lossless.json`, 95 of 95.
 - **Lost no delivery is established** (0.25). `budget.lossless` takes the
   resource's declared QoS, the reader's own loss and miss detection. Only a
   `reliable`, `block` resource's window can be lossless. A `Window` counts
   its span from its declaration plus the reply timeout, and watches the
   owner's token until one lease after its end.
+- **Its reader lost none** (0.27): no queue loss, no transport of its
+  session closed, and no gap beyond `stall_bound` (min of
+  `wait_before_close` and the lease less one keep-alive interval: 5000 ms
+  by default, 750 ms for a 1 s lease). `reader_stalled` is second in the
+  reasons, after `reader_lost`.
+- **`budget.StallWatch`** is how zk2py reads its own stall. zenoh-python
+  1.10.1 exposes transport events
+  (`Session.info.declare_transport_events_listener`, unstable), so it
+  records every transport of the session that closes, and a ticker thread
+  (every 50 ms) records the longest gap. Every `Window` runs one from
+  before its declaration until the end of its watch. zk2py states no
+  premise.
 - **`zk2py.budget`:** `bound`, `population` and `rate`, as the fixtures read
   them. `get_population` is a complete S4 GET, and `Window` a window over a
   stream's or an event's members, with the owner's presence watched
@@ -626,11 +656,21 @@ described below.
   `cardinality=` lowers the bound in the descriptor, `budget=False` makes a
   test owner that breaks the rule, and `occur()` publishes an event.
 - **`just py-budget`** (`python -m zk2py.budget_scenarios`) runs
-  `scenarios/budget.md`, 38 of 38. Pass `--owner <exe>` for the Rust owner
+  `scenarios/budget.md`, 41 of 41. Pass `--owner <exe>` for the Rust owner
   example; it defaults to `target/debug/examples/owner`.
   - §1 to §3 are the measurements, from Python. §1 runs routers in
     processes of their own (`zk2py.proc`), §2 uses relays that close and
     stall, and §3 uses `zenoh.ext`'s miss detection.
+  - §1 (0.27): step 3's stuck callback loses samples, sees its own
+    transport close and the owner's token withdrawn, and its ticker no
+    gap. Step 4's consumer (`proc.py consume`) stops its whole process
+    for 7 s: a gap of 7 s or more, its transport closed, the token
+    withdrawn, samples lost.
+  - §1, "a tool's window over a stalled reader" (`--only 1b`, 0.27): a
+    tool's window over a zk2py event (`interop/budget/zk2py_stall.v1.toml`),
+    1 s lease, through a relay. Closing the tool's connection mid-window
+    makes it `reader_stalled`, its population and rate unobservable. Left
+    alone it is within, complete.
   - §4 to §7 are the owner keeping its bound and its rate, run on zk2py's
     owner and on the owner example, the same writes.
 - **Across the two implementations** (`just py-live`, `--only budget`, 16
@@ -648,10 +688,10 @@ described below.
     short, and a window whose owner left within the watched lease is
     `owner_absent`.
 
-## A late joiner's seed (core §4.2, 0.26)
+## A late joiner's seed (core §4.2, 0.26 and 0.27)
 
 ```bash
-python -m zk2py.state_scenarios      # a `py-state` recipe is requested
+just py-state
 ```
 
 - **`zk2py.seed.LateJoiner`** subscribes first, then makes S4's GET
@@ -660,13 +700,26 @@ python -m zk2py.state_scenarios      # a `py-state` recipe is requested
   newer reply replaces a live sample, a `reply_del` is a deletion, and
   equal stamps are one mutation, kept once. Each arrival is recorded as
   kept, the same mutation, or dropped.
+  - **The order** (0.27): by time, then by id as zenoh compares ids, the
+    128-bit value written as 16 bytes little-endian and compared from the
+    first. At one time, id `100` (hex) is below id `2`. `seed.compare` and
+    `seed.kept` are the pure merge the `seed` fixtures read.
+  - **An unstamped sample** ranks below every stamped one: it is kept on a
+    key holding nothing or only unstamped samples, the later arrival
+    winning.
+  - **R6** binds a consumer, which discards a sample on a non-concrete key.
+    A tool's seed keeps it under its own key.
   - A GET that ran to its timeout seeds possibly incompletely, and an owner
     absent seeds nothing, which is silence.
   - `order="get-first"` is state.md §10's control.
 - **The owner** lets a test hold a state GET: `state_hold` takes it,
   `state_answer` makes the answer, and `answer_state` sends it.
-- **`python -m zk2py.state_scenarios`** runs state.md §10 against zk2py's
-  owner, plus the timeout and absent-owner cases, 10 of 10.
+- **`just py-state`** (`python -m zk2py.state_scenarios`) runs state.md §10
+  against zk2py's owner, plus the timeout and absent-owner cases, and §11
+  (0.27), 15 of 15. §11's W is a peer session without an HLC, which puts
+  unstamped samples and answers a held GET with stamps zk2py chooses. The
+  Rust owner example does not apply to §11: its keys are an owner's,
+  always stamped.
 - **Across the two implementations** (the live runner's `--only seed`, 7
   checks), over the owner example's `budget.v1` items:
   - a put between the subscription and the GET is kept once;
@@ -771,13 +824,13 @@ impl/python/
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
-    budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, readings on a bus
-    budget_scenarios.py §2.7    scenarios/budget.md §1–§7: the measurements, and the owner keeping its budget
-    seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp
-    state_scenarios.py §4.2     scenarios/state.md §10 against zk2py's owner
-    proc.py                     helper processes for the measurements: a router, a publisher
+    budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
+    budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
+    seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge
+    state_scenarios.py §4.2     scenarios/state.md §10 against zk2py's owner, and §11's open cases
+    proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1;
+                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

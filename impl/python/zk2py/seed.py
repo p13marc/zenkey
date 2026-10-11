@@ -1,4 +1,4 @@
-"""Core §4.2, "A late joiner's seed" (0.26): a consumer or a tool that wants
+"""Core §4.2, "A late joiner's seed" (0.26, 0.27): a consumer or a tool that wants
 an owner's current state and every change after it seeds from S4's GET and
 follows a subscription.
 
@@ -9,7 +9,15 @@ follows a subscription.
   one. A newer live put or delete replaces a reply, a newer reply replaces a
   live sample, a ``reply_del`` is a deletion with its stamp, and two samples
   with equal stamps are one mutation, kept once. Stamps compare as
-  ``Latest`` compares replies (§4.1): by time, then by id.
+  ``Latest`` compares replies (§4.1), which 0.27 spells out: by time, then
+  by id, each id's 128-bit value written as 16 bytes little-endian and
+  compared from the first byte. An unstamped sample ranks below every
+  stamped one, and two unstamped samples have no order but their arrival
+  (0.27). :func:`compare` and :func:`kept` are the pure rule
+  (``conformance/seed/merge.json``).
+- **R6** binds a consumer, whose seed discards a key that is not concrete
+  on either path; a tool's seed keeps it under the key it arrived on,
+  merged with that key alone (0.27).
 - **What a seed cannot know:** a GET that ran to its timeout (it ends with
   an error reply, Appendix B) seeds possibly incompletely; an owner absent
   at the GET seeds nothing, which is silence; a seed is current state, never
@@ -28,8 +36,10 @@ GET_TIMEOUT_S = 1.0
 
 @dataclass(frozen=True)
 class Stamp:
-    """A zenoh timestamp as ``Latest`` orders replies: its NTP64 time, then
-    its id (§4.1, §4.3)."""
+    """A zenoh timestamp as ``Latest`` orders replies (§4.1, §4.2, 0.27):
+    its NTP64 time, then its id, "each id's 128-bit value written as 16
+    bytes little-endian, least significant byte first, and the two compared
+    byte by byte from the first"."""
 
     time: int        # the NTP64 value, 2^-32 s since the UNIX epoch
     id: str          # the HLC's id, hex
@@ -42,8 +52,8 @@ class Stamp:
         raw, _, ident = text.partition("/")
         return cls(int(raw), ident.lower().lstrip("0"))
 
-    def key(self) -> tuple[int, int]:
-        return self.time, int(self.id or "0", 16)
+    def key(self) -> tuple[int, bytes]:
+        return self.time, int(self.id or "0", 16).to_bytes(16, "little")
 
     def __str__(self) -> str:
         return f"{self.time}/{self.id}"
@@ -89,11 +99,38 @@ class Seed:
         return self.ended and self.replies == 0 and not self.errors
 
 
+def compare(a: Stamp | None, b: Stamp | None) -> str:
+    """``less``, ``equal`` or ``greater`` for ``a`` against ``b`` (merge.json's
+    ``order``). An unstamped one ranks below every stamped one."""
+    if a is None or b is None:
+        if a is None and b is None:
+            return "equal"
+        return "less" if a is None else "greater"
+    ka, kb = a.key(), b.key()
+    return "less" if ka < kb else "greater" if ka > kb else "equal"
+
+
+def kept(arrivals: list[tuple[Stamp | None, str]]) -> list[bool]:
+    """One key's arrivals, in arrival order, each (stamp or None, kind):
+    whether each replaces what the key holds (merge.json's ``cases``). The
+    kind never decides."""
+    held: Stamp | None = None
+    holding = False
+    out = []
+    for stamp, _kind in arrivals:
+        k = (not holding) or newer(stamp, held)
+        out.append(k)
+        if k:
+            held, holding = stamp, True
+    return out
+
+
 def newer(a: Stamp | None, b: Stamp | None) -> bool:
-    """Whether ``a`` orders after ``b``. A sample with no stamp breaks S1 and
-    cannot be ordered: it replaces only another sample with none (zk2py's
-    reading, the text naming the owner's stamp alone: SPEC-FINDINGS
-    F-106)."""
+    """Whether ``a`` replaces a held ``b`` (§4.2, 0.27): "An unstamped sample
+    ranks below every stamped one … It is kept on a key that holds nothing,
+    or only unstamped samples, and never over a stamped one. Two unstamped
+    samples of a key have no order but their arrival, so the later replaces
+    the earlier." """
     if a is None:
         return b is None
     if b is None:

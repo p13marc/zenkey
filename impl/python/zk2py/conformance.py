@@ -588,12 +588,18 @@ def _budget_lossless(path: Path) -> list[Result]:
     detection -> whether a window is shown to have lost no delivery."""
     from . import budget
 
+    data = _load_json(path)
     out: list[Result] = []
-    for c in _load_json(path)["cases"]:
-        q, m = c["qos"], c["miss_detection"]
+    for c in data["cases"]:
+        q, m, s = c["qos"], c["miss_detection"], c["reader_stall"]
         ok, reason = budget.lossless(q["reliability"], q["congestion"], c["reader_lost"],
-                                     m["declared"], m["used"], m["misses"])
+                                     m["declared"], m["used"], m["misses"], stall_gap_ms=s["gap_ms"],
+                                     stall_bound_ms=s["bound_ms"], transport_closed=s["transport_closed"])
         out.append(_check(f"lossless: {c['note']}", {"lossless": ok, "reason": reason}, c["expect"]))
+    for c in data.get("stall_bounds", []):
+        out.append(_check(f"lossless: stall_bounds: {c['note']}",
+                          budget.stall_bound(c["wait_before_close_ms"], c["lease_ms"], c["keep_alive"]),
+                          c["expect_ms"]))
     return out
 
 
@@ -613,11 +619,35 @@ def family_budget(root: Path) -> list[Result]:
     return out
 
 
+def family_seed(root: Path) -> list[Result]:
+    """``seed/`` (core §4.2, 0.27): a late joiner's merge, every file, an
+    unknown one failing. ``merge.json``: two stamps -> their order, and one
+    key's arrivals -> which are kept."""
+    from . import seed
+
+    out: list[Result] = []
+    for path in sorted((root / "seed").iterdir()):
+        if path.name != "merge.json":
+            out.append((f"seed/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        data = _load_json(path)
+
+        def stamp(x: Any):
+            return None if x is None else seed.Stamp(int(x["time"]), x["id"])
+
+        for c in data["order"]:
+            out.append(_check(f"seed: order: {c['note']}", seed.compare(stamp(c["a"]), stamp(c["b"])), c["expect"]))
+        for c in data["cases"]:
+            got = seed.kept([(stamp(a["stamp"]), a["kind"]) for a in c["arrivals"]])
+            out.append(_check(f"seed: merge: {c['note']}", {"kept": got}, c["expect"]))
+    return out
+
+
 #: Every entry of spec/conformance/ that a family reads. Appendix E lists
 #: the fixture formats; an entry no family reads fails ``layout``, so a new
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
-                 "history", "descriptors", "errors", "compat", "budget"}
+                 "history", "descriptors", "errors", "compat", "budget", "seed"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -639,6 +669,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "errors": family_errors,
     "compat": family_compat,
     "budget": family_budget,
+    "seed": family_seed,
     "examples": family_examples,
     # The profiles, one family each (profiles/README.md, "How the harnesses
     # take profiles in").

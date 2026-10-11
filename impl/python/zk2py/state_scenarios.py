@@ -16,6 +16,13 @@ Beside §10, two things §4.2 says a seed cannot know: a GET that ran to its
 timeout seeds possibly incompletely, and an owner absent at the GET seeds
 nothing, which is silence.
 
+§11 (0.27), the merge's open cases, has no zk2 owner: foreign keys
+``foreign/*``. Their writer W is one zenoh-python peer session without an
+HLC, answering GETs on ``foreign/**`` from a held queryable as a storage
+would, and setting a stamp where the scenario says so. The late joiner, a
+client of W, is a tool's :class:`~zk2py.seed.LateJoiner`, and a
+consumer's beside it shows R6.
+
 Exit 0 when every check passes, 1 when any fails.
 """
 
@@ -192,6 +199,111 @@ def section10(report: Report) -> None:
         r1.close()
 
 
+def section11(report: Report) -> None:
+    import json
+
+    import zenoh
+
+    from .owner import free_loopback_port
+
+    sec = "§11 a late joiner's merge: unstamped samples, equal times, a key that is not concrete"
+    port = free_loopback_port()
+    conf = zenoh.Config()
+    conf.insert_json5("mode", json.dumps("peer"))
+    conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
+    conf.insert_json5("scouting/multicast/enabled", "false")
+    conf.insert_json5("timestamping/enabled", "false")
+    w = zenoh.open(conf)
+    cconf = zenoh.Config()
+    cconf.insert_json5("mode", json.dumps("client"))
+    cconf.insert_json5("connect/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
+    cconf.insert_json5("scouting/multicast/enabled", "false")
+    tool = zenoh.open(cconf)
+    hold = Hold()
+    q = w.declare_queryable("foreign/**", zenoh.handlers.Callback(hold), complete=False)
+
+    def stamp(time_: int, ident: str) -> Any:
+        return zenoh.Timestamp(zenoh.NTP64(time_ // sd_ns(), time_ % sd_ns()),
+                               zenoh.TimestampId(int(ident, 16).to_bytes(16, "little")))
+
+    try:
+        time.sleep(0.5)
+        base = time.time_ns()
+        t1, t2, t3 = stamp(base, "a1"), stamp(base + 1_000_000, "a1"), stamp(base + 2_000_000, "a1")
+        lj = sd.LateJoiner(tool, "foreign/**", consumer=False, timeout=5.0)
+        cons = sd.LateJoiner(tool, "foreign/**", consumer=True, timeout=5.0)
+        cons.subscribe()
+        lj.start()
+        if not report.check(sec, "step 1: W takes the late joiner's GET and holds it", hold.taken.wait(5.0)):
+            return
+        w.put("foreign/a", b"a")
+        w.put("foreign/c", b"c-1")
+        w.put("foreign/c", b"c-2")
+        time.sleep(0.4)
+        query = hold.queries[0]
+        query.reply("foreign/a", b"a-T1", timestamp=t1)
+        query.reply("foreign/b", b"b-T2", timestamp=t2)
+        query.reply("foreign/c", b"c-0")
+        query.drop()
+        lj.wait()
+        time.sleep(0.3)
+        w.put("foreign/a", b"a-late")
+        w.delete("foreign/b")
+        w.put("foreign/b", b"b-T3", timestamp=t3)
+        same = base + 5_000_000
+        w.put("foreign/e", b"e-2", timestamp=stamp(same, "2"))
+        w.put("foreign/e", b"e-100", timestamp=stamp(same, "100"))
+        w.put("foreign/f", b"f-100", timestamp=stamp(same, "100"))
+        w.put("foreign/f", b"f-2", timestamp=stamp(same, "2"))
+        w.put("foreign/g", b"g-T1", timestamp=t1)
+        w.put("foreign/*", b"wild-T3", timestamp=t3)
+        w.put("foreign/g", b"g-T2", timestamp=t2)
+        time.sleep(0.6)
+
+        def kept_values(j: Any, k: str) -> list[str]:
+            """Each arrival on ``k`` at the merge, in order: kept, the same
+            mutation, or dropped."""
+            return [x.outcome for x in j.applied if x.key == k]
+
+        v = lj.view()
+        report.check(sec, "steps 2-3: a is kept unstamped, then replaced by the stamped reply (T1); c keeps c-1, "
+                          "c-2, then the reply's unstamped c-0, which arrived last; b is kept (T2)",
+                     kept_values(lj, "foreign/a")[:2] == ["kept", "kept"]
+                     and kept_values(lj, "foreign/c") == ["kept", "kept", "kept"] and v["foreign/c"].payload == b"c-0"
+                     and kept_values(lj, "foreign/b")[:1] == ["kept"],
+                     f"a {kept_values(lj, 'foreign/a')}, c {kept_values(lj, 'foreign/c')} -> {v['foreign/c'].payload!r}, "
+                     f"b {kept_values(lj, 'foreign/b')}")
+        report.check(sec, "step 4: neither unstamped sample is kept, on a or b, each key holding a stamp; the "
+                          "stamped put on b (T3) is kept",
+                     kept_values(lj, "foreign/a")[2:] == ["dropped"] and kept_values(lj, "foreign/b")[1:] == [
+                         "dropped", "kept"] and v["foreign/a"].payload == b"a-T1" and v["foreign/b"].payload == b"b-T3",
+                     f"a {kept_values(lj, 'foreign/a')} -> {v['foreign/a'].payload!r}; b "
+                     f"{kept_values(lj, 'foreign/b')} -> {v['foreign/b'].payload!r}")
+        report.check(sec, "step 5: on e only (t, 2) is kept, on f both, the second replacing the first: at one time "
+                          "id 100 is below id 2 (the ids' bytes from the least significant)",
+                     kept_values(lj, "foreign/e") == ["kept", "dropped"] and kept_values(lj, "foreign/f") == [
+                         "kept", "kept"] and v["foreign/e"].payload == b"e-2" and v["foreign/f"].payload == b"f-2",
+                     f"e {kept_values(lj, 'foreign/e')}, f {kept_values(lj, 'foreign/f')}")
+        cv = cons.view()
+        report.check(sec, "step 6: a tool's seed keeps all three, the wildcard put under foreign/* never merged with "
+                          "foreign/g, so foreign/g at T2 is kept after it; a consumer's seed discards the wildcard "
+                          "put (R6)",
+                     kept_values(lj, "foreign/g") == ["kept", "kept"] and kept_values(lj, "foreign/*") == ["kept"]
+                     and v["foreign/g"].payload == b"g-T2" and "foreign/*" not in cv and cv["foreign/g"].payload == b"g-T2",
+                     f"tool g {kept_values(lj, 'foreign/g')}, * {kept_values(lj, 'foreign/*')}; consumer keys "
+                     f"{sorted(cv)}")
+        lj.close()
+        cons.close()
+    finally:
+        q.undeclare()
+        tool.close()
+        w.close()
+
+
+def sd_ns() -> int:
+    return 1_000_000_000
+
+
 def _t(ts: Any) -> str:
     return str(sd.Stamp.of(ts))
 
@@ -200,10 +312,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.state_scenarios", description=__doc__.split("\n")[0])
     ap.parse_args(argv)
     report = Report()
-    try:
-        section10(report)
-    except Exception as e:  # noqa: BLE001 - a section that cannot run is a failure
-        report.check("§10", "the section ran", False, f"{type(e).__name__}: {e}")
+    for name, fn in (("§10", section10), ("§11", section11)):
+        try:
+            fn(report)
+        except Exception as e:  # noqa: BLE001 - a section that cannot run is a failure
+            report.check(name, "the section ran", False, f"{type(e).__name__}: {e}")
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
     print(f"state scenarios: {passed} passed, {failed} failed")

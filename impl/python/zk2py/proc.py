@@ -1,6 +1,6 @@
 """Helper processes for the budget measurements (``scenarios/budget.md``
-§1–§3): ``python -m zk2py.proc router …`` and ``python -m zk2py.proc
-publish …``.
+§1–§3): ``python -m zk2py.proc router …``, ``… publish …`` and, for §1 step
+4 (0.27), ``… consume …``, a consumer whose whole process is stopped.
 
 §1 needs each router in a process of its own: "The sessions of one process
 share zenoh's receive threads … That is a measurement of the process, not
@@ -67,6 +67,63 @@ def publish(args: argparse.Namespace) -> None:
     s.close()
 
 
+def consume(args: argparse.Namespace) -> None:
+    """§1 step 4's consumer (0.27), in a process of its own: a client of R1
+    that subscribes to the owner's key, takes 2 ms over each sample, holds a
+    liveliness subscriber on the owner's token, watches its own transport
+    events and runs a ticker (:class:`zk2py.budget.StallWatch`). It prints
+    ``token`` once the owner's token has reached it, stops its own process
+    (SIGSTOP) at sample ``--stop-at`` after printing ``stop``, and, once no
+    sample has arrived for a while, prints ``result <json>``."""
+    import os
+    import signal
+
+    import zenoh
+
+    from .budget import StallWatch
+
+    s = zenoh.open(_config("client", None, [args.connect], None, False))
+    watch = StallWatch(s)
+    got: list[int] = []
+    withdrawn: list[float] = []
+    last = [time.monotonic()]
+    stopped = [False]
+
+    def on_sample(sample) -> None:
+        i = int.from_bytes(sample.payload.to_bytes()[:4], "big")
+        got.append(i)
+        last[0] = time.monotonic()
+        if i == args.stop_at and not stopped[0]:
+            stopped[0] = True
+            print("stop", flush=True)
+            os.kill(os.getpid(), signal.SIGSTOP)
+        time.sleep(0.002)
+
+    lv = s.liveliness().declare_subscriber(args.token, zenoh.handlers.Callback(
+        lambda smp: withdrawn.append(time.monotonic()) if smp.kind == zenoh.SampleKind.DELETE else None),
+        history=True)
+    sub = s.declare_subscriber(args.key, zenoh.handlers.Callback(on_sample))
+    print("ready", flush=True)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        replies = list(s.liveliness().get(args.token, timeout=1.0))
+        if any(r.ok is not None for r in replies):
+            break
+        time.sleep(0.1)
+    print("token", flush=True)
+    last[0] = time.monotonic()
+    while time.monotonic() - last[0] < 9.0 and len(got) < args.count:
+        time.sleep(0.1)
+    gap, closed = watch.reading()
+    print("result " + json.dumps({"got": len(got), "withdrawn": len(withdrawn), "closed": closed, "gap_ms": gap,
+                                  "closes": len(watch.closes)}), flush=True)
+    sys.stdin.read()
+    sub.undeclare()
+    lv.undeclare()
+    watch.close()
+    s.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.proc")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -82,8 +139,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--size", type=int, default=16384)
     p.add_argument("--reliability", choices=["reliable", "best_effort"], default="reliable")
     p.add_argument("--congestion", choices=["block", "drop"], default="block")
+    c = sub.add_parser("consume")
+    c.add_argument("--connect", required=True)
+    c.add_argument("--key", required=True)
+    c.add_argument("--token", required=True)
+    c.add_argument("--count", type=int, default=1000)
+    c.add_argument("--stop-at", type=int, default=100)
     args = ap.parse_args(argv)
-    {"router": router, "publish": publish}[args.cmd](args)
+    {"router": router, "publish": publish, "consume": consume}[args.cmd](args)
     return 0
 
 

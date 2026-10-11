@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twenty-five rounds.**
+**Twenty-six rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -46,8 +46,9 @@ where that was not enough, or where the spec said two things.
   with `health.v1` 0.3 and `hostid.v1` 0.4 (see "At 0.24: the population
   budget"). Core 0.25 resolved it.
 - Nothing new was found against core 0.25 (see "At 0.25").
-- **F-106 is new**, found against core 0.26's §4.2, a late joiner's seed
-  (see "At 0.26: a late joiner's seed" at the end).
+- F-106 was found against core 0.26's §4.2, a late joiner's seed (see "At
+  0.26: a late joiner's seed"). Core 0.27 resolved it.
+- Nothing new was found against core 0.27 (see "At 0.27" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -57,8 +58,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.26, hostid.v1 0.5, freshness.v1 0.2 and health.v1 0.4:**
-106 entries, one open.
+**Counts at core 0.27, hostid.v1 0.5, freshness.v1 0.2 and health.v1 0.4:**
+106 entries, none open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -140,12 +141,15 @@ where that was not enough, or where the spec said two things.
   lost none, and the resource is `reliable` with `block`. zk2py had read
   it as knowledge, so a best-effort window was lossless unless it knew of
   a loss. Now no such window is.
-- F-106: **new**, a gap against core 0.26 §4.2.
+- F-106: resolved by core 0.27. Its unstamped rule is zk2py's guess, and
+  so is R6 for a tool's seed. It overturned zk2py's order on equal times:
+  ids compare as zenoh compares them, their 16 bytes little-endian from
+  the first, where zk2py had compared them as integers.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.26 | Location | In one line |
+| Id | Severity | Status at 0.27 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -252,7 +256,7 @@ by the spec section that now states the rule.
 | F-103 | gap (measured) | resolved by health 0.2 | health.v1 0.1 scenarios.md §4 expected 2, with core 0.23 §4.1 and Appendix B | The fault's stamp "is not the owner's (R1 re-stamped…)" needs the owner's session HLC ahead, which a simulated offset cannot move. |
 | F-104 | gap | resolved by health 0.2 | health.v1 0.1 scenarios.md §5–§7, with freshness.v1 0.2 §2.6 | The tool T judges by GET, and nothing says how it trusts its clock: without that, every status is `clock_untrusted`, never healthy. |
 | F-105 | ambiguity | resolved by 0.25 | core 0.24 §2.7, "What a tool reads" and its table; budget/population.json, rate.json | A complete window and a rate's clean pole need a window that "lost no delivery": a fact a plain subscription cannot establish, only fail to see contradicted. |
-| F-106 | gap | **new** | core 0.26 §4.2 "The merge", with "A selector over several owners" | The merge orders by "the owner's stamp"; a foreign key in a tool's seed has no owner, and its samples may carry no stamp at all. |
+| F-106 | gap | resolved by 0.27 | core 0.26 §4.2 "The merge", with "A selector over several owners" | The merge orders by "the owner's stamp"; a foreign key in a tool's seed has no owner, and its samples may carry no stamp at all. |
 
 ---
 
@@ -3691,3 +3695,104 @@ sample:
 **Resolved:** a guess. zk2py's `LateJoiner` orders an unstamped sample
 below every stamped one. It replaces only another unstamped sample, the
 later arrival winning, and never a stamped one.
+
+**Status at 0.27: resolved by 0.27, as zk2py guessed, and its order of ids against zk2py's.** §4.2: "**An unstamped sample** (0.27) ranks below every stamped one, as `Latest` ranks an unstamped reply lowest (§4.1) … It is kept on a key that holds nothing, or only unstamped samples, and never over a stamped one. Two unstamped samples of a key have no order but their arrival, so the later replaces the earlier." That is zk2py's guess. "**R6 and a tool's seed** (0.27) … A tool's seed … keeps such a sample under the key it arrived on, merged with that key alone" is what zk2py did. The order was zk2py's other guess, which 0.27 overturns: "On equal times, by id: each id's 128-bit value written as 16 bytes little-endian, least significant byte first, and the two compared byte by byte from the first … at one time, id `100` (hex) is below id `2`." zk2py had compared ids as integers. `seed.Stamp.key` now compares the little-endian bytes. The new fixture `seed/merge.json` (7 orders, 13 cases) passes, and so do `state.md` §11's six steps.
+
+## At 0.27: a reader that stalls, a tool as a role, the merge's open cases (#609)
+
+Core 0.27 narrows §2.7's "its reader lost none" to a reader that did not
+stall. It makes "Tool" a role whose grants compose with Own, adds a tool's
+`inspects` and a provider's presence fan-in (§11.1, §11.2), and decides
+the merge's open cases (§4.2), resolving F-106. zk2py read it cold, and ran
+the Rust owner example as a black box (built in the shared target, copies
+run).
+
+**`just py-conformance`: 910 of 910.**
+- `budget` is 95. `lossless.json` is reshaped: 21 cases with
+  `reader_stall`, and 7 `stall_bounds`.
+- The new family `seed` is 20: `merge.json`'s 7 orders and 13 cases.
+- `layout` now knows `seed/`.
+
+All the new and reshaped cases passed the first time once zk2py followed
+the text.
+
+**`just py-state`: 15 of 15.**
+- §11 is new: W is a peer session without an HLC, the late joiner its
+  client.
+  - a unstamped, then replaced by the stamped reply;
+  - c-1, c-2, then the reply's unstamped c-0, which arrived last;
+  - b T2, a later unstamped delete not kept, and T3 kept;
+  - at one time, id `2` above id `100` on e and f;
+  - a tool's seed keeps `foreign/*` apart, and a consumer's discards it.
+- The Rust owner example does not apply to §11: its keys are an owner's,
+  always stamped by its session.
+
+**`just py-budget`: 41 of 41.**
+- §1 step 3: the consumer's callback stuck 7 s. 1 lost (the path's
+  buffers held the rest), its own transport closed, the owner's token
+  withdrawn, the ticker's gap 51 ms.
+- §1 step 4, new: the consumer in a process of its own, which stopped
+  itself (SIGSTOP) at the 100th for 7 s. 241 lost, the ticker's gap
+  7,026 ms, its transport closed, the token withdrawn.
+- "A tool's window over a stalled reader", new: an event of two sources,
+  2 s retention, read over a 4 s window with a 1 s lease through a relay.
+  - The relay closing the tool's connection mid-window: the window is not
+    lossless (`reader_stalled`), and its population and rate are
+    unobservable.
+  - Left alone: within, complete.
+
+**`just py-health`: 29 of 29. `just py-freshness`: 21 of 21. `just py-hostid`: 34 of 34.**
+
+**The live runner: 329.** The `acl` run gains three checks:
+- **inspection:** a tool inspecting `*/tc`, binding and calling nothing,
+  reads both backends' tokens and descriptors on the doctor's wildcard
+  selectors, complete. It reads none of their data, and no presence it
+  does not inspect;
+- **one principal, both roles:** `ops/both` puts under its own prefix and
+  not on h1's key, and as a tool reads `*/tc`'s presence and the admin
+  space;
+- **§2's generator check:** without the presence selectors in the
+  providers' egress, the inspector's wildcard descriptor read gets
+  nothing, while its liveliness read still holds the tokens.
+
+**What changed in zk2py.**
+- **`budget.lossless`** reads the reader's stall: a transport of its
+  session closed, or its ticker's gap beyond the bound, second in the
+  order. `budget.stall_bound` derives the bound.
+- **`budget.StallWatch`** watches zk2py's own receive path. It reads
+  zenoh's transport events, which zenoh-python 1.10.1 exposes
+  (`Session.info.declare_transport_events_listener`, unstable), and runs a
+  ticker on a thread of its own. Every `Window` runs one, from before the
+  window until the watch after it, so zk2py states no premise in place of
+  transport events.
+- **`seed.Stamp`** orders ids as zenoh does. `seed.compare` and `seed.kept`
+  are the pure merge.
+- **The ACL generator:**
+  - a presence selector joins a provider's egress and no longer its
+    ingress `reply`, which zk2py had granted;
+  - a tool's grants compose with Own on one principal, as they already
+    could;
+  - `presence_egress` is §2's new generator check.
+- **New:**
+  - `proc.py consume`, a consumer that stops its own process;
+  - `budget_scenarios`' section `1b`;
+  - `state_scenarios`' §11;
+  - `interop/budget/zk2py_stall.v1.toml`.
+
+**Observations, not findings.**
+- **zk2py's generator already put presence selectors on a provider's
+  egress,** the fan-in 0.27 states in §11.1, "Inspection travels to the
+  provider". It also put them on the provider's ingress `reply`, which
+  0.27 rules out: "It does not join the provider's ingress `reply`: a
+  descriptor is answered with a value, checked against its own key."
+  zk2py no longer does.
+
+**Where zk2py's reading of 0.27 needed a guess.**
+- **The ticker's period:** zk2py ticks every 50 ms. The text bounds the
+  gap, not the tick.
+- **"No transport of its session closed"** covers every transport of the
+  reader's session. A client has one, to its router.
+- **The bound's inputs:** a `Window` takes the lease it is told (its
+  session's), four keep-alives per lease (zenoh's default), and
+  `wait_before_close` as 5 s unless told. The last is the router's, which
+  the reader cannot read from its session.
