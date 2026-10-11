@@ -230,7 +230,7 @@ fn update_palette(
 /// keys (fat pointers, no string bytes) — runs per keypress, not per
 /// frame (#110).
 fn palette_row_count(chrome: &Chrome, dep: &Deployment, work: &Workspace) -> usize {
-    use view::palette::{Overlay, actions, command_order, rank};
+    use view::palette::{Overlay, actions, command_order, rank_keys};
     match chrome.palette.overlay {
         Overlay::Commands => {
             let items = actions(&work.bench.context_form.known);
@@ -241,7 +241,7 @@ fn palette_row_count(chrome: &Chrome, dep: &Deployment, work: &Workspace) -> usi
             // overlay offers what is on the bus, not what a registry
             // says could be.
             let keys: Vec<&str> = dep.facts.keys().collect();
-            rank(&keys, &chrome.palette.query, |k| *k).len()
+            rank_keys(&keys, &chrome.palette.query).len()
         }
         _ => 0,
     }
@@ -255,7 +255,7 @@ fn palette_row(
     work: &Workspace,
     index: usize,
 ) -> Option<Message> {
-    use view::palette::{Overlay, actions, command_order, rank};
+    use view::palette::{Overlay, actions, command_order, rank_keys};
     match chrome.palette.overlay {
         Overlay::Commands => {
             let items = actions(&work.bench.context_form.known);
@@ -265,7 +265,7 @@ fn palette_row(
         }
         Overlay::Keys => {
             let keys: Vec<&str> = dep.facts.keys().collect();
-            let order = rank(&keys, &chrome.palette.query, |k| *k);
+            let order = rank_keys(&keys, &chrome.palette.query);
             order
                 .get(index)
                 .map(|i| Message::Subject(SubjectMsg::Select(Subject::Key(keys[*i].to_string()))))
