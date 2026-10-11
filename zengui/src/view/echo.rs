@@ -498,7 +498,7 @@ fn line_view<'a>(
             crate::verdict::label(&entry.verdict),
         ),
         None => kit::badge_verdict(
-            crate::view::theme::VerdictTone::NotValidated,
+            crate::view::theme::VerdictTone::NotChecked,
             crate::verdict::UNCHECKED_LABEL,
         ),
     };

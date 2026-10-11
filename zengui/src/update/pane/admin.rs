@@ -31,13 +31,13 @@ pub(crate) fn update(admin: &mut AdminState, msg: AdminMsg, cx: Ctx) -> Task<Mes
             if admin.in_flight {
                 return Task::none();
             }
-            let Some(session) = cx.dep.session.clone() else {
+            let Some(session) = cx.dep.raw.clone() else {
                 admin.error = Some("no session — connect first".into());
                 return Task::none();
             };
             admin.in_flight = true;
             admin.error = None;
-            let base = cx.dep.base().to_string();
+            let base = cx.dep.namespace().to_string();
             let timeout = cx.dep.timeout();
             // The app's *resolved* slice set — bus, dirs or the union.
             //
@@ -47,11 +47,11 @@ pub(crate) fn update(admin: &mut AdminState, msg: AdminMsg, cx: Ctx) -> Task<Mes
             // which is `bus.slice_set()` in zenctl. Copying the doctor here
             // would empty the coverage table on every bus-registry-only
             // deployment — an invisible, plausible-looking wrong answer.
-            let slices = cx.dep.slices.clone();
+            let slices = None;
             services::sweep::admin(session, base, slices, timeout)
         }
         AdminMsg::Done(outcome) => {
-            let base = cx.dep.base().to_string();
+            let base = cx.dep.namespace().to_string();
             admin.finish(outcome, &base);
             Task::none()
         }

@@ -21,23 +21,38 @@ use zengui::prefs::Prefs;
 use zenkey_fleet_v1::model::stats::StatsTable;
 use zenkey_fleet_v1::{KeyTreeSnapshot, SampleView, SliceSet};
 
-/// The ZenSight registry snapshot `fixture-tests/` compiles — the codegen
-/// corpus doubles as the GUI's declared world.
+/// The ZenSight registry snapshot `fixture-tests/` compiles — v1's declared
+/// world, still what the v1 panes' own tests render against until each
+/// moves (FL7–FL11). The window itself no longer loads it (#614, FL6a).
 pub fn slices() -> SliceSet {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
     SliceSet::from_dirs(&[dir]).expect("fixture registry")
 }
 
-/// Settings for a window with no bus behind it: nothing to dial, no
-/// registry dirs (slices arrive as a message instead), the default scope.
+/// The zk2 contracts the window's world is described by (#614, FL6a): the
+/// walkthrough and tcgui examples, loaded exactly as `--contracts` loads
+/// them — tcgui's bindings file beside its contracts included, said as a
+/// problem and skipped.
+pub fn contract_paths() -> Vec<PathBuf> {
+    let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2");
+    vec![examples.join("walkthrough"), examples.join("tcgui")]
+}
+
+/// [`contract_paths`], loaded.
+pub fn contracts() -> Arc<zengui::services::contracts::LoadedContracts> {
+    Arc::new(zengui::services::contracts::load_all(&contract_paths()))
+}
+
+/// Settings for a window with no bus behind it: nothing to dial, the
+/// contracts named (they arrive as a message instead), the default scope.
 pub fn settings() -> Settings {
     Settings {
-        base: String::new(),
+        namespace: String::new(),
         connect: vec!["tcp/10.0.4.2:7447".into()],
         listen: vec![],
         scouting: None,
         zenoh_config: None,
-        registry: vec![],
+        contracts: contract_paths(),
         timeout_secs: 5,
         scope: zengui::scope::ScopePreset::Everything,
         selectors: vec![],
@@ -96,20 +111,40 @@ fn view(
 }
 
 /// A small fleet, built to exercise every row anatomy the tree and echo
-/// have: registered leaves under two origins, an unregistered leaf under a
-/// conforming origin, foreign keys from a non-convention publisher and from
-/// another deployment, a state leaf that retires, and a numeric leaf whose
-/// value wanders so a series has something to plot.
+/// have: zk2 keys the lens resolves (#614, FL6a) — a protobuf stream and
+/// state under `robot1/nav`, JSON state under `host-a/tc` — beside one whose
+/// value fails its schema and one whose bytes are not their declared type,
+/// so all four conformance poles have a key; v1 keys, foreign since the
+/// port; foreign keys from a non-convention publisher and from another
+/// deployment; a state leaf that retires; and numeric leaves whose values
+/// wander so a series has something to plot.
 pub struct World {
     stats: StatsTable,
     t0: Instant,
     ticks: u32,
+    contracts: Arc<zengui::services::contracts::LoadedContracts>,
+    catalog: Arc<zenkey_fleet::Catalog>,
+    presence: Arc<zenkey_fleet::LivePresence>,
+    seeded: Vec<zenkey_fleet::PresenceTransition>,
 }
 
 pub const ORIGIN_A: &str = "h-3fa9c2d41b7e";
 pub const ORIGIN_B: &str = "h-9c04d2e1a7f3";
 pub const USED: &str = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used";
 pub const HEALTH: &str = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+
+/// `robot1/nav`'s position stream: a `nav.v2.Position` protobuf, valid.
+pub const POSITION: &str = "zk2/robot1/nav/nav.v2/stream/position";
+/// `robot1/nav`'s status state: a `nav.v2.Status` protobuf, valid.
+pub const NAV_STATUS: &str = "zk2/robot1/nav/nav.v2/state/status";
+/// `robot1/nav`'s origin state, carrying bytes that are no `nav.v2.Origin`:
+/// the undecodable pole.
+pub const NAV_ORIGIN: &str = "zk2/robot1/nav/nav.v2/state/origin";
+/// `host-a/tc`'s `eth0`: a `json:NetworkInterface`, valid.
+pub const ETH0: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+/// `host-a/tc`'s `wlan0`: JSON that decodes and fails its schema — the
+/// invalid pole.
+pub const WLAN0: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/wlan0";
 
 /// `(key, payload at tick n, encoding)`, one row per publisher.
 type Feed = (&'static str, fn(u32) -> Vec<u8>, &'static str);
@@ -157,8 +192,144 @@ const FEEDS: &[Feed] = &[
     ),
 ];
 
+/// The zk2 publishers a contract refuses (#614, FL6a): a value its schema
+/// rejects, and bytes that are not their declared type. Published last in
+/// a tick, so they lead echo's newest-first stream.
+const REFUSED_FEEDS: &[Feed] = &[
+    (
+        WLAN0,
+        |_| br#"{"name":"wlan0","index":-1,"namespace":"default","is_up":"yes"}"#.to_vec(),
+        "application/json",
+    ),
+    (
+        NAV_ORIGIN,
+        // A field tag no varint can finish: not a `nav.v2.Origin`.
+        |_| vec![0x0a, 0xff, 0xff, 0xff],
+        "application/protobuf",
+    ),
+];
+
+/// The zk2 publishers whose payloads the contract itself makes (#614,
+/// FL6a): `(key, iface, kind token, template, encoding)`, synthesized per
+/// tick as `zenctl gen` would (`zenkey_fleet::Synth`), so each is a valid
+/// instance of its declared type and wanders like a live owner's.
+const SYNTH_FEEDS: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        POSITION,
+        "nav.v2",
+        "stream",
+        "position",
+        "application/protobuf",
+    ),
+    (
+        NAV_STATUS,
+        "nav.v2",
+        "state",
+        "status",
+        "application/protobuf",
+    ),
+    (
+        ETH0,
+        "tc.netif.v1",
+        "state",
+        "interfaces/{ns}/{iface}",
+        "application/json",
+    ),
+];
+
 fn json_point(value: f64) -> Vec<u8> {
     format!(r#"{{"value":{value:.2},"unit":"%","ts":"2026-10-05T09:12:44Z"}}"#).into_bytes()
+}
+
+/// One synthesized payload of `iface`'s `token/template` resource at `tick`.
+fn synth(
+    set: &zenkey_fleet::ContractSet,
+    iface: &str,
+    token: &str,
+    template: &str,
+    tick: u32,
+) -> Vec<u8> {
+    let iface: zenkey_model::grammar::IfaceId = iface.parse().expect("an interface");
+    let revision = set.of_iface(&iface).next().expect("the contract is held");
+    let resource = revision
+        .contract()
+        .resources
+        .iter()
+        .find(|r| r.token.as_str() == token && r.template.as_str() == template)
+        .expect("the resource is declared");
+    zenkey_fleet::Synth::new(7)
+        .sample(
+            revision,
+            resource,
+            zenkey_fleet::Member::Type,
+            u64::from(tick),
+        )
+        .expect("the contract's own type synthesizes")
+        .bytes
+}
+
+/// The deployment the lens sees (#614, FL6a), as a catalog built by hand
+/// from tokens and descriptors with the real fingerprints of what
+/// [`contracts`] loaded — the fleet's own skeleton tests' recipe — and the
+/// presence projection seeded from the same read: `robot1/nav` serving
+/// `nav.v2` and `host-a/tc` serving `tc.netif.v1`, each with one instance.
+fn deployment(
+    set: &zenkey_fleet::ContractSet,
+) -> (
+    Arc<zenkey_fleet::Catalog>,
+    zenkey_fleet::LivePresence,
+    Vec<zenkey_fleet::PresenceTransition>,
+) {
+    use std::collections::BTreeMap;
+    use zenkey_fleet::model::catalog::{DescriptorRead, Observed};
+    use zenkey_model::descriptor::{Descriptor, InterfaceEntry};
+    use zenkey_model::grammar::{Addr, IfaceId, InstanceId, alive_key, instance_key};
+
+    let mut keys = Vec::new();
+    let mut descriptors = BTreeMap::new();
+    for (id, address, iface) in [(1, "robot1/nav", "nav.v2"), (2, "host-a/tc", "tc.netif.v1")] {
+        let addr: Addr = address.parse().expect("an address");
+        let iface: IfaceId = iface.parse().expect("an interface");
+        let revision = set.of_iface(&iface).next().expect("held");
+        let instance = InstanceId::from_u64(id);
+        keys.push(instance_key(&addr, &instance).expect("a key").to_string());
+        keys.push(
+            alive_key(
+                &addr,
+                &iface,
+                &instance,
+                &revision.fingerprint().hex().fp16(),
+            )
+            .expect("a key")
+            .to_string(),
+        );
+        descriptors.insert(
+            (addr, instance.clone()),
+            DescriptorRead::Served(Box::new(Descriptor {
+                format: "zk2-descriptor/0.1".into(),
+                service: address.into(),
+                instance: instance.to_string(),
+                interfaces: vec![InterfaceEntry {
+                    iface: iface.to_string(),
+                    contract: revision.fingerprint().to_string(),
+                    minor: 0,
+                    token: true,
+                    unavailable: Vec::new(),
+                    cardinality: BTreeMap::new(),
+                }],
+                capabilities: Vec::new(),
+                requires: Vec::new(),
+                profiles: Vec::new(),
+                meta: BTreeMap::new(),
+            })),
+        );
+    }
+    let mut observed = Observed::from_keys("zk2/*/*/@zk/**", &keys, true);
+    observed.descriptors = Some(descriptors);
+    let catalog = Arc::new(zenkey_fleet::Catalog::new(&observed));
+    let mut presence = zenkey_fleet::LivePresence::new(zenkey_fleet::PresenceScope::all());
+    let seeded = presence.seed(&observed, std::time::SystemTime::now());
+    (catalog, presence, seeded)
 }
 
 impl Default for World {
@@ -169,6 +340,8 @@ impl Default for World {
 
 impl World {
     pub fn new() -> World {
+        let contracts = contracts();
+        let (catalog, presence, seeded) = deployment(&contracts.set);
         World {
             stats: StatsTable::new(),
             // Far enough back that every rate has settled and every age
@@ -177,17 +350,87 @@ impl World {
                 .checked_sub(Duration::from_secs(40))
                 .unwrap_or_else(Instant::now),
             ticks: 0,
+            contracts,
+            catalog,
+            presence: Arc::new(presence),
+            seeded,
         }
     }
 
-    /// The window as the link leaves it once the session is up: registry
-    /// in hand, the pump running.
+    /// The window as the link leaves it once the sessions are up (#614,
+    /// FL6a): the contracts in hand, the presence link's first landing —
+    /// the projection seeded, the lens's catalog beside it — and the pump
+    /// running.
     pub fn connect(&self, app: &mut Zengui) {
         send(
             app,
-            Message::Bus(BusMsg::SlicesLoaded(Ok(Arc::new(slices())))),
+            Message::Bus(BusMsg::ContractsLoaded(Arc::clone(&self.contracts))),
+        );
+        send(
+            app,
+            Message::Bus(BusMsg::Presence(0, self.presence_update())),
         );
         send(app, Message::Bus(BusMsg::Link(LinkState::Pumping)));
+    }
+
+    /// The presence link's landing for this world: what `connect` sends.
+    pub fn presence_update(&self) -> Arc<zengui::presence_link::PresenceUpdate> {
+        Arc::new(zengui::presence_link::PresenceUpdate {
+            presence: Arc::clone(&self.presence),
+            moved: self.seeded.clone(),
+            catalog: Some(Arc::clone(&self.catalog)),
+            generation: 1,
+            seed: zenkey_fleet::SeedOutcome::Complete,
+        })
+    }
+
+    /// Every publisher's payload at tick `n`: `(key, bytes, encoding)`.
+    fn payloads(&self, n: u32) -> Vec<(&'static str, Vec<u8>, &'static str)> {
+        let mut out: Vec<_> = FEEDS
+            .iter()
+            .map(|(key, payload, encoding)| (*key, payload(n), *encoding))
+            .collect();
+        for (key, iface, token, template, encoding) in SYNTH_FEEDS {
+            let bytes = synth(&self.contracts.set, iface, token, template, n);
+            out.push((key, bytes, encoding));
+        }
+        out.extend(
+            REFUSED_FEEDS
+                .iter()
+                .map(|(key, payload, encoding)| (*key, payload(n), *encoding)),
+        );
+        out
+    }
+
+    /// The lens the window resolves with once connected — the same inputs,
+    /// session-free — for the checks a scene answers itself.
+    pub fn check(&self, key: &str, bytes: &[u8], encoding: &str) -> zenkey_fleet::Checked {
+        zenkey_fleet::Lens::new("", Some(&self.catalog), &*self.contracts.set)
+            .offline(&self.contracts.set)
+            .check(
+                key,
+                zenkey_fleet::Member::Type,
+                (!encoding.is_empty()).then_some(encoding),
+                bytes,
+            )
+    }
+
+    /// What the bounded validation batch would have answered (#164) for
+    /// every publisher's newest payload, through the lens: the four poles,
+    /// each on the key that earns it.
+    pub fn verdicts(&self, app: &mut Zengui) {
+        let n = self.ticks.saturating_sub(1);
+        let batch = self
+            .payloads(n)
+            .into_iter()
+            .map(|(key, bytes, encoding)| {
+                (
+                    key.to_string(),
+                    self.check(key, &bytes, encoding).conformance,
+                )
+            })
+            .collect();
+        send(app, Message::Bus(BusMsg::VerdictsChecked(batch)));
     }
 
     /// One 250 ms monitor tick: every feed publishes once, and the tick
@@ -196,8 +439,9 @@ impl World {
         let n = self.ticks;
         let at = self.t0 + Duration::from_millis(250) * (n + 1);
         let mut samples = Vec::new();
-        for (key, payload, encoding) in FEEDS {
-            let body = payload(n);
+        let payloads = self.payloads(n);
+        let feeds = payloads.len();
+        for (key, body, encoding) in payloads {
             self.stats.record(key, body.len(), None, at, None, None);
             samples.push(sample(key, &body, encoding, at));
         }
@@ -207,26 +451,20 @@ impl World {
         if n % 12 == 11 {
             samples.push(tombstone(HEALTH, at));
         }
-        let nodes = if n == 0 {
-            vec![
-                (format!("v1/{ORIGIN_A}/state/sysinfo/alive"), true),
-                (format!("v1/{ORIGIN_B}/state/sysinfo/alive"), true),
-            ]
-        } else {
-            vec![]
-        };
         let totals = WatchedTotals {
-            samples: u64::from(n + 1) * FEEDS.len() as u64,
+            samples: u64::from(n + 1) * feeds as u64,
             bytes: u64::from(n + 1) * 420,
-            rate_hz: FEEDS.len() as f64 * 4.0,
+            rate_hz: feeds as f64 * 4.0,
         };
         let tick = BusTick {
             tree: Arc::new(KeyTreeSnapshot::build(&self.stats)),
             samples,
             lagged: 0,
             coalesced: 0,
-            nodes,
-            keys: FEEDS.len(),
+            // No v1 alive tokens since #614 (FL6a): presence is zk2's, and
+            // arrives through the presence link (`connect`).
+            nodes: Vec::new(),
+            keys: feeds,
             keys_evicted: 0,
             keys_unwatched: 0,
             watched: Arc::from(vec!["**".to_string()]),

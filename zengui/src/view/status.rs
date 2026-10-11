@@ -3,108 +3,111 @@
 //!
 //! This pane exists because of RFC 05 §3.1 and RFC 12 §9. An explorer showing
 //! an empty tree looks identical whether the bus is quiet, the scope excludes
-//! the traffic, the session reaches nothing, or the registry has not loaded.
+//! the traffic, the session reaches nothing, or no contract resolves a key.
 //! Every one of those is stated here so the user never has to infer it.
 
 use iced::Element;
 use iced::widget::row;
 
 use crate::message::{LinkState, Message};
+use crate::state::deployment::ContractCounts;
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::Tone;
 use crate::view::tokens::space;
 
-/// What a §6.1 union of served and on-disk slices came to.
-///
-/// Its own type because these three `usize`s also ride
-/// `BusMsg::SlicesUnionLoaded`, where they were three bare positional counts
-/// that `update/bus.rs` unpacked into this very variant one line later —
-/// three interchangeable numbers crossing a seam to be named on arrival
-/// (#357).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct UnionCounts {
-    /// Slices the bus served.
-    pub from_bus: usize,
-    /// Slices only the `--registry` dirs had.
-    pub dirs_only: usize,
-    /// Producers where the two disagreed.
-    pub disagreements: usize,
-    /// Producers the fleet does not agree with **itself** about (#399):
-    /// several origins answered and did not say the same thing, and the set
-    /// kept one of the answers.
-    ///
-    /// A different question from `disagreements`, which is the fleet against
-    /// the checkout — and only a bus-derived set can ask it, which is why
-    /// `SliceSource::Dirs` has no such field rather than a zero.
-    pub self_disagreements: usize,
+/// What the window holds of zk2's contracts (#614, FL6a): the last load,
+/// and what the store has counted since.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ContractsStatus<'a> {
+    /// The last load, `None` until one landed — "not loaded", never
+    /// "none" (O4).
+    pub loaded: Option<&'a crate::services::contracts::LoadedContracts>,
+    pub counts: ContractCounts,
 }
 
-/// Where registry slices came from, if anywhere.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SliceSource {
-    /// Not loaded. Every registration badge reads "—" until this changes.
-    None,
-    Bus {
-        count: usize,
-        /// Producers several origins answered for, disagreeing (#399).
-        self_disagreements: usize,
-    },
-    Dirs {
-        count: usize,
-    },
-    /// The §6.1 union: served wins, dirs fill, disagreement is data.
-    Union(UnionCounts),
-    Failed(crate::services::ServiceError),
-}
-
-impl SliceSource {
+impl ContractsStatus<'_> {
+    /// The strip's contracts cell: where the revisions in hand came from,
+    /// what retrieval found missing, and what a load could not read — each
+    /// its own number, never folded into another (O6's posture, applied to
+    /// a store). Split from the widget so it is testable.
     pub fn label(&self) -> String {
-        match self {
-            SliceSource::None => "registry: not loaded".to_string(),
-            SliceSource::Bus {
-                count,
-                self_disagreements,
-            } => {
-                let mut label = format!("registry: bus · {count} slices");
-                label.push_str(&split_clause(*self_disagreements));
-                label
-            }
-            // Files never asked which host serves what, so there is no clause
-            // here and no zero either (#399, RFC 13 §3 O4).
-            SliceSource::Dirs { count } => format!("registry: dirs · {count} slices"),
-            SliceSource::Union(UnionCounts {
-                from_bus,
-                dirs_only,
-                disagreements,
-                self_disagreements,
-            }) => {
-                let mut label =
-                    format!("registry: union · {from_bus} served + {dirs_only} dirs-only");
-                if *disagreements > 0 {
-                    label.push_str(&format!(" · {disagreements} DISAGREE"));
-                }
-                label.push_str(&split_clause(*self_disagreements));
-                label
-            }
-            SliceSource::Failed(e) => format!("registry: failed — {e}"),
+        let Some(loaded) = self.loaded else {
+            return "contracts: not loaded".to_string();
+        };
+        let ContractCounts {
+            offline,
+            retrieved,
+            unavailable,
+            unreadable,
+        } = self.counts;
+        let mut label = if loaded.paths.is_empty() {
+            format!("contracts: from the bus · {retrieved} retrieved")
+        } else {
+            format!("contracts: {offline} offline · {retrieved} retrieved")
+        };
+        label.push_str(&format!(" · {unavailable} unavailable"));
+        if unreadable > 0 {
+            label.push_str(&format!(" · {unreadable} unreadable"));
         }
+        if !loaded.problems.is_empty() {
+            label.push_str(&format!(
+                " · {}",
+                kit::plural(loaded.problems.len(), "load problem")
+            ));
+        }
+        label
+    }
+
+    /// Whether the cell is worth a caution chip: a load that could not read
+    /// something, or a revision that verified and does not read.
+    pub fn troubled(&self) -> bool {
+        self.loaded.is_some_and(|l| !l.problems.is_empty()) || self.counts.unreadable > 0
     }
 }
 
-/// The fleet disagreeing with itself, said apart from it disagreeing with the
-/// checkout (#399) — two different claims, so two different words.
-fn split_clause(self_disagreements: usize) -> String {
-    if self_disagreements == 0 {
-        String::new()
-    } else {
-        format!(" · {self_disagreements} FLEET-SPLIT")
+/// The presence cell (#614, FL6a): how many addresses the projection holds
+/// up, down and unobservable — on the basis its seed allows, which the cell
+/// names when it is not complete. "Down" exists only under a complete seed
+/// (§8.1), and a loss since makes every address unobservable at once: the
+/// cell says so as a caution, never as everything down. `None` presence is
+/// "not read", which is not "nobody there" (O4).
+///
+/// Returns the words, and whether they are worth a caution chip.
+pub fn presence_text(p: Option<&crate::presence_link::PresenceUpdate>) -> (String, bool) {
+    use zenkey_fleet::{AddressStatus, PresenceBasis};
+    let Some(p) = p else {
+        return ("presence: not read".to_string(), false);
+    };
+    let (mut up, mut down, mut unobservable) = (0usize, 0usize, 0usize);
+    for (_, a) in p.presence.addresses() {
+        match a.status {
+            AddressStatus::Up => up += 1,
+            AddressStatus::Down => down += 1,
+            AddressStatus::Unobservable => unobservable += 1,
+        }
+    }
+    let counts = format!("{up} up · {down} down · {unobservable} unobservable");
+    match p.presence.basis() {
+        PresenceBasis::Unseeded => ("presence: not seeded yet".to_string(), false),
+        PresenceBasis::Incomplete => (
+            format!("presence: {counts} — the seed was possibly incomplete (§8.1)"),
+            false,
+        ),
+        PresenceBasis::Complete => (format!("presence: {counts}"), false),
+        PresenceBasis::Lost { dropped } => (
+            format!(
+                "presence: {dropped} events lost — every address unobservable until a \
+                 complete re-read"
+            ),
+            true,
+        ),
     }
 }
 
 /// Everything the strip reports.
 pub struct Status<'a> {
     pub link: &'a LinkState,
-    pub base_label: &'a str,
+    pub namespace_label: &'a str,
     /// Active watch selectors (coverage, O5).
     pub watched: &'a [String],
     /// What fed the skeleton, when one was built.
@@ -119,9 +122,9 @@ pub struct Status<'a> {
     /// The scope's short name.
     pub scope_label: &'a str,
     /// What the scope covers, in words — "everything" is not everything
-    /// (RFC 03 §4 D2), and this is where that is said. It moved here from the
+    /// (core §1.3), and this is where that is said. It moved here from the
     /// location bar with #536; the strip wraps rather than clipping, so a
-    /// long statement no longer pushes the registry state and the
+    /// long statement no longer pushes the contracts state and the
     /// reachability warning off screen.
     pub scope_coverage: &'a str,
     pub keys: usize,
@@ -132,8 +135,14 @@ pub struct Status<'a> {
     /// Projections retired to stay within the *cache's* bound — a separate
     /// number from `keys_evicted` on purpose, see [`facts_text`].
     pub facts_evicted: u64,
+    /// zk2 identities held by the identity cache, and those its bound
+    /// retired (#614, FL6a) — its own pair, beside the facts cache's.
+    pub identity: (usize, u64),
     pub totals: crate::message::WatchedTotals,
-    pub slices: &'a SliceSource,
+    /// The contracts in hand (#614, FL6a).
+    pub contracts: ContractsStatus<'a>,
+    /// The last presence landing (#614, FL6a); `None` = not read.
+    pub presence: Option<&'a crate::presence_link::PresenceUpdate>,
     /// Watches whose seed phase has not resolved yet (issue #92).
     pub seeding: usize,
     /// Seed phases that have completed since connect.
@@ -157,7 +166,7 @@ pub struct Status<'a> {
 }
 
 impl<'a> Status<'a> {
-    /// Read the strip's twenty facts off five of the six sub-states (#175).
+    /// Read the strip's facts off five of the six sub-states (#175).
     ///
     /// This looks like [`Ctx`](crate::update::Ctx) and is its opposite. `Ctx`
     /// is an update-side type whose point is being *narrow* — what a handler
@@ -174,7 +183,7 @@ impl<'a> Status<'a> {
     ) -> Status<'a> {
         Status {
             link: &obs.link,
-            base_label: dep.base_label(),
+            namespace_label: dep.namespace_label(),
             scope_label: dep.settings.scope.short(),
             scope_coverage: dep.settings.scope.label(),
             keys: obs.keys,
@@ -182,11 +191,16 @@ impl<'a> Status<'a> {
             keys_unwatched: obs.keys_unwatched,
             facts_cached: dep.facts.len(),
             facts_evicted: dep.facts.evicted(),
+            identity: (dep.identity.len(), dep.identity.evicted()),
             watched: &obs.watched,
             skeleton: dep.skeleton.as_deref().map(|s| s.coverage),
             fetched: sub.follow.fetched.as_ref(),
             totals: obs.totals,
-            slices: &dep.slice_source,
+            contracts: ContractsStatus {
+                loaded: dep.contracts.as_deref(),
+                counts: dep.contract_counts,
+            },
+            presence: dep.presence.as_deref(),
             seeding: obs.seeding.len(),
             seeded_watches: obs.seeded_watches,
             seed_totals: obs.seed_totals,
@@ -195,6 +209,23 @@ impl<'a> Status<'a> {
             replaying: work.replay.replay.is_some(),
             retention: obs.retention,
         }
+    }
+}
+/// What the tree's declared half was built from. Since #614 (FL6a) no v1
+/// slice and no v1 roster feed it — `--registry` is refused and presence is
+/// zk2's — so the cell says the tree is the observed keys, plus whatever the
+/// admin space declared, rather than counting slices that cannot exist.
+pub fn skeleton_text(skeleton: Option<zenkey_fleet_v1::SkeletonCoverage>) -> String {
+    match skeleton {
+        None => "skeleton: not built".to_string(),
+        Some(c) => format!(
+            "skeleton: observed keys · admin {}",
+            match c.admin_entities {
+                // Not asked / not available is not a zero (O4).
+                None => "n/a".to_string(),
+                Some(n) => n.to_string(),
+            }
+        ),
     }
 }
 
@@ -285,9 +316,18 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         rate_hz: rate,
     } = s.totals;
 
+    let contracts: Element<'a, Message> = if s.contracts.troubled() {
+        kit::status_chip(Tone::Caution, s.contracts.label())
+    } else {
+        kit::muted(s.contracts.label())
+    };
+    let presence: Element<'a, Message> = match presence_text(s.presence) {
+        (text, true) => kit::status_chip(Tone::Caution, text),
+        (text, false) => kit::muted(text),
+    };
     let mut r = row![
         link,
-        kit::muted(format!("base: {}", s.base_label)),
+        kit::muted(format!("namespace: {}", s.namespace_label)),
         kit::muted(if s.scope_coverage.is_empty() {
             format!("scope: {}", s.scope_label)
         } else {
@@ -299,20 +339,9 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             human_bytes(bytes),
             human_rate(rate)
         )),
-        kit::muted(s.slices.label()),
-        kit::muted(match s.skeleton {
-            None => "skeleton: not built".to_string(),
-            Some(c) => format!(
-                "skeleton: {} · {} · admin {}",
-                kit::plural(c.slices, "slice"),
-                kit::plural(c.roster_origins, "origin"),
-                match c.admin_entities {
-                    // Not asked / not available is not a zero (O4).
-                    None => "n/a".to_string(),
-                    Some(n) => n.to_string(),
-                }
-            ),
-        }),
+        contracts,
+        presence,
+        kit::muted(skeleton_text(s.skeleton)),
     ]
     .spacing(space::MD)
     .align_y(iced::Alignment::Center);
@@ -363,6 +392,18 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             facts_text(s.facts_cached, s.facts_evicted),
         ));
     }
+    // The identity cache's bound (#614, FL6a), the same way: said once it
+    // has cost something, as its own number.
+    let (identities, identities_evicted) = s.identity;
+    if identities_evicted > 0 {
+        r = r.push(kit::status_chip(
+            Tone::Caution,
+            format!(
+                "identities: {identities} cached (+{identities_evicted} retired — cache \
+                 bound reached)"
+            ),
+        ));
+    }
     if let Some((key, outcome)) = s.fetched {
         let label = match outcome {
             Ok(out) => match out.as_ref() {
@@ -404,7 +445,7 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     }
 
     // It wraps (#536): a strip that clips loses its right-hand end — the
-    // registry state and the reachability warning — exactly when there is
+    // contracts state and the reachability warning — exactly when there is
     // most to say.
     r.wrap().vertical_spacing(space::XS).into()
 }
@@ -472,43 +513,96 @@ mod tests {
     }
 
     /// "Not loaded" and "loaded, and empty" are different facts and must read
-    /// differently — otherwise a missing registry looks like a bus with no
-    /// registered producers.
+    /// differently (#614, FL6a) — otherwise a load that has not landed looks
+    /// like a deployment no contract describes. Every count is its own
+    /// number, and a load problem is said beside what did load, never
+    /// instead of it.
     #[test]
-    fn slice_source_distinguishes_absent_from_empty() {
-        assert_ne!(
-            SliceSource::None.label(),
-            SliceSource::Bus {
-                count: 0,
-                self_disagreements: 0,
-            }
-            .label()
+    fn the_contracts_cell_distinguishes_absent_from_empty() {
+        use crate::services::contracts::LoadedContracts;
+        let absent = ContractsStatus::default();
+        assert_eq!(absent.label(), "contracts: not loaded");
+        assert!(!absent.troubled());
+
+        let bus_only = LoadedContracts::default();
+        let s = ContractsStatus {
+            loaded: Some(&bus_only),
+            counts: ContractCounts {
+                retrieved: 2,
+                unavailable: 1,
+                ..ContractCounts::default()
+            },
+        };
+        assert_eq!(
+            s.label(),
+            "contracts: from the bus · 2 retrieved · 1 unavailable"
         );
-        assert!(SliceSource::None.label().contains("not loaded"));
+        assert_ne!(s.label(), absent.label());
+
+        let with_problem = LoadedContracts {
+            paths: vec!["contracts".into(), "gone".into()],
+            problems: vec![zenkey_fleet::LoadProblem {
+                at: "gone".into(),
+                message: "no such file or directory".into(),
+            }],
+            ..LoadedContracts::default()
+        };
+        let s = ContractsStatus {
+            loaded: Some(&with_problem),
+            counts: ContractCounts {
+                offline: 7,
+                ..ContractCounts::default()
+            },
+        };
+        let label = s.label();
         assert!(
-            SliceSource::Bus {
-                count: 3,
-                self_disagreements: 0,
-            }
-            .label()
-            .contains('3')
+            label.starts_with("contracts: 7 offline · 0 retrieved"),
+            "{label}"
         );
-        // #399: the fleet disagreeing with itself is said apart from the
-        // fleet disagreeing with the checkout, and a set built from files
-        // never asked, so it says neither.
-        let split = SliceSource::Bus {
-            count: 3,
-            self_disagreements: 2,
-        }
-        .label();
-        assert!(split.contains("2 FLEET-SPLIT"), "{split}");
-        assert!(!split.contains("DISAGREE"), "a different claim: {split}");
-        assert!(
-            !SliceSource::Dirs { count: 3 }.label().contains("FLEET"),
-            "files have no origin to disagree across"
+        assert!(label.contains("1 load problem"), "{label}");
+        assert!(s.troubled(), "a problem is a caution chip");
+    }
+    /// The presence cell (#614, FL6a): "not read" is not "nobody there", a
+    /// complete seed counts up and down, and a loss since is a caution that
+    /// says every address is unobservable — never everything down.
+    #[test]
+    fn the_presence_cell_keeps_not_read_complete_and_lost_apart() {
+        use std::sync::Arc;
+        use zenkey_fleet::{LivePresence, ObservedPresence, PresenceScope, SeedOutcome};
+
+        assert_eq!(
+            presence_text(None),
+            ("presence: not read".to_string(), false)
         );
-        assert!(SliceSource::Dirs { count: 7 }.label().contains("dirs"));
-        assert!(SliceSource::Failed("boom".into()).label().contains("boom"));
+
+        let keys = vec![
+            "zk2/robot1/nav/@zk/instance/0123456789abcdef".to_string(),
+            "zk2/host-a/tc/@zk/instance/fedcba9876543210".to_string(),
+        ];
+        let observed = ObservedPresence::from_keys("zk2/*/*/@zk/**", &keys, true);
+        let mut live = LivePresence::new(PresenceScope::all());
+        let at = std::time::SystemTime::now();
+        let moved = live.seed(&observed, at);
+        let update = |live: &LivePresence| crate::presence_link::PresenceUpdate {
+            presence: Arc::new(live.clone()),
+            moved: moved.clone(),
+            catalog: None,
+            generation: 0,
+            seed: SeedOutcome::Complete,
+        };
+        assert_eq!(
+            presence_text(Some(&update(&live))),
+            (
+                "presence: 2 up · 0 down · 0 unobservable".to_string(),
+                false
+            )
+        );
+
+        live.dropped(3, at);
+        let (text, caution) = presence_text(Some(&update(&live)));
+        assert!(caution, "a loss is a caution chip");
+        assert!(text.contains("3 events lost"), "{text}");
+        assert!(!text.contains("down"), "a loss is never 'down': {text}");
     }
 
     /// #217: the budget is visible in the resting state — an operator should

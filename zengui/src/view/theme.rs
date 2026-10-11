@@ -470,7 +470,7 @@ impl ThemeColors<'_> {
     }
 
     /// The payload-conformance verdict scale (#164) — the GUI face of
-    /// [`zenkey_v1::schema::validate::Verdict`]'s three states.
+    /// zk2's `Conformance` and its four poles (#614, FL6a).
     pub fn verdict(&self, kind: VerdictTone) -> Color {
         self.tone(kind.tone())
     }
@@ -658,36 +658,50 @@ impl RegistrationTone {
 }
 
 /// How a payload-conformance verdict should read (#164) — the same
-/// discipline as [`RegistrationTone`]: three states, never a boolean, and
-/// `NotValidated` is [`Tone::Neutral`] because "not checked" must never wear
-/// either answer's swatch (RFC 09 §5.1 O4).
+/// discipline as [`RegistrationTone`]: never a boolean, and `NotChecked` is
+/// [`Tone::Neutral`] because "not checked" must never wear an answer's
+/// swatch (RFC 09 §5.1 O4).
+///
+/// Four poles since #614 (FL6a), zk2's `Conformance`: the bytes that do not
+/// decode as their declared type are their own pole, apart from a value that
+/// decoded and failed its schema. Both are findings, and they read apart —
+/// amber and ⚠ for the encoding, red and ✗ for the value — so neither is
+/// mistaken for the other at a glance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerdictTone {
     Valid,
     Invalid,
-    NotValidated,
+    Undecodable,
+    NotChecked,
 }
 
 impl VerdictTone {
     /// Every state of the scale, for the uniqueness tests.
-    pub const ALL: [Self; 3] = [Self::Valid, Self::Invalid, Self::NotValidated];
+    pub const ALL: [Self; 4] = [
+        Self::Valid,
+        Self::Invalid,
+        Self::Undecodable,
+        Self::NotChecked,
+    ];
 
     /// The swatch this state resolves through.
     pub fn tone(self) -> Tone {
         match self {
             Self::Valid => Tone::Positive,
             Self::Invalid => Tone::Negative,
-            Self::NotValidated => Tone::Neutral,
+            Self::Undecodable => Tone::Caution,
+            Self::NotChecked => Tone::Neutral,
         }
     }
 
     /// The badge glyph, carried by the type (#193): checked-and-passed,
-    /// checked-and-failed, and not checked — the CLI's own three marks.
+    /// checked-and-failed, did-not-decode, and not checked.
     pub fn glyph(self) -> &'static str {
         match self {
             Self::Valid => "✓",
             Self::Invalid => "✗",
-            Self::NotValidated => "·",
+            Self::Undecodable => "⚠",
+            Self::NotChecked => "·",
         }
     }
 }
@@ -830,15 +844,22 @@ mod tests {
     /// each new scale is `Neutral`, never a verdict's swatch.
     #[test]
     fn not_checked_and_not_asked_resolve_neutral() {
-        assert_eq!(VerdictTone::NotValidated.tone(), Tone::Neutral);
+        assert_eq!(VerdictTone::NotChecked.tone(), Tone::Neutral);
         assert_eq!(RungTone::NotAsked.tone(), Tone::Neutral);
         for theme in [iced::Theme::Light, iced::Theme::Dark] {
             let c = colors(&theme);
             assert_ne!(
-                c.verdict(VerdictTone::NotValidated),
+                c.verdict(VerdictTone::NotChecked),
                 c.verdict(VerdictTone::Invalid),
                 "not checked must not read as checked-and-failed"
             );
+            // The four poles (#614, FL6a) are four swatches: neither
+            // finding reads as the other, and neither as "not checked".
+            for (i, a) in VerdictTone::ALL.iter().enumerate() {
+                for b in &VerdictTone::ALL[i + 1..] {
+                    assert_ne!(c.verdict(*a), c.verdict(*b), "{a:?} vs {b:?}");
+                }
+            }
             assert_ne!(
                 c.rung(RungTone::NotAsked),
                 c.rung(RungTone::NotEstablished),

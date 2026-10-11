@@ -107,17 +107,32 @@ mod tests {
             // The window, and nothing the bus does touches it.
             ("chrome", &["prefs", "prefs_dirty", "prefs_note", "palette"]),
             // What fleet this is, and what is claimed about it.
+            // Since #614 (FL6a): two sessions — `raw` in no namespace,
+            // `session` in the deployment's — and zk2's contracts, their
+            // store and the namespace listing in place of v1's slices and
+            // discovered bases. All of it is a fact about (or machinery for)
+            // the fleet the window points at, and goes with it.
             (
                 "dep",
                 &[
                     "settings",
+                    "raw",
                     "session",
                     "schema_store",
                     "skeleton",
-                    "slices",
-                    "slice_source",
-                    "bases",
-                    "base_options",
+                    "contracts",
+                    "store",
+                    "contract_counts",
+                    "namespaces",
+                    "namespace_options",
+                    // FL6a-ii: the presence projection, the lens feed, its
+                    // catalog and generation, and each key's identity under
+                    // them — all of it about the deployment pointed at.
+                    "presence",
+                    "lens_feed",
+                    "catalog",
+                    "lens_generation",
+                    "identity",
                     "facts",
                 ],
             ),
@@ -128,6 +143,10 @@ mod tests {
                     "monitor",
                     "epoch",
                     "link",
+                    // The presence monitor and its link's epoch (#614,
+                    // FL6a): a pump like `monitor`, on the other session.
+                    "presence_monitor",
+                    "presence_epoch",
                     "observed",
                     "watched",
                     "my_watches",
@@ -339,7 +358,11 @@ mod tests {
         // Then #224: the Consumers section, 75. Then #219: the loaded
         // snapshot and its open row (four under `work.replay`) and the
         // slot's compare toggle — 75 became 80. Then #481: the Config
-        // tool's form, 81.
-        assert_eq!(leaves, 81, "the split must place every field exactly once");
+        // tool's form, 81. Then #614 (FL6a-i): `slices`, `slice_source`,
+        // `bases` and `base_options` went, `raw`, `contracts`, `store`,
+        // `contract_counts`, `namespaces` and `namespace_options` came — 83.
+        // Then FL6a-ii: presence, the lens feed, its catalog and generation,
+        // the identity cache, and the presence monitor with its epoch — 90.
+        assert_eq!(leaves, 90, "the split must place every field exactly once");
     }
 }

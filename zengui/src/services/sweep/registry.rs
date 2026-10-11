@@ -1,5 +1,12 @@
-//! The registry slices — from the bus, from dirs, or their union — and the
-//! skeleton built over them.
+//! The declared keyspace the tree starts from.
+//!
+//! Since #614 (FL6a) there is no v1 registry to build it from: `--registry`
+//! is refused, the bus serves no v1 slices, and the window's declared world
+//! is zk2's contracts (`services::contracts`). Until FL6b swaps in the zk2
+//! skeleton (`zenkey_fleet::Skeleton::build` over the lens), the v1 one is
+//! built from **no** slices and no roster — the admin space's declared
+//! entities alone — so the tree shows what is observed, and nothing it
+//! cannot back.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,105 +15,25 @@ use iced::Task;
 use zenkey_fleet_v1::{Skeleton, SliceSet};
 
 use crate::message::{BusMsg, Message};
-use crate::services::ServiceError;
 
-/// The registry slices, from the bus alone.
-pub fn slices(session: zenoh::Session, base: String, timeout: Duration) -> Task<Message> {
+/// (Re)build the skeleton: no slices, no roster (#614, FL6a), and the admin
+/// space's declared entities, asked on the session in no namespace — the
+/// admin space has none.
+pub fn skeleton(raw: zenoh::Session, namespace: String, timeout: Duration) -> Task<Message> {
     Task::perform(
         async move {
-            SliceSet::from_bus(&zenkey_fleet_v1::Fleet::new(&session, &base), timeout)
-                .await
-                .map(Arc::new)
-                .map_err(ServiceError::of)
-        },
-        |r| Message::Bus(BusMsg::SlicesLoaded(r)),
-    )
-}
-
-/// The registry slices from the `--registry` dirs alone, for a session that
-/// never opened (#196's doctrine, which zenctl already keeps): a transport
-/// that will not come up leaves what is on disk answerable. Off the update
-/// thread (#255) — it reads every file in every dir. Lands on
-/// [`BusMsg::SlicesLoaded`], whose handler labels a set loaded with dirs
-/// configured as dirs-only, which is what this is.
-pub fn slices_from_dirs(dirs: Vec<std::path::PathBuf>) -> Task<Message> {
-    Task::perform(
-        async move {
-            SliceSet::from_dirs(&dirs)
-                .map(Arc::new)
-                .map_err(ServiceError::of)
-        },
-        |r| Message::Bus(BusMsg::SlicesLoaded(r)),
-    )
-}
-
-/// The §6.1 union (issue #43): served wins, dirs fill, and the disagreement
-/// count reaches the status strip as data.
-pub fn slices_union(
-    session: zenoh::Session,
-    base: String,
-    dirs: Vec<std::path::PathBuf>,
-    timeout: Duration,
-) -> Task<Message> {
-    Task::perform(
-        async move {
-            SliceSet::from_union(
-                &zenkey_fleet_v1::Fleet::new(&session, &base),
-                &dirs,
-                timeout,
-            )
-            .await
-            .map(|out| {
-                let counts = crate::view::status::UnionCounts {
-                    from_bus: out.from_bus.len(),
-                    dirs_only: out.dirs_only.len(),
-                    disagreements: out.disagreements.len(),
-                    // Read before the set moves into the `Arc` (#399).
-                    self_disagreements: self_disagreements(&out.set),
-                };
-                (Arc::new(out.set), counts)
-            })
-            .map_err(ServiceError::of)
-        },
-        |r| Message::Bus(BusMsg::SlicesUnionLoaded(r)),
-    )
-}
-
-/// (Re)build the skeleton. Slices are already loaded; roster and admin are
-/// gathered inside the task (both metadata-only).
-pub fn skeleton(
-    session: zenoh::Session,
-    base: String,
-    slices: Arc<SliceSet>,
-    timeout: Duration,
-) -> Task<Message> {
-    Task::perform(
-        async move {
-            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
-            let roster = zenkey_fleet_v1::roster(&fleet, timeout)
-                .await
-                .unwrap_or_default();
-            let admin = zenkey_fleet_v1::declared_entities(&session, timeout)
+            let admin = zenkey_fleet_v1::declared_entities(&raw, timeout)
                 .await
                 .unwrap_or(None);
-            let skeleton = Arc::new(Skeleton::build(&base, &slices, &roster, admin.as_ref()));
+            let roster = crate::message::LiveRoster::default();
+            let skeleton = Arc::new(Skeleton::build(
+                &namespace,
+                &SliceSet::default(),
+                &roster,
+                admin.as_ref(),
+            ));
             Ok((skeleton, Arc::new(roster)))
         },
         |r| Message::Bus(BusMsg::SkeletonBuilt(r)),
     )
-}
-
-/// Producers the fleet does not agree with itself about (#399).
-///
-/// Zero for a set that never asked — files carry no origin — which is why the
-/// status strip's `Dirs` variant has no such field at all rather than a zero
-/// this would hand it (RFC 13 §3 O4).
-pub fn self_disagreements(set: &SliceSet) -> usize {
-    set.collapsed()
-        .as_option()
-        .copied()
-        .unwrap_or(&[])
-        .iter()
-        .filter(|c| !c.agreed)
-        .count()
 }

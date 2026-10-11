@@ -6,9 +6,9 @@
 //! decode in `sub` — a rendering of a value fetched from a fleet this window
 //! is no longer pointed at.
 //!
-//! [`forget`] is what a base change owes the old fleet — four calls, of which
-//! two delegate, one is a struct replacement, and exactly one line reaches
-//! across a group boundary.
+//! [`forget`] is what a namespace change owes the old fleet — four calls, of
+//! which two delegate, one is a struct replacement, and exactly one line
+//! reaches across a group boundary.
 
 use std::sync::Arc;
 
@@ -44,6 +44,9 @@ pub(crate) fn update(
         DeploymentMsg::ContextApplied { name, stored } => {
             apply_context(dep, *stored);
             chrome.prefs.context = name;
+            // What is on screen now is the context's namespace, and the one
+            // the next launch should come back to (#614, FL6a).
+            chrome.prefs.namespace = Some(dep.settings.namespace.clone());
             super::chrome::remember(chrome, dep, work);
             reopen_session(dep, obs)
         }
@@ -54,15 +57,21 @@ pub(crate) fn update(
                 unwatch_scope(obs)
             }
         }
-        DeploymentMsg::BaseSelected(base) => {
-            if base == dep.base() {
+        DeploymentMsg::NamespaceSelected(namespace) => {
+            if namespace == dep.namespace() {
                 return Task::none();
             }
-            dep.settings.base = base;
-            // The base is an input to every projection and to the
-            // skeleton, and watch selectors are base-relative: a fresh
-            // monitor is the obviously-correct restart. Everything the old
-            // base taught us is evidence about a different deployment (O4).
+            dep.settings.namespace = namespace;
+            // Remembered from the picker, and only from it (#614, FL6a): a
+            // `--namespace` flag wins its launch without becoming the next
+            // one's default.
+            chrome.prefs.namespace = Some(dep.settings.namespace.clone());
+            chrome.prefs_dirty = true;
+            // The namespace is an input to every projection, the skeleton
+            // and every preset's wire selectors: the data pump restarts on
+            // the session in no namespace, and the session in the namespace
+            // is reopened. Everything the old namespace taught us is
+            // evidence about a different deployment (O4).
             repoint(dep, obs, sub, tree, work)
         }
         DeploymentMsg::ScopeSelected(scope) => {
@@ -72,10 +81,9 @@ pub(crate) fn update(
             // Picking custom with nothing typed yet forks the selectors the
             // window is already using (#187): the preset's resolved set, via
             // `scope::selectors` — the one place selectors are built, so the
-            // Deployment preset's explicit @catalog line (RFC 03 §4 D4)
-            // survives the fork.
+            // explicit preset's named verbatim kinds survive the fork.
             if scope == crate::scope::ScopePreset::Custom && dep.settings.selectors.is_empty() {
-                dep.settings.selectors = dep.settings.scope.selectors(dep.base(), &[]);
+                dep.settings.selectors = dep.settings.scope.selectors(dep.namespace(), &[]);
             }
             dep.settings.scope = scope;
             // Remembered for the next launch (issue #73; selectors too, #187).
@@ -152,11 +160,12 @@ pub(crate) fn update(
                     if t.eager { "on" } else { "off" }
                 ));
             }
-            let registry_changed = t.registry != dep.settings.registry;
-            if registry_changed {
-                dep.settings.registry = t.registry;
+            let contracts_changed = t.contracts != dep.settings.contracts;
+            if contracts_changed {
+                dep.settings.contracts = t.contracts;
                 applied.push(
-                    "registry changed — re-pointing: verdicts about the old slices are dropped"
+                    "contracts changed — reloading: every verdict judged under the old \
+                     ones is dropped"
                         .to_string(),
                 );
             }
@@ -168,32 +177,41 @@ pub(crate) fn update(
             // The overlay's knobs are remembered (#188) — written on the
             // settle timer like a splitter drag, and only from here: a
             // command-line flag never becomes the new default by itself.
+            // The contracts too (#614, FL6a), in this window's own
+            // preferences and never in the shared context.
             chrome.prefs.echo_lines = Some(dep.settings.echo_lines);
             chrome.prefs.history_entries = Some(dep.settings.history_entries);
             chrome.prefs.max_keys = Some(dep.settings.max_keys);
             chrome.prefs.eager = Some(dep.settings.eager);
+            chrome.prefs.contracts = dep.settings.contracts.clone();
             chrome.prefs_dirty = true;
-            if registry_changed {
-                // The registry is a `SliceSource` input: changing it re-runs
-                // the union and can change every registration badge in the
-                // tree — so it takes the same forget path a base change
-                // does, rather than layering new slices over old verdicts.
-                return repoint(dep, obs, sub, tree, work);
+            if contracts_changed {
+                // A load replaces the contracts whole, and its landing
+                // rebuilds the store and drops what was judged under the
+                // old ones — the decode on screen included, which described
+                // a payload under contracts no longer held.
+                for slot in sub.all_mut() {
+                    slot.decoded = None;
+                }
+                return super::bus::load_contracts(dep);
             }
             Task::none()
         }
         DeploymentMsg::Reconnect => {
             forget(dep, obs, tree, work);
+            // The forget dropped what the presence link told the deployment
+            // (its projection, the lens, the store): the link restarts over
+            // the same presence monitor, reseeded.
+            super::bus::restart_presence(obs);
             super::bus::start_monitor(dep)
         }
     }
 }
 
-/// Point the session at different coverage: forget the old deployment's
-/// evidence, rebuild the schema store, and restart the monitor and the slice
-/// load. The shared tail of a base change and a registry change (#188) — the
-/// latter goes through the *same* path deliberately, because new slices over
-/// old verdicts is how a stale registration badge survives a registry swap.
+/// Point the window at another namespace: forget the old deployment's
+/// evidence, rebuild the v1 schema store, restart the data pump on the
+/// session in no namespace, and reopen the session in the namespace (#614,
+/// FL6a) — the one a namespace actually changes.
 fn repoint(
     dep: &mut Deployment,
     obs: &mut Observation,
@@ -201,35 +219,57 @@ fn repoint(
     tree: &mut TreeState,
     work: &mut Workspace,
 ) -> Task<Message> {
+    // The departing namespace's session goes before the forget, so nothing
+    // carries it across: presence and contracts read through it describe
+    // the deployment the window is leaving. Its presence monitor goes with
+    // it, and the epoch moves, so the link over them stops.
+    dep.session = None;
+    let presence = obs
+        .presence_monitor
+        .take()
+        .map(services::watch::shutdown_presence)
+        .unwrap_or_else(Task::none);
+    obs.presence_epoch += 1;
     forget(dep, obs, tree, work);
     dep.schema_store = Some(Arc::new(zenkey_fleet_v1::SchemaStore::new(
-        dep.base(),
+        dep.namespace(),
         dep.timeout(),
     )));
     // Every slot's decode was judged under the departing deployment's
-    // schemas (#257) — the pins' as much as the follow slot's.
+    // contracts (#257) — the pins' as much as the follow slot's.
     for slot in sub.all_mut() {
         slot.decoded = None;
     }
     tree.reflatten(dep, obs);
-    Task::batch([super::bus::start_monitor(dep), super::bus::load_slices(dep)])
+    let reopen = if dep.raw.is_some() {
+        services::link::open_namespaced(
+            dep.namespace().to_string(),
+            services::link::Transport::of(&dep.settings),
+        )
+    } else {
+        Task::none()
+    };
+    Task::batch([
+        presence,
+        super::bus::start_monitor(dep),
+        super::bus::build_skeleton(dep),
+        reopen,
+    ])
 }
 
 /// Everything a session learned about one deployment, forgotten.
 ///
-/// Factored out because three paths need exactly this — a base change, a
-/// reconnect, and a context switch — and each one that forgot a different
+/// Factored out because three paths need exactly this — a namespace change,
+/// a reconnect, and a context switch — and each one that forgot a different
 /// subset would leave a stale verdict on screen about a fleet it is no
 /// longer looking at (O4).
 ///
 /// What survives, deliberately (#109 audit): the tree selection, the
 /// fetched value, the history recorder, and the call/publish forms —
-/// each keyed by a full wire key that names its own base, or user input
-/// rather than projected evidence. What cannot be cleared here — a task
-/// already in flight — is judged at its landing instead: doctor, blob
-/// probe/fetch and node_info each carry the base they ran against.
-/// Point at a different fleet, and stop claiming anything about the old
-/// one.
+/// each keyed by a full wire key that names its own namespace, or user
+/// input rather than projected evidence. What cannot be cleared here — a
+/// task already in flight — is judged at its landing instead: doctor, blob
+/// probe/fetch and node_info each carry the namespace they ran against.
 ///
 /// Four of the six sub-states, and that number is the finding: the issue
 /// assumed this could be one field replacement. Two of the four delegate,
@@ -250,16 +290,14 @@ pub(crate) fn forget(
 
 /// Layer a stored context over the live settings — the same precedence
 /// `Cli::settings_with` applies, minus the flags, because a context picked
-/// in-app *is* the explicit choice.
+/// in-app *is* the explicit choice. Its `registry` is v1's and is read by
+/// nothing (#614, FL6a); a save carries it back to the store untouched.
 fn apply_context(dep: &mut Deployment, stored: zenkey_explorer_config::StoredContext) {
-    dep.settings.base = stored.base.unwrap_or_default();
+    dep.settings.namespace = stored.base.unwrap_or_default();
     dep.settings.connect = stored.connect;
     dep.settings.listen = stored.listen;
     dep.settings.scouting = stored.scouting;
     dep.settings.zenoh_config = stored.zenoh_config;
-    if !stored.registry.is_empty() {
-        dep.settings.registry = stored.registry;
-    }
     if let Some(t) = stored.timeout {
         dep.settings.timeout_secs = t;
     }
@@ -280,14 +318,21 @@ fn reopen_session(dep: &mut Deployment, obs: &mut Observation) -> Task<Message> 
         .take()
         .map(services::watch::shutdown)
         .unwrap_or_else(Task::none);
+    // The presence monitor rides the session in the namespace, which goes.
+    let presence = obs
+        .presence_monitor
+        .take()
+        .map(services::watch::shutdown_presence)
+        .unwrap_or_else(Task::none);
+    obs.presence_epoch += 1;
+    dep.raw = None;
     dep.session = None;
     Task::batch([
         teardown,
+        presence,
         services::link::reopen(
-            dep.settings.zenoh_config.clone(),
-            dep.settings.connect.clone(),
-            dep.settings.listen.clone(),
-            dep.settings.scouting,
+            dep.namespace().to_string(),
+            services::link::Transport::of(&dep.settings),
         ),
     ])
 }
@@ -299,7 +344,7 @@ pub(crate) fn watch_scope(dep: &Deployment, obs: &Observation) -> Task<Message> 
     let selectors = dep
         .settings
         .scope
-        .selectors(dep.base(), &dep.settings.selectors);
+        .selectors(dep.namespace(), &dep.settings.selectors);
     // Scope watches seed too (issue #92) — the eager preset is "observe
     // this scope", and current state is part of observing it.
     let policy = zenkey_fleet_v1::SeedPolicy {

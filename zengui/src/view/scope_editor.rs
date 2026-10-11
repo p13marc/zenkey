@@ -7,15 +7,15 @@
 //!
 //! Two modes, one surface. On a preset, it shows the **resolved** selectors
 //! read-only — via [`ScopePreset::selectors`], the single place selectors are
-//! built, so the `Deployment` preset keeps naming `catalog_subtree()`
-//! explicitly (RFC 03 §4 D4) and no `format!` of a key expression appears
+//! built, so the `Explicit` preset keeps naming each verbatim kind
+//! (core §1.3) and no `format!` of a key expression appears
 //! here. Forking copies that resolved set into an editable draft; applying it
 //! makes the scope [`ScopePreset::Custom`].
 //!
 //! Every row is validated as typed with [`crate::scope::validate_selector`]
 //! (empty and `$*` are refused — RFC 03 §2 forbids `$*` in selectors, not
 //! merely in published keys), and every row carries its
-//! [`crate::scope::blind_spot`]: the D2 rule is the one users get wrong, so
+//! [`crate::scope::blind_spot`]: the verbatim rule is the one users get wrong, so
 //! the editor states it inline rather than trusting a tooltip.
 
 use iced::Element;
@@ -73,18 +73,19 @@ fn msg(m: ScopeMsg) -> Message {
 /// Everything the editor shows, as plain data.
 pub struct ScopeEditorData<'a> {
     pub scope: ScopePreset,
-    /// The deployment base in force; `""` is the bus root.
-    pub base: &'a str,
+    /// The deployment namespace in force; `""` is the bus root.
+    pub namespace: &'a str,
     /// The custom selectors in force (empty unless the scope is custom).
     pub selectors: &'a [String],
     pub form: &'a ScopeForm,
 }
 
-/// The D2 statement the whole editor hangs off — inline, because it is the
+/// The verbatim rule the whole editor hangs off — inline, because it is the
 /// rule users get wrong (`scope.rs`'s module doc, on screen). `pub` so the
 /// pane test pins the exact wording that reaches the screen.
-pub const D2_RULE: &str = "* and ** never cross a chunk beginning with @ (RFC 03 §4 D2). \
-     A ** scope is media-safe by key algebra — and equally cannot see @catalog. \
+pub const VERBATIM_RULE: &str = "* and ** never cross a verbatim chunk — one beginning with @ \
+     (core §1.3). A ** scope cannot pull an explicit @stream or @state by key algebra — and \
+     equally cannot see @op, @zk or the admin space. \
      It is not \"everything\", and each selector below names what it cannot see.";
 
 pub fn pane(d: ScopeEditorData<'_>) -> Element<'_, Message> {
@@ -94,7 +95,7 @@ pub fn pane(d: ScopeEditorData<'_>) -> Element<'_, Message> {
         // The rule users get wrong, set apart as the commentary it is (#559).
         kit::callout(
             crate::view::theme::Tone::Info,
-            kit::body(D2_RULE).style(|theme: &iced::Theme| text::Style {
+            kit::body(VERBATIM_RULE).style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).text_muted()),
             }),
         ),
@@ -122,7 +123,7 @@ fn resolved<'a>(mut col: Column<'a, Message>, d: &ScopeEditorData<'_>) -> Column
     col = col.push(kit::muted(
         "resolved read-only — fork to edit them as a custom scope",
     ));
-    for sel in d.scope.selectors(d.base, d.selectors) {
+    for sel in d.scope.selectors(d.namespace, d.selectors) {
         col = col.push(selector_row(sel));
     }
     col.push(

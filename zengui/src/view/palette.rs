@@ -755,7 +755,7 @@ mod tests {
     ) -> crate::view::scope_editor::ScopeEditorData<'_> {
         crate::view::scope_editor::ScopeEditorData {
             scope: crate::scope::ScopePreset::Everything,
-            base: "",
+            namespace: "",
             selectors: &[],
             form,
         }
@@ -779,12 +779,12 @@ mod tests {
 
     fn test_settings() -> crate::config::Settings {
         crate::config::Settings {
-            base: String::new(),
+            namespace: String::new(),
             connect: vec![],
             listen: vec![],
             scouting: None,
             zenoh_config: None,
-            registry: vec![],
+            contracts: vec![],
             timeout_secs: 5,
             scope: crate::scope::ScopePreset::Everything,
             selectors: vec![],

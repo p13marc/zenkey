@@ -3,8 +3,8 @@
 //!
 //! Like the Connect and Selectors handlers, this one is about the *form*:
 //! a valid apply raises [`DeploymentMsg::TuningApplied`] and the deployment
-//! handler does the resizing, the labelling and — for a registry change —
-//! the forget path. A form that does not parse is refused **here**, beside
+//! handler does the resizing, the labelling and — for a contracts change —
+//! the reload. A form that does not parse is refused **here**, beside
 //! the box that shows why, and never half-applies.
 
 use iced::Task;
@@ -36,8 +36,8 @@ pub(crate) fn update(form: &mut SettingsForm, msg: SettingsMsg) -> Task<Message>
             form.eager = b;
             Task::none()
         }
-        SettingsMsg::RegistryChanged(v) => {
-            form.registry = v;
+        SettingsMsg::ContractsChanged(v) => {
+            form.contracts = v;
             Task::none()
         }
         SettingsMsg::Apply => {
@@ -80,7 +80,7 @@ fn parse(form: &SettingsForm) -> Result<Tuning, String> {
             )
         })?,
         eager: form.eager,
-        registry: crate::view::contexts::words(&form.registry)
+        contracts: crate::view::contexts::words(&form.contracts)
             .into_iter()
             .map(Into::into)
             .collect(),

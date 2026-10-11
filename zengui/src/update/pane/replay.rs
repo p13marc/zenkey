@@ -245,7 +245,7 @@ pub(crate) fn update(
                 "zengui-{}.zrec",
                 zenkey_fleet_v1::rfc3339_now().replace(':', "-")
             );
-            let base = dep.base().to_string();
+            let base = dep.namespace().to_string();
             work.replay.recording = Some(RecordingHandle {
                 stop,
                 path: path.clone(),
@@ -299,7 +299,7 @@ pub(crate) fn update(
                 rows,
                 state.fold_epoch,
                 state.watched.to_vec(),
-                dep.base().to_string(),
+                dep.namespace().to_string(),
                 path,
             )
         }

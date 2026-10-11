@@ -23,7 +23,6 @@
 
 use iced::widget::{Column, column, row};
 use iced::{Element, Length};
-use zenkey_fleet_v1::SliceSet;
 
 use super::tokens::Spacing;
 use super::{doctor, echo, kit, replay, send};
@@ -47,7 +46,6 @@ pub(crate) struct ActivityData<'a> {
     pub doctor: &'a crate::doctor::DoctorState,
     pub base: &'a str,
     pub replay: &'a ReplayMode,
-    pub slices: Option<&'a SliceSet>,
     /// The monitor's retained window as of the last live tick (#217) —
     /// what the Replay tab's "scrub retained" affordance describes.
     /// `None` before a monitor exists, which is "not asked", not "empty"
@@ -109,7 +107,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
         .into(),
         ActivityTab::Publish => send::log_section(d.publish, d.sp),
         ActivityTab::Doctor => doctor::section(d.doctor, d.base, d.sp),
-        ActivityTab::Replay => replay_stream(d.replay, d.slices, d.retention, d.sp),
+        ActivityTab::Replay => replay_stream(d.replay, d.retention, d.sp),
         ActivityTab::Traffic => super::traffic::section(d.traffic).into(),
     };
     column![strip, body].spacing(d.sp.sm).into()
@@ -118,7 +116,6 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
 /// The scrubber and the capture line — replay's *stream*, not its banner.
 fn replay_stream<'a>(
     r: &'a ReplayMode,
-    _slices: Option<&'a SliceSet>,
     retention: Option<zenkey_fleet_v1::RetentionStats>,
     sp: Spacing,
 ) -> Element<'a, Message> {

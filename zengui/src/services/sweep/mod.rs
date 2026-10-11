@@ -26,4 +26,4 @@ pub use budget::budget;
 pub use consumers::consumers_of;
 pub use doctor::doctor;
 pub use nodes::node_info;
-pub use registry::{self_disagreements, skeleton, slices, slices_from_dirs, slices_union};
+pub use registry::skeleton;

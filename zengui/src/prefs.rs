@@ -7,9 +7,9 @@
 //!
 //! **What belongs here and what does not.** Preferences are how the *window*
 //! is set up; a [`crate::config::Settings`] is what the *session* connects to.
-//! The overlap — context, base, scope — is stored as "what was on screen last
-//! time", and a command-line flag always wins: a user who typed `--base acme`
-//! meant it, and a remembered base silently overriding it would be the worst
+//! The overlap — context, namespace, scope — is stored as "what was on screen last
+//! time", and a command-line flag always wins: a user who typed `--namespace acme`
+//! meant it, and a remembered namespace silently overriding it would be the worst
 //! kind of persistence.
 //!
 //! **A user-editable file cannot be trusted to parse.** A malformed or
@@ -469,6 +469,18 @@ pub struct Prefs {
     pub eager: Option<bool>,
     /// The global density mode (#192), toggled by Ctrl+Shift+D.
     pub density: Density,
+    /// The namespace picked last (#614, FL6a): written when the location
+    /// bar's picker (or a context switch) moves the deployment, never from
+    /// a flag. It resolves under `--namespace` and over `ZENGUI_BASE` and
+    /// the context's `base` (`config::namespace`); a remembered one the
+    /// session would refuse is dropped at launch, never a refusal.
+    pub namespace: Option<String>,
+    /// The contracts the Settings overlay applied last (#614, FL6a):
+    /// zengui's own memory, never the shared context, and written only from
+    /// the overlay — a `--contracts` flag wins its launch without becoming
+    /// the default. An entry no longer on disk is dropped from the launch
+    /// and kept here, for when it comes back.
+    pub contracts: Vec<PathBuf>,
 }
 
 impl Default for Prefs {
@@ -486,6 +498,8 @@ impl Default for Prefs {
             max_keys: None,
             eager: None,
             density: Density::default(),
+            namespace: None,
+            contracts: Vec::new(),
         }
     }
 }
@@ -623,13 +637,15 @@ mod tests {
             window: Some((1440.0, 900.0)),
             context: Some("lab".into()),
             scope: ScopePreset::Deployment,
-            selectors: vec!["demo/**".into(), "v1/*/state/**".into()],
+            selectors: vec!["demo/**".into(), "zk2/*/*/*/state/**".into()],
             layout: LayoutPreset::Watch.layout(),
             echo_lines: Some(5000),
             history_entries: Some(400),
             max_keys: Some(100_000),
             eager: Some(true),
             density: Density::Compact,
+            namespace: Some("spray".into()),
+            contracts: vec!["examples/zk2/walkthrough".into()],
         };
         prefs.save_to(&path).unwrap();
         let (back, note) = Prefs::load_from(&path);
@@ -663,6 +679,24 @@ mod tests {
         assert!(note.is_none());
         assert_eq!(back.layout.preset, None, "a bent layout is no preset");
         assert_eq!(back.layout.root, root);
+    }
+
+    /// A file written before zk2 (#614, FL6a) remembers `scope =
+    /// "telemetry"`: v1's name for the ambient streams, read as `streams`
+    /// rather than refused — and written back under the new name.
+    #[test]
+    fn a_remembered_telemetry_scope_loads_as_streams() {
+        let path = tmp("telemetry-scope.toml");
+        std::fs::write(&path, "scope = \"telemetry\"\n").unwrap();
+        let (prefs, note) = Prefs::load_from(&path);
+        assert!(note.is_none(), "an alias, not a parse error");
+        assert_eq!(prefs.scope, ScopePreset::Streams);
+        prefs.save_to(&path).unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("scope = \"streams\"")
+        );
     }
 
     /// First run is silent: an absent file is the normal case, not a problem

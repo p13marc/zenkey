@@ -1,7 +1,9 @@
 //! The Elm loop: state, `update`, `view`, `subscription`.
 //!
-//! **Lazy by default** (issue #85): connecting builds the *skeleton* — the
-//! declared keyspace from registry + liveliness + admin metadata — and starts
+//! **Lazy by default** (issue #85): connecting opens two sessions (one in the
+//! deployment's namespace, one in none, #614), loads the contracts, builds the
+//! *skeleton* — the
+//! declared keyspace (admin metadata until FL6b) — and starts
 //! a monitor with **zero data-plane watches**. Observation is opt-in per
 //! subtree (the tree's watch toggles) or per scope (the location bar's
 //! "observe scope" toggle — the old eager mode made explicit); a selection fetches one
@@ -51,11 +53,10 @@ impl Zengui {
         prefs_note: Option<String>,
     ) -> (Zengui, Task<Message>) {
         let echo_lines = settings.echo_lines;
-        // Read before `settings` is moved into the deployment.
-        let connect = settings.connect.clone();
-        let listen = settings.listen.clone();
-        let scouting = settings.scouting;
-        let zenoh_config = settings.zenoh_config.clone();
+        // Read before `settings` is moved into the deployment: the two
+        // sessions are opened from it (#614, FL6a).
+        let namespace = settings.namespace.clone();
+        let transport = services::link::Transport::of(&settings);
         // The persisted layout is what the grid is rebuilt from (#180); read
         // before `prefs` moves into the chrome.
         let work = Workspace::new(echo_lines, &prefs.layout.root);
@@ -67,10 +68,7 @@ impl Zengui {
             tree: TreeState::default(),
             work,
         };
-        (
-            app,
-            services::link::open(zenoh_config, connect, listen, scouting),
-        )
+        (app, services::link::open(namespace, transport))
     }
 
     /// Open the windows the preferences describe (#186): the main workspace,
@@ -132,11 +130,15 @@ impl Zengui {
                 format!(
                     "zengui — {} (pinned) — {}",
                     t.role.label(),
-                    self.dep.base_label()
+                    self.dep.namespace_label()
                 )
             }
-            Some(t) => format!("zengui — {} — {}", t.role.label(), self.dep.base_label()),
-            None => format!("zengui — {}", self.dep.base_label()),
+            Some(t) => format!(
+                "zengui — {} — {}",
+                t.role.label(),
+                self.dep.namespace_label()
+            ),
+            None => format!("zengui — {}", self.dep.namespace_label()),
         }
     }
 
@@ -182,6 +184,20 @@ impl Zengui {
         }
     }
 
+    /// The presence link this window runs now (#614, FL6a), when it runs
+    /// one: a session in the namespace and its presence monitor exist. The
+    /// one place the link's key is built — [`Zengui::subscription`] runs it,
+    /// and a live test drives the same stream without a window.
+    pub fn presence_link(&self) -> Option<crate::presence_link::PresenceKey> {
+        Some(crate::presence_link::PresenceKey {
+            epoch: self.obs.presence_epoch,
+            session: self.dep.session.clone()?,
+            monitor: self.obs.presence_monitor.clone()?,
+            store: self.dep.store.clone(),
+            timeout: self.dep.timeout(),
+        })
+    }
+
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = Vec::new();
         // Replay mode replaces the link (#74): while a `.zrec` feeds the
@@ -193,6 +209,14 @@ impl Zengui {
                 monitor,
                 epoch: self.obs.epoch,
             }));
+        }
+        // The presence link (#614, FL6a): presence and the lens, from their
+        // own monitor on the session in the namespace. Not suspended by
+        // replay — it feeds no pane data, only what the deployment is — and
+        // keyed by its epoch, so a namespace switch, a new monitor or a new
+        // contract store is a new stream.
+        if let Some(key) = self.presence_link() {
+            subs.push(crate::presence_link::subscribe(key));
         }
         // The play clock, only while actually playing (a paused replay
         // costs nothing) — the same cadence as the live stats tick, so the
@@ -356,7 +380,7 @@ impl Zengui {
             self.dep.settings.is_unreachable(),
             view::scope_editor::ScopeEditorData {
                 scope: self.dep.settings.scope,
-                base: self.dep.base(),
+                namespace: self.dep.namespace(),
                 selectors: &self.dep.settings.selectors,
                 form: &self.work.bench.scope_form,
             },
@@ -396,12 +420,12 @@ mod tests;
 #[cfg(test)]
 pub(crate) fn test_settings() -> Settings {
     Settings {
-        base: String::new(),
+        namespace: String::new(),
         connect: vec![],
         listen: vec![],
         scouting: None,
         zenoh_config: None,
-        registry: vec![],
+        contracts: vec![],
         timeout_secs: 5,
         scope: crate::scope::ScopePreset::Everything,
         selectors: vec![],

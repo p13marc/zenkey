@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use zengui::keyfacts::{KeyFacts, KeyShape, Registration};
-use zengui::scope::{self, ScopePreset};
+use zengui::scope::ScopePreset;
 use zengui::view::tree;
 use zenkey_fleet_v1::{Monitor, MonitorSpec, SliceSet};
 
@@ -38,7 +38,7 @@ async fn watch(selectors: Vec<String>) -> (zenkey_fleet_v1::KeyTreeSnapshot, Vec
         &session,
         MonitorSpec {
             selectors,
-            liveliness: scope::liveliness_any_base(),
+            liveliness: liveliness_selectors("**"),
             ..Default::default()
         },
     )
@@ -52,6 +52,34 @@ async fn watch(selectors: Vec<String>) -> (zenkey_fleet_v1::KeyTreeSnapshot, Vec
         .core()
         .with_stats(|s| s.iter().map(|(k, _)| k.to_string()).collect::<Vec<_>>());
     ((*tree).clone(), keys)
+}
+
+/// v1's roster selectors — the fleet's alive tokens, and `@catalog`'s by
+/// name (RFC 03 §4 D4). They left `zengui::scope` when presence became
+/// zk2's (#614, FL6a); this file runs against `spray_v1` until FL6b moves it
+/// onto the zk2 spray, so it keeps its own copy.
+fn liveliness_selectors(base: &str) -> Vec<String> {
+    use zenkey_v1::grammar::with_base;
+    use zenkey_v1::origin::ServiceOrigin;
+    use zenkey_v1::selector::{self, Scope};
+    vec![
+        with_base(base, selector::all_liveliness(Scope::fleet())),
+        with_base(base, selector::service_alive(&ServiceOrigin::catalog())),
+    ]
+}
+
+/// v1's Deployment preset — the three data classes plus `@catalog`, named
+/// (D4). zengui's preset is zk2's ambient selector since #614 (FL6a); the
+/// v1 spray needs the v1 set, until FL6b.
+fn v1_deployment_selectors(base: &str) -> Vec<String> {
+    use zenkey_v1::grammar::with_base;
+    use zenkey_v1::selector::{self, Scope};
+    vec![
+        with_base(base, selector::all_telemetry(Scope::fleet())),
+        with_base(base, selector::all_state(Scope::fleet())),
+        with_base(base, selector::all_events(Scope::fleet())),
+        with_base(base, "v1/@catalog/state/**"),
+    ]
 }
 
 fn slices() -> SliceSet {
@@ -99,7 +127,7 @@ async fn the_raw_scope_sees_plain_keys_but_no_verbatim_planes() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs a live bus; see the module docs"]
 async fn the_deployment_scope_reaches_the_catalog() {
-    let (_tree, keys) = watch(ScopePreset::Deployment.selectors("", &[])).await;
+    let (_tree, keys) = watch(v1_deployment_selectors("")).await;
     assert!(
         keys.iter().any(|k| k.contains("/@catalog/")),
         "the @catalog selector should have delivered entity state; got {keys:#?}"
@@ -270,7 +298,7 @@ async fn a_retracted_token_flips_the_roster_to_suspect_immediately() {
         &observer_side,
         MonitorSpec {
             selectors: vec![], // lazy: liveliness only
-            liveliness: scope::liveliness_selectors(""),
+            liveliness: liveliness_selectors(""),
             ..Default::default()
         },
     )

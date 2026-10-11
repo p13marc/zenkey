@@ -4,11 +4,11 @@
 //!
 //! > **A message lives where its failure is displayed.**
 //!
-//! `SessionOpened(Err)` writes `link`, which the status strip renders → `Bus`.
+//! `SessionsOpened(Err)` writes `link`, which the status strip renders → `Bus`.
 //! `SendMsg::Done(Err)` writes `SendForm::outcome` → `Pane`. `ContextSwitched(Err)`
 //! writes `ContextForm::status` → `Pane`. It settles the cases a topic-shaped
 //! grouping leaves to taste, and it is why `Reconnect` is `Deployment` (its
-//! handler is the tail of `BaseSelected`'s) rather than `Bus` or `Chrome`
+//! handler is the tail of `NamespaceSelected`'s) rather than `Bus` or `Chrome`
 //! (it is reachable from the location bar, Ctrl-R *and* the palette, so
 //! provenance says nothing).
 //!
@@ -26,9 +26,7 @@
 
 use std::sync::Arc;
 
-use zenkey_fleet_v1::{
-    DiscoveredBase, FetchOutcome, KeyTreeSnapshot, Monitor, SampleView, Skeleton, SliceSet, WatchId,
-};
+use zenkey_fleet_v1::{FetchOutcome, KeyTreeSnapshot, Monitor, SampleView, Skeleton, WatchId};
 
 use crate::scope::ScopePreset;
 
@@ -75,38 +73,66 @@ impl SlotId {
 /// None of these is user intent: each is a `Task::perform` or a `link.rs`
 /// `yield` landing. A message lives where its failure is displayed, and every
 /// failure here reaches the status strip rather than a pane —
-/// `SessionOpened(Err)` and `MonitorStarted(Err)` write `link`, and
+/// `SessionsOpened(Err)` and `MonitorStarted(Err)` write `link`, and
 /// `SkeletonBuilt(Err)` is a `tracing::warn!` nobody's pane shows.
 ///
-/// `SlicesLoaded` and `SlicesUnionLoaded` are here rather than under
-/// `Deployment` for the same reason: a registry sweep is a *landing*, like
-/// `BasesDiscovered`. `Deployment` holds the intent that asked for it.
+/// `ContractsLoaded` is here rather than under `Deployment` for the same
+/// reason: a contracts load is a *landing*, like `NamespacesListed`.
+/// `Deployment` holds the intent that asked for it.
 #[derive(Debug, Clone)]
 pub enum BusMsg {
     /// One coalesced batch from the bus link. See [`BusTick`].
     Tick(Arc<BusTick>),
     /// The link changed state.
     Link(LinkState),
-    /// A session was opened (or could not be).
-    SessionOpened(Result<zenoh::Session, crate::services::ServiceError>),
+    /// The two sessions were opened, or could not be (#614, FL6a): one in
+    /// the deployment's namespace, one in none. A transport that would not
+    /// come up fails both, said once.
+    SessionsOpened(Result<crate::services::link::Sessions, crate::services::ServiceError>),
+    /// A namespace switch's session, in the namespace it names (#614,
+    /// FL6a): the session in no namespace is kept, and only the one in the
+    /// namespace is reopened. A landing for a namespace the window has
+    /// since moved past is dropped.
+    NamespacedOpened(
+        String,
+        Result<zenoh::Session, crate::services::ServiceError>,
+    ),
     /// The monitor started (lazily — no data-plane watches yet unless eager).
     MonitorStarted(Result<Arc<Monitor>, crate::services::ServiceError>),
     /// The declared-keyspace skeleton was (re)built, with the liveliness
     /// roster the build task gathered anyway (#61 seeds the node roster
     /// from it instead of throwing it away).
     SkeletonBuilt(Result<(Arc<Skeleton>, Arc<LiveRoster>), crate::services::ServiceError>),
-    /// The base sweep finished. An empty list is *not* a verdict (RFC 05 §3.1).
-    BasesDiscovered(Result<Vec<DiscoveredBase>, crate::services::ServiceError>),
-    /// Registry slices arrived, from the bus or from `--registry` dirs.
-    SlicesLoaded(Result<Arc<SliceSet>, crate::services::ServiceError>),
-    /// The §6.1 union arrived: (set, from_bus, dirs_only, disagreements).
-    SlicesUnionLoaded(
-        Result<(Arc<SliceSet>, crate::view::status::UnionCounts), crate::services::ServiceError>,
+    /// The namespace listing landed (#614, FL6a): which namespaces hold
+    /// zk2 instance tokens, read on the session in no namespace. An empty
+    /// list is *not* a verdict (RFC 05 §3.1), and a read that ran to its
+    /// timeout says so.
+    NamespacesListed(Result<Arc<zenkey_fleet::NamespaceListing>, crate::services::ServiceError>),
+    /// The contracts `--contracts` (or the Settings overlay) names, loaded
+    /// off the update thread (#614, FL6a). Never an error as a whole: a path
+    /// that is not there or loads nothing is a problem by where it was
+    /// named, and what did load is held.
+    ContractsLoaded(Arc<crate::services::contracts::LoadedContracts>),
+    /// The presence monitor started on the session in the namespace it
+    /// names (#614, FL6a), or could not; a landing for a namespace the
+    /// window has left is dropped.
+    PresenceStarted(
+        String,
+        Result<Arc<zenkey_fleet::Monitor>, crate::services::ServiceError>,
     ),
+    /// One presence landing from the presence link, of the epoch it names
+    /// (#614, FL6a): the projection, its moves, and the lens's catalog
+    /// after folding them. An older epoch's landing is dropped.
+    Presence(u64, Arc<crate::presence_link::PresenceUpdate>),
+    /// The lens feed opened, in the presence link of the epoch it names
+    /// (#614, FL6a): held for the nudges a check makes, and polled each
+    /// tick for a catalog a background re-read swapped in.
+    LensOpened(u64, crate::presence_link::LensHandle),
     /// One bounded validation batch finished (#164): per checked key, the
-    /// payload-conformance verdict of its newest sample. Lands in the
-    /// verdict cache; the render paths only look up.
-    VerdictsChecked(Vec<(String, zenkey_v1::schema::validate::Verdict)>),
+    /// conformance of its newest sample through the lens (#614, FL6a) —
+    /// one of four poles. Lands in the verdict cache; the render paths only
+    /// look up.
+    VerdictsChecked(Vec<(String, zenkey_fleet::report::Conformance)>),
     /// The throttled budget join finished (#221): declared `cardinality`
     /// against the observed tree, keyed by subtree display path.
     BudgetJoined(Arc<crate::budget::BudgetBadges>),
@@ -117,7 +143,7 @@ pub enum BusMsg {
 /// The invariant: **every variant here invalidates or re-points observation.**
 ///
 /// `Reconnect` is here rather than under `Bus`, on behaviour rather than taste:
-/// its handler is byte-for-byte the tail of `BaseSelected`'s, and a message whose
+/// its handler is the tail of `NamespaceSelected`'s, and a message whose
 /// body is a subset of another's belongs in that group. Where it is *reached
 /// from* — the location bar, Ctrl-R, the palette — is a bad tiebreaker, because
 /// it is all three.
@@ -140,7 +166,10 @@ pub enum DeploymentMsg {
     /// Apply/release the scope preset's selectors as watches — the eager
     /// mode, made explicit and labelled by its cost.
     ScopeWatchToggled,
-    BaseSelected(String),
+    /// The namespace picker moved the deployment (#614, FL6a): the session
+    /// in the namespace, its presence and its lens are reopened, and what
+    /// they held is forgotten. The session in no namespace stays.
+    NamespaceSelected(String),
     /// A stored context was chosen, and the deployment must now become it.
     ///
     /// The connect pane raises this rather than rewriting seven `Settings`
@@ -156,8 +185,9 @@ pub enum DeploymentMsg {
     },
     ScopeSelected(ScopePreset),
     /// A validated Settings-overlay apply (#188): re-bound the rings live,
-    /// store what needs a reconnect, and route a registry change through the
-    /// same forget path a base change takes. Here rather than under `Pane`
+    /// store what needs a reconnect, and reload the contracts when they
+    /// changed (#614, FL6a), dropping every verdict judged under the old
+    /// ones. Here rather than under `Pane`
     /// for the same reason `CustomSelectorsApplied` is: its body moves the
     /// deployment and the observation, and only its *status line* lands in
     /// the form.
@@ -284,10 +314,10 @@ pub enum SubjectMsg {
         String,
         Result<Arc<FetchOutcome>, crate::services::ServiceError>,
     ),
-    /// The fetched value's schema decode finished (§6.4 item 5's inspector):
-    /// (key, the whole decoded sample — rendering, verdict and the decode
-    /// error behind an `Undecodable`, #164 — with the document text rendered
-    /// from it in the same task rather than on every redraw, #345).
+    /// The fetched value's check through the lens finished (#614, FL6a):
+    /// (key, the whole check — identity, rendering and the conformance, one
+    /// of four poles, #164 — with the document text rendered from it in the
+    /// same task rather than on every redraw, #345).
     ValueDecoded(String, Arc<crate::value::DecodedValue>),
     /// Point the whole workspace at something (#181).
     ///

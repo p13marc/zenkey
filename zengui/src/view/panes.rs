@@ -306,13 +306,13 @@ fn inspector<'a>(
         latency: slot.selected_latency.clone(),
         blob: &work.verdicts.blob,
         media: &work.bench.media,
-        slices: dep.slices.as_deref(),
+        slices: None,
         roster: &work.verdicts.roster,
         node_detail: &work.verdicts.node_detail,
         fields: &slot.fields,
         why: &slot.why,
         consumers: &slot.consumers,
-        base: dep.base(),
+        base: dep.namespace(),
         observed: &obs.observed,
         sp,
     })
@@ -341,9 +341,8 @@ fn activity<'a>(
         next_seq: work.echo.echo.next_seq(),
         publish: &work.bench.send_form,
         doctor: &work.verdicts.doctor,
-        base: dep.base(),
+        base: dep.namespace(),
         replay: &work.replay,
-        slices: dep.slices.as_deref(),
         retention: obs.retention,
         theme,
         traffic: view::traffic::TrafficData {
@@ -403,17 +402,12 @@ fn workbench<'a>(
         |p| Message::Workspace(WorkspaceMsg::PaneSelected(p)),
     );
     let body: Element<'a, Message> = match work.right_pane {
-        RightPane::Send => view::send::pane(
-            &work.bench.send_form,
-            dep.slices.as_deref(),
-            &work.verdicts.roster,
-            sp,
-        ),
+        RightPane::Send => view::send::pane(&work.bench.send_form, None, &work.verdicts.roster, sp),
         RightPane::Nodes => view::nodes::pane(view::nodes::NodesData {
             roster: &work.verdicts.roster,
             selected: sub.follow.current.origin(),
             detail: &work.verdicts.node_detail,
-            slices: dep.slices.as_deref(),
+            slices: None,
             sp,
         }),
         RightPane::Admin => view::admin::pane(&work.verdicts.admin, sp),
@@ -422,12 +416,12 @@ fn workbench<'a>(
             let form = &work.bench.config_form;
             view::configure::pane(view::configure::ConfigData {
                 form,
-                producers: crate::configure::producers(dep.slices.as_deref()),
+                producers: crate::configure::producers(None),
                 origins: crate::configure::origins(
                     &work.verdicts.roster,
                     form.target.producer.trim(),
                 ),
-                session: dep.session.is_some(),
+                session: dep.raw.is_some(),
                 sp,
             })
         }

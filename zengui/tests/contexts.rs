@@ -70,13 +70,9 @@ fn contexts_round_trip_between_the_two_explorers() {
     assert_eq!(form.base, "acme");
     assert_eq!(form.connect, "tcp/127.0.0.1:7449");
     assert!(!form.scouting);
-    // The two fields the pane had no widget for and therefore used to destroy
-    // (issue #194) are now loaded like the rest.
+    // The field the pane had no widget for and therefore used to destroy
+    // (issue #194) is loaded like the rest.
     assert_eq!(form.timeout, "9", "the timeout reaches the editor");
-    assert_eq!(
-        form.registry, "/abs/registry",
-        "and so do the registry dirs"
-    );
 
     // …and what the pane would write re-reads as the same thing.
     let round = form.to_stored().expect("valid");
@@ -84,7 +80,24 @@ fn contexts_round_trip_between_the_two_explorers() {
     assert_eq!(round.connect, ["tcp/127.0.0.1:7449"]);
     assert_eq!(round.scouting, Some(false));
     assert_eq!(round.timeout, Some(9), "a zenctl-authored timeout survives");
-    assert_eq!(round.registry, [std::path::PathBuf::from("/abs/registry")]);
+
+    // The registry has no widget since #614 (FL6a) — zk2 reads contracts —
+    // and a save through the pane's own path (`upsert` + `apply_to`, what
+    // `services::context::save` runs) carries it back to the store
+    // untouched: parsed, ignored, never deleted.
+    let mut cfg = zenkey_explorer_config::load().expect("reload");
+    let mut applied = Ok(());
+    zenkey_explorer_config::upsert(&mut cfg, "lab", |c| applied = form.apply_to(c));
+    applied.expect("valid");
+    zenkey_explorer_config::save(&cfg).expect("save");
+    let saved = zenkey_explorer_config::load().expect("reload");
+    let lab = saved.contexts.get("lab").expect("lab");
+    assert_eq!(
+        lab.registry,
+        [std::path::PathBuf::from("/abs/registry")],
+        "a context's registry survives a round trip through the pane"
+    );
+    assert_eq!(lab.timeout, Some(9));
 
     // The structural guard, for the *next* field added to the store: an edit
     // merges over what is there rather than replacing it. Simulated by a form

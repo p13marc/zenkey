@@ -24,14 +24,14 @@ pub(crate) fn update(v: &mut Verdicts, msg: NodesMsg, cx: Ctx) -> Task<Message> 
             // same host after a base switch would otherwise admit the old
             // deployment's reply through the selection-only check.
             if cx.sub.follow.current.origin() == Some(origin.as_str())
-                && ran_against == cx.dep.base()
+                && ran_against == cx.dep.namespace()
             {
                 v.node_detail = DetailState::Loaded(origin, outcome);
             }
             Task::none()
         }
         NodesMsg::ShowInTree(origin) => {
-            let path = scope::origin_display_path(cx.dep.base(), &origin);
+            let path = scope::origin_display_path(cx.dep.namespace(), &origin);
             // Reveal, then select WITHOUT fetching: a subtree prefix is
             // not a concrete key, and asking for its value would be a GET
             // no producer answers (#85).

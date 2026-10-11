@@ -12,34 +12,41 @@ registration badge. When it does not, it is still a first-class node in the tree
 with counts, rates and structural payload rendering — "does not parse" is an
 answer, not an error.
 
-Like every explorer, the session is **un-namespaced** (RFC 09 §5): zengui spells
-full wire keys and does its own base handling, which is what lets it see traffic
-a namespaced application is blind to. The empty base is legal and is the default
-(RFC v1.6) — an explorer that cannot see and name the base-less bus root is blind
-to the common case.
+zengui runs **two sessions** since #614 (FL6a), as zenctl and zenwatch do: the
+data pump watches on a session in **no** namespace (RFC 09 §5), spelling full
+wire keys — which is what lets it see traffic a namespaced application is blind
+to — and presence, descriptors and contracts are read on a session **in** the
+deployment's namespace. Every zk2 key is checked through the contract its
+provider's descriptor names: valid, invalid, undecodable, or not checked with
+the rung where resolution stopped. The empty namespace is legal and is the
+default — an explorer that cannot see and name the bus-root deployment is blind
+to the common case. (The port is in progress: the tree, the nodes pane and the
+v1 panes still read v1 until the chunks after FL6a move them.)
 
 ## Usage
 
 ```bash
-zengui -c tcp/127.0.0.1:7447                      # the bus root (empty base)
-zengui -c tcp/127.0.0.1:7447 --base zensight      # a named deployment
-zengui -c … --scope deployment                    # data classes + @catalog
-zengui -c … --selector 'demo/**'                  # your own key expressions
-zengui -c … --registry ../zensight/zensight-common/registry   # offline registry
+zengui -c tcp/127.0.0.1:7447                         # the bus-root deployment
+zengui -c tcp/127.0.0.1:7447 --namespace spray       # a named deployment (--base is its alias)
+zengui -c … --scope deployment                       # the namespace's ambient zk2/**
+zengui -c … --scope explicit                         # its explicit @stream and @state, named
+zengui -c … --selector 'demo/**'                     # your own key expressions
+zengui -c … --contracts examples/zk2/.history        # contracts held offline (repeatable)
 ```
 
-Bases in use are discovered on connect (RFC 09 §5's sweep) and offered in a
-picker; `--base` is a shortcut, not a requirement.
+Namespaces in use are listed on connect (`zenkey_fleet::namespace_listing`)
+and offered in a picker; `--namespace` is a shortcut, not a requirement.
+`--registry` is v1's, and is refused by name in favour of `--contracts`.
 
 ### A note on `**`
 
-`*` and `**` never match a chunk beginning with `@` (RFC 03 §4 **D2**). So the
-default raw scope cannot pull `@media` frames or `@blob` bulk into the echo
-pane — it is media-safe by key algebra rather than by policy — but it equally
-cannot see `@catalog`. `**` is therefore **not** "everything", and zengui never
-labels it as such: the `deployment` scope names `@catalog` explicitly, and the
-liveliness roster always watches both the fleet sweep and the service token,
-because otherwise "catalog dead" and "no entities" would look identical.
+`*` and `**` never match a verbatim chunk — one beginning with `@` (core §1.3).
+So the default raw scope cannot pull an explicit `@stream` (camera frames) or
+an `@state` population into the echo pane — it is safe by key algebra rather
+than by policy — but it equally cannot see `@op` or the `@zk` control keys.
+`**` is therefore **not** "everything", and zengui never labels it as such:
+the `explicit` scope names the verbatim kinds, and every selector says which
+verbatim chunks it cannot see.
 
 ## Status
 
@@ -103,23 +110,26 @@ backend, real services serving their contracts from `examples/zk2/`, and a
 service implementing `health.v1` alone — beside the traffic no zk2 service
 would send: an interface token with no instance token, a second answerer on
 an owner's state, garbage on an owned key, an unowned key, a key in another
-namespace, and foreign keys. zengui still reads v1 while #614 ports it pane
-by pane, so today every one of those keys shows as a foreign key, with real
-counts, rates and structural payloads, unlabelled rather than mislabelled:
-the key-agnostic core keeping its promise. `just smoke-spray` reads the same
-deployment through zenctl's `service list` and `doctor`.
+namespace, and foreign keys. `just gui-demo` opens zengui with `--namespace
+spray`, so since FL6a each of those keys is checked through its contract and
+badged with what the check found — valid, invalid, undecodable, or not checked
+with the rung where resolution stopped. The tree still reads v1 while #614
+ports it pane by pane, so the zk2 keys are unlabelled rather than mislabelled
+rows. `just smoke-spray` reads the same deployment through zenctl's `service
+list` and `doctor`.
 
 The v1 demo traffic the panes were built for is `spray_v1` (`just
 gui-demo-v1`, `just spray-v1`; it goes at FL11). What to look at there:
 
-- Expand `v1` — chunks are labelled origin / class / producer / subject, and
-  leaves carry a registration badge plus the registry-declared type.
+- Expand `v1` — chunks are labelled origin / class / producer / subject. The
+  window loads no v1 registry since FL6a, so the registration badges read
+  "not asked".
 - Expand `demo`, `two`, `v2`, `someotherbase` — foreign keys with real counts
   and rates, deliberately *unlabelled* rather than mislabelled.
   `someotherbase/…` is another deployment's traffic, visible because an
   explorer runs un-namespaced (RFC 09 §5).
-- Switch scope to `deployment` and watch `@catalog` appear — see the note above
-  on why `**` cannot see it.
+- `@catalog` is invisible under the raw scope — `**` never crosses an `@` chunk;
+  a custom `v1/@catalog/state/**` selector shows it (the `deployment` scope is zk2's since FL6a).
 - `just gui-demo-bounded` trips both bounds immediately, so the status strip
   reads `N keys (+M retired — bound reached)` **and**
   `facts: N cached (+M projections retired — cache bound reached)`. Two
@@ -130,8 +140,8 @@ gui-demo-v1`, `just spray-v1`; it goes at FL11). What to look at there:
   disabled" — and the coverage table should read "coverage not judged"
   without a registry, never "uncovered". Point it at a router with storages
   and the rows must match `zenctl storage list`.
-- `just gui-demo-no-registry` withholds the registry, so every badge reads `—`
-  ("not asked") rather than "unregistered".
+- `just gui-demo-no-contracts` holds nothing offline: the status strip counts
+  every revision as retrieved from the spray's own holders (spec §8.4).
 - Select a key on `spray_v1`'s `@blob` plane and the Inspector grows a
   **Blobs** section. `spray_v1` serves a 1 MiB artifact *and* a second
   origin claiming the same id at a different content root, so probing

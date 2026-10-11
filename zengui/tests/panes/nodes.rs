@@ -61,7 +61,7 @@ fn the_nodes_pane_distinguishes_not_asked_from_empty() {
         slices: None,
     }));
     assert!(
-        ui.find("no presence asked yet").is_ok(),
+        ui.find("v1 presence not asked").is_ok(),
         "'not asked' must not render as an empty fleet"
     );
 }

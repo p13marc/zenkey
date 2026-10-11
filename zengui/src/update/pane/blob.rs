@@ -47,24 +47,20 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
             let Some(Ok(target)) = blob.target.clone() else {
                 return Task::none();
             };
-            let Some(session) = cx.dep.session.clone() else {
+            let Some(session) = cx.dep.raw.clone() else {
                 blob.probe = crate::blob::Probe::Failed("no session — connect first".into());
                 return Task::none();
             };
             blob.probe = crate::blob::Probe::InFlight;
             blob.holder = None;
-            let base = cx.dep.base().to_string();
+            let base = cx.dep.namespace().to_string();
             let timeout = cx.dep.timeout();
-            let slices = cx
-                .dep
-                .slices
-                .as_deref()
-                .map(|s| s.slices().to_vec())
-                .unwrap_or_default();
-            services::sweep::blob_probe(session, base, target, slices, timeout)
+            // No v1 slices since #614 (FL6a): the probe asks with none, and
+            // the blob browser goes with v1 in FL11 (no blob.v1 yet, #613).
+            services::sweep::blob_probe(session, base, target, Vec::new(), timeout)
         }
         BlobMsg::ProbeDone(ran_against, outcome) => {
-            blob.probe_finished(outcome, &ran_against, cx.dep.base());
+            blob.probe_finished(outcome, &ran_against, cx.dep.namespace());
             Task::none()
         }
         BlobMsg::Fetch => {
@@ -74,7 +70,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
             let Some(Ok(target)) = blob.target.clone() else {
                 return Task::none();
             };
-            let Some(session) = cx.dep.session.clone() else {
+            let Some(session) = cx.dep.raw.clone() else {
                 blob.fetch = crate::blob::Fetch::Failed("no session — connect first".into());
                 return Task::none();
             };
@@ -91,7 +87,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
             if let zenkey_fleet_v1::BlobTarget::Tree { root } = &target {
                 let root = root.clone();
                 blob.fetch = crate::blob::Fetch::Inspecting;
-                let base = cx.dep.base().to_string();
+                let base = cx.dep.namespace().to_string();
                 let timeout = cx.dep.timeout();
                 return services::sweep::blob_tree(session, base, origin, root, timeout);
             }
@@ -118,7 +114,7 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
             };
 
             let dest = std::path::PathBuf::from(blob.dest_input.trim());
-            let base = cx.dep.base().to_string();
+            let base = cx.dep.namespace().to_string();
             let timeout = cx.dep.timeout();
             // Progress arrives on a channel rather than through the return
             // value: a transfer that only reported at the end would leave
@@ -181,11 +177,11 @@ pub(crate) fn update(blob: &mut BlobState, msg: BlobMsg, cx: Ctx) -> Task<Messag
             Task::none()
         }
         BlobMsg::FetchDone(ran_against, outcome) => {
-            blob.fetch_finished(outcome, &ran_against, cx.dep.base());
+            blob.fetch_finished(outcome, &ran_against, cx.dep.namespace());
             Task::none()
         }
         BlobMsg::InspectDone(ran_against, outcome) => {
-            blob.inspect_finished(outcome, &ran_against, cx.dep.base());
+            blob.inspect_finished(outcome, &ran_against, cx.dep.namespace());
             Task::none()
         }
         BlobMsg::Cancel => {

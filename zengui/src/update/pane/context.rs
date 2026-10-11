@@ -7,7 +7,7 @@
 //! The handler is about the *form*. Choosing a context does not rewrite seven
 //! `Settings` fields here; it raises [`DeploymentMsg::ContextApplied`] and
 //! lets the deployment handler do that with every other deployment change.
-//! A failed switch reports through `BusMsg::SessionOpened(Err)` rather than
+//! A failed switch reports through `BusMsg::SessionsOpened(Err)` rather than
 //! writing the link state here. With that and the deployment rewrite both
 //! raised as messages, this is the only handler in the app that takes no
 //! [`Ctx`](crate::update::Ctx) at all: one form, and nothing else.
@@ -29,10 +29,10 @@ use crate::view::contexts::{ContextForm, ContextMsg};
 /// vice versa — that reciprocity is the feature, not a side effect.
 pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
     match msg {
-        ContextMsg::Switched(Ok(session)) => {
-            // The forget rides on `SessionOpened` now, for both of that
+        ContextMsg::Switched(Ok(sessions)) => {
+            // The forget rides on `SessionsOpened` now, for both of that
             // variant's producers — see its handler.
-            Task::done(Message::Bus(BusMsg::SessionOpened(Ok(session))))
+            Task::done(Message::Bus(BusMsg::SessionsOpened(Ok(sessions))))
         }
         ContextMsg::Switched(Err(e)) => {
             form.status = Some(Err(e.context("could not connect")));
@@ -40,7 +40,7 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
             // variants of `Switched` now land through `Bus`, which is the
             // honest reading: a context switch is a session open that the
             // connect pane happened to ask for.
-            Task::done(Message::Bus(BusMsg::SessionOpened(Err(e))))
+            Task::done(Message::Bus(BusMsg::SessionsOpened(Err(e))))
         }
         ContextMsg::NameChanged(v) => {
             form.name = v;
@@ -60,10 +60,6 @@ pub(crate) fn update(form: &mut ContextForm, msg: ContextMsg) -> Task<Message> {
         }
         ContextMsg::ZenohConfigChanged(p) => {
             form.zenoh_config = p;
-            Task::none()
-        }
-        ContextMsg::RegistryChanged(v) => {
-            form.registry = v;
             Task::none()
         }
         ContextMsg::TimeoutChanged(v) => {

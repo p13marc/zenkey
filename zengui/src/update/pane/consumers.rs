@@ -38,7 +38,7 @@ pub(crate) fn update(slot: &mut SubjectSlot, dep: &Deployment, msg: ConsumersMsg
                 ));
                 return Task::none();
             };
-            let Some(session) = dep.session.clone() else {
+            let Some(session) = dep.raw.clone() else {
                 slot.consumers.report = Some(Err("no session — connect first".into()));
                 return Task::none();
             };
@@ -47,7 +47,7 @@ pub(crate) fn update(slot: &mut SubjectSlot, dep: &Deployment, msg: ConsumersMsg
             let run = services::sweep::consumers_of(
                 slot.id,
                 session,
-                dep.base().to_string(),
+                dep.namespace().to_string(),
                 target,
                 dep.timeout(),
             );

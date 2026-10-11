@@ -15,10 +15,13 @@
 # the traffic no zk2 service would send: an interface token with no
 # instance token, a second answerer on an owner's state, garbage on an
 # owned key, an unowned key, a key in another namespace, and foreign keys.
-# zengui still reads v1 (#614 ports it pane by pane), so today it shows
-# every one of those keys as a foreign key, with real counts, rates and
-# structural payloads, unlabelled rather than mislabelled: the key-agnostic
-# core's promise. zenctl reads the same deployment resolved:
+# zengui reads that deployment on zk2 since #614 FL6a: presence and the
+# lens on a session in the namespace, every key checked through its
+# contract — valid, invalid (the squatter's), undecodable (the garbage),
+# not checked with the rung it stopped at (the unowned key, the other
+# namespace, the foreign keys). Its tree is still v1's until FL6b, so the
+# zk2 keys are unlabelled rows wearing those badges. zenctl reads the same
+# deployment resolved:
 #
 #   just ctl service list --namespace spray -c tcp/127.0.0.1:7449
 #   just ctl doctor --namespace spray --deep --clocks-synced -c tcp/127.0.0.1:7449
@@ -31,15 +34,19 @@
 # the interesting half of zengui is what it does with traffic this
 # convention does not govern.
 #
-#   * Expand `v1` — chunks are labelled origin / class / producer / subject,
-#     and leaves carry a registration badge plus the registry-declared type.
+#   * Expand `v1` — chunks are labelled origin / class / producer / subject.
+#     Since #614 FL6a the window loads no v1 registry, so the leaves'
+#     registration badges read "not asked", and their payloads are checked
+#     as what they now are to a zk2 window: not zk2 keys.
 #   * Expand `demo`, `two`, `v2`, `someotherbase` — foreign keys, carrying real
 #     counts and rates, deliberately *unlabelled* rather than mislabelled.
 #     `someotherbase/…` is another deployment's traffic, visible because an
 #     explorer runs un-namespaced (RFC 09 §5).
-#   * Switch scope to `deployment` and watch `@catalog` appear. It is invisible
-#     under `everything` because `**` never crosses an `@` chunk (RFC 03 §4 D2)
-#     — which is also why `**` cannot pull the `@media` frames spray publishes.
+#   * `@catalog` is invisible under `everything` because `**` never crosses an
+#     `@` chunk (RFC 03 §4 D2) — which is also why `**` cannot pull the
+#     `@media` frames spray publishes. (The `deployment` scope is zk2's
+#     ambient `zk2/**` since #614 FL6a; a custom `v1/@catalog/state/**`
+#     selector shows the v1 catalog.)
 #   * Select `…/telemetry/sysinfo/disk/var-log/used` and watch its subtree. The
 #     Inspector's `Series` section traces the wandering `value`; its `History`
 #     section fills, and clicking a row names the field that moved. Before
@@ -71,13 +78,13 @@
 #     should read "N keys (+M retired — bound reached)" and, beside it,
 #     "facts: N cached (+M projections retired — cache bound reached)" — two
 #     bounds over two populations, two sentences (RFC 09 §5.1 O6).
-#   * `just gui-demo-no-registry` withholds the registry: every badge should
-#     read "—" ("not asked"), never "unregistered" (RFC 09 §5.1 O4).
+#   * `just gui-demo-no-contracts` is the zk2 demo with nothing held offline:
+#     the contracts cell counts every revision as retrieved from the spray's
+#     own holders (spec §8.4), and the decodes are the same.
 #
 # `just --list` for the rest.
 
 port := "7449"
-registry := "fixture-tests/registry"
 rundir := ".run"
 
 # zengui's pane tests build a real iced renderer per test, which probes wgpu
@@ -92,25 +99,30 @@ export WGPU_BACKEND := "gl"
 default:
     @just --list
 
-# Today's zengui still reads v1 (#614 ports it pane by pane), so it shows
-# every zk2 key as a foreign key: counts, rates and structural payloads,
-# unlabelled rather than mislabelled — the key-agnostic core's promise. No
-# registry: there is no v1 subject here to badge.
+# zengui reads its deployment on zk2 since #614 FL6a: `--namespace spray`
+# opens a session in the namespace for presence and the lens, and every zk2
+# key is checked through its contract — the four conformance poles on the
+# echo rows and the tree's leaves, the contract decode in the Inspector.
+# The tree itself is still v1's until FL6b, so zk2 keys are unlabelled rows.
+# The contracts come offline from examples/zk2/.history.
 # The GUI against the zk2 demo traffic — start here. Ctrl-C stops both.
-gui-demo port=port: (_demo port "spray" "" "50000")
+gui-demo port=port: (_demo port "spray" "--namespace spray --contracts examples/zk2/.history" "50000")
 
-# `spray_v1` keeps the registry badges, blob, config and media demos until
-# FL11.
+# No contracts named: every revision a descriptor names is retrieved from the
+# spray's own holders (spec §8.4), and the strip counts them as retrieved.
+# The zk2 demo with no offline contracts: retrieval from the bus.
+gui-demo-no-contracts port=port: (_demo port "spray" "--namespace spray" "50000")
+
+# `spray_v1` keeps the blob, config and media demos until FL11. Since FL6a
+# the window loads no v1 registry, so its keys are foreign and their
+# registration badges read "not asked".
 # The GUI against the v1 demo traffic it was built for.
-gui-demo-v1 port=port: (_demo port "spray_v1" registry "50000")
+gui-demo-v1 port=port: (_demo port "spray_v1" "" "50000")
 
 # The v1 demo with a key bound small enough to trip immediately.
-gui-demo-bounded port=port: (_demo port "spray_v1" registry "6")
+gui-demo-bounded port=port: (_demo port "spray_v1" "" "6")
 
-# The v1 demo with no registry loaded, so badges read "not asked".
-gui-demo-no-registry port=port: (_demo port "spray_v1" "" "50000")
-
-_demo port example registry_dir max_keys:
+_demo port example flags max_keys:
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -p zengui --example {{example}}
@@ -127,8 +139,7 @@ _demo port example registry_dir max_keys:
     done
     echo "{{example}} publishing on tcp/127.0.0.1:{{port}} (log: {{rundir}}/{{example}}.log)"
     ./target/debug/zengui -c tcp/127.0.0.1:{{port}} \
-        --max-keys {{max_keys}} \
-        {{ if registry_dir == "" { "" } else { "--registry " + registry_dir } }}
+        --max-keys {{max_keys}} {{flags}}
 
 # Just the zk2 traffic: it listens as a router, so anything can connect to it.
 spray port=port:
@@ -163,8 +174,8 @@ smoke-spray:
     echo "doctor exit $? (1: the findings above are the spray's own)"
 
 # Just the GUI, against an already-running bus.
-gui port=port:
-    cargo run -p zengui -- -c tcp/127.0.0.1:{{port}} --registry {{registry}}
+gui port=port namespace="spray":
+    cargo run -p zengui -- -c tcp/127.0.0.1:{{port}} --namespace {{namespace}}
 
 # The CLI, for cross-checking the GUI's numbers against the same engine.
 ctl *ARGS:

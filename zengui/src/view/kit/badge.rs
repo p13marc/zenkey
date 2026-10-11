@@ -153,9 +153,9 @@ pub fn badge_coverage<'a, M: 'a>(
 }
 
 /// A payload-conformance verdict badge (#164) — theme-resolved like
-/// [`tone_badge`], glyph from the tone. Three states, never a boolean, and
-/// the call sites derive the tone from a [`zenkey_v1::schema::validate::Verdict`]
-/// through [`crate::verdict::tone`] so "not validated" can never be collapsed
+/// [`tone_badge`], glyph from the tone. Four poles, never a boolean, and
+/// the call sites derive the tone from a zk2 `Conformance` (#614, FL6a)
+/// through [`crate::verdict::tone`] so "not checked" can never be collapsed
 /// into either answer.
 pub fn badge_verdict<'a, M: 'a>(
     tone: crate::view::theme::VerdictTone,

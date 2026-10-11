@@ -44,6 +44,15 @@ sub_state! {
         /// Bumped per monitor generation — the pump's identity.
         pub(crate) epoch: u64,
         pub(crate) link: LinkState,
+        /// The presence monitor (#614, FL6a): its own, on the session in the
+        /// namespace, watching nothing but the token selectors — so the data
+        /// pump's `Dropped(n)` can never knock presence to lost. `None` until
+        /// a namespaced session exists.
+        pub(crate) presence_monitor: Option<Arc<zenkey_fleet::Monitor>>,
+        /// Bumped whenever the presence link must restart — a new presence
+        /// monitor, or a new contract store under the lens: the link's
+        /// identity, and the epoch every presence landing carries.
+        pub(crate) presence_epoch: u64,
 
         pub(crate) observed: Arc<KeyTreeSnapshot>,
         /// Active watch selectors, as the last tick reported them (coverage, O5).
@@ -90,6 +99,8 @@ impl Default for Observation {
         Observation {
             monitor: None,
             epoch: 0,
+            presence_monitor: None,
+            presence_epoch: 0,
             link: LinkState::Connecting,
             observed: Arc::new(KeyTreeSnapshot::default()),
             watched: std::sync::Arc::from([] as [String; 0]),

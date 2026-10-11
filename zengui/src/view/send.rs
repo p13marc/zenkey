@@ -448,7 +448,11 @@ fn publish_body<'a>(
             .on_input(|t| msg(SendMsg::KeyChanged(t)))
             .font(face::MONO)
             .size(font::CAPTION),
-        Some("a full wire key, base included — this session is un-namespaced (RFC 09 §5)".into()),
+        Some(
+            "a full wire key, namespace included — it is written on the session in no \
+             namespace, and a key a zk2 service owns is refused (P3)"
+                .into(),
+        ),
     );
 
     // KeyFacts feedback as you type — the same classification ladder the tree

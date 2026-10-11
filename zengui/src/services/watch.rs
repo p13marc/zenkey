@@ -71,6 +71,48 @@ pub fn shutdown(monitor: Arc<Monitor>) -> Task<Message> {
     .discard()
 }
 
+/// Start the presence monitor on the session in `namespace` (#614, FL6a):
+/// zk2's three token selectors and nothing else
+/// (`MonitorSpec::with_presence`), its own broadcast, and no stats ticks
+/// worth the name — zenwatch's shape. Lands on `PresenceStarted` with the
+/// namespace it was started in, so one the window has since left is
+/// dropped.
+pub fn start_presence(session: zenoh::Session, namespace: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            let spec = zenkey_fleet::MonitorSpec {
+                // Presence moves arrive as events; a stats tick on a monitor
+                // that watches no samples would be noise.
+                stats_tick: std::time::Duration::from_secs(3600),
+                ..zenkey_fleet::MonitorSpec::default()
+            }
+            .with_presence("", &zenkey_fleet::PresenceScope::all());
+            let r = zenkey_fleet::Monitor::start(&session, spec)
+                .await
+                .map(Arc::new)
+                .map_err(ServiceError::of);
+            (namespace, r)
+        },
+        |(namespace, r)| Message::Bus(BusMsg::PresenceStarted(namespace, r)),
+    )
+}
+
+/// End the presence monitor, acknowledged when this handle is the last —
+/// [`shutdown`]'s shape, for the zk2 monitor the presence link drives.
+pub fn shutdown_presence(monitor: Arc<zenkey_fleet::Monitor>) -> Task<Message> {
+    Task::future(async move {
+        match Arc::try_unwrap(monitor) {
+            Ok(monitor) => {
+                if let Err(e) = monitor.shutdown().await {
+                    tracing::warn!("presence monitor shutdown: {e}");
+                }
+            }
+            Err(shared) => drop(shared),
+        }
+    })
+    .discard()
+}
+
 /// Watch one subtree, seeding it first (issue #92).
 ///
 /// The seed is what makes an observation honest on arrival: current state comes

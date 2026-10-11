@@ -1,4 +1,5 @@
-//! One key's value: fetching it, and decoding what came back (#175).
+//! One key's value: fetching it (v1 until FL8a), and checking what came back
+//! through the lens (#175; zk2's lens since #614, FL6a).
 
 use std::sync::Arc;
 
@@ -26,29 +27,63 @@ pub fn fetch(session: zenoh::Session, key: String) -> Task<Message> {
     )
 }
 
-/// Decode one fetched payload through the RFC 08 §7 ladder.
+/// What a lens is built from, owned (#614, FL6a), so a task can build one
+/// off the update thread: the namespace, the presence read behind it, the
+/// contract store, the contracts held offline and the generation they were
+/// all at. `Deployment::lens_inputs` takes them; [`LensInputs::lens`] is
+/// the same lens the update thread resolves with.
+#[derive(Clone)]
+pub struct LensInputs {
+    pub namespace: String,
+    /// The catalog the lens feed last swapped in; `None` when no presence
+    /// read stands — every zk2 key then stops at its rung, and says so.
+    pub catalog: Option<Arc<zenkey_fleet::Catalog>>,
+    pub store: zenkey_fleet::BundleStore,
+    /// The revisions held offline: without a presence read, an interface
+    /// of which exactly one revision is held resolves through it.
+    pub contracts: Option<Arc<zenkey_fleet::ContractSet>>,
+    pub generation: u64,
+    /// The lens feed, when one is open: a key that resolved short of a
+    /// provider or a revision nudges it into a background re-read
+    /// (`LensFeed::nudge`). From a task, because the nudge spawns.
+    pub feed: Option<zenkey_fleet::LensFeed>,
+}
+
+impl LensInputs {
+    /// The lens over these inputs.
+    pub fn lens(&self) -> zenkey_fleet::Lens<'_> {
+        let lens = zenkey_fleet::Lens::new(&self.namespace, self.catalog.as_deref(), &self.store)
+            .held(self.contracts.as_ref().map_or(0, |c| c.len()))
+            .at_generation(self.generation);
+        match &self.contracts {
+            Some(set) => lens.offline(set),
+            None => lens,
+        }
+    }
+
+    /// Nudge the feed with the rung a key stopped at; the feed itself
+    /// decides whether that rung is worth a re-read, and how often.
+    pub fn nudge(&self, why: Option<&zenkey_fleet::report::Unresolved>) {
+        if let Some(feed) = &self.feed {
+            feed.nudge(why);
+        }
+    }
+}
+
+/// Check one fetched payload through the lens (#614, FL6a; spec §7.2, §7.3).
 ///
-/// A `Task` and never the render path: `decode_sample` may fetch a producer's
-/// `describe` on a first miss, so it can touch the bus.
+/// A `Task` and never the render path: a decode is unbounded work, and a
+/// key that stops short of a provider nudges the lens feed, which spawns.
 ///
-/// `fetched_key` and `wire_key` are deliberately two parameters. The first is
-/// what the *selection* asked for and is what the landing message is keyed by;
-/// the second is what the reply actually carried. They are usually equal and
-/// the code must not assume it.
-///
-/// `slices: None` = no registry was loaded; the decode still runs, so the
-/// verdict is `NotValidated(NoRegistry)` — "nobody looked" rendered as
-/// itself, never omitted and never dressed as `NoSchema` (#164, #246).
+/// `fetched_key` and `wire_key` are deliberately two fields. The first is
+/// what the *selection* asked for and is what the landing message is keyed
+/// by; the second is what the reply actually carried. They are usually
+/// equal and the code must not assume it (#360).
 pub struct Decode {
-    pub store: Arc<zenkey_fleet_v1::SchemaStore>,
-    pub session: zenoh::Session,
-    pub slices: Option<Arc<zenkey_fleet_v1::SliceSet>>,
-    pub base: String,
+    pub lens: LensInputs,
     /// What the *selection* asked for — the landing message is keyed by it.
     pub fetched_key: String,
-    /// What the reply actually carried. Usually equal to `fetched_key`, and a
-    /// field rather than a position because transposing the two filed a decode
-    /// under the wrong key and nothing complained (#360).
+    /// What the reply actually carried.
     pub wire_key: String,
     pub encoding: String,
     pub bytes: zenoh::bytes::ZBytes,
@@ -58,64 +93,53 @@ pub fn decode(d: Decode) -> Task<Message> {
     Task::perform(
         async move {
             let Decode {
-                store,
-                session,
-                slices,
-                base,
+                lens,
                 fetched_key,
                 wire_key,
                 encoding,
                 bytes,
             } = d;
-            let d = zenkey_fleet_v1::decode_sample(
-                &zenkey_fleet_v1::Fleet::new(&session, &base),
-                &store,
-                slices.as_deref(),
-                &wire_key,
-                Some(&encoding),
-                &bytes.to_bytes(),
-            )
-            .await;
-            // The verdict rides the sample (#159) and lands whole: the
+            let bytes = bytes.to_bytes();
+            let encoding = (!encoding.is_empty()).then_some(encoding.as_str());
+            let checked =
+                lens.lens()
+                    .check(&wire_key, zenkey_fleet::Member::Type, encoding, &bytes);
+            lens.nudge(checked.identity.unresolved.as_ref());
+            // The conformance rides the check and lands whole: the
             // Inspector renders it, and the cache learns it (#164). The
             // document is rendered here too (#345) — once, off the update
-            // thread, rather than re-serialized on every redraw of the pane
-            // that shows it.
-            (fetched_key, Arc::new(crate::value::DecodedValue::new(d)))
+            // thread, rather than re-serialized on every redraw.
+            (
+                fetched_key,
+                Arc::new(crate::value::DecodedValue::new(checked, &bytes)),
+            )
         },
         |(k, d)| Message::Subject(SubjectMsg::ValueDecoded(k, d)),
     )
 }
 
-/// Validate one bounded batch of observed samples (#164).
+/// Check one bounded batch of observed samples (#164) through the lens
+/// (#614, FL6a).
 ///
 /// The verdict cache's fill path: `update/bus.rs` picks at most
 /// [`crate::verdict::VALIDATE_PER_TICK`] keys from the tick's samples and
-/// hands their payloads here — a `Task`, because `decode_sample` may fetch a
-/// producer's `describe` on a first miss. The render paths only ever *read*
-/// the cache this lands in.
+/// hands their payloads here — a `Task`, because a decode is unbounded work
+/// and a key short of a provider nudges the feed. The render paths only
+/// ever *read* the cache this lands in.
 pub fn validate(
-    store: Arc<zenkey_fleet_v1::SchemaStore>,
-    session: zenoh::Session,
-    slices: Option<Arc<zenkey_fleet_v1::SliceSet>>,
-    base: String,
+    lens: LensInputs,
     batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let fleet = zenkey_fleet_v1::Fleet::new(&session, &base);
+            let over = lens.lens();
             let mut out = Vec::with_capacity(batch.len());
             for (key, encoding, bytes) in batch {
-                let d = zenkey_fleet_v1::decode_sample(
-                    &fleet,
-                    &store,
-                    slices.as_deref(),
-                    &key,
-                    Some(&encoding),
-                    &bytes.to_bytes(),
-                )
-                .await;
-                out.push((key, d.verdict));
+                let bytes = bytes.to_bytes();
+                let encoding = (!encoding.is_empty()).then_some(encoding.as_str());
+                let checked = over.check(&key, zenkey_fleet::Member::Type, encoding, &bytes);
+                lens.nudge(checked.identity.unresolved.as_ref());
+                out.push((key, checked.conformance));
             }
             out
         },

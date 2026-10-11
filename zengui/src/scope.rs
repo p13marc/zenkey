@@ -1,37 +1,36 @@
 //! What zengui subscribes to, and how it says so honestly.
 //!
-//! Selectors are **never** built with `format!`. Base-relative selectors come
-//! from `zenkey_v1::selector`'s typed builders and are lifted to the wire with
-//! `grammar::with_base` — the same path `zenctl` takes. That is a convention of
-//! this repo, and here it is also load-bearing: the D4 trap below is exactly
-//! the kind of thing a hand-written string gets wrong.
+//! Selectors are **never** built with `format!`. A preset's selectors come
+//! from `zenkey_model::grammar`'s typed builders — [`AMBIENT`] and
+//! [`kind_selector`] — and are lifted to the wire with
+//! `zenkey_fleet::with_namespace`, the same path zenctl's raw observers take.
+//! The data pump watches on the session in **no** namespace (#614, FL6a), so
+//! every selector here is a wire selector, the deployment's namespace in
+//! front: that is what lets a key outside the deployment show up at all.
 //!
 //! # What `**` actually reaches
 //!
-//! Verified against zenoh 1.9: `*` and `**` **never match a chunk beginning
-//! with `@`**. This is RFC 03 §4 **D2**, pinned executably in
-//! `zenkey/tests/guard.rs`, and it cuts both ways:
+//! Zenoh's `*` and `**` **never match a verbatim chunk** — one beginning with
+//! `@` (core §1.3). It cuts both ways:
 //!
-//! - A `**` subscription **cannot** pull `@media` video frames, `@blob` bulk,
-//!   `@rpc` replies, `@adv` sidecars, or the admin space. The raw scope is
-//!   media-safe by key algebra, not by policy — no defensive narrowing needed.
+//! - A `**` subscription **cannot** pull an explicit `@stream` (high rate,
+//!   large: camera frames), an `@state` population, an `@op` reply, the `@zk`
+//!   control keys or the admin space. The raw scope is safe by key algebra,
+//!   not by policy — no defensive narrowing needed.
 //! - `**` is therefore **not "everything"**, and calling it that would be a
-//!   lie. It silently omits every verbatim plane, most importantly `@catalog`.
-//!   An explorer that shows `**` and reports "no entities" when the catalog is
-//!   merely unmatched has produced the false verdict RFC 05 §3.1 and D4's
-//!   corollary forbid. Hence [`ScopePreset::label`], and hence `@catalog`'s
-//!   liveliness token being named explicitly in every roster.
+//!   lie. A preset that wants an explicit kind names it ([`ScopePreset::Explicit`]),
+//!   and every selector carries a line saying which verbatim chunks it cannot
+//!   see ([`blind_spot`], from `zenkey_model::grammar::blind_spots`).
 
 use anyhow::{Result, bail};
-use zenkey_v1::grammar::with_base;
-use zenkey_v1::origin::ServiceOrigin;
-use zenkey_v1::selector::{self, Scope};
+use zenkey_model::grammar::{AMBIENT, KindToken, kind_selector};
 
-/// The base placeholder used before the deployment base is known.
+/// The raw scope: every plain-chunk key under any prefix, every namespace's
+/// and none.
 ///
-/// `**` spans any number of chunks *including zero*, so a single sweep covers
-/// every base and the base-less bus root alike (RFC 09 §5's discovery recipe).
-pub const ANY_BASE: &str = "**";
+/// `**` spans any number of chunks *including zero*, so one selector covers
+/// every namespace and the bus root alike.
+pub const EVERYTHING: &str = "**";
 
 /// What to watch.
 ///
@@ -44,11 +43,18 @@ pub const ANY_BASE: &str = "**";
 pub enum ScopePreset {
     /// Every plain-chunk key on the bus. The key-agnostic default.
     Everything,
-    /// The three data classes of one deployment, plus `@catalog`.
+    /// The deployment's ambient keys: `<namespace>/zk2/**`.
     Deployment,
-    Telemetry,
+    /// The deployment's ambient streams. v1 called the preset `telemetry`,
+    /// and a remembered or typed `telemetry` still reads as this one.
+    #[serde(alias = "telemetry")]
+    #[value(alias = "telemetry")]
+    Streams,
     State,
     Events,
+    /// The explicit-only kinds, named: `@stream` and `@state` (core §1.3).
+    /// No ambient selector ever delivers one.
+    Explicit,
     /// User-supplied key expressions.
     Custom,
 }
@@ -65,12 +71,13 @@ impl ScopePreset {
     /// the #187 defect: the picker hardcoded five presets, so launching with
     /// `--scope custom` produced a `pick_list` whose selected value was not
     /// among its own options.
-    pub const ALL: [ScopePreset; 6] = [
+    pub const ALL: [ScopePreset; 7] = [
         ScopePreset::Everything,
         ScopePreset::Deployment,
-        ScopePreset::Telemetry,
+        ScopePreset::Streams,
         ScopePreset::State,
         ScopePreset::Events,
+        ScopePreset::Explicit,
         ScopePreset::Custom,
     ];
 
@@ -79,9 +86,10 @@ impl ScopePreset {
         match self {
             ScopePreset::Everything => "everything",
             ScopePreset::Deployment => "deployment",
-            ScopePreset::Telemetry => "telemetry",
+            ScopePreset::Streams => "streams",
             ScopePreset::State => "state",
             ScopePreset::Events => "events",
+            ScopePreset::Explicit => "explicit",
             ScopePreset::Custom => "custom",
         }
     }
@@ -90,83 +98,52 @@ impl ScopePreset {
     pub fn label(self) -> &'static str {
         match self {
             ScopePreset::Everything => {
-                "all plain-chunk traffic — @rpc/@media/@blob/@catalog excluded by key algebra (RFC 03 §4 D2)"
+                "all plain-chunk traffic — @stream/@state/@op/@zk and the admin space excluded by key algebra (core §1.3)"
             }
-            ScopePreset::Deployment => "the deployment's data classes, plus @catalog",
-            ScopePreset::Telemetry => "one deployment's telemetry",
-            ScopePreset::State => "one deployment's state",
-            ScopePreset::Events => "one deployment's events",
+            ScopePreset::Deployment => {
+                "the deployment's ambient keys (zk2/**) — its explicit @stream/@state, @op and @zk excluded"
+            }
+            ScopePreset::Streams => "the deployment's ambient streams",
+            ScopePreset::State => "the deployment's ambient state",
+            ScopePreset::Events => "the deployment's events",
+            ScopePreset::Explicit => {
+                "the deployment's explicit @stream and @state, named — high rate or large"
+            }
             ScopePreset::Custom => "user-supplied key expressions",
         }
     }
 
     /// The wire selectors this preset subscribes to.
     ///
-    /// `base` is the active deployment base; the empty base is legal and means
-    /// the bus root, for which `with_base` is the identity.
-    pub fn selectors(self, base: &str, custom: &[String]) -> Vec<String> {
+    /// `namespace` is the active deployment namespace; the empty one is legal
+    /// and means the bus root, for which `with_namespace` is the identity.
+    pub fn selectors(self, namespace: &str, custom: &[String]) -> Vec<String> {
+        let kind = |k: KindToken| {
+            zenkey_fleet::with_namespace(namespace, kind_selector(None, None, None, k))
+        };
         match self {
-            ScopePreset::Everything => vec![ANY_BASE.to_string()],
-            ScopePreset::Deployment => vec![
-                with_base(base, selector::all_telemetry(Scope::fleet())),
-                with_base(base, selector::all_state(Scope::fleet())),
-                with_base(base, selector::all_events(Scope::fleet())),
-                // Named explicitly: `*` in the origin position never matches a
-                // verbatim service origin (RFC 03 §4 D4). Without this line the
-                // catalog is invisible and its absence reads as "no entities".
-                with_base(base, catalog_subtree()),
+            ScopePreset::Everything => vec![EVERYTHING.to_string()],
+            ScopePreset::Deployment => vec![zenkey_fleet::with_namespace(namespace, AMBIENT)],
+            ScopePreset::Streams => vec![kind(KindToken::Stream)],
+            ScopePreset::State => vec![kind(KindToken::State)],
+            ScopePreset::Events => vec![kind(KindToken::Events)],
+            // Named one by one: a verbatim kind is reached only by being
+            // spelled, and spelling one lends nothing to the other.
+            ScopePreset::Explicit => vec![
+                kind(KindToken::ExplicitStream),
+                kind(KindToken::ExplicitState),
             ],
-            ScopePreset::Telemetry => {
-                vec![with_base(base, selector::all_telemetry(Scope::fleet()))]
-            }
-            ScopePreset::State => vec![with_base(base, selector::all_state(Scope::fleet()))],
-            ScopePreset::Events => vec![with_base(base, selector::all_events(Scope::fleet()))],
             ScopePreset::Custom => custom.to_vec(),
         }
     }
 }
 
-/// The `@catalog` state subtree, base-relative.
-///
-/// `zenkey_v1::selector` has no builder for a service origin's whole state subtree
-/// (only `service_alive` and `service_rpc`), so this is assembled from the
-/// crate's own reserved tokens rather than a literal.
-fn catalog_subtree() -> String {
-    format!(
-        "{}/{}/{}/**",
-        zenkey_v1::grammar::VERSION_CHUNK,
-        ServiceOrigin::catalog().as_str(),
-        zenkey_v1::grammar::CLASS_STATE,
-    )
-}
-
-/// The liveliness selectors for a roster.
-///
-/// Always two, never one. RFC 04 §5 makes the per-producer `alive` token the
-/// only presence signal a dashboard may read, and RFC 03 §4 D4 means the fleet
-/// sweep cannot reach `@catalog` — so "catalog dead" and "no entities" are
-/// indistinguishable unless the service token is asked for by name (RFC 09 §1).
-///
-/// `base` may be [`ANY_BASE`] while the deployment base is still unknown.
-pub fn liveliness_selectors(base: &str) -> Vec<String> {
-    vec![
-        with_base(base, selector::all_liveliness(Scope::fleet())),
-        with_base(base, selector::service_alive(&ServiceOrigin::catalog())),
-    ]
-}
-
-/// The base-agnostic roster sweep, for use before a base has been chosen.
-pub fn liveliness_any_base() -> Vec<String> {
-    liveliness_selectors(ANY_BASE)
-}
-
 /// The tree display path of one origin's subtree (#61 click-through):
-/// assembled from the grammar's version chunk + a parsed origin chunk,
-/// lifted with the base — the same discipline as every other selector here
-/// (never `format!` of arbitrary user text; `origin` comes from a parsed
-/// liveliness token).
-pub fn origin_display_path(base: &str, origin: &str) -> String {
-    with_base(base, format!("v1/{origin}"))
+/// v1's `v1/<origin>`, lifted with the namespace. A v1 notion kept for the
+/// nodes pane's v1 subjects until FL9 replaces origins with addresses —
+/// `origin` comes from a parsed liveliness token, never typed text.
+pub fn origin_display_path(namespace: &str, origin: &str) -> String {
+    zenkey_fleet::with_namespace(namespace, ["v1", origin].join("/"))
 }
 
 /// The watch selector for one tree subtree: symbolic skeleton chunks widen
@@ -174,8 +151,8 @@ pub fn origin_display_path(base: &str, origin: &str) -> String {
 /// trailing `/**`.
 ///
 /// Verbatim chunks in the path are spelled literally, so watching an
-/// `@catalog` subtree works; verbatim planes *below* the subtree stay
-/// excluded by key algebra (RFC 03 §4 D2) — which the coverage label states
+/// `@stream` subtree works; verbatim chunks *below* the subtree stay
+/// excluded by key algebra (core §1.3) — which the coverage label states
 /// rather than hides.
 pub fn subtree_selector(display_path: &str) -> String {
     let mut chunks: Vec<String> = Vec::new();
@@ -196,32 +173,34 @@ pub fn subtree_selector(display_path: &str) -> String {
 }
 
 /// What one selector **cannot** see — the per-selector honesty line the
-/// key-expression editor renders (#187).
+/// key-expression editor renders (#187), in zk2's verbatim chunks (#614,
+/// FL6a).
 ///
-/// The rule users get wrong is RFC 03 §4 D2: `*` and `**` never cross a chunk
-/// beginning with `@`. So a wildcarded selector is media-safe by key algebra —
-/// and equally blind to `@catalog`; it is not "everything" and must never be
-/// labelled so. A verbatim `@` chunk is reached only by being spelled, and
-/// spelling one does not lend the selector's wildcards any reach into the
-/// *other* verbatim planes.
+/// The rule users get wrong is core §1.3's: `*` and `**` never cross a
+/// verbatim chunk. So a wildcarded selector is safe by key algebra — and
+/// equally blind to every verbatim chunk it does not spell; it is not
+/// "everything" and must never be labelled so. Which of `@stream`,
+/// `@state`, `@op` and `@zk` it cannot reach is
+/// `zenkey_model::grammar::blind_spots`'s answer, and any other `@` chunk
+/// (the admin space, an advanced publisher's `@adv`) is out of reach the
+/// same way.
 pub fn blind_spot(sel: &str) -> String {
     let has_wildcard = sel.split('/').any(|c| c.contains('*'));
-    let named: Vec<&str> = sel
-        .split('/')
-        .filter(|c| c.starts_with('@') && !c.contains('*'))
-        .collect();
     if !has_wildcard {
-        "literal — matches exactly the keys it spells, and nothing else".to_string()
-    } else if named.is_empty() {
-        "wildcards never cross an @ chunk (RFC 03 §4 D2) — \
-         cannot see @rpc, @media, @blob, @adv or @catalog"
-            .to_string()
-    } else {
-        format!(
-            "names {} explicitly; its wildcards still cannot cross any other \
-             @ chunk (RFC 03 §4 D2)",
-            named.join(", ")
-        )
+        return "literal — matches exactly the keys it spells, and nothing else".to_string();
+    }
+    match zenkey_model::grammar::blind_spots(sel) {
+        Ok(hidden) if hidden.is_empty() => {
+            "names every zk2 verbatim chunk it could reach; its wildcards still \
+             cannot cross any other @ chunk (core §1.3)"
+                .to_string()
+        }
+        Ok(hidden) => format!(
+            "wildcards never cross a verbatim chunk (core §1.3) — cannot see {}, \
+             nor any other @ chunk (the admin space, @adv)",
+            hidden.join(", ")
+        ),
+        Err(e) => format!("not a key expression: {e}"),
     }
 }
 
@@ -247,7 +226,8 @@ pub fn validate_selector(sel: &str) -> Result<()> {
 /// amplification §2 forbids, on the plane with the most bytes per second).
 /// This is the single place a media key is built, and it refuses rather
 /// than trusts: a `*`/`$`/`{var}` anywhere in the parts is an error naming
-/// the rule, so the pin is structural for every caller.
+/// the rule, so the pin is structural for every caller. A v1 plane, kept
+/// until FL11 removes the media viewer (no media.v1 yet, #613).
 pub fn media_key(
     base: &str,
     origin: &str,
@@ -279,7 +259,7 @@ pub fn media_key(
             ));
         }
     }
-    Ok(with_base(
+    Ok(zenkey_fleet::with_namespace(
         base,
         format!(
             "v1/{origin}/@media/{producer}/{}",
@@ -300,21 +280,21 @@ mod tests {
     }
 
     /// The claim the whole scope design rests on: a wildcard never crosses a
-    /// verbatim chunk (RFC 03 §4 D2). Pinned here, in zengui's own tests,
+    /// verbatim chunk (core §1.3). Pinned here, in zengui's own tests,
     /// because if it ever stopped holding the raw scope would start pulling
-    /// video frames into an echo pane.
+    /// camera frames into an echo pane.
     #[test]
     fn a_wildcard_never_crosses_a_verbatim_chunk() {
         let raw = &ScopePreset::Everything.selectors("", &[])[0];
         assert!(intersects(
             raw,
-            "zensight/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage"
+            "spray/zk2/robot1/nav/nav.v2/stream/position"
         ));
         for hidden in [
-            "zensight/v1/h-3fa9c2d41b7e/@media/parallax/cam0/video/h264/hi",
-            "zensight/v1/h-3fa9c2d41b7e/@blob/store/sha256/abcdef01",
-            "zensight/v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect",
-            "zensight/v1/@catalog/state/entity/x",
+            "spray/zk2/robot1/camera/camera.v1/@stream/frames",
+            "spray/zk2/fleet/planner/mission_plan.v1/@state/plans/r1",
+            "spray/zk2/robot1/nav/nav.v2/@op/set_origin",
+            "spray/zk2/robot1/nav/@zk/instance/0123456789abcdef",
             "@/router/abc",
         ] {
             assert!(!intersects(raw, hidden), "{raw} must not reach {hidden}");
@@ -326,88 +306,104 @@ mod tests {
     fn the_raw_scope_does_not_claim_to_be_everything() {
         let label = ScopePreset::Everything.label();
         assert!(label.contains("plain-chunk"), "{label}");
-        assert!(label.contains("D2"), "{label}");
+        assert!(label.contains("@stream"), "{label}");
+        assert!(label.contains("§1.3"), "{label}");
     }
 
-    /// The D4 regression guard: dropping this selector is a silent coverage
-    /// loss that reads to the user as a dead catalog.
+    /// The Deployment preset is the namespace's ambient selector — and an
+    /// ambient selector is the guard: it never delivers an explicit kind,
+    /// an `@op` reply or a control key (core §1.3).
     #[test]
-    fn the_deployment_scope_names_the_catalog_explicitly() {
-        let sels = ScopePreset::Deployment.selectors("zensight", &[]);
-        let catalog_key = "zensight/v1/@catalog/state/entity/x";
-        assert!(
-            sels.iter().any(|s| intersects(s, catalog_key)),
-            "no selector in {sels:?} reaches {catalog_key}"
+    fn the_deployment_scope_is_the_ambient_selector_in_the_namespace() {
+        assert_eq!(
+            ScopePreset::Deployment.selectors("spray", &[]),
+            ["spray/zk2/**"]
         );
-        // And it is a *distinct* selector — the fleet ones genuinely cannot.
-        for s in sels.iter().filter(|s| !s.contains("@catalog")) {
-            assert!(!intersects(s, catalog_key), "{s} should not reach it");
-        }
-    }
-
-    /// Presence needs both tokens, for the same D4 reason.
-    #[test]
-    fn the_roster_watches_both_the_fleet_and_the_catalog() {
-        let sels = liveliness_selectors("zensight");
-        assert_eq!(sels.len(), 2);
-        assert!(
-            sels.iter()
-                .any(|s| intersects(s, "zensight/v1/h-3fa9c2d41b7e/state/sysinfo/alive"))
-        );
-        assert!(
-            sels.iter()
-                .any(|s| intersects(s, "zensight/v1/@catalog/state/alive"))
-        );
-    }
-
-    /// `**` spans zero chunks, so one sweep covers every base *and* the
-    /// base-less bus root (RFC 09 §5).
-    #[test]
-    fn the_any_base_roster_covers_named_and_empty_bases() {
-        let sels = liveliness_any_base();
-        for key in [
-            "v1/h-3fa9c2d41b7e/state/sysinfo/alive",
-            "zensight/v1/h-3fa9c2d41b7e/state/sysinfo/alive",
-            "acme/fleet-a/v1/h-3fa9c2d41b7e/state/sysinfo/alive",
-        ] {
-            assert!(sels.iter().any(|s| intersects(s, key)), "{key}");
-        }
-    }
-
-    /// The empty base is the identity, so a base-less deployment gets clean
-    /// `v1/...` selectors rather than a leading slash.
-    #[test]
-    fn the_empty_base_yields_bus_root_selectors() {
-        let sels = ScopePreset::Deployment.selectors("", &[]);
-        for s in &sels {
-            assert!(s.starts_with("v1/"), "{s}");
-        }
-        assert!(
-            sels.iter()
-                .any(|s| intersects(s, "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage"))
-        );
-    }
-
-    /// A multi-chunk base is legal (RFC 03 §1.1).
-    #[test]
-    fn multi_chunk_bases_compose() {
-        let sels = ScopePreset::Telemetry.selectors("acme/fleet-a", &[]);
+        assert_eq!(ScopePreset::Deployment.selectors("", &[]), ["zk2/**"]);
+        let sel = &ScopePreset::Deployment.selectors("spray", &[])[0];
         assert!(intersects(
-            &sels[0],
-            "acme/fleet-a/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage"
+            sel,
+            "spray/zk2/host-a/tc/tc.netif.v1/state/default/eth0"
+        ));
+        assert!(!intersects(
+            sel,
+            "elsewhere/zk2/host-a/tc/tc.netif.v1/state/default/eth0"
+        ));
+        assert!(!intersects(
+            sel,
+            "spray/zk2/robot1/camera/camera.v1/@stream/frames"
         ));
     }
 
-    /// RFC 03 §4 D3: the class presets are pairwise disjoint.
+    /// The explicit preset names both explicit kinds, each on its own — and
+    /// neither reaches the other's keys, nor an ambient one.
     #[test]
-    fn class_presets_are_disjoint() {
-        let classes = [
-            ScopePreset::Telemetry,
+    fn the_explicit_scope_names_each_explicit_kind() {
+        let sels = ScopePreset::Explicit.selectors("spray", &[]);
+        assert_eq!(sels.len(), 2);
+        let frames = "spray/zk2/robot1/camera/camera.v1/@stream/frames";
+        let plans = "spray/zk2/fleet/planner/mission_plan.v1/@state/plans/r1";
+        assert!(intersects(&sels[0], frames) && !intersects(&sels[0], plans));
+        assert!(intersects(&sels[1], plans) && !intersects(&sels[1], frames));
+        for s in &sels {
+            assert!(!intersects(
+                s,
+                "spray/zk2/robot1/nav/nav.v2/stream/position"
+            ));
+        }
+    }
+
+    /// `telemetry` is v1's word for the ambient streams (#614, FL6a): a
+    /// typed `--scope telemetry` still parses, and as `streams`.
+    #[test]
+    fn telemetry_is_an_alias_of_streams() {
+        use clap::ValueEnum as _;
+        assert_eq!(
+            ScopePreset::from_str("telemetry", false),
+            Ok(ScopePreset::Streams)
+        );
+        assert_eq!(
+            ScopePreset::from_str("streams", false),
+            Ok(ScopePreset::Streams)
+        );
+    }
+
+    /// The empty namespace is the identity, so a bus-root deployment gets
+    /// clean `zk2/...` selectors rather than a leading slash.
+    #[test]
+    fn the_empty_namespace_yields_bus_root_selectors() {
+        for preset in ScopePreset::ALL {
+            for s in preset.selectors("", &["demo/**".into()]) {
+                assert!(!s.starts_with('/'), "{preset}: {s}");
+            }
+        }
+        assert!(intersects(
+            &ScopePreset::Streams.selectors("", &[])[0],
+            "zk2/robot1/nav/nav.v2/stream/position"
+        ));
+    }
+
+    /// A multi-chunk namespace is legal (core §1.6).
+    #[test]
+    fn multi_chunk_namespaces_compose() {
+        let sels = ScopePreset::State.selectors("acme/fleet-a", &[]);
+        assert!(intersects(
+            &sels[0],
+            "acme/fleet-a/zk2/host-a/tc/tc.netif.v1/state/default/eth0"
+        ));
+    }
+
+    /// Positions 1–5 have fixed arity (core §1.3), so the kind presets are
+    /// pairwise disjoint.
+    #[test]
+    fn kind_presets_are_disjoint() {
+        let kinds = [
+            ScopePreset::Streams,
             ScopePreset::State,
             ScopePreset::Events,
         ];
-        for (i, a) in classes.iter().enumerate() {
-            for (j, b) in classes.iter().enumerate() {
+        for (i, a) in kinds.iter().enumerate() {
+            for (j, b) in kinds.iter().enumerate() {
                 let (sa, sb) = (a.selectors("zs", &[]), b.selectors("zs", &[]));
                 assert_eq!(intersects(&sa[0], &sb[0]), i == j, "{a} vs {b}");
             }
@@ -421,9 +417,10 @@ mod tests {
         for preset in [
             ScopePreset::Everything,
             ScopePreset::Deployment,
-            ScopePreset::Telemetry,
+            ScopePreset::Streams,
             ScopePreset::State,
             ScopePreset::Events,
+            ScopePreset::Explicit,
             ScopePreset::Custom,
         ] {
             // The match is the exhaustiveness proof: a new variant fails to
@@ -432,39 +429,42 @@ mod tests {
             match preset {
                 ScopePreset::Everything
                 | ScopePreset::Deployment
-                | ScopePreset::Telemetry
+                | ScopePreset::Streams
                 | ScopePreset::State
                 | ScopePreset::Events
+                | ScopePreset::Explicit
                 | ScopePreset::Custom => {}
             }
             assert!(ScopePreset::ALL.contains(&preset), "{preset} not offered");
         }
     }
 
-    /// The editor's per-selector honesty line (#187): a wildcard scope names
-    /// what it cannot see, a literal admits it sees only itself, and a spelled
-    /// verbatim chunk does not launder the rest of the planes in.
+    /// The editor's per-selector honesty line (#187), in zk2's verbatim
+    /// chunks (#614, FL6a): a wildcard scope names what it cannot see, a
+    /// literal admits it sees only itself, and a spelled verbatim kind does
+    /// not launder the others in.
     #[test]
     fn a_blind_spot_line_names_what_the_selector_cannot_see() {
         let raw = blind_spot("**");
-        assert!(raw.contains("D2"), "{raw}");
-        assert!(raw.contains("@catalog"), "{raw}");
-        assert!(raw.contains("@media"), "{raw}");
+        assert!(raw.contains("§1.3"), "{raw}");
+        for chunk in ["@stream", "@state", "@op", "@zk"] {
+            assert!(raw.contains(chunk), "{chunk}: {raw}");
+        }
 
-        let literal = blind_spot("zensight/v1/h-a/state/sysinfo/health");
+        let literal = blind_spot("spray/zk2/host-a/tc/tc.netif.v1/state/default/eth0");
         assert!(literal.contains("exactly"), "{literal}");
-        assert!(!literal.contains("D2"), "{literal}");
+        assert!(!literal.contains("§1.3"), "{literal}");
 
-        let named = blind_spot("v1/@catalog/state/**");
-        assert!(named.contains("@catalog"), "{named}");
-        assert!(named.contains("explicitly"), "{named}");
-        assert!(named.contains("D2"), "{named}");
+        let named = blind_spot("spray/zk2/*/*/*/@stream/**");
+        assert!(!named.contains("@stream,"), "it names @stream: {named}");
+        assert!(named.contains("@state"), "{named}");
+        assert!(named.contains("@op"), "{named}");
     }
 
     #[test]
     fn selector_validation_rejects_the_forbidden_forms() {
         assert!(validate_selector("demo/**").is_ok());
-        assert!(validate_selector("v1/*/state/**").is_ok());
+        assert!(validate_selector("zk2/*/*/*/state/**").is_ok());
         assert!(validate_selector("").is_err());
         assert!(validate_selector("   ").is_err());
         // RFC 03 §2 forbids `$*` in selectors, not only in published keys.
@@ -491,10 +491,10 @@ mod tests {
             subtree_selector("v1/h-abc/state/x/{path...}"),
             "v1/h-abc/state/x/**"
         );
-        // A verbatim origin is spelled literally.
+        // A verbatim kind is spelled literally.
         assert_eq!(
-            subtree_selector("v1/@catalog/state"),
-            "v1/@catalog/state/**"
+            subtree_selector("zk2/robot1/camera/camera.v1/@stream"),
+            "zk2/robot1/camera/camera.v1/@stream/**"
         );
     }
 
