@@ -84,8 +84,10 @@
 //!   `lens` (a raw observer's key resolved rung by rung, its payload
 //!   checked, its stamp attributed), `presence_live` (each address up, down
 //!   or unobservable, from a seed and the liveliness events after it, with
-//!   every move a value, #614), `skeleton` (the declared keyspace a tree
-//!   starts from, merged with what was observed, #614 FL4), `identity`
+//!   every move a value, #614), `presence_watch` (one watcher's reading of
+//!   it, held or gone per address a pattern matches: `instance-gone`'s in
+//!   zenctl and zenwatch alike, #747), `skeleton` (the declared keyspace a
+//!   tree starts from, merged with what was observed, #614 FL4), `identity`
 //!   (each key's resolution, kept and bounded), `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
@@ -264,6 +266,9 @@ pub use model::compat::compat;
 pub use model::presence_live::{
     DEFAULT_MAX_GONE, LiveAddress, LiveInstance, LivePresence, PresenceBasis, PresenceIgnored,
 };
+// `instance-gone`'s per-address reading of it (#747): one implementation
+// for zenctl's watchdog and zenwatch's rule.
+pub use model::presence_watch::{AddressMove, AddressWatch, covering_scope};
 // Its moves are wire shapes since zenwatch's notifications carry them (#614,
 // FL2): computed by `model::presence_live`, pinned in `report`, spelled here
 // as before.
