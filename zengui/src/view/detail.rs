@@ -20,7 +20,7 @@
 use iced::widget::{Column, row};
 use iced::{Element, Length};
 
-use zenkey_fleet_v1::{FetchOutcome, KeyFacts, KeyShape, Registration};
+use zenkey_fleet_v1::FetchOutcome;
 
 use crate::keyfacts::{KeyGroup, Resolution, Rung, Unresolved};
 use crate::message::{Message, PaneMsg, SlotId};
@@ -624,126 +624,6 @@ pub(crate) fn identity_section(
                 .collect::<Vec<_>>()
                 .join(" · "),
         ));
-    }
-    col.into()
-}
-
-/// v1's facts ladder for one key — kept for the send form's as-you-type
-/// feedback alone, which reads v1 facts on demand until FL10 moves it (#614,
-/// FL7). The Inspector draws [`identity_section`]; nothing else draws this.
-pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
-    let mut col = Column::new().spacing(sp.sm);
-    // The facts as fields (#539): an eyebrow over each value, wrapping to the
-    // width the section has — where they were one joined line. A field
-    // appears only when its fact exists, so absent stays absent rather than
-    // becoming a blank box.
-    let mut grid: Vec<Element<'_, Message>> = Vec::new();
-    match &f.shape {
-        KeyShape::V1(v) => {
-            grid.push(kit::field(
-                "ORIGIN",
-                row![
-                    kit::mono(v.origin.to_string()),
-                    kit::muted(match v.origin_kind {
-                        zenkey_fleet_v1::model::facts::OriginKind::Host => "host",
-                        zenkey_fleet_v1::model::facts::OriginKind::Service => "service",
-                    }),
-                ]
-                .spacing(sp.xs)
-                .align_y(iced::Alignment::Center),
-            ));
-            grid.push(kit::field("CLASS", kit::mono(v.class.to_string())));
-            if let Some(p) = v.producer.as_deref() {
-                grid.push(kit::field("PRODUCER", kit::mono(p.to_string())));
-            }
-            // The echo of a configuration resource (RFC 05 §5.1): the form
-            // that reads and changes it is one click away (#481).
-            if let Some(t) = crate::configure::config_target(f) {
-                let label = format!("configure {}", t.resource);
-                grid.push(
-                    kit::secondary(kit::labelled(kit::Icon::Config, label))
-                        .padding([0.0, sp.xs])
-                        .on_press(Message::Pane(PaneMsg::Config(
-                            crate::view::configure::ConfigMsg::Goto(t),
-                        )))
-                        .into(),
-                );
-            }
-        }
-        KeyShape::NotUnderBase => {
-            col = col.push(kit::muted(
-                "under a different deployment base (RFC 03 §1.1) — a fact, not an error",
-            ));
-        }
-        KeyShape::Unparsed { reason } => {
-            col = col.push(kit::muted(format!(
-                "not a keyspace-v2 key (O1: a fact): {reason}"
-            )));
-        }
-    }
-    let mut after: Vec<Element<'_, Message>> = Vec::new();
-    match &f.registration {
-        Registration::Registered(s) => {
-            col = col.push(kit::tone_badge(IdentityTone::Resolved, "registered"));
-            grid.push(kit::field("SUBJECT", kit::mono(s.path.to_string())));
-            grid.push(kit::field("TYPE", kit::mono(s.type_name.to_string())));
-            if let Some(u) = &s.unit {
-                grid.push(kit::field("UNIT", kit::mono(u.to_string())));
-            }
-            if let Some(k) = &s.kind {
-                grid.push(kit::field("KIND", kit::mono(k.to_string())));
-            }
-            if let Some(q) = &s.qos {
-                grid.push(kit::field("QOS", kit::mono(q.to_string())));
-            }
-            if let Some(t) = s.ttl_s {
-                grid.push(kit::field("TTL", kit::mono(format!("{t}s"))));
-            }
-            if let Some(e) = &s.encoding {
-                grid.push(kit::field("ENCODING", kit::mono(e.to_string())));
-            }
-            if let Some(w) = &s.when {
-                // RFC 08 §2 (v1.35): the gate, so silence reads as honest.
-                let tokens: Vec<String> =
-                    w.iter().map(zenkey_v1::slice::Predicate::token).collect();
-                grid.push(kit::field("WHEN", kit::mono(tokens.join(" and "))));
-            }
-            if let Some(e) = &s.exposure {
-                // RFC 08 §2 (v1.43): how far the value may travel.
-                grid.push(kit::field("EXPOSURE", kit::mono(e.token().to_string())));
-            }
-            if let Some(n) = &s.gate_note {
-                after.push(kit::muted(format!("gate: {n}")));
-            }
-            if !s.vars.is_empty() {
-                after.push(kit::muted(
-                    s.vars
-                        .iter()
-                        .map(|(k, v)| format!("{k} = {v}"))
-                        .collect::<Vec<_>>()
-                        .join(" · "),
-                ));
-            }
-        }
-        Registration::Unregistered => {
-            col = col.push(kit::tone_badge(IdentityTone::Short, "unregistered"));
-        }
-        Registration::NoSliceForProducer => {
-            col = col.push(kit::tone_badge(IdentityTone::Broken, "no slice"));
-        }
-        Registration::Unknown => {
-            col = col.push(kit::tone_badge(
-                IdentityTone::NotAsked,
-                "registry not asked",
-            ));
-        }
-        Registration::NotApplicable => {}
-    }
-    if !grid.is_empty() {
-        col = col.push(kit::fields(grid));
-    }
-    for e in after {
-        col = col.push(e);
     }
     col.into()
 }
