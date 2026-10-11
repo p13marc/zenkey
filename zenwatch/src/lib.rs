@@ -5,7 +5,8 @@
 //! process, one config, N rules, M sinks. A rule is one spelling of the
 //! closed [`rules::VOCABULARY`] — `zenctl watchdog`'s zk2 seven, plus
 //! `instance-gone <SYSTEM/SERVICE>` (each address up or gone, read from the
-//! fleet's live presence projection) and `liveliness-gone <SEL>` (the
+//! fleet's live presence projection by the reading `zenctl watchdog`'s rule
+//! folds too, #747) and `liveliness-gone <SEL>` (the
 //! dead-man's switch on liveliness tokens). `alerts` is dark until zk2's
 //! alarm profile exists (#613). A transition on any rule produces exactly
 //! one notification per sink, and the three states ride through —

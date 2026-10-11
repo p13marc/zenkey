@@ -46,7 +46,11 @@ than per rule:
   appearing under a pattern is an identity of its own. An address the
   operator named exactly is watched from the start: absent at the first
   look is down. Under a wildcard, nothing can be gone that was never seen.
-  It replaces v1's `origin-down`, which is refused with that said.
+  It replaces v1's `origin-down`, which is refused with that said. The
+  reading is the engine's (`AddressWatch`, #747), and `zenctl watchdog
+  --rule 'instance-gone …'` reads the same: there it is one state for the
+  rule, firing while any address is gone, unobservable while the
+  projection cannot see, else ok.
 - `liveliness-gone <SEL>` — the dead-man's switch: a token that
   disappears is firing, one that comes back is ok. On the deployment's own
   zk2 presence tokens (`site/zk2/<system>/<service>/@zk/…`, each position

@@ -7,6 +7,16 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — `instance-gone`, one reading with zenctl (#747)
+
+The address form's reading — `instance-gone`, and `liveliness-gone
+…/@zk/instance/*` — moved into the engine (`zenkey_fleet::AddressWatch`),
+and `zenctl watchdog`'s `instance-gone` reads the same one: what an
+address held and gone means, the first look, and what a pattern can call
+gone are decided once. Nothing a rule notifies changed, but one sentence:
+the observer back under a complete read says "every address under … is
+observable", without "again", in the words the watchdog's rule uses.
+
 ## Unreleased (`main`, zk2) — the write side on zk2 (#614, FL3)
 
 The daemon is a zk2 service of its own: `health.v1`, through the runtime,
