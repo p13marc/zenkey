@@ -205,8 +205,9 @@ pub(crate) struct GenArgs {
     #[arg(long = "bind", value_name = "ROLE=PROVIDERS")]
     pub(crate) binds: Vec<String>,
     /// Override every stream's and state's rate (Hz). Default: 1 Hz for a
-    /// stream, a state re-put every 2 s; an event stays within its
-    /// declared rate whatever this says (spec §2.6).
+    /// stream, a state re-put every 2 s; an event keeps its declared rate
+    /// whatever this says, and the plan says so where this asks for more
+    /// (spec §2.7).
     #[arg(long, value_name = "HZ")]
     pub(crate) rate: Option<f64>,
     /// Send-timing shape (all deterministic under --seed).
@@ -2013,7 +2014,9 @@ pub(crate) struct RecordArgs {
     /// <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
     /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `instance-gone
     /// <SYSTEM/SERVICE>`, `doctor <CHECK-ID>`, `dropped` — the rules that
-    /// read the deployment reading it in the namespace. The file carries a
+    /// read the deployment reading it in the namespace, `instance-gone` per
+    /// address on the live presence projection, as the watchdog's and
+    /// zenwatch's (#747). The file carries a
     /// state preamble (the owners' own answer, spec §4.2 S4), the pre-roll,
     /// the trigger record where it fired, then `--post` seconds more.
     #[arg(long, value_name = "RULE", requires = "pre")]
@@ -2331,12 +2334,18 @@ pub(crate) struct WatchdogArgs {
     /// `invalid-payload <SEL>` (a payload that does not decode as its
     /// declared type, or fails its JSON Schema), `qos-mismatch <SEL>` (a
     /// sample whose priority, congestion control or express differs from
-    /// its resource's, spec §2.4), `instance-gone <SYSTEM/SERVICE>` (no
-    /// instance token visible to this reader, §8.1 — v1's origin-down),
-    /// `doctor <CHECK-ID>`, `dropped`. Selectors are wire keys (this
-    /// session is in no namespace); the rules that read the deployment read
-    /// it through a second session in its namespace (`--namespace`), once
-    /// per tick, beside the drain.
+    /// its resource's, spec §2.4), `instance-gone <SYSTEM/SERVICE>` (`*`
+    /// in either position: each address the pattern matches is up while an
+    /// instance token is held, and gone when none is with a complete read
+    /// behind it, read from the live presence projection, §8.1 — under a
+    /// wildcard only an address seen held can go, and an exact address is
+    /// watched from the start; the rule fires while any address is gone,
+    /// zenwatch's rule notifying per address from the same reading; v1's
+    /// origin-down), `doctor <CHECK-ID>`, `dropped`. Selectors are wire
+    /// keys (this session is in no namespace); the rules that read the
+    /// deployment read it through a second session in its namespace
+    /// (`--namespace`): the lens and the doctor once per tick, beside the
+    /// drain, presence as it moves.
     #[arg(long = "rule", value_name = "RULE", required = true)]
     pub(crate) rules: Vec<String>,
     /// Seconds between evaluations — the one period flag (#307).

@@ -132,14 +132,19 @@ impl Render for GenReport {
     fn table(&self, t: &mut Table) {
         t.line(format!(
             "{} as instance {}: sent {} sample(s) over {:.1}s across {} entr(y|ies), answered {} \
-             call(s); {} not sent",
+             call(s); {} not sent{}",
             self.address,
             self.instance,
             self.sent,
             self.duration_s,
             self.entries,
             self.calls,
-            self.failed
+            self.failed,
+            if self.refused > 0 {
+                format!(", {} refused by the runtime's budget", self.refused)
+            } else {
+                String::new()
+            }
         ));
         let mut g = Grid::unheaded(2);
         for e in &self.first_errors {
@@ -149,13 +154,26 @@ impl Render for GenReport {
     }
 
     fn notes(&self) -> Vec<Note> {
-        if self.failed == 0 {
-            return Vec::new();
+        let mut notes = Vec::new();
+        if self.failed > 0 {
+            notes.push(Note::coverage(format!(
+                "{} sample(s) not sent — a value the synthesizer could not make valid, or a put \
+                 that failed — counted, never skipped, and never sent unchecked",
+                self.failed
+            )));
         }
-        vec![Note::coverage(format!(
-            "{} sample(s) not sent — a value the synthesizer could not make valid, or a put the \
-             runtime refused — counted, never skipped, and never sent unchecked",
-            self.failed
-        ))]
+        if self.refused > 0 {
+            notes.push(
+                Note::coverage(format!(
+                    "{} write(s) refused by the runtime's own budget, nothing published — an \
+                     occurrence beyond its event's rate, or a member beyond its resource's bound \
+                     — counted apart from the samples not sent: gen paces every event within its \
+                     declared rate, so each is a write it should not have attempted",
+                    self.refused
+                ))
+                .cite("spec §2.7"),
+            );
+        }
+        notes
     }
 }

@@ -10,8 +10,9 @@
 //! zk2's since #612 (FJ8b): the rule selectors are wire keys, watched on a
 //! session in no namespace, and the rules that read the deployment —
 //! `invalid-payload` and `qos-mismatch` through the lens, `instance-gone`
-//! through presence, `doctor` — read it through a second session in its
-//! namespace (`--namespace`, alias `--base`).
+//! per address on the live presence projection (the reading zenwatch's
+//! rule of the same name makes, #747), `doctor` — read it through a second
+//! session in its namespace (`--namespace`, alias `--base`).
 //!
 //! Output is ndjson regardless of `--format`: a stream of transitions has
 //! one honest encoding — a table redraw would be a state display, which is

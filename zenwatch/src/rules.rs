@@ -2,13 +2,16 @@
 //! owns.
 //!
 //! `instance-gone <SYSTEM/SERVICE>` and `liveliness-gone <SEL>` are **not**
-//! judged by the engine's watchdog, and the reason is structural: a
-//! [`Condition`] is one state per rule (a `RuleState`), while these are one
-//! state per *address* or per *token* — `*/tc` is every `tc` there is, each
-//! one up or gone on its own (#614, FL2). The engine judges its seven every
+//! judged by the engine's watchdog here, and the reason is structural: a
+//! [`Condition`] is one state per rule (a `RuleState`), while these notify
+//! per *address* or per *token* — `*/tc` is every `tc` there is, each one
+//! up or gone on its own (#614, FL2). The engine judges its seven every
 //! tick; the daemon reads the other two from the fleet's live presence
 //! projection ([`crate::presence`]) or its own token ledger
-//! ([`crate::liveliness`]). [`parse_rule`] is the one parser over the
+//! ([`crate::liveliness`]). `instance-gone` means one thing in both tools
+//! (#747): the per-address reading is the fleet's
+//! ([`zenkey_fleet::AddressWatch`]), which `zenctl watchdog` folds into its
+//! rule's one state and this daemon notifies from address by address. [`parse_rule`] is the one parser over the
 //! union, and its error spells the whole vocabulary, because closed means
 //! closed: no expressions, no templating.
 //!

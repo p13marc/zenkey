@@ -6,6 +6,35 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `instance-gone` per address, one meaning with zenwatch (#747)
+
+`instance-gone` reads the same in `zenctl watchdog`, `record --on` and
+zenwatch: per address, on the live presence projection (FL1), by one
+reading in the engine (`zenkey_fleet::AddressWatch`). zenwatch notifies
+from it address by address; the watchdog folds it into its rule's one
+state.
+
+| Before | Now | Notes |
+|---|---|---|
+| `watchdog --rule 'instance-gone <PATTERN>'`: one liveliness read of the pattern per tick; firing when a complete read found no instance token under it, ok while any matched | per address the pattern matches, on the live presence projection (seeded before the first window, then fed by liveliness events): an address is gone when none of its instances holds a token and a complete read stands behind it. The rule is **firing while any address is gone**, the evidence naming each; else **unobservable** while the projection cannot see; else ok | Under a wildcard an address seen held that goes fires, even while others hold: `instance-gone */tc` fires when `h2/tc` goes and `h1/tc` stays. A read that ended at its timeout, and events lost to a `Dropped(n)`, are unobservable, never ok; an address gone stays firing across a loss until a complete re-read says otherwise, and one whose going the loss hid fires when the re-read finds it |
+| `instance-gone */tc` with nothing under it in a complete read: firing | ok, "no address matches */tc yet": nothing can be gone that was never seen held | **The dead-man's switch is an exact address.** `instance-gone host-a/tc` is watched from the start, so absent from the first complete read it fires, as before. A wildcard that should fire when everything under it is gone names the addresses it needs, one rule each |
+| `record --on 'instance-gone …'` | the same reading, through the deployment's session | Without one, the rule is unobservable and never fires the capture |
+| presence read with one GET per rule address per tick | one projection over the narrowest scope covering every `instance-gone` pattern (one service, one system, or all), its own monitor on the session in the namespace, its moves folded as they arrive | The tick judges where each rule's reading stands then: an address gone and back inside one tick is two zenwatch notifications and no watchdog transition. Engine side: `InstanceAsk`/`InstanceRead` are gone, `SweepOutcome` and `TickEvidence` carry the projection, and `judge_instance_gone` takes the rule's `AddressWatch` |
+
+## Unreleased (`main`, zk2) — `gen` keeps an event's declared rate (#744)
+
+Core §2.7's rate binds each event member within any period of its own
+length, and the runtime's event writer refuses an occurrence beyond it.
+`gen --rate` above an event's rate ran into those refusals and counted
+each one as a failure (590 in a 125 s run of `tc.netem.v1` at
+`--rate 10`, exit 1).
+
+| Before | Now | Notes |
+|---|---|---|
+| `gen --rate <HZ>` above an event's declared rate: the event put at `<HZ>`, each occurrence past the rate refused and counted in `failed`, exit 1 | the event keeps its declared rate, and its plan entry says so once: `--rate 10 Hz is above its declared rate low (at most 1 per minute): it keeps its declared rate (core §2.7)` | Streams and states take `--rate` as given. The event's `rate_hz` in the plan is its declared rate's (one a minute for `low`, one an hour for `rare`, n an hour for `burst(n/h)`); its `events_cap` is unchanged |
+| `--pattern jitter` and `burst`: an event's occurrences paced by the pattern alone | and never before the runtime's window on its rate would admit them | A steady run without `--rate` is unchanged: its rate was already within the declared one. Jitter's shortened intervals and burst's 1 s ones had the runtime refuse `low` events too, with no `--rate` at all |
+| `gen`'s report: `failed` counted both a put that failed and a write the runtime refused | `refused`: the writes the runtime's budget refused (core §2.7), apart from `failed`, always present | Zero while every event keeps its rate. Exit 1 on either. The table says `N refused by the runtime's budget` only when there is one, with a note |
+
 ## Unreleased (`main`, zk2) — a stalled reader, and a tool's inspection (#753, #748)
 
 Core 0.27 (spec §2.7) has a window's reader watch itself: a router that

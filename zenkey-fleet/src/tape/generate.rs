@@ -15,16 +15,27 @@
 //! small synthetic set the plan states; the template that declares `epoch`
 //! holds a member token per value (§8.1).
 //!
+//! **An event keeps its declared rate** (core §2.7, #744). The runtime's
+//! event writer refuses an occurrence beyond the member's rate (at most `n`
+//! within any period of its own length), so a mock that out-paced it would
+//! only count refusals. An event's rate is its declared one whatever
+//! `--rate` asks, and the plan says so once, on each entry it held back;
+//! its occurrences are capped over the run ([`GenPlanEntry::events_cap`])
+//! and paced so that none is attempted before the runtime's own window
+//! would admit it, whatever the `--pattern`. A write the runtime refuses
+//! all the same is counted apart ([`GenReport::refused`]), never as a
+//! failure and never silently.
+//!
 //! The plan ([`build_plan`]) is session-free and printed before anything
 //! is brought up, the replay dry-run precedent. It replaced v1's
 //! registry-driven generator: the registry walk, the schema ladder through
 //! a served `describe`, the impersonated `--origin`, `--serve-describe` and
 //! the fault injector went with it (the `v1` branch keeps them).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use zenkey::OpError;
 use zenkey_model::authoring::{Kind, ParamType};
@@ -111,7 +122,8 @@ pub struct GenSpec {
     /// Role bindings (R1), `role → providers`.
     pub bindings: BTreeMap<String, Vec<String>>,
     /// Override every stream's and state's rate (Hz); an event's stays
-    /// within its declared rate whatever this says.
+    /// within its declared rate whatever this says, and the plan says so
+    /// where this asked for more (#744).
     pub rate_hz: Option<f64>,
     pub pattern: GenPattern,
     pub duration: Duration,
@@ -131,6 +143,100 @@ fn events_cap(rate: Rate, duration: Duration) -> u64 {
     };
     let run = (per_h.min(3600) as f64 * duration.as_secs_f64() / 3600.0).floor() as u64;
     run.max(1).min(per_h)
+}
+
+/// The most a steady rate can be and stay within `rate` (core §2.7: `n`
+/// occurrences within any period), Hz.
+fn declared_hz(rate: Rate) -> f64 {
+    let (n, period) = rate.limit();
+    f64::from(n) / period.as_secs_f64()
+}
+
+/// A declared rate, spelled and said: `low (at most 1 per minute)`.
+fn rate_words(rate: Rate) -> String {
+    let (n, period) = rate.limit();
+    let per = match period.as_secs() {
+        60 => "minute".to_owned(),
+        3600 => "hour".to_owned(),
+        s => format!("{s} s"),
+    };
+    format!("{rate} (at most {n} per {per})")
+}
+
+/// An event member's pacing within its declared rate (core §2.7, #744):
+/// the instants of its occurrences within the rate's period, so the next
+/// one is attempted only when the runtime's own window admits it.
+///
+/// The runtime counts an occurrence at its admission, inside the put; this
+/// records it when the put has returned, never earlier, so its window lags
+/// the runtime's and never offers an instant the runtime would refuse.
+#[derive(Debug)]
+struct Pace {
+    allowed: usize,
+    period: Duration,
+    recent: VecDeque<Instant>,
+}
+
+impl Pace {
+    fn new(rate: Rate) -> Pace {
+        let (n, period) = rate.limit();
+        Pace {
+            allowed: usize::try_from(n).unwrap_or(usize::MAX).max(1),
+            period,
+            recent: VecDeque::new(),
+        }
+    }
+
+    /// The earliest instant from `now` at which one more occurrence is
+    /// within the rate: `now` while the period holds fewer than `n`, else
+    /// when its oldest leaves it.
+    fn ready_at(&mut self, now: Instant) -> Instant {
+        while self
+            .recent
+            .front()
+            .is_some_and(|t| now.saturating_duration_since(*t) >= self.period)
+        {
+            self.recent.pop_front();
+        }
+        match self.recent.front() {
+            Some(oldest) if self.recent.len() >= self.allowed => *oldest + self.period,
+            _ => now,
+        }
+    }
+
+    /// An occurrence the runtime admitted, its put returned at `at`.
+    fn record(&mut self, at: Instant) {
+        self.recent.push_back(at);
+        while self.recent.len() > self.allowed {
+            self.recent.pop_front();
+        }
+    }
+}
+
+/// The wait after tick `tick`'s sample under `pattern`: `base` is one over
+/// the entry's rate, `elapsed` how far into a run of `total` seconds it is.
+/// An event's [`Pace`] may hold the next one back further.
+fn interval(
+    pattern: GenPattern,
+    base: Duration,
+    rate: f64,
+    tick: u64,
+    salt: u64,
+    elapsed: f64,
+    total: f64,
+) -> Duration {
+    match pattern {
+        GenPattern::Steady => base,
+        GenPattern::Jitter => base.mul_f64(0.7 + 0.6 * halton(salt ^ tick)),
+        GenPattern::Burst => {
+            if tick.is_multiple_of(rate.ceil().max(1.0) as u64) {
+                Duration::from_secs(1)
+            } else {
+                Duration::ZERO
+            }
+        }
+        GenPattern::Ramp => base.div_f64((elapsed / total).clamp(0.05, 1.0)),
+    }
 }
 
 /// The base-relative key expression of every member of `r`: each parameter
@@ -339,12 +445,25 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
                 }
             };
             let cap = d.rate.map(|rate| events_cap(rate, spec.duration));
-            let rate_hz = match (r.kind, cap) {
-                (Kind::Event, Some(cap)) => spec
-                    .rate_hz
-                    .unwrap_or((cap as f64 / secs).min(1.0))
-                    .clamp(0.001, 1000.0),
-                (Kind::State, _) => spec.rate_hz.unwrap_or(0.5).clamp(0.001, 1000.0),
+            // An event keeps its declared rate (#744): `--rate` above it is
+            // held back to it, and the entry says so.
+            let mut kept = None;
+            let rate_hz = match (r.kind, d.rate, cap) {
+                (Kind::Event, Some(rate), Some(cap)) => match spec.rate_hz {
+                    None => (cap as f64 / secs).min(1.0).clamp(0.001, 1000.0),
+                    Some(asked) => {
+                        let declared = declared_hz(rate);
+                        if asked > declared {
+                            kept = Some(format!(
+                                "--rate {asked} Hz is above its declared rate {}: it keeps \
+                                 its declared rate (core §2.7)",
+                                rate_words(rate)
+                            ));
+                        }
+                        asked.clamp(0.001, 1000.0).min(declared)
+                    }
+                },
+                (Kind::State, ..) => spec.rate_hz.unwrap_or(0.5).clamp(0.001, 1000.0),
                 _ => spec.rate_hz.unwrap_or(1.0).clamp(0.001, 1000.0),
             };
             let made = synth.sample(rev, r, Member::Type, 0).and_then(|_| {
@@ -355,8 +474,9 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
                 }
             });
             let mut notes = Vec::new();
-            if let Err(e) = &made {
-                notes.push(format!("cannot synthesize ({e}): publishes nothing"));
+            match &made {
+                Err(e) => notes.push(format!("cannot synthesize ({e}): publishes nothing")),
+                Ok(()) => notes.extend(kept),
             }
             if d.attachment.is_some() {
                 notes.push(if r.kind == Kind::Stream {
@@ -490,12 +610,30 @@ enum Out {
 struct Tally {
     sent: u64,
     failed: u64,
+    /// Writes the runtime's budget refused (core §2.7): apart from `failed`.
+    refused: u64,
     errors: Vec<String>,
 }
 
 impl Tally {
     fn fail(&mut self, e: String) {
         self.failed += 1;
+        self.example(e);
+    }
+
+    /// One put's outcome: sent, refused by the runtime's budget, or failed.
+    fn put(&mut self, key: &str, put: zenkey::Result<()>) {
+        match put {
+            Ok(()) => self.sent += 1,
+            Err(e @ zenkey::Error::Budget(_)) => {
+                self.refused += 1;
+                self.example(format!("{key}: {e}"));
+            }
+            Err(e) => self.fail(format!("{key}: {e}")),
+        }
+    }
+
+    fn example(&mut self, e: String) {
         if self.errors.len() < 3 {
             self.errors.push(e);
         }
@@ -566,9 +704,8 @@ pub async fn run_gen(
     let calls = Arc::new(AtomicU64::new(0));
     let mut servers = Vec::new();
     let mut outs: Vec<(usize, Out)> = Vec::new();
-    let mut first_errors = Vec::new();
-    let mut failed = 0u64;
-    let mut sent = 0u64;
+    // The puts made before start: each state's first value.
+    let mut before = Tally::default();
     for (i, e) in plan.entries.iter().enumerate() {
         let (rev, r) = lookup(spec, e)?;
         let iface = rev.iface();
@@ -591,19 +728,9 @@ pub async fn run_gen(
                     .map_err(|err| runtime_error(rev, err))?;
                 // A state value held at start goes out before the tokens
                 // (§8.2), so a GET made when they appear finds it.
-                let first = synth.sample(rev, r, Member::Type, 0);
-                match first {
-                    Ok(s) => match w.put(s.bytes).await {
-                        Ok(_) => sent += 1,
-                        Err(err) => {
-                            failed += 1;
-                            first_errors.push(format!("{}: {err}", e.key));
-                        }
-                    },
-                    Err(why) => {
-                        failed += 1;
-                        first_errors.push(format!("{}: {why}", e.key));
-                    }
+                match synth.sample(rev, r, Member::Type, 0) {
+                    Ok(s) => before.put(&e.key, w.put(s.bytes).await.map(|_| ())),
+                    Err(why) => before.fail(format!("{}: {why}", e.key)),
                 }
                 Out::State(w)
             }
@@ -648,6 +775,11 @@ pub async fn run_gen(
         let (rev, r) = lookup(spec, &e)?;
         let (rev, r) = (Arc::clone(rev), r.clone());
         let (pattern, seed, total) = (spec.pattern, spec.seed, spec.duration.as_secs_f64());
+        // An event member's own window on its declared rate (#744).
+        let mut pace = match (&out, zenkey_model::budget::rate_of(&r)) {
+            (Out::Event(_), Some(rate)) => Some(Pace::new(rate)),
+            _ => None,
+        };
         tasks.spawn(async move {
             let mut tally = Tally::default();
             let rate = e.rate_hz.unwrap_or(1.0);
@@ -670,6 +802,17 @@ pub async fn run_gen(
                     (&mut run_over).await;
                     break;
                 }
+                // An event waits for its rate's window, whatever the
+                // pattern asked: the runtime would refuse it sooner.
+                if let Some(pace) = &mut pace {
+                    let ready = pace.ready_at(Instant::now());
+                    if ready > Instant::now() {
+                        tokio::select! {
+                            () = tokio::time::sleep_until(ready.into()) => {}
+                            () = &mut run_over => break,
+                        }
+                    }
+                }
                 match synth.sample(&rev, &r, Member::Type, tick) {
                     Ok(s) => {
                         let put = match &out {
@@ -682,31 +825,25 @@ pub async fn run_gen(
                                 }
                             }
                         };
-                        match put {
-                            Ok(()) => tally.sent += 1,
-                            Err(err) => tally.fail(format!("{}: {err}", e.key)),
+                        if let (Ok(()), Some(pace)) = (&put, &mut pace) {
+                            pace.record(Instant::now());
                         }
+                        tally.put(&e.key, put);
                     }
                     Err(why) => tally.fail(format!("{}: {why}", e.key)),
                 }
                 tick += 1;
-                let interval = match pattern {
-                    GenPattern::Steady => base,
-                    GenPattern::Jitter => base.mul_f64(0.7 + 0.6 * halton(seed ^ i as u64 ^ tick)),
-                    GenPattern::Burst => {
-                        if tick.is_multiple_of(rate.ceil().max(1.0) as u64) {
-                            Duration::from_secs(1)
-                        } else {
-                            Duration::ZERO
-                        }
-                    }
-                    GenPattern::Ramp => {
-                        let progress = (started.elapsed().as_secs_f64() / total).clamp(0.05, 1.0);
-                        base.div_f64(progress)
-                    }
-                };
+                let wait = interval(
+                    pattern,
+                    base,
+                    rate,
+                    tick,
+                    seed ^ i as u64,
+                    started.elapsed().as_secs_f64(),
+                    total,
+                );
                 tokio::select! {
-                    () = tokio::time::sleep(interval) => {}
+                    () = tokio::time::sleep(wait) => {}
                     () = &mut run_over => break,
                 }
                 if tokio::time::Instant::now() >= deadline {
@@ -743,9 +880,16 @@ pub async fn run_gen(
         return Err(e);
     }
     closed.map_err(|e| Error::bus("undeclare", "the mock owner", e))?;
+    let Tally {
+        mut sent,
+        mut failed,
+        mut refused,
+        errors: mut first_errors,
+    } = before;
     for t in done.into_values() {
         sent += t.sent;
         failed += t.failed;
+        refused += t.refused;
         for e in t.errors {
             if first_errors.len() < 5 {
                 first_errors.push(e);
@@ -760,6 +904,7 @@ pub async fn run_gen(
         sent,
         calls: calls.load(Ordering::SeqCst),
         failed,
+        refused,
         first_errors,
     })
 }
@@ -924,6 +1069,189 @@ mod tests {
                 .to_string()
                 .contains("no implemented contract")
         );
+    }
+
+    /// #744: an event keeps its declared rate whatever `--rate` asks, and
+    /// its entry says so once, naming the rate; a stream and a state take
+    /// `--rate` as given. Without `--rate`, or with one within the rate,
+    /// nothing is held back and nothing is said.
+    #[test]
+    fn an_event_keeps_its_declared_rate_and_the_plan_says_so() {
+        let netem = |rate_hz| {
+            let mut s = spec(vec![]);
+            s.revisions = vec![revision(&examples("tcgui"), "tc.netem.v1")];
+            s.rate_hz = rate_hz;
+            s.duration = Duration::from_secs(300);
+            build_plan(&s).unwrap()
+        };
+        let applied = |plan: &GenPlan| -> GenPlanEntry {
+            plan.entries
+                .iter()
+                .find(|e| e.resource == "events/applied")
+                .cloned()
+                .expect("tc.netem.v1 declares events/applied, rate low")
+        };
+
+        let fast = netem(Some(10.0));
+        let e = applied(&fast);
+        assert_eq!(e.rate_hz, Some(1.0 / 60.0), "one a minute: low (§2.7)");
+        assert_eq!(e.events_cap, Some(5), "five minutes of low");
+        assert_eq!(
+            e.note.as_deref(),
+            Some(
+                "--rate 10 Hz is above its declared rate low (at most 1 per minute): it keeps \
+                 its declared rate (core §2.7)"
+            )
+        );
+        for other in fast.entries.iter().filter(|e| e.kind != Kind::Event) {
+            if other.kind != Kind::Operation {
+                assert_eq!(other.rate_hz, Some(10.0), "{other:?}");
+            }
+            assert!(
+                !other
+                    .note
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("declared rate"),
+                "{other:?}"
+            );
+        }
+
+        // No --rate: the plan an event had before #744, and no note.
+        let e = applied(&netem(None));
+        assert_eq!(e.rate_hz, Some(5.0 / 300.0));
+        assert_eq!(e.note, None);
+        // A --rate within the declared rate is taken as given.
+        let e = applied(&netem(Some(0.01)));
+        assert_eq!(e.rate_hz, Some(0.01));
+        assert_eq!(e.note, None);
+    }
+
+    /// Runs one event entry's schedule on a simulated clock, the way
+    /// `run_gen`'s loop does, against the runtime's own budget for the
+    /// resource (`zenkey::budget::Budget`, core §2.7): how many occurrences
+    /// it admitted, and how many it refused. `paced` is the loop's
+    /// [`Pace`]; without it, the schedule `--rate` and the pattern make.
+    fn simulate(
+        rev: &Revision,
+        resource: &str,
+        pattern: GenPattern,
+        rate_hz: f64,
+        run: Duration,
+        paced: bool,
+    ) -> (u64, u64) {
+        let r = rev
+            .contract()
+            .resources
+            .iter()
+            .find(|r| zenkey::implementation::resource_name(r) == resource)
+            .expect("the resource");
+        let rate = zenkey_model::budget::rate_of(r).expect("an event with a rate");
+        let budget = zenkey::budget::Budget::new(rev.iface(), r).expect("a data resource");
+        let cap = events_cap(rate, run);
+        let mut pace = paced.then(|| Pace::new(rate));
+        let base = Duration::from_secs_f64(1.0 / rate_hz);
+        let start = Instant::now();
+        let deadline = start + run;
+        let (mut now, mut tick, mut admitted, mut refused) = (start, 0u64, 0u64, 0u64);
+        while admitted < cap {
+            if let Some(pace) = &mut pace {
+                now = now.max(pace.ready_at(now));
+            }
+            if now >= deadline {
+                break;
+            }
+            match budget.admit("member", now) {
+                Ok(()) => {
+                    admitted += 1;
+                    if let Some(pace) = &mut pace {
+                        pace.record(now);
+                    }
+                }
+                Err(_) => refused += 1,
+            }
+            tick += 1;
+            let elapsed = (now - start).as_secs_f64();
+            now += interval(pattern, base, rate_hz, tick, 42, elapsed, run.as_secs_f64());
+        }
+        (admitted, refused)
+    }
+
+    /// #744: whatever the pattern and however fast `--rate`, no occurrence
+    /// `gen` attempts is one the runtime's budget refuses, and every one
+    /// the cap allows is published. The unpaced schedule is what the
+    /// runtime refused before: the test has teeth.
+    #[test]
+    fn pacing_keeps_every_pattern_within_the_runtimes_budget() {
+        let netem = revision(&examples("tcgui"), "tc.netem.v1");
+        let snmp = revision(&examples("zensight"), "zs.snmp.v1");
+        let modem = revision(&examples("zenoh-modem"), "modem.v3");
+        let cases = [
+            (&netem, "events/applied", 300),       // low: 1 a minute
+            (&snmp, "events/traps", 600),          // burst(1000/h)
+            (&modem, "events/oper_change", 7_200), // rare: 1 an hour
+        ];
+        let patterns = [
+            GenPattern::Steady,
+            GenPattern::Jitter,
+            GenPattern::Burst,
+            GenPattern::Ramp,
+        ];
+        for (rev, resource, secs) in cases {
+            let run = Duration::from_secs(secs);
+            let r = rev
+                .contract()
+                .resources
+                .iter()
+                .find(|r| zenkey::implementation::resource_name(r) == resource)
+                .unwrap_or_else(|| panic!("{resource} in {}", rev.iface()));
+            let cap = events_cap(zenkey_model::budget::rate_of(r).expect("a rate"), run);
+            for pattern in patterns {
+                for hz in [10.0, 1000.0] {
+                    let (admitted, refused) = simulate(rev, resource, pattern, hz, run, true);
+                    assert_eq!(
+                        (admitted, refused),
+                        (cap, 0),
+                        "{resource} {pattern:?} at {hz} Hz over {secs} s"
+                    );
+                }
+            }
+        }
+        let (_, refused) = simulate(
+            &netem,
+            "events/applied",
+            GenPattern::Steady,
+            10.0,
+            Duration::from_secs(300),
+            false,
+        );
+        assert!(
+            refused > 0,
+            "the runtime refuses an unpaced 10 Hz low event"
+        );
+        // Without --rate, the plan's own rate: a steady run never needed
+        // the pace, and is what it was; `--pattern burst` did, and was
+        // refused too.
+        let run = Duration::from_secs(300);
+        let planned = 5.0 / 300.0;
+        let steady = simulate(
+            &netem,
+            "events/applied",
+            GenPattern::Steady,
+            planned,
+            run,
+            false,
+        );
+        assert_eq!(steady, (5, 0));
+        let (_, refused) = simulate(
+            &netem,
+            "events/applied",
+            GenPattern::Burst,
+            planned,
+            run,
+            false,
+        );
+        assert!(refused > 0, "an unpaced burst at the planned rate");
     }
 
     #[test]

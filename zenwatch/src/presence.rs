@@ -39,13 +39,22 @@
 //! identity. A wildcard names no address until a token does: nothing can
 //! be gone that was never seen. An exact address is tracked from the start,
 //! so a complete seed that shows none of it says it is down.
+//!
+//! **One reading, two tools** (#747). The address form — `instance-gone`,
+//! and `liveliness-gone …/@zk/instance/*` — is the fleet's
+//! [`AddressWatch`]: which addresses are held and gone, the first look, and
+//! what a pattern can call gone are decided there, and `zenctl watchdog`'s
+//! `instance-gone` folds the same reading into one state per rule. What is
+//! this daemon's is what it does with a move: the notification, its ledger
+//! and its baseline. The observer's sight is the fleet's too
+//! ([`presence_observer`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
 
 use zenkey_fleet::{
-    AddressStatus, CondState, LivePresence, PresenceBasis, PresenceChange, PresenceSource,
-    PresenceTransition, ResolvedTarget as Target,
+    AddressWatch, CondState, LivePresence, PresenceBasis, PresenceChange, PresenceSource,
+    PresenceTransition, ResolvedTarget as Target, presence_observer,
 };
 use zenkey_model::grammar::{Addr, InstanceId, alive_key, member_key};
 use zenoh::key_expr::KeyExpr;
@@ -109,7 +118,11 @@ struct PresenceRule {
     /// token's wire key; `None` for `instance-gone`, which reads the
     /// address alone.
     keyexpr: Option<KeyExpr<'static>>,
-    /// What the rule last said per identity: `true` held, `false` gone.
+    /// The address form's reading: the fleet's, which `zenctl watchdog`'s
+    /// `instance-gone` folds too (#747).
+    addresses: AddressWatch,
+    /// What the rule last said per identity of the interface and member
+    /// forms: `true` held, `false` gone.
     known: BTreeMap<String, bool>,
     /// The instances (interface form) or epochs (member form) holding each
     /// identity's tokens.
@@ -144,6 +157,7 @@ impl PresenceRules {
                 };
                 Some(PresenceRule {
                     name: r.name.clone(),
+                    addresses: AddressWatch::new(target.clone()),
                     target,
                     form,
                     keyexpr,
@@ -171,7 +185,7 @@ impl PresenceRules {
     /// Track every rule's pattern on the projection, before it is seeded.
     pub fn track(&self, presence: &mut LivePresence, at: SystemTime) {
         for r in &self.rules {
-            presence.track_pattern(&r.target, at);
+            r.addresses.track(presence, at);
         }
     }
 
@@ -189,7 +203,7 @@ impl PresenceRules {
         let namespace = self.namespace.clone();
         let mut out = Vec::new();
         for r in &mut self.rules {
-            let observer = observer_state(presence.basis());
+            let observer = presence_observer(presence.basis(), &r.target.address).state;
             let held = r.holdings(presence, &namespace);
             let id = rule_ids.get(&r.name).cloned().unwrap_or_default();
             // What the ledger remembers announced under the rule, by
@@ -204,7 +218,6 @@ impl PresenceRules {
             let mut up = Vec::new();
             let mut down = Vec::new();
             for (identity, holds) in &held {
-                r.known.insert(identity.clone(), *holds);
                 let (address, _) = split_identity(identity);
                 if *holds {
                     up.push(identity.clone());
@@ -228,7 +241,7 @@ impl PresenceRules {
                 if held.contains_key(identity) {
                     continue;
                 }
-                r.known.insert(identity.to_string(), false);
+                r.remember_gone(identity);
                 if presence.basis() == PresenceBasis::Complete {
                     down.push(identity.to_string());
                     let (address, _) = split_identity(identity);
@@ -257,9 +270,26 @@ impl PresenceRules {
     ) -> Vec<RuleNotice> {
         let namespace = self.namespace.clone();
         let mut out = Vec::new();
+        let state_of = |held: bool| {
+            if held {
+                CondState::Ok
+            } else {
+                CondState::Firing
+            }
+        };
         for r in &mut self.rules {
+            if r.form == Form::Address {
+                // The fleet's reading decides each address (#747).
+                for m in r.addresses.fold(moved) {
+                    let identity = m.address.to_string();
+                    let address = Some(identity.clone());
+                    let prior = m.prior.map(state_of);
+                    let state = state_of(m.held);
+                    out.push(r.notice(&identity, state, prior, false, at, Some(&m.by), address));
+                }
+            }
             for t in moved {
-                if !r.target.matches(&t.address) {
+                if r.form == Form::Address || !r.target.matches(&t.address) {
                     continue;
                 }
                 if let Some((identity, holds)) = r.apply(t, &namespace) {
@@ -269,27 +299,20 @@ impl PresenceRules {
                     }
                     // First sight: held is not news, only remembered, so its
                     // going can say it went. Nothing can be gone that was
-                    // never seen held — but an address the operator named
-                    // exactly is watched from the start.
-                    let named = r.form == Form::Address && r.target.concrete.is_some();
-                    if prior.is_none() && (holds || !named) {
+                    // never seen held.
+                    if prior.is_none() {
                         if holds {
                             r.known.insert(identity, true);
                         }
                         continue;
                     }
                     r.known.insert(identity.clone(), holds);
-                    let state = if holds {
-                        CondState::Ok
-                    } else {
-                        CondState::Firing
-                    };
-                    let prior = prior.map(|h| if h { CondState::Ok } else { CondState::Firing });
                     let address = Some(t.address.to_string());
+                    let (state, prior) = (state_of(holds), prior.map(state_of));
                     out.push(r.notice(&identity, state, prior, false, at, Some(t), address));
                 }
             }
-            let observer = observer_state(presence.basis());
+            let observer = presence_observer(presence.basis(), &r.target.address).state;
             if r.observer != Some(observer) {
                 let prior = r.observer;
                 r.observer = Some(observer);
@@ -297,14 +320,6 @@ impl PresenceRules {
             }
         }
         out
-    }
-}
-
-/// The observer's state under a basis: only a complete read can see.
-fn observer_state(basis: PresenceBasis) -> CondState {
-    match basis {
-        PresenceBasis::Complete => CondState::Ok,
-        _ => CondState::Unobservable,
     }
 }
 
@@ -342,27 +357,26 @@ impl PresenceRule {
         KeyExpr::try_from(wire.as_str()).is_ok_and(|w| k.intersects(&w))
     }
 
-    /// What the projection holds now, per identity, for the addresses this
-    /// rule's pattern matches: `true` held, `false` gone (an address down,
-    /// a complete read behind it). Unobservable addresses are left out.
+    /// The first look, per identity, for the addresses this rule's pattern
+    /// matches: `true` held, `false` gone, each said from here. The address
+    /// form is the fleet's ([`AddressWatch::first_look`]: an address down
+    /// is gone only when the operator named it exactly); the interface and
+    /// member forms are held by any holder. Unobservable addresses are left
+    /// out.
     fn holdings(&mut self, presence: &LivePresence, namespace: &str) -> BTreeMap<String, bool> {
+        if self.form == Form::Address {
+            return self
+                .addresses
+                .first_look(presence)
+                .into_iter()
+                .map(|(addr, held)| (addr.to_string(), held))
+                .collect();
+        }
         let mut out = BTreeMap::new();
         let target = self.target.clone();
         for (addr, rec) in presence.matching(&target) {
             match self.form {
-                Form::Address => match rec.status {
-                    AddressStatus::Up => {
-                        out.insert(addr.to_string(), true);
-                    }
-                    // Down at the first look is news only for an address
-                    // the operator named: under a wildcard, a record with
-                    // nothing held is one another rule tracked, never one
-                    // this rule saw.
-                    AddressStatus::Down if self.target.concrete.is_some() => {
-                        out.insert(addr.to_string(), false);
-                    }
-                    AddressStatus::Down | AddressStatus::Unobservable => {}
-                },
+                Form::Address => {}
                 Form::Interface => {
                     for (instance, i) in &rec.instances {
                         for (iface, fps) in &i.interfaces {
@@ -404,21 +418,30 @@ impl PresenceRule {
                 }
             }
         }
+        self.known.extend(out.iter().map(|(i, h)| (i.clone(), *h)));
         out
     }
 
-    /// One move of the projection, as this rule reads it: the identity it
-    /// moved and whether that identity is held now — or nothing, when the
-    /// move is not this rule's (another form, a key the selector does not
-    /// cover, an address going unobservable, which is the observer's).
+    /// Remember `identity` gone with no move to show for it: the ledger's
+    /// memory after a restart, so that its return is the resolve it owes.
+    fn remember_gone(&mut self, identity: &str) {
+        match (self.form, identity.parse::<Addr>()) {
+            (Form::Address, Ok(addr)) => self.addresses.remember_gone(addr),
+            (Form::Address, Err(_)) => {}
+            _ => {
+                self.known.insert(identity.to_string(), false);
+            }
+        }
+    }
+
+    /// One move of the projection, as an interface or member rule reads
+    /// it: the identity it moved and whether that identity is held now — or
+    /// nothing, when the move is not this rule's (another form, a key the
+    /// selector does not cover). The address form is the fleet's
+    /// ([`AddressWatch::fold`]).
     fn apply(&mut self, t: &PresenceTransition, namespace: &str) -> Option<(String, bool)> {
         let addr: &Addr = &t.address;
         match (&self.form, &t.change) {
-            (Form::Address, PresenceChange::Status { to, .. }) => match to {
-                AddressStatus::Up => Some((addr.to_string(), true)),
-                AddressStatus::Down => Some((addr.to_string(), false)),
-                AddressStatus::Unobservable => None,
-            },
             (
                 Form::Interface,
                 PresenceChange::InterfaceAppeared {
@@ -551,26 +574,9 @@ impl PresenceRule {
         assume: bool,
         at: &str,
     ) -> RuleNotice {
-        let target = &self.target.address;
-        let evidence = match basis {
-            PresenceBasis::Complete => format!(
-                "a complete presence read stands: every address under {target} is observable \
-                 again"
-            ),
-            PresenceBasis::Lost { dropped } => format!(
-                "the presence projection lost {dropped} liveliness event(s): every address \
-                 under {target} is unobservable until a complete re-read — a token gone or \
-                 back inside that span was not seen, and nothing here says it is fine (RFC 13 \
-                 §3 O6)"
-            ),
-            PresenceBasis::Incomplete => format!(
-                "the presence read ended at its timeout, possibly incomplete (spec §8.1): an \
-                 address under {target} it did not show is unobservable, not down; re-reading"
-            ),
-            PresenceBasis::Unseeded => {
-                format!("presence under {target} has not been read yet: nothing is established")
-            }
-        };
+        // The observer's words are the fleet's (#747), the watchdog's
+        // `instance-gone` fold says the same.
+        let evidence = presence_observer(basis, &self.target.address).evidence;
         RuleNotice {
             rule: self.name.clone(),
             what: OBSERVER.to_string(),
@@ -667,7 +673,7 @@ impl PresenceRule {
 mod tests {
     use super::*;
     use std::time::Duration;
-    use zenkey_fleet::PresenceScope;
+    use zenkey_fleet::{AddressStatus, PresenceScope};
 
     fn rule(name: &str, text: &str) -> Rule {
         Rule::from_config(&crate::config::RuleConfig {
@@ -1040,5 +1046,160 @@ mod tests {
             )]
         );
         assert_eq!(out[0].kind, NoticeKind::Liveliness);
+    }
+
+    /// One scenario, both tools' readings of it (#747): zenwatch's rules
+    /// over the projection, and `zenctl watchdog`'s path — the fleet's
+    /// `RuleSet`, judged per tick from the same moves.
+    struct Both {
+        watch: PresenceRules,
+        set: zenkey_fleet::RuleSet,
+        ids: BTreeMap<String, String>,
+        /// zenwatch's last word per (rule, address), and per rule observer.
+        addresses: BTreeMap<(String, String), CondState>,
+        observers: BTreeMap<String, CondState>,
+        /// The watchdog's state per rule, from its transitions.
+        watchdog: BTreeMap<String, CondState>,
+    }
+
+    impl Both {
+        fn new(rules: &[(&str, &str)]) -> Both {
+            let configured: Vec<Rule> = rules.iter().map(|(n, r)| rule(n, r)).collect();
+            let conditions: Vec<zenkey_fleet::Condition> = rules
+                .iter()
+                .map(|(_, r)| zenkey_fleet::Condition::parse(r).expect("a rule"))
+                .collect();
+            Both {
+                watch: PresenceRules::new(&configured, ""),
+                set: zenkey_fleet::RuleSet::new(&conditions).expect("compiles"),
+                ids: ids(&configured),
+                addresses: BTreeMap::new(),
+                observers: BTreeMap::new(),
+                watchdog: BTreeMap::new(),
+            }
+        }
+
+        fn track(&self, p: &mut LivePresence) {
+            self.watch.track(p, at(0));
+            self.set.track_presence(p, at(0));
+        }
+
+        fn absorb(&mut self, out: Vec<RuleNotice>) {
+            for n in out {
+                match n.what.as_str() {
+                    OBSERVER => {
+                        self.observers.insert(n.rule, n.state);
+                    }
+                    BASELINE => {}
+                    what => {
+                        self.addresses.insert((n.rule, what.to_string()), n.state);
+                    }
+                }
+            }
+        }
+
+        fn tick(&mut self, p: &LivePresence) {
+            let sweep = zenkey_fleet::SweepOutcome {
+                doctor: None,
+                presence: Some(p),
+            };
+            for t in self.set.evaluate(tokio::time::Instant::now(), "t", sweep) {
+                self.watchdog.insert(t.rule, t.to);
+            }
+        }
+
+        fn first_look(&mut self, p: &LivePresence) {
+            let out = self.watch.baseline(p, &BTreeMap::new(), &self.ids, "t");
+            self.absorb(out);
+            self.set.first_look(p);
+            self.tick(p);
+        }
+
+        fn moved(&mut self, moved: &[PresenceTransition], p: &LivePresence) {
+            let out = self.watch.fold(moved, p, "t");
+            self.absorb(out);
+            self.set.observe_presence(moved);
+            self.tick(p);
+        }
+
+        /// zenwatch's per-address states, folded the watchdog's way: firing
+        /// if any address is, else unobservable if the observer is, else ok.
+        fn zenwatch(&self, name: &str) -> CondState {
+            if self
+                .addresses
+                .iter()
+                .any(|((r, _), s)| r == name && *s == CondState::Firing)
+            {
+                CondState::Firing
+            } else if self.observers.get(name) == Some(&CondState::Unobservable) {
+                CondState::Unobservable
+            } else {
+                CondState::Ok
+            }
+        }
+
+        /// Both agree on every rule, and say `want`.
+        fn agree(&self, step: &str, want: &[(&str, &str, CondState)]) {
+            for (name, text, state) in want {
+                assert_eq!(
+                    (self.zenwatch(name), self.watchdog.get(*text).copied()),
+                    (*state, Some(*state)),
+                    "{step}: {name} — zenwatch {:?}, the watchdog {:?}",
+                    self.addresses,
+                    self.watchdog
+                );
+            }
+        }
+    }
+
+    /// #747: the same scenario judged by `zenctl watchdog`'s path and by
+    /// zenwatch's rule gives the same states, step by step — a first look
+    /// that cannot see, a complete read with an exact address absent, a
+    /// wildcard's address gone while another holds, a loss, the re-read
+    /// that finds what it hid, and a wildcard that never matched.
+    #[test]
+    fn instance_gone_reads_the_same_in_zenwatch_and_the_watchdog() {
+        use CondState::{Firing, Ok, Unobservable};
+        let tc = ("tc-gone", "instance-gone */tc");
+        let h9 = ("h9-gone", "instance-gone h9/tc");
+        let gui = ("gui-gone", "instance-gone */gui");
+        let mut both = Both::new(&[tc, h9, gui]);
+        let mut p = LivePresence::new(PresenceScope::all());
+        both.track(&mut p);
+        let states = |a, b, c| [(tc.0, tc.1, a), (h9.0, h9.1, b), (gui.0, gui.1, c)];
+
+        p.seed(&seed(&[instance("h1/tc", 1)], false), at(1));
+        both.first_look(&p);
+        both.agree(
+            "a first read possibly incomplete",
+            &states(Unobservable, Unobservable, Unobservable),
+        );
+
+        let t = p.seed(
+            &seed(&[instance("h1/tc", 1), instance("h2/tc", 2)], true),
+            at(2),
+        );
+        both.moved(&t, &p);
+        both.agree("a complete read", &states(Ok, Firing, Ok));
+
+        let t = p.token(&instance("h2/tc", 2), false, at(3));
+        both.moved(&t, &p);
+        both.agree("h2/tc goes", &states(Firing, Firing, Ok));
+
+        let t = p.dropped(3, at(4));
+        both.moved(&t, &p);
+        both.agree("a loss", &states(Firing, Firing, Unobservable));
+
+        // h1/tc went inside the loss; h2/tc came back, and h9/tc started.
+        let t = p.seed(
+            &seed(&[instance("h2/tc", 3), instance("h9/tc", 1)], true),
+            at(5),
+        );
+        both.moved(&t, &p);
+        both.agree("the re-read", &states(Firing, Ok, Ok));
+
+        let t = p.token(&instance("h1/tc", 4), true, at(6));
+        both.moved(&t, &p);
+        both.agree("h1/tc back", &states(Ok, Ok, Ok));
     }
 }

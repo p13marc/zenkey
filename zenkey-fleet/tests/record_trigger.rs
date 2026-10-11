@@ -420,3 +420,81 @@ async fn an_invalid_payload_fires_a_capture_through_the_lens() {
     );
     assert!(trigger.evidence.contains("/is_up"), "{}", trigger.evidence);
 }
+
+/// #747: `instance-gone` arms a capture on the live presence projection,
+/// per address, as the watchdog's rule does: under `*/tc` the capture
+/// fires when an address it saw held goes, the evidence naming it — and
+/// with no deployment session the rule is unobservable, so nothing fires.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn instance_gone_fires_a_capture_when_a_seen_address_goes() {
+    let (_router, ep) = router(None).await;
+    let (owners, recorder_session) = (client(&ep).await, client(&ep).await);
+    let token = |address: &str, id: u64| {
+        let addr: zenkey_model::grammar::Addr = address.parse().expect("an address");
+        zenkey_model::grammar::instance_key(&addr, &zenkey_model::grammar::InstanceId::from_u64(id))
+            .expect("a key")
+            .as_str()
+            .to_owned()
+    };
+    let held = owners
+        .liveliness()
+        .declare_token(token("h1/tc", 1))
+        .await
+        .expect("token");
+
+    // No deployment session: unobservable throughout, never firing.
+    let blind = spec("instance-gone */tc", None, Duration::from_millis(900));
+    let report = record_on(
+        &recorder_session,
+        "",
+        &blind,
+        || async { Ok(SharedBuf::default()) },
+        |_| {},
+    )
+    .await
+    .expect("a run that gives up is a clean run");
+    assert!(report.trigger.is_none(), "unobservable is not firing");
+
+    let (armed_tx, mut armed_rx) = tokio::sync::mpsc::unbounded_channel::<CondState>();
+    let recorder = tokio::spawn({
+        let session = recorder_session.clone();
+        async move {
+            let mut s = spec("instance-gone */tc", None, Duration::from_secs(20));
+            s.deployment = Some(zenkey_fleet::DoctorBus {
+                session: session.clone(),
+                raw: session.clone(),
+                namespace: String::new(),
+            });
+            record_on(
+                &session,
+                "",
+                &s,
+                || async { Ok(SharedBuf::default()) },
+                |ev| {
+                    if let TriggerEvent::Transition(t) = ev {
+                        let _ = armed_tx.send(t.to);
+                    }
+                },
+            )
+            .await
+        }
+    });
+    // The baseline says h1/tc is held; then it goes.
+    let baseline = tokio::time::timeout(util::SETTLE, armed_rx.recv())
+        .await
+        .expect("a baseline within the settle window");
+    assert_eq!(baseline, Some(CondState::Ok));
+    held.undeclare().await.expect("undeclare");
+    let report = tokio::time::timeout(util::SETTLE, recorder)
+        .await
+        .expect("fired within the settle window")
+        .expect("join")
+        .expect("the capture ran");
+    let trigger = report.trigger.expect("it fired");
+    assert_eq!(trigger.rule, "instance-gone */tc");
+    assert!(
+        trigger.evidence.contains("gone: h1/tc"),
+        "{}",
+        trigger.evidence
+    );
+}

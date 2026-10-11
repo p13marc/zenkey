@@ -84,8 +84,10 @@
 //!   `lens` (a raw observer's key resolved rung by rung, its payload
 //!   checked, its stamp attributed), `presence_live` (each address up, down
 //!   or unobservable, from a seed and the liveliness events after it, with
-//!   every move a value, #614), `skeleton` (the declared keyspace a tree
-//!   starts from, merged with what was observed, #614 FL4), `identity`
+//!   every move a value, #614), `presence_watch` (one watcher's reading of
+//!   it, held or gone per address a pattern matches: `instance-gone`'s in
+//!   zenctl and zenwatch alike, #747), `skeleton` (the declared keyspace a
+//!   tree starts from, merged with what was observed, #614 FL4), `identity`
 //!   (each key's resolution, kept and bounded), `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
@@ -159,8 +161,8 @@ pub mod tape;
 // below actually **return** are lifted to the root.
 
 pub use judge::condition::{
-    CondWindow, Condition, DoctorWatch, Eval, InstanceAsk, InstanceRead, RuleSet, RuleState,
-    SweepOutcome, WatchdogSpec, WindowExamples, watchdog,
+    CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome, WatchdogSpec,
+    WindowExamples, watchdog,
 };
 pub use judge::expect::{ExpectAim, ExpectSpec, run_expect};
 pub use judge::field::{
@@ -264,6 +266,9 @@ pub use model::compat::compat;
 pub use model::presence_live::{
     DEFAULT_MAX_GONE, LiveAddress, LiveInstance, LivePresence, PresenceBasis, PresenceIgnored,
 };
+// `instance-gone`'s per-address reading of it (#747): one implementation
+// for zenctl's watchdog and zenwatch's rule.
+pub use model::presence_watch::{AddressMove, AddressWatch, covering_scope};
 // Its moves are wire shapes since zenwatch's notifications carry them (#614,
 // FL2): computed by `model::presence_live`, pinned in `report`, spelled here
 // as before.
@@ -308,7 +313,7 @@ pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
 pub use judge::condition::{
-    SilenceEvidence, TickEvidence, judge_doctor_check, judge_instance_gone,
+    SilenceEvidence, TickEvidence, judge_doctor_check, judge_instance_gone, presence_observer,
 };
 // The remaining items a frontend actually calls. Every one of these was
 // reachable only by module path (#350) — which said nothing about whether it

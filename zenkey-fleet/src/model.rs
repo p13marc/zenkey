@@ -18,7 +18,9 @@
 //! ([`structural`]). One read of presence and the liveliness events after
 //! it become each address's live presence — up, down or unobservable, and
 //! every instance, interface and member move as a value
-//! ([`presence_live`], #614). For a tree (#614, FL4): the deployment's
+//! ([`presence_live`], #614); one watcher's reading of it, per address a
+//! pattern matches, held or gone ([`presence_watch`], `instance-gone`'s in
+//! both zenctl and zenwatch, #747). For a tree (#614, FL4): the deployment's
 //! declared keyspace, from the same lens, merged with what was observed and
 //! what is watched into one typed tree ([`skeleton`]), and each wire key's
 //! identity resolved once, bounded and dropped when the lens's inputs move
@@ -68,6 +70,7 @@ pub mod jsonschema;
 pub mod lens;
 pub mod namespace;
 pub mod presence_live;
+pub mod presence_watch;
 pub mod render;
 pub mod retain;
 pub mod skeleton;

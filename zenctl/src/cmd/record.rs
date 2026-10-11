@@ -18,7 +18,8 @@
 //! record and the post-roll. The engine's [`record_on`] does all of it over
 //! one event stream; this verb parses the rules the way `watchdog` does —
 //! the whole zk2 vocabulary since FJ8b, `invalid-payload`, `qos-mismatch`
-//! and `instance-gone` judged through the deployment's namespace — and
+//! and `instance-gone` judged through the deployment's namespace, the last
+//! per address on the live presence projection (#747) — and
 //! renders what came back. Nothing firing within `--for` is exit 0 with a
 //! silence note — a rule not firing is not a finding.
 

@@ -118,8 +118,10 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
     })
     .await?;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
-    // An act's finding (`crate::exit`): samples the mock could not send.
-    if report.failed > 0 {
+    // An act's finding (`crate::exit`): samples the mock could not send,
+    // and writes the runtime's budget refused (#744: counted apart, and
+    // zero while every event keeps its declared rate).
+    if report.failed > 0 || report.refused > 0 {
         std::process::exit(crate::exit::FINDING);
     }
     Ok(())

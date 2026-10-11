@@ -2223,6 +2223,7 @@ async fn gen_brings_up_a_visible_owner_that_watch_and_get_state_read() {
     assert_eq!(docs[1]["report"], "gen");
     assert!(docs[1]["sent"].as_u64() > Some(10), "{generated}");
     assert_eq!(docs[1]["failed"], 0, "{generated}");
+    assert_eq!(docs[1]["refused"], 0, "{generated}");
 }
 
 /// `serve` (FJ8a) answers `call` with its fixed reply and logs the call:

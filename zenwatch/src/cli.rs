@@ -26,8 +26,12 @@ use clap::{Args, Parser, Subcommand};
     long_about = "Watch N rules and route every genuine state change to M sinks.\n\n\
         Rules are zenctl watchdog's closed zk2 vocabulary — rate-above, rate-below, \
         silent-for, invalid-payload, qos-mismatch, doctor, dropped — plus \
-        `instance-gone <SYSTEM/SERVICE>` (each address up while an instance token is \
-        held, read from the live presence projection; `*` in either position) and \
+        `instance-gone <SYSTEM/SERVICE>` (`*` in either position: each address the \
+        pattern matches is up while an instance token is held, and gone when none is with \
+        a complete read behind it, read from the live presence projection — under a \
+        wildcard only an address seen held can go, and an exact address is watched from \
+        the start; one notification per address, zenctl watchdog's rule firing from the \
+        same reading) and \
         `liveliness-gone <SEL>` (the dead-man's switch on liveliness tokens). `alerts` \
         is dark until zk2's alarm profile exists (#613). Three states ride every \
         notification, never two: ok / firing / unobservable, and a drop in the observer \
