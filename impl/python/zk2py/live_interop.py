@@ -33,8 +33,9 @@ operations.md §2 (fan-out over templates), the tool rules of 0.10 to 0.13,
 access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
 generated grants), ``hostid.v1`` with core R1's ``self.system``
 providers (0.20), ``freshness.v1``'s re-puts and judgements (0.21), and
-``health.v1`` (text 0.2), and the population budget (core §2.7, 0.24),
-across both implementations. ``--only`` picks some of them.
+``health.v1`` (text 0.2), the population budget (core §2.7, 0.24), and a
+late joiner's seed (core §4.2, 0.26), across both implementations.
+``--only`` picks some of them.
 
 Exit 0 when every check passes, 1 when any fails, 2 when it could not run.
 A rule the owner example is known not to meet is reported XFAIL (or XPASS),
@@ -3078,6 +3079,107 @@ def run_python_budget(report: Report, exe: Path) -> None:
         r1.close()
 
 
+def run_python_seed(report: Report, exe: Path) -> None:
+    """Core §4.2, "A late joiner's seed" (0.26), over the owner example's
+    state, its writes driven over its stdin (``put``, ``delete``), through
+    a router R1 of the runner's:
+    - a put made between the late joiner's subscription and its GET is kept;
+    - a stale reply loses to a newer live put. The owner example answers a
+      GET at once, so the runner holds the GET open (target ``All`` waits for
+      every queryable): a queryable of its own on the same keys, answering
+      nothing, ends its part 1.5 s later. Its replies, ``Latest``'s, are
+      delivered at the GET's end (§4.1), and a put made meanwhile arrives
+      first;
+    - a delete reaches the merge as a deletion, through the owner's
+      ``reply_del``;
+    - a GET that runs to its timeout (the owner stopped) is possibly
+      incomplete."""
+    import signal
+
+    import zenoh
+
+    from . import live
+    from . import seed as sd
+
+    r1, ep, _ = _r1()
+    tool, helper = live.open_client(ep), live.open_client(ep)
+    rusts: list[Owner] = []
+    extra: list[Any] = []
+    try:
+        run = "core 0.26 §4.2: a late joiner's seed over the owner example's state (budget.v1 items/{item})"
+        rust = Owner(exe, "lab/st", [REPO / BUDGET_V1], connect=ep)
+        rusts.append(rust)
+        if not report.check(run, "it starts behind R1", rust.wait_for("ready ", 120) is not None,
+                            str(rust.stderr[-1:])):
+            return
+        base = "zk2/lab/st/budget.v1/state/items"
+        pre = [rust.command(f"{v} budget.v1 state/items/{{item}} {k}") for v, k in
+               (("put", "a"), ("put", "b"), ("delete", "b"))]
+        held_open: list[Any] = []
+
+        def slow(query: Any) -> None:
+            held_open.append(query)
+            threading.Timer(1.5, query.drop).start()
+
+        extra.append(helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(slow), complete=False))
+        time.sleep(0.3)
+        lj = sd.LateJoiner(tool, f"{base}/*", consumer=True, timeout=5.0)
+        lj.subscribe()
+        time.sleep(0.3)
+        put_c = rust.command("put budget.v1 state/items/{item} c")  # between the subscription and the GET
+        time.sleep(0.3)
+        lj.get()
+        time.sleep(0.4)
+        put_a = rust.command("put budget.v1 state/items/{item} a")  # after the owner answered, before the GET ends
+        ended = lj.wait()
+        time.sleep(0.3)
+        v = lj.view()
+        arrivals = {k.rsplit("/", 1)[1]: [(x.via, x.outcome) for x in lj.applied if x.key == k]
+                    for k in sorted({x.key for x in lj.applied})}
+        report.check(run, "the owner example's writes: a and b put, b deleted, before the late joiner",
+                     [x.split(" ")[0] if x else x for x in pre] == ["put", "put", "deleted"], str(pre))
+        c = v.get(f"{base}/c")
+        report.check(run, "a put made between the subscription and the GET is kept, once: its live sample and its "
+                          "reply carry one stamp",
+                     bool(put_c) and c is not None and not c.deleted
+                     and sorted(o for _, o in arrivals.get("c", [])) == ["kept", "same"],
+                     f"{put_c!r}; c {c}; arrivals {arrivals.get('c')}")
+        a = v.get(f"{base}/a")
+        report.check(run, "a stale reply loses to a newer live put: a's reply, made before the owner's newer put "
+                          "and delivered at the GET's end, is dropped, and a holds the live put's stamp",
+                     bool(put_a) and a is not None and a.via == "live"
+                     and [o for via, o in arrivals.get("a", []) if via == "reply"] == ["dropped"],
+                     f"{put_a!r}; a {a}; arrivals {arrivals.get('a')}")
+        b = v.get(f"{base}/b")
+        report.check(run, "a delete reaches the merge as a deletion: b, deleted before the late joiner came, is the "
+                          "owner's reply_del, merged as a deletion with its stamp",
+                     b is not None and b.deleted and b.via == "reply", f"b {b}")
+        report.check(run, "the seed ran to its final reply, with no error reply: complete",
+                     ended and lj.seed.complete, f"ended {ended}, errors {lj.seed.errors}")
+        lj.close()
+        rust.proc.send_signal(signal.SIGSTOP)
+        try:
+            ljt = sd.seed(tool, f"{base}/*", timeout=1.0)
+        finally:
+            rust.proc.send_signal(signal.SIGCONT)
+        report.check(run, "the owner example stopped (SIGSTOP): the GET runs to its timeout, ends with an error "
+                          "reply, and the seed is reported possibly incomplete",
+                     ljt.seed.ended and not ljt.seed.complete and bool(ljt.seed.errors),
+                     f"errors {ljt.seed.errors}, replies {ljt.seed.replies}")
+        ljt.close()
+    finally:
+        for e in extra:
+            try:
+                e.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+        for o in rusts:
+            o.close()
+        tool.close()
+        helper.close()
+        r1.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -3098,6 +3200,7 @@ def main(argv: list[str] | None = None) -> int:
         "freshness": lambda r: run_python_freshness(r, args.owner, args.consume),
         "health": lambda r: run_python_health(r, args.owner, args.consume),
         "budget": lambda r: run_python_budget(r, args.owner),
+        "seed": lambda r: run_python_seed(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),

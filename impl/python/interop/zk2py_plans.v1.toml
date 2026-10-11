@@ -1,0 +1,14 @@
+# zk2py's contract for spec/scenarios/state.md's common setup, a state
+# template `plans/{vehicle}`, used by its §10, a late joiner's seed (core
+# §4.2, 0.26). It must load with no finding at all.
+[interface]
+name    = "zk2py_plans"
+major   = 1
+minor   = 0
+summary = "state.md's plans, for a late joiner's seed"
+
+[resources."plans/{vehicle}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { vehicle = "string" }
+cardinality = 16

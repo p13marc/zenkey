@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twenty-four rounds.**
+**Twenty-five rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -45,7 +45,9 @@ where that was not enough, or where the spec said two things.
 - F-105 was found against core 0.24's §2.7, the population budget, read cold
   with `health.v1` 0.3 and `hostid.v1` 0.4 (see "At 0.24: the population
   budget"). Core 0.25 resolved it.
-- Nothing new was found against core 0.25 (see "At 0.25" at the end).
+- Nothing new was found against core 0.25 (see "At 0.25").
+- **F-106 is new**, found against core 0.26's §4.2, a late joiner's seed
+  (see "At 0.26: a late joiner's seed" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -55,8 +57,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.25, hostid.v1 0.4, freshness.v1 0.2 and health.v1 0.3:**
-105 entries, none open.
+**Counts at core 0.26, hostid.v1 0.5, freshness.v1 0.2 and health.v1 0.4:**
+106 entries, one open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -138,11 +140,12 @@ where that was not enough, or where the spec said two things.
   lost none, and the resource is `reliable` with `block`. zk2py had read
   it as knowledge, so a best-effort window was lossless unless it knew of
   a loss. Now no such window is.
+- F-106: **new**, a gap against core 0.26 §4.2.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.24 | Location | In one line |
+| Id | Severity | Status at 0.26 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -249,6 +252,7 @@ by the spec section that now states the rule.
 | F-103 | gap (measured) | resolved by health 0.2 | health.v1 0.1 scenarios.md §4 expected 2, with core 0.23 §4.1 and Appendix B | The fault's stamp "is not the owner's (R1 re-stamped…)" needs the owner's session HLC ahead, which a simulated offset cannot move. |
 | F-104 | gap | resolved by health 0.2 | health.v1 0.1 scenarios.md §5–§7, with freshness.v1 0.2 §2.6 | The tool T judges by GET, and nothing says how it trusts its clock: without that, every status is `clock_untrusted`, never healthy. |
 | F-105 | ambiguity | resolved by 0.25 | core 0.24 §2.7, "What a tool reads" and its table; budget/population.json, rate.json | A complete window and a rate's clean pole need a window that "lost no delivery": a fact a plain subscription cannot establish, only fail to see contradicted. |
+| F-106 | gap | **new** | core 0.26 §4.2 "The merge", with "A selector over several owners" | The merge orders by "the owner's stamp"; a foreign key in a tool's seed has no owner, and its samples may carry no stamp at all. |
 
 ---
 
@@ -3515,7 +3519,7 @@ All the new and changed cases passed the first time once `budget.lossless`
 and `budget.rate(…, present)` followed 0.25.
 
 **`python -m zk2py.budget_scenarios`** (new): 38 of 38. zk2py writes nothing
-outside `impl/python/`, so this runner has no `just` recipe.
+outside `impl/python/`, so this runner had no `just` recipe then (`py-budget` came later).
 - **§1** used routers and an owner each in a process of its own
   (`python -m zk2py.proc`), and a consumer whose callback takes 2 ms per
   sample:
@@ -3595,3 +3599,95 @@ reading windows by 0.25:
 - **The lease.** zk2py's in-process routers and owners, and the owner
   example, run zenoh's default 10 s. The tool watches 10 s after a window's
   end, as §2.7 says of the default.
+
+## At 0.26: a late joiner's seed (#609)
+
+Core 0.26 adds "A late joiner's seed" to §4.2: subscribe first, then S4's
+GET, merged per key by the owner's stamp, and what a seed cannot know. Its
+evidence is `scenarios/state.md` §10. `hostid.v1` 0.5 and `health.v1` 0.4
+change citations only, in their Appendix B: nothing zk2py implements moves.
+zk2py read them cold, and drove the Rust owner example as a black box (its
+`put` and `delete` stdin commands). The example was built in the shared
+target, and its copies were run.
+
+**`just py-conformance`: 875 of 875**, unchanged. 0.26 adds no fixture: "No
+pure function decides the merge apart from Zenoh's own timestamp order".
+
+**`python -m zk2py.state_scenarios`** (new): 10 of 10, on an in-process
+router. It needs a `py-state` recipe, which is outside zk2py's barrier.
+- **§10, against zk2py's owner of `interop/zk2py_plans.v1.toml`.** The test
+  holds the owner's answer to the GET (`Owner.state_hold`, `state_answer`,
+  `answer_state`):
+  - a is v2 with T4, and the reply's T1 was dropped by the merge;
+  - c is v1 with T5, through the subscription;
+  - b is a deletion with T2, the `reply_del`;
+  - d is v1 with T3, once: the live put kept, and the equal-stamped reply
+    the same mutation;
+  - the seed is complete;
+  - the control, GET first, misses c.
+- **What a seed cannot know:**
+  - a GET held past its timeout ends with an error reply, so the seed is
+    possibly incomplete;
+  - an owner absent at the GET seeds nothing, which is silence.
+
+**`just py-budget`: 38 of 38. `just py-health`: 29 of 29. `just py-freshness`:
+21 of 21. `just py-hostid`: 34 of 34.**
+
+**The live runner, run directly: 326 passed, 0 failed, 0 known deviations.** The new run `seed`
+adds 7 checks over the owner example's `budget.v1` items:
+- a put made between the subscription and the GET is kept, once;
+- a stale reply loses to a newer live put. The owner example answers a GET
+  at once, so the runner holds the GET open with a queryable of its own on
+  the same keys, which answers nothing and ends its part 1.5 s later.
+  `Latest` then delivers the owner's reply at the GET's end, and the put
+  made meanwhile arrives first;
+- a delete reaches the merge as a deletion: the owner's `reply_del`;
+- the seed is complete. With the owner stopped (SIGSTOP), the GET runs to
+  its timeout, and the seed is possibly incomplete.
+
+**What changed in zk2py.**
+- **`zk2py.seed`**, new: `LateJoiner` (subscribe, then S4's GET, or the
+  control's other order) and its merge. The merge goes per key by stamp,
+  compared as `Latest` compares replies, and records each arrival as kept,
+  the same mutation, or dropped. A consumer discards a key that is not
+  concrete (R6); a tool keeps it.
+- **The owner** lets a test hold a state GET (`state_hold`), make its
+  answer, and send it later. Its ordinary answering path is unchanged.
+- **New:** `zk2py.state_scenarios` and `interop/zk2py_plans.v1.toml`.
+
+**Where zk2py's reading of 0.26 needed a guess.**
+- **A sample with no stamp** (F-106).
+- **Comparing two stamps of different ids:** zk2py orders by the NTP64
+  time, then by the id read as an integer. The text says "as `Latest`
+  compares replies"; the order of two ids at one instant is zenoh's, which
+  zk2py does not read.
+- **The Rust owner example cannot hold a GET's answer**, so the stale reply
+  needed a queryable of the runner's own to keep the GET open. It answers
+  nothing, so it holds no state on the owner's keys.
+
+### F-106 · gap · core 0.26 §4.2 "The merge", with "A selector over several owners": a key with no owner, a sample with no stamp
+
+> §4.2: "A late joiner MUST merge the GET's replies and the subscription's
+> samples per key by the owner's stamp (S1, S2), whichever path brought
+> each one, and keep the newer."
+
+> "The keys it matches that no zk2 owner has, foreign keys (§1.7), are
+> outside S4, and a storage may answer them."
+
+> 0.26, "R6 and a tool's seed": "A tool's seeded view of the raw bus shows
+> what arrived, as its live subscription does".
+
+The merge orders by "the owner's stamp". A foreign key has no owner, and
+its samples need carry no stamp. A session without an HLC puts unstamped,
+and a router stamps such a put only where its timestamping is on (core
+§4.1). A tool's seed over a selector that matches foreign keys, which 0.26
+contemplates, can therefore hold samples the rule cannot order: an
+unstamped live put against a storage's stamped reply, or two unstamped
+puts. The text does not say which of these a seed does with such a
+sample:
+- keeps it as it arrived;
+- orders it below every stamped sample;
+- sets it apart.
+**Resolved:** a guess. zk2py's `LateJoiner` orders an unstamped sample
+below every stamped one. It replaces only another unstamped sample, the
+later arrival winning, and never a stamped one.
