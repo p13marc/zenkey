@@ -2,14 +2,34 @@
 # things that need more than one command, chiefly running the GUI against
 # traffic to look at.
 #
-#   just gui-demo     # the GUI, against generated demo traffic. Start here.
+#   just gui-demo     # the GUI, against the zk2 demo traffic. Start here.
+#   just gui-demo-v1  # the GUI, against the v1 demo traffic it was built for
 #   just ci           # everything CI runs, in the same order
 #
-# ── What to look at once the window is up ────────────────────────────────
+# ── The demo traffic ─────────────────────────────────────────────────────
 #
-# `spray` publishes conforming *and* deliberately non-conforming keys, because
-# the interesting half of zengui is what it does with traffic this convention
-# does not govern.
+# `spray` (zengui/examples/spray.rs, #614 FL5) is a zk2 deployment in
+# namespace `spray`: nav, camera, perception, teleop, thrusters, a planner
+# and a tc backend, real services serving their contracts from
+# examples/zk2/, and a service implementing health.v1 alone. Beside it runs
+# the traffic no zk2 service would send: an interface token with no
+# instance token, a second answerer on an owner's state, garbage on an
+# owned key, an unowned key, a key in another namespace, and foreign keys.
+# zengui still reads v1 (#614 ports it pane by pane), so today it shows
+# every one of those keys as a foreign key, with real counts, rates and
+# structural payloads, unlabelled rather than mislabelled: the key-agnostic
+# core's promise. zenctl reads the same deployment resolved:
+#
+#   just ctl service list --namespace spray -c tcp/127.0.0.1:7449
+#   just ctl doctor --namespace spray --deep --clocks-synced -c tcp/127.0.0.1:7449
+#   just smoke-spray  # both, headless, against a spray on a free port
+#
+# ── What to look at in the v1 demos ──────────────────────────────────────
+#
+# `spray_v1` (`just gui-demo-v1`, `just spray-v1`; deleted at FL11)
+# publishes conforming v1 *and* deliberately non-conforming keys, because
+# the interesting half of zengui is what it does with traffic this
+# convention does not govern.
 #
 #   * Expand `v1` — chunks are labelled origin / class / producer / subject,
 #     and leaves carry a registration badge plus the registry-declared type.
@@ -72,37 +92,75 @@ export WGPU_BACKEND := "gl"
 default:
     @just --list
 
-# The GUI against generated demo traffic — start here. Ctrl-C stops both.
-gui-demo port=port: (_demo port registry "50000")
+# Today's zengui still reads v1 (#614 ports it pane by pane), so it shows
+# every zk2 key as a foreign key: counts, rates and structural payloads,
+# unlabelled rather than mislabelled — the key-agnostic core's promise. No
+# registry: there is no v1 subject here to badge.
+# The GUI against the zk2 demo traffic — start here. Ctrl-C stops both.
+gui-demo port=port: (_demo port "spray" "" "50000")
 
-# The demo with a key bound small enough to trip immediately.
-gui-demo-bounded port=port: (_demo port registry "6")
+# `spray_v1` keeps the registry badges, blob, config and media demos until
+# FL11.
+# The GUI against the v1 demo traffic it was built for.
+gui-demo-v1 port=port: (_demo port "spray_v1" registry "50000")
 
-# The demo with no registry loaded, so badges read "not asked".
-gui-demo-no-registry port=port: (_demo port "" "50000")
+# The v1 demo with a key bound small enough to trip immediately.
+gui-demo-bounded port=port: (_demo port "spray_v1" registry "6")
 
-_demo port registry_dir max_keys:
+# The v1 demo with no registry loaded, so badges read "not asked".
+gui-demo-no-registry port=port: (_demo port "spray_v1" "" "50000")
+
+_demo port example registry_dir max_keys:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build -p zengui --example spray
+    cargo build -p zengui --example {{example}}
     cargo build -p zengui
     mkdir -p {{rundir}}
-    ./target/debug/examples/spray -l tcp/127.0.0.1:{{port}} > {{rundir}}/spray.log 2>&1 &
+    ./target/debug/examples/{{example}} -l tcp/127.0.0.1:{{port}} > {{rundir}}/{{example}}.log 2>&1 &
     spray=$!
     trap 'kill $spray 2>/dev/null || true' EXIT
-    for _ in $(seq 1 100); do
-        grep -q 'Ctrl-C to stop' {{rundir}}/spray.log 2>/dev/null && break
-        kill -0 $spray 2>/dev/null || { echo "spray exited early:"; cat {{rundir}}/spray.log; exit 1; }
+    # Up to 30 s: the zk2 spray brings nine services up before it says so.
+    for _ in $(seq 1 300); do
+        grep -q 'Ctrl-C to stop' {{rundir}}/{{example}}.log 2>/dev/null && break
+        kill -0 $spray 2>/dev/null || { echo "{{example}} exited early:"; cat {{rundir}}/{{example}}.log; exit 1; }
         sleep 0.1
     done
-    echo "spray publishing on tcp/127.0.0.1:{{port}} (log: {{rundir}}/spray.log)"
+    echo "{{example}} publishing on tcp/127.0.0.1:{{port}} (log: {{rundir}}/{{example}}.log)"
     ./target/debug/zengui -c tcp/127.0.0.1:{{port}} \
         --max-keys {{max_keys}} \
         {{ if registry_dir == "" { "" } else { "--registry " + registry_dir } }}
 
-# Just the traffic generator: it listens, so anything can connect to it.
+# Just the zk2 traffic: it listens as a router, so anything can connect to it.
 spray port=port:
     cargo run -p zengui --example spray -- -l tcp/127.0.0.1:{{port}}
+
+# Just the v1 traffic (`spray_v1`, until FL11): what `test-live` reads.
+spray-v1 port=port:
+    cargo run -p zengui --example spray_v1 -- -l tcp/127.0.0.1:{{port}}
+
+# The spray runs on a free port. The doctor exits 1, and that is the point:
+# its findings (token-missing, state-stamp-foreign) are the spray's
+# deliberate non-conformance.
+# The zk2 spray, headless: zenctl's service list and doctor --deep against it.
+smoke-spray:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cargo build -p zengui --example spray
+    cargo build -p zenctl
+    mkdir -p {{rundir}}
+    port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+    ep=tcp/127.0.0.1:$port
+    ./target/debug/examples/spray -l "$ep" > {{rundir}}/spray-smoke.log 2>&1 &
+    spray=$!
+    trap 'kill $spray 2>/dev/null || true' EXIT
+    for _ in $(seq 1 300); do
+        grep -q 'Ctrl-C to stop' {{rundir}}/spray-smoke.log 2>/dev/null && break
+        kill -0 $spray 2>/dev/null || { echo "spray exited early:"; cat {{rundir}}/spray-smoke.log; exit 1; }
+        sleep 0.1
+    done
+    ./target/debug/zenctl service list --namespace spray -c "$ep"
+    ./target/debug/zenctl doctor --namespace spray --deep --clocks-synced -c "$ep"
+    echo "doctor exit $? (1: the findings above are the spray's own)"
 
 # Just the GUI, against an already-running bus.
 gui port=port:
@@ -112,7 +170,11 @@ gui port=port:
 ctl *ARGS:
     cargo run -p zenctl -- {{ARGS}}
 
-# The live-bus tests. Needs `just spray` running in another terminal.
+# They read v1 traffic, so they stay on `spray_v1` until FL6b rewrites
+# them. The zk2 spray's own check is not here: `zengui/tests/spray_smoke.rs`
+# brings the example up in process on an ephemeral port and runs in the
+# ordinary suite, and `just smoke-spray` runs the real binaries.
+# The live-bus tests. Needs `just spray-v1` running in another terminal.
 test-live port=port:
     ZENGUI_TEST_ENDPOINT=tcp/127.0.0.1:{{port}} \
         cargo test -p zengui --test live_bus -- --ignored --nocapture
