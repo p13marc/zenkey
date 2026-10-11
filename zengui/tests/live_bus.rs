@@ -209,9 +209,9 @@ async fn a_bounded_observer_reports_what_it_retired() {
     bus.down().await;
 }
 
-/// The tree renders foreign traffic as ordinary nodes with real counts, and
-/// a zk2 key beside it — neither labelled by v1's roles (#614: a zk2 key is
-/// unlabelled until FL7, never mislabelled).
+/// The tree renders foreign traffic as ordinary nodes with real counts,
+/// unlabelled, and a zk2 key beside it labelled by zk2's positions under
+/// the deployment's namespace (#614, FL7).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs the zk2 spray; see the module docs"]
 async fn the_tree_carries_foreign_traffic() {
@@ -232,7 +232,13 @@ async fn the_tree_carries_foreign_traffic() {
     let none = zenkey_fleet::ContractSet::new();
     let skel = zenkey_fleet::Skeleton::build(&zenkey_fleet::Lens::new("", None, &none), None);
     let merged = zenkey_fleet::merge_skeleton(&skel, &snapshot, &["**".to_string()]);
-    let flat = tree::flatten(&merged, "", &expanded, 500, std::time::Instant::now());
+    let flat = tree::flatten(
+        &merged,
+        &bus.namespace,
+        &expanded,
+        500,
+        std::time::Instant::now(),
+    );
 
     // `rows` carries the shape; the numbers are joined by `row` (#177), and
     // paths are ids into the flatten's own arena (#251).
@@ -259,7 +265,11 @@ async fn the_tree_carries_foreign_traffic() {
 
     let i = at(&position);
     assert!(flat.rows[i].is_leaf && flat.row(i).count > 0);
-    assert_eq!(flat.rows[i].role, None, "a zk2 key wears no v1 role");
+    assert_eq!(
+        flat.rows[i].role,
+        Some(tree::Role::Resource),
+        "a zk2 key wears zk2's roles"
+    );
     bus.down().await;
 }
 
@@ -526,6 +536,177 @@ async fn a_late_joiners_seed_counts_its_state_leg() {
         "the strip says what the seed's two legs brought: {said:?}"
     );
 
+    bus.down().await;
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// A contract with a templated stream that is reliable and blocking — the
+/// only kind of family whose window can be lossless (core §2.7, 0.25): what
+/// no example the spray serves declares.
+const PROBE: &str = r#"
+[interface]
+name = "probe"
+major = 1
+
+[resources."m/{n}"]
+kind = "stream"
+type = { raw = "application/octet-stream" }
+params = { n = "string" }
+cardinality = 8
+reliability = "reliable"
+congestion = "block"
+"#;
+
+/// The tree's identity rungs and a budget badge on real traffic, through
+/// the window (#614, FL7). Beside the spray, a probe owner, `lab/probe`,
+/// publishes two members of a reliable, blocking templated stream. The
+/// window boots, its own presence link reads the deployment, the scope is
+/// observed, and its own pump runs until a budget judgement lands. Then the
+/// tree, filtered to one key at a time, shows the rung each reached: the
+/// owned position stream "resolved", the ghost "no provider", the other
+/// namespace's key "not in namespace" — and the probe's family, a lossless
+/// window with its owner present throughout, "budget unobservable (window
+/// too short)": the only premise a window of seconds cannot meet is an hour
+/// of listening.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the zk2 spray; see the module docs"]
+async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
+    use iced::futures::StreamExt as _;
+    use zengui::message::{BusMsg, DeploymentMsg, Message, WorkspaceMsg};
+
+    let home = std::env::temp_dir().join(format!("zengui-live-rungs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("scratch dir");
+    // SAFETY: set before any store call; no other test here reads a store.
+    unsafe { std::env::set_var("ZENKEY_EXPLORER_CONFIG_DIR", &home) };
+
+    let bus = Bus::up().await;
+
+    // The probe owner, through the engine `zenctl gen` runs, on a session
+    // of its own in the deployment's namespace.
+    let loaded = zenkey_model::contract::load_str(PROBE, std::path::Path::new("."), None);
+    let contract = loaded
+        .contract
+        .unwrap_or_else(|| panic!("does not load:\n{}", loaded.report));
+    let revision = std::sync::Arc::new(zenkey_fleet::Revision::from_contract(
+        contract,
+        zenkey_fleet::report::ContractSource::File,
+    ));
+    let owner = zenkey_fleet::open_in_namespace(
+        &bus.namespace,
+        None,
+        std::slice::from_ref(&bus.endpoint),
+        &[],
+        Some(false),
+    )
+    .await
+    .expect("the probe's session");
+    let spec = zenkey_fleet::GenSpec {
+        address: "lab/probe".parse().expect("an address"),
+        revisions: vec![revision],
+        members: vec![zenkey_fleet::MemberArg::parse("m/{n}=a,b").expect("members")],
+        bindings: Default::default(),
+        rate_hz: Some(4.0),
+        pattern: zenkey_fleet::GenPattern::Steady,
+        duration: Duration::from_secs(600),
+        seed: 7,
+        tool: "zengui live test".into(),
+    };
+    let plan = zenkey_fleet::gen_plan(&spec).expect("the probe plans");
+    let (up_tx, up_rx) = tokio::sync::oneshot::channel();
+    let probe = {
+        let owner = owner.clone();
+        tokio::spawn(async move {
+            let mut up = Some(up_tx);
+            let _ = zenkey_fleet::run_gen(&owner, &spec, &plan, |instance| {
+                if let Some(tx) = up.take() {
+                    let _ = tx.send(instance.to_owned());
+                }
+            })
+            .await;
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(20), up_rx)
+        .await
+        .expect("the probe comes up")
+        .expect("its instance");
+
+    let settings = zengui::config::Settings {
+        namespace: bus.namespace.clone(),
+        connect: vec![bus.endpoint.clone()],
+        listen: vec![],
+        scouting: Some(false),
+        zenoh_config: None,
+        contracts: vec![],
+        timeout_secs: 2,
+        scope: ScopePreset::Everything,
+        selectors: vec![],
+        eager: false,
+        echo_lines: 100,
+        history_entries: 10,
+        max_keys: 1000,
+    };
+    let (mut app, boot) =
+        zengui::app::Zengui::with_prefs(settings, zengui::prefs::Prefs::default(), None);
+    tokio::time::timeout(Duration::from_secs(20), drive(&mut app, boot))
+        .await
+        .expect("the boot settles");
+
+    // Both of the window's links, run as its subscriptions would.
+    let presence = app.presence_link().expect("a presence link after the boot");
+    let mut presence = Box::pin(zengui::presence_link::stream(presence));
+    let data = app.data_link().expect("a data pump after the boot");
+    let mut data = Box::pin(zengui::link::stream(data));
+    let first = data.next().await.expect("the pump runs");
+    let _ = app.update(first);
+    let observe = app.update(Message::Deployment(DeploymentMsg::ScopeWatchToggled));
+    drive(&mut app, observe).await;
+
+    // Forty ticks, ten seconds: the budget judgement runs on the first
+    // and every sixteenth after it, as a task the tick returns — run here
+    // as the runtime would, with any validation beside it.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut ticks = 0u32;
+    while ticks < 40 {
+        let message = tokio::time::timeout_at(deadline, async {
+            tokio::select! {
+                m = presence.next() => m,
+                m = data.next() => m,
+            }
+        })
+        .await
+        .expect("the links run")
+        .expect("a link runs");
+        ticks += u32::from(matches!(message, Message::Bus(BusMsg::Tick(_))));
+        let task = app.update(message);
+        drive(&mut app, task).await;
+    }
+
+    // One key at a time, filtered, in a window wide enough for every badge.
+    let mut said = |query: &str, want: &str| {
+        let _ = app.update(Message::Workspace(WorkspaceMsg::TreeSearchChanged(
+            query.to_owned(),
+        )));
+        let mut ui = iced_test::Simulator::with_size(
+            iced::Settings::default(),
+            (4000.0, 2400.0),
+            app.view(iced::window::Id::unique()),
+        );
+        assert!(ui.find(want).is_ok(), "{query:?}: {want:?} on screen");
+    };
+    said(
+        &bus.wire("zk2/robot1/nav/nav.v2/stream/position"),
+        "resolved",
+    );
+    said("robot1/ghost/nav.v2/stream/position", "no provider");
+    said("elsewhere/zk2/robot9", "not in namespace");
+    said(
+        &bus.wire("zk2/lab/probe/probe.v1/stream/m/a"),
+        "budget unobservable (window too short)",
+    );
+
+    probe.abort();
+    let _ = owner.close().await;
     bus.down().await;
     let _ = std::fs::remove_dir_all(&home);
 }
