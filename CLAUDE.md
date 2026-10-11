@@ -213,8 +213,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `meta.zid`, by value (O7). `.zsnap` is version 2 and `snapshot diff`
   aligns by zk2 key (no origin alignment). `check expect`, `check probe` and
   `check schema` take an address, an interface revision and a resource;
-  `origin-down` is `instance-gone`, `alert-firing` and field-stuck are dark
-  until their profiles exist (#613). The zk2 `why` and `check conform` are
+  `origin-down` is `instance-gone` — judged per address on FL1's presence
+  projection with zenwatch's meaning, and folded into one state per rule
+  (firing while any address is gone; #747) — and `alert-firing` and
+  field-stuck are dark until their profiles exist (#613). The zk2 `why` and `check conform` are
   follow-ups.
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
@@ -297,7 +299,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   read is the rule's `<rule_id>:observer` going `unobservable`, never `ok`.
   The **first look is a baseline**: an address down at start is *assumed*
   (`NoticeMeta::assume`) and said once in a `baseline` notification;
-  under a wildcard nothing can be gone that was never seen. **Refused by
+  under a wildcard nothing can be gone that was never seen. That address
+  reading is the fleet's `model::presence_watch::AddressWatch`, which
+  `zenctl watchdog` and `record --on` share (#747). **Refused by
   name, exit 2, never ignored**: `alerts` (dark until alarms.v1, #613),
   `origin-down`, inhibition switched on (removed with v1's catalog),
   `group_by: ["origin"]` (zk2 groups by `system`/`address`),
