@@ -655,10 +655,18 @@ mod tests {
     use zenkey_model::decode::{Rendered, decode};
 
     /// A contract from `toml` and its schema files, in a directory of its
-    /// own.
+    /// own per call (#766): the tests build the same contract at once, and
+    /// one truncating `common.json` while another read it made the reader
+    /// see half a file. The loaded contract carries every schema it read,
+    /// so the directory goes as soon as the load returns.
     fn revision(tag: &str, toml: &str, files: &[(&str, &str)]) -> Revision {
-        let dir =
-            std::env::temp_dir().join(format!("zenkey-fleet-synth-{}-{tag}", std::process::id()));
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NTH: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "zenkey-fleet-synth-{}-{tag}-{}",
+            std::process::id(),
+            NTH.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&dir).expect("temp dir");
         for (name, text) in files {
             let path = dir.join(name);
@@ -666,6 +674,7 @@ mod tests {
             std::fs::write(path, text).expect("write");
         }
         let l = zenkey_model::contract::load_str(toml, &dir, None);
+        std::fs::remove_dir_all(&dir).expect("remove the temp dir");
         let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
         Revision::from_contract(c, ContractSource::File)
     }

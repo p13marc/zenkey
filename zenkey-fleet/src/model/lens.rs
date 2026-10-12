@@ -760,8 +760,18 @@ mod tests {
     use crate::report::ContractSource;
     use serde_json::json;
 
+    /// A directory per call (#766): the tests build this contract at once,
+    /// and one truncating `s.json` while another read it made the reader
+    /// see half a file. The loaded contract carries the schema, so the
+    /// directory goes as soon as the load returns.
     fn status() -> Revision {
-        let dir = std::env::temp_dir().join(format!("zenkey-fleet-lens-{}", std::process::id()));
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NTH: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "zenkey-fleet-lens-{}-{}",
+            std::process::id(),
+            NTH.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&dir).expect("temp dir");
         std::fs::write(
             dir.join("s.json"),
@@ -774,6 +784,7 @@ mod tests {
              params = { dev = \"string\" }\ncardinality = 8\n\
              [resources.frame]\nkind = \"stream\"\ntype = { raw = \"image/*\" }\npriority = \"data_low\"\n";
         let l = zenkey_model::contract::load_str(toml, &dir, None);
+        std::fs::remove_dir_all(&dir).expect("remove the temp dir");
         let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
         Revision::from_contract(c, ContractSource::File)
     }
