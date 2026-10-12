@@ -25,9 +25,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   module (deduped `Tier` enum across all declaring producers, typed key
   builders, the probe form).
 - `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0; 0.18.x on
-  crates.io is the v1 engine zengui pins, the in-tree 0.20.0 is
-  zk2's and `publish = false` until the port completes): the shared core of
-  the zk2 explorers, zenctl first — `fleet_get` (the RFC 05 §2.1 chokepoint,
+  crates.io is the v1 engine, released from the `v1` branch, which no
+  member of `main` links since #614 FL11b; the in-tree 0.20.0 is zk2's and
+  `publish = false`): the shared core of the zk2 explorers — zenctl,
+  zengui and zenwatch — `fleet_get` (the RFC 05 §2.1 chokepoint,
   moved verbatim from zenctl), presence and contract retrieval
   (`bus::presence`, `bus::contracts`), the session-free **lens** a raw
   observer resolves keys through (`model::lens`), contract-resolved
@@ -74,15 +75,68 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   forced `dirs` and `toml` onto every library consumer.
 - `zengui/` — the **graphical bus explorer** (Apache-2.0, **not published**;
   Forgejo release binaries, like zenctl). The GUI sibling of zenctl over the
-  same engine, in Iced 0.14. **Key-agnostic core, RFC as overlay**: it is a
-  useful explorer on *any* Zenoh bus, and keyspace-v2 awareness lights up only
-  when a key parses — `keyfacts.rs` is the single seam where that happens, and
-  `scope.rs` the single place selectors are built (typed builders +
-  `with_base`, never `format!`). Note `**` never crosses an `@`-chunk
-  (RFC 03 §4 D2), so the raw scope is media-safe *and* cannot see `@catalog` —
-  which is why the roster always names the service token explicitly.
+  same engine, in Iced 0.14, and zk2's since #614 (FL5–FL12; it links no v1
+  crate). **Key-agnostic core, zk2 as overlay**: it is a useful explorer on
+  *any* Zenoh bus, and zk2 awareness lights up only when a key resolves —
+  `keyfacts.rs` is the single seam where that happens (the fleet's
+  `IdentityCache` over the lens, read as fourteen `Rung`s, from `resolved`
+  to the rung where resolution stopped), and `scope.rs` the single place
+  selectors are built (zenkey-model's kind selectors + `with_namespace`,
+  never `format!`). Note `**` never crosses a verbatim chunk (core §1.3),
+  so the raw scope cannot pull an explicit `@stream` *and* cannot see `@op`
+  or `@zk` — which is why the `explicit` preset names `@stream/**` and
+  `@state/**` one by one, and every selector says what it cannot see. v1
+  keys are foreign (`not zk2`), with no v1 overlay.
   Deviation from `docs/redesign-2026-07.md` §15, deliberate: it lives here
   rather than in a separate `p13marc/zengui` repo.
+  **Two sessions** (`state/deployment.rs`), as zenctl and zenwatch hold
+  them: `raw`, in no namespace, carries the data pump, wire selectors, the
+  admin space and a foreign key's raw read; `session`, in the deployment's
+  namespace, reads presence, descriptors and contracts and asks every
+  resolved question (S4 reads, health, why, calls). The namespace resolves
+  `--namespace` (alias `--base`) > the one picked last (zengui's prefs) >
+  `ZENGUI_BASE` > the context's `base` > empty; the location bar's picker
+  is fed by `namespace_listing`, and a switch reopens the namespaced
+  session, the presence monitor and the lens, and forgets what they held.
+  Contracts come from `--contracts` (zenctl's loading) or the Settings
+  overlay, remembered in zengui's prefs, never the shared context;
+  `--registry` is refused by name, exit 2, and a context's stored
+  `registry` rides a save untouched. **Presence** runs on a monitor of its
+  own on the namespaced session (`presence_link.rs`, the zenwatch pattern,
+  coalesced to four snapshots a second), so the pump's `Dropped(n)` cannot
+  knock it to lost, and its batches fold into the `LensFeed` in order.
+  **The lens**: the feed's catalog and generation, the contract store
+  (offline contracts plus retrieval, §8.4), and the identity cache under
+  its own `identity_epoch`, bumped at every door the lens's inputs move
+  through. Payloads are checked through `Lens::check` into four
+  conformance poles (valid, invalid, undecodable, not checked), the
+  verdict cache's "not yet checked" never one of them. **The tree** starts
+  from the contract skeleton (`Skeleton::build(&lens, admin)`, on the
+  update thread, rebuilt by `Arc` identity when the lens's inputs or the
+  admin answer move, never on a tick); its chunks carry zk2 roles, it
+  pivots by system, address, iface and kind, a declared `@op` row offers no
+  watch (`scope::names_operation`: no watch, seed or fetch GETs under
+  `@op`), and a watched templated family wears a budget badge from
+  `zenkey_model::budget` (mostly unobservable, saying why). **The
+  Inspector** reads a value by what the key is (`value::plan`): S4's owner
+  GET for state, `last_known_state` behind a button per `archive.v1`
+  provider, the owner's `@adv` cache for a stream with history, an event
+  replay on demand, a raw `fleet_get` for a foreign key; declared vs
+  observed QoS by `qos_mismatch`; zk2's why, fields and R3 consumers.
+  **The Workbench**: nodes per address from presence (health read once per
+  selection, a "clocks synced" toggle), zk2's doctor, the admin pane's S4
+  rows (`on_owner_state`), the mesh; Send publishes a foreign key only, on
+  `WireQos` axes (P3 and wildcards refused, a tombstone behind
+  `--i-know`), and calls an operation through its contract on `@op`
+  (`plan_call` refuses a forbidden fan-out before sending). **Replay**
+  resolves through an offline `ReplayLens` (no catalog, the offline
+  contracts, the capture's namespace) with a replay-scoped identity cache,
+  and publish, call, record, why, fields and consumers are refused in every
+  window while it runs. Files: `.zrec` v3 (v1/v2 rows read "QoS not
+  recorded"), `.zsnap` v2, echo exports zk2's `SampleRow` with `identity`.
+  The Config tool, Blob browser and Media viewer are deleted, not stubbed,
+  until #613's profiles exist. `zengui/CHANGELOG.md` carries the old→new
+  tables.
   **Layout (#175)**: `app.rs` is the shell only — `new`/`update`/`view`/
   `subscription`. The state lives in `state/` as six sub-states named for what
   invalidates them; the handlers in `update/` (one module per message group,
@@ -90,7 +144,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   move; every bus call in `services/` as a free `fn -> Task<Message>`. Nothing
   but `update` takes `&mut Zengui`, and nothing under `view/` names it at all.
   The workspace holds **subject slots** (#181, #257, `message.rs`): each slot
-  is one `Subject` — a key, a subtree prefix, an origin, or nothing — plus
+  is one `Subject` — a key, a subtree prefix, an address, or nothing — plus
   everything derived from it (`state/subject.rs`, `SubjectSlot`); slot 0
   (`SlotId::FOLLOW`) is the one the tree and location bar drive, and every
   further slot is a *pin*. The one bus tick fans out to every slot's recorder
@@ -137,21 +191,21 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   alone would be the freeze the issue rejects). The torn set and each
   window's geometry ride the named layout (`WorkspaceLayout::torn`); the
   replay locks are per-application and hold across every window.
-  **The port's preparation (#614, FL5)**: v1 is spelled `zenkey_v1::` and
-  `zenkey_fleet_v1::` (renamed dependencies, pinned inline in
-  `zengui/Cargo.toml`), so the zk2 `zenkey_fleet` and `zenkey_model`, by
-  path, sit beside them while the panes move. The RFC 05 §5.1 config double
-  is `tests/util/config_server.rs` (v1, gone at FL11). `tests/panes/` is one
-  test binary with a module per surface, `src/app_tests/` a module per
-  subject, `services/sweep/` a module per question re-exported flat — so
-  the chunks porting them in parallel do not meet in one file. The demo
-  traffic is `examples/spray.rs`, a zk2 deployment (in-process `run_gen`
-  owners over `examples/zk2/walkthrough` and `tcgui`, a `health.v1`-only
-  service, and deliberately non-conforming raw traffic the doctor finds:
+  **Tests**: `tests/panes/` is one test binary with a module per surface,
+  `src/app_tests/` a module per subject, `services/sweep/` a module per
+  question re-exported flat (FL5's split, so parallel chunks do not meet in
+  one file). `tests/common`'s `World` is the scenes' bus: a hand-built
+  catalog over the real fingerprints of `examples/zk2/walkthrough` and
+  `tcgui`, and every zk2 sample on the axes its contract declares
+  (`Axes::declared`, as the runtime's writer maps them), so the scenes read
+  a QoS match; the one mismatch is the `inspector-qos-mismatch` scene's
+  stranger (`World::tick_with_stranger`). The demo traffic is
+  `examples/spray.rs`, a zk2 deployment (in-process `run_gen` owners over
+  `examples/zk2/walkthrough` and `tcgui`, a `health.v1`-only service, and
+  deliberately non-conforming raw traffic the doctor finds:
   `token-missing`, `state-stamp-foreign`), smoked in process by
-  `tests/spray_smoke.rs`. The v1 spray went with the Config tool, the
-  Blob browser and the Media viewer, deleted in FL11a (no `config.v1`,
-  `blob.v1` or `media.v1` yet, #613).
+  `tests/spray_smoke.rs`; `tests/live_bus.rs` (ignored, `just test-live`)
+  brings it up in process on port 0.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral, and zk2's since FJ9 (#612),
@@ -346,23 +400,18 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   coverage (scope read, checks established / unobservable / not asked).
   `zenwatch/CHANGELOG.md` carries the old→new tables.
 
-**Strangler layout (#615).** The `zenkey/` and `zenkey-build/` sources
-described above, and the `fixture-tests` crate, now live on the **`v1`
-branch**. On `main` zengui, the v1 tool still there, builds against
-`zenkey =0.11.1` and (since FJ1, #612) `zenkey-fleet =0.18.0` from
-crates.io until #614 ports it — since FL5 under renamed dependencies
-(`zenkey-v1`, `zenkey-fleet-v1`) pinned inline in `zengui/Cargo.toml`,
-beside the zk2 crates by path; the workspace table pins neither any more.
-zenwatch no longer pins v1 (FL2 its read side, FL3 its write
-side): `cargo tree -p zenwatch -i zenkey@0.11.1` and `-i
-zenkey-fleet@0.18.0` match nothing, and no member uses v1's
-`zenkey-build`, so its pin left the workspace. With both fleets in the
-graph, `-p zenkey-fleet` is ambiguous: say `-p zenkey-fleet@0.20.0`, as
-`-p zenkey@0.20.0`. The in-tree `zenkey-fleet` 0.20.0 (`publish = false`)
-is zk2's, and zenctl and zenwatch depend on it by path; neither links v1's
-`zenkey` (`cargo tree -p zenctl -i zenkey@0.11.1` matches nothing). `fixture-tests/registry`
-(+ `registry-kdl/`) stays on `main` as test data that the tools' tests read.
-The `registry-conventions` skill describes the v1 registry format.
+**Strangler layout (#615), complete.** The v1 `zenkey/` and `zenkey-build/`
+sources described above, and the `fixture-tests` crate with its
+`registry/` and `registry-kdl/` corpus, live on the **`v1` branch**, which
+releases 0.14.x patches. No member of `main` links v1: zenctl and the
+in-tree fleet left it at FJ9 (#612), zenwatch at FL2–FL3 and zengui at
+FL11b (#614), so `cargo tree -i zenkey@0.11.1` and `-i
+zenkey-fleet@0.18.0` match no package, and `Cargo.lock` holds one
+`zenkey` and one `zenkey-fleet`. zk2 reuses the crate names at 0.20.0
+(`publish = false`), every member takes them by path, and the workspace
+table pins none; plain `-p zenkey` and `-p zenkey-fleet` name them. The
+`registry-conventions` skill describes the v1 registry format; its
+fixtures are the `v1` branch's.
 
 Graduated from the ZenSight monorepo in 2026-07; issue references like `#453`/`#475`
 point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
@@ -376,9 +425,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   "what changed since rN" table.
 - **The v1 line.** v1 (`rfcs/`, frozen at v1.50) is maintained on the `v1`
   branch (0.14.x patches, #587).
-- **`main` is the zk2 line, in the strangler layout (#615).** The v1 tools
-  pin `zenkey`/`zenkey-build` `=0.11.1` from crates.io until each one is
-  ported. zk2 reuses the crate names at 0.20.0. `zenkey-model` is new.
+- **`main` is the zk2 line, in the strangler layout (#615).** Every tool on
+  it is ported, and none links v1's crates since #614 (FL11b). zk2 reuses
+  the crate names at 0.20.0. `zenkey-model` is new.
 - **`zenkey-model/`** (MIT, unpublished until #606) is zk2's session-free
   half (#608): keys, templates, §1.3's kind selectors and what a selector
   cannot see (`grammar::blind_spots`, #614 FL4), the authoring format
@@ -456,10 +505,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   the stream, and `clock_ahead` while the guard holds (the `Minter`'s hold
   watch). The owner example drives it from stdin.
   `tests/` runs `spec/scenarios/` sections as in-process routers and
-  clients, one test per section, named after it. On `main` it shares the
-  name with v1's crates.io `zenkey =0.11.1`; `-p zenkey` selects the member.
-- **`zenkey-build/`** 0.20.0 (MIT, unpublished; the v1 tools keep
-  `zenkey-build =0.11.1` from crates.io, side by side) is zk2's codegen
+  clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
+  on crates.io, from the `v1` branch; no member of `main` links it.
+- **`zenkey-build/`** 0.20.0 (MIT, unpublished; v1's `zenkey-build` 0.11.x
+  is the `v1` branch's, and no member of `main` uses it) is zk2's codegen
   (#611, FI; the design is `docs/zk2/codegen.md`). A consumer's build
   script runs `zenkey-model`'s lints and the history's compatibility gate
   (breaking fails, review warns), embeds each bundle as `zenkey-model` builds
@@ -522,7 +571,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     amendment (0.24, §2.7, #735). This reverses that part of FJ's "kind and
     budget go dark";
   - zengui moves pane by pane, beside v1's fleet under a renamed dependency
-    (`zenkey-fleet-v1 = { package = "zenkey-fleet", version = "=0.18.0" }`);
+    (`zenkey-fleet-v1 = { package = "zenkey-fleet", version = "=0.18.0" }`),
+    which FL11b removed with `zenkey-v1` once nothing read them;
     zenwatch requires `publish.address` until hostid.v1; contracts come by
     flag, never a named context (the config file is shared with the v1
     tools); no zengui or zenwatch release from `main` without the
@@ -530,8 +580,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 
 ## Commands
 
-Zero warnings is a CI gate. (The fixture-tests codegen round-trip now runs on
-the `v1` branch; see the strangler note above.)
+Zero warnings is a CI gate. (The fixture-tests codegen round-trip runs on the
+`v1` branch, where the corpus lives; see the strangler note above.)
 
 ```bash
 cargo run -p zenctl -- service list --namespace zensight -c tcp/127.0.0.1:7447
