@@ -188,8 +188,9 @@ fn replies_task(
 
 /// `answers` as the panes read them: the value replies newest first by
 /// stamp (the unstamped after them, in arrival order), each stamp attributed
-/// through the lens; error replies counted apart; an event replay's
-/// occurrences older than its retention filtered out and counted.
+/// through the lens and a delete kept as a tombstone; error replies counted
+/// apart; an event replay's occurrences older than its retention filtered
+/// out and counted.
 pub(crate) fn replies(
     lens: &LensInputs,
     kind: ReadKind,
@@ -213,6 +214,9 @@ pub(crate) fn replies(
     let mut older = 0;
     let mut out = Vec::new();
     for a in answers {
+        // A delete is a tombstone (#765): an owner's `reply_del`, kept as
+        // one rather than as a put whose payload is empty.
+        let delete = a.is_delete();
         let zenkey_fleet::Answer::Value(payload) = a.answer else {
             errors += 1;
             continue;
@@ -235,7 +239,7 @@ pub(crate) fn replies(
             payload,
             encoding: a.encoding.unwrap_or_default(),
             attachment: a.attachment,
-            delete: false,
+            delete,
             stamp,
             provenance,
         });
@@ -506,6 +510,7 @@ mod tests {
             encoding: Some("application/octet-stream".into()),
             attachment: None,
             timestamp: None,
+            kind: Some(zenoh::sample::SampleKind::Put),
             answer: zenkey_fleet::Answer::Value(zenoh::bytes::ZBytes::from(vec![1u8])),
         };
         let refused = zenkey_fleet::FleetAnswer {
@@ -513,6 +518,7 @@ mod tests {
             encoding: None,
             attachment: None,
             timestamp: None,
+            kind: None,
             answer: zenkey_fleet::Answer::Error {
                 name: "error/unavailable".into(),
                 message: String::new(),
@@ -537,5 +543,51 @@ mod tests {
         );
         assert_eq!(got.errors, 1, "a refusal is counted, not a value");
         assert!(got.replies[0].provenance.is_none(), "unstamped: no clock");
+    }
+
+    /// #765: a raw GET's tombstone (an owner's `reply_del`, its kind kept
+    /// by `fleet_get`) lands as one: a reply marked deleted, newest first
+    /// when it is the newest, never a value whose payload is empty — and
+    /// never counted as an error.
+    #[test]
+    fn a_tombstoned_raw_reply_reads_as_deleted() {
+        use zenoh::sample::SampleKind;
+        let lens = LensInputs {
+            namespace: String::new(),
+            catalog: None,
+            store: zenkey_fleet::BundleStore::new(Duration::from_secs(1)),
+            contracts: None,
+            generation: 0,
+            feed: None,
+        };
+        let key = "plant/line-1/temp";
+        let at = |seconds: u64, kind: SampleKind| zenkey_fleet::FleetAnswer {
+            key: key.into(),
+            encoding: Some("zenoh/bytes".into()),
+            attachment: None,
+            timestamp: Some(zenoh::time::Timestamp::new(
+                zenoh::time::NTP64(seconds << 32),
+                "a1b2".parse().expect("an id"),
+            )),
+            kind: Some(kind),
+            answer: zenkey_fleet::Answer::Value(match kind {
+                SampleKind::Put => zenoh::bytes::ZBytes::from("21.5"),
+                SampleKind::Delete => zenoh::bytes::ZBytes::new(),
+            }),
+        };
+        let got = replies(
+            &lens,
+            ReadKind::Raw,
+            key.into(),
+            vec![at(1, SampleKind::Put), at(2, SampleKind::Delete)],
+            0,
+            None,
+            std::time::SystemTime::now(),
+        );
+        assert_eq!(got.errors, 0, "a tombstone is a reply, not a refusal");
+        assert_eq!(got.replies.len(), 2);
+        assert!(got.replies[0].delete, "the newest reply is the tombstone");
+        assert!(got.replies[0].payload.is_empty());
+        assert!(!got.replies[1].delete, "the put before it is a value");
     }
 }

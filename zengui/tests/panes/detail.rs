@@ -160,7 +160,8 @@ fn the_value_names_the_zk2_read_that_produced_it() {
     let archive: zenkey_model::grammar::Addr = "ground/archive".parse().expect("an address");
 
     // The owner answered: decoded through its contract, its stamp's clock
-    // named, and no hex — S4's read keeps none, and says so.
+    // named, and its bytes in hex beside the decode — kept on the row
+    // since #765.
     let answer = world.state_read(key, Some(body), None);
     let decoded = answer.decoded.clone().expect("a value row is checked");
     let fetched = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(
@@ -184,11 +185,8 @@ fn the_value_names_the_zk2_read_that_produced_it() {
             .is_ok()
     );
     assert!(
-        ui.find(
-            "no hex — S4's read hands back the owner's reply decoded through its contract, \
-             as `zenctl get state` does; its wire bytes are not kept"
-        )
-        .is_ok()
+        ui.find(zengui::view::detail::hex_dump(body)).is_ok(),
+        "the owner's reply, in hex"
     );
     assert!(
         ui.find("ask ground/archive").is_ok(),
@@ -289,6 +287,119 @@ fn the_value_names_the_zk2_read_that_produced_it() {
         ..data(key)
     }));
     assert!(ui.find("asking — owner GET (S4) …").is_ok());
+}
+
+/// #765: S4's read keeps the owner's reply bytes on its row, so the value
+/// shows them in hex beside the decode, and bytes that did not decode as
+/// their declared type are sniffed from them, as a GET's reply is, rather
+/// than only counted. A row built with no bytes says so.
+#[test]
+fn an_owner_read_shows_its_bytes_in_hex() {
+    use zengui::view::detail::hex_dump;
+    use zenkey_fleet::report::{Provenance, StateReading, StateReport, StateRow, StateValue};
+    let world = common::World::new();
+    let key = common::ETH0;
+    let identity = leak(world.resolve(key));
+    let resolved = identity.resolved.as_ref().expect("a state key resolves");
+    // S4's answer as the fleet hands it back: the row rendered through the
+    // world's contract, carrying `bytes`.
+    let owner_read = |body: &[u8], bytes: Option<&[u8]>| {
+        let report = StateReport {
+            reading: StateReading::Current,
+            address: resolved.address.to_string(),
+            iface: resolved.iface.to_string(),
+            fingerprint: resolved.revision.fingerprint().to_string(),
+            resource: resolved.resource_name(),
+            values: resolved.values.clone(),
+            selectors: vec![key.to_string()],
+            archive: None,
+            timeout_s: 5.0,
+            rows: vec![StateRow {
+                key: key.to_string(),
+                value: StateValue::Value {
+                    payload: Box::new(world.check(key, body, "application/json").rendering),
+                },
+                bytes: bytes.map(|b| b.to_vec().into()),
+                timestamp: None,
+                confirmed: None,
+                identity: None,
+            }],
+        };
+        zengui::value::StateAnswer::new(report, identity, |_| Provenance::Unattributable)
+    };
+    let draw = |answer: zengui::value::StateAnswer| {
+        let decoded = answer.decoded.clone().expect("a value row is checked");
+        let fetched = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(
+            ValueRead::Owner(answer),
+        )));
+        simulator::<Message, _, _>(section(DetailData {
+            identity: Some(identity),
+            fetched: Fetched::Landed(fetched),
+            decoded: Some(leak(decoded).as_ref()),
+            ..data(key)
+        }))
+    };
+
+    let body = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#;
+    let mut ui = draw(owner_read(body, Some(body)));
+    assert!(ui.find("via owner GET (S4)").is_ok());
+    assert!(ui.find("hex").is_ok(), "the hex side is present");
+    assert!(ui.find(hex_dump(body)).is_ok(), "the owner's reply, in hex");
+    assert!(ui.find("contract-decoded <json:NetworkInterface>").is_ok());
+
+    // Not the declared type: the sniff of what arrived, beside its hex.
+    let bad = b"not json";
+    let mut ui = draw(owner_read(bad, Some(bad)));
+    assert!(
+        ui.find(
+            "<json:NetworkInterface?> structural (the bytes did not decode as their declared \
+             type)"
+        )
+        .is_ok()
+    );
+    assert!(
+        ui.find(zenkey_fleet::structural(bad)).is_ok(),
+        "sniffed from the row's bytes, not only counted"
+    );
+    assert!(ui.find(hex_dump(bad)).is_ok());
+
+    // A row that kept no bytes: said, never a blank well.
+    let mut ui = draw(owner_read(body, None));
+    assert!(
+        ui.find("no hex — this read handed back its rendering with no bytes beside it")
+            .is_ok()
+    );
+    assert!(ui.find(hex_dump(body)).is_err());
+}
+
+/// #765: a raw GET answered with a tombstone — an owner's `reply_del`,
+/// which `fleet_get` now keeps as a delete — reads as one: the retired chip
+/// where a size would be, the tombstone's words, and no hex of an empty
+/// payload.
+#[test]
+fn a_tombstoned_raw_reply_reads_as_deleted() {
+    let world = common::World::new();
+    let identity = leak(world.resolve(FOREIGN));
+    let ValueRead::Replies(mut read) = raw(FOREIGN, b"", "zenoh/bytes") else {
+        unreachable!("a raw GET's answer")
+    };
+    read.replies[0].delete = true;
+    let fetched = leak(Ok::<_, zengui::services::ServiceError>(Arc::new(
+        ValueRead::Replies(read),
+    )));
+    let mut ui = simulator::<Message, _, _>(section(DetailData {
+        identity: Some(identity),
+        fetched: Fetched::Landed(fetched),
+        ..data(FOREIGN)
+    }));
+    assert!(ui.find("via raw GET").is_ok());
+    assert!(ui.find("DELETE (tombstone)").is_ok());
+    assert!(
+        ui.find("a tombstone — retirement, not an empty value (RFC 04 §1.2)")
+            .is_ok()
+    );
+    assert!(ui.find("0 B").is_err(), "never an empty value's size");
+    assert!(ui.find("hex").is_err(), "no hex of an empty payload");
 }
 
 /// #614 (FL8a): what is not read on selection says why, in the plan's own

@@ -2044,6 +2044,7 @@ mod tests {
                         value,
                     )),
                 },
+                bytes: Some(zenoh::bytes::ZBytes::from(value.to_vec())),
                 timestamp: clock.and_then(stamp),
                 confirmed: None,
                 identity: None,

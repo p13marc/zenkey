@@ -24,7 +24,9 @@ use zenkey_fleet::model::render::Member;
 use zenkey_fleet::report::Conformance;
 use zenkey_fleet::{Lens, LensFeed};
 
-use super::sample::{Line, Payload, SampleLine, format_sample, hex, qos_summary, source_summary};
+use super::sample::{
+    Line, Payload, SampleLine, TOMBSTONE, format_sample, hex, qos_summary, source_summary,
+};
 use crate::bus::Deployment;
 use crate::cli::EchoArgs;
 use crate::cmd::zk2;
@@ -245,10 +247,7 @@ fn formatted(
 /// stopped at, and what failed against the declared type on stderr.
 fn print(line: &Line, sample: &zenkey_fleet::SampleView, hex_payload: bool, rate_suffix: &str) {
     let Some((rendering, conformance)) = &line.checked else {
-        println!(
-            "{}\n  <tombstone — a deletion, not an empty value>{rate_suffix}",
-            sample.key
-        );
+        println!("{}\n  {TOMBSTONE}{rate_suffix}", sample.key);
         return;
     };
     if hex_payload {
