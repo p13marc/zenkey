@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.27** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.28** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -23,8 +23,11 @@ member and a live member are, what `rate` bounds, and what a tool
 concludes, in 0.25 a window's "lost no delivery" established from
 what its reader can see, with the owner keeping its budget, in 0.26
 a late joiner's seed: subscribe, then S4's GET, merged by the owner's
-stamp, and in 0.27 a reader that stalls, a tool as a role with what it
-inspects, and the merge's unstamped samples and equal times).
+stamp, in 0.27 a reader that stalls, a tool as a role with what it
+inspects, and the merge's unstamped samples and equal times, and in 0.28
+what `config.v1` needed: the error codes defined, `forbidden` among
+them, `unavailable` from a handler for one member, and a rate across a
+restart).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -474,6 +477,14 @@ presence budget (§8.3) is another. `[F: budget/]`
     tool measures it from keys alone: the ULID stripped and the template
     resolved (§2.2). A rate per instance could not be measured, since a
     key names no instance, and a re-mint does not reset it.
+  - **Across a restart** (0.28). A restart is a re-mint (§1.5), so the
+    rate holds across it: a restarted owner counts the occurrences its
+    earlier instances published within the period, from a record of their
+    instants that it keeps across the restart. The bus need not give them
+    back, since a union storage is optional (§2.6). An owner that keeps no
+    such record cannot keep the rate across a restart: its occurrences in
+    the period after a start can break it, which a tool measuring from keys
+    reports like any other break.
   - A template without parameters has one member, so its rate bounds the
     resource.
 
@@ -1327,6 +1338,16 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
     answers `unavailable` where another would have served.
 
   `[Sc: operations.md §3, §8]`
+- **`unavailable` from a handler** (0.28). An operation the instance
+  exposes may still be unavailable for one member of its template: a
+  member its configuration or its capabilities leave out now, such as
+  `config.v1`'s groups outside the startup allowlist. Its handler MAY then
+  refuse a call to that member with `unavailable` and the cause, `config`
+  or `capability`, after the refusals above and the request's decode. The
+  descriptor does not list it: §3.3's `unavailable` names resources, not
+  members. A profile that refuses so names the member and its cause in
+  its own state, as `config.v1`'s `writable` does, so a tool sees it before
+  it calls. `[Sc: profiles/config/scenarios.md §9]`
 
 **Fan-out.**
 - **Over a template (O2, O3).** A fan-out's key expression can hold a
@@ -1390,6 +1411,33 @@ A failed call replies with `reply_err` and an envelope with these fields:
 | `message` | string | For a human, never parsed |
 | `cause` | string or null | With `unavailable` only, and then required: `build`, `config` or `capability` (§2.3) |
 | `detail` | a value, bytes, or null | With `app` only, and optional: a value of the operation's declared `error` type, inline (JSON, CBOR), as its encoded message (protobuf), or as base64 text of its bytes (raw, below) |
+
+**The codes** (0.28). Each says what failed, for a caller that reads no
+message:
+- `invalid_request`: the request, or the member the key names, is
+  malformed, or breaks the operation's rules (§5.1, "The request" and "A
+  key that names no member").
+- `not_found`: a well-formed member, or a thing the request names, that
+  the owner does not have.
+- `unavailable`: the operation, or one member of it, is not served here
+  now, for its cause (O3; §5.1, "`unavailable` from a handler").
+- `forbidden`: a rule of the owner's own refuses the act, and goes on
+  refusing it while what the rule rests on holds. It is a profile's or an
+  application's rule, such as `config.v1`'s refusal to persist a change
+  that set a sensitive value. It is never access control's, which is
+  silent (O5, §11.3), and never a configuration or a capability that
+  leaves the act out, which is `unavailable`.
+- `fanout_forbidden`: a fan-out to an operation that forbids one (O2).
+- `busy`: the owner's state refuses the call now, and the same call may
+  succeed later. Calling again is a new call, never a retry (O4).
+- `internal`: the owner failed, as a handler that ends without replying
+  does (O3).
+- `app`: the operation's own failure (below).
+
+Only `app` carries a detail. A refusal of another code that has
+something for a program to read leaves it in the owner's state, which a
+program can GET, and names it for a person in the message, as
+`config.v1`'s `busy` names the pending change's token.
 
 **Encoding.** The envelope's kind follows the operation's `error` type when
 it declares one, else its `response` type:

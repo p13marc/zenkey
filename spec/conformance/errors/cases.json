@@ -52,6 +52,33 @@
    }
   },
   {
+   "name": "json-forbidden",
+   "encoding": "application/json",
+   "text": "{\"code\": \"forbidden\", \"message\": \"the last change set a sensitive value\"}",
+   "expect": {
+    "code": "forbidden",
+    "message": "the last change set a sensitive value",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "refuse-detail-on-busy",
+   "encoding": "application/json",
+   "text": "{\"code\": \"busy\", \"message\": \"a change is pending (token i1-3)\", \"detail\": {\"token\": \"i1-3\"}}",
+   "expect": {
+    "refused": "detail"
+   }
+  },
+  {
+   "name": "refuse-cause-on-forbidden",
+   "encoding": "application/json",
+   "text": "{\"code\": \"forbidden\", \"message\": \"x\", \"cause\": \"config\"}",
+   "expect": {
+    "refused": "cause"
+   }
+  },
+  {
    "name": "cbor-fanout",
    "encoding": "application/cbor",
    "hex": "a264636f64657066616e6f75745f666f7262696464656e676d65737361676575636f6e6372657465206b6579207265717569726564",
