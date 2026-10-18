@@ -18,8 +18,9 @@ published on `state/doctor`, carries their verdicts and the scope's new
 
 `zenwatch.v1` is at **1.1** (`sha256:21433f7d…`, published in
 `contracts/.history`). The doctor report's types grew, and one change is a
-**review** the build script now warns about on every build, by design of
-the compatibility gate:
+**review**, accepted by publishing 1.1: the build gate re-warns no review of
+a published revision (`zenkey-build`, #768), so zenwatch builds without a
+word:
 
 | 1.0 | 1.1 | Class |
 |---|---|---|
@@ -33,8 +34,8 @@ check after 1.0 would have been a new major of `zenwatch.v1`. A reader
 shows an id it does not know as written. What it costs: a reader that
 validates `state/doctor` against 1.0's bundle refuses a report naming a
 `config-*` id; one that retrieves the bundle the descriptor names (core
-§8.4) reads 1.1. The alternative was `zenwatch.v2`; it is a maintainer's
-choice, and reverting to it means a new major file and history.
+§8.4) reads 1.1. The alternative was `zenwatch.v2`, not taken: the next
+appended check is a compatible change.
 
 | Before | Now | Notes |
 |---|---|---|

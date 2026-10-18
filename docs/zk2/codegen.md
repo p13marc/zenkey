@@ -31,9 +31,16 @@ generated types go beside it, in `zk2.d/`.
 - **every lint error** of `zenkey-model` (stable codes; warnings go to
   `cargo:warning`), and the set's checks (E035, E036);
 - **with a history:** a candidate `breaking` against any published revision
-  (`zenkey_model::compat::check_history`). `review` is a `cargo:warning`
-  naming each finding; the CI binary (`zk2 contract compat`) is where review
-  is accepted. A history that does not verify fails too.
+  (`zenkey_model::compat::check_history`), whether or not the candidate is
+  itself published. Publishing (`zk2 contract bundle --history`) appends the
+  bundle and runs no classifier, so the build is where breaking is refused.
+  `review` is a `cargo:warning` naming each finding, for a candidate not yet
+  published; the CI binary (`zk2 contract compat`) is where review is read,
+  and publishing the revision is where it is accepted. A candidate whose
+  fingerprint is a revision in the history therefore builds without a word:
+  its review findings and classifier warnings against the other entries
+  were accepted when it was published, and are not re-warned on every build
+  (#768). A history that does not verify fails too.
 
 It emits `cargo:rerun-if-changed` for every contract, every schema file and
 proto include root it names, the contracts directories and the history.
@@ -204,8 +211,9 @@ depends on it without zenoh: its normal tree holds `zenoh-keyexpr` (and
 - The generated `Api` drives a unit test with a double.
 - A contract crate builds with no zenoh dependency (`cargo tree` shows none
   without the feature; `zenkey-build/fixtures/contract-crate`).
-- A breaking revision against a history fails the build; a review revision
-  warns (`zenkey-build/tests/gate.rs`).
+- A breaking revision against a history fails the build, published or not;
+  a review revision warns until it is published, and then builds without a
+  word (`zenkey-build/tests/gate.rs`).
 
 ## What the implementation changed (2026-10-08)
 

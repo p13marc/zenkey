@@ -24,8 +24,13 @@
 //!   `cargo:warning`), and the set's checks (E035, E036);
 //! - **with a history**, on a candidate that is `breaking` against any
 //!   published revision (`zenkey_model::compat::check_history`, the rules
-//!   of `zk2 contract compat --history`); `review` is a `cargo:warning`
-//!   naming each finding.
+//!   of `zk2 contract compat --history`), itself published or not: publishing
+//!   (`zk2 contract bundle --history`) runs no classifier, so the build is
+//!   where breaking is refused. `review` is a `cargo:warning` naming each
+//!   finding, for a candidate not yet published. A candidate whose
+//!   fingerprint is a revision in the history builds without a word: its
+//!   review findings against the other entries were accepted when it was
+//!   published, and are not re-warned on every build.
 //!
 //! It emits `cargo:rerun-if-changed` for every contract, every schema file
 //! and include root it read, and the history.
@@ -337,6 +342,15 @@ fn schema_inputs(file: &Path) -> Vec<PathBuf> {
 }
 
 /// The compatibility gate (spec §9.8): breaking fails, review warns.
+///
+/// Breaking is judged against every published revision, always:
+/// publishing (`zk2 contract bundle --history`, `history::append`) runs no
+/// classifier, so a breaking revision can sit in a history, and building
+/// it fails. A candidate whose fingerprint is itself a published revision
+/// does not warn: its review findings and classifier warnings against the
+/// other entries were the author's to accept when it was published, and a
+/// build re-warning them forever would be noise. A candidate not yet
+/// published warns as it always did, against every entry.
 fn compat(root: &Path, contracts: &[Contract], warnings: &mut Vec<String>) -> Result<(), Error> {
     if !root.exists() {
         return Ok(());
@@ -355,13 +369,16 @@ fn compat(root: &Path, contracts: &[Contract], warnings: &mut Vec<String>) -> Re
         };
         let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
         files.sort();
+        let fingerprint = Bundle::build(c).fingerprint();
         let mut history = Vec::new();
+        let mut published = false;
         for f in files {
             let bytes = std::fs::read(&f).map_err(|e| Error::Io(f.clone(), e))?;
             let b = Bundle::verify(&bytes).map_err(|e| Error::History {
                 dir: root.display().to_string(),
                 problems: format!("{}: {e}", f.display()),
             })?;
+            published |= b.fingerprint() == fingerprint;
             history.push(Revision::of_bundle(&b));
         }
         let v = check_history(&history, &Revision::of(c));
@@ -380,6 +397,9 @@ fn compat(root: &Path, contracts: &[Contract], warnings: &mut Vec<String>) -> Re
                 iface: c.iface.to_string(),
                 findings: v.findings.iter().map(line).collect::<Vec<_>>().join("\n"),
             });
+        }
+        if published {
+            continue;
         }
         warnings.extend(v.findings.iter().map(line));
         warnings.extend(
