@@ -200,8 +200,15 @@ pub fn doc_read<T: Clone>(
         stamp: None,
         fresh: fresh::judge_all(&horizon(), &[]),
     };
+    // A subscription's silence judges only a member the reader knows: one
+    // it heard, or one the GET showed a value of (`freshness.v1` §2.5,
+    // 0.2). Otherwise it says nothing of the document.
+    let shown = matches!(got, Got::Answered { reply, .. } if reply.value.is_some());
     if let Some((o, last)) = heard {
-        observations.push(o);
+        let silent = matches!(o, Observation::Subscribed { last: None, .. });
+        if !silent || shown {
+            observations.push(o);
+        }
         if let Some(r) = last {
             out.value = r.value.clone();
             out.via = Some(ConfigVia::Subscription);
@@ -877,6 +884,31 @@ mod tests {
         );
         let silent = doc_read::<ConfigView>(Got::Silent, None, &Trust::Word);
         assert_eq!(silent.fresh.reason, fresh::Reason::Silent);
+        // A window's silence judges only a member the reader knows: with
+        // nothing heard and nothing answered, it is no evidence of stale.
+        let quiet = Observation::Subscribed {
+            last: None,
+            listened: Duration::from_secs(90),
+            complete: true,
+        };
+        let r = doc_read::<ConfigView>(Got::Silent, Some((quiet, None)), &Trust::Word);
+        assert_eq!(
+            (r.fresh.verdict, r.fresh.reason),
+            (fresh::Verdict::Unobservable, fresh::Reason::Silent)
+        );
+        let answered = doc_read(
+            Got::Answered {
+                reply: &stale,
+                at: at(),
+            },
+            Some((quiet, None)),
+            &Trust::None,
+        );
+        assert_eq!(
+            (answered.fresh.verdict, answered.fresh.reason),
+            (fresh::Verdict::Stale, fresh::Reason::NoDelivery),
+            "a member the GET showed, silent for longer than its horizon"
+        );
     }
 
     /// The projection is the model's, member for member.
