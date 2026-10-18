@@ -239,22 +239,40 @@ def _check_member(name: str, v: Any) -> Refusal | None:
     return None
 
 
+def is_param_value(v: Any) -> bool:
+    """A ``ParamValue`` (§3): a boolean, an integer or a string, as JSON
+    Schema reads them. ``2.0`` and ``2e0`` are integers to JSON Schema, and
+    so are integers beyond 64 bits: of the request's type, and refused at
+    row 11 against the parameter's kind (§2.5, 0.2). ``null``, a number with
+    a fractional part, an array and an object are not."""
+    if type(v) in (bool, int, str):
+        return True
+    return type(v) is float and v.is_integer()
+
+
 def decode_set(request: Any) -> Refusal | None:
-    """A ``SetRequest`` (§3): an object, its ``values`` an object, its
-    members of their types. A member a reader does not know is ignored (the
-    types are open, §3). The members are checked in the bytewise order of
-    their names, ``values`` required. A value's kind and bounds are row 11's
-    (§2.5 "A value of the wrong kind"), not the decode's, ``null``, a
-    fraction and 2^63 included (SPEC-FINDINGS F-107)."""
+    """A ``SetRequest`` (§3, §2.5 "A request outside its type", 0.2): an
+    object, its members of their types, ``values`` an object of
+    ``ParamValue``. A member a reader does not know is ignored (the types
+    are open, §3). Several faults: "the first in the bytewise order of the
+    member names, ``values`` last, and in ``values`` the first in the
+    bytewise order of the parameter names"."""
     if not isinstance(request, dict):
         return _bad("", "the request is a SetRequest object")
     for name in bytewise(n for n in request if n in
-                         ("confirm_s", "dry_run", "expected_revision", "idempotency_key", "token", "values")):
+                         ("confirm_s", "dry_run", "expected_revision", "idempotency_key", "token")):
         r = _check_member(name, request[name])
         if r is not None:
             return r
     if "values" not in request:
         return _bad(pointer("values"), "a SetRequest carries values")
+    r = _check_member("values", request["values"])
+    if r is not None:
+        return r
+    for name in bytewise(request["values"]):
+        if not is_param_value(request["values"][name]):
+            return _bad(pointer("values", name), f"the value of {name!r} is a boolean, an integer or a string "
+                                                 "(ParamValue, §3)")
     return None
 
 
@@ -373,11 +391,16 @@ def check_control(op: str, request: dict[str, Any], f: Facts) -> Refusal | None:
     return None
 
 
-def persist_unavailable(f: Facts) -> Refusal | None:
+def persist_unavailable(f: Facts, writable: bool = True) -> Refusal | None:
     """§2.13 row 1: "no persisted layer: unavailable, cause config", which
-    the core answers before any handler runs, the request's type included."""
+    the core answers before any handler runs, the request's type included;
+    and a layer the owner "cannot write to now … before the request's type
+    too" (0.2)."""
     if not f.persist:
         return Refusal("unavailable", None, "this owner has no persisted layer (§2.13)", cause="config")
+    if not writable:
+        return Refusal("unavailable", None, "this owner cannot write its persisted layer now (§2.13)",
+                       cause="config")
     return None
 
 
@@ -532,13 +555,16 @@ class Core:
             raise ValueError("at most 16 groups (§2.2)")
         if apply_after_ns >= floor_s * NS:
             # §2.9: apply_at "MUST state one before the deadline"; a window
-            # is never shorter than the floor (SPEC-FINDINGS F-113).
+            # is never shorter than the floor, which an owner MUST keep above
+            # its apply's delay (§2.8 "Above the apply's delay", 0.2).
             raise ValueError("apply_at would not come before the smallest window's deadline (§2.9)")
         self.service, self.schema = service, schema
         self.startup_file = startup
         self.overlay = overlay if overlay is not None else {}
         self.floor_s, self.apply_after_ns, self.persist_layer = floor_s, apply_after_ns, persist
         self.device = device or (lambda act: "ok")
+        #: §2.13 row 1 (0.2): whether the persisted layer can be written now
+        self.layer_writable = True
         self.events_at = events_at if events_at is not None else []
         self.log: list[str] = []
         self.instance = ""
@@ -626,7 +652,7 @@ class Core:
                     p["value"] = cur.value
                 if cur.source is not None:
                     # An unknown value has no source (lifecycle.json case 4,
-                    # SPEC-FINDINGS F-109).
+                    # §2.3, 0.2).
                     p["source"] = cur.source
                 start, _ = self.startup_value(*key)
                 if not decl.get("sensitive") and cur.value is not UNKNOWN and start is not UNKNOWN \
@@ -689,7 +715,7 @@ class Core:
     def _rate_spent(self, now: int) -> bool:
         """§2.17: "while 600 change events were published within the last
         hour": an event exactly an hour old no longer counts, as
-        lifecycle.json's case 19 says (SPEC-FINDINGS F-110)."""
+        core §2.7's span (§2.17, 0.2)."""
         return sum(1 for t in self.events_at if now - RATE_PERIOD_NS < t <= now) >= RATE_N
 
     def _end(self, change: Change, outcome: str, step: Step, now: int) -> None:
@@ -865,7 +891,7 @@ class Core:
                                 "deadline": write_time(change.deadline or 0)}})
             return step
         # Hot: the apply now (row 14 at its result). An empty values is an
-        # apply of nothing, which moves the revision (SPEC-FINDINGS F-108).
+        # act that sets no value, and moves the revision (§2.5, §2.3, 0.2).
 
         def then(result: Any) -> None:
             if isinstance(result, dict) and "refused" in result:
@@ -943,23 +969,32 @@ class Core:
         its parameters read ``source: overlay``, and ``startup`` leaves
         them. No act, no revision, no event."""
         step = Step()
-        r = persist_unavailable(self.facts(now)) or decode_control(request) or check_persist(request,
-                                                                                               self.facts(now))
+        r = persist_unavailable(self.facts(now), self.layer_writable) or decode_control(request) \
+            or check_persist(request, self.facts(now))
         if r is not None:
             step.reply = r
             return step
         assert self.last_change is not None
+        # §2.13 "What it writes" (0.2): "The values the last change set, as
+        # it set them: never a value a pending change runs since".
         for (g, p), v in self.last_change["values"].items():
             self.overlay.setdefault(g, {})[p] = v
             cur = self.running[(g, p)]
-            if self.pending is not None and (g, p) in self.pending.before:
-                # Under another pending change, which an undo would restore
-                # to the persisted value: the restored source is overlay
-                # (SPEC-FINDINGS F-111).
-                b = self.pending.before[(g, p)]
+            pending = self.pending
+            if pending is not None and (g, p) in pending.before:
+                # The value before the pending change, when it is the value
+                # written, is restored at source overlay (§2.13 "After it").
+                b = pending.before[(g, p)]
                 if b.value is not UNKNOWN and json_equal(b.value, v):
-                    self.pending.before[(g, p)] = Param(v, "overlay")
-            elif cur.value is not UNKNOWN and json_equal(cur.value, v):
+                    pending.before[(g, p)] = Param(v, "overlay")
+                if (g, p) in pending.applied:
+                    # "keeps its running value and its source, and shows the
+                    # value written as its startup".
+                    continue
+            # "Each parameter the change set that runs the value written
+            # reads source: overlay", a reach group not yet applied
+            # included.
+            if cur.value is not UNKNOWN and json_equal(cur.value, v):
                 self.running[(g, p)] = Param(v, "overlay")
         step.reply = self._reply_doc(request)
         return step
@@ -1262,7 +1297,7 @@ class ConfigOwner:
     def _after(self, step: Step) -> None:
         """Events published, and the view and the status put when either
         changed (§2.3), the view first; one revision may name several such
-        pairs (SPEC-FINDINGS F-112). The timer is told of a new due
+        pairs (§2.3, 0.2: "An owner SHOULD put the view first"). The timer is told of a new due
         instant."""
         for ev in step.events:
             self.owner.occur(self.event_member, encode_json(ev))

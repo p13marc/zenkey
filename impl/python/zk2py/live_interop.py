@@ -3079,6 +3079,176 @@ def run_python_budget(report: Report, exe: Path) -> None:
         r1.close()
 
 
+CONFIG_TOML = "spec/profiles/config/config.v1.toml"
+
+#: The order of refusals across the two implementations (config.v1 §2.5,
+#: §2.10, §2.13, 0.2): requests to an idle owner, each predicted by zk2py
+#: from the view the owner serves (§2.5 "A caller that checks first") and
+#: answered by the owner example. A request zk2py accepts is sent as a dry
+#: run, so nothing changes.
+CONFIG_PROBES: list[tuple[str, Any, str]] = [
+    ("set/power", {"values": {"level": None}}, "null is outside the type: before row 3"),
+    ("set/queue", {"values": {"tx_queue_len": {}}}, "an object is outside the type: before row 4"),
+    ("set/duty", {"values": {"fraction_ppm": [1]}}, "an array is outside the type"),
+    ("set/duty", {"values": {"fraction_ppm": 1.5}}, "a fraction is outside the type"),
+    ("set/duty", {"confirm_s": 0, "values": {"fraction_ppm": 1}}, "confirm_s 0"),
+    ("set/duty", {"token": "", "values": {"fraction_ppm": 1}}, "an empty token"),
+    ("set/duty", {"idempotency_key": "k" * 129, "values": {"fraction_ppm": 1}}, "a key beyond 128 characters"),
+    ("set/duty", {"values": 3}, "values not an object"),
+    ("set/duty", {"confirm_s": 30}, "no values"),
+    ("set/power", {"values": {"level": 3}}, "row 3: no such group"),
+    ("set/Duty", {"values": {"fraction_ppm": 1}}, "row 3: a group name compares exactly"),
+    ("set/queue", {"values": {"tx_queue_len": 10}}, "row 4: outside the allowlist"),
+    ("set/queue", {"values": {"nope": 1}}, "row 4 before the values"),
+    ("set/radio", {"token": "t-1", "values": {"frequency_hz": 869525000}}, "row 6: a token, nothing pending"),
+    ("set/duty", {"expected_revision": 99, "values": {"fraction_ppm": 1}}, "row 7: a stale revision"),
+    ("set/modulation", {"values": {"spreading_factor": 8}}, "row 8: a contract group"),
+    ("set/modulation", {"dry_run": True, "values": {"spreading_factor": 8}}, "row 8: a contract dry run"),
+    ("set/radio", {"values": {"frequency_hz": 869525000}}, "row 10: reach, no window"),
+    ("set/radio", {"values": {"frequency_hz": "fast"}}, "row 10 before row 11"),
+    ("set/duty", {"values": {"power": 3}}, "row 11: no such parameter"),
+    ("set/duty", {"values": {"fraction_ppm": "10000"}}, "row 11: text for an integer"),
+    ("set/duty", {"values": {"fraction_ppm": 2.0}}, "row 11: 2.0, of the type, not of the kind"),
+    ("set/duty", {"values": {"fraction_ppm": 9223372036854775808}}, "row 11: beyond 64 bits, of the type"),
+    ("set/duty", {"values": {"fraction_ppm": -1}}, "row 11: below the minimum"),
+    ("set/sim", {"values": {"pin": 1234}}, "row 11: a sensitive value of the wrong kind"),
+    ("set/duty", {"values": {"aa": 1, "fraction_ppm": -5}}, "row 11: bytewise, an unknown name first"),
+    ("set/duty", {"values": {"fraction_ppm": -5, "zz": 1}}, "row 11: bytewise, a bad value first"),
+    ("set/duty", {"dry_run": True, "values": {"fraction_ppm": 20000}}, "a hot dry run"),
+    ("set/radio", {"dry_run": True, "values": {"frequency_hz": 869525000}}, "a reach dry run needs no window"),
+    ("set/sim", {"dry_run": True, "values": {"pin": "1234"}}, "a sensitive dry run"),
+    ("confirm", {"token": "x"}, "confirm, nothing pending"),
+    ("confirm", {"token": "x", "confirm_s": 5}, "confirm with a window"),
+    ("confirm", {"token": "x", "answer": "both"}, "an answer outside the type"),
+    ("extend", {"token": "x"}, "extend without a window"),
+    ("cancel", {"token": ""}, "cancel, an empty token"),
+    ("persist", {"token": "x"}, "persist, no last change"),
+    ("persist", {"token": "x", "confirm_s": 1}, "persist with a window"),
+]
+
+
+def _config_predict(schema: list[dict[str, Any]], op: str, request: Any) -> dict[str, Any]:
+    """zk2py's word on a probe to an idle owner: accepted, or the code,
+    cause and ConfigError code of its refusal."""
+    from . import config as cf
+
+    f = cf.Facts(revision=0)
+    if op.startswith("set/"):
+        r = cf.decode_set(request) or cf.check_set(schema, op[4:], request, f)
+    elif op == "persist":
+        r = cf.persist_unavailable(f) or cf.decode_control(request) or cf.check_persist(request, f)
+    else:
+        r = cf.decode_control(request) or cf.check_control(op, request, f)
+    if r is None:
+        return {"accepted": True}
+    return {"code": r.code, "cause": r.cause, "app": r.app}
+
+
+def run_python_config(report: Report, exe: Path) -> None:
+    """config.v1 (text 0.2) across the two implementations: zk2py the caller,
+    the tool and the subscriber, the owner example's ``--config`` the owner,
+    a black box driven by its flags and stdin.
+    - Its bring-up: the view and the status before the tokens, its
+      descriptor and bundle against the standard contract.
+    - The order of refusals: :data:`CONFIG_PROBES`, each predicted by
+      zk2py from the served view and answered by the owner example.
+    - ``scenarios.md`` §1 to §14 in :mod:`zk2py.config_scenarios`'s
+      owner-example mode, each section on a bus of its own."""
+    import zenoh
+
+    from . import config as cf
+    from . import config_scenarios as cs
+    from . import live
+    from .contract import load_contract
+    from .descriptor import check_descriptor
+
+    run = "config.v1 0.2: the owner example's config (lab/rf0), read and called by zk2py"
+    contract = load_contract(REPO / CONFIG_TOML)
+    r1, ep, _ = _r1()
+    t_sess, c_sess = live.open_client(ep), live.open_client(ep)
+    at_token: list[Any] = []
+    appeared: queue.Queue = queue.Queue()
+    rust = None
+    try:
+        def get_at_token() -> None:
+            if appeared.get() is not None:
+                at_token.append((live.get_state(t_sess, "zk2/lab/rf0/config.v1/state/view"),
+                                 live.get_state(t_sess, "zk2/lab/rf0/config.v1/state/status")))
+
+        threading.Thread(target=get_at_token, daemon=True).start()
+        lv = t_sess.liveliness().declare_subscriber("zk2/lab/rf0/@zk/instance/*", zenoh.handlers.Callback(
+            lambda smp: appeared.put(str(smp.key_expr)) if smp.kind == zenoh.SampleKind.PUT else None),
+            history=True)
+        time.sleep(0.3)
+        rust = Owner(exe, "lab/rf0", [], connect=ep, flags=["--config", "--config-floor", "10",
+                                                            "--config-apply-after-ms", "1000"])
+        ready = rust.wait_for("ready ", 120)
+        if not report.check(run, "it starts behind R1 with --config", ready is not None,
+                            f"ready {ready!r}; stderr {rust.stderr[-2:]}"):
+            return
+        time.sleep(1.0)
+        v_reply, s_reply = at_token[0] if at_token else (None, None)
+        view = json.loads(v_reply.replies[0].payload) if v_reply and v_reply.replies else None
+        status = json.loads(s_reply.replies[0].payload) if s_reply and s_reply.replies else None
+        report.check(run, "a GET made the moment its instance token appeared answers the view and the status, the "
+                          "status the view's projection: put before the tokens (§2.3, §2.19)",
+                     view is not None and status is not None and view["revision"] == 0
+                     and cf.status_of(view) == status, f"view {view is not None}, status {status}")
+        doc, raw = _doc(t_sess, ready)
+        entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == "config.v1"), {})
+        report.check(run, "its descriptor lists config.v1 with the standard contract's fingerprint and its token, its "
+                          "profiles freshness.v1 alone (§1, core §3.3), and it has no D code against the contract",
+                     entry.get("contract") == contract.fingerprint and entry.get("token") is True
+                     and doc.get("profiles") == ["freshness.v1"] and check_descriptor(raw, [contract]) == [],
+                     f"entry {entry}, profiles {doc.get('profiles')}")
+        fp = live.fingerprint_of(doc, "config.v1")
+        got = live.retrieve_bundle(t_sess, "config.v1", fp) if fp else None
+        report.check(run, "its bundle, retrieved by the descriptor's fingerprint, is revision 1.0 as zk2py builds it "
+                          "from spec/profiles/config/config.v1.toml (§3)",
+                     got is not None and got.verified is not None and got.verified.contract == contract.canonical,
+                     f"fingerprint {fp}")
+        schema = (view or {}).get("groups") or []
+        names = [g["name"] for g in schema]
+        report.info(run, f"its schema: {[(g['name'], g['class'], g['writable']) for g in schema]}")
+        report.check(run, "its schema is lifecycle.json's rf, every group's parameters as declared there, and a "
+                          "contract group, modulation",
+                     names[:5] == [g["name"] for g in cs.rf_schema()] and "modulation" in names
+                     and all([{k: v for k, v in p.items() if k not in ("value", "source", "startup", "description")}
+                              for p in g["parameters"]]
+                             == [{k: v for k, v in p.items() if k != "description"} for p in rg["parameters"]]
+                             for g, rg in zip(schema, cs.rf_schema())), str(names))
+        run2 = "config.v1 0.2: the order of refusals, zk2py's prediction against the owner example's answer"
+        for op, request, note in CONFIG_PROBES:
+            want = _config_predict(schema, op, request)
+            got_call = cs.call(c_sess, "lab/rf0", op, request)
+            if got_call.kind == "value":
+                seen: dict[str, Any] = {"accepted": True}
+            elif got_call.kind == "refused":
+                e = got_call.envelope or {}
+                d = e.get("detail")
+                seen = {"code": e.get("code"), "cause": e.get("cause"),
+                        "app": d.get("code") if isinstance(d, dict) else None}
+            else:
+                seen = {"silent": True}
+            report.check(run2, f"{op} {json.dumps(request)[:70]} ({note}): {want}", seen == want, f"answered {seen}")
+        st = live.get_state(c_sess, "zk2/lab/rf0/config.v1/state/status")
+        after = json.loads(st.replies[0].payload) if st.replies else {}
+        report.check(run2, "after every probe, nothing changed: revision 0, no last change, nothing pending",
+                     after.get("revision") == 0 and "last_change" not in after and "pending" not in after, str(after))
+        lv.undeclare()
+    finally:
+        appeared.put(None)
+        if rust is not None:
+            rust.close()
+        t_sess.close()
+        c_sess.close()
+        r1.close()
+    # The scenarios, each section on a bus of its own.
+    sub = cs.Report(label="config.v1 0.2 scenarios against the owner example, ")
+    cs.run(sub, exe)
+    report.rows.extend(sub.rows)
+
+
 def run_python_seed(report: Report, exe: Path) -> None:
     """Core §4.2, "A late joiner's seed" (0.26), over the owner example's
     state, its writes driven over its stdin (``put``, ``delete``), through
@@ -3201,6 +3371,7 @@ def main(argv: list[str] | None = None) -> int:
         "health": lambda r: run_python_health(r, args.owner, args.consume),
         "budget": lambda r: run_python_budget(r, args.owner),
         "seed": lambda r: run_python_seed(r, args.owner),
+        "config": lambda r: run_python_config(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),
