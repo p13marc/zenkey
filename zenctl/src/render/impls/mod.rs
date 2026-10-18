@@ -18,6 +18,7 @@ mod acl;
 pub mod acts;
 mod bench;
 mod closing;
+mod config;
 mod fields;
 mod findings;
 pub mod observations;

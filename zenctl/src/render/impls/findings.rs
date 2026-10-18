@@ -138,6 +138,24 @@ impl Render for DoctorReport {
                 .cite("freshness.v1 §2.6"),
             );
         }
+        if let Some(c) = self.scope.config.as_option() {
+            notes.push(
+                Note::coverage(format!(
+                    "read config.v1 through `{}`, {} reading(s): {} service(s) list it; {}",
+                    c.selector,
+                    c.readings,
+                    c.services,
+                    if c.clocks_synced {
+                        "a document's age is read against this host's clock, on the \
+                         deployment's word (--clocks-synced)"
+                    } else {
+                        "no clock is trusted, so the checks that conclude from a fresh view or \
+                         status are unobservable — pass --clocks-synced on the deployment's word"
+                    }
+                ))
+                .cite("config.v1 §5"),
+            );
+        }
         let not_asked: Vec<String> = self
             .checks
             .iter()
@@ -199,6 +217,9 @@ impl Render for DoctorReport {
         }
         if let Some(h) = self.scope.health.as_option() {
             asked.push(h.selector.clone());
+        }
+        if let Some(c) = self.scope.config.as_option() {
+            asked.push(c.selector.clone());
         }
         Some(ObservedScope {
             asked,

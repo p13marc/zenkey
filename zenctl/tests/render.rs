@@ -114,6 +114,12 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ⚠  hostid-duplicate (hostid.v1 §2.12)    finding — 1 subject(s)
     ⚠ warning: h-bbd1aa1db10b/sysinfo — in both presence reads 2.0s apart, instances of h-bbd1aa1db10b/sysinfo on a system their descriptors declare minted state 2 session zids: the cause is undecided
 —  population-over-bound (§2.7)          not asked
+✗  config-projection (config.v1 §2.19)   finding — 1 subject(s)
+    ✗ error: lab/rf0 — in both of two readings 2.0s apart, its status is not its view's projection: an owner keeps the status equal to the view's projection (config.v1 §2.19)
+✓  config-overdue (config.v1 §2.11)      clean — 1 service(s) implementing config.v1, none listing a change pending past its deadline by its own clock; 3 present service(s) do not list config.v1, and are not asked
+?  config-unpersisted (config.v1 §5)     unobservable — 1 subject(s) unjudged
+    ? unjudged lab/rf0: no fresh view: the status carries no class, no writable and no startup value — the view this reader's clock is not trusted to the HLC delta against the stamping clock (unobservable) — the doctor measures no clock: pass --clocks-synced on the deployment's word that this host's clock and the owners' agree (freshness.v1 §2.6)
+—  config-desired (config.v1 §2.18)      not asked
 
 "#]]
     );
@@ -165,7 +171,13 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
         "{said}"
     );
     assert!(
-        said.contains("6 finding(s): 3 error(s), 2 warning(s), 1 info"),
+        said.contains("7 finding(s): 4 error(s), 2 warning(s), 1 info"),
+        "{said}"
+    );
+    // The config.v1 checks' scope (#768, CC): what they read, and the cure
+    // for the clock.
+    assert!(
+        said.contains("read config.v1 through `zk2/*/*/config.v1/state/**`, 2 reading(s)"),
         "{said}"
     );
 
@@ -1693,6 +1705,8 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cache",
         "cache-action",
         "compat",
+        "config",
+        "config-act",
         "conform",
         "context",
         "context-action",
@@ -1812,7 +1826,12 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::doctor_report());
     assert_eq!(
         s.asked,
-        ["zk2/*/*/@zk/**", "@/*/router", "zk2/*/*/health.v1/state/**"]
+        [
+            "zk2/*/*/@zk/**",
+            "@/*/router",
+            "zk2/*/*/health.v1/state/**",
+            "zk2/*/*/config.v1/state/**"
+        ]
     );
     assert_eq!(s.window_s, None);
     // `health` (#721, PF): presence, the readings' GET, the window's
@@ -1820,6 +1839,14 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::health_report());
     assert_eq!(s.asked.len(), 4);
     assert_eq!(s.window_s, Some(31.0));
+    // `config get` (#768, CC): presence, the GET, a replay, no window; an
+    // act: its one key, waiting its timeout.
+    let s = scoped(&fx::config_report());
+    assert_eq!(s.asked.len(), 3);
+    assert_eq!(s.window_s, None);
+    let s = scoped(&fx::config_act_pending());
+    assert_eq!(s.asked, ["zk2/lab/rf0/config.v1/@op/set/radio"]);
+    assert_eq!(s.window_s, Some(2.0));
     // `storage gen --check` sweeps the admin space once, no window.
     let s = scoped(&fx::storage_check());
     assert_eq!(s.asked, ["@/*/router/**/storage_manager/storages/**"]);
@@ -3286,4 +3313,201 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
             .last()
             .is_some_and(|l| l.contains("never a verdict"))
     );
+}
+
+/// `config get` (#768, CC): the view drawn as its schema beside every
+/// running value, each document's freshness said, then §5's answers each in
+/// its own word — `not yet` and `not asked` apart from `no` — a sensitive
+/// value never drawn, and a group's and a parameter's answer as rows of
+/// their own in ndjson.
+#[test]
+fn a_config_reading_spells_every_answer_apart_in_every_medium() {
+    let r = fx::config_report();
+    assert_data_eq!(
+        table(&r),
+        str![[r#"
+config.v1 of lab/rf0 in namespace "acme"
+  view: fresh, its owner's reply stamped 2026-10-18T12:00:05.000000000Z by 751033f1fbbb816bc6f7bad180995fa2
+  status: fresh, its owner's reply stamped 2026-10-18T12:00:05.000000000Z by 751033f1fbbb816bc6f7bad180995fa2
+  instance 3fa9c2d41b7e0012, revision 1, floor 10 s
+  pending change: 3fa9c2d41b7e0012-2 on radio, deadline 2026-10-18T12:02:00.000Z (the owner's clock), not every group applied yet
+  last change: 3fa9c2d41b7e0012-1 on duty
+duty (hot, writable) — the transmit duty cycle
+  fraction_ppm  20000 ppm                runtime  startup 10000 ppm — a restart would run it
+
+radio (reach, writable) — the radio channel
+  frequency_hz  868100000 Hz             file
+
+sim (hot, writable) — the SIM
+  pin           <sensitive: write-only>  file
+
+queue (hot, not writable: outside the startup allowlist) — the transmit queue
+  tx_queue_len  100 packets              default
+
+what a tool may conclude (config.v1 §5):
+  is a change pending: yes — change 3fa9c2d41b7e0012-2 is pending on radio, its deadline 2026-10-18T12:02:00.000Z (the owner's clock), not every group applied yet — by the fresh view
+  did 3fa9c2d41b7e0012-2 land: not yet — it is still pending, its deadline 2026-10-18T12:02:00.000Z (the owner's clock): confirm it, or it is undone then
+  was its undo clean: not asked — it is still pending: no undo has run yet
+  is duty writable: yes — duty is hot and writable
+  is queue writable: no — queue is outside this service's startup allowlist (config.v1 §2.16)
+  will duty.fraction_ppm survive a restart: no — it runs 20000, and a restart would run 10000: a divergence an operator may want persisted or undone (config.v1 §2.13)
+  will sim.pin survive a restart: unobservable — write-only: its startup value is never shown (config.v1 §2.15)
+  has it converged to its desired document: not asked — no desired member: the owner converges no desired state (config.v1 §2.18)
+
+change events read:
+  3fa9c2d41b7e0012-1 applied at revision 1, by ops (claimed): duty.fraction_ppm 10000 → 20000
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&r),
+        str![[r#"
+presence read through `zk2/lab/rf0/@zk/**`: 1 instance(s) of lab/rf0; its descriptor lists config.v1 (config.v1 §2.1)
+a reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 §2.6)
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&r)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("a line of json"))
+        .collect();
+    assert_eq!(lines[0]["report"], "config");
+    assert_eq!(lines[0]["pending"]["answer"], "yes");
+    assert_eq!(lines[0]["change"]["landed"]["answer"], "not_yet");
+    assert!(lines[0].get("writable").is_none(), "rows ride as rows");
+    let kinds: Vec<&str> = lines[1..]
+        .iter()
+        .map(|l| l["row"].as_str().expect("a tagged row"))
+        .collect();
+    assert_eq!(kinds, ["group", "group", "parameter", "parameter", "event"]);
+    assert_eq!(lines[4]["answer"], "unobservable", "a sensitive value");
+    let pin = &lines[0]["view"]["value"]["groups"][2]["parameters"][0];
+    assert_eq!(pin["name"], "pin");
+    assert!(
+        pin.get("value").is_none() && pin.get("startup").is_none(),
+        "a sensitive value is never carried: {pin}"
+    );
+}
+
+/// `config get --status --across-face` with no trusted clock: the status's
+/// values drawn as read, and every answer unobservable — never no — with
+/// the cure named in the notes (§5, `freshness.v1` §2.6).
+#[test]
+fn a_status_read_without_a_trusted_clock_answers_nothing() {
+    let r = fx::config_status_report();
+    assert_data_eq!(
+        table(&r),
+        str![[r#"
+config.v1 of lab/rf0 in the bus root
+  status: unobservable — this reader's clock is not trusted to the HLC delta against the stamping clock, its owner's reply stamped 2026-10-18T12:00:05.000000000Z by 751033f1fbbb816bc6f7bad180995fa2
+  instance 3fa9c2d41b7e0012, revision 1, floor 10 s
+  pending change: none
+  last change: 3fa9c2d41b7e0012-1 on duty
+duty.fraction_ppm   20000
+queue.tx_queue_len  100
+radio.frequency_hz  868100000
+
+what a tool may conclude (config.v1 §5):
+  is a change pending: unobservable — neither the view nor the status is fresh — the view was not asked (--status); the status this reader's clock is not trusted to the HLC delta against the stamping clock (unobservable)
+  has it converged to its desired document: unobservable — neither the view nor the status is fresh — the view was not asked (--status); the status this reader's clock is not trusted to the HLC delta against the stamping clock (unobservable)
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&r),
+        str![[r#"
+across a constrained face: presence and descriptors do not cross, and the deployment's word stands for the descriptor (config.v1 §2.19)
+no clock was trusted — no window, no --clocks-synced — so a reply's age is unobservable, and a document read only by GET answers nothing of §5 (freshness.v1 §2.6)
+
+"#]]
+    );
+    let doc: serde_json::Value = serde_json::from_str(ndjson(&r).lines().next().unwrap()).unwrap();
+    assert!(doc.get("view").is_none(), "--status asks no view");
+    assert_eq!(doc["premise"], "across_face");
+    assert_eq!(doc["pending"]["answer"], "unobservable");
+}
+
+/// The acts (#768, CC): each branch of the reply union under its own word —
+/// `pending` with the owner's instants, `refused` with its `ConfigError`,
+/// the compact status, silence attributed and never a failure — the request
+/// as sent, a sensitive value redacted, and the envelope carrying the whole
+/// act (no rows).
+#[test]
+fn a_config_act_names_its_reply_branch_in_every_medium() {
+    let pending = fx::config_act_pending();
+    assert_data_eq!(
+        table(&pending),
+        str![[r#"
+set/radio on lab/rf0 in namespace "acme"  (2s)
+  request {"confirm_s":120,"values":{"frequency_hz":869525000}}
+  checked first against its view (instance 3fa9c2d41b7e0012, revision 1); the group is reach; values typed by the schema
+pending — change 3fa9c2d41b7e0012-2 applies at 2026-10-18T12:00:01.000Z, and is undone at 2026-10-18T12:02:00.000Z unless confirmed (the owner's clock)
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&pending),
+        str![[r#"
+read its view over the new link, then: zenctl config confirm lab/rf0 3fa9c2d41b7e0012-2
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&fx::config_act_refused()),
+        str![[r#"
+set/sim on lab/rf0 in namespace "acme"  (2s)
+  request {"values":{"pin":"<redacted>"}}
+refused — app: the device refused group "sim"
+  ConfigError device-refused
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&fx::config_act_status()),
+        str![[r#"
+confirm on lab/rf0 in namespace "acme"  (2s, across a constrained face)
+  request {"answer":"status","token":"3fa9c2d41b7e0012-2"}
+answered — its compact status after the act, revision 1
+  instance 3fa9c2d41b7e0012, revision 1, floor 10 s
+  pending change: none
+  last change: 3fa9c2d41b7e0012-2 on radio
+duty.fraction_ppm   20000
+queue.tx_queue_len  100
+radio.frequency_hz  868100000
+
+"#]]
+    );
+    let silent = fx::config_act_silent();
+    assert_data_eq!(
+        table(&silent),
+        str![[r#"
+set/duty on lab/rf0 in namespace "acme"  (2s)
+  request {"values":{"fraction_ppm":30000}}
+no answer within 2s — silence, never a failure: the service holds the interface's token: it is up and did not answer (an access-control refusal, a frozen server, or a lost reply)
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&silent),
+        str![[r#"
+a set that drew nothing started nothing a tool can name: resent without an idempotency key, it may make a second change (config.v1 §5)
+
+"#]]
+    );
+    for (r, answer) in [
+        (&pending, "pending"),
+        (&fx::config_act_refused(), "refused"),
+        (&fx::config_act_status(), "status"),
+        (&silent, "silent"),
+    ] {
+        let text = ndjson(r);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 1, "one act, one line");
+        let doc: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(
+            (doc["report"].as_str(), doc["answer"].as_str()),
+            (Some("config-act"), Some(answer))
+        );
+    }
+    assert!(ndjson(&fx::config_act_refused()).contains("<redacted>"));
 }

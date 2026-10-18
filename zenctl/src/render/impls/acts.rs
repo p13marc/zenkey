@@ -80,7 +80,7 @@ fn envelope_lines(t: &mut Table, e: &EnvelopeView, lead: &str) {
 }
 
 /// The presence attribution, as what this reader could see.
-fn attribution_words(p: PresenceAttribution) -> &'static str {
+pub(super) fn attribution_words(p: PresenceAttribution) -> &'static str {
     match p {
         PresenceAttribution::Present => {
             "the service holds the interface's token: it is up and did not answer \

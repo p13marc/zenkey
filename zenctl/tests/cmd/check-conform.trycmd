@@ -60,6 +60,30 @@ on one resource:
                    within it a pass only over a window of at least
                    that span (--for), lost no delivery, the owner
                    present throughout
+  config-projection  when its descriptor lists config.v1, its status
+                   is its view's projection: a mismatch as the window
+                   opens and at its end is the finding (config.v1
+                   §2.19)
+  config-fresh     its view and its status are each confirmed within
+                   60 s at the window's end, never deleted (§2.3)
+  config-view      its view is well-formed: its own address and
+                   instance, names unique, bounds ordered, no
+                   sensitive value carried, no pending change past
+                   its deadline by its own clock (§2.2, §2.15)
+  config-refusal   each refusal checkable without changing anything,
+                   one subject per probe: a set on an undeclared
+                   group not_found, on a group outside the allowlist
+                   unavailable (config), over the wildcard
+                   fanout_forbidden; confirm, cancel and extend with
+                   a token naming nothing not_found; persist listed
+                   unavailable answered so (§2.5, §2.10, §2.13). Each
+                   probe is a dry run against a revision no owner
+                   holds; one a broken owner could act on (a control
+                   while a change is pending, persist with a last
+                   change) only under --i-know
+  config-dry-run   a dry run of a hot group's running values answers
+                   applied, the revision and the changes as they
+                   were (§2.9)
 
 "Lost no delivery" is established, never assumed (§2.7, 0.25): this
 run lost nothing, and the resource is reliable with block, which no
@@ -229,7 +253,7 @@ is clap's refusal, which lists them.
 ```console
 $ zenctl check conform host-a/tc tc.netif.v1 --skip budgets
 ? 2
-error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate, budget-window
+error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate, budget-window, config-projection, config-fresh, config-view, config-refusal, config-dry-run
 
 For more information, try '--help'.
 

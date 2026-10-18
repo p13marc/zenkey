@@ -49,8 +49,8 @@ use anyhow::Result;
 // context is read once, at the edge, and a command that gets a `Link` or a
 // `Deployment` is past every way resolution can fail (#209).
 use crate::cli::{
-    AclCmd, AdminCmd, BenchCmd, CheckCmd, Cli, Command, GetSub, IfaceCmd, KeyCmd, NamespaceCmd,
-    SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
+    AclCmd, AdminCmd, BenchCmd, CheckCmd, Cli, Command, ConfigCmd, GetSub, IfaceCmd, KeyCmd,
+    NamespaceCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -116,6 +116,12 @@ pub async fn run() -> Result<()> {
         Command::Key(KeyCmd::Intersects(a)) => cmd::key::intersects(a),
         Command::Key(KeyCmd::Canon { expr, out }) => cmd::key::canon(&expr, out.format, out.color),
         Command::Hostid(a) => cmd::hostid::run(a),
+        Command::Config(ConfigCmd::Get(a)) => cmd::config::get(a).await,
+        Command::Config(ConfigCmd::Set(a)) => cmd::config::set(a).await,
+        Command::Config(ConfigCmd::Confirm(a)) => cmd::config::confirm(a).await,
+        Command::Config(ConfigCmd::Cancel(a)) => cmd::config::cancel(a).await,
+        Command::Config(ConfigCmd::Extend(a)) => cmd::config::extend(a).await,
+        Command::Config(ConfigCmd::Persist(a)) => cmd::config::persist(a).await,
         Command::Bench(BenchCmd::Call(a)) => cmd::bench::call(a).await,
 
         // ── Wire verbs ───────────────────────────────────────────────────
