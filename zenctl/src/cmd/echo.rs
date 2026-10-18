@@ -127,15 +127,19 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         };
         if ndjson {
             println!("{}", row(&line, &sample).to_line());
-        } else if raw {
-            println!("{}\n  {}{rate_suffix}", sample.key, hex(&line.bytes));
-            if let Some(a) = &sample.attachment {
-                println!("  attachment: {}", hex(&a.to_bytes()));
-            }
-        } else if let Some(fmt) = &fmt {
-            println!("{}", formatted(&line, fmt, seen, &sample, &namespace));
         } else {
-            print(&line, &sample, hex_payload, &rate_suffix);
+            let shape = match &fmt {
+                _ if raw => Shape::Raw,
+                Some(fmt) => Shape::Fmt(fmt),
+                None => Shape::Table { hex: hex_payload },
+            };
+            let printed = human(&line, &sample, shape, seen, &namespace, &rate_suffix);
+            for l in printed.out {
+                println!("{l}");
+            }
+            for l in printed.err {
+                eprintln!("{l}");
+            }
         }
         if count > 0 && seen >= count {
             break;
@@ -196,6 +200,73 @@ fn row(line: &Line, sample: &zenkey_fleet::SampleView) -> zenkey_fleet::SampleRo
     row
 }
 
+/// How a human reads the stream: the key and the bytes in hex (`--raw`),
+/// one line from the `%` vocabulary (`--fmt`), or the table form, its
+/// rendering or the type tag and the hex (`--hex`).
+enum Shape<'a> {
+    Raw,
+    Fmt(&'a str),
+    Table { hex: bool },
+}
+
+/// One sample as a human form prints it: stdout's lines, then stderr's.
+#[derive(Debug, Default)]
+struct Printed {
+    out: Vec<String>,
+    err: Vec<String>,
+}
+
+/// One sample in a human form, pure so a snapshot pins it. A deletion
+/// reads as one in every shape, in the words `get` prints for a tombstone
+/// reply (#765, #766): `--fmt`'s `%v` is those words and `%l` is 0, never
+/// an empty value. `n` is `--fmt`'s `%n`; `rate_suffix` is `--rate`'s.
+fn human(
+    line: &Line,
+    sample: &zenkey_fleet::SampleView,
+    shape: Shape<'_>,
+    n: usize,
+    namespace: &str,
+    rate_suffix: &str,
+) -> Printed {
+    let mut p = Printed::default();
+    match shape {
+        Shape::Raw => {
+            let delete = sample.kind == zenoh::sample::SampleKind::Delete;
+            p.out.push(sample.key.clone());
+            p.out.push(if delete {
+                format!("  {TOMBSTONE}{rate_suffix}")
+            } else {
+                format!("  {}{rate_suffix}", hex(&line.bytes))
+            });
+            if let Some(a) = &sample.attachment {
+                p.out.push(format!("  attachment: {}", hex(&a.to_bytes())));
+            }
+        }
+        Shape::Fmt(fmt) => p.out.push(formatted(line, fmt, n, sample, namespace)),
+        Shape::Table { hex: hex_payload } => {
+            p.out.push(sample.key.clone());
+            let Some((rendering, conformance)) = &line.checked else {
+                p.out.push(format!("  {TOMBSTONE}{rate_suffix}"));
+                return p;
+            };
+            p.out.push(if hex_payload {
+                format!("  {} {}{rate_suffix}", line.tag(), hex(&line.bytes))
+            } else {
+                format!("  {}{rate_suffix}", crate::render::payload_text(rendering))
+            });
+            if let Some(a) = &line.attachment {
+                p.out
+                    .push(format!("  attachment: {}", crate::render::payload_text(a)));
+            }
+            if let Conformance::Invalid { violations } = conformance {
+                p.err
+                    .extend(violations.iter().map(|v| format!("  invalid: {v}")));
+            }
+        }
+    }
+    p
+}
+
 /// One `--fmt` line.
 fn formatted(
     line: &Line,
@@ -204,7 +275,11 @@ fn formatted(
     sample: &zenkey_fleet::SampleView,
     namespace: &str,
 ) -> String {
-    let value = line.value_text();
+    let value = if sample.kind == zenoh::sample::SampleKind::Delete {
+        TOMBSTONE.to_owned()
+    } else {
+        line.value_text()
+    };
     let qos = qos_summary(
         sample.priority,
         sample.congestion_control,
@@ -243,39 +318,90 @@ fn formatted(
     )
 }
 
-/// The table form: the wire key, then the rendering with the rung it
-/// stopped at, and what failed against the declared type on stderr.
-fn print(line: &Line, sample: &zenkey_fleet::SampleView, hex_payload: bool, rate_suffix: &str) {
-    let Some((rendering, conformance)) = &line.checked else {
-        println!("{}\n  {TOMBSTONE}{rate_suffix}", sample.key);
-        return;
-    };
-    if hex_payload {
-        println!(
-            "{}\n  {} {}{rate_suffix}",
-            sample.key,
-            line.tag(),
-            hex(&line.bytes)
-        );
-    } else {
-        println!(
-            "{}\n  {}{rate_suffix}",
-            sample.key,
-            crate::render::payload_text(rendering)
-        );
-    }
-    if let Some(a) = &line.attachment {
-        println!("  attachment: {}", crate::render::payload_text(a));
-    }
-    if let Conformance::Invalid { violations } = conformance {
-        for v in violations {
-            eprintln!("  invalid: {v}");
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    use snapbox::{assert_data_eq, str};
+    use zenoh::sample::SampleKind;
+
+    const ETH0: &str = "prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+
+    /// A sample as the monitor hands it over, its payload empty and its
+    /// stamp the one `get`'s tombstone reply carries: a deletion or, for
+    /// contrast, an empty put.
+    fn sample(kind: SampleKind) -> zenkey_fleet::SampleView {
+        zenkey_fleet::SampleView {
+            key: ETH0.into(),
+            payload: zenoh::bytes::ZBytes::new(),
+            encoding: "zenoh/bytes".into(),
+            kind,
+            timestamp: Some(zenoh::time::Timestamp::new(
+                zenoh::time::NTP64(1 << 32),
+                "a1b2".parse().expect("an id"),
+            )),
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::Data,
+            congestion_control: zenoh::qos::CongestionControl::Drop,
+            reliability: zenoh::qos::Reliability::Reliable,
+            express: false,
+            source: None,
+            received: std::time::Instant::now(),
+        }
+    }
+
+    /// One sample's stdout in each human shape: the table form, `--hex`,
+    /// `--raw` (which resolves nothing) and `--fmt`, with the format
+    /// `get`'s own snapshot uses.
+    fn shown(s: &zenkey_fleet::SampleView, lens: &Lens<'_>) -> String {
+        let mut out = String::new();
+        for (name, shape) in [
+            ("table", Shape::Table { hex: false }),
+            ("--hex", Shape::Table { hex: true }),
+            ("--raw", Shape::Raw),
+            ("--fmt", Shape::Fmt("%n %k <%t> %v (%l B) %T")),
+        ] {
+            let line = line_of(s, lens, matches!(shape, Shape::Raw));
+            out.push_str(&format!("# {name}\n"));
+            for l in human(&line, s, shape, 1, "prod", "").out {
+                out.push_str(&l);
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// #766: a deletion reads as one in every human shape, `--fmt` and
+    /// `--raw` included, in the words `get` prints for a tombstone reply:
+    /// the `--fmt` line is the one `get`'s snapshot pins, `%v` the words
+    /// and `%l` 0. An empty put, drawn below it, is a value.
+    #[test]
+    fn a_deletion_renders_as_one_in_every_human_form() {
+        let contracts = zenkey_fleet::ContractSet::new();
+        let lens = Lens::new("prod", None, &contracts);
+        assert_data_eq!(
+            shown(&sample(SampleKind::Delete), &lens),
+            str![[r#"
+# table
+prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
+  <tombstone — a deletion, not an empty value>
+# --hex
+prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
+  <tombstone — a deletion, not an empty value>
+# --raw
+prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
+  <tombstone — a deletion, not an empty value>
+# --fmt
+1 prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0 <> <tombstone — a deletion, not an empty value> (0 B) 4294967296/a1b2
+
+"#]]
+        );
+        let put = shown(&sample(SampleKind::Put), &lens);
+        assert!(put.contains("\n  <0 bytes>  (structural: "), "{put}");
+        assert!(!put.contains(TOMBSTONE), "an empty put is a value: {put}");
+    }
+
     /// The pipe round trip, meta lines included (#235's symmetry, kept): the
     /// tagged `dropped` line this verb prints between its sample rows reads
     /// back as stream metadata — skipped, not malformed — and a sample row

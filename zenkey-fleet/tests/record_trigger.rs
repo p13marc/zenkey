@@ -4,12 +4,21 @@
 //! counted apart.
 //!
 //! The fixture is a zk2 owner (`tc.netif.v1` at `host-a/tc`): one state
-//! member that speaks at 2 Hz for a second and a half and then goes quiet,
-//! a second state resource that is only ever *held* (put once before the
-//! window, answered by the owner's state queryable), and a `silent-for`
-//! rule on the first. When the silence fires, the preamble — the owner's
-//! own S4 answer — holds exactly the held key under the default semantics,
-//! the one the ring cannot tell you about, and both under `full`.
+//! member that speaks at 4 Hz for three quarters of a second and then goes
+//! quiet, a second state resource that is only ever *held* (put once
+//! before the window, answered by the owner's state queryable), and a
+//! `silent-for` rule on the first. When the silence fires, the preamble —
+//! the owner's own S4 answer — holds exactly the held key under the
+//! default semantics, the one the ring cannot tell you about, and both
+//! under `full`.
+//!
+//! No assertion here rests on a race against the scheduler (#766). The
+//! pre-roll and the post-roll are both far wider than the fixture needs,
+//! and the post-roll ends on its first row rather than when a window
+//! closes, so a row that arrives late under load still lands, and the
+//! passing case waits for that row and nothing longer. The held key's put
+//! is seen through to a probe before the recorder subscribes, where it
+//! used to be left to age out of a 2 s pre-roll.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -72,6 +81,11 @@ fn spec(rule: &str, semantics: Option<PreambleSemantics>, give_up: Duration) -> 
     }
 }
 
+/// The pre-roll [`capture`] asks for (#766): far wider than its burst, so
+/// the ring's age bound never trims a row the test counts. At 2 s it did
+/// whenever the rule's tick ran a few hundred milliseconds late.
+const PRE_ROLL: Duration = Duration::from_secs(30);
+
 /// Run the fixture once under `semantics` and read the file back.
 async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, Vec<Line>) {
     let (_router, ep) = router(None).await;
@@ -97,9 +111,30 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
         .declare_state_writer(&netif, "state/namespaces", &Bindings::new())
         .await
         .expect("held");
+    // The held put is seen through to a probe before the recorder exists
+    // (#766). One still in flight when the recorder's subscriber lands
+    // reaches it, and then the window holds the key this fixture calls
+    // held: the 2 s pre-roll used to hide that by ageing it out.
+    let probe = recorder_session
+        .declare_subscriber(CONFIG)
+        .await
+        .expect("a probe");
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while !held.writer().matching().await.unwrap_or(false) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the probe never matched"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     held.put(synth.sample(&rev, &ns, Member::Type, 0).unwrap().bytes)
         .await
         .expect("held value");
+    tokio::time::timeout(util::SETTLE, probe.recv_async())
+        .await
+        .expect("the held put reached the probe within the settle window")
+        .expect("a sample");
+    probe.undeclare().await.expect("the probe undeclared");
     let member: Bindings = [
         ("ns".to_owned(), vec!["default".to_owned()]),
         ("iface".to_owned(), vec!["eth0".to_owned()]),
@@ -113,17 +148,25 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
 
     let (fired_tx, mut fired_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let buf = SharedBuf::default();
-    let recorder = tokio::spawn({
+    let mut recorder = tokio::spawn({
         let buf = buf.clone();
         async move {
             record_on(
                 &recorder_session,
                 "",
-                &spec(
-                    &format!("silent-for {HEALTH} 0.7"),
-                    Some(semantics),
-                    Duration::from_secs(20),
-                ),
+                // The post-roll ends on its first row, with the settle
+                // window as its deadline: it waits for the row, never for
+                // a fixed window (#766).
+                &TriggerSpec {
+                    pre: PRE_ROLL,
+                    post: util::SETTLE,
+                    max_samples: Some(1),
+                    ..spec(
+                        &format!("silent-for {HEALTH} 0.7"),
+                        Some(semantics),
+                        Duration::from_secs(20),
+                    )
+                },
                 || async move { Ok(buf) },
                 |ev| {
                     if let TriggerEvent::Fired(_) = ev {
@@ -135,7 +178,9 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
         }
     });
 
-    // The recorder's subscriber matches; then 2 Hz for ~1.5 s.
+    // The recorder's subscriber matches; then 4 Hz for ~0.75 s. A gap of
+    // 0.7 s inside the burst fires the rule early, so the burst is paced
+    // well inside it (#766: at 2 Hz, a 200 ms stall was enough).
     let deadline = tokio::time::Instant::now() + util::SETTLE;
     while !spoken.writer().matching().await.unwrap_or(false) {
         assert!(tokio::time::Instant::now() < deadline, "never matched");
@@ -146,19 +191,35 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
             .put(synth.sample(&rev, &ifc, Member::Type, i).unwrap().bytes)
             .await
             .expect("put");
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    // Quiet now. When the silence fires, speak once more: that sample is
-    // the post-roll, and must land after the trigger record.
+    // Quiet now. When the silence fires, speak again: that sample is the
+    // post-roll, and must land after the trigger record. The capture ends
+    // on its first post-roll row, so this waits for that row. A put that
+    // lands while the preamble is fetched is written after the trigger
+    // too, but as backlog, which `max_samples` does not count: speak again
+    // until the capture ends.
     tokio::time::timeout(util::SETTLE, fired_rx.recv())
         .await
         .expect("the rule fired within the settle window");
-    spoken
-        .put(synth.sample(&rev, &ifc, Member::Type, 9).unwrap().bytes)
+    let post_roll = async {
+        let mut tick = 9;
+        loop {
+            spoken
+                .put(synth.sample(&rev, &ifc, Member::Type, tick).unwrap().bytes)
+                .await
+                .expect("put post");
+            tokio::select! {
+                joined = &mut recorder => break joined,
+                () = tokio::time::sleep(Duration::from_millis(250)) => tick += 1,
+            }
+        }
+    };
+    let report = tokio::time::timeout(util::SETTLE, post_roll)
         .await
-        .expect("put post");
-
-    let report = recorder.await.expect("join").expect("the capture ran");
+        .expect("a post-roll row ended the capture within the settle window")
+        .expect("join")
+        .expect("the capture ran");
 
     let bytes = buf.0.lock().expect("buffer lock").clone();
     let mut reader = ZrecReader::new(bytes.as_slice()).expect("a .zrec header");
@@ -213,7 +274,8 @@ async fn a_condition_firing_writes_preamble_pre_trigger_and_post_in_one_file() {
         .as_ref()
         .expect("the header states the pre-roll");
     assert!(
-        (pre_roll.asked_s - 2.0).abs() < 1e-9 && pre_roll.covered_s <= 2.0,
+        (pre_roll.asked_s - PRE_ROLL.as_secs_f64()).abs() < 1e-9
+            && pre_roll.covered_s <= PRE_ROLL.as_secs_f64(),
         "{pre_roll:?}"
     );
     assert_eq!(pre_roll.watched, vec![SELECTOR.to_string()]);
@@ -246,7 +308,7 @@ async fn a_condition_firing_writes_preamble_pre_trigger_and_post_in_one_file() {
         pre_rows += 1;
         i += 1;
     }
-    assert!(pre_rows >= 3, "the ring held the 2 Hz burst: {lines:?}");
+    assert!(pre_rows >= 3, "the ring held the burst: {lines:?}");
     assert!(
         matches!(&lines[i], Line::Trigger(rule, CondState::Firing) if rule.starts_with("silent-for")),
         "the trigger record sits after the pre-roll: {lines:?}"

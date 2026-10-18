@@ -6,6 +6,18 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `echo` prints a deletion as one in every form (#766)
+
+Since #765 raw `get` prints a tombstone in the words
+`<tombstone — a deletion, not an empty value>`, in every human form.
+`echo`'s table form and `--hex` already did; `--fmt` and `--raw` printed
+nothing where the value goes.
+
+| Before | Now | Notes |
+|---|---|---|
+| `echo --fmt` on a deletion: `%v` empty, `%l` 0 | `%v` is the tombstone's words, `%l` 0 | The line `get --fmt` prints for a tombstone reply, field for field. `%{path}` is an empty field, as on any value that is not JSON |
+| `echo --raw` on a deletion: the key, then an empty hex line | the key, then the tombstone's words | An empty put still prints its empty hex line: a value, not a deletion. `--format ndjson` is unchanged: its row says `"delete": true` |
+
 ## Unreleased (`main`, zk2) — raw `get` names a deletion (#765)
 
 An owner answering a GET within its window with `reply_del` (core §4, a
@@ -16,7 +28,7 @@ and every form of raw `get` says a deletion is one.
 | Before | Now | Notes |
 |---|---|---|
 | a tombstone: `<0 bytes>` in the table, `--hex` and `--raw` | `<tombstone — a deletion, not an empty value>`, echo's words (one constant now) | An empty put stays `<0 bytes>` |
-| `--fmt`: `%v` empty, `%l` 0 | `%v` is the tombstone words, `%l` 0 | `echo --fmt` still prints an empty `%v` (#766) |
+| `--fmt`: `%v` empty, `%l` 0 | `%v` is the tombstone words, `%l` 0 | `echo --fmt` and `--raw` say the same since #766 |
 | JSON/ndjson row of a tombstone: an empty value | `"delete": true`, with no value, byte count or verdict | A put's row carries `"delete": false`, decoded and `--raw` alike, so a script can test the field on every row |
 | — | the exit stays 0: a deletion is an answer | |
 

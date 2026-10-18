@@ -646,7 +646,10 @@ mod tests {
     /// zenoh reads YAML too, and so must the stated-key check.
     #[test]
     fn a_yaml_file_is_read_in_its_own_dialect() {
-        let path = std::env::temp_dir().join("zenkey-fleet-session-stated.yaml");
+        let path = std::env::temp_dir().join(format!(
+            "zenkey-fleet-session-{}-stated.yaml",
+            std::process::id()
+        ));
         std::fs::write(
             &path,
             "mode: peer\nscouting:\n  multicast:\n    enabled: true\n",
@@ -748,8 +751,14 @@ mod tests {
         assert!(json.contains("tcp/127.0.0.1:7447"), "{json}");
     }
 
+    /// Named for the process as well as the test (#766): two runs of this
+    /// suite at once share the temp dir, and one removing a file the other
+    /// has not read yet would fail it.
     fn temp_config(name: &str, body: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("zenkey-fleet-session-{name}.json5"));
+        let path = std::env::temp_dir().join(format!(
+            "zenkey-fleet-session-{}-{name}.json5",
+            std::process::id()
+        ));
         std::fs::write(&path, body).unwrap();
         path
     }
