@@ -66,6 +66,12 @@
 //!   redaction, and a pure state machine of one owner's configuration
 //!   (`spec/profiles/config/v1.md`, #768). The device, the persisted layer
 //!   and the timers are the runtime's.
+//! - [`link`]: `link.v1`'s exposure, the face policy a deployment writes
+//!   and its lints, the plan a generator derives from both (denies, one
+//!   downsampling rule per concrete key, the attachment, window floors,
+//!   liveness evidence), and the checks of a router's block
+//!   (`spec/profiles/link/v1.md`, #769). The router's configuration is the
+//!   generator's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -87,6 +93,7 @@ pub mod grammar;
 pub mod health;
 pub mod history;
 pub mod hostid;
+pub mod link;
 pub mod schema;
 pub mod seed;
 pub mod slug;
