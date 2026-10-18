@@ -7,10 +7,9 @@ license = "MIT"
 repository.workspace = true
 authors.workspace = true
 description = "The zk2 runtime: services, presence, descriptors and contract retrieval over Zenoh"
-# Not on crates.io until the zk2 runtime chunks land (#610 onward). The v1
-# tools on `main` build against `zenkey =0.11.1` from crates.io meanwhile.
-# Both resolve side by side: `-p zenkey` selects this member, and only
-# whole-graph commands (`cargo pkgid`, `cargo tree -i`) need `zenkey@0.20.0`.
+# Not on crates.io until the zk2 runtime chunks land (#610 onward). v1's
+# `zenkey` 0.11.x stays there, from the `v1` branch; no member links it
+# since #614 (FL11b), so `-p zenkey` names this crate in every command.
 publish = false
 
 [features]

@@ -20,18 +20,10 @@ name = "zengui"
 path = "src/main.rs"
 
 [dependencies]
-# The strangler (#614, FL5): v1's runtime and engine from crates.io under
-# renamed dependencies (`zenkey_v1::`, `zenkey_fleet_v1::`), so the in-tree
-# zk2 crates below sit beside them under their own names while the panes
-# move one by one. Spelled inline, as zenwatch's were in FL2, so the pins
-# live with their one user; FL11b deletes both, once the Inspector (FL8) and
-# the Workbench (FL9) no longer read v1. The Config tool, the blob browser
-# and the media viewer were deleted in FL11a, and their features with them.
-zenkey-v1 = { package = "zenkey", version = "=0.11.1" }
-# The payloads v1's zenctl could read (#97, #98, #58).
-zenkey-fleet-v1 = { package = "zenkey-fleet", version = "=0.18.0", features = ["decode-protobuf", "decode-cdr", "validate-json"] }
 # zk2's engine and its session-free model, by path, as zenctl and zenwatch
-# take them.
+# take them. v1's runtime and engine (`zenkey =0.11.1`, `zenkey-fleet
+# =0.18.0`), which zengui read under renamed dependencies while #614 moved
+# it pane by pane, left at FL11b; their sources live on the `v1` branch.
 zenkey-fleet = { path = "../zenkey-fleet" }
 zenkey-model = { path = "../zenkey-model" }
 zenkey-explorer-config = { workspace = true }

@@ -1,7 +1,7 @@
 //! Fixtures shared by the integration suites (#532).
 //!
 //! `tests/panes/` renders surfaces one at a time; `shots.rs` renders the whole
-//! window. Both need the same registry, and the window needs a bus that is
+//! window. Both need the same contracts, and the window needs a bus that is
 //! not there — so the bus is a fixture too: [`World`] drives a bus-less
 //! [`Zengui`] through its public messages exactly as the link would, minus the
 //! link. Nothing here reaches past `zengui`'s public API.
@@ -20,15 +20,6 @@ use zengui::message::{BusMsg, BusTick, LinkState, Message, WatchedTotals};
 use zengui::prefs::Prefs;
 use zenkey_fleet::StatsTable;
 use zenkey_fleet::{KeyTreeSnapshot, SampleView};
-use zenkey_fleet_v1::SliceSet;
-
-/// The ZenSight registry snapshot `fixture-tests/` compiles — v1's declared
-/// world, still what the v1 panes' own tests render against until each
-/// moves (FL7–FL11). The window itself no longer loads it (#614, FL6a).
-pub fn slices() -> SliceSet {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
-    SliceSet::from_dirs(&[dir]).expect("fixture registry")
-}
 
 /// The zk2 contracts the window's world is described by (#614, FL6a): the
 /// walkthrough and tcgui examples, loaded exactly as `--contracts` loads
@@ -77,14 +68,78 @@ pub fn send(app: &mut Zengui, message: Message) {
     let _ = app.update(message);
 }
 
-/// One sample, as the monitor would hand it over.
+/// The wire axes a sample rides (core §2.4): what the monitor reads off
+/// every sample, and what the Inspector compares against the declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Axes {
+    pub priority: zenoh::qos::Priority,
+    pub congestion: zenoh::qos::CongestionControl,
+    pub reliability: zenoh::qos::Reliability,
+    pub express: bool,
+}
+
+impl Axes {
+    /// zenoh's defaults: what a raw put rides, and all a key no contract
+    /// types can ride.
+    pub const DEFAULT: Axes = Axes {
+        priority: zenoh::qos::Priority::DEFAULT,
+        congestion: zenoh::qos::CongestionControl::DEFAULT,
+        reliability: zenoh::qos::Reliability::DEFAULT,
+        express: false,
+    };
+
+    /// The axes `key` rides when its owner writes it (#614, FL12): its
+    /// resource's declared QoS, mapped as the runtime's writer maps it
+    /// (`zenkey::qos`), when `lens` resolves the key to a stream, state or
+    /// event; zenoh's defaults for any other key.
+    pub fn declared(lens: &zenkey_fleet::Lens<'_>, key: &str) -> Axes {
+        use zenkey_model::contract::Body;
+        let resolution = lens.resolve(key);
+        match resolution.resolved.as_ref().map(|r| &r.resource().body) {
+            Some(Body::Data(d)) => Axes {
+                priority: zenkey::qos::priority(d.priority),
+                congestion: zenkey::qos::congestion(d.congestion),
+                reliability: zenkey::qos::reliability(d.reliability),
+                express: d.express,
+            },
+            _ => Axes::DEFAULT,
+        }
+    }
+}
+
+/// One sample, as the monitor would hand it over, on zenoh's default axes.
 pub fn sample(key: &str, payload: &[u8], encoding: &str, at: Instant) -> Arc<SampleView> {
-    view(key, payload, encoding, zenoh::sample::SampleKind::Put, at)
+    sample_on(key, payload, encoding, at, Axes::DEFAULT)
+}
+
+/// One sample on the axes it rode.
+pub fn sample_on(
+    key: &str,
+    payload: &[u8],
+    encoding: &str,
+    at: Instant,
+    axes: Axes,
+) -> Arc<SampleView> {
+    view(
+        key,
+        payload,
+        encoding,
+        zenoh::sample::SampleKind::Put,
+        at,
+        axes,
+    )
 }
 
 /// A tombstone (RFC 04 §1.2) — retirement, not an empty put.
 pub fn tombstone(key: &str, at: Instant) -> Arc<SampleView> {
-    view(key, b"", "", zenoh::sample::SampleKind::Delete, at)
+    view(
+        key,
+        b"",
+        "",
+        zenoh::sample::SampleKind::Delete,
+        at,
+        Axes::DEFAULT,
+    )
 }
 
 fn view(
@@ -93,6 +148,7 @@ fn view(
     encoding: &str,
     kind: zenoh::sample::SampleKind,
     at: Instant,
+    axes: Axes,
 ) -> Arc<SampleView> {
     Arc::new(SampleView {
         key: key.to_string(),
@@ -102,10 +158,10 @@ fn view(
         timestamp: None,
         stamped_by: None,
         attachment: None,
-        priority: zenoh::qos::Priority::DEFAULT,
-        congestion_control: zenoh::qos::CongestionControl::DEFAULT,
-        reliability: zenoh::qos::Reliability::DEFAULT,
-        express: false,
+        priority: axes.priority,
+        congestion_control: axes.congestion,
+        reliability: axes.reliability,
+        express: axes.express,
         source: None,
         received: at,
     })
@@ -119,6 +175,12 @@ fn view(
 /// port; foreign keys from a non-convention publisher and from another
 /// deployment; a state leaf that retires; and numeric leaves whose values
 /// wander so a series has something to plot.
+///
+/// Every zk2 key rides the axes its contract declares (#614, FL12), as an
+/// owner writing through the runtime does, so the Inspector reads a match;
+/// a key no contract types rides zenoh's defaults. A stranger's raw put on
+/// an owned key is the one sample that rides other axes, and only when a
+/// scene asks for it ([`World::tick_with_stranger`]).
 pub struct World {
     stats: StatsTable,
     t0: Instant,
@@ -130,6 +192,8 @@ pub struct World {
     /// The presence read both were built from: what a health reading of
     /// this world reads presence and descriptors as (#614, FL9).
     observed: zenkey_fleet::model::catalog::Observed,
+    /// Each publisher's axes ([`Axes::declared`]), resolved once.
+    axes: std::collections::BTreeMap<&'static str, Axes>,
 }
 
 pub const ORIGIN_A: &str = "h-3fa9c2d41b7e";
@@ -347,6 +411,15 @@ impl World {
     pub fn new() -> World {
         let contracts = contracts();
         let (catalog, presence, seeded, observed) = deployment(&contracts.set);
+        let lens =
+            zenkey_fleet::Lens::new("", Some(&catalog), &*contracts.set).offline(&contracts.set);
+        let axes = FEEDS
+            .iter()
+            .chain(REFUSED_FEEDS)
+            .map(|(key, ..)| *key)
+            .chain(SYNTH_FEEDS.iter().map(|(key, ..)| *key))
+            .map(|key| (key, Axes::declared(&lens, key)))
+            .collect();
         World {
             stats: StatsTable::new(),
             // Far enough back that every rate has settled and every age
@@ -360,6 +433,7 @@ impl World {
             presence: Arc::new(presence),
             seeded,
             observed,
+            axes,
         }
     }
 
@@ -612,17 +686,43 @@ impl World {
         send(app, Message::Bus(BusMsg::VerdictsChecked(batch)));
     }
 
-    /// One 250 ms monitor tick: every feed publishes once, and the tick
-    /// carries the snapshot, the samples and the counters a real one would.
+    /// One 250 ms monitor tick: every feed publishes once, on its axes, and
+    /// the tick carries the snapshot, the samples and the counters a real
+    /// one would.
     pub fn tick(&mut self, app: &mut Zengui) {
+        self.tick_inner(app, None);
+    }
+
+    /// One tick in which, after every feed, a stranger puts `key`'s payload
+    /// again, raw, on zenoh's default axes (#614, FL12): the second writer
+    /// on an owned key that the spray sends and no owner writing through
+    /// the runtime would. The key's newest sample is the stranger's, so its
+    /// Inspector compares the declared QoS against axes the owner did not
+    /// choose.
+    pub fn tick_with_stranger(&mut self, app: &mut Zengui, key: &'static str) {
+        self.tick_inner(app, Some(key));
+    }
+
+    fn tick_inner(&mut self, app: &mut Zengui, stranger: Option<&'static str>) {
         let n = self.ticks;
         let at = self.t0 + Duration::from_millis(250) * (n + 1);
         let mut samples = Vec::new();
         let payloads = self.payloads(n);
         let feeds = payloads.len();
+        let mut stray = None;
         for (key, body, encoding) in payloads {
             self.stats.record(key, body.len(), None, at, None, None);
-            samples.push(sample(key, &body, encoding, at));
+            let axes = self.axes.get(key).copied().unwrap_or(Axes::DEFAULT);
+            samples.push(sample_on(key, &body, encoding, at, axes));
+            if stranger == Some(key) {
+                stray = Some(sample(key, &body, encoding, at));
+            }
+        }
+        if let Some(key) = stranger {
+            let stray = stray.unwrap_or_else(|| panic!("{key} is no publisher of this world"));
+            self.stats
+                .record(key, stray.payload.len(), None, at, None, None);
+            samples.push(stray);
         }
         // Every 12th tick the health leaf retires and comes back (RFC 04
         // §1.2): the tree, the echo and the history all have a tombstone to

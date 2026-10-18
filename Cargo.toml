@@ -37,10 +37,6 @@ serde_json = "1"
 sha2 = "0.11"
 thiserror = "2"
 toml = "1"
-# Comments, for `registry migrate` alone (#374; zenkey-build's `migrate`
-# feature). Already in the tree through trycmd, pinned at the version it
-# brought; default features off — parsing is all a migration reads.
-toml_edit = { version = "0.25.13", default-features = false }
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 # `unstable-dynamic` is what makes cache-backed completion possible (#54);
@@ -75,9 +71,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ciborium = "0.2"
 schemars = "1"
-# default-features off on purpose: a served SchemaSet is self-contained
-# (RFC 08 §7), so remote $ref resolution must not exist to fail.
-jsonschema = { version = "0.55", default-features = false }
 base64 = "0.23"
 prost = "0.14"
 prost-reflect = { version = "0.16", features = ["serde"] }
@@ -154,16 +147,11 @@ json5 = "1.0"
 serde_yaml = "0.9"
 
 # Internal
-# The strangler layout (#615). `main` is the zk2 line. The v1 tool still
-# on it (zengui) builds against the v1 libraries pinned from crates.io until
-# #614 ports it; zenctl and the in-tree zenkey-fleet left them at FJ9 (#612),
-# zenwatch at FL3 (#614), and depend on the zk2 crates by path. The v1
-# sources live on the `v1` branch, which releases 0.14.x patches. zk2
-# re-creates these crate names at 0.20.0; two `zenkey` packages coexist then,
-# because 0.x minors are semver-incompatible. (v1's `zenkey-build =0.11.1`
-# left with zenwatch's v1 registry: no member generates v1 code.) zengui
-# takes v1's `zenkey =0.11.1` and `zenkey-fleet =0.18.0` under renamed
-# dependencies (#614, FL5), spelled inline in `zengui/Cargo.toml` as
-# zenwatch's were in FL2, so neither pin is in this table any more.
+# The strangler layout (#615), complete. `main` is the zk2 line, and no
+# member links the v1 libraries: zenctl and the in-tree zenkey-fleet left
+# them at FJ9 (#612), zenwatch at FL3 and zengui at FL11b (#614). The v1
+# sources (`zenkey`, `zenkey-build`, the `fixture-tests` corpus) live on the
+# `v1` branch, which releases 0.14.x patches. zk2 reuses the crate names at
+# 0.20.0, and every member takes them by path, so this table pins none.
 zenkey-explorer-config = { version = "0.1.0", path = "zenkey-explorer-config" }
 zenkey-report-fixtures = { path = "report-fixtures" }

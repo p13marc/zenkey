@@ -96,7 +96,8 @@ Parse a selector **once per set**, never once per candidate.
 > exactly like this one did.
 
 *Pinned by:* `stats/retire_unwatched_1k`, `skeleton/merge_10k`,
-`echo/admits_2k_keyexpr`, `roster/refresh_40p_8w`.
+`echo/admits_2k_keyexpr`, `nodes/refresh_40a_8w` (`roster/refresh_40p_8w`
+until #614, FL9: the same join, over addresses read from presence).
 
 ---
 
@@ -189,7 +190,7 @@ cargo bench -p zenkey-fleet -- stats/ monitor/  # the per-sample floor
 cargo bench -p zenkey-fleet -- tree/ skeleton/  # the per-tick paths
 cargo bench -p zengui                           # the frontend's own two cadences
 cargo bench -p zengui -- echo/ hex/             # per frame
-cargo bench -p zengui -- roster/ series/        # per tick
+cargo bench -p zengui -- nodes/ series/         # per tick
 ```
 
 `tree/build_50k` and `skeleton/merge_10k` are tens of milliseconds an

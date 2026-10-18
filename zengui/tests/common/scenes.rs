@@ -185,6 +185,14 @@ pub const ALL: &[Scene] = &[
         build: inspector_last_known,
         landmark: "last-known from ground/archive — not current (S5, S6)",
     },
+    Scene {
+        name: "inspector-qos-mismatch",
+        size: DESKTOP,
+        build: inspector_qos_mismatch,
+        // The axis named with both sides (#614, FL12): the one scene whose
+        // newest sample rode other axes than its contract declares.
+        landmark: "congestion: declared block, observed drop",
+    },
 ];
 
 fn prefs(theme: ThemeChoice) -> Prefs {
@@ -198,6 +206,11 @@ fn prefs(theme: ThemeChoice) -> Prefs {
 /// (#614, FL6a), the pump running, a few seconds of traffic, the tree
 /// opened down to the leaves.
 fn live(prefs: Prefs) -> Zengui {
+    live_world(prefs).0
+}
+
+/// [`live`], with the world still publishing, for a scene that adds a tick.
+fn live_world(prefs: Prefs) -> (Zengui, World) {
     let mut app = window(prefs);
     let mut world = World::new();
     world.connect(&mut app);
@@ -223,7 +236,7 @@ fn live(prefs: Prefs) -> Zengui {
     select(&mut app, &world, ETH0);
     world.ticks(&mut app, 30);
     world.verdicts(&mut app);
-    app
+    (app, world)
 }
 
 /// The body `host-a/tc` answers for `eth0`: a valid `json:NetworkInterface`.
@@ -919,5 +932,19 @@ fn inspector_last_known(theme: ThemeChoice) -> Zengui {
             ))),
         )),
     );
+    app
+}
+
+/// A stranger on an owned key (#614, FL12): `host-a/tc`'s `eth0` selected,
+/// and its newest sample a raw put on zenoh's default axes after the
+/// owner's. The Inspector names the axis that differs, with both sides:
+/// the `block` tc.netif.v1's state declares against the `drop` the
+/// stranger rode. Every other scene's zk2 samples ride their declared
+/// axes, as an owner writing through the runtime does, so this is the one
+/// picture of a mismatch.
+fn inspector_qos_mismatch(theme: ThemeChoice) -> Zengui {
+    let (mut app, mut world) = live_world(prefs(theme));
+    preset(&mut app, LayoutPreset::Explore);
+    world.tick_with_stranger(&mut app, ETH0);
     app
 }

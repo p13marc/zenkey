@@ -7,32 +7,43 @@
 #
 # ── The demo traffic ─────────────────────────────────────────────────────
 #
-# `spray` (zengui/examples/spray.rs, #614 FL5) is a zk2 deployment in
-# namespace `spray`: nav, camera, perception, teleop, thrusters, a planner
-# and a tc backend, real services serving their contracts from
-# examples/zk2/, and a service implementing health.v1 alone. Beside it runs
-# the traffic no zk2 service would send: an interface token with no
-# instance token, a second answerer on an owner's state, garbage on an
-# owned key, an unowned key, a key in another namespace, and foreign keys.
-# zengui reads that deployment on zk2 since #614 FL6a: presence and the
-# lens on a session in the namespace, every key checked through its
-# contract — valid, invalid (the squatter's), undecodable (the garbage),
-# not checked with the rung it stopped at (the unowned key, the other
-# namespace, the foreign keys). Its tree starts from zk2's contract
-# skeleton since FL6b — every resource of every address presence names, a
-# declared row before a byte arrives — and its role labels are still v1's
-# until FL7, so the zk2 keys are unlabelled rows. zenctl reads the same
-# deployment resolved:
+# `spray` (zengui/examples/spray.rs) is a zk2 deployment in namespace
+# `spray`: nav, camera, perception, teleop, thrusters, a planner and a tc
+# backend, real services serving their contracts from examples/zk2/, and a
+# service implementing health.v1 alone. Beside it runs the traffic no zk2
+# service would send: an interface token with no instance token, a second
+# answerer on an owner's state, garbage on an owned key, an unowned key, a
+# key in another namespace, and foreign keys.
+#
+# `just gui-demo` opens zengui on it with `--namespace spray`: the pump on a
+# session in no namespace, presence and the contracts on one in the
+# namespace (#614). What to look at:
+#
+#   * The Locator. The tree starts from the contract skeleton — every
+#     resource of every address presence names, a declared row before a
+#     byte arrives — each chunk labelled with its zk2 role, and it pivots
+#     by system, address, iface and kind. Every key reads its identity
+#     rung and its payload's conformance: valid, invalid (the squatter's),
+#     undecodable (the garbage), `no provider` (the unowned key), `not in
+#     namespace` (the other namespace's), `not zk2` (the v1 key), and
+#     the other foreign keys unbadged.
+#     Watched, a templated family (fleet/planner's `plans/{vehicle}`)
+#     wears a budget badge, mostly "unobservable" and saying why.
+#   * The Inspector. A state key's value is the owner's S4 GET, and a
+#     stream's that declares history the owner's @adv cache; the declared
+#     QoS against the observed axes; why, fields and consumers.
+#   * The Workbench. Nodes per address from presence (select host-a/sysmon
+#     for its health.v1 reading), the doctor (with `deep` on it finds the
+#     spray's token-missing and state-stamp-foreign), Send (a foreign
+#     publish, or robot1/nav's set_origin call), the admin space, the mesh.
+#
+# zenctl reads the same deployment resolved:
 #
 #   just ctl service list --namespace spray -c tcp/127.0.0.1:7449
 #   just ctl doctor --namespace spray --deep --clocks-synced -c tcp/127.0.0.1:7449
 #   just smoke-spray  # both, headless, against a spray on a free port
 #
 # ── Two more demos ───────────────────────────────────────────────────────
-#
-# The v1 demo traffic (`spray_v1`) was deleted in #614 FL11, with the
-# Config tool, the blob browser and the media viewer it was kept for: no
-# zk2 profile serves configuration, blobs or media yet (#613).
 #
 #   * `just gui-demo-bounded` trips *both* bounds immediately: the status strip
 #     should read "N keys (+M retired — bound reached)" and, beside it,
@@ -59,12 +70,11 @@ export WGPU_BACKEND := "gl"
 default:
     @just --list
 
-# zengui reads its deployment on zk2 since #614 FL6a: `--namespace spray`
-# opens a session in the namespace for presence and the lens, and every zk2
-# key is checked through its contract — the four conformance poles on the
-# echo rows and the tree's leaves, the contract decode in the Inspector.
-# The tree itself is still v1's until FL6b, so zk2 keys are unlabelled rows.
-# The contracts come offline from examples/zk2/.history.
+# `--namespace spray` opens a session in the namespace for presence and the
+# lens, and every zk2 key resolves to its identity rung and is checked
+# through its contract — the four conformance poles on the echo rows and
+# the tree's leaves, the contract decode in the Inspector. The contracts
+# come offline from examples/zk2/.history.
 # The GUI against the zk2 demo traffic — start here. Ctrl-C stops both.
 gui-demo port=port: (_demo port "spray" "--namespace spray --contracts examples/zk2/.history" "50000")
 
@@ -237,7 +247,7 @@ clean-run:
 # no feature axes since FJ9 (#612); the axis left is zenkey's `zenoh`, without
 # which the runtime is the session-free half a contract crate builds on.
 features:
-    cargo check -p zenkey@0.20.0 --no-default-features --locked
+    cargo check -p zenkey --no-default-features --locked
     ./scripts/check-model-zenoh-free.sh
 
 # Builds target/py-venv with the standard library only (no ensurepip

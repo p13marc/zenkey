@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — raw `get` names a deletion (#765)
+
+An owner answering a GET within its window with `reply_del` (core §4, a
+tombstone) read as a put with an empty payload through raw `get
+<selector>`: the engine's `FleetAnswer` kept no sample kind. It does now,
+and every form of raw `get` says a deletion is one.
+
+| Before | Now | Notes |
+|---|---|---|
+| a tombstone: `<0 bytes>` in the table, `--hex` and `--raw` | `<tombstone — a deletion, not an empty value>`, echo's words (one constant now) | An empty put stays `<0 bytes>` |
+| `--fmt`: `%v` empty, `%l` 0 | `%v` is the tombstone words, `%l` 0 | `echo --fmt` still prints an empty `%v` (#766) |
+| JSON/ndjson row of a tombstone: an empty value | `"delete": true`, with no value, byte count or verdict | A put's row carries `"delete": false`, decoded and `--raw` alike, so a script can test the field on every row |
+| — | the exit stays 0: a deletion is an answer | |
+
 ## Unreleased (`main`, zk2) — `instance-gone` per address, one meaning with zenwatch (#747)
 
 `instance-gone` reads the same in `zenctl watchdog`, `record --on` and
