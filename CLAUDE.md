@@ -270,9 +270,12 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `check schema` take an address, an interface revision and a resource;
   `origin-down` is `instance-gone` — judged per address on FL1's presence
   projection with zenwatch's meaning, and folded into one state per rule
-  (firing while any address is gone; #747) — and `alert-firing` and
-  field-stuck are dark until their profiles exist (#613). The zk2 `why` and `check conform` are
-  follow-ups.
+  (firing while any address is gone; #747) — `alert-firing` is dark until
+  its profile exists (#613), and field-stuck waits to be ported onto
+  `freshness.v1`, which exists since #720 (`docs/zk2/tooling-guide.md`
+  §6). FK1 (#585) brought back zk2's `why`, the ladder from `namespace`
+  to `last-known` (#702), and `check conform`, one service against the
+  revision its descriptor claims (#703).
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
   `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
