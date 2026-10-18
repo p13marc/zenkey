@@ -4,6 +4,118 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-18: round 29's two findings, and the four points 0.2 left open (#768, CC; #609)
+
+zk2py's round 29 read 0.2 cold and passed every fixture (1240 of 1240)
+and every scenario section, §1 to §14, against its own owner and against
+the Rust owner example's `--config`; the live runner passed 423 of 423,
+and the order of refusals matched the Rust owner's on all 37 probes. It
+filed two findings, F-114 and F-115. 0.2 also left four points to the
+maintainer. Each is decided here the way the text's rules point, and one
+that is better left to the owner says so. Still written against core 0.28.
+
+The evidence is now `validation.json`, 114 cases, and `lifecycle.json`, 27
+cases. Seven `validation.json` cases were written by hand and pass as
+written; the new `lifecycle.json` case was blessed from the model (its
+reason: a new case) and read step by step: the first `set` with key `k2`
+applied at revision 1 with its event; the same request with `"dry_run":
+false` answered that first answer with no act and no event; the same
+with `"dry_run": true` refused `invalid_request` on `/idempotency_key`.
+No case that existed changes.
+
+**Answered: the two findings.**
+- **F-114, a bound desired document after a restart** (§2.18, §2.12). The
+  binding is the deployment's, and survives a restart; the values the
+  document converged were runtime changes, which the restart rolled back.
+  So the new instance acts on the document bound to it as the first did,
+  converging the same revision again, and its view and its status carry no
+  `desired` until it has acted: a new instance knows nothing of the old
+  one's report. §5's "not asked" for no `desired` member now names that
+  window. That is zk2py's reading.
+  - **The reference already behaved so** for an application that hands the
+    document to the new instance (`Configuration::set_desired`, an instance
+    acting on each revision once). The owner example did not: its binding
+    is its standard input, and `config restart` dropped it. It now carries
+    the document to the new instance (`Configuration::desired_document`,
+    new), and `zenkey/tests/owner_example.rs` restarts after a convergence
+    and sees the same revision converged again, at revision 1 of the new
+    instance.
+  - No fixture: converging is not a step of `lifecycle.json`, and a
+    restart's binding is a deployment's; the owner example's test pins it.
+- **F-115, a request member that JSON Schema reads as an integer and the
+  core does not** (§2.5, "A request outside its type"). `confirm_s` or
+  `expected_revision` written `30.0` or `3e1`, or beyond the unsigned
+  64-bit range, is outside the request's type, refused `invalid_request`
+  before row 1, in the bytewise order of the member names. A value in
+  `values` stays as 0.2 read it: `2.0` is a `ParamValue` row 11 refuses
+  against its parameter's kind, because only row 11 knows the kind, while
+  each of the request's own members has one type. Both implementations
+  already refused these at decode, which the text now says.
+  - A member of the wrong JSON type (a `dry_run` that is not a boolean, an
+    `answer` other than `view` or `status`) is named in the same list.
+  - **A control request's members in bytewise order** (§2.10 said "as §2.5
+    says of a set"): `answer`, then `confirm_s`, then `token`. The model
+    checked `token` before `confirm_s`, which no case had distinguished; it
+    now takes them in the bytewise order. `zenkey_model::config` gains
+    `decode_set`, `decode_control`, `validate_set_json` and
+    `validate_control_json`, the request's own type checked from the body
+    as it arrived, and the fixture runner reads every case through them.
+  - `validation.json`: seven cases. `confirm_s` written `30.0` before an
+    act in flight; `expected_revision` beyond 64 bits before no such group;
+    `expected_revision` `4.0` before a `values` fraction; a `dry_run` of
+    `"yes"` before row 5; an extend with `confirm_s` 0 and an empty token
+    (`confirm_s` first); a confirm with an unknown `answer` and an empty
+    token (`answer` first); an extend with `confirm_s` written `60.0`
+    before an act in flight.
+
+**Decided: the four points 0.2 left open.**
+- **A hot group left part applied** (§2.9). The refusal is still
+  `device-refused`, starting no change, minting no token and publishing no
+  event: the profile's changes are the ones a `set` started. An owner whose
+  device can be left part applied restores what was applied before it
+  answers, once, as an undo restores; a restore that succeeds is no act.
+  One that fails leaves the read-back the truth, moves the revision by one
+  (the running values moved, §2.3), and SHOULD be reported in the owner's
+  own interfaces (`health.v1`). **How** it restores is deliberately the
+  owner's, as an undo's means are. The reference's device contract is
+  "whole or not at all", so nothing in it changes.
+- **A re-mint while `config.v1` runs** (§2.12, §2.3, core §1.5). A re-mint
+  is a new instance, and a new instance starts from its startup values. So
+  an owner re-mints while `config.v1` runs only with its device running
+  them: nothing pending, every runtime change of the instance undone or
+  persisted (a persisted value is a startup value). The reference refuses
+  the re-mint, the simplest owner that keeps the rule. A ROS 2 bridge that
+  re-mints when a node's parameters change (Appendix B) keeps it the same
+  way.
+- **A converged revision after a later `set`** (§2.18). Each revision is
+  acted on once in an instance, whatever its outcome: a later `set` that
+  changes a value the document names does not make it converge again, and
+  `converged` now says what was true when the owner acted ("was the running
+  value"). A desired document is not a lock on the configuration; a tool
+  that wants to know whether one still holds compares it with the view. Both
+  implementations already acted once per revision. `desired.v1` may add
+  drift; this text does not.
+- **"An equal request"** (§2.14). Equal as decoded: a member at its default
+  is the member absent, so `"dry_run": false` and no `dry_run` are one
+  request, as the model read it; every other member, and each value of
+  `values`, compares as the JSON value it is. zk2py compared the members as
+  written, and changes. `lifecycle.json`: one case (above).
+
+**Corrected.**
+- **Appendix B's fourth kind.** 0.2 said a `oneOf` branch added to
+  `Parameter` is a review; core §9.8 classifies it breaking (spike S7: a new
+  writer sends the new variant, an old reader refuses it). A fourth kind is
+  a new major of the contract. Found while CC added the doctor's checks,
+  whose closed list of ids hit the same rule in `zenwatch.v1`.
+
+**Deliberately not stated.**
+- **Whether a re-mint publishes anything for the old instance's pending
+  change.** §2.12's last bullet already lets an owner that keeps a record
+  publish what it knows as a change of the new instance; a re-mint is no
+  different.
+- **Drift of a converged document.** No outcome reports that a later `set`
+  changed a value a document names: that is `desired.v1`'s, when it exists.
+
 ## 0.2 — 2026-10-18: the cold reader's findings, and what the runtime settled (#768, CB; #609)
 
 Two readings of 0.1 met here. The spec-only implementation read it cold

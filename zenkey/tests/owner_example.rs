@@ -769,6 +769,26 @@ async fn the_owner_example_implements_config() {
         })
     })
     .await;
+    // F-114 (text 0.3): the binding outlives a restart, and the new
+    // instance converges the same revision again: its converged value was
+    // a runtime change the restart rolled back.
+    let restarted = o.ask("config restart").await;
+    let third: zenkey::model::grammar::InstanceId = restarted
+        .strip_prefix("config restarted zk2/ex/rf/@zk/instance/")
+        .unwrap_or_else(|| panic!("{restarted}"))
+        .parse()
+        .unwrap();
+    eventually("the bound document converged again", || async {
+        let v = view().await;
+        v.instance == third.to_string()
+            && v.revision == 1
+            && v.groups[0].parameters[0].value == Some(zenkey::config_v1::Value::Integer(30000))
+            && v.desired.is_some_and(|d| {
+                d.observed_revision == 1
+                    && d.outcome == zenkey::model::config::DesiredOutcome::Converged
+            })
+    })
+    .await;
     assert_eq!(o.ask("config offset 1000").await, "config offset 1000");
     assert!(
         o.ask("config nope")

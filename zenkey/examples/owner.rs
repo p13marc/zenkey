@@ -169,7 +169,10 @@
 //! new instance's key, once the new instance's tokens are declared. A
 //! restart keeps the persisted layer and the change events of the last
 //! hour (§2.17), and the device runs its startup values again; anything else
-//! of the old instance is gone, as a process restart leaves it.
+//! of the old instance is gone, as a process restart leaves it, but the
+//! desired document `config desired` bound: that binding is the
+//! deployment's, so the new instance converges it again, its view carrying
+//! no `desired` until it has acted (§2.18; text 0.3, F-114).
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -589,9 +592,15 @@ impl Ctx<'_> {
         // values again, and the new instance starts from them, with the
         // persisted layer and the change events of the last hour (§2.17).
         let events = cfg.published().await;
+        // The desired document's binding is the deployment's, here this
+        // process's stdin, and outlives the instance (text 0.3, F-114).
+        let bound = cfg.desired_document().await;
         up.close().await?;
         device.restart(startup);
         let up = self.up(events).await?;
+        if let (Some(doc), Some(next)) = (bound, &up.config) {
+            next.set_desired(doc).await;
+        }
         let answer = format!("config restarted {}", up.svc.instance_key()?);
         Ok((answer, up))
     }
