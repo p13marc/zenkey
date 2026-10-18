@@ -31,10 +31,10 @@
 //! | §2.7 one act at a time, `busy` meanwhile | the owner is unlocked while the device acts, so a call that arrives meanwhile is answered `busy` by the model, never queued |
 //! | §2.8 the deadline; §2.9 `apply_at` | the timer sleeps until [`Owner::next_due`] and calls [`Owner::due`]; every call wakes it |
 //! | §2.12 a restart is a rollback | a new service is a new instance: [`Owner::start`] from the startup values, nothing pending, no key held; [`crate::Service::new_epoch`] is refused (below) |
-//! | §2.13 persist | [`Device::persist_ready`] first (`unavailable`, cause `config`), then [`Owner::persist_plan`], the write ([`Device::persist`]; a failure is `internal`), then [`Owner::persisted`]; the owner stays locked through the write |
+//! | §2.13 persist | [`Device::persist_ready`] first (`unavailable`, cause `config`), then [`Owner::persist_plan`] (the values the last change set, text 0.2), the write ([`Device::persist`]; a failure is `internal`), then [`Owner::persisted`]; the owner stays locked through the write |
 //! | §2.14 idempotency keys | [`Owner::set`] keeps each first answer 300 s; a restart forgets them |
 //! | §2.15 sensitive values | the model's view, status, replies and edits; each request logged by [`log_request`], the device's words logged by [`device_words`] |
-//! | §2.16 the startup allowlist | each group's [`GroupDecl::writable`] in [`Startup::schema`] |
+//! | §2.16 the startup allowlist | each group's [`GroupDecl::writable`] in [`Startup::schema`]; a group outside it answered `unavailable`, cause `config`, by the handler (core §5.1, 0.28) |
 //! | §2.17 one event per change; the rate | each event [`Owner`] ends a change with, on `events/change/<ulid>`; the rate kept by row 12, from [`Startup::events`] |
 //! | §2.18 desired state | [`Configuration::set_desired`]: [`Owner::converge`] in the timer's task, one `set` per group, the report in the view and the status |
 //!
