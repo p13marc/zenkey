@@ -1,0 +1,629 @@
+{
+  "cases": [
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "fraction_ppm": 10000,
+            "period_s": 3600
+          }
+        }
+      },
+      "expect": {
+        "accepted": true
+      },
+      "note": "hot values in range",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "alerts": {
+            "ring_alerts": false
+          },
+          "duty": {
+            "fraction_ppm": 10000
+          }
+        }
+      },
+      "expect": {
+        "accepted": true
+      },
+      "note": "two hot groups",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {}
+      },
+      "expect": {
+        "accepted": true
+      },
+      "note": "nothing at all: converged by construction",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "alerts": {}
+        }
+      },
+      "expect": {
+        "accepted": true
+      },
+      "note": "a hot group named with no values",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "sim": {
+            "pin_retries": 3
+          }
+        }
+      },
+      "expect": {
+        "accepted": true
+      },
+      "note": "a non-sensitive parameter of a group that has a sensitive one",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 0,
+        "values": {
+          "duty": {
+            "fraction_ppm": 1
+          }
+        }
+      },
+      "expect": {
+        "accepted": true
+      },
+      "note": "revision 0",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "radio": {
+            "frequency_hz": 868100000
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "reach",
+          "group": "radio"
+        }
+      },
+      "note": "a reach group: refused whole (§2.18)",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "radio": {}
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "reach",
+          "group": "radio"
+        }
+      },
+      "note": "a reach group named with no values is still a reach group",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "modulation": {
+            "spreading_factor": 8
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "contract",
+          "group": "modulation"
+        }
+      },
+      "note": "a contract group",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "sim": {
+            "pin": "1234"
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "sensitive",
+          "group": "sim",
+          "parameter": "pin"
+        }
+      },
+      "note": "a sensitive parameter",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "sim": {
+            "pin": 1234
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "sensitive",
+          "group": "sim",
+          "parameter": "pin"
+        }
+      },
+      "note": "a sensitive parameter, whatever its value's kind",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "power": {
+            "level": 3
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "group": "power"
+        }
+      },
+      "note": "a group the schema does not declare",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "Duty": {
+            "fraction_ppm": 1
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "group": "Duty"
+        }
+      },
+      "note": "a group name compares exactly",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "power": 3
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "group": "duty",
+          "parameter": "power"
+        }
+      },
+      "note": "a parameter the group does not declare",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "queue": {
+            "tx_queue_len": 10
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "group": "queue"
+        }
+      },
+      "note": "a group outside the allowlist",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "bearer": {
+            "apn": "iot"
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "reach",
+          "group": "bearer"
+        }
+      },
+      "note": "a reach group outside the allowlist: reach before unavailable",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "alerts": {
+            "ring_alerts": "yes"
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "alerts",
+          "parameter": "ring_alerts"
+        }
+      },
+      "note": "a value of the wrong kind",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "fraction_ppm": 2000000
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "fraction_ppm"
+        }
+      },
+      "note": "a value out of bounds",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "period_s": 2.0
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "period_s"
+        }
+      },
+      "note": "2.0 is not an integer",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "period_s": null
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "period_s"
+        }
+      },
+      "note": "null is no kind",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "alerts": {
+            "ring_alerts": "x"
+          },
+          "radio": {
+            "frequency_hz": 868100000
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "alerts",
+          "parameter": "ring_alerts"
+        }
+      },
+      "note": "groups in bytewise order: alerts before radio",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "fraction_ppm": 1
+          },
+          "radio": {
+            "frequency_hz": 868100000
+          },
+          "sim": {
+            "pin": "1"
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "reach",
+          "group": "radio"
+        }
+      },
+      "note": "groups in bytewise order: duty is fine, radio before sim",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "modulation": {},
+          "radio": {}
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "contract",
+          "group": "modulation"
+        }
+      },
+      "note": "groups in bytewise order: modulation before radio",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "sim": {
+            "pin": true
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "sensitive",
+          "group": "sim",
+          "parameter": "pin"
+        }
+      },
+      "note": "a sensitive parameter before its own bad value",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "sim": {
+            "aaa": 1,
+            "pin": "x"
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "group": "sim",
+          "parameter": "aaa"
+        }
+      },
+      "note": "parameters in bytewise order: an unknown name before the sensitive one",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "sim": {
+            "pin": "x",
+            "pin_retries": 99
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "sensitive",
+          "group": "sim",
+          "parameter": "pin"
+        }
+      },
+      "note": "parameters in bytewise order: the sensitive pin before pin_retries out of bounds",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "queue": {
+            "nope": 1
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "group": "queue"
+        }
+      },
+      "note": "the group's checks before its parameters: unavailable before an unknown name",
+      "schema": "modem"
+    },
+    {
+      "document": {
+        "revision": 7,
+        "values": {
+          "Zz": {},
+          "duty": {
+            "fraction_ppm": -1
+          }
+        }
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "group": "Zz"
+        }
+      },
+      "note": "upper case sorts before lower case among groups",
+      "schema": "modem"
+    }
+  ],
+  "description": "config.v1 §2.18: a desired document against a schema -> accepted, or refused whole before anything applies, with the first problem found. schemas is as in validation.json, writable being the startup allowlist. document is a DesiredConfig: {revision, values: {group: {parameter: value}}}. The owner takes the groups in the bytewise (UTF-8) order of their names; for each group: not declared (not_found), contract (contract), reach (reach), outside the allowlist (unavailable); then each parameter in the bytewise order of its name: not declared (not_found), sensitive (sensitive), of the wrong kind or out of bounds (invalid_request), as validation.json reads values. expect is {accepted: true}, or {refused: {code, group, parameter (absent for a group's own check)}}, which the owner reports in its view's and status's desired.refusal.",
+  "schemas": {
+    "modem": [
+      {
+        "class": "hot",
+        "description": "",
+        "name": "duty",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 1000000,
+            "min": 0,
+            "name": "fraction_ppm",
+            "unit": "ppm"
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "min": 1,
+            "name": "period_s",
+            "unit": "s"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "reach",
+        "description": "",
+        "name": "radio",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 960000000,
+            "min": 150000000,
+            "name": "frequency_hz",
+            "unit": "Hz"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "contract",
+        "description": "",
+        "name": "modulation",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 9,
+            "min": 7,
+            "name": "spreading_factor"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "reach",
+        "description": "",
+        "name": "bearer",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "apn"
+          }
+        ],
+        "writable": false
+      },
+      {
+        "class": "hot",
+        "description": "",
+        "name": "sim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "hot",
+        "description": "",
+        "name": "alerts",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "bool",
+            "name": "ring_alerts"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "hot",
+        "description": "",
+        "name": "queue",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "min": 0,
+            "name": "tx_queue_len",
+            "unit": "packets"
+          }
+        ],
+        "writable": false
+      }
+    ]
+  }
+}

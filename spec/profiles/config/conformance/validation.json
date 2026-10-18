@@ -1,0 +1,2557 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "a hot value in range",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": 10000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "both parameters of a hot group",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": 10000,
+          "period_s": 60
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "an empty change is a change of nothing (§2.5)",
+      "op": "set",
+      "request": {
+        "values": {}
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "a hot change with a window",
+      "op": "set",
+      "request": {
+        "confirm_s": 60,
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "radio",
+      "note": "a reach change with a window",
+      "op": "set",
+      "request": {
+        "confirm_s": 120,
+        "values": {
+          "frequency_hz": 869525000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "radio",
+      "note": "a reach dry run needs no window (§2.4)",
+      "op": "set",
+      "request": {
+        "dry_run": true,
+        "values": {
+          "frequency_hz": 869525000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "radio",
+      "note": "a reach change joining the pending change needs no window (§2.7)",
+      "op": "set",
+      "request": {
+        "token": "i1-3",
+        "values": {
+          "frequency_hz": 869525000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": false,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "a hot change joining the pending change",
+      "op": "set",
+      "request": {
+        "token": "i1-3",
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "expected_revision equal to the revision",
+      "op": "set",
+      "request": {
+        "expected_revision": 4,
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "the maximum, inclusive",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": 1000000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "the minimum, inclusive",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": 0
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "trim",
+      "note": "an unbounded integer at the signed 64-bit maximum",
+      "op": "set",
+      "request": {
+        "values": {
+          "offset_db": 9223372036854775807
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "trim",
+      "note": "an unbounded integer at the signed 64-bit minimum",
+      "op": "set",
+      "request": {
+        "values": {
+          "offset_db": -9223372036854775808
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "trim",
+      "note": "the empty string is text",
+      "op": "set",
+      "request": {
+        "values": {
+          "note": ""
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "alerts",
+      "note": "a boolean",
+      "op": "set",
+      "request": {
+        "values": {
+          "ring_alerts": true
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "sim",
+      "note": "a sensitive value of its kind",
+      "op": "set",
+      "request": {
+        "values": {
+          "pin": "1234"
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "group": "duty",
+      "note": "an idempotency key and every guard",
+      "op": "set",
+      "request": {
+        "confirm_s": 30,
+        "dry_run": false,
+        "expected_revision": 4,
+        "idempotency_key": "k-1",
+        "values": {
+          "fraction_ppm": 5
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "group": "duty",
+      "note": "confirm_s 0 is outside SetRequest, refused before an act in flight (§2.5)",
+      "op": "set",
+      "request": {
+        "confirm_s": 0,
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": true,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/token"
+        }
+      },
+      "group": "duty",
+      "note": "an empty token is outside SetRequest",
+      "op": "set",
+      "request": {
+        "token": "",
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/idempotency_key"
+        }
+      },
+      "group": "duty",
+      "note": "an empty idempotency key is outside SetRequest",
+      "op": "set",
+      "request": {
+        "idempotency_key": "",
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "group": "power",
+      "note": "an act in flight: busy, before anything of the request (row 1)",
+      "op": "set",
+      "request": {
+        "values": {
+          "x": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": true,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "group"
+        }
+      },
+      "group": "power",
+      "note": "no such group (row 3)",
+      "op": "set",
+      "request": {
+        "values": {
+          "level": 3
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "group"
+        }
+      },
+      "group": "power",
+      "note": "no such group, before the allowlist and the pending change",
+      "op": "set",
+      "request": {
+        "values": {
+          "level": 3
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "group"
+        }
+      },
+      "group": "Duty",
+      "note": "a group name compares exactly",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "cause": "config",
+          "code": "unavailable",
+          "field": "group"
+        }
+      },
+      "group": "queue",
+      "note": "a group outside the allowlist (row 4)",
+      "op": "set",
+      "request": {
+        "values": {
+          "tx_queue_len": 10
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "cause": "config",
+          "code": "unavailable",
+          "field": "group"
+        }
+      },
+      "group": "queue",
+      "note": "outside the allowlist, before its values",
+      "op": "set",
+      "request": {
+        "values": {
+          "nope": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "cause": "config",
+          "code": "unavailable",
+          "field": "group"
+        }
+      },
+      "group": "bearer",
+      "note": "a reach group outside the allowlist: unavailable before the window rule",
+      "op": "set",
+      "request": {
+        "values": {
+          "apn": "iot"
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "cause": "config",
+          "code": "unavailable",
+          "field": "group"
+        }
+      },
+      "group": "queue",
+      "note": "outside the allowlist, before the pending change",
+      "op": "set",
+      "request": {
+        "values": {
+          "tx_queue_len": 10
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "group": "radio",
+      "note": "a change is pending and the request carries no token (row 5)",
+      "op": "set",
+      "request": {
+        "confirm_s": 120,
+        "values": {
+          "frequency_hz": 869525000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "group": "duty",
+      "note": "a hot change without a window is a change of its own: busy",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "group": "duty",
+      "note": "another token while a change is pending: busy",
+      "op": "set",
+      "request": {
+        "token": "i1-2",
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "group": "duty",
+      "note": "its token, after its deadline: busy until the undo has run",
+      "op": "set",
+      "request": {
+        "token": "i1-3",
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": true,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "group": "duty",
+      "note": "a dry run runs row 5 too",
+      "op": "set",
+      "request": {
+        "dry_run": true,
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "group": "duty",
+      "note": "busy before a stale revision",
+      "op": "set",
+      "request": {
+        "expected_revision": 3,
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "group": "radio",
+      "note": "a token and nothing pending (row 6)",
+      "op": "set",
+      "request": {
+        "token": "i1-3",
+        "values": {
+          "frequency_hz": 869525000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "group": "duty",
+      "note": "a token and nothing pending, before a stale revision",
+      "op": "set",
+      "request": {
+        "expected_revision": 1,
+        "token": "i1-3",
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/expected_revision"
+        }
+      },
+      "group": "duty",
+      "note": "a stale expected_revision (row 7)",
+      "op": "set",
+      "request": {
+        "expected_revision": 3,
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/expected_revision"
+        }
+      },
+      "group": "duty",
+      "note": "an expected_revision ahead of the revision",
+      "op": "set",
+      "request": {
+        "expected_revision": 5,
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/expected_revision"
+        }
+      },
+      "group": "modulation",
+      "note": "a stale revision before a contract group",
+      "op": "set",
+      "request": {
+        "expected_revision": 3,
+        "values": {
+          "spreading_factor": 8
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "app": "restart-required",
+          "code": "app",
+          "field": "group"
+        }
+      },
+      "group": "modulation",
+      "note": "a contract group (row 8)",
+      "op": "set",
+      "request": {
+        "values": {
+          "spreading_factor": 8
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "app": "restart-required",
+          "code": "app",
+          "field": "group"
+        }
+      },
+      "group": "modulation",
+      "note": "a contract group, before the window rules and its values",
+      "op": "set",
+      "request": {
+        "confirm_s": 60,
+        "token": "x",
+        "values": {
+          "spreading_factor": 99
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "x"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "app": "restart-required",
+          "code": "app",
+          "field": "group"
+        }
+      },
+      "group": "modulation",
+      "note": "a contract dry run is refused too",
+      "op": "set",
+      "request": {
+        "dry_run": true,
+        "values": {
+          "spreading_factor": 8
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "group": "radio",
+      "note": "joining with a window of its own (row 9)",
+      "op": "set",
+      "request": {
+        "confirm_s": 60,
+        "token": "i1-3",
+        "values": {
+          "frequency_hz": 869525000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "group": "duty",
+      "note": "joining with a window, whatever the class",
+      "op": "set",
+      "request": {
+        "confirm_s": 60,
+        "token": "i1-3",
+        "values": {
+          "fraction_ppm": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "group": "radio",
+      "note": "a reach change with neither window nor token (row 10)",
+      "op": "set",
+      "request": {
+        "values": {
+          "frequency_hz": 869525000
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "group": "radio",
+      "note": "reach without a window, before its values",
+      "op": "set",
+      "request": {
+        "values": {
+          "frequency_hz": "fast"
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/values/power"
+        }
+      },
+      "group": "duty",
+      "note": "no such parameter (row 11)",
+      "op": "set",
+      "request": {
+        "values": {
+          "power": 3
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/fraction_ppm"
+        }
+      },
+      "group": "duty",
+      "note": "an integer written as text",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": "10000"
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/ring_alerts"
+        }
+      },
+      "group": "alerts",
+      "note": "a number for a boolean",
+      "op": "set",
+      "request": {
+        "values": {
+          "ring_alerts": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/note"
+        }
+      },
+      "group": "trim",
+      "note": "a boolean for text",
+      "op": "set",
+      "request": {
+        "values": {
+          "note": true
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/note"
+        }
+      },
+      "group": "trim",
+      "note": "null is no kind",
+      "op": "set",
+      "request": {
+        "values": {
+          "note": null
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/fraction_ppm"
+        }
+      },
+      "group": "duty",
+      "note": "below the minimum",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": -1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/fraction_ppm"
+        }
+      },
+      "group": "duty",
+      "note": "above the maximum",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": 1000001
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/period_s"
+        }
+      },
+      "group": "duty",
+      "note": "below a minimum of 1",
+      "op": "set",
+      "request": {
+        "values": {
+          "period_s": 0
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/fraction_ppm"
+        }
+      },
+      "group": "duty",
+      "note": "2.0 is not an integer (§2.5)",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": 2.0
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/offset_db"
+        }
+      },
+      "group": "trim",
+      "note": "a fraction is not an integer",
+      "op": "set",
+      "request": {
+        "values": {
+          "offset_db": 1.5
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/offset_db"
+        }
+      },
+      "group": "trim",
+      "note": "beyond 64 bits is out of every parameter's bounds",
+      "op": "set",
+      "request": {
+        "values": {
+          "offset_db": 9223372036854775808
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/fraction_ppm"
+        }
+      },
+      "group": "duty",
+      "note": "bytewise order: fraction_ppm before period_s",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": "x",
+          "period_s": 0
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/fraction_ppm"
+        }
+      },
+      "group": "duty",
+      "note": "bytewise order: a bad value before an unknown name",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": -5,
+          "zz": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/values/aa"
+        }
+      },
+      "group": "duty",
+      "note": "bytewise order: an unknown name before a bad value",
+      "op": "set",
+      "request": {
+        "values": {
+          "aa": 1,
+          "fraction_ppm": -5
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/values/Zeta"
+        }
+      },
+      "group": "trim",
+      "note": "bytewise order: upper case sorts before lower case",
+      "op": "set",
+      "request": {
+        "values": {
+          "Zeta": 1,
+          "alpha": 2
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/pin"
+        }
+      },
+      "group": "sim",
+      "note": "a sensitive value of the wrong kind names the parameter (§2.15)",
+      "op": "set",
+      "request": {
+        "values": {
+          "pin": 1234
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/values/a~1b"
+        }
+      },
+      "group": "trim",
+      "note": "a name holding a slash is escaped in the pointer (RFC 6901)",
+      "op": "set",
+      "request": {
+        "values": {
+          "a/b": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/values/nope"
+        }
+      },
+      "group": "duty",
+      "note": "a dry run checks its values",
+      "op": "set",
+      "request": {
+        "dry_run": true,
+        "values": {
+          "nope": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/frequency_hz"
+        }
+      },
+      "group": "radio",
+      "note": "a reach dry run checks its values",
+      "op": "set",
+      "request": {
+        "dry_run": true,
+        "values": {
+          "frequency_hz": 1
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "confirm the pending change",
+      "op": "confirm",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "confirm with answer = status",
+      "op": "confirm",
+      "request": {
+        "answer": "status",
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "note": "confirm, nothing pending: not_found",
+      "op": "confirm",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "note": "confirm another token: not_found",
+      "op": "confirm",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "note": "confirm the last change, nothing pending: not_found (a retry after a lost reply)",
+      "op": "confirm",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "note": "confirm with a window: invalid_request",
+      "op": "confirm",
+      "request": {
+        "confirm_s": 30,
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "note": "confirm before every group is applied: busy",
+      "op": "confirm",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": false,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "note": "confirm after the deadline, before the undo: busy",
+      "op": "confirm",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": true,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "note": "confirm while an act is in flight: busy",
+      "op": "confirm",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": true,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "note": "confirm, wrong token, after the deadline: not_found before busy",
+      "op": "confirm",
+      "request": {
+        "token": "i1-9"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": true,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/token"
+        }
+      },
+      "note": "confirm, an empty token: outside ControlRequest",
+      "op": "confirm",
+      "request": {
+        "token": ""
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": true,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "cancel before the apply",
+      "op": "cancel",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": false,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "cancel after the apply",
+      "op": "cancel",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "note": "cancel with a window: invalid_request",
+      "op": "cancel",
+      "request": {
+        "confirm_s": 30,
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "note": "cancel another token",
+      "op": "cancel",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "note": "cancel after the deadline: busy",
+      "op": "cancel",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": true,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "extend the pending change",
+      "op": "extend",
+      "request": {
+        "confirm_s": 60,
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "extend before the apply",
+      "op": "extend",
+      "request": {
+        "confirm_s": 60,
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": false,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "note": "extend without a window: invalid_request",
+      "op": "extend",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "note": "extend without a window and another token: the window first",
+      "op": "extend",
+      "request": {
+        "token": "i1-9"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "note": "extend, nothing pending",
+      "op": "extend",
+      "request": {
+        "confirm_s": 60,
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "note": "extend after the deadline: busy",
+      "op": "extend",
+      "request": {
+        "confirm_s": 60,
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": true,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "note": "extend with confirm_s 0: outside ControlRequest",
+      "op": "extend",
+      "request": {
+        "confirm_s": 0,
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "persist the last change",
+      "op": "persist",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "persist the last change while another is pending",
+      "op": "persist",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "note": "persist the pending change: busy, confirm it first",
+      "op": "persist",
+      "request": {
+        "token": "i1-3"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "note": "persist a change older than the last: not_found",
+      "op": "persist",
+      "request": {
+        "token": "i1-1"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "/token"
+        }
+      },
+      "note": "persist with no last change: not_found",
+      "op": "persist",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "forbidden",
+          "field": "/token"
+        }
+      },
+      "note": "persist a last change that set a sensitive value: forbidden",
+      "op": "persist",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": true,
+          "token": "i1-2"
+        },
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "cause": "config",
+          "code": "unavailable",
+          "field": null
+        }
+      },
+      "note": "persist with no persisted layer: unavailable, cause config",
+      "op": "persist",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": null,
+        "persist": false,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "cause": "config",
+          "code": "unavailable",
+          "field": null
+        }
+      },
+      "note": "no persisted layer, before an act in flight and the request's type",
+      "op": "persist",
+      "request": {
+        "token": ""
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": true,
+        "last_change": null,
+        "pending": null,
+        "persist": false,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/confirm_s"
+        }
+      },
+      "note": "persist with a window: invalid_request",
+      "op": "persist",
+      "request": {
+        "confirm_s": 10,
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "field": null
+        }
+      },
+      "note": "persist while an act is in flight: busy",
+      "op": "persist",
+      "request": {
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": true,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "accepted": true
+      },
+      "note": "persist answering the status",
+      "op": "persist",
+      "request": {
+        "answer": "status",
+        "token": "i1-2"
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": {
+          "set_sensitive": false,
+          "token": "i1-2"
+        },
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    }
+  ],
+  "description": "config.v1 §2.5, §2.10, §2.13: one request against a schema and the owner's state -> accepted, or the refusal the owner sends, before any act. schemas holds the schemas by name, each a list of groups as the view carries them (§2.2), a group's writable being the startup allowlist (§2.16). A case gives op (set, confirm, cancel, extend, persist), group (the {group} of a set's key), request (the SetRequest or ControlRequest, as JSON) and state: revision; pending, null or {token, applied: whether every group of the change is applied, deadline_passed: whether the deadline has passed and its undo not yet run}; last_change, null or {token, set_sensitive: whether that change set a sensitive parameter}; persist, whether the owner has a persisted layer; in_flight, whether an act is in flight. Rows that need more state (an idempotency key held, the event's rate, a reach join near its deadline, the device) are lifecycle.json's. expect is {accepted: true}, or {refused: {code, field, cause (unavailable alone), app (the ConfigError code, app alone)}}: code is core 5.2's; field is \"group\" for the key's {group}, a JSON pointer into the request (RFC 6901: ~ written ~0 and / written ~1) for a member of it, or null for a refusal about the owner's state or the operation (busy, persist's unavailable). Values are taken in the bytewise (UTF-8) order of their names. An integer is a JSON number written without a fraction or an exponent, within the signed 64-bit range.",
+  "schemas": {
+    "modem": [
+      {
+        "class": "hot",
+        "description": "",
+        "name": "duty",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 1000000,
+            "min": 0,
+            "name": "fraction_ppm",
+            "unit": "ppm"
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "min": 1,
+            "name": "period_s",
+            "unit": "s"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "reach",
+        "description": "",
+        "name": "radio",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 960000000,
+            "min": 150000000,
+            "name": "frequency_hz",
+            "unit": "Hz"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "contract",
+        "description": "",
+        "name": "modulation",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 9,
+            "min": 7,
+            "name": "spreading_factor"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "reach",
+        "description": "",
+        "name": "bearer",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "apn"
+          }
+        ],
+        "writable": false
+      },
+      {
+        "class": "hot",
+        "description": "",
+        "name": "sim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "hot",
+        "description": "",
+        "name": "alerts",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "bool",
+            "name": "ring_alerts"
+          }
+        ],
+        "writable": true
+      },
+      {
+        "class": "hot",
+        "description": "",
+        "name": "queue",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "min": 0,
+            "name": "tx_queue_len",
+            "unit": "packets"
+          }
+        ],
+        "writable": false
+      },
+      {
+        "class": "hot",
+        "description": "",
+        "name": "trim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "name": "offset_db"
+          },
+          {
+            "description": "",
+            "kind": "text",
+            "name": "note"
+          }
+        ],
+        "writable": true
+      }
+    ]
+  }
+}

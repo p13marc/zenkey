@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config.json",
+  "$comment": "config.v1's types (spec/profiles/config/v1.md section 3). The zk2 subset of JSON Schema (core section 7.3). Objects are open: a later minor may add a member, and a reader ignores one it does not know. The two replies are discriminated unions: each branch requires a member no other branch has, so oneOf picks exactly one.",
+  "$defs": {
+    "ParamValue": {
+      "description": "One parameter's value, untagged: a boolean, a signed 64-bit integer, or text (v1.md 2.2). No float: a value that needs one is an integer in a finer unit.",
+      "anyOf": [
+        { "type": "boolean" },
+        { "type": "integer" },
+        { "type": "string" }
+      ]
+    },
+    "Class": {
+      "description": "Whether a group may change under a running service (v1.md 2.4): hot takes effect at once; reach decides whether the service can reach the bus, and is changed only under a window; contract is refused at runtime.",
+      "type": "string",
+      "enum": ["hot", "reach", "contract"]
+    },
+    "Source": {
+      "description": "Where a running value came from (v1.md 2.3): the owner's built-in default, its startup file, its persisted layer, or a change in this instance.",
+      "type": "string",
+      "enum": ["default", "file", "overlay", "runtime"]
+    },
+    "Time": {
+      "description": "An instant on the owner's clock: an RFC 3339 date-time in UTC, written with Z (v1.md 2.8).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "Token": {
+      "description": "A change's name, minted by the owner, never reused by any instance of the service (v1.md 2.6).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "Parameter": {
+      "description": "One parameter as the view shows it: its declaration, and what the owner runs with. Tagged by kind. A sensitive parameter never carries value or startup; a value the owner cannot read back is absent, never guessed (v1.md 2.2, 2.3, 2.15).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "kind": { "const": "bool" },
+            "description": { "type": "string" },
+            "sensitive": { "type": "boolean" },
+            "value": { "type": "boolean" },
+            "source": { "$ref": "#/$defs/Source" },
+            "startup": { "type": "boolean" }
+          },
+          "required": ["name", "kind", "description"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "kind": { "const": "integer" },
+            "min": { "type": "integer" },
+            "max": { "type": "integer" },
+            "unit": { "type": "string" },
+            "description": { "type": "string" },
+            "sensitive": { "type": "boolean" },
+            "value": { "type": "integer" },
+            "source": { "$ref": "#/$defs/Source" },
+            "startup": { "type": "integer" }
+          },
+          "required": ["name", "kind", "description"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "kind": { "const": "text" },
+            "description": { "type": "string" },
+            "sensitive": { "type": "boolean" },
+            "value": { "type": "string" },
+            "source": { "$ref": "#/$defs/Source" },
+            "startup": { "type": "string" }
+          },
+          "required": ["name", "kind", "description"]
+        }
+      ]
+    },
+    "Group": {
+      "description": "One group: the parameters that change together, the unit a set addresses, with its class and whether the startup allowlist lets a set reach it (v1.md 2.2, 2.16).",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "class": { "$ref": "#/$defs/Class" },
+        "description": { "type": "string" },
+        "writable": { "type": "boolean" },
+        "parameters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Parameter" }
+        }
+      },
+      "required": ["name", "class", "description", "writable", "parameters"]
+    },
+    "Pending": {
+      "description": "The change applied, or armed, and not yet confirmed (v1.md 2.7): its token, its groups in the order they joined, the instant its undo runs, and whether every group of it is applied yet.",
+      "type": "object",
+      "properties": {
+        "token": { "$ref": "#/$defs/Token" },
+        "groups": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "deadline": { "$ref": "#/$defs/Time" },
+        "applied": { "type": "boolean" }
+      },
+      "required": ["token", "groups", "deadline", "applied"]
+    },
+    "LastChange": {
+      "description": "The most recent change made permanent at runtime in this instance: confirmed, or applied without a window. Never a pending change (v1.md 2.6).",
+      "type": "object",
+      "properties": {
+        "token": { "$ref": "#/$defs/Token" },
+        "groups": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      },
+      "required": ["token", "groups"]
+    },
+    "DesiredRefusal": {
+      "description": "Why the server did not converge a desired document, and where (v1.md 2.18).",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["reach", "contract", "sensitive", "not_found", "invalid_request", "unavailable", "busy", "device-refused"]
+        },
+        "group": { "type": "string" },
+        "parameter": { "type": "string" }
+      },
+      "required": ["code", "group"]
+    },
+    "DesiredReport": {
+      "description": "What the server did with the last desired document it acted on (v1.md 2.18): its revision, and converged, refused before anything applied, or failed partway.",
+      "type": "object",
+      "properties": {
+        "observed_revision": { "type": "integer", "minimum": 0 },
+        "outcome": { "type": "string", "enum": ["converged", "refused", "failed"] },
+        "refusal": { "$ref": "#/$defs/DesiredRefusal" }
+      },
+      "required": ["observed_revision", "outcome"]
+    },
+    "ConfigView": {
+      "description": "The read-back (v1.md 2.3), state/view: the served schema and the running values in one document. A GET on it is the read. Never carries a sensitive value.",
+      "type": "object",
+      "properties": {
+        "service": { "type": "string", "minLength": 1 },
+        "instance": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "confirm_floor_s": { "type": "integer", "minimum": 1 },
+        "pending": { "$ref": "#/$defs/Pending" },
+        "last_change": { "$ref": "#/$defs/LastChange" },
+        "desired": { "$ref": "#/$defs/DesiredReport" },
+        "groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Group" },
+          "maxItems": 16
+        }
+      },
+      "required": ["service", "instance", "revision", "confirm_floor_s", "groups"]
+    },
+    "ConfigStatus": {
+      "description": "The compact status (v1.md 2.19), state/status: what a constrained face can afford. The values by group and name; a sensitive value, and one the owner cannot read back, is never present.",
+      "type": "object",
+      "properties": {
+        "instance": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "confirm_floor_s": { "type": "integer", "minimum": 1 },
+        "pending": { "$ref": "#/$defs/Pending" },
+        "last_change": { "$ref": "#/$defs/LastChange" },
+        "desired": { "$ref": "#/$defs/DesiredReport" },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/ParamValue" }
+          }
+        }
+      },
+      "required": ["instance", "revision", "confirm_floor_s", "values"]
+    },
+    "SetRequest": {
+      "description": "The body of @op/set/{group} (v1.md 2.5): values for some parameters of the group, and, each optional, the window, the pending change's token to join, the revision the caller read, a key that makes a retry return the first answer, and a dry run.",
+      "type": "object",
+      "properties": {
+        "values": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/ParamValue" }
+        },
+        "confirm_s": { "type": "integer", "minimum": 1 },
+        "token": { "$ref": "#/$defs/Token" },
+        "expected_revision": { "type": "integer", "minimum": 0 },
+        "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "dry_run": { "type": "boolean" }
+      },
+      "required": ["values"]
+    },
+    "PendingReply": {
+      "description": "The reply to a set on a reach group, sent before the change is applied (v1.md 2.9): the change's token, when the group applies, and when the change rolls back unless confirmed.",
+      "type": "object",
+      "properties": {
+        "token": { "$ref": "#/$defs/Token" },
+        "apply_at": { "$ref": "#/$defs/Time" },
+        "deadline": { "$ref": "#/$defs/Time" }
+      },
+      "required": ["token", "apply_at", "deadline"]
+    },
+    "SetReply": {
+      "description": "The reply to a set (v1.md 2.9): the read-back after the apply, or a dry run's would-be read-back; or, for a reach group, the pending reply before the apply.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "applied": { "$ref": "#/$defs/ConfigView" } },
+          "required": ["applied"]
+        },
+        {
+          "type": "object",
+          "properties": { "pending": { "$ref": "#/$defs/PendingReply" } },
+          "required": ["pending"]
+        }
+      ]
+    },
+    "ControlRequest": {
+      "description": "The body of confirm, cancel, extend and persist (v1.md 2.10, 2.13): the change's token; for extend alone, the new window from now; and which document the reply carries, the view by default.",
+      "type": "object",
+      "properties": {
+        "token": { "$ref": "#/$defs/Token" },
+        "confirm_s": { "type": "integer", "minimum": 1 },
+        "answer": { "type": "string", "enum": ["view", "status"] }
+      },
+      "required": ["token"]
+    },
+    "ControlReply": {
+      "description": "The reply to confirm, cancel, extend and persist (v1.md 2.10): the read-back after the act, or the compact status when the request asked for it.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "view": { "$ref": "#/$defs/ConfigView" } },
+          "required": ["view"]
+        },
+        {
+          "type": "object",
+          "properties": { "status": { "$ref": "#/$defs/ConfigStatus" } },
+          "required": ["status"]
+        }
+      ]
+    },
+    "Edit": {
+      "description": "One parameter a change set (v1.md 2.17): its group and name, the value before the change and the value the change set. A sensitive parameter's edit is redacted, with neither value.",
+      "type": "object",
+      "properties": {
+        "group": { "type": "string" },
+        "parameter": { "type": "string" },
+        "old": { "$ref": "#/$defs/ParamValue" },
+        "new": { "$ref": "#/$defs/ParamValue" },
+        "redacted": { "type": "boolean" }
+      },
+      "required": ["group", "parameter"]
+    },
+    "ConfigChangeEvent": {
+      "description": "One change, as it ended (v1.md 2.17), after RFC 6470's netconf-config-change: events/change/<ulid>. The attribution is what the change's caller claimed, never authentication.",
+      "type": "object",
+      "properties": {
+        "service": { "type": "string", "minLength": 1 },
+        "instance": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "token": { "$ref": "#/$defs/Token" },
+        "outcome": { "type": "string", "enum": ["applied", "confirmed", "rolled-back", "partial"] },
+        "edits": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Edit" }
+        },
+        "actor": { "type": "string" },
+        "request_id": { "type": "string" },
+        "claimed_source": { "type": "string" }
+      },
+      "required": ["service", "instance", "revision", "token", "outcome", "edits"]
+    },
+    "ConfigError": {
+      "description": "The app detail of config.v1's operations (v1.md 2.5): restart-required for a contract group, device-refused with the device's words.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "enum": ["restart-required", "device-refused"] },
+        "detail": { "type": "string" }
+      },
+      "required": ["code"]
+    },
+    "DesiredConfig": {
+      "description": "A desired document for a config.v1 server (v1.md 2.18), for an authoring service's own contract to carry: no config.v1 resource does. Values by group and name, under the author's revision.",
+      "type": "object",
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0 },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/ParamValue" }
+          }
+        }
+      },
+      "required": ["revision", "values"]
+    }
+  }
+}
