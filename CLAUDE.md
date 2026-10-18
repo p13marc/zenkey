@@ -511,6 +511,15 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `"starting"` by default) and never deleted; checks on change, faults on
   the stream, and `clock_ahead` while the guard holds (the `Minter`'s hold
   watch). The owner example drives it from stdin.
+  `config_v1` (#768, CB; `config` is the deployment's) is `config.v1`'s
+  owner on the embedded standard bundle: `ServiceBuilder::config_v1(startup,
+  device)` wraps `zenkey_model::config`'s `Owner` over the application's
+  `Device` (apply, undo, persist; async, fallible, run on a task of its
+  own), serves the five operations, puts the view and the status before
+  the tokens and after every step that moves them, runs the deadline timer
+  at `Owner::next_due`, and converges desired state; a restart is a new
+  service from `Startup` (`new_epoch` is refused while it runs), and the
+  owner example's `--config` drives it from stdin.
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
@@ -550,7 +559,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.27 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.28 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
