@@ -1386,6 +1386,210 @@
       "expect": {
         "refused": {
           "code": "invalid_request",
+          "field": "/values/level"
+        }
+      },
+      "group": "power",
+      "note": "null is outside the request's type: refused before row 3, no such group (text 0.2, F-107)",
+      "op": "set",
+      "request": {
+        "values": {
+          "level": null
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/offset_db"
+        }
+      },
+      "group": "trim",
+      "note": "a fraction is outside the request's type: before an act in flight, row 1 (F-107)",
+      "op": "set",
+      "request": {
+        "values": {
+          "offset_db": 1.5
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": true,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/fraction_ppm"
+        }
+      },
+      "group": "duty",
+      "note": "an array is outside the request's type: before row 5's busy (F-107)",
+      "op": "set",
+      "request": {
+        "values": {
+          "fraction_ppm": [
+            20000
+          ]
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": {
+          "applied": true,
+          "deadline_passed": false,
+          "token": "i1-3"
+        },
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/tx_queue_len"
+        }
+      },
+      "group": "queue",
+      "note": "an object is outside the request's type: before the allowlist, row 4 (F-107)",
+      "op": "set",
+      "request": {
+        "values": {
+          "tx_queue_len": {
+            "n": 10
+          }
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "field": "group",
+          "cause": "config"
+        }
+      },
+      "group": "queue",
+      "note": "2.0 is an integer of the request's type, so the allowlist (row 4) comes before row 11's kind (F-107)",
+      "op": "set",
+      "request": {
+        "values": {
+          "tx_queue_len": 2.0
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "field": "group"
+        }
+      },
+      "group": "power",
+      "note": "an integer beyond 64 bits is of the request's type, so no such group (row 3) comes first (F-107)",
+      "op": "set",
+      "request": {
+        "values": {
+          "level": 18446744073709551616
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/idempotency_key"
+        }
+      },
+      "group": "duty",
+      "note": "the request's members outside their types in the bytewise order of their names: idempotency_key before token and values (F-107)",
+      "op": "set",
+      "request": {
+        "idempotency_key": "",
+        "token": "",
+        "values": {
+          "fraction_ppm": null
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/note"
+        }
+      },
+      "group": "trim",
+      "note": "the first value outside the request's type, by the bytewise order of the names (F-107)",
+      "op": "set",
+      "request": {
+        "values": {
+          "offset_db": null,
+          "note": 0.5
+        }
+      },
+      "schema": "modem",
+      "state": {
+        "in_flight": false,
+        "last_change": null,
+        "pending": null,
+        "persist": true,
+        "revision": 4
+      }
+    },
+    {
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
           "field": "/values/offset_db"
         }
       },
@@ -2422,7 +2626,7 @@
       }
     }
   ],
-  "description": "config.v1 §2.5, §2.10, §2.13: one request against a schema and the owner's state -> accepted, or the refusal the owner sends, before any act. schemas holds the schemas by name, each a list of groups as the view carries them (§2.2), a group's writable being the startup allowlist (§2.16). A case gives op (set, confirm, cancel, extend, persist), group (the {group} of a set's key), request (the SetRequest or ControlRequest, as JSON) and state: revision; pending, null or {token, applied: whether every group of the change is applied, deadline_passed: whether the deadline has passed and its undo not yet run}; last_change, null or {token, set_sensitive: whether that change set a sensitive parameter}; persist, whether the owner has a persisted layer; in_flight, whether an act is in flight. Rows that need more state (an idempotency key held, the event's rate, a reach join near its deadline, the device) are lifecycle.json's. expect is {accepted: true}, or {refused: {code, field, cause (unavailable alone), app (the ConfigError code, app alone)}}: code is core 5.2's; field is \"group\" for the key's {group}, a JSON pointer into the request (RFC 6901: ~ written ~0 and / written ~1) for a member of it, or null for a refusal about the owner's state or the operation (busy, persist's unavailable). Values are taken in the bytewise (UTF-8) order of their names. An integer is a JSON number written without a fraction or an exponent, within the signed 64-bit range.",
+  "description": "config.v1 §2.5, §2.10, §2.13: one request against a schema and the owner's state -> accepted, or the refusal the owner sends, before any act. schemas holds the schemas by name, each a list of groups as the view carries them (§2.2), a group's writable being the startup allowlist (§2.16). A case gives op (set, confirm, cancel, extend, persist), group (the {group} of a set's key), request (the SetRequest or ControlRequest, as JSON) and state: revision; pending, null or {token, applied: whether every group of the change is applied, deadline_passed: whether the deadline has passed and its undo not yet run}; last_change, null or {token, set_sensitive: whether that change set a sensitive parameter}; persist, whether the owner has a persisted layer; in_flight, whether an act is in flight. Rows that need more state (an idempotency key held, the event's rate, a reach join near its deadline, the device) are lifecycle.json's. expect is {accepted: true}, or {refused: {code, field, cause (unavailable alone), app (the ConfigError code, app alone)}}: code is core 5.2's; field is \"group\" for the key's {group}, a JSON pointer into the request (RFC 6901: ~ written ~0 and / written ~1) for a member of it, or null for a refusal about the owner's state or the operation (busy, persist's unavailable). Values are taken in the bytewise (UTF-8) order of their names. A value that is not a ParamValue (a boolean, a string, or a number with no fractional part: null, a fraction, an array, an object) is outside the request's type, refused before row 1, as are the request's other members outside theirs, taken in the bytewise order of the member names, values last; 2.0 and an integer beyond 64 bits are ParamValue integers, refused at row 11 against the parameter's kind (text 0.2, F-107). An integer is a JSON number written without a fraction or an exponent, within the signed 64-bit range.",
   "schemas": {
     "modem": [
       {
