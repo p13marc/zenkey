@@ -329,3 +329,13 @@ py-config:
     protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
     ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
         target/py-venv/bin/python -m zk2py.config_scenarios
+
+# The Python implementation's link.v1 scenarios (spec/profiles/link/
+# scenarios.md §1–§6): a face policy compiled into zenoh-python routers'
+# blocks, and what crosses each face measured. No Rust build.
+py-link:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
+    ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
+        target/py-venv/bin/python -m zk2py.link_scenarios
