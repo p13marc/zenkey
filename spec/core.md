@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.28** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.29** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -24,10 +24,12 @@ concludes, in 0.25 a window's "lost no delivery" established from
 what its reader can see, with the owner keeping its budget, in 0.26
 a late joiner's seed: subscribe, then S4's GET, merged by the owner's
 stamp, in 0.27 a reader that stalls, a tool as a role with what it
-inspects, and the merge's unstamped samples and equal times, and in 0.28
+inspects, and the merge's unstamped samples and equal times, in 0.28
 what `config.v1` needed: the error codes defined, `forbidden` among
 them, `unavailable` from a handler for one member, and a rate across a
-restart).
+restart, and in 0.29 what `link.v1` needed: its vocabulary published
+without `downsample_ms`, a crossing counter's epoch, and a batch's
+example made exact).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -216,8 +218,10 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
   - It SHOULD do so in a new session, so that its timestamps' id changes
     too (§4.3). That change, and presence, are how a consumer sees the
     discontinuity.
-  - A counter that crosses a face where neither is visible carries its
-    epoch in its value: a profile's counter type does.
+  - A counter that crosses a face where neither is visible SHOULD carry
+    its epoch in-band, in its value or its attachment, as a profile's
+    counter type does. Without one, a reader across the face reads a
+    decrease as a reset ([`link.v1`](profiles/link/v1.md) §2.13, 0.29).
 
   `[Sc: presence.md §3]`
 - **Moving a service to another host changes no key.**
@@ -914,7 +918,7 @@ and reports these codes. `[F: descriptors/]`
 |---|---|---|
 | S1 | **Owner:** every state mutation, put **and** delete, MUST carry a timestamp the owner set. | `[Sc: state.md §1]` |
 | S2 | **Owner:** a GET reply MUST carry the timestamp of the mutation it represents. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` |
-| S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's timestamp. The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5). | `[Sc: state.md §2, §6]` |
+| S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's timestamp. The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it (0.29). | `[Sc: state.md §2, §6]` |
 | S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
 | S6 | **Consumer:** current state is the owner's answer. A consumer turns to an archive only when the owner gave no reply within the GET's timeout, or presence shows it absent. That silence is not a verdict about the key (O5). The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
@@ -1915,8 +1919,9 @@ the hash is the check. A caller or tool MUST retrieve a bundle as follows:
 
 A **face** is a router's link to a part of the network. A deployment marks
 a face constrained, and gives its maximum outage, in its face configuration.
-`link.v1` standardizes that configuration, but the core rules below need
-only the two facts.
+[`link.v1`](profiles/link/v1.md) standardizes that configuration, its
+face policy (§2.1, 0.29), but the core rules below need only the two
+facts.
 - **No `@zk` traffic is required across it.** Bindings resolve statically
   (R7), and bundles come from holders on the same side or are
   pre-provisioned.
@@ -1951,17 +1956,22 @@ only the two facts.
 
   `[Sc: constrained.md §1]`
 - **A batch SHOULD take at most a third of the lease to cross the face.**
-  - At 2,400 bit/s with the 10 s lease, 1 KB batches qualify, and zenoh's
-    64 KB default does not: the link reconnected in a loop.
+  - At 2,400 bit/s with the 10 s lease, a batch of up to 1,000 B
+    qualifies: 1,000 B take 3.33 s, exactly a third (0.29: 0.1 said
+    "1 KB", and the spike's 1,024 B batches take 3.41 s, a little over,
+    though the link held).
+    zenoh's 64 KB default does not: the link reconnected in a loop.
   - A link's batch is the minimum of the configured size, the link's MTU and
     the other end's. Over TCP, the face therefore needs a router configured
     for it.
 
   `[Sc: constrained.md §4]`
 - **`@stream` keys SHOULD be denied across the face** unless `link.v1`
-  downsamples them. A named key's frames are queued, not dropped, and every
-  request waits behind them. `link.v1`'s exceptions are its own (#613). The
-  reference generator denies `@stream` wholesale at this version.
+  downsamples them: an `@stream` resource whose contract exposes it, one
+  rule per concrete key ([`link.v1`](profiles/link/v1.md) §2.7, §2.8,
+  0.29). A named key's frames are queued, not dropped, and every request
+  waits behind them. The reference generator denies `@stream` wholesale at
+  this version.
 - **A far router in a south region needs declarations sent toward it**
   (0.14, measured). It learns of queryables only from the declarations the
   near router sends it, so the far side's principal MUST be granted
@@ -2732,7 +2742,7 @@ the new variant, and an old reader refuses it. A branch added to an
 A **profile** is an independently versioned specification, such as
 `timing.v1` or `archive.v1`. The core never depends on one. Where a rule
 here names a profile ([`health.v1`](profiles/health/v1.md) for reporting,
-`link.v1` for face configuration, `archive.v1` for archives,
+[`link.v1`](profiles/link/v1.md) for face configuration, `archive.v1` for archives,
 [`freshness.v1`](profiles/freshness/v1.md) for a value's age), it names
 the standard way to meet the rule, which the core states in its own
 terms. A profile contributes through these four points, and through no
@@ -2753,7 +2763,9 @@ other:
    outside one: no W105. `[F: contracts/ok-profile-without-vocabulary]`
    A published vocabulary replaces its interim table, and W105 reads it
    the same way (0.21). The first is `freshness.v1`'s
-   ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4).
+   ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4), and
+   `link.v1`'s followed ([`profiles/link/v1.md`](profiles/link/v1.md) §4,
+   0.29).
    What a published vocabulary defines (`views.v1`'s documents among them,
    §9.6) is the profile's, not the core's.
    **One major per contract** (0.22). A key names its profile without a
@@ -2973,7 +2985,7 @@ above, with these relaxations and additions:
 | Namespace (§1.6) | The deployment prefix written literally in keys |
 | Descriptor (§3.3) | MUST fit one fragment (4 KB with zenoh-pico's default `Z_FRAG_MAX_SIZE`) `[Sc: constrained.md §5]` |
 | Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so the limit is on receiving. |
-| Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled. Presence never crosses. |
+| Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled ([`link.v1`](profiles/link/v1.md), 0.29). Presence never crosses. |
 
 `[Sc: constrained.md]`
 
@@ -3150,6 +3162,7 @@ Appendix B. These are the ones the rules above cite:
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
+| `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)
@@ -3181,6 +3194,12 @@ profile's own table replaces its interim one.
 | Profile | Keys | Published by |
 |---|---|---|
 | `freshness` | `ttl_s` | [`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4 |
+| `link` | `exposure` | [`profiles/link/v1.md`](profiles/link/v1.md) §4 (0.29) |
+
+`link.downsample_ms` left with the interim `link` row (0.29): a face's
+rate is its face policy's `interval_s` (`link.v1` §2.8), a deployment
+fact, so it is outside `link.v1`'s published table, and a contract that
+writes it draws W105. `[F: contracts/w105-link-downsample]`
 
 **Interim annotation vocabularies** (W105 outside them, until each profile
 publishes its own):
@@ -3189,7 +3208,6 @@ publishes its own):
 |---|---|
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` |
 | `telemetry` | `unit`, `kind`, `buckets`, `semantic` |
-| `link` | `exposure`, `downsample_ms` |
 | `arbitration` | `policy` |
 | `desired` | `target_param`, `target` |
 | `alarms` | `severity_default` |

@@ -466,11 +466,17 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   bundles and `.history`, the compatibility classifier (`compat`,
   #618), a late joiner's merge (`seed`, core 0.27: zenoh's timestamp
   order spelled out, an unstamped sample below every stamp), which the
-  fleet's seeded subscription decides by, and `config.v1`'s session-free
+  fleet's seeded subscription decides by, `config.v1`'s session-free
   half (`config`, #768 CA: the validators in the profile's order of
   refusals, the window, redaction, and `Owner`, a pure state machine whose
   device acts are two-phase, `Step::Act` then `finish`, which the runtime
-  wraps). It depends on `zenoh-keyexpr` and no other zenoh crate
+  wraps), and `link.v1`'s (`link`, #769 LA: `link.exposure`, the face
+  policy a deployment writes per router and its lints, the plan a generator
+  derives from both, named denies with `zk` never omitted, one
+  downsampling rule per concrete key, the attachment, window floors and
+  liveness evidence, and the checks of a router's block; `acl gen`
+  compiling a plan into a router's block is LB's). It depends on
+  `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
   as zenctl's). `tests/examples.rs` requires every contract in
@@ -586,7 +592,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.28 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.29 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

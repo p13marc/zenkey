@@ -1,5 +1,27 @@
 # `link.v1` for zenoh-modem: the RF and SBD faces (#623, #616, #617)
 
+> **Superseded by [`link.v1`](../../../spec/profiles/link/v1.md), text 0.1
+> (#769).** This sketch is kept as the record it was; the profile is the
+> rule. Its Appendix B gives zenoh-modem's two face policies and the plans
+> derived from them (`conformance/plan.json`'s first two cases). What
+> changed:
+> - **A defect: the events.** `face-deny-modem-streams` below denies
+>   `zk2/*/*/modem.v3/stream/{oper_change,device_fault,identity_change,action_event}/**`,
+>   the draft-0 keys of zenoh-modem's occurrences. Under draft 1 they are
+>   events, keyed `…/modem.v3/events/<template>/<ulid>` (core §2.6), which
+>   that rule does not cover: under this sketch's `allow`, they would cross
+>   the RF face. The profile's plan denies every event that is not exposed,
+>   here `zk2/*/*/*/events/**` (`link.v1` §2.9).
+> - **The face file** gains the far principal, the attachment, the maximum
+>   outage, the batch and the link's rate (§2.1).
+> - **No `@op` deny and no link subject.** Calls and GETs cross by grant
+>   (§2.9), and the face's denies go into the far principal's policy
+>   (§2.4).
+> - **Companions are denied by interface**, as every resource is: exposure
+>   is the contract's (§2.7).
+> - **A name beside a link resource** is denied as `…/<name>/**`, which
+>   includes the key itself (§2.7).
+
 zenoh-modem carries stock Zenoh over radios where every byte is billed in airtime:
 - 220 B MTU at 2,400 bit/s on RF;
 - LoRa at a 1% duty cycle;
@@ -120,6 +142,9 @@ access_control: {
       messages: ["put", "delete", "declare_subscriber", "query", "reply", "declare_queryable"],
       key_exprs: ["zk2/*/*/modem.v3/state/**", "zk2/h-3fa9c2d41b7e/rf0/*/state/**"] },
     // modem.v3 streams: whole subtrees holding no link resource (a new resource there stays home)…
+    // (SUPERSEDED, see the note at the top: the four `…/stream/<occurrence>/**` keys below are
+    //  draft 0's; draft 1 keys these events `…/modem.v3/events/<template>/<ulid>`, which this
+    //  rule does not cover. link.v1 §2.9 denies them as `zk2/*/*/*/events/**`.)
     { id: "face-deny-modem-streams", permission: "deny", flows: ["egress", "ingress"],
       messages: ["put", "delete", "declare_subscriber", "query", "reply", "declare_queryable"],
       key_exprs: ["zk2/*/*/modem.v3/stream/layer/**", "zk2/*/*/modem.v3/stream/radio/**",

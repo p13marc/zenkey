@@ -24,9 +24,12 @@ use zenkey_model::config::{
     Step, Time,
 };
 use zenkey_model::freshness::{self, ClockTrust, Horizon, Last, Observation, Reply, StampAge};
+use zenkey_model::grammar::KindToken;
 use zenkey_model::health::{self, Judged, Level, Listing, Presence, Read, Reading};
 use zenkey_model::hostid;
+use zenkey_model::link;
 use zenkey_model::slug::chunk_slug;
+use zenkey_model::template::Template;
 
 /// The fixtures this crate runs, as (profile directory, file name).
 const KNOWN: &[(&str, &str)] = &[
@@ -44,6 +47,9 @@ const KNOWN: &[(&str, &str)] = &[
     ("config", "desired.json"),
     ("config", "redaction.json"),
     ("config", "lifecycle.json"),
+    ("link", "exposure.json"),
+    ("link", "plan.json"),
+    ("link", "lints.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -1170,4 +1176,229 @@ fn config_desired_types_are_the_contracts() {
         "{dj}"
     );
     assert!(config::check_desired(owner.schema(), &d).is_ok());
+}
+
+// --- link.v1 (#769, LA) ---------------------------------------------------------
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
+}
+
+fn annotations(v: &Value) -> BTreeMap<String, Value> {
+    v.as_object()
+        .expect("annotations")
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+fn link_token(v: &Value) -> KindToken {
+    v.as_str()
+        .expect("token")
+        .parse()
+        .unwrap_or_else(|e| panic!("token {v}: {e}"))
+}
+
+fn findings_json(f: &[link::Finding]) -> Value {
+    serde_json::to_value(f).unwrap()
+}
+
+/// A case's deployment, as `link/conformance/` writes it: `implements`, and
+/// the interfaces inline or loaded from `contracts`.
+fn link_deployment(case: &Value) -> Option<link::Deployment> {
+    let implements = case.get("implements")?;
+    let mut d = link::Deployment {
+        implements: serde_json::from_value(implements.clone()).expect("implements"),
+        ..link::Deployment::default()
+    };
+    for p in case
+        .get("contracts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let path = repo_root().join(p.as_str().expect("a path"));
+        let l = zenkey_model::contract::load_path(&path);
+        let c = l
+            .contract
+            .unwrap_or_else(|| panic!("{}: {}", path.display(), l.report));
+        d.add_contract(&c);
+    }
+    for (iface, rs) in case
+        .get("interfaces")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        let rs = rs
+            .as_array()
+            .expect("resources")
+            .iter()
+            .map(|r| link::Res {
+                template: Template::parse(r["template"].as_str().expect("template"))
+                    .expect("a template"),
+                token: link_token(&r["token"]),
+                annotations: annotations(&r["annotations"]),
+            })
+            .collect();
+        d.interfaces.insert(iface.clone(), rs);
+    }
+    Some(d)
+}
+
+/// `link/conformance/exposure.json`: one resource and the face's `expose` →
+/// its exposure and whether its pushes cross (link.v1 §2.2, §2.7).
+#[test]
+fn link_exposure() {
+    let path = profiles().join("link/conformance/exposure.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let token = link_token(&case["token"]);
+        let template =
+            Template::parse(case["template"].as_str().expect("template")).expect("a template");
+        let e = link::exposure(link::kind_of(token), &annotations(&case["annotations"]));
+        let expose = match case["expose"].as_str().expect("expose") {
+            "link" => link::Expose::Link,
+            "none" => link::Expose::None,
+            other => panic!("expose {other:?}"),
+        };
+        let c = link::crossing(token, template.has_params(), &e, expose);
+        let what = format!("{}", case["note"]);
+        expect(
+            case,
+            json!({"exposure": e.as_str(), "pushes": c.pushes.as_str(), "reason": c.reason.as_str()}),
+            &what,
+        );
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A plan as a router's block, which [`link::check_block`] must pass: every
+/// plan has the whole `@zk` deny and concrete rules that do not intersect
+/// (link.v1 §2.6, §2.8).
+fn plan_as_block(p: &link::FacePlan) -> link::Block {
+    link::Block {
+        namespace: String::new(),
+        deny: p
+            .deny
+            .iter()
+            .map(|d| link::BlockDeny {
+                flows: d.flows.iter().map(|s| (*s).to_owned()).collect(),
+                messages: d.messages.iter().map(|s| (*s).to_owned()).collect(),
+                key_exprs: d.key_exprs.clone(),
+            })
+            .collect(),
+        downsampling: p
+            .downsampling
+            .iter()
+            .flat_map(|d| &d.rules)
+            .map(|r| link::BlockRule {
+                key_expr: r.key_expr.clone(),
+                freq: r.freq,
+            })
+            .collect(),
+    }
+}
+
+/// `link/conformance/plan.json`: a face policy and a deployment → each
+/// face's plan, or the findings that refuse it (link.v1 §2.3, §2.5–§2.12).
+#[test]
+fn link_plan() {
+    let path = profiles().join("link/conformance/plan.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let parsed = link::parse(case["policy"].as_str().expect("policy"));
+        let deployment = link_deployment(case).expect("implements");
+        let got = match parsed.policy {
+            None => json!({"refused": findings_json(&parsed.findings)}),
+            Some(policy) => match link::plan(&policy, &deployment) {
+                Err(f) => json!({"refused": findings_json(&f)}),
+                Ok(plans) => {
+                    for p in &plans {
+                        for d in &p.deny {
+                            for k in &d.key_exprs {
+                                assert!(
+                                    zenoh_keyexpr::keyexpr::new(k.as_str()).is_ok(),
+                                    "{what}: {k} is a canonical key expression"
+                                );
+                            }
+                        }
+                        let found = link::check_block(&p.name, &plan_as_block(p));
+                        assert!(
+                            found.is_empty(),
+                            "{what}: the plan fails its own checks: {found:?}"
+                        );
+                    }
+                    json!({"faces": serde_json::to_value(&plans).unwrap()})
+                }
+            },
+        };
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A case's router block, as `lints.json` writes it.
+fn link_block(b: &Value) -> (String, link::Block) {
+    let strings = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .expect("strings")
+            .iter()
+            .map(|s| s.as_str().expect("a string").to_owned())
+            .collect()
+    };
+    let block = link::Block {
+        namespace: b["namespace"].as_str().expect("namespace").to_owned(),
+        deny: b["deny"]
+            .as_array()
+            .expect("deny")
+            .iter()
+            .map(|d| link::BlockDeny {
+                flows: strings(&d["flows"]),
+                messages: strings(&d["messages"]),
+                key_exprs: strings(&d["key_exprs"]),
+            })
+            .collect(),
+        downsampling: b["downsampling"]
+            .as_array()
+            .expect("downsampling")
+            .iter()
+            .map(|r| link::BlockRule {
+                key_expr: r["key_expr"].as_str().expect("key_expr").to_owned(),
+                freq: r["freq"].as_f64().expect("freq"),
+            })
+            .collect(),
+    };
+    (b["face"].as_str().expect("block.face").to_owned(), block)
+}
+
+/// `link/conformance/lints.json`: a face policy, and what comes with it →
+/// every finding (link.v1 §2.1, §2.3, §2.11, §2.15).
+#[test]
+fn link_lints() {
+    let path = profiles().join("link/conformance/lints.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let deployment = link_deployment(case);
+        let windows: Option<BTreeMap<String, u64>> = case
+            .get("windows")
+            .map(|w| serde_json::from_value(w.clone()).expect("windows"));
+        let block = case.get("block").map(link_block);
+        let found = link::lint(&link::LintInput {
+            text: case["policy"].as_str().expect("policy"),
+            deployment: deployment.as_ref(),
+            windows: windows.as_ref(),
+            block: block.as_ref().map(|(f, b)| (f.as_str(), b)),
+        });
+        expect(case, findings_json(&found), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
 }

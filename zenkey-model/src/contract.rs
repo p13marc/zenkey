@@ -550,12 +550,14 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// The annotation vocabularies W105 reads (core §10 point 2, Appendix D):
 /// a profile's published table where it has one, else the interim table
 /// of draft 1 (r3.3 D19), until each profile ships its own (#613).
-/// `freshness.v1` publishes its own (`freshness::VOCABULARY`, core 0.21).
+/// `freshness.v1` publishes its own (`freshness::VOCABULARY`, core 0.21),
+/// and so does `link.v1` (`link::VOCABULARY`, core 0.29, which drops the
+/// interim `downsample_ms`).
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),
     ("timing", &["period_ms", "deadline_ms", "lifespan_ms"]),
     ("telemetry", &["unit", "kind", "buckets", "semantic"]),
-    ("link", &["exposure", "downsample_ms"]),
+    (crate::link::NAME, crate::link::VOCABULARY),
     ("arbitration", &["policy"]),
     ("desired", &["target_param", "target"]),
     ("alarms", &["severity_default"]),

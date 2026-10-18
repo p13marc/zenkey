@@ -190,7 +190,7 @@ profile must be listed in `uses`.
 | `freshness.v1` | `ttl_s` (seconds; `0` = never stale) |
 | `timing.v1` | `period_ms`, `deadline_ms`, `lifespan_ms` |
 | `telemetry.v1` | `unit` (UCUM), `kind` (`counter` \| `gauge` \| `histogram` \| `text`), `buckets` (list), `semantic` |
-| `link.v1` | `exposure` (`host` \| `link`), `downsample_ms` |
+| `link.v1` | `exposure` (`host` \| `link`, default `host`): published by [`link.v1`](../../spec/profiles/link/v1.md) §4 (core 0.29), which dropped `downsample_ms`, a face's rate being its face policy's `interval_s` |
 | `arbitration.v1` | `policy` (`priority` \| `freshest` \| `lease`) |
 | `desired.v1` | `target_param` (template parameter naming the target), `target` (`self.system` \| `self.service`) |
 | `alarms.v1` | `severity_default`; the key recipe is fixed by the profile, not annotated |
@@ -201,7 +201,8 @@ profile must be listed in `uses`.
 ### What stays out of the contract
 
 - **Deployment facts:** the system and service names, bindings, link face
-  policy (which may widen `link.v1` exposure per principal).
+  policy (`link.v1` §2.1; exposure per principal is not in its text 0.1,
+  §2.14).
 - **Instance facts:** the capabilities held, the unavailable exceptions, a
   lower cardinality. These are the descriptor's.
 
