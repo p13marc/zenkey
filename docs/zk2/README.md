@@ -23,6 +23,7 @@ observability shape.
 | [`spike-report.md`](spike-report.md) | **The spike report** (complete, 2026-10-08): the environment, the decisions table that r4 settles, and one section per spike. Raw data is in [`spike-results/`](spike-results/), copied from branch `zk2-spike` (tag `zk2-spike-final`). |
 | [`codegen.md`](codegen.md) | The design note of `zenkey-build` 0.20 (#611): what a contract generates, and why. |
 | [`tooling-guide.md`](tooling-guide.md) | **The tooling guide** (non-normative for the core): what a tool owes the person reading it. It carries v1's observer conformance (RFC 13) over to zk2: the judgement shape, silence never being a verdict, the observer obligations, recording and replay (#612). |
+| [`migration.md`](migration.md) | **The migration note** (non-normative, #614): for a team on v1 weighing zk2. The concept map from v1 to zk2, the steps of a port, the tools' changes, what waits on #613's profiles, and each adopter's position. |
 | [`upstream/`](upstream/) | Two draft reports on zenoh 1.10.1 behaviour (the storage manager, S5; ACL denies on router links, S3). **Not filed** (maintainer, 2026-10-08). They are kept as records. |
 
 ## Rules for this directory
