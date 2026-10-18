@@ -62,6 +62,10 @@
 //!   of one reading of a service, on top of [`freshness`]
 //!   (`spec/profiles/health/v1.md`, #721). The owner's puts and its
 //!   `clock_ahead` fault are the runtime's.
+//! - [`config`]: `config.v1`'s wire types, its validators, the window,
+//!   redaction, and a pure state machine of one owner's configuration
+//!   (`spec/profiles/config/v1.md`, #768). The device, the persisted layer
+//!   and the timers are the runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -72,6 +76,7 @@ pub mod bundle;
 pub mod canonical;
 pub mod chunk;
 pub mod compat;
+pub mod config;
 pub mod contract;
 pub mod decode;
 pub mod descriptor;
