@@ -1,0 +1,439 @@
+{
+  "cases": [
+    {
+      "annotations": {
+        "link.exposure": "link",
+        "telemetry.kind": "counter"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "downsampled",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "note": "zenoh-modem's link counter on an exposing face: downsampled (§2.7, §2.8)",
+      "template": "sdu/dropped_total",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "counter"
+      },
+      "expect": {
+        "exposure": "host",
+        "pushes": "denied",
+        "reason": "host"
+      },
+      "expose": "link",
+      "note": "no annotation: host, the default (§2.2)",
+      "template": "sdu/tx_sdus_total",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "host"
+      },
+      "expect": {
+        "exposure": "host",
+        "pushes": "denied",
+        "reason": "host"
+      },
+      "expose": "link",
+      "note": "host, written out",
+      "template": "radio/snr",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "denied",
+        "reason": "face_closed"
+      },
+      "expose": "none",
+      "note": "exposed, on a face that exposes none (§2.1 expose)",
+      "template": "sdu/dropped_total",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "host"
+      },
+      "expect": {
+        "exposure": "host",
+        "pushes": "denied",
+        "reason": "host"
+      },
+      "expose": "none",
+      "note": "host on a face that exposes none: host decides first",
+      "template": "radio/snr",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "downsampled",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "note": "an exposed @stream is downsampled like any stream (§2.7, core §8.5)",
+      "template": "frames",
+      "token": "@stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "host"
+      },
+      "expect": {
+        "exposure": "host",
+        "pushes": "denied",
+        "reason": "host"
+      },
+      "expose": "link",
+      "note": "a host @stream",
+      "template": "raw",
+      "token": "@stream"
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "exposure": "host",
+        "pushes": "denied",
+        "reason": "host"
+      },
+      "expose": "link",
+      "note": "an @stream with no annotation",
+      "template": "camera/frames",
+      "token": "@stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "denied",
+        "reason": "templated"
+      },
+      "expose": "link",
+      "note": "an exposed stream with a parameter: no rule names its members (§2.8)",
+      "template": "endpoint/{endpoint}",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "denied",
+        "reason": "templated"
+      },
+      "expose": "link",
+      "note": "an exposed stream with a rest parameter",
+      "template": "trace/{path...}",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "denied",
+        "reason": "templated"
+      },
+      "expose": "link",
+      "note": "an exposed @stream with a parameter",
+      "template": "camera/{cam}/frames",
+      "token": "@stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "denied",
+        "reason": "face_closed"
+      },
+      "expose": "none",
+      "note": "a templated exposed stream on a closed face: closed first",
+      "template": "endpoint/{endpoint}",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60,
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "whole",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "note": "an exposed state crosses whole (§2.7)",
+      "template": "oper",
+      "token": "state"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "whole",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "note": "an exposed templated state crosses whole: state is not downsampled",
+      "template": "peers/{peer}",
+      "token": "state"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "whole",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "note": "an exposed @state",
+      "template": "map",
+      "token": "@state"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "exposure": "host",
+        "pushes": "denied",
+        "reason": "host"
+      },
+      "expose": "link",
+      "note": "a state with no annotation: zenoh-modem's oper",
+      "template": "oper",
+      "token": "state"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "denied",
+        "reason": "face_closed"
+      },
+      "expose": "none",
+      "note": "an exposed state on a closed face",
+      "template": "oper",
+      "token": "state"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "whole",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "note": "an exposed event crosses whole, never downsampled (§2.9)",
+      "template": "fault",
+      "token": "events"
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "exposure": "host",
+        "pushes": "denied",
+        "reason": "host"
+      },
+      "expose": "link",
+      "note": "zenoh-modem's oper_change: host, so it never crosses (§2.9)",
+      "template": "oper_change",
+      "token": "events"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "pushes": "denied",
+        "reason": "face_closed"
+      },
+      "expose": "none",
+      "note": "an exposed event on a closed face",
+      "template": "fault",
+      "token": "events"
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "ignored",
+        "pushes": "none",
+        "reason": "requests_only"
+      },
+      "expose": "link",
+      "note": "an operation: exposure ignored, its calls cross by grant (§2.2, §2.9)",
+      "template": "action/{name}",
+      "token": "@op"
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "exposure": "ignored",
+        "pushes": "none",
+        "reason": "requests_only"
+      },
+      "expose": "link",
+      "note": "an operation with no annotation",
+      "template": "sdu/lanes",
+      "token": "@op"
+    },
+    {
+      "annotations": {
+        "link.exposure": 3
+      },
+      "expect": {
+        "exposure": "ignored",
+        "pushes": "none",
+        "reason": "requests_only"
+      },
+      "expose": "none",
+      "note": "an operation with a value that is no exposure: still ignored",
+      "template": "reset",
+      "token": "@op"
+    },
+    {
+      "annotations": {
+        "link.exposure": "LINK"
+      },
+      "expect": {
+        "exposure": "invalid",
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "link",
+      "note": "a string that is not one of the two: read as host (§2.2)",
+      "template": "sdu/dropped_total",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "fleet"
+      },
+      "expect": {
+        "exposure": "invalid",
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "link",
+      "note": "v1's third value, fleet: not an exposure",
+      "template": "sdu/dropped_total",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": true
+      },
+      "expect": {
+        "exposure": "invalid",
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "link",
+      "note": "a boolean",
+      "template": "oper",
+      "token": "state"
+    },
+    {
+      "annotations": {
+        "link.exposure": 1
+      },
+      "expect": {
+        "exposure": "invalid",
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "link",
+      "note": "a number",
+      "template": "fault",
+      "token": "events"
+    },
+    {
+      "annotations": {
+        "link.exposure": [
+          "link"
+        ]
+      },
+      "expect": {
+        "exposure": "invalid",
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "link",
+      "note": "an array",
+      "template": "level",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": {
+          "face": "rf"
+        }
+      },
+      "expect": {
+        "exposure": "invalid",
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "link",
+      "note": "a table",
+      "template": "level",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": "LINK"
+      },
+      "expect": {
+        "exposure": "invalid",
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "none",
+      "note": "an invalid value on a closed face: invalid decides first",
+      "template": "level",
+      "token": "stream"
+    },
+    {
+      "annotations": {
+        "link.exposure": ""
+      },
+      "expect": {
+        "exposure": "invalid",
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "link",
+      "note": "the empty string",
+      "template": "level",
+      "token": "stream"
+    }
+  ],
+  "description": "link.v1 §2.2, §2.7: one resource's kind token, template and resolved annotations, and the face's expose -> its exposure and whether its pushes cross. token is the resource's kind token (stream, @stream, state, @state, events, @op); template is its template text; annotations are its resolved annotations (core §9.3), of which only link.exposure is read; expose is the face policy's link or none. expect.exposure is host (absent, or \"host\"), link (\"link\"), invalid (any other value), or ignored (an operation, whatever the value). expect.pushes is downsampled, whole, denied, or none (an operation has no pushes). expect.reason is the first of these that holds, in this order: requests_only (an operation); invalid; host; face_closed (the face exposes none); templated (a stream or @stream whose template has a parameter); exposed."
+}

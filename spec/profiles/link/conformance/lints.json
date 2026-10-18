@@ -1,0 +1,1467 @@
+{
+  "cases": [
+    {
+      "expect": [],
+      "note": "zenoh-modem's RF policy: no finding; 220 B at 2,400 bit/s takes 0.73 s, within a third of 10 s (§2.10)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [],
+      "note": "1,000 B at 2,400 bit/s with the 10 s lease: exactly a third, no finding (§2.10)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 1000\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "batch_bytes",
+          "code": "batch_over_lease",
+          "face": "rf",
+          "severity": "warning"
+        }
+      ],
+      "note": "1,024 B at 2,400 bit/s: 3.41 s, a little over a third of the lease (§2.10; spike S3's batches)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 1024\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "batch_bytes",
+          "code": "batch_over_lease",
+          "face": "rf",
+          "severity": "warning"
+        }
+      ],
+      "note": "zenoh's 65,535 B default at 2,400 bit/s: 218 s (§2.10)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 65535\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [],
+      "note": "1,024 B against a 60 s lease: within a third (§2.10)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 1024\nlink_bps = 2400\nlease_ms = 60000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.interfaces",
+          "code": "select_interfaces",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "select.link_protocols",
+          "code": "missing_field",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "selected by interface: refused, and link_protocols is then missing (§2.14)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { interfaces = [\"wlan0\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.interfaces",
+          "code": "select_interfaces",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "both selectors: interfaces refused, link_protocols read (§2.14)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"], interfaces = [\"wlan0\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.zids",
+          "code": "unknown_field",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an unknown key inside select",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\"], zids = [\"a1\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "attach",
+          "code": "router_attach",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "router to router: refused (§2.5)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"router\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "attach",
+          "code": "router_attach",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "router to router with a region: refused, the region checked for its type only (§2.1)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"router\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\nregion = \"ground\"\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "attach",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an attachment that is none of the three",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"peer\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "region",
+          "code": "missing_field",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a south region without its region (§2.5)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"south-region\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [],
+      "note": "a south region with its region: no finding",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"south-region\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\nregion = \"ground\"\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "region",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a client with a region (§2.1)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\nregion = \"ground\"\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "region",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a region longer than zenoh's 32 bytes",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"south-region\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\nregion = \"ggggggggggggggggggggggggggggggggg\"\n"
+    },
+    {
+      "expect": [],
+      "note": "a region of exactly 32 bytes: no finding",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"south-region\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\nregion = \"gggggggggggggggggggggggggggggggg\"\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "region",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an empty region",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"south-region\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\nregion = \"\"\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "interval_s",
+          "code": "missing_field",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "exposing without an interval (§2.1)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "interval_s",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "exposing none with an interval (§2.1)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"none\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [],
+      "note": "exposing none, no interval: no finding",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "expose",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an expose that is neither: interval_s checked for its type only",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"all\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "interval_s",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an interval of 0: zenoh would drop every put",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 0\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "interval_s",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an interval written as a float",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60.0\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [],
+      "note": "an interval of 2^32-1: no finding",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 4294967295\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "interval_s",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an interval of 2^32",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 4294967296\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "class",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a class other than constrained",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"open\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.link_protocols",
+          "code": "unknown_protocol",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an unknown link protocol (§2.1)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"lora\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.link_protocols",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a link protocol repeated",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\", \"serial\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.link_protocols",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "no link protocol",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "select that is not a table",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = \"unixsock-stream\"\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "select.link_protocols",
+          "code": "shared_protocol",
+          "face": "a",
+          "severity": "error"
+        },
+        {
+          "at": "select.link_protocols",
+          "code": "shared_protocol",
+          "face": "b",
+          "severity": "error"
+        }
+      ],
+      "note": "two faces with a common protocol: each has the finding (§2.14)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.a]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\", \"unixpipe\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n\n[face.b]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\"] }\nclass = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [],
+      "note": "two faces on distinct protocols: no finding",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.a]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixpipe\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n\n[face.b]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\"] }\nclass = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "far",
+          "code": "missing_field",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a far principal missing",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "far",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an empty far principal",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "batch_bytes",
+          "code": "missing_field",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "link_bps",
+          "code": "missing_field",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "max_outage_s",
+          "code": "missing_field",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "the outage, the batch and the link's rate missing",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "batch_bytes",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a batch above zenoh's 65,535",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 65536\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "max_outage_s",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a negative outage",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = -1\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "lease_ms",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a lease of 0",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\nlease_ms = 0\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "link_bps",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a link rate written as a string",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = \"2400\"\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "max_outage_s",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a datetime where an integer belongs",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 1979-05-27T07:32:00Z\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "link_interval",
+          "code": "unknown_field",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "an unknown key in a face: v1's link_interval",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\nlink_interval = 60\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "colour",
+          "code": "unknown_field",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "an unknown top-level key",
+      "policy": "colour = \"blue\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "system",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a system that is not a plain chunk",
+      "policy": "system   = \"H-3fa9\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "services",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a service repeated",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\", \"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "services",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a service that is not a plain chunk",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"RF0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "services",
+          "code": "missing_field",
+          "face": null,
+          "severity": "error"
+        },
+        {
+          "at": "system",
+          "code": "missing_field",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "system and services missing",
+      "policy": "[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "face",
+          "code": "missing_field",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "no face at all",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "face",
+          "code": "bad_value",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "a face table with no face",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face]\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "",
+          "code": "bad_value",
+          "face": "RF",
+          "severity": "error"
+        }
+      ],
+      "note": "a face name that is not a plain chunk",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.RF]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a face that is not a table",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nface = { rf = 3 }\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "",
+          "code": "toml",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "not TOML",
+      "policy": "system = \n"
+    },
+    {
+      "expect": [
+        {
+          "at": "",
+          "code": "toml",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "TOML 1.1's trailing comma in an inline table: not TOML 1.0 (core §9.1)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\"], }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "attach",
+          "code": "router_attach",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "batch_bytes",
+          "code": "bad_value",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "colour",
+          "code": "unknown_field",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "several findings in one face, sorted by at",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"router\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 0\nlink_bps = 2400\ncolour = \"x\"\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "probe.v1/stream/lane/{lane}",
+          "code": "templated_exposure",
+          "face": "lora",
+          "severity": "warning"
+        },
+        {
+          "at": "probe.v1/stream/level",
+          "code": "interval_over_horizon",
+          "face": "lora",
+          "severity": "warning"
+        }
+      ],
+      "implements": {
+        "p1": [
+          "probe.v1"
+        ]
+      },
+      "interfaces": {
+        "probe.v1": [
+          {
+            "annotations": {
+              "freshness.ttl_s": 60,
+              "link.exposure": "link"
+            },
+            "template": "level",
+            "token": "stream"
+          },
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "lane/{lane}",
+            "token": "stream"
+          }
+        ]
+      },
+      "note": "the plan's warnings: a templated exposed stream, and an interval above half its horizon (§2.8, §2.12)",
+      "policy": "system   = \"site\"\nservices = [\"p1\"]\n\n[face.lora]\nfar          = \"gateway\"\nattach       = \"client\"\nselect       = { link_protocols = [\"serial\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 120\nbatch_bytes  = 64\nlink_bps     = 300\n"
+    },
+    {
+      "expect": [],
+      "implements": {
+        "p1": [
+          "probe.v1"
+        ]
+      },
+      "interfaces": {
+        "probe.v1": [
+          {
+            "annotations": {
+              "freshness.ttl_s": 60,
+              "link.exposure": "link"
+            },
+            "template": "level",
+            "token": "stream"
+          }
+        ]
+      },
+      "note": "an interval of exactly half the horizon: no finding (§2.12)",
+      "policy": "system   = \"site\"\nservices = [\"p1\"]\n\n[face.lora]\nfar          = \"gateway\"\nattach       = \"client\"\nselect       = { link_protocols = [\"serial\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 30\nmax_outage_s = 120\nbatch_bytes  = 64\nlink_bps     = 300\n"
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": [
+        {
+          "at": "rf1",
+          "code": "service_unknown",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "a listed service with no interfaces named: the plan is refused (§2.3)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\", \"rf1\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": [
+        {
+          "at": "h-3fa9c2d41b7e/rf0",
+          "code": "window_under_outage",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "rf0's window left at the core's 60 s, against an outage of 3,600 s (§2.11)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n",
+      "windows": {}
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": [],
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "rf0's window raised to the outage: no finding (§2.11)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n",
+      "windows": {
+        "h-3fa9c2d41b7e/rf0": 3600
+      }
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": [
+        {
+          "at": "h-3fa9c2d41b7e/rf0",
+          "code": "window_under_outage",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "one second short (§2.11)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n",
+      "windows": {
+        "h-3fa9c2d41b7e/rf0": 3599
+      }
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": [],
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "an outage within the core's 60 s: the default window holds (§2.11)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 60\nbatch_bytes = 220\nlink_bps = 2400\n",
+      "windows": {}
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": [
+        {
+          "at": "h-3fa9c2d41b7e/rf0",
+          "code": "window_under_outage",
+          "face": "b",
+          "severity": "error"
+        }
+      ],
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "two faces: the window is held against each one's outage (§2.11)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.a]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixpipe\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 600\nbatch_bytes = 220\nlink_bps = 2400\n\n[face.b]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\"] }\nclass = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 7200\nbatch_bytes = 220\nlink_bps = 2400\n",
+      "windows": {
+        "h-3fa9c2d41b7e/rf0": 3600
+      }
+    },
+    {
+      "expect": [],
+      "implements": {
+        "p1": [
+          "probe.v1"
+        ]
+      },
+      "interfaces": {
+        "probe.v1": [
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "level",
+            "token": "stream"
+          }
+        ]
+      },
+      "note": "a listed service that owns no state has no floor (§2.11)",
+      "policy": "system   = \"site\"\nservices = [\"p1\"]\n\n[face.lora]\nfar          = \"gateway\"\nattach       = \"client\"\nselect       = { link_protocols = [\"serial\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 30\nmax_outage_s = 86400\nbatch_bytes  = 64\nlink_bps     = 300\n",
+      "windows": {}
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [],
+      "note": "a block with the @zk deny, whole: no finding (§2.15)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/*/@stream/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a block with no @zk deny (§2.6, §2.15)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "the @zk deny on egress only (§2.15)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "the @zk deny without liveliness_query (§2.15)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [],
+      "note": "the @zk deny split over two rules, one per flow: no finding",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [],
+      "note": "the sketch's wider **/@zk/** includes zk2/**/@zk/**: no finding",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/*"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a narrower deny, the instance tokens only: not the whole of @zk (§2.15)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": "dep1"
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a namespace: the deny must carry it (§2.15)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "dep1/zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": "dep1"
+      },
+      "expect": [],
+      "note": "a namespace, carried: no finding",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2//@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a key expression that is not one includes nothing (§2.15)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [
+          {
+            "freq": 0.016666666666666666,
+            "key_expr": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total"
+          },
+          {
+            "freq": 0.016666666666666666,
+            "key_expr": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sched/queue_depth"
+          }
+        ],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [],
+      "note": "concrete downsampling rules: no finding (§2.8)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [
+          {
+            "freq": 0.016666666666666666,
+            "key_expr": "zk2/*/*/modem.v3/stream/sdu/dropped_total"
+          }
+        ],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "zk2/*/*/modem.v3/stream/sdu/dropped_total",
+          "code": "wildcard_downsampling",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "v1's rule over every device, one shared timer (§2.8; the sketch's gap 11)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [
+          {
+            "freq": 0.1,
+            "key_expr": "zk2/h-3fa9c2d41b7e/rf0/**"
+          },
+          {
+            "freq": 0.016666666666666666,
+            "key_expr": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total"
+          }
+        ],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "zk2/h-3fa9c2d41b7e/rf0/**",
+          "code": "wildcard_downsampling",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total",
+          "code": "intersecting_downsampling",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "a wildcard rule beside a concrete one it intersects: both findings, the later named (§2.8)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [
+          {
+            "freq": 0.016666666666666666,
+            "key_expr": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total"
+          },
+          {
+            "freq": 0.016666666666666666,
+            "key_expr": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total"
+          }
+        ],
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total",
+          "code": "intersecting_downsampling",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "the same key twice (§2.8)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [],
+        "downsampling": [
+          {
+            "freq": 0.016666666666666666,
+            "key_expr": "zk2/*/rf0/modem.v3/stream/sdu/dropped_total"
+          }
+        ],
+        "face": "rf",
+        "namespace": ""
+      },
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "batch_bytes",
+          "code": "batch_over_lease",
+          "face": "rf",
+          "severity": "warning"
+        },
+        {
+          "at": "h-3fa9c2d41b7e/rf0",
+          "code": "window_under_outage",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "zk2/*/rf0/modem.v3/stream/sdu/dropped_total",
+          "code": "wildcard_downsampling",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "everything at once: a batch over a third, a window short, no @zk deny, a wildcard rule",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 2048\nlink_bps = 2400\n",
+      "windows": {}
+    }
+  ],
+  "description": "link.v1 §2.1, §2.3, §2.11, §2.15: a face policy, and optionally a deployment, the windows it configures and a router's block -> every finding, sorted by face (null first), at, then code, each by its bytes. policy is the face policy's TOML text. implements and interfaces or contracts are plan.json's: when implements is present, the plan is derived and its findings (errors that refuse it, or its warnings) are included. windows, present only with implements, maps a listed service's address (<system>/<service>) to the tombstone window the deployment configures, in seconds; an address it does not name has the core's 60 s (S3). block is a router's block for one face: {face, namespace, deny: [{flows, messages, key_exprs}], downsampling: [{key_expr, freq}]}, in the block's order. The plan, the windows and the block are checked only when the policy has no error. A finding is {code, severity, face, at}: severity is error or warning; face is the face's name, or null for the top level and the deployment; at is the key within the face (select.link_protocols), the top-level key, the service or interface, the resource's name (<iface>/<token>/<template>), the service's address for window_under_outage, @zk for zk_not_denied, or the rule's key expression for a downsampling finding, and empty for toml and a face itself."
+}
