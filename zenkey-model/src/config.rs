@@ -19,6 +19,9 @@
 //! Owner::finish(now, DeviceResult)       ─▶ the act's outcome: the reply it owed, the events, or a next act
 //! Owner::persist_plan / persisted        ─▶ the last change into the persisted layer
 //! Owner::view / status                   ─▶ ConfigView │ ConfigStatus, its projection (§2.19)
+//! Owner::converge(doc)                   ─▶ Wait │ Refused │ Set{group, request} │ Converged   §2.18
+//! Owner::published(now)                  ─▶ the change events of the last hour, for the next instance §2.17
+//! device_words(schema, act, words)       ─▶ the device's words as a log line may carry them    §2.15
 //! ```
 //!
 //! There is no I/O and no clock here. The runtime receives calls, performs
@@ -1118,12 +1121,41 @@ fn too_long(s: &str, max: usize) -> bool {
     s.is_empty() || s.chars().count() > max
 }
 
+/// Whether `v` is a `ParamValue`, the type of `SetRequest`'s values (§3):
+/// a boolean, a string, or an integer as JSON Schema reads one, a number
+/// with no fractional part. `2.0` and an integer beyond 64 bits are; row 11
+/// then refuses them against the parameter's kind (§2.5, text 0.2, F-107).
+fn is_param_value(v: &Json) -> bool {
+    match v {
+        Json::Bool(_) | Json::String(_) => true,
+        Json::Number(n) => {
+            n.is_i64()
+                || n.is_u64()
+                || n.as_f64()
+                    .is_some_and(|f| f.is_finite() && f.fract() == 0.0)
+        }
+        _ => false,
+    }
+}
+
+/// The request's own type, before row 1 (§2.5): its members in the
+/// bytewise order of their names, `values` last, and in it the first value
+/// outside `ParamValue` by name (text 0.2, F-107).
 fn check_set_shape(req: &SetRequest) -> Result<(), Refusal> {
     if req.confirm_s == Some(0) {
         return Err(Refusal::new(
             Code::InvalidRequest,
             Some(Field::member("confirm_s")),
             "confirm_s is a window of at least 1 s",
+        ));
+    }
+    if let Some(k) = &req.idempotency_key
+        && too_long(k, MAX_KEY)
+    {
+        return Err(Refusal::new(
+            Code::InvalidRequest,
+            Some(Field::member("idempotency_key")),
+            format!("an idempotency key is 1 to {MAX_KEY} characters"),
         ));
     }
     if let Some(t) = &req.token
@@ -1135,13 +1167,14 @@ fn check_set_shape(req: &SetRequest) -> Result<(), Refusal> {
             format!("a token is 1 to {MAX_TOKEN} characters"),
         ));
     }
-    if let Some(k) = &req.idempotency_key
-        && too_long(k, MAX_KEY)
-    {
+    if let Some((name, _)) = req.values.iter().find(|(_, v)| !is_param_value(v)) {
         return Err(Refusal::new(
             Code::InvalidRequest,
-            Some(Field::member("idempotency_key")),
-            format!("an idempotency key is 1 to {MAX_KEY} characters"),
+            Some(Field::value(name)),
+            format!(
+                "{name}: not a boolean, an integer or a string, so outside the request's type \
+                 (SetRequest's ParamValue)"
+            ),
         ));
     }
     Ok(())
@@ -1585,6 +1618,73 @@ pub enum DeviceResult {
     },
 }
 
+impl Act {
+    /// Whether the act sets a value whose parameter is sensitive, or one
+    /// the owner cannot tell is not (an unknown group or parameter): an
+    /// apply of such a value, or an undo restoring one (§2.15).
+    #[must_use]
+    pub fn carries_sensitive(&self, schema: &Schema) -> bool {
+        let sensitive = |g: &str, p: &str| schema.group(g).is_none_or(|g| g.is_sensitive(p));
+        match self {
+            Self::Apply { group, values } => values.keys().any(|p| sensitive(group, p)),
+            Self::Undo { restore } => restore.iter().any(|r| sensitive(&r.group, &r.parameter)),
+        }
+    }
+}
+
+/// The device's words about `act` as a log line may carry them (§2.15):
+/// left out when the act sets a sensitive value, since they may repeat it.
+#[must_use]
+pub fn device_words<'w>(schema: &Schema, act: &Act, words: &'w str) -> Option<&'w str> {
+    (!act.carries_sensitive(schema)).then_some(words)
+}
+
+/// What converging a desired document asks of the owner next (§2.18),
+/// from [`Owner::converge`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Converge {
+    /// A change is pending, or an act is in flight: wait until it ends.
+    Wait,
+    /// Refused whole, before anything applied: the report to carry.
+    Refused(DesiredReport),
+    /// One `set` without a window, on the first group by bytewise name
+    /// whose values differ from the document: its own change, `applied`.
+    /// A refusal of it is the report [`desired_failed`] makes.
+    Set {
+        /// The group.
+        group: String,
+        /// The request: the values that differ, and nothing else.
+        request: SetRequest,
+    },
+    /// Every value the document names is the running value.
+    Converged(DesiredReport),
+}
+
+/// The report of a document whose converging `set` on `group` was refused
+/// (§2.18): `failed`, with that refusal's code (`busy` for the rate,
+/// `device-refused`) and group.
+#[must_use]
+pub fn desired_failed(revision: u64, group: &str, refusal: &Refusal) -> DesiredReport {
+    let code = match refusal.code {
+        Code::Busy => DesiredCode::Busy,
+        Code::App => DesiredCode::DeviceRefused,
+        Code::InvalidRequest => DesiredCode::InvalidRequest,
+        Code::NotFound => DesiredCode::NotFound,
+        // A set never answers `forbidden`; and `unavailable` is the
+        // allowlist's, which check_desired refused first.
+        Code::Unavailable | Code::Forbidden => DesiredCode::Unavailable,
+    };
+    DesiredReport {
+        observed_revision: revision,
+        outcome: DesiredOutcome::Failed,
+        refusal: Some(DesiredRefusal {
+            code,
+            group: group.to_owned(),
+            parameter: None,
+        }),
+    }
+}
+
 /// A reply an owner sends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
@@ -1677,8 +1777,24 @@ struct Change {
 struct Last {
     token: String,
     groups: Vec<String>,
-    set: Vec<Key>,
+    /// The values the change set, as it set them: what `persist` writes,
+    /// whatever a pending change runs since (§2.13, text 0.2, F-111).
+    values: BTreeMap<Key, Value>,
     sensitive: bool,
+}
+
+impl Last {
+    fn of(token: String, groups: Vec<String>, edits: &BTreeMap<Key, EditRec>) -> Self {
+        Self {
+            token,
+            groups,
+            values: edits
+                .iter()
+                .map(|(k, r)| (k.clone(), r.new.clone()))
+                .collect(),
+            sensitive: edits.values().any(|r| r.sensitive),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1963,6 +2079,76 @@ impl Owner {
     /// Sets the desired report the view and the status carry (§2.18).
     pub fn report_desired(&mut self, report: Option<DesiredReport>) {
         self.desired = report;
+    }
+
+    /// The desired report the view and the status carry (§2.18).
+    #[must_use]
+    pub fn desired(&self) -> Option<&DesiredReport> {
+        self.desired.as_ref()
+    }
+
+    /// The instants of the change events published within the last hour
+    /// at `now`, oldest first (§2.17): what the next instance starts from
+    /// ([`Start::events`]), so that the event's rate, which a re-mint does
+    /// not reset (core §2.7), holds across a restart.
+    #[must_use]
+    pub fn published(&self, now: Time) -> Vec<Time> {
+        let mut out: Vec<Time> = self
+            .events
+            .iter()
+            .copied()
+            .filter(|e| now.within(*e, RATE_PERIOD))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// What converging `doc` asks next (§2.18): wait while a change is
+    /// pending or an act is in flight; the document refused whole
+    /// ([`check_desired`]); one `set` without a window on the first group,
+    /// in the bytewise order of the group names, whose values differ from
+    /// the running ones; or converged. Called again after each `set`, it
+    /// moves to the next group, since the one applied no longer differs.
+    #[must_use]
+    pub fn converge(&self, doc: &DesiredConfig) -> Converge {
+        if self.pending.is_some() || self.flight.is_some() {
+            return Converge::Wait;
+        }
+        if let Err(refusal) = check_desired(&self.schema, doc) {
+            return Converge::Refused(DesiredReport {
+                observed_revision: doc.revision,
+                outcome: DesiredOutcome::Refused,
+                refusal: Some(refusal),
+            });
+        }
+        for (g, params) in &doc.values {
+            let Some(decl) = self.schema.group(g) else {
+                continue;
+            };
+            let differ: BTreeMap<String, Json> = params
+                .iter()
+                .filter(|(p, v)| {
+                    let wanted = decl.parameter(p).and_then(|d| d.kind.check(v).ok());
+                    let running = self.slots.get(&key(g, p)).and_then(|s| s.value.as_ref());
+                    wanted.as_ref() != running
+                })
+                .map(|(p, v)| (p.clone(), v.clone()))
+                .collect();
+            if !differ.is_empty() {
+                return Converge::Set {
+                    group: g.clone(),
+                    request: SetRequest {
+                        values: differ,
+                        ..SetRequest::default()
+                    },
+                };
+            }
+        }
+        Converge::Converged(DesiredReport {
+            observed_revision: doc.revision,
+            outcome: DesiredOutcome::Converged,
+            refusal: None,
+        })
     }
 
     /// What the validators read of the owner's state at `now`.
@@ -2366,12 +2552,7 @@ impl Owner {
         let ch = self.pending.take().expect("validated: a change is pending");
         let edits = self.edits(&ch.groups, &ch.edits);
         let ev = self.event(now, &ch.token, Outcome::Confirmed, edits, &ch.call);
-        self.last = Some(Last {
-            token: ch.token.clone(),
-            groups: ch.groups.clone(),
-            set: ch.edits.keys().cloned().collect(),
-            sensitive: ch.edits.values().any(|r| r.sensitive),
-        });
+        self.last = Some(Last::of(ch.token.clone(), ch.groups.clone(), &ch.edits));
         Step::Done(Done {
             reply: Some(Ok(self.control_reply(req.answer.unwrap_or_default()))),
             events: vec![ev],
@@ -2419,14 +2600,14 @@ impl Owner {
     pub fn persist_plan(&self, now: Time, req: &ControlRequest) -> Result<PersistPlan, Refusal> {
         validate_control(ControlOp::Persist, &self.facts(now), req)?;
         let last = self.last.as_ref().expect("validated: a last change");
+        // The values the last change set, never the running ones: a pending
+        // change may run another since (§2.13, text 0.2, F-111).
         let mut entries: BTreeMap<String, BTreeMap<String, Value>> = BTreeMap::new();
-        for k in &last.set {
-            if let Some(v) = self.slots.get(k).and_then(|s| s.value.clone()) {
-                entries
-                    .entry(k.0.clone())
-                    .or_default()
-                    .insert(k.1.clone(), v);
-            }
+        for ((g, p), v) in &last.values {
+            entries
+                .entry(g.clone())
+                .or_default()
+                .insert(p.clone(), v.clone());
         }
         Ok(PersistPlan {
             token: last.token.clone(),
@@ -2435,14 +2616,27 @@ impl Owner {
         })
     }
 
-    /// Commits a `persist` whose entries the runtime wrote: they read
-    /// `source: overlay`. No revision, no event (§2.13).
+    /// Commits a `persist` whose entries the runtime wrote (§2.13): a
+    /// parameter that runs the value persisted reads `source: overlay`,
+    /// unless an applied group of a pending change holds it, which keeps
+    /// its value and source and shows the persisted value as `startup`;
+    /// and a pending change's value before it, when it is the value
+    /// persisted, restores at `source: overlay` (text 0.2, F-111). No
+    /// revision, no event.
     pub fn persisted(&mut self, plan: PersistPlan) -> Done {
         for (g, ps) in &plan.entries {
             for (p, v) in ps {
                 let k = key(g, p);
                 self.overlay.insert(k.clone(), v.clone());
-                if let Some(s) = self.slots.get_mut(&k)
+                let pending = self.pending.as_mut().and_then(|c| c.edits.get_mut(&k));
+                let held = pending.as_ref().is_some_and(|r| r.applied);
+                if let Some(r) = pending
+                    && r.old.as_ref() == Some(v)
+                {
+                    r.old_source = Some(Source::Overlay);
+                }
+                if !held
+                    && let Some(s) = self.slots.get_mut(&k)
                     && s.value.as_ref() == Some(v)
                 {
                     s.source = Some(Source::Overlay);
@@ -2682,12 +2876,7 @@ impl Owner {
             } else {
                 let list = self.edits(&groups, &edits);
                 events.push(self.event(now, &token, Outcome::Applied, list, call));
-                self.last = Some(Last {
-                    token,
-                    groups,
-                    set: edits.keys().cloned().collect(),
-                    sensitive: edits.values().any(|r| r.sensitive),
-                });
+                self.last = Some(Last::of(token, groups, &edits));
             }
         }
         Done {
@@ -2776,5 +2965,220 @@ mod tests {
         let decl: ParamDecl = serde_json::from_value(serde_json::json!({"name": "pin", "kind": "text", "description": "", "sensitive": true, "value": "x"})).unwrap();
         assert!(decl.sensitive);
         assert_eq!(decl.kind, Kind::Text);
+    }
+
+    /// scenarios.md's `rf`, reduced: `duty` and `sim` hot, `radio` reach.
+    fn rf() -> Owner {
+        let int = |min, max| Kind::Integer {
+            min: Some(min),
+            max: Some(max),
+            unit: None,
+        };
+        let group = |name: &str, class, p: ParamDecl| GroupDecl {
+            name: name.into(),
+            class,
+            description: String::new(),
+            writable: true,
+            parameters: vec![p],
+        };
+        let param = |name: &str, kind, sensitive| ParamDecl {
+            name: name.into(),
+            kind,
+            description: String::new(),
+            sensitive,
+        };
+        let schema = Schema {
+            groups: vec![
+                group(
+                    "duty",
+                    Class::Hot,
+                    param("fraction_ppm", int(0, 1_000_000), false),
+                ),
+                group(
+                    "radio",
+                    Class::Reach,
+                    param("frequency_hz", int(0, 1_000_000_000), false),
+                ),
+                group("sim", Class::Hot, param("pin", Kind::Text, true)),
+                group("tx", Class::Hot, param("power", int(0, 30), false)),
+            ],
+        };
+        let startup = [
+            ("duty", "fraction_ppm", Value::Integer(10_000)),
+            ("radio", "frequency_hz", Value::Integer(868_100_000)),
+            ("tx", "power", Value::Integer(14)),
+        ]
+        .into_iter()
+        .map(|(g, p, v)| {
+            (
+                g.to_owned(),
+                BTreeMap::from([(p.to_owned(), (v, Source::File))]),
+            )
+        })
+        .collect();
+        Owner::start(Start {
+            service: "lab/rf0".into(),
+            instance: "i1".into(),
+            schema,
+            startup,
+            overlay: BTreeMap::new(),
+            floor_s: 10,
+            apply_after: Duration::from_secs(1),
+            persist: true,
+            events: vec![Time::from_millis(0)],
+        })
+        .unwrap()
+    }
+
+    fn doc(revision: u64, values: Json) -> DesiredConfig {
+        serde_json::from_value(serde_json::json!({"revision": revision, "values": values})).unwrap()
+    }
+
+    /// §2.18 "Converging": one set per differing group, bytewise; a group
+    /// already at its values is skipped; a pending change is waited out;
+    /// a reach group refuses the document whole, applying nothing.
+    #[test]
+    fn converging_a_desired_document() {
+        let mut o = rf();
+        let t = Time::from_millis(10_000);
+        let d = doc(
+            1,
+            serde_json::json!({"tx": {"power": 20}, "duty": {"fraction_ppm": 10000}}),
+        );
+        let Converge::Set { group, request } = o.converge(&d) else {
+            panic!("a set")
+        };
+        assert_eq!(group, "tx", "duty already runs its value");
+        assert_eq!(
+            request.values,
+            BTreeMap::from([("power".into(), 20.into())])
+        );
+        assert_eq!((request.confirm_s, request.token.as_ref()), (None, None));
+        let Step::Act(_) = o.set(t, &group, &request, &Call::default()) else {
+            panic!("a hot apply")
+        };
+        let Step::Done(done) = o.finish(t, DeviceResult::Ok) else {
+            panic!("done")
+        };
+        assert_eq!(done.events[0].outcome, Outcome::Applied);
+        let Converge::Converged(r) = o.converge(&d) else {
+            panic!("converged")
+        };
+        assert_eq!(
+            (r.observed_revision, r.outcome),
+            (1, DesiredOutcome::Converged)
+        );
+
+        // A pending change is waited out.
+        let reach = SetRequest {
+            values: BTreeMap::from([("frequency_hz".into(), 869_525_000.into())]),
+            confirm_s: Some(60),
+            ..SetRequest::default()
+        };
+        let _ = o.set(t, "radio", &reach, &Call::default());
+        assert_eq!(
+            o.converge(&doc(2, serde_json::json!({"tx": {"power": 1}}))),
+            Converge::Wait
+        );
+
+        // Refused whole: the reach group, though tx is legal on its own.
+        let mut o = rf();
+        let d = doc(
+            3,
+            serde_json::json!({"tx": {"power": 1}, "radio": {"frequency_hz": 1}}),
+        );
+        let Converge::Refused(r) = o.converge(&d) else {
+            panic!("refused")
+        };
+        assert_eq!(r.outcome, DesiredOutcome::Refused);
+        assert_eq!(
+            r.refusal,
+            Some(DesiredRefusal {
+                code: DesiredCode::Reach,
+                group: "radio".into(),
+                parameter: None
+            })
+        );
+        o.report_desired(Some(r.clone()));
+        assert_eq!(o.desired(), Some(&r));
+        assert_eq!(o.view().desired, Some(r));
+    }
+
+    /// §2.18: a converging set refused is `failed`, with its code and group.
+    #[test]
+    fn a_converging_set_refused_is_failed() {
+        let busy = Refusal::busy("the rate");
+        let r = desired_failed(4, "tx", &busy);
+        assert_eq!(
+            (r.observed_revision, r.outcome),
+            (4, DesiredOutcome::Failed)
+        );
+        assert_eq!(r.refusal.as_ref().map(|r| r.code), Some(DesiredCode::Busy));
+        let refused = Refusal::app(ErrorCode::DeviceRefused, None, "no");
+        let r = desired_failed(4, "tx", &refused);
+        assert_eq!(
+            r.refusal,
+            Some(DesiredRefusal {
+                code: DesiredCode::DeviceRefused,
+                group: "tx".into(),
+                parameter: None
+            })
+        );
+    }
+
+    /// §2.17, core §2.7: the events of the last hour carry to the next
+    /// instance, and the restart keeps them.
+    #[test]
+    fn the_published_events_carry_to_the_next_instance() {
+        let mut o = rf();
+        let t = Time::from_millis(3_000_000);
+        let req = SetRequest {
+            values: BTreeMap::from([("power".into(), 3.into())]),
+            ..SetRequest::default()
+        };
+        let _ = o.set(t, "tx", &req, &Call::default());
+        let _ = o.finish(t, DeviceResult::Ok);
+        assert_eq!(o.published(t), vec![Time::from_millis(0), t]);
+        let later = Time::from_millis(3_600_000);
+        assert_eq!(o.published(later), vec![t], "an hour on, the first is out");
+        assert_eq!(o.restart("i2").published(later), vec![t]);
+    }
+
+    /// §2.15: the device's words about an act that sets a sensitive value,
+    /// or restores one, are not logged.
+    #[test]
+    fn device_words_leave_a_sensitive_act_out() {
+        let o = rf();
+        let apply = |g: &str, p: &str, v: Value| Act::Apply {
+            group: g.into(),
+            values: BTreeMap::from([(p.into(), v)]),
+        };
+        let schema = o.schema();
+        assert_eq!(
+            device_words(schema, &apply("tx", "power", Value::Integer(1)), "no"),
+            Some("no")
+        );
+        assert_eq!(
+            device_words(
+                schema,
+                &apply("sim", "pin", Value::Text("1234".into())),
+                "1234?"
+            ),
+            None
+        );
+        assert_eq!(
+            device_words(schema, &apply("nope", "x", Value::Bool(true)), "x"),
+            None,
+            "unknown: it cannot tell"
+        );
+        let undo = Act::Undo {
+            restore: vec![Restore {
+                group: "sim".into(),
+                parameter: "pin".into(),
+                value: Value::Text("0000".into()),
+            }],
+        };
+        assert!(undo.carries_sensitive(schema));
+        assert_eq!(device_words(schema, &undo, "0000"), None);
     }
 }

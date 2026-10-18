@@ -16,7 +16,7 @@ mod owner;
 use std::path::Path;
 use std::time::Duration;
 
-use common::{SETTLE, T, client, router};
+use common::{SETTLE, T, client, eventually, router};
 use zenkey::model::envelope;
 use zenkey::model::grammar::{ZkKey, parse};
 use zenkey::presence;
@@ -601,5 +601,194 @@ async fn the_owner_example_reaches_each_bound() {
             .await
             .contains("takes 1 value(s)")
     );
+    o.stop().await;
+}
+
+/// `config.v1` in the owner example (#768, CB): the standard contract
+/// among the files is the runtime's to implement, on `rf` and a contract
+/// group; the commands a black-box runner drives make the device refuse,
+/// restart the owner as a new instance, and give it a desired document.
+/// `--config-no-persist` lists `persist` unavailable, cause `config`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_implements_config() {
+    use zenkey::config_v1::{self, ConfigView};
+    use zenkey::{CallMetadata, Client, Outcome};
+
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let standard =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles/config/config.v1.toml");
+    let standard = standard.display().to_string();
+    let o = spawn_owner(&["--connect", &ep, "--config-floor", "5", "ex/rf", &standard]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let first: zenkey::model::grammar::InstanceId =
+        ready.rsplit('/').next().unwrap().parse().unwrap();
+    let addr: zenkey::model::grammar::Addr = "ex/rf".parse().unwrap();
+    let descriptor = |instance: zenkey::model::grammar::InstanceId, addr| {
+        let tool = tool.clone();
+        async move {
+            loop {
+                match presence::descriptor(&tool, &addr, &instance, T)
+                    .await
+                    .unwrap()
+                {
+                    presence::Found::Nothing => continue,
+                    found => break found.into_descriptor().unwrap(),
+                }
+            }
+        }
+    };
+    let d = descriptor(first.clone(), addr.clone()).await;
+    let e = d
+        .interfaces
+        .iter()
+        .find(|e| e.iface == "config.v1")
+        .unwrap();
+    assert_eq!(e.contract, format!("sha256:{}", config_v1::FINGERPRINT));
+    assert!(e.unavailable.is_empty(), "persist is served");
+    let view = || async {
+        let v = state(&tool, "zk2/ex/rf/config.v1/state/view").await;
+        serde_json::from_slice::<ConfigView>(&v[0]).unwrap()
+    };
+    let v = view().await;
+    let groups: Vec<(&str, &str)> = v
+        .groups
+        .iter()
+        .map(|g| (g.name.as_str(), g.class.as_str()))
+        .collect();
+    assert_eq!(
+        groups,
+        [
+            ("duty", "hot"),
+            ("radio", "reach"),
+            ("link", "reach"),
+            ("sim", "hot"),
+            ("queue", "hot"),
+            ("modulation", "contract")
+        ]
+    );
+    assert_eq!(v.confirm_floor_s, 5);
+
+    let c = Client::new(
+        &tool,
+        config_v1::implementation().shared_contract(),
+        &["ex/rf"],
+    )
+    .unwrap()
+    .with_timeout(Duration::from_secs(2))
+    .with_metadata(CallMetadata::new("ops", "r1"));
+    let set = |group: &str, body: serde_json::Value| {
+        let c = c.clone();
+        let addr = addr.clone();
+        let values: zenkey::model::template::Bindings =
+            [("group".to_owned(), vec![group.to_owned()])].into();
+        async move {
+            c.call_value(&addr, config_v1::SET, &values, &body)
+                .await
+                .unwrap()
+        }
+    };
+    let refusal = |o: &Outcome| o.refusal().cloned().expect("a refusal");
+
+    // The contract group: restart-required.
+    let r = set(
+        "modulation",
+        serde_json::json!({"values": {"spreading_factor": 10}}),
+    )
+    .await;
+    let e = refusal(&r);
+    assert_eq!(e.code, "app");
+    assert_eq!(
+        e.detail,
+        Some(envelope::Detail::Value(
+            serde_json::json!({"code": "restart-required"})
+        ))
+    );
+
+    // The device told to refuse its next apply, in its words.
+    let held = o.ask("config fail-apply no carrier").await;
+    assert!(
+        held.starts_with("config device held=") && held.ends_with("next=fail-apply"),
+        "{held}"
+    );
+    let r = set(
+        "duty",
+        serde_json::json!({"values": {"fraction_ppm": 20000}}),
+    )
+    .await;
+    let e = refusal(&r);
+    assert_eq!(
+        e.detail,
+        Some(envelope::Detail::Value(
+            serde_json::json!({"code": "device-refused", "detail": "no carrier"})
+        ))
+    );
+    let r = set(
+        "duty",
+        serde_json::json!({"values": {"fraction_ppm": 20000}}),
+    )
+    .await;
+    assert!(r.answer().is_some(), "{r:?}");
+    let device = o.ask("config device").await;
+    assert!(
+        device.contains(r#""fraction_ppm":20000"#) && device.contains("applies=1"),
+        "{device}"
+    );
+
+    // A restart: a new instance, from the startup values.
+    let restarted = o.ask("config restart").await;
+    let next: zenkey::model::grammar::InstanceId = restarted
+        .strip_prefix("config restarted zk2/ex/rf/@zk/instance/")
+        .unwrap_or_else(|| panic!("{restarted}"))
+        .parse()
+        .unwrap();
+    assert_ne!(next, first);
+    descriptor(next.clone(), addr.clone()).await;
+    let v = view().await;
+    assert_eq!((v.instance, v.revision), (next.to_string(), 0));
+    let duty = &v.groups[0].parameters[0];
+    assert_eq!(
+        (duty.value.clone(), duty.source),
+        (
+            Some(zenkey::config_v1::Value::Integer(10000)),
+            Some(zenkey::config_v1::Source::File)
+        )
+    );
+
+    // A desired document, converged; the clock shifted.
+    assert_eq!(
+        o.ask(r#"config desired {"revision": 1, "values": {"duty": {"fraction_ppm": 30000}}}"#)
+            .await,
+        "config desired 1"
+    );
+    eventually("the document converged", || async {
+        view().await.desired.is_some_and(|d| {
+            d.observed_revision == 1
+                && d.outcome == zenkey::model::config::DesiredOutcome::Converged
+        })
+    })
+    .await;
+    assert_eq!(o.ask("config offset 1000").await, "config offset 1000");
+    assert!(
+        o.ask("config nope")
+            .await
+            .starts_with("refused config nope: usage")
+    );
+    o.stop().await;
+
+    // Without a persisted layer: persist unavailable, cause config.
+    let o = spawn_owner(&["--connect", &ep, "--config-no-persist", "ex/rf2"]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let instance = ready.rsplit('/').next().unwrap().parse().unwrap();
+    let d = descriptor(instance, "ex/rf2".parse().unwrap()).await;
+    let e = d
+        .interfaces
+        .iter()
+        .find(|e| e.iface == "config.v1")
+        .unwrap();
+    let listed: Vec<&str> = e.unavailable.iter().map(|u| u.resource.as_str()).collect();
+    assert_eq!(listed, ["@op/persist"]);
     o.stop().await;
 }

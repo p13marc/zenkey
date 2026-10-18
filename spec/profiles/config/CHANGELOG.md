@@ -4,6 +4,176 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.2 — 2026-10-18: the cold reader's findings, and what the runtime settled (#768, CB; #609)
+
+Two readings of 0.1 met here. The spec-only implementation read it cold
+(zk2py round 28, PR #774): every fixture, 291 of 291, and every scenario
+section, §1 to §14, passed, and it filed seven findings, F-107 to F-113.
+The runtime (`zenkey::config_v1`, #768's CB) wraps `zenkey_model::config`'s
+owner over an application's device, and runs §1 to §12 on in-process
+routers. Building it found three more places where 0.1 left a reader to
+infer. Written against core 0.28, which answers the four core questions
+CA raised (`../../CHANGELOG.md`).
+
+Each answer is stated in the text, and pinned by a fixture case where a
+fixture can pin it. Two answers change the model, F-107's order and
+F-111's persist, and no case that existed before changes: the new
+`validation.json` cases were written by hand and pass as written, and the
+two new `lifecycle.json` cases were blessed from the model and read step by
+step (below). The evidence is now `validation.json`, 107 cases, and
+`lifecycle.json`, 26 cases and 131 steps; the other three files are
+unchanged.
+
+**Answered: the seven findings.**
+- **F-107, a value outside `ParamValue`** (§2.5). `SetRequest.values` is a
+  map to `ParamValue`, a boolean, an integer or a string. A decode that
+  holds the schema refuses `null`, a fraction, an array or an object
+  before row 1, while 0.1 listed `null` under row 11. An owner cannot
+  choose: one whose runtime checks the request against the schema has
+  refused it before any handler. So every owner refuses such a value
+  before row 1, as outside the request's type. `2.0`, `2e0` and an integer
+  beyond 64 bits are integers to JSON Schema, so of the request's type,
+  and row 11 refuses them against the parameter's kind, as 0.1 said.
+  - **Several faults at once** are taken in the bytewise order of the
+    member names, `values` last, and in `values` in the bytewise order of
+    the parameter names. That is zk2py's guess for the order among
+    members, now stated. The model's order was `confirm_s`, `token`,
+    `idempotency_key`, so the two orders differed only for a request with
+    both a bad token and a bad key, which no case had. It changes to the
+    bytewise one.
+  - It overturns zk2py's guess for the values themselves, which left
+    every value to row 11.
+  - `validation.json`: eight cases. `null` before row 3, a fraction before
+    row 1, an array before row 5, an object before row 4, `2.0` after row
+    4, an integer beyond 64 bits after row 3, `idempotency_key` before
+    `token` and `values`, and the first bad value by name.
+  - The fixture's own description says where the type ends.
+- **F-108, an empty change** (§2.5, §2.3, §2.11). 0.1 said an empty
+  `values` "applies nothing to the device" and that its revision is "as
+  any other's", while the revision counted "acts that moved the running
+  values". The model, and zk2py's guess, make its apply an act with no
+  values: the device is called, the revision moves, a token is minted, and
+  the event carries no edits. Under a window, its undo has nothing to
+  restore, so no act is made, as §2.11 says of any change with nothing
+  applied.
+  - The text now says so, and §2.3 counts "the owner's acts on its running
+    values", an empty apply included.
+  - Rejected: no act at all. A revision that moved without an act would
+    break §2.3's "at nothing else", and one that did not move would break
+    "as any other's".
+  - `lifecycle.json`: a new case. An empty hot change without a window, one
+    under a window then cancelled with no act, and an empty reach change
+    applied at its `apply_at`, then confirmed.
+- **F-109, a value not read back** (§2.3, §2.11). Its `source` is absent
+  too: both are unknown. `lifecycle.json`'s case 4 already pinned it, and
+  zk2py read it from there.
+- **F-110, the edge of the rate's hour** (§2.17). An event published
+  exactly an hour before no longer counts. That is core §2.7's span: "two
+  instants exactly one span apart are not within one span". Case 19
+  already pinned it, and zk2py read it from there.
+- **F-111, persist under a pending change** (§2.13). 0.1 accepted it, as
+  `validation.json` does, and said each parameter the last change set then
+  reads `source: overlay`.
+  - **A bug in the model, found by the finding.** The model wrote the
+    *running* values of the parameters the last change set. When a pending
+    change had set one of them since, it persisted the pending change's
+    value, never confirmed: a restart would bring back a change §2.12 makes
+    a rollback. It now writes the values the last change set, as it set
+    them, which is what "writes the last change" says.
+  - **After it**, as zk2py guessed:
+    - a parameter that an applied group of the pending change holds keeps
+      its value and source, and shows the value written as `startup`;
+    - undone, it returns to its value before the change at `source:
+      overlay` when that is the value written, not at the stale source
+      §2.11 would otherwise restore;
+    - a parameter only a reach group not yet applied set still runs the
+      value written, and reads `overlay` at once.
+  - `lifecycle.json`: a new case, with both branches and a restart after
+    each.
+- **F-112, pairing the view and the status** (§2.3). The revision counts
+  acts, not versions of the documents. An arm, a join, an extend, a
+  confirm, a cancel with nothing applied, a persist and a desired report
+  each re-put both at the same revision. So `instance` and `revision` name
+  the running values, never a pair.
+  - A reader pairs the two only when the status is the view's projection,
+    and otherwise takes each by itself, judged by its own freshness. That
+    is zk2py's reader.
+  - An owner SHOULD put the view first, then the status. The reference
+    and zk2py both do.
+  - No fixture: pairing is a reader's, and `ConfigStatus::of` already
+    pins the projection.
+- **F-113, a starting reach change its device cannot apply in time**
+  (§2.8, §2.9). Row 13 refuses a join only, and 0.1 required no more of the
+  floor than 1 s.
+  - Now an owner MUST keep its floor above the longest delay its device
+    states for a reach `apply_at`, so every change it starts can apply
+    before its deadline. Row 13 stays a join's: a join keeps a deadline
+    that may have come closer than the floor.
+  - The model already refused to start an owner whose `apply_after` is not
+    below its floor, and zk2py refuses to construct one: both are the
+    rule.
+  - Rejected: a row refusing the starting `set`. It would refuse every
+    reach change of such an owner, a fault of its configuration, at call
+    time, one caller at a time.
+  - No fixture: an owner's construction is no call.
+
+**Stated: what the runtime settled.**
+- **A persisted layer that cannot be written now is refused before the
+  request's type** (§2.13, row 1). 0.1 said "the same way, first of the
+  handler's refusals", while §2.10 says a request outside its type is
+  refused "first". `validation.json` pins "no persisted layer" before the
+  request's type, and the model checks the layer first. "The same way"
+  now says so, and a caller gets one refusal whether the layer is absent
+  or unwritable.
+- **The rate holds across a restart** (§2.17, a line in §2.12). Core 0.28
+  states it for every rated event (§2.7). `events/change` is one member per
+  service, so a restarted owner counts its earlier instances' events, from
+  a record of their instants that it keeps across the restart, as it keeps
+  its persisted layer. The reference takes the record from the application
+  (`Startup::events`, filled from `Configuration::published`).
+- **Converging waits for an act in flight too, and claims no actor**
+  (§2.18). One act at a time (§2.7) already holds a converging `set` back
+  while another act is in flight, as a pending change does. A converging
+  `set` is the owner's, not a call, so §2.17's "absent when it carried
+  none" leaves its event without `actor` and `request_id`.
+- **The core's words** (0.28): `forbidden` is core §5.2's refusal by a rule
+  of the owner's own (§2.13, row 6), and an owner may answer `unavailable`
+  from its handler for one member of an operation it exposes, which is
+  §2.16's allowlist, group by group.
+
+**Deliberately not stated.**
+- **A hot group's device left part-applied** (§2.9: "an owner whose device
+  can be left with part of a group applied reads the device back"). The
+  model reads a refused hot apply as nothing applied: no change, no token,
+  no event, as §2.9 says of a refusal. What the view shows, and whether a
+  change starts, when a hot apply leaves part of its group applied is not
+  settled. The reference's device contract is "whole or not at all", and
+  the question goes to the maintainer.
+- **A re-mint while the configuration runs.** §2.3 restarts the revision
+  in each instance, and §2.12 rolls a restart back by construction, since
+  the process starts again. A re-mint within one running process (core
+  §1.5) would restart the revision while the device still runs the old
+  instance's values. The text does not say whether an owner may re-mint
+  so. The reference refuses it while `config.v1` runs, and the question
+  goes to the maintainer.
+- **A converged document after a later `set`.** "It tries a failed
+  document again when its revision changes" leaves open whether an owner
+  converges a converged revision again when a later `set` changes a value
+  it names. The reference and zk2py both act on each revision once,
+  whatever its outcome. The text keeps its words until `desired.v1`
+  decides.
+- **"An equal request"** (§2.14). zk2py compares the members as written,
+  so `dry_run` absent and `dry_run: false` differ. The model compares the
+  decoded request, where they are equal. Neither reading changes any
+  fixture, and no finding raised it. It is left for the next round, named
+  here so that it is not lost.
+- **`busy`'s token in a detail.** Core 0.28 keeps a detail on `app` alone,
+  so the token stays in the message for a person, and in the view and the
+  status for a program, as 0.1 decided.
+- **The scenarios.** Unchanged: §1 to §12 run as `zenkey`'s
+  `tests/profile_config.rs`, one test per section. §10's 300 s are the
+  owner's clock moved, which is what the step observes.
+
 ## 0.1 — 2026-10-18: the first text, draft (#768, CA)
 
 `config.v1` is the fourth profile of #613, after `hostid.v1`,

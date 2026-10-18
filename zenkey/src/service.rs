@@ -24,7 +24,9 @@
 //!
 //! A service implementing `health.v1` through [`ServiceBuilder::health`]
 //! has its status put before step 3, as `health.v1` §2.3 makes a MUST
-//! ([`crate::health`]).
+//! ([`crate::health`]); one implementing `config.v1` through
+//! [`ServiceBuilder::config_v1`] has its view and status put when it
+//! declares them, as `config.v1` §2.3 makes a MUST ([`crate::config_v1`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
@@ -117,6 +119,8 @@ pub struct ServiceBuilder {
     closed: tokio::sync::watch::Sender<bool>,
     /// `health.v1`, once [`ServiceBuilder::health`] implemented it.
     pub(crate) health: Option<crate::health::Health>,
+    /// `config.v1`, once [`ServiceBuilder::config_v1`] implemented it.
+    pub(crate) config_v1: Option<crate::config_v1::Configuration>,
 }
 
 fn mint() -> InstanceId {
@@ -217,6 +221,7 @@ impl ServiceBuilder {
             state_ifaces: BTreeSet::new(),
             closed: tokio::sync::watch::Sender::new(false),
             health: None,
+            config_v1: None,
         }
     }
 
@@ -235,6 +240,29 @@ impl ServiceBuilder {
             return Err(Error::Duplicate(iface));
         }
         crate::health::Health::declare(self).await
+    }
+
+    /// Implements `config.v1`, its standard contract embedded
+    /// ([`crate::config_v1`]): the owner starts from `startup`, never from
+    /// a runtime change of an earlier instance (§2.12), and configures
+    /// `device`. The view and the status are put here, so before step 4
+    /// (§2.3); `set/{group}` is served over the template, `confirm`,
+    /// `cancel` and `extend` on their keys, and `persist` with a persisted
+    /// layer, else listed unavailable with cause `config` (§2.13). The
+    /// deadline timer runs until the service closes. Refused when the
+    /// service implements `config.v1` already, or when `startup` is not one
+    /// an owner can start from (a floor of 0, more than 16 groups, a layer
+    /// naming an undeclared parameter, …).
+    pub async fn config_v1(
+        &mut self,
+        startup: crate::config_v1::Startup,
+        device: Arc<dyn crate::config_v1::Device>,
+    ) -> Result<crate::config_v1::Configuration> {
+        let iface = crate::config_v1::iface();
+        if self.config_v1.is_some() || self.implements(&iface) {
+            return Err(Error::Duplicate(iface));
+        }
+        crate::config_v1::Configuration::declare(self, startup, device).await
     }
 
     /// The service's state stamp minter (§4.3): catch-up before the first
@@ -602,6 +630,7 @@ impl ServiceBuilder {
             state_qs: BTreeMap::new(),
             clock: None,
             health: self.health,
+            config_v1: self.config_v1,
             descriptor: Arc::new(RwLock::new(Arc::from(Vec::new()))),
             session: self.session,
             config: self.config,
@@ -744,6 +773,8 @@ pub struct Service {
     clock: Option<ClockGuard>,
     /// `health.v1`, when the builder implemented it (`health.v1` §2.3).
     health: Option<crate::health::Health>,
+    /// `config.v1`, when the builder implemented it.
+    config_v1: Option<crate::config_v1::Configuration>,
     descriptor: Arc<RwLock<Arc<[u8]>>>,
     session: zenoh::Session,
     config: ServiceConfig,
@@ -859,6 +890,13 @@ impl Service {
     #[must_use]
     pub fn health(&self) -> Option<&crate::health::Health> {
         self.health.as_ref()
+    }
+
+    /// Its `config.v1`, when [`ServiceBuilder::config_v1`] implemented it:
+    /// the handle the builder returned.
+    #[must_use]
+    pub fn config_v1(&self) -> Option<&crate::config_v1::Configuration> {
+        self.config_v1.as_ref()
     }
 
     /// Declares `iface`'s state queryables, once: one over `state/**` and
@@ -1035,7 +1073,19 @@ impl Service {
     ///
     /// The spec's SHOULD of a new session, so that timestamps' id changes
     /// too (§4.3), is the caller's: the runtime never owns the session.
+    ///
+    /// Refused for a service implementing `config.v1` through
+    /// [`ServiceBuilder::config_v1`]: a new instance is a restart of its
+    /// configuration (`config.v1` §2.12), which the runtime makes as a new
+    /// service, from the startup values ([`crate::config_v1`]).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
+        if self.config_v1.is_some() {
+            return Err(Error::Contract(
+                "config.v1: a new instance is a restart of the configuration, from its startup \
+                 values (config.v1 §2.12): close this service and start another"
+                    .to_owned(),
+            ));
+        }
         let next = mint();
         let (q, current) = self.serve_descriptor(&next).await?;
         let token = self.token(instance_key(&self.addr, &next)?).await?;
@@ -1101,6 +1151,11 @@ impl Service {
         }
         if let Some(t) = self.instance_token.take() {
             t.undeclare().await.map_err(zenoh)?;
+        }
+        // config.v1: its operations go with the tokens, so a restarted
+        // instance never shares a key with this one (§2.12).
+        if let Some(c) = &self.config_v1 {
+            c.shutdown().await?;
         }
         if let Some(q) = self.descriptor_q.take() {
             q.undeclare().await.map_err(zenoh)?;

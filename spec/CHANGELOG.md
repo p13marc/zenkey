@@ -3,6 +3,99 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.28 — 2026-10-18: what `config.v1` needed of the core (#768)
+
+`config.v1`'s first text (#768, CA) found four places where the core said
+less than the profile needed, and settled each inside the profile, waiting
+for the core. Its runtime (CB) met the same four. The spec-only
+implementation's cold read (zk2py round 28) filed F-107 to F-113 against
+the profile alone, which `config.v1` 0.2 answers. This amendment decides
+the four. One is a definition the core lacked, one lets an owner say what
+it already had to say, one states the means of a MUST the core already
+had, and one keeps the rule as it was, with its reason. No fixture case
+changed (three are added, below), and no reading of an earlier version is
+overturned.
+
+**Changed: the error codes defined (§5.2).**
+- **The gap.** §5.2 listed eight codes and defined some of them only in
+  passing, elsewhere: `not_found` beside a key that names no member,
+  `internal` beside a handler that ends without replying. `forbidden` was
+  defined nowhere. `config.v1` §2.13 refuses with it, and CA had to guess
+  what it meant: "an act refused by rule rather than by the request's form
+  or the device".
+- **The rule.** A list after the table says what each code means to a
+  caller that reads no message. `forbidden` is a rule of the owner's own
+  that goes on refusing the act while what it rests on holds. It is never
+  access control's, which is silent (O5), and never a configuration or a
+  capability that leaves the act out, which is `unavailable`.
+- **Why that line.** A caller decides what to do from the code alone.
+  `unavailable` says another deployment, or a later configuration, could
+  serve it. `busy` says the same call could succeed later. `forbidden` says
+  neither will help while the rule's premise holds: for `config.v1`, a new
+  last change that set no sensitive value.
+
+**Changed: `unavailable` from a handler, for one member (§5.1).**
+- **The gap.** O3 gave `unavailable` and its cause to an optional operation
+  an instance does not expose, answered before any handler runs.
+  `config.v1`'s startup allowlist refuses `set/{group}` group by group:
+  the operation is exposed, and one member of its template is left out
+  by the owner's startup configuration. CA answered it `unavailable`,
+  cause `config`, from the handler, which the core neither allowed nor
+  forbade.
+- **The rule.** A handler MAY refuse a call to one member of an exposed
+  operation with `unavailable` and its cause, `config` or `capability`,
+  after the refusals the core makes before any handler and the request's
+  decode. The descriptor does not list it, since §3.3's `unavailable` names
+  resources, not members. A profile that refuses so says it in its own
+  state, as `config.v1`'s `writable` does, so a tool sees it before it
+  calls.
+- **Why not another code.** `forbidden` would tell the caller that nothing
+  will help, while a startup configuration that names the group does.
+  `not_found` would deny a member the view lists.
+
+**Changed: the rate across a restart (§2.7).**
+- **The gap.** 0.24 made a rate per member, and said that a re-mint does
+  not reset it. A restarted owner is a re-mint (§1.5), and it can count its
+  earlier instances' occurrences only from a record it keeps: nothing on
+  the bus gives them back, since a union storage is optional (§2.6).
+- **The rule.** The MUST stands, and its means is stated: a restarted
+  owner counts its earlier instances' occurrences within the period from a
+  record of their instants that it keeps across the restart. An owner that
+  keeps none cannot keep the rate across a restart, and a tool that
+  measures from keys reports the break like any other.
+- **`config.v1`** (text 0.2) states it for its change event, and the
+  reference carries the record through its application
+  (`zenkey::config_v1::Startup::events`).
+
+**Deliberately not changed.**
+- **The rate is not relaxed to "since the instance started".** The rate
+  bounds the keys a storage holds, cardinality × rate × retention (§2.2).
+  An owner in a crash loop that reset its count at each start would
+  multiply that bound by its restarts, which is the case the bound exists
+  for. 0.24 already rejected a rate per instance as unmeasurable, since a
+  key names no instance.
+- **A detail stays on `app` alone (§5.2).** `config.v1` wants `busy` to name
+  the pending change's token, and CA put the token in the message, for a
+  person, and in the view and the status, for a program. The core keeps it
+  so:
+  - a tool decodes an envelope without the contract, and refuses a detail
+    on any code but `app` (§5.2, "Decoding"), so that a detail always has
+    a declared type to read it by;
+  - a detail per code would need a type per code in every contract that
+    declares an `error` type, while the owner's state is already typed and
+    already GET-able.
+
+  §5.2 now says this, beside the codes.
+- **O3's own wording.** The table's O3 still speaks of an operation not
+  exposed. Refusing one member from a handler is an owner's option beside
+  it, stated under "Answering", not a new duty of every owner.
+- **The decoder.** A tool's decoding of an envelope is unchanged. No case
+  of `errors/cases.json` changed; three are added, since no case decoded
+  `forbidden` at all: `json-forbidden` decodes, `refuse-cause-on-forbidden`
+  is refused (`cause`), and `refuse-detail-on-busy`, `config.v1`'s token
+  sent as a detail, is refused (`detail`). The reference passed all three
+  as written. 45 cases.
+
 ## 0.27 — 2026-10-11: a reader that stalls, a tool as a role, and the merge's open cases (#753, #748, #752)
 
 Three issues, one of them a premise a measurement falsified.
