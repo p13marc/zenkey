@@ -518,6 +518,8 @@ pub enum PaneMsg {
     Admin(crate::view::admin::AdminMsg),
     /// Mesh tool interactions (#541).
     Mesh(crate::view::mesh::MeshMsg),
+    /// Config tool interactions (#768, CD): `config.v1`, read and changed.
+    Config(crate::view::configure::ConfigMsg),
     /// Traffic tab interactions (#542) — a stream of the Activity dock.
     Traffic(crate::view::traffic::TrafficMsg),
     /// Echo pane interactions (issue #72, echo v2).
@@ -555,6 +557,7 @@ impl PaneMsg {
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
             PaneMsg::Mesh(_) => RightPane::Mesh,
+            PaneMsg::Config(_) => RightPane::Config,
             // The Activity dock's streams (#183), and the Connect (#185),
             // Selectors (#187) and Settings (#188) overlays: regions of the
             // window, but not right-hand panes, and answering a pane for one
@@ -687,6 +690,10 @@ pub enum RightPane {
     /// The swept topology, drawn (#541) — a tool of its own, read from the
     /// admin sweep.
     Mesh,
+    /// One service's configuration, read and changed through `config.v1`
+    /// (#768, CD). v1's Config tool (#481) spoke RFC 05 §5.1 and left with
+    /// FL11 (#614); this one is zk2's, on the profile #613 brought.
+    Config,
     // `Connect` is deliberately absent since #185: contexts and endpoints
     // (issue #67) are a session-scoped *overlay*
     // ([`Overlay::Connect`](crate::view::palette::Overlay)), reached from the
@@ -697,12 +704,13 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in the old tab order — the palette and the workbench's
     /// tool strip iterate this, so a new variant cannot be forgotten.
-    pub const ALL: [RightPane; 5] = [
+    pub const ALL: [RightPane; 6] = [
         RightPane::Send,
         RightPane::Inspector,
         RightPane::Nodes,
         RightPane::Admin,
         RightPane::Mesh,
+        RightPane::Config,
     ];
 
     pub fn label(self) -> &'static str {
@@ -712,6 +720,7 @@ impl RightPane {
             RightPane::Nodes => "nodes",
             RightPane::Admin => "admin",
             RightPane::Mesh => "mesh",
+            RightPane::Config => "config",
         }
     }
 }
@@ -837,6 +846,7 @@ mod tests {
             PaneMsg::Why(SlotId::FOLLOW, view::why::WhyMsg::Run),
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Mesh(view::mesh::MeshMsg::CopyDot),
+            PaneMsg::Config(view::configure::ConfigMsg::ReadAgain),
             PaneMsg::Traffic(view::traffic::TrafficMsg::Sort(
                 crate::traffic::TrafficSort::Rate,
             )),

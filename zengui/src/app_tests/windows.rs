@@ -495,14 +495,15 @@ fn two_windows_render_independently() {
 }
 
 /// A layout saved while the Config tool was open still loads (#614, FL11a
-/// deleted the tool). The named layout never named a tool: it names docks
-/// (#180), and which tool the Workbench shows is session state, Send at
-/// every launch. So the file an older build wrote with Config on screen
-/// comes back whole — the Workbench torn into its own window at its
-/// geometry, drawing the tools that are left — and a hand edit naming the
-/// tool is ignored like the retired `split`, never a refused launch.
+/// deleted v1's tool; #768, CD brought one back on config.v1). The named
+/// layout never named a tool: it names docks (#180), and which tool the
+/// Workbench shows is session state, Send at every launch. So the file an
+/// older build wrote with Config on screen comes back whole — the
+/// Workbench torn into its own window at its geometry, every tool on its
+/// strip, config.v1's among them — and a hand edit naming the tool is
+/// ignored like the retired `split`, never a refused launch.
 #[test]
-fn a_layout_saved_with_the_config_tool_open_loads_without_it() {
+fn a_layout_saved_with_the_config_tool_open_still_loads() {
     use crate::message::RightPane;
     use crate::prefs::{DockRole, Prefs};
     use iced_test::simulator;
@@ -540,8 +541,7 @@ fn a_layout_saved_with_the_config_tool_open_loads_without_it() {
     );
     assert_eq!(app.work.right_pane, RightPane::Send, "the launch tool");
     let mut ui = simulator::<Message, _, _>(app.view(bench));
-    for tool in ["send", "nodes", "admin", "mesh"] {
+    for tool in ["send", "nodes", "admin", "mesh", "config"] {
         assert!(ui.find(tool).is_ok(), "the {tool} tool is on the strip");
     }
-    assert!(ui.find("config").is_err(), "no tool answers to config");
 }

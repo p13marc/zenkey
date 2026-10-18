@@ -72,9 +72,10 @@ pub enum Icon {
     Nodes,
     Admin,
     Mesh,
-    /// The Config tool's (#481). No surface draws it since #614 (FL11)
-    /// deleted the tool; the glyph stays in the cut until the font is next
-    /// re-cut (scripts/subset-icons.py), with `Check`, the blob browser's.
+    /// The Config tool's: #481's, then, since #768 (CD), the one on
+    /// `config.v1` — the strip, the nodes cards' and the Inspector's
+    /// "configure". It stayed in the cut through FL11 (#614), which
+    /// deleted v1's tool.
     Config,
     // Layout presets.
     Explore,

@@ -9,15 +9,110 @@
 //! typed, and a call's request was planned and encoded (`plan_call`,
 //! `encode_request`) before its task started — every refusal of the input
 //! is the form's, before anything is sent.
+//!
+//! The Config tool's acts (#768, CD) are changes too: one `config.v1`
+//! operation at one address through `zenkey_fleet::call_config`, its
+//! request typed and checked by the owner's own validator in the form
+//! before the task started ([`ConfigAct`]).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use iced::Task;
+use zenkey_fleet::report::ConfigChecked;
 use zenkey_fleet::{CallPlan, Publication, Revision, WireQos};
+use zenkey_model::grammar::Addr;
 
+use crate::configure::{Act, ActLanding};
 use crate::message::{Message, PaneMsg, PublishOutcome};
 use crate::services::ServiceError;
+use crate::view::configure::ConfigMsg;
 use crate::view::send::SendMsg;
+
+/// One `config.v1` act, gathered before the future starts. No `Debug`: the
+/// request carries a sensitive value as typed, and only `shown` may be
+/// printed (§2.15).
+pub struct ConfigAct {
+    /// The session **in** the deployment's namespace: the operation's key
+    /// is base-relative.
+    pub session: zenoh::Session,
+    pub namespace: String,
+    pub addr: Addr,
+    pub act: Act,
+    /// The `SetRequest` or `ControlRequest` sent.
+    pub request: serde_json::Value,
+    /// The request as the report shows it, every sensitive value redacted.
+    pub shown: serde_json::Value,
+    /// The sensitive values sent: taken out of whatever the owner returns.
+    pub secrets: Vec<String>,
+    /// The parameters the view declares sensitive, by group and name.
+    pub sensitive: BTreeSet<(String, String)>,
+    pub timeout: std::time::Duration,
+    /// What a `set` read and checked first.
+    pub checked: Option<ConfigChecked>,
+}
+
+/// The call metadata a Config act claims (core O7): the operator's login
+/// as the actor, a fresh ULID as the request id — claimed, never
+/// authentication, as `zenctl config` claims it.
+fn claimed() -> zenkey::CallMetadata {
+    zenkey::CallMetadata {
+        actor: std::env::var("USER").ok().filter(|u| !u.is_empty()),
+        request_id: Some(zenkey::writer::ulid(SystemTime::now())),
+    }
+}
+
+/// One act through the runtime's client (O1: one address, `BestMatching`;
+/// none is idempotent, so none is retried, O4), landing on the Config tool
+/// with the address and namespace it ran against. The report keeps the
+/// reply union, the envelope and silence apart (O5); an `Err` is the
+/// runtime or the bus failing, never silence.
+pub fn config(c: ConfigAct) -> Task<Message> {
+    Task::perform(
+        async move {
+            let ConfigAct {
+                session,
+                namespace,
+                addr,
+                act,
+                request,
+                shown,
+                secrets,
+                sensitive,
+                timeout,
+                checked,
+            } = c;
+            let result = zenkey_fleet::call_config(
+                &session,
+                zenkey_fleet::ConfigCall {
+                    namespace: &namespace,
+                    address: &addr,
+                    op: act.op(),
+                    request,
+                    shown,
+                    secrets,
+                    sensitive,
+                    metadata: Some(claimed()),
+                    timeout,
+                    across_face: false,
+                    checked,
+                },
+            )
+            .await
+            .map(Arc::new)
+            .map_err(ServiceError::of);
+            ActLanding {
+                addr,
+                namespace,
+                act,
+                at: SystemTime::now(),
+                result,
+            }
+        },
+        |l| Message::Pane(PaneMsg::Config(ConfigMsg::Answered(l))),
+    )
+}
 
 /// One planned call, gathered before the future starts: the revision it was
 /// planned against, the plan (`plan_call` already refused a forbidden

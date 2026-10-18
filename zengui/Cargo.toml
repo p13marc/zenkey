@@ -26,6 +26,11 @@ path = "src/main.rs"
 # it pane by pane, left at FL11b; their sources live on the `v1` branch.
 zenkey-fleet = { path = "../zenkey-fleet" }
 zenkey-model = { path = "../zenkey-model" }
+# The zk2 runtime: the call metadata a Config act claims (core O7), and the
+# ULID its request id is (#768, CD). Already in the tree through the engine;
+# the `spray` example's `host-a/sysmon` is a service of its own on it (#614,
+# FL5).
+zenkey = { path = "../zenkey" }
 zenkey-explorer-config = { workspace = true }
 
 zenoh = { workspace = true }
@@ -43,9 +48,6 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 iced_test = { workspace = true }
 ttf-parser = { workspace = true }
-# The zk2 runtime: the `spray` example's `host-a/sysmon` is a service of its
-# own, brought up with `ServiceBuilder` and `health.v1` (#614, FL5).
-zenkey = { path = "../zenkey" }
 criterion = { workspace = true }
 
 [[bench]]

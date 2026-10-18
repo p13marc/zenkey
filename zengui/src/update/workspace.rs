@@ -145,6 +145,17 @@ pub(crate) fn update(
                 work.right_pane = pane;
                 DockRole::Workbench
             };
+            // The Config tool picked with an address selected reads it
+            // (#768, CD): picking the tool is asking.
+            let read = if pane == RightPane::Config {
+                super::pane::configure::opened(
+                    &mut work.verdicts.config,
+                    sub.follow.current.address(),
+                    dep,
+                )
+            } else {
+                Task::none()
+            };
             // A role has one home (#186): while its window is torn off,
             // restoring it into the grid would show the dock twice, so the
             // reveal is that window. A *pinned* Inspector window is not that
@@ -152,12 +163,12 @@ pub(crate) fn update(
             // selection there would show the wrong thing; the docked
             // Inspector is restored instead.
             if let Some(id) = work.windows.follow_window_of(role) {
-                return iced::window::gain_focus(id);
+                return Task::batch([iced::window::gain_focus(id), read]);
             }
             if work.docks.restore(role) {
                 persist_custom(chrome, work);
             }
-            Task::none()
+            read
         }
         WorkspaceMsg::PaneResized(e) => {
             // The widget already bounds the drag to the splitter's legal

@@ -88,6 +88,15 @@ impl DescriptorFacts {
     pub fn lists_hostid(&self) -> bool {
         self.profiles.iter().any(|p| p == HOSTID)
     }
+
+    /// Whether the descriptor lists `config.v1` in its interfaces — the
+    /// gate the profile names (`config.v1` §2.1: "the interface is the
+    /// gate"), and the Config tool's one premise (#768, CD).
+    pub fn lists_config(&self) -> bool {
+        self.interfaces
+            .iter()
+            .any(|(iface, _)| iface == zenkey_model::config::IFACE)
+    }
 }
 
 /// One instance of an address, as its descriptor describes it.
@@ -188,6 +197,15 @@ impl NodesState {
     /// holds no record of it (no presence read, or not in it).
     pub fn instances(&self, addr: &Addr) -> Option<&[InstanceFacts]> {
         self.described.by_address.get(addr).map(Vec::as_slice)
+    }
+
+    /// Whether a served descriptor of `addr` lists `config.v1` (§2.1): what
+    /// earns its card and its Inspector view a "configure" (#768, CD).
+    pub fn lists_config(&self, addr: &Addr) -> bool {
+        self.instances(addr).is_some_and(|all| {
+            all.iter()
+                .any(|i| matches!(&i.described, Described::Served(f) if f.lists_config()))
+        })
     }
 
     /// The watched-freshness join for one address.

@@ -368,6 +368,11 @@ sub_state! {
         /// verdict about a payload is a verdict about a fleet — judged under
         /// its schemas — and dropped with the rest of them.
         pub(crate) payloads: crate::verdict::VerdictCache,
+        /// The Config tool (#768, CD): one service's `config.v1` reading
+        /// with §5's answers, the forms typed against its view, and the
+        /// acts' answers — all about an address, which is namespace-
+        /// relative, so all of it a claim about this deployment.
+        pub(crate) config: crate::configure::ConfigState,
     }
 }
 
@@ -383,6 +388,9 @@ impl Verdicts {
         self.admin.clear();
         // The verdicts were judged under the old fleet's schemas (#164).
         self.payloads.clear();
+        // The address read was the old fleet's (#768, CD); the clock word
+        // is the operator's, and stays.
+        self.config.clear();
     }
 }
 
