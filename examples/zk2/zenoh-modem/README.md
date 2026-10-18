@@ -22,7 +22,8 @@ Its seam crates are on crates.io for out-of-tree backends.
   [`config.v1-binding.md`](config.v1-binding.md). That file also explains why the far side of a
   radio can arm a reach change today but never keep it, and gives the zk2 grants that fix it.
 - The radio faces, the rules a generator would emit, and the declaration cost of zk2 keys against
-  v1's are in [`link.md`](link.md).
+  v1's are in [`link.md`](link.md), a sketch now superseded by the profile
+  [`link.v1`](../../../spec/profiles/link/v1.md) (#769), whose Appendix B gives the two faces.
 - What `modem-contract` becomes is in [`contract-crate.md`](contract-crate.md).
 
 **The verdict.** Every v1 entry maps or is deleted for a stated reason, and the constrained-face
