@@ -4,6 +4,36 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-18: an appendix corrected, non-normative (#614)
+
+Two sentences of Appendix A, under "What is not ported", had fallen behind
+the core. The migration note (`docs/zk2/migration.md`) and its follow-up
+found them.
+- It said that a population budget is a profile's (#613). Core 0.24 (#735)
+  made it core: §2.7 bounds a templated resource's live members, a budget
+  the owner keeps and a tool can judge.
+- It said that zk2 has no seed. Core 0.26 (#614) gave a late joiner one:
+  it subscribes, then makes S4's GET to the owner, and merges the two by
+  the owner's stamp (§4.2).
+
+**Changed: wording, in v1.md's Appendix A, which states no rule.**
+- **"Aging out a population"** cites core §2.7 for the budget, and says
+  that a horizon ages no member out. An owner still deletes when it
+  decides (core S3), as before.
+- **"Seeding by re-publishing"** keeps its point, that the owner is the
+  only seed source and a re-put is a confirmation, not a seed. It now
+  says how a late joiner seeds (core §4.2, 0.26), and that an archive's
+  answer is last-known, never a seed (core S5, S6).
+
+**Deliberately not changed.**
+- **No rule and no fixture.** §2, §5 and every case of `conformance/` are
+  as before.
+- **Written against core 0.22**, still. No rule of this text reads
+  anything a later core changed; the appendix names 0.24 and 0.26 for
+  facts about the core.
+- **`health.v1`** names the text 0.2 it was written against, and keeps it:
+  nothing it uses moved.
+
 ## 0.2 — 2026-10-10: three questions a cold read asked (#720)
 
 The Python implementation read 0.1 cold (PR #729): every fixture case
