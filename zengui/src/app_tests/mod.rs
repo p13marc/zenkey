@@ -21,6 +21,7 @@ use crate::message::{BusTick, Message, Subject, SubjectMsg};
 use crate::state::tree::{KeyCounts, shape_held};
 use crate::update;
 
+mod config;
 mod link;
 mod replay;
 mod send;

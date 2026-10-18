@@ -214,6 +214,27 @@ pub const ETH0: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0"
 /// invalid pole.
 pub const WLAN0: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/wlan0";
 
+/// The `config.v1` owner of the Config scenes (#768, CD): the profile's
+/// `rf`, as `scenarios.md` names it.
+pub const RF0: &str = "lab/rf0";
+/// Its instance; its tokens are `<instance>-<n>` (§2.6, the reference's).
+pub const RF0_INSTANCE: &str = "00000000000000a1";
+
+/// The instant a config reading of this world ended, on this host's clock:
+/// fixed, so a countdown renders the same twice.
+pub fn config_read_at() -> std::time::SystemTime {
+    let ms = zenkey_model::config::Time::parse("2026-10-18T09:00:00.000Z")
+        .expect("an instant")
+        .millis();
+    std::time::SystemTime::UNIX_EPOCH + Duration::from_millis(ms as u64)
+}
+
+/// The tick a Config scene's countdown reads: 13 s after the reading, so
+/// a deadline a minute after it is 47 s away.
+pub fn config_now() -> std::time::SystemTime {
+    config_read_at() + Duration::from_secs(13)
+}
+
 /// `(key, payload at tick n, encoding)`, one row per publisher.
 type Feed = (&'static str, fn(u32) -> Vec<u8>, &'static str);
 
@@ -529,6 +550,203 @@ impl World {
             generation: 2,
             seed: zenkey_fleet::SeedOutcome::Complete,
         })
+    }
+
+    /// The world's presence read with `lab/rf0` beside it (#768, CD): its
+    /// instance token, its `config.v1` interface token, and a descriptor
+    /// that lists `config.v1` — the gate the profile names (§2.1) — and
+    /// `freshness.v1`, which the contract uses (core §3.3).
+    pub fn observed_with_config(&self) -> zenkey_fleet::model::catalog::Observed {
+        use std::collections::BTreeMap;
+        use zenkey_fleet::model::catalog::DescriptorRead;
+        use zenkey_model::descriptor::{Descriptor, InterfaceEntry};
+        use zenkey_model::grammar::{Addr, InstanceId, Sha256Hex, ZkKey};
+        let addr: Addr = RF0.parse().expect("an address");
+        let instance: InstanceId = RF0_INSTANCE.parse().expect("an instance id");
+        let fp = Sha256Hex::new(zenkey::config_v1::FINGERPRINT)
+            .expect("a fingerprint")
+            .fp16();
+        let mut observed = self.observed.clone();
+        observed.with_token(ZkKey::Instance {
+            addr: addr.clone(),
+            instance: instance.clone(),
+        });
+        observed.with_token(ZkKey::Alive {
+            addr: addr.clone(),
+            iface: zenkey::config_v1::iface(),
+            instance: instance.clone(),
+            fp,
+        });
+        let mut descriptors = observed.descriptors.clone().unwrap_or_default();
+        descriptors.insert(
+            (addr, instance),
+            DescriptorRead::Served(Box::new(Descriptor {
+                format: "zk2-descriptor/0.1".into(),
+                service: RF0.into(),
+                instance: RF0_INSTANCE.into(),
+                interfaces: vec![InterfaceEntry {
+                    iface: zenkey_model::config::IFACE.into(),
+                    contract: format!("sha256:{}", zenkey::config_v1::FINGERPRINT),
+                    minor: 0,
+                    token: true,
+                    unavailable: Vec::new(),
+                    cardinality: BTreeMap::new(),
+                }],
+                capabilities: Vec::new(),
+                requires: Vec::new(),
+                profiles: vec!["freshness.v1".into()],
+                meta: BTreeMap::new(),
+            })),
+        );
+        observed.descriptors = Some(descriptors);
+        observed
+    }
+
+    /// A presence landing for this world with `lab/rf0` beside it, the
+    /// `config.v1` owner (#768, CD). The lens moves with it (generation 2).
+    pub fn presence_update_with_config(&self) -> Arc<zengui::presence_link::PresenceUpdate> {
+        let observed = self.observed_with_config();
+        let mut presence = zenkey_fleet::LivePresence::new(zenkey_fleet::PresenceScope::all());
+        let moved = presence.seed(&observed, std::time::SystemTime::now());
+        Arc::new(zengui::presence_link::PresenceUpdate {
+            presence: Arc::new(presence),
+            moved,
+            catalog: Some(Arc::new(zenkey_fleet::Catalog::new(&observed))),
+            generation: 2,
+            seed: zenkey_fleet::SeedOutcome::Complete,
+        })
+    }
+
+    /// `lab/rf0`'s view (§2.3), the profile's `rf` owner as the scenarios
+    /// run it (`scenarios.md`'s conventions), at revision 3: `duty` hot,
+    /// its fraction a runtime change a restart would not keep; `sim` hot,
+    /// its `pin` sensitive — declared, sourced, never valued (§2.15);
+    /// `queue` outside the allowlist; `radio` reach; `modulation` contract.
+    /// The last change set `duty`; with `pending`, a reach change on
+    /// `radio` is pending and applied, its deadline a minute after
+    /// [`config_read_at`]. Its desired report: revision 4, converged.
+    pub fn config_view(&self, pending: bool) -> zenkey_model::config::ConfigView {
+        let mut v = serde_json::json!({
+            "service": RF0, "instance": RF0_INSTANCE, "revision": 3, "confirm_floor_s": 10,
+            "last_change": {"token": format!("{RF0_INSTANCE}-2"), "groups": ["duty"]},
+            "desired": {"observed_revision": 4, "outcome": "converged"},
+            "groups": [
+                {"name": "duty", "class": "hot", "description": "the transmit duty cycle",
+                 "writable": true,
+                 "parameters": [{"name": "fraction_ppm", "kind": "integer", "min": 0,
+                                 "max": 1_000_000, "unit": "ppm",
+                                 "description": "the share of airtime", "value": 20_000,
+                                 "source": "runtime", "startup": 10_000}]},
+                {"name": "radio", "class": "reach", "description": "the radio channel",
+                 "writable": true,
+                 "parameters": [{"name": "frequency_hz", "kind": "integer",
+                                 "min": 150_000_000, "max": 960_000_000, "unit": "Hz",
+                                 "description": "the carrier frequency",
+                                 "value": 868_100_000, "source": "file"}]},
+                {"name": "sim", "class": "hot", "description": "the SIM", "writable": true,
+                 "parameters": [{"name": "pin", "kind": "text",
+                                 "description": "the SIM's PIN", "sensitive": true,
+                                 "source": "file"}]},
+                {"name": "queue", "class": "hot", "description": "the transmit queue",
+                 "writable": false,
+                 "parameters": [{"name": "tx_queue_len", "kind": "integer", "min": 0,
+                                 "unit": "packets", "description": "the queue's length",
+                                 "value": 100, "source": "default"}]},
+                {"name": "modulation", "class": "contract",
+                 "description": "what the transport was started against", "writable": true,
+                 "parameters": [{"name": "spreading_factor", "kind": "integer", "min": 7,
+                                 "max": 12, "description": "the LoRa spreading factor",
+                                 "value": 9, "source": "file"}]}
+            ]
+        });
+        if pending {
+            v["revision"] = serde_json::json!(4);
+            v["pending"] = serde_json::json!({
+                "token": format!("{RF0_INSTANCE}-3"), "groups": ["radio"],
+                "deadline": "2026-10-18T09:01:00.000Z", "applied": true
+            });
+            v["groups"][1]["parameters"][0]["value"] = serde_json::json!(869_525_000);
+            v["groups"][1]["parameters"][0]["source"] = serde_json::json!("runtime");
+            v["groups"][1]["parameters"][0]["startup"] = serde_json::json!(868_100_000);
+        }
+        serde_json::from_value(v).expect("a ConfigView")
+    }
+
+    /// The change events of `lab/rf0`'s first two changes (§2.17): a `sim`
+    /// change whose pin edit is redacted, rolled back at its deadline, then
+    /// `duty` applied without a window.
+    pub fn config_events(&self) -> Vec<zenkey_model::config::ConfigChangeEvent> {
+        serde_json::from_value(serde_json::json!([
+            {"service": RF0, "instance": RF0_INSTANCE, "revision": 2,
+             "token": format!("{RF0_INSTANCE}-1"), "outcome": "rolled-back",
+             "edits": [{"group": "sim", "parameter": "pin", "redacted": true}],
+             "actor": "ops"},
+            {"service": RF0, "instance": RF0_INSTANCE, "revision": 3,
+             "token": format!("{RF0_INSTANCE}-2"), "outcome": "applied",
+             "edits": [{"group": "duty", "parameter": "fraction_ppm", "old": 10_000,
+                        "new": 20_000}],
+             "actor": "ops"}
+        ]))
+        .expect("change events")
+    }
+
+    /// A reading of `lab/rf0` as the engine judges it (#768, CD): presence
+    /// and the descriptor as [`World::observed_with_config`] holds them, the
+    /// GET answered with `view` and its status stamped four seconds before
+    /// [`config_read_at`], the operator's word on the clocks (so a stamp's
+    /// age is judged), and `events` replayed for the change `token` names.
+    pub fn config_report(
+        &self,
+        view: &zenkey_model::config::ConfigView,
+        events: Vec<zenkey_model::config::ConfigChangeEvent>,
+        token: Option<&str>,
+    ) -> Arc<zenkey_fleet::report::ConfigReport> {
+        use zenkey_fleet::bus::config::{ConfigReplay, ServiceDocs};
+        use zenkey_fleet::bus::health::{Replied, Stamped};
+        use zenkey_model::config::ConfigStatus;
+        let addr: zenkey_model::grammar::Addr = RF0.parse().expect("an address");
+        let stamp = Some(Stamped {
+            time: config_read_at() - Duration::from_secs(4),
+            clock: "a1b2c3d4e5f60718".into(),
+        });
+        let docs = ServiceDocs {
+            view: Some(Replied {
+                value: Some(Ok(view.clone())),
+                stamp: stamp.clone(),
+            }),
+            status: Some(Replied {
+                value: Some(Ok(ConfigStatus::of(view))),
+                stamp,
+            }),
+        };
+        let target = zenkey_fleet::ConfigTarget::One(addr.clone());
+        let mut spec = zenkey_fleet::ConfigSpec::new(Duration::from_secs(5));
+        spec.clocks_synced = true;
+        spec.token = token.map(str::to_owned);
+        spec.instance = token.map(|_| RF0_INSTANCE.to_owned());
+        let replay = token.map(|_| {
+            Ok(ConfigReplay {
+                selector: format!("zk2/{RF0}/config.v1/events/change/*"),
+                events,
+                undecodable: 0,
+            })
+        });
+        Arc::new(zenkey_fleet::judge_config(
+            &zenkey_fleet::ConfigObservation {
+                namespace: String::new(),
+                address: addr.clone(),
+                spec,
+                presence: Some(Ok(self.observed_with_config())),
+                get: Ok(zenkey_fleet::ConfigGet {
+                    selector: target.state_selector(false),
+                    read_at: config_read_at(),
+                    complete: true,
+                    services: [(addr, docs)].into(),
+                }),
+                window: None,
+                replay,
+            },
+        ))
     }
 
     /// Every publisher's payload at tick `n`: `(key, bytes, encoding)`.

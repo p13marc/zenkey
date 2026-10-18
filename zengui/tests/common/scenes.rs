@@ -81,6 +81,32 @@ pub const ALL: &[Scene] = &[
         build: workbench_mesh,
         landmark: "drag to pan · scroll to zoom · right-click resets",
     },
+    // The Config tool on config.v1 (#768, CD): `lab/rf0` read, a reach
+    // change on `radio` pending and applied, its deadline the owner's
+    // instant and the countdown read against this host's clock.
+    Scene {
+        name: "workbench-config",
+        size: DESKTOP,
+        build: workbench_config,
+        landmark: "pending change 00000000000000a1-3 on radio",
+    },
+    // A sensitive group (§2.15): the pin is write-only — no value in its
+    // row, a masked field never prefilled, its event edit redacted.
+    Scene {
+        name: "workbench-config-sensitive",
+        size: DESKTOP,
+        build: workbench_config_sensitive,
+        landmark: "write-only",
+    },
+    // A set refused in the form (§2.5): `duty` changed while the reach
+    // change is pending and not joined — the owner's own `busy`, and
+    // nothing sent.
+    Scene {
+        name: "workbench-config-refused",
+        size: DESKTOP,
+        build: workbench_config_refused,
+        landmark: "refused here — nothing was sent",
+    },
     Scene {
         name: "traffic",
         size: DESKTOP,
@@ -675,6 +701,107 @@ fn workbench_nodes(theme: ThemeChoice) -> Zengui {
             World::new().health("robot1/nav"),
         ))),
     );
+    app
+}
+
+fn config_msg(app: &mut Zengui, msg: zengui::view::configure::ConfigMsg) {
+    send(app, Message::Pane(PaneMsg::Config(msg)));
+}
+
+/// The Config tool given the window (#768, CD): presence with `lab/rf0`
+/// beside the world, the tool picked, the address selected — which the
+/// tool follows — and its reading landed as the engine judged it, with the
+/// countdown's tick 13 s after it.
+fn config_window(theme: ThemeChoice, view: zenkey_model::config::ConfigView) -> (Zengui, World) {
+    use zengui::configure::{ReadLanding, ReadWhy};
+    use zengui::prefs::DockRole;
+    use zengui::view::configure::ConfigMsg;
+    let (mut app, world) = live_world(prefs(theme));
+    send(
+        &mut app,
+        Message::Bus(zengui::message::BusMsg::Presence(
+            0,
+            world.presence_update_with_config(),
+        )),
+    );
+    // The tool first — picking it restores the Workbench — then the other
+    // docks closed, so the tool has the window: its groups sit under the
+    // pending change.
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Config)),
+    );
+    for role in [DockRole::Locator, DockRole::Inspector] {
+        send(
+            &mut app,
+            Message::Workspace(WorkspaceMsg::DockToggled(role)),
+        );
+    }
+    let rf0: zenkey_model::grammar::Addr = super::RF0.parse().expect("an address");
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Address(rf0.clone()))),
+    );
+    // The change asked about (§5): the pending one, else the last.
+    let token = view
+        .pending
+        .as_ref()
+        .map(|p| p.token.clone())
+        .or_else(|| view.last_change.as_ref().map(|l| l.token.clone()));
+    let report = world.config_report(&view, world.config_events(), token.as_deref());
+    config_msg(
+        &mut app,
+        ConfigMsg::Read(ReadLanding {
+            addr: rf0,
+            namespace: String::new(),
+            why: ReadWhy::Asked,
+            report,
+            at: super::config_read_at(),
+        }),
+    );
+    config_msg(&mut app, ConfigMsg::Tick(super::config_now()));
+    (app, world)
+}
+
+fn workbench_config(theme: ThemeChoice) -> Zengui {
+    let view = World::new().config_view(true);
+    config_window(theme, view).0
+}
+
+/// The sim group's pin typed into its masked field: four bullets on
+/// screen, the value nowhere.
+fn workbench_config_sensitive(theme: ThemeChoice) -> Zengui {
+    use zengui::configure::{Draft, Masked};
+    use zengui::view::configure::ConfigMsg;
+    let view = World::new().config_view(false);
+    let (mut app, _) = config_window(theme, view);
+    config_msg(
+        &mut app,
+        ConfigMsg::Draft {
+            group: "sim".into(),
+            param: "pin".into(),
+            draft: Draft::Secret(Masked::new("4821")),
+        },
+    );
+    app
+}
+
+/// `duty` edited and applied while the reach change is pending, not
+/// joined: the precheck refuses it in the owner's words, before any task.
+fn workbench_config_refused(theme: ThemeChoice) -> Zengui {
+    use zengui::configure::Draft;
+    use zengui::view::configure::ConfigMsg;
+    let view = World::new().config_view(true);
+    let (mut app, _) = config_window(theme, view);
+    config_msg(
+        &mut app,
+        ConfigMsg::Draft {
+            group: "duty".into(),
+            param: "fraction_ppm".into(),
+            draft: Draft::Text("30000".into()),
+        },
+    );
+    config_msg(&mut app, ConfigMsg::Apply("duty".into()));
     app
 }
 
