@@ -24,7 +24,7 @@
 //! **v1 left at FJ9** (#612). The registry slice sets, RFC 08 §6
 //! introspection, the v1 roster, the schema-aware decode seam, the v1
 //! judges (`why`, `cutover`, `retired`, `conform` and its registry checks)
-//! and the profile-backed features (configuration, blobs, the exporter,
+//! and the profile-backed features (v1's configuration, blobs, the exporter,
 //! alerts, kinds and budgets) live on the `v1` branch, which releases
 //! 0.14.x. Every frontend on `main` runs on this crate: zenctl since FJ9,
 //! zenwatch since FL3 and zengui since FL11b (#614), and none links the v1
@@ -90,7 +90,9 @@
 //!   it, held or gone per address a pattern matches: `instance-gone`'s in
 //!   zenctl and zenwatch alike, #747), `skeleton` (the declared keyspace a
 //!   tree starts from, merged with what was observed, #614 FL4), `identity`
-//!   (each key's resolution, kept and bounded), `timeline`, `snapshot` and
+//!   (each key's resolution, kept and bounded), `config` (a `config.v1`
+//!   reading's freshness and projection, a change typed, pre-checked and
+//!   redacted before it is sent, #768), `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
 //!   schema reaches fall to, `stats`, `tree` and `diff`, plus the two

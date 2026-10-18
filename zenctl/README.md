@@ -275,6 +275,9 @@ reach further than one concrete thing:
 | `call`, `bench call` | a JSON Schema request its type refuses: every violation named, nothing sent (spec §7.3, #671) | not overridable — send what the type declares |
 | `bench call` | an operation not declared `idempotent` | `--i-know` |
 | `bench call` | a fan-out to an operation that does not declare `fanout = "allowed"` (O2) | not overridable |
+| `config set` | a change the owner's own validator refuses against its view (`config.v1` §2.5): the owner's words, nothing sent | `--no-precheck` (the owner still refuses) |
+| `config set` | a sensitive parameter's value given inline (§2.15) | not overridable — `NAME=@FILE` or `NAME=@-` |
+| `config set` | a reach change, or a windowed one whose class no view named, with no terminal to ask (§2.4) | `--i-know` |
 
 Each refusal names its reason and comes before a session opens wherever the
 command line alone decides it. [`CHANGELOG.md`](CHANGELOG.md) has the
@@ -341,7 +344,14 @@ back) · `zenctl gen <address> [iface…] --contracts <dir>` (a mock owner: a re
 service at the address you name, publishing every stream, state and event
 member through the runtime's writers and answering every operation, its
 descriptor marked synthetic) · `zenctl serve <address> <iface> <operation>
-[reply]` (a mock owner of one operation, every call logged).
+[reply]` (a mock owner of one operation, every call logged) · `zenctl config
+get <SYSTEM/SERVICE>` (a service's `config.v1`: its view and status, each
+fresh, stale or unread, and the text's questions — pending, landed, undone,
+writable, kept by a restart, converged — each yes, no, not yet,
+unobservable or not asked) and `zenctl config set|confirm|cancel|extend|persist`
+(a change through the owner's own operations: each value typed as its schema
+declares, the owner's validator run before anything is sent, a reach change
+asked first, a sensitive value read from a file and shown redacted).
 
 **Judge — exit-coded.**
 `zenctl check expect <address> <iface> [resource]` (an expectation over a
@@ -401,7 +411,8 @@ show|refresh|clear` (the name cache behind completion) · `zenctl completions
 > `field`, `timeline`, `snapshot`, `check expect|schema|probe`, `watchdog`)
 > over zk2 keys; FJ9 removed what was left of v1 — `why`, `check
 > cutover|retired|conform`, `config`, `blob`, `export` and `--registry` — and
-> FK1 (#702–#705) brought `why` and `check conform` back in zk2's terms.
+> FK1 (#702–#705) brought `why` and `check conform` back in zk2's terms, and
+> CC (#768) `config`, as `config.v1`'s.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -670,7 +681,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks nineteen questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks twenty-three questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -698,6 +709,10 @@ none.
 | `health-inconsistent` | does an owner hold a status better than a current check, in both of two readings? (error) | health.v1 §2.2 |
 | `hostid-duplicate` | do two sessions claim one address of a minted system, in both presence reads? The cause is undecided, and never named (warning) | hostid.v1 §2.12 |
 | `population-over-bound` | does an owner hold more live members of a templated state than its bound — its descriptor's lowered `cardinality`, else the contract's — by its own answer to a GET? (`--deep`; error) | §2.7 |
+| `config-projection` | does an owner's `config.v1` status disagree with its view's projection, in both of two readings? (error) | config.v1 §2.19 |
+| `config-overdue` | does an owner's view, by its own clock, stand more than 60 s past its pending change's deadline? (error) | config.v1 §2.11 |
+| `config-unpersisted` | does an owner run a value a restart would not keep? (`--clocks-synced`; info) | config.v1 §5 |
+| `config-desired` | does an owner report its desired document refused or failed? (`--clocks-synced`; warning) | config.v1 §2.18 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -736,6 +751,13 @@ clean only when it did. A resource the GET answered no member of adds
 nothing (an empty reply set is never a verdict), and the no-ceiling bound
 (4294967295) is not asked. Streams and events are `check conform`'s: the
 doctor listens to no window.
+
+The `config-*` checks (#768) read every owner's `config.v1/state/**` with
+each presence read, the services whose descriptors list `config.v1` alone.
+The two that compare two readings, or an owner's stamp with its own
+deadline, need no clock of ours; the two that read a document's value as
+current take `--clocks-synced`, like the `health-*` checks, and are
+unjudged without it. A stale document answers nothing, never a no.
 
 A `doctor health-*` rule of `watchdog` or `record --on`
 runs the same doctor, so it takes the same word: `watchdog --clocks-synced`,
