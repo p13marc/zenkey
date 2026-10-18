@@ -575,6 +575,25 @@ def compile_face(face_plan: dict[str, Any], block: dict[str, Any], far_subject: 
     return out
 
 
+def liveness_across(face_plan: dict[str, Any], address: str, subscriber: Any,
+                    annotations: dict[str, dict[str, Any]]) -> tuple[str, str]:
+    """§2.12 and §5, "Is this provider live across the face?": ``live``
+    while a member of the plan's evidence for ``address`` is fresh by
+    ``subscriber``'s receive clock (``freshness.v1`` §2.5), else
+    ``unobservable``: no evidence, or none of it fresh. Never down (core
+    R7). ``annotations`` are each evidence resource's, by its name."""
+    entry = next((x for x in face_plan["liveness"] if x["service"] == address), None)
+    if entry is None or not entry["evidence"]:
+        return "unobservable", "the plan lists no evidence for it"
+    for name in entry["evidence"]:
+        iface, token, template = name.split("/", 2)
+        key = f"zk2/{address}/{iface}/{token}/{template}"
+        v = freshness.judge(_KIND_OF_TOKEN[token], annotations[name], [subscriber.observation(key)])
+        if v.verdict == freshness.FRESH:
+            return "live", f"{name} is fresh"
+    return "unobservable", "none of its evidence is fresh"
+
+
 def router_extras(face_plan: dict[str, Any]) -> dict[str, Any]:
     """The plan's other router configuration: the ``downsampling`` items
     (§2.8) and, for a south region, the near router's ``gateway`` (§2.5)."""

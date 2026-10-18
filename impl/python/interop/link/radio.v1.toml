@@ -1,0 +1,58 @@
+# link.v1 scenarios.md's contract (#609), as the text gives it: a stream that
+# crosses downsampled and one that stays home, an @stream of each, a state
+# that crosses whole and a templated one that stays home, an event of each,
+# and an operation called by grant. It must load with no finding at all.
+[interface]
+name  = "radio"
+major = 1
+minor = 0
+uses  = ["link.v1", "freshness.v1"]
+
+[resources."air/dropped_total"]               # crosses, downsampled
+kind        = "stream"
+type        = { raw = "text/plain" }
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 4 }
+
+[resources."air/frames_total"]                # stays home
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.frames]                            # an @stream that crosses, downsampled
+kind        = "stream"
+explicit    = true
+type        = { raw = "application/octet-stream" }
+annotations = { "link.exposure" = "link" }
+
+[resources.raw]                               # an @stream that stays home
+kind     = "stream"
+explicit = true
+type     = { raw = "application/octet-stream" }
+
+[resources.oper]                              # a state that crosses whole
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 4 }
+
+[resources."peers/{peer}"]                    # a state that stays home; a GET crosses by grant
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { peer = "string" }
+cardinality = 16
+
+[resources.fault]                             # an event that crosses whole
+kind        = "event"
+type        = { raw = "text/plain" }
+rate        = "burst(3600/h)"
+retention   = "1h"
+annotations = { "link.exposure" = "link" }
+
+[resources.change]                            # an event that stays home
+kind      = "event"
+type      = { raw = "text/plain" }
+rate      = "burst(3600/h)"
+retention = "1h"
+
+[resources.reset]                             # an operation, called by grant
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
