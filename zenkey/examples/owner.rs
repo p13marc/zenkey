@@ -7,6 +7,7 @@
 //!     [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
 //!     [--tokenless <iface>]... [--clock-reference <key>] [--clock-offset-ms <ms>]
 //!     [--cardinality <iface>:<resource>=<n>]...
+//!     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
 //!     <address> <contract.toml>...
 //! ```
 //!
@@ -116,12 +117,68 @@
 //!
 //! `--tokenless <iface>` puts an interface in the deployment's tokenless
 //! set (core §8.1, U22): `health.v1`, for one.
+//!
+//! **`config.v1`** (`spec/profiles/config/v1.md`, #768) is implemented by
+//! the runtime ([`zenkey::config_v1`]) with `--config`, or when a contract
+//! file given is the standard one (its fingerprint is `727ff009…`, as
+//! `spec/profiles/config/config.v1.toml` is). The schema is
+//! `conformance/lifecycle.json`'s `rf`, as `scenarios.md` runs it, and a
+//! contract group after it:
+//!
+//! | Group | Class | Parameter | Startup |
+//! |---|---|---|---|
+//! | `duty` | hot | `fraction_ppm`, 0 to 1000000 ppm | 10000, `file` |
+//! | `radio` | reach | `frequency_hz`, 150000000 to 960000000 Hz | 868100000, `file` |
+//! | `link` | reach | `net_id`, 0 to 255 | 1, `default` |
+//! | `sim` | hot | `pin`, text, sensitive | `"0000"`, `file` |
+//! | `queue` | hot, outside the allowlist | `tx_queue_len`, at least 0 packets | 100, `default` |
+//! | `modulation` | contract | `spreading_factor`, 7 to 12 | 9, `file` |
+//!
+//! `--config-floor <s>` is the floor (10 by default, §2.8);
+//! `--config-apply-after-ms <ms>` is how long after a reach `set` the
+//! device applies it, the `apply_at` it states (1000 by default, below the
+//! floor, §2.9); `--config-no-persist` leaves the owner without a persisted
+//! layer, so `persist` is listed unavailable, cause `config` (§2.13). The
+//! device is simulated: it holds what it is told, in memory, and its
+//! persisted layer survives `config restart`. The runtime logs each request
+//! on standard error, a sensitive value written `"<redacted>"` (§2.15):
+//! `zenkey::config_v1` logs at `info` by default here.
+//!
+//! Its commands, each answered by one line:
+//!
+//! ```text
+//! config fail-apply [<words>...]     the device refuses its next apply, in these words
+//! config fail-undo [unknown]         its next undo fails, reading back what it holds (unknown: nothing)
+//! config fail-persist [<words>...]   its next persisted-layer write fails: persist answers internal
+//! config block-persist [<words>...]  its persisted layer cannot be written until cleared: unavailable, cause config
+//! config clear                       every failure above cleared
+//! config device                      what the device holds and did
+//! config desired <json>              a DesiredConfig to converge (§2.18); the report is the view's and the status's
+//! config offset <ms>                 the owner's clock shifted from this host's (a test's: §2.8, §2.14)
+//! config restart                     a restart (§2.12): the service closes and comes up as a new instance
+//! ```
+//!
+//! A failure command is answered `config device` followed by the device's
+//! state, as `config device` is: `held=<json> applies=<n> undos=<n>
+//! persisted=<json|none> next=<the failures set, or ->`, `held` being what
+//! the device runs with, a sensitive value written `"<redacted>"` (§2.15),
+//! `applies` the applies it made (a refused one is not), and `undos` every
+//! undo it was asked for, a failed one included. `desired` is
+//! answered `config desired <revision>`, `offset` `config offset <ms>`, and
+//! `restart` `config restarted zk2/<system>/<service>/@zk/instance/<id>`, the
+//! new instance's key, once the new instance's tokens are declared. A
+//! restart keeps the persisted layer and the change events of the last
+//! hour (§2.17), and the device runs its startup values again; anything else
+//! of the old instance is gone, as a process restart leaves it.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::BufRead;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
+use zenkey::config_v1::{self, Configuration, DesiredConfig, Startup};
 use zenkey::health::{self, Effective, Health, Level};
 use zenkey::hostid::{HostIdMinter, HostIdSource};
 use zenkey::model::authoring::Kind;
@@ -129,9 +186,13 @@ use zenkey::model::contract::{Body, Contract, Resource, load_path};
 use zenkey::model::grammar::IfaceId;
 use zenkey::model::schema::TypeId;
 use zenkey::model::template::{Bindings, Segment};
+use zenkey::operation::OperationServer;
 use zenkey::state::StateWriter;
 use zenkey::writer::{EventWriter, Writer};
 use zenkey::{Address, Implementation, OpError, Service, ServiceBuilder, ServiceConfig};
+
+#[path = "owner/config.rs"]
+pub mod config;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -161,6 +222,15 @@ pub struct Options {
     /// `--cardinality <iface>:<resource>=<n>`: a template's bound lowered in
     /// the descriptor (core §3.3, §2.7).
     pub cardinality: Vec<(String, String, u64)>,
+    /// `--config`, or implied by a `--config-*` option or the standard
+    /// contract among the files: `config.v1` by the runtime.
+    pub config: bool,
+    /// `--config-floor <s>`: the floor (config.v1 §2.8).
+    pub config_floor_s: u64,
+    /// `--config-apply-after-ms <ms>`: the reach apply's delay (§2.9).
+    pub config_apply_after_ms: u64,
+    /// Without `--config-no-persist`: a persisted layer (§2.13).
+    pub config_persist: bool,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
@@ -190,6 +260,7 @@ impl Options {
              [--health-check <name>=<LEVEL>[:<detail>]]... [--tokenless <iface>]... \
              [--clock-reference <key>] [--clock-offset-ms <ms>] \
              [--cardinality <iface>:<resource>=<n>]... \
+             [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist] \
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
@@ -204,6 +275,10 @@ impl Options {
             clock_reference: None,
             clock_offset_ms: 0,
             cardinality: Vec::new(),
+            config: false,
+            config_floor_s: 10,
+            config_apply_after_ms: 1000,
+            config_persist: true,
             address: String::new(),
             contracts: Vec::new(),
         };
@@ -281,6 +356,29 @@ impl Options {
                     o.cardinality.push(c);
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--config" => {
+                    o.config = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--config-floor" => {
+                    o.config_floor_s = value
+                        .parse()
+                        .map_err(|e| format!("--config-floor {value:?}: {e}"))?;
+                    o.config = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--config-apply-after-ms" => {
+                    o.config_apply_after_ms = value
+                        .parse()
+                        .map_err(|e| format!("--config-apply-after-ms {value:?}: {e}"))?;
+                    o.config = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--config-no-persist" => {
+                    o.config_persist = false;
+                    o.config = true;
+                    rest = tail;
+                }
                 [flag, ..] if flag.starts_with("--") => return Err(usage()),
                 _ => break,
             }
@@ -342,6 +440,13 @@ pub async fn run_with(
             opts.health = true;
             continue;
         }
+        // So is the standard config.v1 (#768).
+        if imp.iface() == &config_v1::iface()
+            && imp.fingerprint().hex().to_string() == config_v1::FINGERPRINT
+        {
+            opts.config = true;
+            continue;
+        }
         imps.push(imp);
     }
 
@@ -390,88 +495,27 @@ pub async fn run_with(
         }
     };
 
-    let mut b = ServiceBuilder::with_hostid(&session, config, minter);
-    b.minter().simulate_offset(opts.clock_offset_ms);
-    let mut states = Vec::new();
-    let mut servers = Vec::new();
-    let mut members = Members::default();
-    let none = Bindings::new();
-    for imp in imps {
-        let iface = imp.iface().clone();
-        let resources = imp.contract().resources.clone();
-        members
-            .contracts
-            .insert(iface.clone(), imp.contract().clone());
-        b.implement(imp)?;
-        for r in resources {
-            let name = zenkey::implementation::resource_name(&r);
-            let raw = |t: &TypeId| matches!(t, TypeId::Raw { .. });
-            match &r.body {
-                Body::Data(d)
-                    if r.kind == Kind::State && !r.template.has_params() && raw(&d.type_) =>
-                {
-                    states.push(b.declare_state_writer(&iface, &name, &none).await?);
-                }
-                Body::Operation(o) => {
-                    let echo = raw(&o.request) && raw(&o.response);
-                    // Over the whole template when it has parameters (§5.1),
-                    // else on the operation's one key.
-                    let values = (!r.template.has_params()).then_some(&none);
-                    servers.push(
-                        b.serve(&iface, &name, values, move |call| async move {
-                            if !echo {
-                                // §5.2: `app` from any operation, and no detail
-                                // where there is no `error` type to carry one.
-                                return Err(OpError::app_without_detail(
-                                    "this interop owner decodes no schema",
-                                ));
-                            }
-                            let body = call
-                                .payload()
-                                .map(|p| p.to_bytes().into_owned())
-                                .unwrap_or_default();
-                            call.reply(body)
-                                .await
-                                .map_err(|e| OpError::internal(e.to_string()))
-                        })
-                        .await?,
-                    );
-                }
-                _ => {
-                    b.expose(&iface, &name)?;
-                }
-            }
-        }
-    }
-    // Core §3.3: a template's bound lowered in the descriptor, which the
-    // runtime then keeps (§2.7).
-    for (iface, resource, n) in &opts.cardinality {
-        b.cardinality(&iface.parse()?, resource, *n)?;
-    }
-    // health.v1 §2.3: its status and checks before the tokens; the status
-    // is UNSPECIFIED, "starting", when none is given.
-    let health = if opts.health {
-        let h = b.health().await?;
-        if let Some((level, reason)) = &opts.health_status {
-            h.set_status(*level, reason.as_str()).await?;
-        }
-        for (name, level, detail) in &opts.health_checks {
-            match level {
-                Some(l) => h.set_check(name, *l, detail.as_str()).await?,
-                None => h.set_check_unknown(name, detail.as_str()).await?,
-            };
-        }
-        Some(h)
-    } else {
-        None
+    // config.v1: the rf owner's startup, and its simulated device.
+    let configured = opts.config.then(|| {
+        let startup = config::rf_startup(
+            true,
+            opts.config_floor_s,
+            Duration::from_millis(opts.config_apply_after_ms),
+            opts.config_persist,
+        );
+        let device = Arc::new(config::SimDevice::new(&startup));
+        (startup, device)
+    });
+    let ctx = Ctx {
+        opts: &opts,
+        session: &session,
+        config,
+        minter,
+        imps,
+        configured,
     };
-    // §8.2 "State values" (F-68): the value is put before the tokens, so a
-    // GET made the moment they appear finds it.
-    for w in &states {
-        w.put("ok").await?;
-    }
-    let mut svc = b.start().await?;
-    say(format!("ready {}", svc.instance_key()?));
+    let mut up = ctx.up(Vec::new()).await?;
+    say(format!("ready {}", up.svc.instance_key()?));
 
     let mut until = std::pin::pin!(until);
     let mut open = true;
@@ -479,19 +523,187 @@ pub async fn run_with(
         tokio::select! {
             () = &mut until => break,
             line = commands.recv_async(), if open => match line {
-                Ok(line) => say(command(&line, health.as_ref(), &mut svc, &mut members).await),
+                Ok(line) => {
+                    let answer;
+                    (answer, up) = ctx.command(&line, up).await?;
+                    say(answer);
+                }
                 Err(_) => open = false,
             },
         }
     }
     while let Ok(line) = commands.try_recv() {
-        say(command(&line, health.as_ref(), &mut svc, &mut members).await);
+        let answer;
+        (answer, up) = ctx.command(&line, up).await?;
+        say(answer);
     }
-    drop(members);
-    svc.close().await?;
-    drop(servers);
+    up.close().await?;
     session.close().await?;
     Ok(())
+}
+
+/// What every bring-up of the service is made from: the first, and each
+/// `config restart`'s.
+struct Ctx<'a> {
+    opts: &'a Options,
+    session: &'a zenoh::Session,
+    config: ServiceConfig,
+    minter: &'a HostIdMinter,
+    imps: Vec<Implementation>,
+    /// config.v1's startup and device, with `--config`.
+    configured: Option<(Startup, Arc<config::SimDevice>)>,
+}
+
+/// One running instance of the service, and what it holds.
+struct Up {
+    svc: Service,
+    servers: Vec<OperationServer>,
+    _states: Vec<StateWriter>,
+    health: Option<Health>,
+    members: Members,
+    config: Option<Configuration>,
+}
+
+impl Up {
+    async fn close(self) -> Result<(), BoxError> {
+        drop(self.members);
+        self.svc.close().await?;
+        drop(self.servers);
+        Ok(())
+    }
+}
+
+impl Ctx<'_> {
+    /// Answers one command line (the module doc's): `config restart` here,
+    /// since it replaces the instance; every other one by [`command`].
+    async fn command(&self, line: &str, mut up: Up) -> Result<(String, Up), BoxError> {
+        if line.split_whitespace().collect::<Vec<_>>() != ["config", "restart"] {
+            let answer = command(line, &mut up, self.configured.as_ref()).await;
+            return Ok((answer, up));
+        }
+        let (Some(cfg), Some((startup, device))) = (up.config.clone(), &self.configured) else {
+            let refused = format!("refused {line}: config.v1 is not implemented here (--config)");
+            return Ok((refused, up));
+        };
+        // §2.12: the old instance goes first, the device runs its startup
+        // values again, and the new instance starts from them, with the
+        // persisted layer and the change events of the last hour (§2.17).
+        let events = cfg.published().await;
+        up.close().await?;
+        device.restart(startup);
+        let up = self.up(events).await?;
+        let answer = format!("config restarted {}", up.svc.instance_key()?);
+        Ok((answer, up))
+    }
+
+    /// Brings the service up: every contract's resources, `health.v1` and
+    /// `config.v1` as asked, then `start()`. `events` are config.v1's
+    /// change events of the last hour (§2.17).
+    async fn up(&self, events: Vec<SystemTime>) -> Result<Up, BoxError> {
+        let opts = self.opts;
+        let mut b = ServiceBuilder::with_hostid(self.session, self.config.clone(), self.minter);
+        b.minter().simulate_offset(opts.clock_offset_ms);
+        let mut states = Vec::new();
+        let mut servers = Vec::new();
+        let mut members = Members::default();
+        let none = Bindings::new();
+        for imp in self.imps.iter().cloned() {
+            let iface = imp.iface().clone();
+            let resources = imp.contract().resources.clone();
+            members
+                .contracts
+                .insert(iface.clone(), imp.contract().clone());
+            b.implement(imp)?;
+            for r in resources {
+                let name = zenkey::implementation::resource_name(&r);
+                let raw = |t: &TypeId| matches!(t, TypeId::Raw { .. });
+                match &r.body {
+                    Body::Data(d)
+                        if r.kind == Kind::State && !r.template.has_params() && raw(&d.type_) =>
+                    {
+                        states.push(b.declare_state_writer(&iface, &name, &none).await?);
+                    }
+                    Body::Operation(o) => {
+                        let echo = raw(&o.request) && raw(&o.response);
+                        // Over the whole template when it has parameters (§5.1),
+                        // else on the operation's one key.
+                        let values = (!r.template.has_params()).then_some(&none);
+                        servers.push(
+                            b.serve(&iface, &name, values, move |call| async move {
+                                if !echo {
+                                    // §5.2: `app` from any operation, and no detail
+                                    // where there is no `error` type to carry one.
+                                    return Err(OpError::app_without_detail(
+                                        "this interop owner decodes no schema",
+                                    ));
+                                }
+                                let body = call
+                                    .payload()
+                                    .map(|p| p.to_bytes().into_owned())
+                                    .unwrap_or_default();
+                                call.reply(body)
+                                    .await
+                                    .map_err(|e| OpError::internal(e.to_string()))
+                            })
+                            .await?,
+                        );
+                    }
+                    _ => {
+                        b.expose(&iface, &name)?;
+                    }
+                }
+            }
+        }
+        // Core §3.3: a template's bound lowered in the descriptor, which the
+        // runtime then keeps (§2.7).
+        for (iface, resource, n) in &opts.cardinality {
+            b.cardinality(&iface.parse()?, resource, *n)?;
+        }
+        // health.v1 §2.3: its status and checks before the tokens; the status
+        // is UNSPECIFIED, "starting", when none is given.
+        let health = if opts.health {
+            let h = b.health().await?;
+            if let Some((level, reason)) = &opts.health_status {
+                h.set_status(*level, reason.as_str()).await?;
+            }
+            for (name, level, detail) in &opts.health_checks {
+                match level {
+                    Some(l) => h.set_check(name, *l, detail.as_str()).await?,
+                    None => h.set_check_unknown(name, detail.as_str()).await?,
+                };
+            }
+            Some(h)
+        } else {
+            None
+        };
+        // config.v1 §2.3: the view and the status are put here, before the
+        // tokens; the owner starts from its startup values and the persisted
+        // layer the device holds (§2.12).
+        let config = match &self.configured {
+            Some((startup, device)) => {
+                let next = device.next_startup(startup, events);
+                Some(
+                    b.config_v1(next, Arc::clone(device) as Arc<dyn config_v1::Device>)
+                        .await?,
+                )
+            }
+            None => None,
+        };
+        // §8.2 "State values" (F-68): the value is put before the tokens, so a
+        // GET made the moment they appear finds it.
+        for w in &states {
+            w.put("ok").await?;
+        }
+        let svc = b.start().await?;
+        Ok(Up {
+            svc,
+            servers,
+            _states: states,
+            health,
+            members,
+            config,
+        })
+    }
 }
 
 /// The status as a command's answer.
@@ -610,16 +822,128 @@ impl Members {
     }
 }
 
-/// Answers one command line (the module doc's).
+/// The simulated device's state, as a `config` command answers it: a
+/// sensitive value written `"<redacted>"`, as everything this owner says is
+/// (config.v1 §2.15).
+fn device_line(d: &config::SimDevice, schema: &config_v1::Schema) -> String {
+    d.with(|s| {
+        let mut held = serde_json::to_value(&s.held).unwrap_or_default();
+        for g in &schema.groups {
+            for p in g.parameters.iter().filter(|p| p.sensitive) {
+                if let Some(v) = held.get_mut(&g.name).and_then(|g| g.get_mut(&p.name)) {
+                    *v = serde_json::Value::String(zenkey::model::config::REDACTED.to_owned());
+                }
+            }
+        }
+        let mut next = Vec::new();
+        if s.refuse_apply.is_some() {
+            next.push("fail-apply");
+        }
+        match s.fail_undo {
+            Some(config::UndoFailure::Held) => next.push("fail-undo"),
+            Some(config::UndoFailure::Unknown) => next.push("fail-undo-unknown"),
+            None => {}
+        }
+        if s.fail_persist.is_some() {
+            next.push("fail-persist");
+        }
+        if s.block_persist.is_some() {
+            next.push("block-persist");
+        }
+        let json = |v: &config_v1::Values| serde_json::to_string(v).unwrap_or_default();
+        format!(
+            "config device held={held} applies={} undos={} persisted={} next={}",
+            s.applies.len(),
+            s.undos.len(),
+            s.persisted.as_ref().map_or_else(|| "none".to_owned(), json),
+            if next.is_empty() {
+                "-".to_owned()
+            } else {
+                next.join(",")
+            }
+        )
+    })
+}
+
+/// Answers a `config` command but `restart` (the module doc's).
+async fn config_command(
+    words: &[&str],
+    cfg: &Configuration,
+    device: &config::SimDevice,
+) -> Result<String, String> {
+    let words_from = |n: usize| words.get(n..).map(|w| w.join(" ")).unwrap_or_default();
+    let said = |n: usize, default: &str| {
+        let w = words_from(n);
+        if w.is_empty() { default.to_owned() } else { w }
+    };
+    match words {
+        ["config", "fail-apply", ..] => {
+            let w = said(2, "the simulated device refused the apply");
+            device.with(|s| s.refuse_apply = Some(w));
+        }
+        ["config", "fail-undo"] => device.with(|s| s.fail_undo = Some(config::UndoFailure::Held)),
+        ["config", "fail-undo", "unknown"] => {
+            device.with(|s| s.fail_undo = Some(config::UndoFailure::Unknown));
+        }
+        ["config", "fail-persist", ..] => {
+            let w = said(2, "the simulated persisted layer failed its write");
+            device.with(|s| s.fail_persist = Some(w));
+        }
+        ["config", "block-persist", ..] => {
+            let w = said(2, "the simulated persisted layer is read-only");
+            device.with(|s| s.block_persist = Some(w));
+        }
+        ["config", "clear"] => device.with(|s| {
+            s.refuse_apply = None;
+            s.fail_undo = None;
+            s.fail_persist = None;
+            s.block_persist = None;
+        }),
+        ["config", "device"] => {}
+        ["config", "desired", ..] => {
+            let doc: DesiredConfig = serde_json::from_str(&words_from(2))
+                .map_err(|e| format!("not a DesiredConfig: {e}"))?;
+            let revision = doc.revision;
+            cfg.set_desired(doc).await;
+            return Ok(format!("config desired {revision}"));
+        }
+        ["config", "offset", ms] => {
+            let ms: i64 = ms.parse().map_err(|e| format!("{e}"))?;
+            cfg.simulate_offset(ms);
+            return Ok(format!("config offset {ms}"));
+        }
+        _ => {
+            return Err(
+                "usage: config fail-apply [<words>] | fail-undo [unknown] | fail-persist [<words>] | \
+                 block-persist [<words>] | clear | device | desired <json> | offset <ms> | restart"
+                    .to_owned(),
+            );
+        }
+    }
+    Ok(device_line(device, cfg.schema()))
+}
+
+/// Answers one command line (the module doc's) but `config restart`.
 async fn command(
     line: &str,
-    health: Option<&Health>,
-    svc: &mut Service,
-    members: &mut Members,
+    up: &mut Up,
+    configured: Option<&(Startup, Arc<config::SimDevice>)>,
 ) -> String {
     let words: Vec<&str> = line.split_whitespace().collect();
     let refuse = |why: &str| format!("refused {}: {why}", words.join(" "));
     let rest = |n: usize| words.get(n..).map(|w| w.join(" ")).unwrap_or_default();
+    if words.first() == Some(&"config") {
+        let (Some(cfg), Some((_, device))) = (&up.config, configured) else {
+            return refuse("config.v1 is not implemented here (--config)");
+        };
+        return match config_command(&words, cfg, device).await {
+            Ok(answer) => answer,
+            Err(why) => refuse(&why),
+        };
+    }
+    let health = up.health.as_ref();
+    let svc = &mut up.svc;
+    let members = &mut up.members;
     if let ["clock-offset", ms] = words.as_slice() {
         return match ms.parse::<i64>() {
             Ok(ms) => {
@@ -737,12 +1061,14 @@ async fn command(
 async fn main() {
     // The runtime's logs go to stderr (warnings unless `RUST_LOG` says
     // otherwise), so a runner driving this owner as a black box sees what
-    // the runtime says, such as hostid.v1's ephemeral warning (§2.6, 0.3).
+    // the runtime says, such as hostid.v1's ephemeral warning (§2.6, 0.3),
+    // and config.v1's requests, redacted (§2.15).
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("warn,zenkey::config_v1=info")
+            }),
         )
         .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
