@@ -263,7 +263,7 @@
           }
         ],
         "log": {
-          "confirm_s": 60,
+          "idempotency_key": "k9",
           "values": {
             "key_id": "<redacted>"
           }
@@ -312,7 +312,7 @@
       },
       "note": "a group of sensitive values only: the status leaves the group out, a sensitive integer is redacted in the log",
       "request": {
-        "confirm_s": 60,
+        "idempotency_key": "k9",
         "values": {
           "key_id": 7
         }
@@ -339,7 +339,7 @@
         "edits": null,
         "log": {
           "dry_run": true,
-          "expected_revision": 3,
+          "expected_revision": 0,
           "idempotency_key": "k1",
           "values": {
             "pin": "<redacted>",
@@ -393,7 +393,7 @@
       "note": "a dry run: its would-be view carries no sensitive value, it has no event, and its log line is redacted",
       "request": {
         "dry_run": true,
-        "expected_revision": 3,
+        "expected_revision": 0,
         "idempotency_key": "k1",
         "values": {
           "pin": "1234",

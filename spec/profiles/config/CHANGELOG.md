@@ -109,8 +109,15 @@ event, `burst(600/h)`, `7d`; `apply_at` is the device's to state.
 - **The event's rate** is kept by refusing `busy` a `set` that would start
   a change while 600 events fall within the last hour; with one pending
   change at a time, no change's end event can break it (§2.17).
-- **An idempotency key keeps refusals too**, and a key reused for another
-  request is `invalid_request` (§2.14).
+- **An idempotency key keeps refusals too**, from §2.5's row 3 on, and a
+  key reused for another request is `invalid_request` (§2.14). A retry
+  that meets its own first attempt's act in flight is `busy`, and the
+  attempt's answer is kept when the act ends: a refusal sent before the
+  owner reads the key is not kept.
+- **An integer is written without a fraction or an exponent** (§2.5), as
+  core §3.3 reads one in a descriptor: stricter than JSON Schema 2020-12,
+  for which `2.0` is an integer, and an owner's further check that core
+  §5.1 allows.
 - **Desired state**: a `DesiredConfig` shape for authors, refused whole
   with the first problem in a stated order, converged by `set`, and
   reported as `desired` in the view and the status (§2.18).
