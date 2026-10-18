@@ -12,11 +12,17 @@
 
 use std::path::{Path, PathBuf};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use zenkey_model::authoring::Kind;
+use zenkey_model::bundle::Bundle;
+use zenkey_model::config::{
+    self, Call, ConfigStatus, ControlOp, ControlReply, ControlRequest, DesiredConfig, DeviceResult,
+    Facts, GroupDecl, LastFacts, Owner, PendingFacts, Refusal, Schema, SetReply, SetRequest, Start,
+    Step, Time,
+};
 use zenkey_model::freshness::{self, ClockTrust, Horizon, Last, Observation, Reply, StampAge};
 use zenkey_model::health::{self, Judged, Level, Listing, Presence, Read, Reading};
 use zenkey_model::hostid;
@@ -33,6 +39,11 @@ const KNOWN: &[(&str, &str)] = &[
     ("health", "codes.json"),
     ("freshness", "clock-trust.json"),
     ("health", "clock.json"),
+    ("config", "window.json"),
+    ("config", "validation.json"),
+    ("config", "desired.json"),
+    ("config", "redaction.json"),
+    ("config", "lifecycle.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -599,4 +610,566 @@ fn freshness_clock_trust() {
     if bless() {
         write_json(&path, &doc);
     }
+}
+
+// --- config.v1 (#768, CA) -------------------------------------------------------
+
+/// `config.v1`'s standard contract as a bundle: every wire document the
+/// model produces below is checked against its own type (core §7.3).
+fn config_bundle() -> Bundle {
+    let l = zenkey_model::contract::load_path(&profiles().join("config/config.v1.toml"));
+    Bundle::build(&l.contract.unwrap_or_else(|| panic!("{}", l.report)))
+}
+
+/// Checks `value` against the contract's type of a resource's member.
+fn conforms(b: &Bundle, token: &str, template: &str, member: &str, value: &Value, what: &str) {
+    let ty = zenkey_model::decode::type_of(b, token, template, member)
+        .unwrap_or_else(|| panic!("{token}/{template}: no {member} type"));
+    if let Err(v) = zenkey_model::validate::validate(b, ty, value) {
+        panic!("{what}: {token}/{template} {member} does not satisfy its type: {v:?}\n{value:#}");
+    }
+}
+
+fn config_schema(doc: &Value, name: &Value) -> Schema {
+    serde_json::from_value(doc["schemas"][name.as_str().expect("schema name")].clone())
+        .expect("a schema")
+}
+
+fn refusal_json(r: &Refusal) -> Value {
+    let mut o =
+        json!({"code": r.code.as_str(), "field": r.field.as_ref().map(config::Field::as_str)});
+    if let Some(c) = r.cause() {
+        o["cause"] = json!(c);
+    }
+    if let Some(a) = &r.app {
+        o["app"] = json!(a.code.as_str());
+    }
+    json!({ "refused": o })
+}
+
+/// `config/conformance/window.json`: `confirm_s`, the floor and the instant
+/// received → the window and the deadline (config.v1 §2.8).
+#[test]
+fn config_window() {
+    let path = profiles().join("config/conformance/window.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let confirm = case["confirm_s"].as_u64().expect("confirm_s");
+        let floor = case["floor_s"].as_u64().expect("floor_s");
+        let received = Time::parse(case["received"].as_str().expect("received"))
+            .unwrap_or_else(|| panic!("{}: received is RFC 3339", case["note"]));
+        let w = config::window(confirm, floor);
+        let d = config::deadline(received, w);
+        assert_eq!(
+            Time::parse(&d.rfc3339()),
+            Some(d),
+            "the owner's spelling reads back"
+        );
+        let what = format!("{}", case["note"]);
+        expect(case, json!({"window_s": w, "deadline": d.rfc3339()}), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `config/conformance/validation.json`: one request against a schema and
+/// the owner's state → accepted or the refusal (config.v1 §2.5, §2.10,
+/// §2.13).
+#[test]
+fn config_validation() {
+    let path = profiles().join("config/conformance/validation.json");
+    let mut doc = read_json(&path);
+    let schemas = doc.clone();
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let schema = config_schema(&schemas, &case["schema"]);
+        let st = &case["state"];
+        let pending_token = st["pending"]["token"].as_str().map(str::to_owned);
+        let last_token = st["last_change"]["token"].as_str().map(str::to_owned);
+        let got = {
+            let facts = Facts {
+                revision: st["revision"].as_u64().expect("revision"),
+                pending: pending_token.as_deref().map(|token| PendingFacts {
+                    token,
+                    applied: st["pending"]["applied"].as_bool().expect("applied"),
+                    deadline_passed: st["pending"]["deadline_passed"]
+                        .as_bool()
+                        .expect("deadline_passed"),
+                }),
+                last_change: last_token.as_deref().map(|token| LastFacts {
+                    token,
+                    set_sensitive: st["last_change"]["set_sensitive"]
+                        .as_bool()
+                        .expect("set_sensitive"),
+                }),
+                persist: st["persist"].as_bool().expect("persist"),
+                in_flight: st["in_flight"].as_bool().expect("in_flight"),
+            };
+            let op = case["op"].as_str().expect("op");
+            let r = if op == "set" {
+                let req: SetRequest =
+                    serde_json::from_value(case["request"].clone()).expect("a SetRequest");
+                let group = case["group"].as_str().expect("group");
+                config::validate_set(&schema, &facts, group, &req).map(|_| ())
+            } else {
+                let req: ControlRequest =
+                    serde_json::from_value(case["request"].clone()).expect("a ControlRequest");
+                let op = match op {
+                    "confirm" => ControlOp::Confirm,
+                    "cancel" => ControlOp::Cancel,
+                    "extend" => ControlOp::Extend,
+                    "persist" => ControlOp::Persist,
+                    other => panic!("op {other:?}"),
+                };
+                config::validate_control(op, &facts, &req)
+            };
+            match r {
+                Ok(()) => json!({"accepted": true}),
+                Err(r) => refusal_json(&r),
+            }
+        };
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `config/conformance/desired.json`: a desired document against a schema →
+/// accepted, or refused whole with the first problem (config.v1 §2.18).
+#[test]
+fn config_desired() {
+    let path = profiles().join("config/conformance/desired.json");
+    let mut doc = read_json(&path);
+    let schemas = doc.clone();
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let schema = config_schema(&schemas, &case["schema"]);
+        let d: DesiredConfig =
+            serde_json::from_value(case["document"].clone()).expect("a DesiredConfig");
+        let got = match config::check_desired(&schema, &d) {
+            Ok(()) => json!({"accepted": true}),
+            Err(r) => json!({ "refused": r }),
+        };
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+type Layer<T> = BTreeMap<String, BTreeMap<String, T>>;
+
+/// Runs a step to its answer: performs each act with the next device
+/// result, leaving it in flight on `hold`.
+fn drive(owner: &mut Owner, now: Time, mut step: Step, queue: &mut VecDeque<Value>, out: &mut Ran) {
+    loop {
+        match step {
+            Step::Done(d) => {
+                if d.reply.is_some() {
+                    out.reply = d.reply;
+                }
+                out.events.extend(d.events);
+                return;
+            }
+            Step::Act(a) => {
+                out.acts.push(match a {
+                    config::Act::Apply { .. } => "apply",
+                    config::Act::Undo { .. } => "undo",
+                });
+                let r = queue.pop_front().unwrap_or(json!("ok"));
+                if r == json!("hold") {
+                    return;
+                }
+                step = owner.finish(now, device_result(&r));
+            }
+        }
+    }
+}
+
+/// What one step produced.
+#[derive(Default)]
+struct Ran {
+    acts: Vec<&'static str>,
+    events: Vec<config::ConfigChangeEvent>,
+    reply: Option<Result<config::Reply, Refusal>>,
+}
+
+fn device_result(r: &Value) -> DeviceResult {
+    if r == &json!("ok") {
+        return DeviceResult::Ok;
+    }
+    if let Some(w) = r["refused"].as_str() {
+        return DeviceResult::Refused(w.to_owned());
+    }
+    if let Some(w) = r["failed"].as_str() {
+        return DeviceResult::Failed {
+            words: w.to_owned(),
+            readback: serde_json::from_value(r["readback"].clone()).expect("a readback"),
+        };
+    }
+    panic!("device result {r}")
+}
+
+/// `config/conformance/redaction.json`: what the view, the status, the
+/// event, an envelope and a log line carry of a sensitive value
+/// (config.v1 §2.15).
+#[test]
+fn config_redaction() {
+    let path = profiles().join("config/conformance/redaction.json");
+    let bundle = config_bundle();
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let group: GroupDecl = serde_json::from_value(case["group"].clone()).expect("a group");
+        let gname = group.name.clone();
+        let schema = Schema {
+            groups: vec![group],
+        };
+        let mut startup: Layer<(config::Value, config::Source)> = BTreeMap::new();
+        for (p, h) in case["running"].as_object().expect("running") {
+            let v = serde_json::from_value(h["value"].clone()).expect("a value");
+            let s = serde_json::from_value(h["source"].clone()).expect("a source");
+            assert_eq!(
+                case["startup"][p], h["value"],
+                "{what}: the cases run from their startup values"
+            );
+            startup
+                .entry(gname.clone())
+                .or_default()
+                .insert(p.clone(), (v, s));
+        }
+        let fresh = || {
+            Owner::start(Start {
+                service: "lab/svc".into(),
+                instance: "i1".into(),
+                schema: schema.clone(),
+                startup: startup.clone(),
+                overlay: BTreeMap::new(),
+                floor_s: 10,
+                apply_after: Duration::from_secs(1),
+                persist: true,
+                events: Vec::new(),
+            })
+            .expect("a valid start")
+        };
+        let req: SetRequest =
+            serde_json::from_value(case["request"].clone()).expect("a SetRequest");
+        let t0 = Time::from_millis(0);
+        let mut owner = fresh();
+        let mut ran = Ran::default();
+        let step = owner.set(t0, &gname, &req, &Call::default());
+        drive(&mut owner, t0, step, &mut VecDeque::new(), &mut ran);
+        let got = match ran.reply.expect("a set is answered") {
+            Err(r) => {
+                let repeats = req.values.values().any(|v| {
+                    r.message.contains(&v.to_string())
+                        || v.as_str().is_some_and(|s| r.message.contains(s))
+                });
+                json!({"refused": {
+                    "code": r.code.as_str(),
+                    "field": r.field.as_ref().map(config::Field::as_str),
+                    "message_repeats_value": repeats,
+                }})
+            }
+            Ok(config::Reply::Set(SetReply::Applied(view))) => {
+                let vj = serde_json::to_value(&*view).unwrap();
+                conforms(&bundle, "state", "view", "type", &vj, &what);
+                let g = view
+                    .groups
+                    .iter()
+                    .find(|g| g.name == gname)
+                    .expect("the group");
+                let device_detail = match case["device_words"].as_str() {
+                    None => Value::Null,
+                    Some(words) => {
+                        let mut o = fresh();
+                        let s = o.set(t0, &gname, &req, &Call::default());
+                        assert!(matches!(s, Step::Act(_)), "{what}: the device is asked");
+                        match o.finish(t0, DeviceResult::Refused(words.into())) {
+                            Step::Done(config::Done {
+                                reply: Some(Err(r)),
+                                ..
+                            }) => json!(r.app.and_then(|a| a.detail)),
+                            other => panic!("{what}: {other:?}"),
+                        }
+                    }
+                };
+                json!({
+                    "view": g.parameters,
+                    "status": ConfigStatus::of(&view).values.get(&gname),
+                    "edits": ran.events.first().map(|e| &e.edits),
+                    "log": config::log_request(&schema, &gname, &req),
+                    "device_detail": device_detail,
+                })
+            }
+            Ok(other) => panic!("{what}: {other:?}"),
+        };
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn reply_json(r: &Option<Result<config::Reply, Refusal>>) -> Value {
+    match r {
+        None => Value::Null,
+        Some(Err(r)) => refusal_json(r),
+        Some(Ok(config::Reply::Set(SetReply::Applied(v)))) => {
+            json!({"applied": ConfigStatus::of(v)})
+        }
+        Some(Ok(config::Reply::Set(SetReply::Pending(p)))) => json!({ "pending": p }),
+        Some(Ok(config::Reply::Control(ControlReply::View(v)))) => {
+            json!({"view": ConfigStatus::of(v)})
+        }
+        Some(Ok(config::Reply::Control(ControlReply::Status(s)))) => json!({ "status": s }),
+    }
+}
+
+fn config_state(owner: &Owner) -> Value {
+    let view = owner.view();
+    let mut params = serde_json::Map::new();
+    for g in &view.groups {
+        let mut ps = serde_json::Map::new();
+        for p in &g.parameters {
+            let mut o = serde_json::Map::new();
+            if let Some(s) = p.source {
+                o.insert("source".into(), json!(s));
+            }
+            if let Some(s) = &p.startup {
+                o.insert("startup".into(), json!(s));
+            }
+            ps.insert(p.name.clone(), Value::Object(o));
+        }
+        params.insert(g.name.clone(), Value::Object(ps));
+    }
+    let writable: Vec<&str> = view
+        .groups
+        .iter()
+        .filter(|g| g.writable)
+        .map(|g| g.name.as_str())
+        .collect();
+    json!({"status": owner.status(), "params": params, "writable": writable})
+}
+
+fn lifecycle_owner(schemas: &Value, su: &Value) -> Owner {
+    let startup: Layer<(config::Value, config::Source)> =
+        serde_json::from_value::<Layer<serde_json::Map<String, Value>>>(su["startup"].clone())
+            .expect("startup")
+            .into_iter()
+            .map(|(g, ps)| {
+                let ps = ps
+                    .into_iter()
+                    .map(|(p, h)| {
+                        let v = serde_json::from_value(h["value"].clone()).expect("a value");
+                        let s = serde_json::from_value(h["source"].clone()).expect("a source");
+                        (p, (v, s))
+                    })
+                    .collect();
+                (g, ps)
+            })
+            .collect();
+    let mut events = Vec::new();
+    for e in su["events_at"].as_array().expect("events_at") {
+        let t = Time::from_secs_f64(e["t"].as_f64().expect("t"));
+        for _ in 0..e["count"].as_u64().expect("count") {
+            events.push(t);
+        }
+    }
+    Owner::start(Start {
+        service: su["service"].as_str().expect("service").into(),
+        instance: su["instance"].as_str().expect("instance").into(),
+        schema: config_schema(schemas, &su["schema"]),
+        startup,
+        overlay: serde_json::from_value(su["overlay"].clone()).expect("overlay"),
+        floor_s: su["floor_s"].as_u64().expect("floor_s"),
+        apply_after: Duration::from_millis(su["apply_after_ms"].as_u64().expect("apply_after_ms")),
+        persist: su["persist"].as_bool().expect("persist"),
+        events,
+    })
+    .expect("a valid setup")
+}
+
+/// Runs one lifecycle step on `owner`.
+fn lifecycle_step(owner: &mut Owner, step: &Value, now: Time) -> Ran {
+    let mut queue: VecDeque<Value> = step["device"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into();
+    let call = Call {
+        actor: step["call"]["actor"].as_str().map(str::to_owned),
+        request_id: step["call"]["request_id"].as_str().map(str::to_owned),
+    };
+    let control = || -> ControlRequest {
+        serde_json::from_value(step["request"].clone()).expect("a ControlRequest")
+    };
+    let mut ran = Ran::default();
+    match step["do"].as_str().expect("do") {
+        "set" => {
+            let req: SetRequest =
+                serde_json::from_value(step["request"].clone()).expect("a SetRequest");
+            let s = owner.set(now, step["group"].as_str().expect("group"), &req, &call);
+            drive(owner, now, s, &mut queue, &mut ran);
+        }
+        "confirm" => {
+            let s = owner.confirm(now, &control(), &call);
+            drive(owner, now, s, &mut queue, &mut ran);
+        }
+        "cancel" => {
+            let s = owner.cancel(now, &control(), &call);
+            drive(owner, now, s, &mut queue, &mut ran);
+        }
+        "extend" => {
+            let s = owner.extend(now, &control(), &call);
+            drive(owner, now, s, &mut queue, &mut ran);
+        }
+        "persist" => match owner.persist_plan(now, &control()) {
+            Ok(plan) => ran.reply = owner.persisted(plan).reply,
+            Err(r) => ran.reply = Some(Err(r)),
+        },
+        "due" => {
+            while let Some(s) = owner.due(now) {
+                drive(owner, now, s, &mut queue, &mut ran);
+                if owner.in_flight() {
+                    break;
+                }
+            }
+        }
+        "complete" => {
+            let r = queue.pop_front().unwrap_or(json!("ok"));
+            let s = owner.finish(now, device_result(&r));
+            drive(owner, now, s, &mut queue, &mut ran);
+        }
+        "restart" => {
+            *owner = owner.restart(step["instance"].as_str().expect("instance"));
+        }
+        other => panic!("do {other:?}"),
+    }
+    ran
+}
+
+/// `config/conformance/lifecycle.json`: sequences of calls, device results
+/// and instants on one owner → its replies, acts, events and state
+/// (config.v1 §2.3, §2.6–§2.14, §2.17, §2.19).
+#[test]
+fn config_lifecycle() {
+    let path = profiles().join("config/conformance/lifecycle.json");
+    let bundle = config_bundle();
+    let mut doc = read_json(&path);
+    let schemas = doc.clone();
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let note = case["note"].as_str().expect("note").to_owned();
+        let mut owner = lifecycle_owner(&schemas, &case["setup"]);
+        let start = config_state(&owner);
+        if bless() {
+            case["start"] = start;
+        } else {
+            assert_eq!(case["start"], start, "{note}: the state before any step");
+        }
+        for (i, step) in case["steps"]
+            .as_array_mut()
+            .expect("steps")
+            .iter_mut()
+            .enumerate()
+        {
+            let what = format!("{note}, step {i} ({} at t={})", step["do"], step["t"]);
+            let now = Time::from_secs_f64(step["t"].as_f64().expect("t"));
+            let ran = lifecycle_step(&mut owner, step, now);
+            // Every document the owner puts or sends is its contract's type.
+            let view = serde_json::to_value(owner.view()).unwrap();
+            conforms(&bundle, "state", "view", "type", &view, &what);
+            let status = serde_json::to_value(owner.status()).unwrap();
+            conforms(&bundle, "state", "status", "type", &status, &what);
+            for e in &ran.events {
+                let e = serde_json::to_value(e).unwrap();
+                conforms(&bundle, "events", "change", "type", &e, &what);
+            }
+            match &ran.reply {
+                Some(Ok(r @ config::Reply::Set(_))) => {
+                    conforms(
+                        &bundle,
+                        "@op",
+                        "set/{group}",
+                        "response",
+                        &r.to_json(),
+                        &what,
+                    );
+                }
+                Some(Ok(r @ config::Reply::Control(_))) => {
+                    conforms(&bundle, "@op", "confirm", "response", &r.to_json(), &what);
+                }
+                Some(Err(Refusal { app: Some(a), .. })) => {
+                    let a = serde_json::to_value(a).unwrap();
+                    conforms(&bundle, "@op", "set/{group}", "error", &a, &what);
+                }
+                _ => {}
+            }
+            let got = json!({
+                "reply": reply_json(&ran.reply),
+                "acts": ran.acts,
+                "events": ran.events,
+                "state": config_state(&owner),
+            });
+            expect(step, got, &what);
+        }
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// The two types no fixture puts on the wire, checked against the contract:
+/// a view and a status carrying a desired report (config.v1 §2.18), and a
+/// `DesiredConfig`, which no resource of `config.v1` carries.
+#[test]
+fn config_desired_types_are_the_contracts() {
+    let bundle = config_bundle();
+    let doc = read_json(&profiles().join("config/conformance/lifecycle.json"));
+    let mut owner = lifecycle_owner(&doc, &doc["cases"][0]["setup"]);
+    owner.report_desired(Some(config::DesiredReport {
+        observed_revision: 2,
+        outcome: config::DesiredOutcome::Refused,
+        refusal: Some(config::DesiredRefusal {
+            code: config::DesiredCode::Sensitive,
+            group: "sim".into(),
+            parameter: Some("pin".into()),
+        }),
+    }));
+    let view = serde_json::to_value(owner.view()).unwrap();
+    conforms(&bundle, "state", "view", "type", &view, "a desired report");
+    assert_eq!(
+        view["desired"],
+        json!({"observed_revision": 2, "outcome": "refused",
+               "refusal": {"code": "sensitive", "group": "sim", "parameter": "pin"}})
+    );
+    let status = serde_json::to_value(owner.status()).unwrap();
+    conforms(
+        &bundle,
+        "state",
+        "status",
+        "type",
+        &status,
+        "a desired report",
+    );
+    let mut ty = zenkey_model::decode::type_of(&bundle, "state", "view", "type")
+        .expect("the view's type")
+        .clone();
+    ty["name"] = json!("DesiredConfig");
+    let d = config::DesiredConfig {
+        revision: 7,
+        values: [(
+            "duty".to_owned(),
+            [("fraction_ppm".to_owned(), json!(20000))].into(),
+        )]
+        .into(),
+    };
+    let dj = serde_json::to_value(&d).unwrap();
+    assert!(
+        zenkey_model::validate::validate(&bundle, &ty, &dj).is_ok(),
+        "{dj}"
+    );
+    assert!(config::check_desired(owner.schema(), &d).is_ok());
 }

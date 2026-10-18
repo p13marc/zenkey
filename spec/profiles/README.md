@@ -12,13 +12,14 @@ and `examples/zk2/`.
 | [`hostid.v1`](hostid/v1.md) | 0.5 | draft | 0.22 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
 | [`freshness.v1`](freshness/v1.md) | 0.3 | draft | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
 | [`health.v1`](health/v1.md) | 0.4 | draft | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
+| [`config.v1`](config/v1.md) | 0.1 | draft | 0.27 | 1: [`config.v1.toml`](config/config.v1.toml); 4 through `uses` (`freshness.v1`) | Changing a running service's configuration without locking it out: groups with classes, a change that can cut the link applied only under a window and undone once unless confirmed, persistence as a separate act, and the compact status a constrained face can afford (core §5, §6, O7) |
 
 ## Layout
 
 ```text
 profiles/
   README.md               this file: the index, the template, the process
-  .history/               published revisions of the profiles' standard contracts (health.v1)
+  .history/               published revisions of the profiles' standard contracts (health.v1, config.v1)
   <name>/
     v<major>.md           the normative text of one wire major
     CHANGELOG.md          the versions of that text
@@ -98,6 +99,8 @@ thing in the same place.
   0.21, so that W105 reads its published vocabulary and a re-put is a
   mutation. `health.v1` needed 0.23, so that a clock ahead is reported by
   a stream, which the guard does not hold, rather than by its status.
+  `config.v1` needed no change: core §7.3's `oneOf` expresses its
+  discriminated replies.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in
@@ -117,7 +120,7 @@ thing in the same place.
     is named by its interface id, and is published in
     `spec/profiles/.history`, compatible with every earlier revision there.
   - A profile's session-free code lives in `zenkey-model` (`hostid`,
-    `freshness`, `health`), and its runtime in `zenkey`. Its scenarios run as tests
+    `freshness`, `health`, `config`), and its runtime in `zenkey`. Its scenarios run as tests
     of the runtime, one test per section, named after it, as the core's
     do. A scenario that is a tool's runs as a test of that tool.
 - **Other implementations** run the same files. Each fixture states its

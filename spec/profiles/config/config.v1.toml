@@ -1,0 +1,80 @@
+# config.v1's standard contract (spec/profiles/config/v1.md section 3): the
+# configuration of one service, in groups with classes, under confirmed
+# commit, with persistence as a separate act. Every act is its own @op key, so
+# each is separately grantable (docs/zk2/architecture.md section 4.10).
+# Published in spec/profiles/.history/config.v1/.
+# Doc strings are outside the fingerprint (core section 9.5), and so are comments.
+[interface]
+name    = "config"
+major   = 1
+minor   = 0
+summary = "The configuration of one service: groups with classes, confirmed commit, persistence"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/config.json"]
+
+# No operation is idempotent: a retry of set is made safe by its
+# idempotency_key (v1.md 2.14), and a confirm retried after a lost reply
+# answers not_found. None fans out (core section 11.3: under allow, an
+# operation that must not run for everyone is fanout = "forbidden").
+[defaults.operation]
+idempotent = false
+fanout     = "forbidden"
+
+[resources.view]
+kind        = "state"
+type        = "json:ConfigView"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "The read-back: the served schema and the running values. A GET on it is the read (config.v1 2.3). Put before the tokens and on every change, re-put at least every 30 s."
+
+[resources.status]
+kind        = "state"
+type        = "json:ConfigStatus"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "The compact status a constrained face can afford: revision, pending change, last change, floor and values, never a sensitive value (config.v1 2.19)."
+
+[resources."set/{group}"]
+kind        = "operation"
+params      = { group = "string" }
+cardinality = 16
+request     = "json:SetRequest"
+response    = "json:SetReply"
+error       = "json:ConfigError"
+doc         = "Change some parameters of one group: hot replies with the read-back after the apply, reach with {token, apply_at, deadline} before it (config.v1 2.5, 2.9)."
+
+[resources.confirm]
+kind     = "operation"
+request  = "json:ControlRequest"
+response = "json:ControlReply"
+error    = "json:ConfigError"
+doc      = "Keep the pending change: it becomes the last change (config.v1 2.10)."
+
+[resources.cancel]
+kind     = "operation"
+request  = "json:ControlRequest"
+response = "json:ControlReply"
+error    = "json:ConfigError"
+doc      = "Undo the pending change now, once (config.v1 2.10, 2.11)."
+
+[resources.extend]
+kind     = "operation"
+request  = "json:ControlRequest"
+response = "json:ControlReply"
+error    = "json:ConfigError"
+doc      = "Move the pending change's deadline to now plus a new window (config.v1 2.10)."
+
+[resources.persist]
+kind     = "operation"
+request  = "json:ControlRequest"
+response = "json:ControlReply"
+error    = "json:ConfigError"
+optional = true
+doc      = "Write the last change into the persisted layer, so that it survives a restart: its own key, so a change can be granted while surviving a restart is not. An owner with no persisted layer lists it unavailable, cause config (config.v1 2.13)."
+
+[resources.change]
+kind      = "event"
+type      = "json:ConfigChangeEvent"
+rate      = "burst(600/h)"
+retention = "7d"
+doc       = "One change as it ended: applied, confirmed, rolled-back or partial, with its edits and its claimed attribution (config.v1 2.17). Keyed per occurrence, events/change/<ulid>."

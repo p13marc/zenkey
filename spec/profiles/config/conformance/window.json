@@ -1,0 +1,185 @@
+{
+  "cases": [
+    {
+      "confirm_s": 120,
+      "expect": {
+        "deadline": "2026-10-18T12:02:00.000Z",
+        "window_s": 120
+      },
+      "floor_s": 10,
+      "note": "the window asked for, above the floor",
+      "received": "2026-10-18T12:00:00.000Z"
+    },
+    {
+      "confirm_s": 5,
+      "expect": {
+        "deadline": "2026-10-18T12:00:10.000Z",
+        "window_s": 10
+      },
+      "floor_s": 10,
+      "note": "below the floor: raised to it, and the deadline says so",
+      "received": "2026-10-18T12:00:00.000Z"
+    },
+    {
+      "confirm_s": 10,
+      "expect": {
+        "deadline": "2026-10-18T12:00:10.000Z",
+        "window_s": 10
+      },
+      "floor_s": 10,
+      "note": "equal to the floor",
+      "received": "2026-10-18T12:00:00.000Z"
+    },
+    {
+      "confirm_s": 11,
+      "expect": {
+        "deadline": "2026-10-18T12:00:11.000Z",
+        "window_s": 11
+      },
+      "floor_s": 10,
+      "note": "one second above the floor",
+      "received": "2026-10-18T12:00:00.000Z"
+    },
+    {
+      "confirm_s": 1,
+      "expect": {
+        "deadline": "2026-10-18T12:01:00.000Z",
+        "window_s": 60
+      },
+      "floor_s": 60,
+      "note": "the default floor, 60 s, raises a one-second window",
+      "received": "2026-10-18T12:00:00.000Z"
+    },
+    {
+      "confirm_s": 1,
+      "expect": {
+        "deadline": "2026-10-18T12:00:01.000Z",
+        "window_s": 1
+      },
+      "floor_s": 1,
+      "note": "the smallest window and the smallest floor",
+      "received": "2026-10-18T12:00:00.000Z"
+    },
+    {
+      "confirm_s": 30,
+      "expect": {
+        "deadline": "2026-10-18T12:00:30.250Z",
+        "window_s": 30
+      },
+      "floor_s": 10,
+      "note": "milliseconds carried through",
+      "received": "2026-10-18T12:00:00.250Z"
+    },
+    {
+      "confirm_s": 60,
+      "expect": {
+        "deadline": "2027-01-01T00:00:30.000Z",
+        "window_s": 60
+      },
+      "floor_s": 10,
+      "note": "across a year's end",
+      "received": "2026-12-31T23:59:30.000Z"
+    },
+    {
+      "confirm_s": 120,
+      "expect": {
+        "deadline": "2028-02-29T00:01:00.000Z",
+        "window_s": 120
+      },
+      "floor_s": 90,
+      "note": "into a leap day",
+      "received": "2028-02-28T23:59:00.000Z"
+    },
+    {
+      "confirm_s": 120,
+      "expect": {
+        "deadline": "2027-03-01T00:01:00.000Z",
+        "window_s": 120
+      },
+      "floor_s": 90,
+      "note": "no leap day in 2027",
+      "received": "2027-02-28T23:59:00.000Z"
+    },
+    {
+      "confirm_s": 120,
+      "expect": {
+        "deadline": "1970-01-01T00:02:00.000Z",
+        "window_s": 120
+      },
+      "floor_s": 60,
+      "note": "the epoch",
+      "received": "1970-01-01T00:00:00.000Z"
+    },
+    {
+      "confirm_s": 120,
+      "expect": {
+        "deadline": "2026-10-18T12:02:00.000Z",
+        "window_s": 120
+      },
+      "floor_s": 10,
+      "note": "received written without a fraction: the deadline is still written to the millisecond",
+      "received": "2026-10-18T12:00:00Z"
+    },
+    {
+      "confirm_s": 10,
+      "expect": {
+        "deadline": "2026-10-18T12:00:10.500Z",
+        "window_s": 10
+      },
+      "floor_s": 10,
+      "note": "received with one fraction digit",
+      "received": "2026-10-18T12:00:00.5Z"
+    },
+    {
+      "confirm_s": 120,
+      "expect": {
+        "deadline": "2026-10-18T12:02:00.000Z",
+        "window_s": 120
+      },
+      "floor_s": 10,
+      "note": "received with a positive offset: the deadline is written in UTC",
+      "received": "2026-10-18T14:00:00.000+02:00"
+    },
+    {
+      "confirm_s": 60,
+      "expect": {
+        "deadline": "2026-10-18T12:01:00.000Z",
+        "window_s": 60
+      },
+      "floor_s": 10,
+      "note": "received with a negative offset",
+      "received": "2026-10-18T07:00:00.000-05:00"
+    },
+    {
+      "confirm_s": 86400,
+      "expect": {
+        "deadline": "2026-10-19T12:00:00.000Z",
+        "window_s": 86400
+      },
+      "floor_s": 10,
+      "note": "a day's window",
+      "received": "2026-10-18T12:00:00.000Z"
+    },
+    {
+      "confirm_s": 31536000,
+      "expect": {
+        "deadline": "2027-10-18T12:00:00.000Z",
+        "window_s": 31536000
+      },
+      "floor_s": 10,
+      "note": "a year's window: no upper bound in this text (§2.8)",
+      "received": "2026-10-18T12:00:00.000Z"
+    },
+    {
+      "confirm_s": 1,
+      "expect": {
+        "deadline": "2026-10-19T00:00:00.999Z",
+        "window_s": 1
+      },
+      "floor_s": 1,
+      "note": "the last millisecond of a day",
+      "received": "2026-10-18T23:59:59.999Z"
+    }
+  ],
+  "description": "config.v1 §2.8: a set's or an extend's confirm_s, the owner's floor, and the instant the owner received the call -> the window and the deadline. confirm_s and floor_s are integer seconds, each at least 1. received is an RFC 3339 date-time, to the millisecond or coarser, with Z or an offset: a reader accepts any RFC 3339 date-time. expect.window_s is max(confirm_s, floor_s); expect.deadline is received plus window_s, as the owner writes it: RFC 3339 in UTC, YYYY-MM-DDTHH:MM:SS.sssZ, always three fraction digits."
+}

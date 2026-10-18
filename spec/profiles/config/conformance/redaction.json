@@ -1,0 +1,642 @@
+{
+  "cases": [
+    {
+      "device_words": "PIN 1234 rejected by the SIM",
+      "expect": {
+        "device_detail": null,
+        "edits": [
+          {
+            "group": "sim",
+            "parameter": "pin",
+            "redacted": true
+          }
+        ],
+        "log": {
+          "values": {
+            "pin": "<redacted>"
+          }
+        },
+        "status": {
+          "pin_retries": 3
+        },
+        "view": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true,
+            "source": "runtime"
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries",
+            "source": "file",
+            "value": 3
+          }
+        ]
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "sim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries"
+          }
+        ],
+        "writable": true
+      },
+      "note": "a sensitive value set: the view shows its source alone, the status leaves it out, the edit is redacted",
+      "request": {
+        "values": {
+          "pin": "1234"
+        }
+      },
+      "running": {
+        "pin": {
+          "source": "file",
+          "value": "0000"
+        },
+        "pin_retries": {
+          "source": "file",
+          "value": 3
+        }
+      },
+      "startup": {
+        "pin": "0000",
+        "pin_retries": 3
+      }
+    },
+    {
+      "device_words": "retries locked at 3",
+      "expect": {
+        "device_detail": null,
+        "edits": [
+          {
+            "group": "sim",
+            "parameter": "pin",
+            "redacted": true
+          },
+          {
+            "group": "sim",
+            "new": 5,
+            "old": 3,
+            "parameter": "pin_retries"
+          }
+        ],
+        "log": {
+          "values": {
+            "pin": "<redacted>",
+            "pin_retries": 5
+          }
+        },
+        "status": {
+          "pin_retries": 5
+        },
+        "view": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true,
+            "source": "runtime"
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries",
+            "source": "runtime",
+            "startup": 3,
+            "value": 5
+          }
+        ]
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "sim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries"
+          }
+        ],
+        "writable": true
+      },
+      "note": "a change setting a sensitive and a plain value: the device's words are left out",
+      "request": {
+        "values": {
+          "pin": "1234",
+          "pin_retries": 5
+        }
+      },
+      "running": {
+        "pin": {
+          "source": "file",
+          "value": "0000"
+        },
+        "pin_retries": {
+          "source": "file",
+          "value": 3
+        }
+      },
+      "startup": {
+        "pin": "0000",
+        "pin_retries": 3
+      }
+    },
+    {
+      "device_words": "retries locked at 3",
+      "expect": {
+        "device_detail": "retries locked at 3",
+        "edits": [
+          {
+            "group": "sim",
+            "new": 5,
+            "old": 3,
+            "parameter": "pin_retries"
+          }
+        ],
+        "log": {
+          "values": {
+            "pin_retries": 5
+          }
+        },
+        "status": {
+          "pin_retries": 5
+        },
+        "view": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true,
+            "source": "file"
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries",
+            "source": "runtime",
+            "startup": 3,
+            "value": 5
+          }
+        ]
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "sim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries"
+          }
+        ],
+        "writable": true
+      },
+      "note": "a change setting no sensitive value: the device's words are kept",
+      "request": {
+        "values": {
+          "pin_retries": 5
+        }
+      },
+      "running": {
+        "pin": {
+          "source": "file",
+          "value": "0000"
+        },
+        "pin_retries": {
+          "source": "file",
+          "value": 3
+        }
+      },
+      "startup": {
+        "pin": "0000",
+        "pin_retries": 3
+      }
+    },
+    {
+      "device_words": null,
+      "expect": {
+        "device_detail": null,
+        "edits": [
+          {
+            "group": "key",
+            "parameter": "key_id",
+            "redacted": true
+          }
+        ],
+        "log": {
+          "idempotency_key": "k9",
+          "values": {
+            "key_id": "<redacted>"
+          }
+        },
+        "status": null,
+        "view": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 255,
+            "min": 0,
+            "name": "key_id",
+            "sensitive": true,
+            "source": "runtime"
+          },
+          {
+            "description": "",
+            "kind": "text",
+            "name": "psk",
+            "sensitive": true,
+            "source": "file"
+          }
+        ]
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "key",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 255,
+            "min": 0,
+            "name": "key_id",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "text",
+            "name": "psk",
+            "sensitive": true
+          }
+        ],
+        "writable": true
+      },
+      "note": "a group of sensitive values only: the status leaves the group out, a sensitive integer is redacted in the log",
+      "request": {
+        "idempotency_key": "k9",
+        "values": {
+          "key_id": 7
+        }
+      },
+      "running": {
+        "key_id": {
+          "source": "file",
+          "value": 1
+        },
+        "psk": {
+          "source": "file",
+          "value": "s3cret"
+        }
+      },
+      "startup": {
+        "key_id": 1,
+        "psk": "s3cret"
+      }
+    },
+    {
+      "device_words": null,
+      "expect": {
+        "device_detail": null,
+        "edits": null,
+        "log": {
+          "dry_run": true,
+          "expected_revision": 0,
+          "idempotency_key": "k1",
+          "values": {
+            "pin": "<redacted>",
+            "pin_retries": 4
+          }
+        },
+        "status": {
+          "pin_retries": 4
+        },
+        "view": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true,
+            "source": "runtime"
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries",
+            "source": "runtime",
+            "startup": 3,
+            "value": 4
+          }
+        ]
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "sim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries"
+          }
+        ],
+        "writable": true
+      },
+      "note": "a dry run: its would-be view carries no sensitive value, it has no event, and its log line is redacted",
+      "request": {
+        "dry_run": true,
+        "expected_revision": 0,
+        "idempotency_key": "k1",
+        "values": {
+          "pin": "1234",
+          "pin_retries": 4
+        }
+      },
+      "running": {
+        "pin": {
+          "source": "file",
+          "value": "0000"
+        },
+        "pin_retries": {
+          "source": "file",
+          "value": 3
+        }
+      },
+      "startup": {
+        "pin": "0000",
+        "pin_retries": 3
+      }
+    },
+    {
+      "device_words": null,
+      "expect": {
+        "device_detail": null,
+        "edits": [
+          {
+            "group": "sim",
+            "parameter": "pin",
+            "redacted": true
+          }
+        ],
+        "log": {
+          "values": {
+            "pin": "<redacted>"
+          }
+        },
+        "status": {
+          "pin_retries": 3
+        },
+        "view": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true,
+            "source": "runtime"
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries",
+            "source": "file",
+            "value": 3
+          }
+        ]
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "sim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries"
+          }
+        ],
+        "writable": true
+      },
+      "note": "a sensitive value equal to its startup value: still neither value nor startup",
+      "request": {
+        "values": {
+          "pin": "0000"
+        }
+      },
+      "running": {
+        "pin": {
+          "source": "file",
+          "value": "0000"
+        },
+        "pin_retries": {
+          "source": "file",
+          "value": 3
+        }
+      },
+      "startup": {
+        "pin": "0000",
+        "pin_retries": 3
+      }
+    },
+    {
+      "device_words": null,
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/pin",
+          "message_repeats_value": false
+        }
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "sim",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "text",
+            "name": "pin",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 10,
+            "min": 0,
+            "name": "pin_retries"
+          }
+        ],
+        "writable": true
+      },
+      "note": "a sensitive text value of the wrong kind: refused, naming the parameter and never the value",
+      "request": {
+        "values": {
+          "pin": 1234
+        }
+      },
+      "running": {
+        "pin": {
+          "source": "file",
+          "value": "0000"
+        },
+        "pin_retries": {
+          "source": "file",
+          "value": 3
+        }
+      },
+      "startup": {
+        "pin": "0000",
+        "pin_retries": 3
+      }
+    },
+    {
+      "device_words": null,
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/unlock",
+          "message_repeats_value": false
+        }
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "lock",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "bool",
+            "name": "unlock",
+            "sensitive": true
+          }
+        ],
+        "writable": true
+      },
+      "note": "a sensitive boolean given text: refused, never repeating the text",
+      "request": {
+        "values": {
+          "unlock": "open-sesame"
+        }
+      },
+      "running": {
+        "unlock": {
+          "source": "default",
+          "value": false
+        }
+      },
+      "startup": {
+        "unlock": false
+      }
+    },
+    {
+      "device_words": null,
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "field": "/values/key_id",
+          "message_repeats_value": false
+        }
+      },
+      "group": {
+        "class": "hot",
+        "description": "",
+        "name": "key",
+        "parameters": [
+          {
+            "description": "",
+            "kind": "integer",
+            "max": 255,
+            "min": 0,
+            "name": "key_id",
+            "sensitive": true
+          },
+          {
+            "description": "",
+            "kind": "text",
+            "name": "psk",
+            "sensitive": true
+          }
+        ],
+        "writable": true
+      },
+      "note": "a sensitive integer out of bounds: refused, never repeating the value",
+      "request": {
+        "values": {
+          "key_id": 4096
+        }
+      },
+      "running": {
+        "key_id": {
+          "source": "file",
+          "value": 1
+        },
+        "psk": {
+          "source": "file",
+          "value": "s3cret"
+        }
+      },
+      "startup": {
+        "key_id": 1,
+        "psk": "s3cret"
+      }
+    }
+  ],
+  "description": "config.v1 §2.15: what the view, the status, the change event, an error envelope and a log line may carry for a sensitive value. A case gives one group as the view declares it, the owner's running values before the change ({parameter: {value, source}}), the startup values ({parameter: value}: what a restart would give), a SetRequest on the group, and device_words, what the device would say refusing it (or null). The owner applies the request's values (source runtime; a dry run applies nothing, and is shown as its would-be view). expect.view is the group's parameters as the view then shows them (§2.3: startup only where it differs from a known running value, and never for a sensitive parameter); expect.status the group's member of the status's values, or null when the status leaves the group out; expect.edits the change event's edits, or null when there is no event (a dry run); expect.log the request as the owner logs it, each sensitive value written \"<redacted>\"; expect.device_detail the ConfigError detail of a device-refused envelope given device_words, null when the words are left out or there are none. A request the owner refuses instead expects {refused: {code, field, message_repeats_value}}, as validation.json reads code and field; message_repeats_value says whether the envelope's message contains the refused value, as its JSON text or, for a string, the string itself, which it never does."
+}
