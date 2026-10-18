@@ -62,13 +62,16 @@
 //! O2 ladder got, a payload's conformance to its declared type, a sample's
 //! QoS against the contract's, and what the observer resolved with). PF
 //! gave `health.v1` its domain (`health`: each service's verdict, §5's other
-//! questions and the roll-up, in the profile's own tokens, #721).
+//! questions and the roll-up, in the profile's own tokens, #721). CC gave
+//! `config.v1` its domain (`config`: a reading of the view and the status
+//! with §5's answers, and one act with its reply union, #768).
 
 mod acl;
 mod admin;
 mod asked;
 mod bench;
 mod condition;
+mod config;
 mod conform;
 mod contract;
 mod diff;
@@ -100,6 +103,7 @@ pub use admin::*;
 pub use asked::*;
 pub use bench::*;
 pub use condition::*;
+pub use config::*;
 pub use conform::*;
 pub use contract::*;
 pub use diff::*;

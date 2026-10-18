@@ -69,7 +69,8 @@ The enrollment file (examples/zk2/acl/ holds two):
   [[service.calls]]
   interface  = "nav.v2"
   providers  = ["vehicle-01/navigation"]
-  operations = ["set_origin"]            # default: every operation
+  operations = ["set_origin"]            # default: every operation;
+                                         #   "set/duty": one member
   [[archive]]
   address = "vehicle-01/archive"
   records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"]

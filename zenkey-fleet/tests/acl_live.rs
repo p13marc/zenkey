@@ -1320,3 +1320,104 @@ async fn under_allow_no_principal_answers_the_admin_space() {
         assert_eq!(replies.len(), answered, "{replies:?}");
     }
 }
+
+/// `config.v1`'s acts, each its own grant (config.v1 §2.21; scenarios.md
+/// §8's shape; #768, CC), judged by a router: `examples/zk2/acl/
+/// config.enrollment.toml` planned under deny over the standard contract.
+/// The far side's operators reach rf0's `set/duty`, `set/radio`, `confirm`,
+/// `cancel` and `extend` and its view, and draw silence from rf0's
+/// `persist`, from a group no grant names, and from everything of sat0; the
+/// local operator reaches `persist` and every group of both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_acts_are_granted_one_by_one() {
+    let text = std::fs::read_to_string(util::zk2::examples().join("acl/config.enrollment.toml"))
+        .expect("the config enrollment");
+    let enrollment: Enrollment = toml::from_str(&text).expect("the enrollment parses");
+    let (contracts, problems) = ContractSet::load_path(&util::zk2::profiles().join("config"));
+    assert!(problems.is_empty(), "{problems:?}");
+    let plan = plan_acl(&enrollment, &contracts, &AclOptions::default()).expect("it plans");
+    assert!(plan.refusals.is_empty(), "{:#?}", plan.refusals);
+
+    let dict = scratch("usrpwd.txt");
+    let users = ["router", "modem", "ops", "admin"]
+        .map(|u| format!("{u}:{u}-pw\n"))
+        .concat();
+    std::fs::write(&dict, users).unwrap();
+    let text = format!(
+        "{{\n  mode: \"router\",\n  scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
+         listen: {{ endpoints: [\"{}\"] }},\n  \
+         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }} }},\n{}}}\n",
+        util::ANY_PORT,
+        dict.display().to_string(),
+        acl_plan_json5(&plan)
+    );
+    let config = zenoh::Config::from_json5(&text)
+        .unwrap_or_else(|e| panic!("the router config does not parse: {e}\n{text}"));
+    let router = zenoh::open(config).await.expect("a router with the plan");
+    let ep = util::bound(&router).await;
+    let modem = client(&ep, Some("modem")).await.expect("modem connects");
+    let ops = client(&ep, Some("ops")).await.expect("ops connects");
+    let admin = client(&ep, Some("admin")).await.expect("admin connects");
+
+    const HOST: &str = "zk2/h-3fa9c2d41b7e";
+    let mut servers = Vec::new();
+    for svc in ["rf0", "sat0"] {
+        servers.push(operation(&modem, &format!("{HOST}/{svc}/config.v1/@op/**")).await);
+        servers.push(serve(&modem, &format!("{HOST}/{svc}/config.v1/state/view"), "v").await);
+    }
+    let answered = |s: &zenoh::Session, key: String| {
+        let s = s.clone();
+        async move {
+            let (values, _) = get(&s, &key, QueryTarget::BestMatching, T).await;
+            values == [key]
+        }
+    };
+    for key in [
+        "rf0/config.v1/@op/set/duty",
+        "rf0/config.v1/@op/set/radio",
+        "rf0/config.v1/@op/confirm",
+        "rf0/config.v1/@op/cancel",
+        "rf0/config.v1/@op/extend",
+        "rf0/config.v1/state/view",
+    ] {
+        eventually(&format!("ops reaches {key}"), || {
+            answered(&ops, format!("{HOST}/{key}"))
+        })
+        .await;
+    }
+    for key in [
+        "rf0/config.v1/@op/persist",
+        "sat0/config.v1/@op/set/duty",
+        "sat0/config.v1/@op/persist",
+        "sat0/config.v1/state/view",
+    ] {
+        eventually(&format!("admin reaches {key}"), || {
+            answered(&admin, format!("{HOST}/{key}"))
+        })
+        .await;
+    }
+    // What no grant of ops names draws nothing, neither a value nor a
+    // refusal: an access-control refusal is silent (core O5), never
+    // not_found.
+    for key in [
+        "rf0/config.v1/@op/persist",
+        "rf0/config.v1/@op/set/queue",
+        "sat0/config.v1/@op/set/duty",
+        "sat0/config.v1/@op/confirm",
+        "sat0/config.v1/state/view",
+    ] {
+        let (values, errors) = get(
+            &ops,
+            &format!("{HOST}/{key}"),
+            QueryTarget::BestMatching,
+            SILENCE,
+        )
+        .await;
+        assert!(
+            values.is_empty() && !errors.iter().any(|e| e.contains("fanout_forbidden")),
+            "ops on {key}: {values:?} {errors:?}"
+        );
+    }
+    drop(servers);
+    let _ = std::fs::remove_file(&dict);
+}

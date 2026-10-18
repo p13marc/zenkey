@@ -211,7 +211,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   stays on crates.io un-yanked): app-neutral, and zk2's since FJ9 (#612),
   when what was left of v1 went — `why`, `check cutover|retired|conform`,
   `config`, `blob`, `export`, `--registry` and the slice cache — and the
-  binary stopped linking v1's `zenkey`. Verbs read contracts from the
+  binary stopped linking v1's `zenkey` (`why` and `check conform` came back
+  at FK1, `config` at #768). Verbs read contracts from the
   bundles the bus serves (spec §8.4) or `--contracts <path>`; resolved verbs
   open their session in the deployment namespace — `--namespace` (alias
   `--base`) resolves flag > env `ZENCTL_BASE` > the active named context
@@ -227,8 +228,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: nineteen checks
-  since #735 (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`), each a
+  FJ6's `doctor` judges a zk2 deployment against the core: twenty-three
+  checks since #768 (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  an appendable vocabulary whose JSON Schema is one open string branch
+  since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
   namespace and one in none for the admin space and the presence domain;
   exit 1 on a finding at or above `--fail-on` (default warning), 2 when a
@@ -299,11 +302,35 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   an occurrence beyond the rate and a lowering below the live members
   (`Error::Budget`), so a test that needs an owner over its bound uses
   two instances of one service, or raw puts.
+  CC's `config get|set|confirm|cancel|extend|persist <SYSTEM/SERVICE>`
+  (#768) are `config.v1`'s, every rule the engine's: `bus::config`
+  (`run_config` reads presence, the descriptor — the premise: listed, not
+  listed, unread, absent, incomplete, across a face — then S4's GET of the
+  view and status and a `--for` window on them and `events/change`;
+  `call_config` makes one act through `zenkey::Client`), `model::config`
+  (`freshness.v1` at 60 s, a GET's stamp aged only on a trusted clock; the
+  projection; values typed by the view's schema, else the status, else
+  their spelling; the owner's own `validate_set` run before anything is
+  sent; consent for a reach change, `--i-know` or a terminal's yes; a
+  sensitive value only from `@FILE`/`@-`, shown and scrubbed as
+  `<redacted>`) and `judge::config` (§5's questions, each yes, no,
+  `not_yet`, `unobservable` or `not_asked`: a stale document answers
+  nothing, never a no). `config get` is a read (0 decoded, 1 undecodable,
+  2 nothing read); an act exits 0 on a reply of its type, 1 on a refusal or
+  a malformed reply, 2 on silence. The doctor adds `config-projection`,
+  `config-overdue`, `config-unpersisted` and `config-desired` (the last two
+  under `--clocks-synced`), `check conform` five `config-*` cases asked of
+  any service whose descriptor lists `config.v1` (its refusal probes are
+  dry runs against a revision no owner holds), and `acl gen` grants one
+  member of a templated operation in place (`"set/duty"`,
+  `examples/zk2/acl/config.enrollment.toml`). Scenarios §13–§14 run live
+  in `tests/live_zk2.rs` against the owner example's simulated device.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,
   `storage list|gen`, `acl gen`, `admin routers|graph`, `key`, `bench
-  call`); a **wire verb** is an act or observation on live traffic and
+  call`, `config get|set|confirm|cancel|extend|persist`); a **wire verb**
+  is an act or observation on live traffic and
   hangs off the root (`get` and `get state`, `call`, `watch`, `echo`, `pub`,
   `rate`, `field`, `record`, `replay`, `timeline`, `snapshot`, `graph`,
   `serve`, `gen`, `scout`); `compat` compares two contract revisions

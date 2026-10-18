@@ -28,6 +28,13 @@
 //! decode as the type, a sample off the declared QoS — which is what each
 //! verb must name apart (the tooling guide's O1–O7).
 //!
+//! CC's `config.v1` (#768) brings up `scenarios.md`'s `lab/rf0` through
+//! `ServiceBuilder::config_v1` on the owner example's simulated device: the
+//! `config` verbs end to end, §13 (the compact status across a constrained
+//! face, a router whose access control denies the face's `@zk` and the
+//! state subscription), §14 (a tool's answers), and the doctor's and
+//! `check conform`'s config checks.
+//!
 //! What is asserted is what zenctl adds on top of the fleet's zk2 core (whose
 //! own suite, `zenkey-fleet/tests/zk2_core.rs`, pins the projections): the
 //! namespaced session, the flags, the JSON each verb prints and its exit
@@ -221,8 +228,14 @@ impl Bus {
 
     /// The bus around a router already up.
     async fn on((router, endpoint): (zenoh::Session, String), namespace: Option<&str>) -> Bus {
-        static NTH: AtomicU64 = AtomicU64::new(0);
         let owners = client(&endpoint, namespace).await;
+        Bus::with_owners(router, endpoint, owners)
+    }
+
+    /// The bus around a router already up and an owners' session already
+    /// open: a router that authenticates its clients (#768, CC).
+    fn with_owners(router: zenoh::Session, endpoint: String, owners: zenoh::Session) -> Bus {
+        static NTH: AtomicU64 = AtomicU64::new(0);
         let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
             .join("live-zk2-home")
             .join(format!(
@@ -5339,4 +5352,740 @@ async fn check_conform_reads_a_window_unobservable_when_its_own_transport_closes
             && reason.contains("of its own transport(s) close"),
         "{run}"
     );
+}
+
+// ─── config.v1 (#768, CC) ────────────────────────────────────────────────────
+//
+// The owner is `scenarios.md`'s: `lab/rf0` on `conformance/lifecycle.json`'s
+// `rf`, through `ServiceBuilder::config_v1`, on the owner example's simulated
+// device (`zenkey/examples/owner/config.rs`, compiled in as zenkey's own
+// scenario suite compiles it). zenctl reads it and acts on it as a script
+// would; each case cites the section it runs.
+
+#[allow(dead_code)]
+#[path = "../../zenkey/examples/owner/config.rs"]
+mod sim;
+
+/// One running `config.v1` owner, and what restarts it.
+struct Rf {
+    address: String,
+    svc: Service,
+    cfg: zenkey::config_v1::Configuration,
+    device: Arc<sim::SimDevice>,
+    startup: zenkey::config_v1::Startup,
+}
+
+impl Rf {
+    async fn up(
+        session: &zenoh::Session,
+        address: &str,
+        startup: zenkey::config_v1::Startup,
+        device: Arc<sim::SimDevice>,
+    ) -> Rf {
+        let mut b = ServiceBuilder::new(
+            session,
+            ServiceConfig::new(address.parse().expect("an address")),
+        );
+        let cfg = b
+            .config_v1(
+                startup.clone(),
+                Arc::clone(&device) as Arc<dyn zenkey::config_v1::Device>,
+            )
+            .await
+            .expect("config.v1 declared");
+        let svc = b.start().await.expect("the owner starts");
+        Rf {
+            address: address.to_owned(),
+            svc,
+            cfg,
+            device,
+            startup,
+        }
+    }
+
+    /// `lab/rf0`'s `rf`, a persisted layer, the floor and the delay its
+    /// device states for a reach `apply_at`.
+    async fn fresh(session: &zenoh::Session, address: &str, floor_s: u64, apply_ms: u64) -> Rf {
+        let startup = sim::rf_startup(false, floor_s, Duration::from_millis(apply_ms), true);
+        let device = Arc::new(sim::SimDevice::new(&startup));
+        Rf::up(session, address, startup, device).await
+    }
+
+    /// A restart (§2.12): the old instance goes, the device runs its
+    /// startup values again, a new instance starts from them.
+    async fn restart(self, session: &zenoh::Session) -> Rf {
+        let events = self.cfg.published().await;
+        self.svc.close().await.expect("the old instance closes");
+        self.device.restart(&self.startup);
+        let next = self.device.next_startup(&self.startup, events);
+        Rf::up(session, &self.address, next, self.device).await
+    }
+}
+
+/// What a run printed, as JSON, or null: what a retry loop reads.
+fn parsed(r: &Run) -> Value {
+    serde_json::from_str(&r.stdout).unwrap_or(Value::Null)
+}
+
+/// The JSON document a `--format json` run printed, its rows beside.
+fn row_of<'a>(doc: &'a Value, kind: &str, key: &str, value: &str) -> &'a Value {
+    doc["rows"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["row"] == kind && r[key] == value))
+        .unwrap_or_else(|| panic!("a {kind} row with {key} = {value}: {doc}"))
+}
+
+/// The verbs end to end against one owner: a reading with §5's answers, a
+/// hot set applied and read back, the owner's own refusals made here with
+/// nothing sent, a sensitive value only from standard input and never
+/// echoed, a reach change that asks first, then its pending reply,
+/// confirmed with the compact status, persisted, and confirmed again
+/// `not_found`; silence from a service that is not there, never a failure.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_verbs_read_change_and_end_a_change() {
+    let mut bus = Bus::bare(None).await;
+    let rf = Rf::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+
+    // config get: the premise, both documents fresh on the deployment's
+    // word for the clock (one host), and every answer.
+    let get = [
+        "config",
+        "get",
+        "lab/rf0",
+        "--clocks-synced",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&get, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["premise"], "listed", "{run}");
+    assert_eq!(doc["view"]["freshness"]["verdict"], "fresh", "{run}");
+    assert_eq!(doc["pending"]["answer"], "no", "{run}");
+    assert_eq!(doc["projection"]["answer"], "yes", "{run}");
+    assert_eq!(row_of(&doc, "group", "group", "queue")["answer"], "no");
+    assert_eq!(row_of(&doc, "group", "group", "radio")["reason"], "reach");
+    assert_eq!(
+        row_of(&doc, "parameter", "parameter", "fraction_ppm")["answer"],
+        "yes"
+    );
+    assert_eq!(
+        row_of(&doc, "parameter", "parameter", "pin")["reason"],
+        "sensitive"
+    );
+
+    // A hot set: applied, the read-back after the apply (§2.9).
+    let run = bus
+        .zenctl(&[
+            "config",
+            "set",
+            "lab/rf0",
+            "duty",
+            "fraction_ppm=20000",
+            "--actor",
+            "ops",
+            "--request-id",
+            "r-1",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "applied", "{run}");
+    assert_eq!(doc["view"]["revision"], 1);
+    assert_eq!(doc["checked"]["read"], "view");
+    assert_eq!(doc["checked"]["class"], "hot");
+    assert_eq!(
+        (doc["actor"].as_str(), doc["request_id"].as_str()),
+        (Some("ops"), Some("r-1"))
+    );
+    let run = bus.zenctl(&get).await;
+    let doc = run.json();
+    let p = row_of(&doc, "parameter", "parameter", "fraction_ppm");
+    assert_eq!(
+        p["answer"], "no",
+        "a runtime change a restart would not keep: {run}"
+    );
+
+    // The owner's own refusals, made here against the view just read:
+    // nothing is sent (§2.5).
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "queue", "tx_queue_len=5"])
+        .await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("refused here, nothing sent") && run.stderr.contains("unavailable"),
+        "{run}"
+    );
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "duty", "fraction_ppm=lots"])
+        .await;
+    exits(&run, 2);
+    assert!(run.stderr.contains("fraction_ppm"), "{run}");
+
+    // A sensitive value: never inline; from standard input, applied, and
+    // echoed nowhere (§2.15).
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "sim", "pin=1234"])
+        .await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("pin=@-") && !run.stderr.contains("1234"),
+        "{run}"
+    );
+    let run = bus
+        .zenctl_stdin(
+            &[
+                "config", "set", "lab/rf0", "sim", "pin=@-", "--format", "json",
+            ],
+            "4321\n",
+        )
+        .await;
+    exits(&run, 0);
+    assert!(
+        !run.stdout.contains("4321") && !run.stderr.contains("4321"),
+        "{run}"
+    );
+    assert_eq!(run.json()["request"]["values"]["pin"], "<redacted>");
+    assert_eq!(
+        rf.device.holds("sim", "pin"),
+        Some(zenkey::config_v1::Value::Text("4321".into()))
+    );
+
+    // A reach change asks first (§2.4): from a script, --i-know.
+    let reach = [
+        "config",
+        "set",
+        "lab/rf0",
+        "radio",
+        "frequency_hz=869525000",
+        "--confirm-s",
+        "30",
+        "--format",
+        "json",
+    ];
+    let run = bus.zenctl(&reach).await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("--i-know") && run.stderr.contains("not sent"),
+        "{run}"
+    );
+    let mut sent = reach.to_vec();
+    sent.push("--i-know");
+    let run = bus.zenctl(&sent).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "pending", "{run}");
+    let token = doc["pending"]["token"]
+        .as_str()
+        .expect("a token")
+        .to_owned();
+    assert!(
+        run.stderr.contains(&format!("--token {token}")),
+        "the hint names how to ask whether it landed: {run}"
+    );
+    // Not yet landed, then applied: confirmed with the compact status.
+    let run = bus
+        .until(
+            &[
+                "config",
+                "get",
+                "lab/rf0",
+                "--clocks-synced",
+                "--token",
+                &token,
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0 && parsed(r)["pending_change"]["applied"] == true,
+        )
+        .await;
+    let doc = run.json();
+    assert_eq!(doc["change"]["landed"]["answer"], "not_yet", "{run}");
+    let run = bus
+        .zenctl(&[
+            "config", "confirm", "lab/rf0", &token, "--status", "--format", "json",
+        ])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "status", "{run}");
+    assert_eq!(doc["status"]["last_change"]["token"], token.as_str());
+    assert_eq!(doc["request"]["answer"], "status");
+    // Persisted: the view after it, at source overlay (§2.13).
+    let run = bus
+        .zenctl(&["config", "persist", "lab/rf0", &token, "--format", "json"])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    let radio = &doc["view"]["groups"][1]["parameters"][0];
+    assert_eq!(radio["source"], "overlay", "{run}");
+    // A confirm retried finds nothing pending: refused, the act's 1.
+    let run = bus
+        .zenctl(&["config", "confirm", "lab/rf0", &token, "--format", "json"])
+        .await;
+    exits(&run, 1);
+    assert_eq!(run.json()["refusal"]["code"], "not_found", "{run}");
+    let run = bus
+        .zenctl(&["config", "extend", "lab/rf0", "nope", "--confirm-s", "5"])
+        .await;
+    exits(&run, 1);
+
+    // A service that is not there: no document to check against, typed by
+    // spelling, and silence — never a failure (§5, core O5).
+    let run = bus
+        .zenctl(&[
+            "config",
+            "set",
+            "lab/zz",
+            "duty",
+            "fraction_ppm=1",
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "silent", "{run}");
+    assert_eq!(doc["checked"]["typed_by"], "spelling");
+    let run = bus
+        .zenctl(&[
+            "config",
+            "get",
+            "lab/zz",
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 2);
+    assert_eq!(run.json()["premise"], "absent", "{run}");
+    bus.keep(rf.svc);
+}
+
+/// `scenarios.md` §13, the compact status across a constrained face: the
+/// caller is a client of R1 with the face's `@zk` deny on it and the
+/// subscription to the owner's state denied, so it binds statically
+/// (`--across-face`) and reads no presence. It sizes its window from the
+/// status, gets a reach set's pending reply in at most 160 bytes and the
+/// confirm's status in at most 400, and learns of a restart from the
+/// status's `instance` alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn scenario_13_the_compact_status_across_a_constrained_face() {
+    static NTH: AtomicU64 = AtomicU64::new(0);
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "live-zk2-face-{}-{}",
+        std::process::id(),
+        NTH.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&scratch).unwrap();
+    let dict = scratch.join("usrpwd.txt");
+    std::fs::write(&dict, "router:router-pw\nowner:owner-pw\nfar:far-pw\n").unwrap();
+    // The face, on the far principal's policy: the `@zk` deny (§8.5), and
+    // the subscription to the owner's state, whose GET crosses.
+    let acl = r#"access_control: {
+    enabled: true,
+    default_permission: "allow",
+    rules: [
+      { id: "face-zk", permission: "deny", flows: ["ingress", "egress"],
+        messages: ["put", "delete", "declare_subscriber", "query", "reply", "liveliness_token",
+                   "declare_liveliness_subscriber", "liveliness_query"],
+        key_exprs: ["zk2/*/*/@zk/**"] },
+      { id: "face-state-push", permission: "deny", flows: ["ingress", "egress"],
+        messages: ["declare_subscriber", "put", "delete"],
+        key_exprs: ["zk2/lab/rf0/*/state/**"] },
+    ],
+    subjects: [{ id: "far", usernames: ["far"] }],
+    policies: [{ id: "far", rules: ["face-zk", "face-state-push"], subjects: ["far"] }],
+  },"#;
+    let text = format!(
+        "{{\n  mode: \"router\",\n  scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
+         listen: {{ endpoints: [\"tcp/127.0.0.1:0\"] }},\n  adminspace: {{ enabled: false }},\n  \
+         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }} }},\n  {acl}\n}}\n",
+        dict.display().to_string()
+    );
+    let router = zenoh::open(zenoh::Config::from_json5(&text).expect("the router config"))
+        .await
+        .expect("a router with the face");
+    let endpoint = router
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("the router listens on loopback");
+    let mut c = base_config();
+    c.insert_json5("mode", "\"client\"").unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .unwrap();
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        r#"{ user: "owner", password: "owner-pw" }"#,
+    )
+    .unwrap();
+    let owners = zenoh::open(c).await.expect("the owner's session");
+    let mut bus = Bus::with_owners(router, endpoint, owners);
+    let far = scratch.join("far.json5");
+    std::fs::write(
+        &far,
+        r#"{ transport: { auth: { usrpwd: { user: "far", password: "far-pw" } } } }"#,
+    )
+    .unwrap();
+    let far = far.display().to_string();
+    let rf = Rf::fresh(&bus.owners, "lab/rf0", 10, 1000).await;
+    let face = ["--across-face", "--zenoh-config", far.as_str()];
+    let with = |args: &[&str]| -> Vec<String> {
+        args.iter()
+            .chain(face.iter())
+            .map(|s| s.to_string())
+            .collect()
+    };
+
+    // 1. C GETs St: the floor it sizes its window from, and nothing of `@zk`.
+    let status = with(&["config", "get", "lab/rf0", "--status", "--format", "json"]);
+    let status: Vec<&str> = status.iter().map(String::as_str).collect();
+    let run = bus.until(&status, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["premise"], "across_face", "{run}");
+    assert!(
+        doc.get("presence").is_none(),
+        "no presence read across a face"
+    );
+    assert_eq!(doc["status"]["value"]["confirm_floor_s"], 10, "{run}");
+    assert!(
+        doc["asked"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|a| !a.as_str().unwrap().contains("@zk")),
+        "{run}"
+    );
+    let first = doc["status"]["value"]["instance"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // The face denies `@zk`: a presence read from C is complete and empty.
+    let run = bus
+        .zenctl(&[
+            "service",
+            "list",
+            "--zenoh-config",
+            &far,
+            "--format",
+            "json",
+        ])
+        .await;
+    assert!(
+        !run.stdout.contains("lab/rf0"),
+        "no @zk delivery crosses the face: {run}"
+    );
+
+    // 2. A reach set: the pending reply, at most 160 bytes of payload.
+    let set = with(&[
+        "config",
+        "set",
+        "lab/rf0",
+        "radio",
+        "frequency_hz=869525000",
+        "--confirm-s",
+        "120",
+        "--i-know",
+        "--format",
+        "json",
+    ]);
+    let set: Vec<&str> = set.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&set).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "pending", "{run}");
+    assert_eq!(
+        doc["checked"]["read"], "status",
+        "the status, not the view, read first"
+    );
+    let reply = json!({"pending": doc["pending"]});
+    let size = serde_json::to_vec(&reply).unwrap().len();
+    assert!(size <= 160, "the pending reply is {size} bytes: {reply}");
+    let token = doc["pending"]["token"].as_str().unwrap().to_owned();
+
+    // 3. Once St shows it applied, confirm with answer = "status": at most
+    //    400 bytes, the status and not the view.
+    let run = bus
+        .until(&status, |r| {
+            r.code == 0 && parsed(r)["status"]["value"]["pending"]["applied"] == true
+        })
+        .await;
+    exits(&run, 0);
+    let confirm = with(&[
+        "config", "confirm", "lab/rf0", &token, "--status", "--format", "json",
+    ]);
+    let confirm: Vec<&str> = confirm.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&confirm).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "status", "{run}");
+    let reply = json!({"status": doc["status"]});
+    let size = serde_json::to_vec(&reply).unwrap().len();
+    assert!(size <= 400, "the confirm's status is {size} bytes: {reply}");
+    assert_eq!(doc["status"]["last_change"]["token"], token.as_str());
+
+    // 4. The owner restarts: St's instance differs, which C learns without
+    //    presence (§2.12).
+    let rf = rf.restart(&bus.owners).await;
+    let run = bus
+        .until(&status, |r| {
+            r.code == 0 && parsed(r)["status"]["value"]["instance"] != first.as_str()
+        })
+        .await;
+    exits(&run, 0);
+    assert_eq!(run.json()["status"]["value"]["revision"], 0, "{run}");
+    bus.keep(rf.svc);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// `scenarios.md` §14, a tool's answers (§5): "is a change pending?" no of
+/// an idle owner and not asked of a service that does not implement
+/// config.v1; yes of an armed reach change, which has not landed yet; once
+/// it rolls back at its deadline, it did not land and its undo was clean;
+/// a value set without a window will not survive a restart; and after the
+/// owner stops, not asked on presence's word, and, for a reader that reads
+/// no presence and holds the status it last heard, unobservable, the
+/// status stale — never no.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn scenario_14_a_tools_answers() {
+    let mut bus = Bus::bare(None).await;
+    let rf = Rf::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+    let plain = bring_up(
+        &bus.owners,
+        ServiceConfig::new("lab/plain".parse().unwrap()),
+        &["tcgui/tc.netif.v1"],
+    )
+    .await;
+    let get = |addr: &'static str| -> Vec<&'static str> {
+        vec!["config", "get", addr, "--clocks-synced", "--format", "json"]
+    };
+
+    // 1. Idle: no; lab/plain: not asked, its descriptor not listing config.v1.
+    let run = bus.until(&get("lab/rf0"), |r| r.code == 0).await;
+    assert_eq!(run.json()["pending"]["answer"], "no", "{run}");
+    let run = bus
+        .until(&get("lab/plain"), |r| parsed(r)["premise"] == "not_listed")
+        .await;
+    let doc = run.json();
+    assert_eq!(doc["pending"]["answer"], "not_asked", "{run}");
+    assert_eq!(doc["pending"]["reason"], "not_listed");
+    exits(&run, 2);
+
+    // 2. A reach change armed: pending yes, with the token and the
+    //    deadline; did it land: not yet.
+    let run = bus
+        .zenctl(&[
+            "config",
+            "set",
+            "lab/rf0",
+            "radio",
+            "frequency_hz=869525000",
+            "--confirm-s",
+            "3",
+            "--i-know",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    let token = doc["pending"]["token"].as_str().unwrap().to_owned();
+    let instance = doc["checked"]["instance"].as_str().unwrap().to_owned();
+    let asked = [
+        "config",
+        "get",
+        "lab/rf0",
+        "--clocks-synced",
+        "--token",
+        token.as_str(),
+        "--instance",
+        instance.as_str(),
+        "--format",
+        "json",
+    ];
+    let run = bus.zenctl(&asked).await;
+    let doc = run.json();
+    assert_eq!(doc["pending"]["answer"], "yes", "{run}");
+    assert_eq!(doc["pending_change"]["token"], token.as_str());
+    assert!(doc["pending_change"]["deadline"].is_string());
+    assert_eq!(doc["change"]["landed"]["answer"], "not_yet", "{run}");
+
+    // 3. It rolls back at its deadline: a window across it hears the event.
+    //    Did it land: no, rolled-back; was its undo clean: yes.
+    let mut window = asked.to_vec();
+    window.extend(["--for", "5"]);
+    let run = bus.zenctl(&window).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["change"]["landed"]["answer"], "no", "{run}");
+    assert_eq!(doc["change"]["landed"]["reason"], "rolled-back", "{run}");
+    assert_eq!(doc["change"]["undo_clean"]["answer"], "yes", "{run}");
+    assert_eq!(doc["change"]["event"]["outcome"], "rolled-back");
+
+    // 4. duty set without a window: will fraction_ppm survive a restart?
+    //    No, it runs a value with startup 10000.
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "duty", "fraction_ppm=20000"])
+        .await;
+    exits(&run, 0);
+    let run = bus.zenctl(&get("lab/rf0")).await;
+    let doc = run.json();
+    let p = row_of(&doc, "parameter", "parameter", "fraction_ppm");
+    assert_eq!(p["answer"], "no", "{run}");
+    assert!(p["says"].as_str().unwrap().contains("10000"), "{run}");
+
+    // 5. A reader that reads no presence holds the status it last heard:
+    //    its window hears a put (a change made after it opened), then the
+    //    owner stops; at the window's end the status is stale.
+    let held = bus.spawn_within(
+        &[
+            "config",
+            "get",
+            "lab/rf0",
+            "--status",
+            "--across-face",
+            "--for",
+            "72",
+            "--format",
+            "json",
+        ],
+        Duration::from_secs(150),
+    );
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "duty", "fraction_ppm=30000"])
+        .await;
+    exits(&run, 0);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    rf.svc.close().await.expect("the owner stops");
+    // Within 60 s: not asked, the owner absent (presence's word).
+    let run = bus
+        .until(&get("lab/rf0"), |r| parsed(r)["premise"] == "absent")
+        .await;
+    let doc = run.json();
+    assert_eq!(doc["pending"]["answer"], "not_asked", "{run}");
+    assert_eq!(doc["pending"]["reason"], "absent");
+    // After it: unobservable, the status stale — never no.
+    let run = held.await.expect("the held reading");
+    let doc = run.json();
+    assert_eq!(doc["status"]["freshness"]["verdict"], "stale", "{run}");
+    assert_eq!(doc["pending"]["answer"], "unobservable", "{run}");
+    exits(&run, 0);
+    bus.keep(plain);
+}
+
+/// The doctor's and `check conform`'s config.v1 checks against a live
+/// owner (#768, CC): the suite's probes refused as the text names them, the
+/// status its view's projection, both documents fresh on the deployment's
+/// word, a dry run of `duty`'s running value; and, after a hot set, the
+/// doctor's `config-unpersisted` naming the value a restart would not keep,
+/// beside its clean checks.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_doctor_and_check_conform_judge_a_config_owner() {
+    let mut bus = Bus::bare(None).await;
+    let rf = Rf::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+    bus.until(
+        &[
+            "config",
+            "get",
+            "lab/rf0",
+            "--clocks-synced",
+            "--format",
+            "json",
+        ],
+        |r| r.code == 0,
+    )
+    .await;
+    let run = bus
+        .zenctl(&[
+            "check",
+            "conform",
+            "lab/rf0",
+            "config.v1",
+            "--for",
+            "2",
+            "--timeout",
+            "2",
+            "--clocks-synced",
+            "--calls-granted",
+            "--format",
+            "json",
+        ])
+        .await;
+    let doc = run.json();
+    let case = |id: &str, subject: &str| -> Value {
+        rows_of(&doc, "case")
+            .into_iter()
+            .find(|c| c["case"] == id && c["subject"] == subject)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} {subject}: {run}"))
+    };
+    let passed = |id: &str, subject: &str| {
+        let c = case(id, subject);
+        assert_eq!(
+            c["verdict"]["answer"], "not_established",
+            "{id} {subject}: {c}\n{run}"
+        );
+    };
+    passed("config-projection", "service");
+    passed("config-fresh", "state/view");
+    passed("config-fresh", "state/status");
+    passed("config-view", "state/view");
+    for probe in [
+        "@op/set/zk2-conform-none",
+        "@op/set/queue",
+        "@op/set/*",
+        "@op/confirm",
+        "@op/cancel",
+        "@op/extend",
+        "@op/persist",
+    ] {
+        passed("config-refusal", probe);
+    }
+    passed("config-dry-run", "@op/set/duty");
+    // The probes changed nothing: the revision is still 0.
+    assert_eq!(rf.cfg.view().await.revision, 0);
+
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "duty", "fraction_ppm=20000"])
+        .await;
+    exits(&run, 0);
+    let mut args = doctor_args(&["--clocks-synced", "--format", "json"]);
+    for c in [
+        "config-projection",
+        "config-overdue",
+        "config-unpersisted",
+        "config-desired",
+    ] {
+        args.extend(["--check", c]);
+    }
+    let run = bus.zenctl(&args).await;
+    let doc = run.json();
+    let f = &check_row(&doc, "config-unpersisted")["findings"][0];
+    assert_eq!(
+        (f["subject"].as_str(), f["severity"].as_str()),
+        (Some("lab/rf0 duty.fraction_ppm"), Some("info")),
+        "{run}"
+    );
+    for id in ["config-projection", "config-overdue", "config-desired"] {
+        assert_eq!(
+            check_row(&doc, id)["verdict"]["answer"],
+            "not_established",
+            "{id}: {run}"
+        );
+    }
+    assert_eq!(doc["scope"]["config"]["services"], 1, "{run}");
+    // An info finding is below the default floor: the run is clean.
+    exits(&run, 0);
+    bus.keep(rf.svc);
 }

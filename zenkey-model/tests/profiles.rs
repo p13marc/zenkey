@@ -706,14 +706,12 @@ fn config_validation() {
                 in_flight: st["in_flight"].as_bool().expect("in_flight"),
             };
             let op = case["op"].as_str().expect("op");
+            // The body as it arrived: its own type is checked first, as
+            // the decode does (text 0.3, F-115).
             let r = if op == "set" {
-                let req: SetRequest =
-                    serde_json::from_value(case["request"].clone()).expect("a SetRequest");
                 let group = case["group"].as_str().expect("group");
-                config::validate_set(&schema, &facts, group, &req).map(|_| ())
+                config::validate_set_json(&schema, &facts, group, &case["request"]).map(|_| ())
             } else {
-                let req: ControlRequest =
-                    serde_json::from_value(case["request"].clone()).expect("a ControlRequest");
                 let op = match op {
                     "confirm" => ControlOp::Confirm,
                     "cancel" => ControlOp::Cancel,
@@ -721,7 +719,7 @@ fn config_validation() {
                     "persist" => ControlOp::Persist,
                     other => panic!("op {other:?}"),
                 };
-                config::validate_control(op, &facts, &req)
+                config::validate_control_json(op, &facts, &case["request"])
             };
             match r {
                 Ok(()) => json!({"accepted": true}),

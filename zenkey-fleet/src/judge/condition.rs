@@ -1578,6 +1578,7 @@ mod tests {
                 presence: crate::report::Asked::NotAsked,
                 routers: crate::report::Asked::NotAsked,
                 health: crate::report::Asked::NotAsked,
+                config: crate::report::Asked::NotAsked,
             },
             checks: CheckId::ALL
                 .into_iter()

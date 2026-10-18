@@ -14876,6 +14876,429 @@
           "t": 50
         }
       ]
+    },
+    {
+      "note": "an equal request is equal as decoded: dry_run absent and dry_run false are one request, so the retry gets the first answer; dry_run true is another request under the key (§2.14, text 0.3)",
+      "setup": {
+        "apply_after_ms": 1000,
+        "events_at": [],
+        "floor_s": 10,
+        "instance": "i1",
+        "overlay": {},
+        "persist": true,
+        "schema": "rf",
+        "service": "lab/rf0",
+        "startup": {
+          "duty": {
+            "fraction_ppm": {
+              "source": "file",
+              "value": 10000
+            }
+          },
+          "link": {
+            "net_id": {
+              "source": "default",
+              "value": 1
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "source": "default",
+              "value": 100
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "source": "file",
+              "value": 868100000
+            }
+          },
+          "sim": {
+            "pin": {
+              "source": "file",
+              "value": "0000"
+            }
+          }
+        }
+      },
+      "start": {
+        "params": {
+          "duty": {
+            "fraction_ppm": {
+              "source": "file"
+            }
+          },
+          "link": {
+            "net_id": {
+              "source": "default"
+            }
+          },
+          "queue": {
+            "tx_queue_len": {
+              "source": "default"
+            }
+          },
+          "radio": {
+            "frequency_hz": {
+              "source": "file"
+            }
+          },
+          "sim": {
+            "pin": {
+              "source": "file"
+            }
+          }
+        },
+        "status": {
+          "confirm_floor_s": 10,
+          "instance": "i1",
+          "revision": 0,
+          "values": {
+            "duty": {
+              "fraction_ppm": 10000
+            },
+            "link": {
+              "net_id": 1
+            },
+            "queue": {
+              "tx_queue_len": 100
+            },
+            "radio": {
+              "frequency_hz": 868100000
+            }
+          }
+        },
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "steps": [
+        {
+          "call": {
+            "actor": "ops",
+            "request_id": "r1"
+          },
+          "do": "set",
+          "expect": {
+            "acts": [
+              "apply"
+            ],
+            "events": [
+              {
+                "actor": "ops",
+                "edits": [
+                  {
+                    "group": "duty",
+                    "new": 20000,
+                    "old": 10000,
+                    "parameter": "fraction_ppm"
+                  }
+                ],
+                "instance": "i1",
+                "outcome": "applied",
+                "request_id": "r1",
+                "revision": 1,
+                "service": "lab/rf0",
+                "token": "i1-1"
+              }
+            ],
+            "reply": {
+              "applied": {
+                "confirm_floor_s": 10,
+                "instance": "i1",
+                "last_change": {
+                  "groups": [
+                    "duty"
+                  ],
+                  "token": "i1-1"
+                },
+                "revision": 1,
+                "values": {
+                  "duty": {
+                    "fraction_ppm": 20000
+                  },
+                  "link": {
+                    "net_id": 1
+                  },
+                  "queue": {
+                    "tx_queue_len": 100
+                  },
+                  "radio": {
+                    "frequency_hz": 868100000
+                  }
+                }
+              }
+            },
+            "state": {
+              "params": {
+                "duty": {
+                  "fraction_ppm": {
+                    "source": "runtime",
+                    "startup": 10000
+                  }
+                },
+                "link": {
+                  "net_id": {
+                    "source": "default"
+                  }
+                },
+                "queue": {
+                  "tx_queue_len": {
+                    "source": "default"
+                  }
+                },
+                "radio": {
+                  "frequency_hz": {
+                    "source": "file"
+                  }
+                },
+                "sim": {
+                  "pin": {
+                    "source": "file"
+                  }
+                }
+              },
+              "status": {
+                "confirm_floor_s": 10,
+                "instance": "i1",
+                "last_change": {
+                  "groups": [
+                    "duty"
+                  ],
+                  "token": "i1-1"
+                },
+                "revision": 1,
+                "values": {
+                  "duty": {
+                    "fraction_ppm": 20000
+                  },
+                  "link": {
+                    "net_id": 1
+                  },
+                  "queue": {
+                    "tx_queue_len": 100
+                  },
+                  "radio": {
+                    "frequency_hz": 868100000
+                  }
+                }
+              },
+              "writable": [
+                "duty",
+                "radio",
+                "link",
+                "sim"
+              ]
+            }
+          },
+          "group": "duty",
+          "request": {
+            "idempotency_key": "k2",
+            "values": {
+              "fraction_ppm": 20000
+            }
+          },
+          "t": 0
+        },
+        {
+          "call": {
+            "actor": "ops",
+            "request_id": "r2"
+          },
+          "do": "set",
+          "expect": {
+            "acts": [],
+            "events": [],
+            "reply": {
+              "applied": {
+                "confirm_floor_s": 10,
+                "instance": "i1",
+                "last_change": {
+                  "groups": [
+                    "duty"
+                  ],
+                  "token": "i1-1"
+                },
+                "revision": 1,
+                "values": {
+                  "duty": {
+                    "fraction_ppm": 20000
+                  },
+                  "link": {
+                    "net_id": 1
+                  },
+                  "queue": {
+                    "tx_queue_len": 100
+                  },
+                  "radio": {
+                    "frequency_hz": 868100000
+                  }
+                }
+              }
+            },
+            "state": {
+              "params": {
+                "duty": {
+                  "fraction_ppm": {
+                    "source": "runtime",
+                    "startup": 10000
+                  }
+                },
+                "link": {
+                  "net_id": {
+                    "source": "default"
+                  }
+                },
+                "queue": {
+                  "tx_queue_len": {
+                    "source": "default"
+                  }
+                },
+                "radio": {
+                  "frequency_hz": {
+                    "source": "file"
+                  }
+                },
+                "sim": {
+                  "pin": {
+                    "source": "file"
+                  }
+                }
+              },
+              "status": {
+                "confirm_floor_s": 10,
+                "instance": "i1",
+                "last_change": {
+                  "groups": [
+                    "duty"
+                  ],
+                  "token": "i1-1"
+                },
+                "revision": 1,
+                "values": {
+                  "duty": {
+                    "fraction_ppm": 20000
+                  },
+                  "link": {
+                    "net_id": 1
+                  },
+                  "queue": {
+                    "tx_queue_len": 100
+                  },
+                  "radio": {
+                    "frequency_hz": 868100000
+                  }
+                }
+              },
+              "writable": [
+                "duty",
+                "radio",
+                "link",
+                "sim"
+              ]
+            }
+          },
+          "group": "duty",
+          "request": {
+            "dry_run": false,
+            "idempotency_key": "k2",
+            "values": {
+              "fraction_ppm": 20000
+            }
+          },
+          "t": 5
+        },
+        {
+          "call": {
+            "actor": "ops",
+            "request_id": "r3"
+          },
+          "do": "set",
+          "expect": {
+            "acts": [],
+            "events": [],
+            "reply": {
+              "refused": {
+                "code": "invalid_request",
+                "field": "/idempotency_key"
+              }
+            },
+            "state": {
+              "params": {
+                "duty": {
+                  "fraction_ppm": {
+                    "source": "runtime",
+                    "startup": 10000
+                  }
+                },
+                "link": {
+                  "net_id": {
+                    "source": "default"
+                  }
+                },
+                "queue": {
+                  "tx_queue_len": {
+                    "source": "default"
+                  }
+                },
+                "radio": {
+                  "frequency_hz": {
+                    "source": "file"
+                  }
+                },
+                "sim": {
+                  "pin": {
+                    "source": "file"
+                  }
+                }
+              },
+              "status": {
+                "confirm_floor_s": 10,
+                "instance": "i1",
+                "last_change": {
+                  "groups": [
+                    "duty"
+                  ],
+                  "token": "i1-1"
+                },
+                "revision": 1,
+                "values": {
+                  "duty": {
+                    "fraction_ppm": 20000
+                  },
+                  "link": {
+                    "net_id": 1
+                  },
+                  "queue": {
+                    "tx_queue_len": 100
+                  },
+                  "radio": {
+                    "frequency_hz": 868100000
+                  }
+                }
+              },
+              "writable": [
+                "duty",
+                "radio",
+                "link",
+                "sim"
+              ]
+            }
+          },
+          "group": "duty",
+          "request": {
+            "dry_run": true,
+            "idempotency_key": "k2",
+            "values": {
+              "fraction_ppm": 20000
+            }
+          },
+          "t": 6
+        }
+      ]
     }
   ],
   "description": "config.v1 §2.3, §2.6 to §2.14, §2.17, §2.19: sequences of calls, device results and clock instants on one owner -> its replies, its device acts, its change events and its state after each step. schemas holds the schemas by name, as in validation.json. setup: service (the owner's address), instance (its instance id; tokens are minted <instance>-<n>, n counting the instance's changes from 1, and an implementation that mints otherwise maps its tokens to these by the order it minted them), schema, startup ({group: {parameter: {value, source}}}, the startup file's or default values), overlay (the persisted layer, {group: {parameter: value}}, source overlay), floor_s, apply_after_ms (the reach apply_at the device states: the instant the set was received plus this; how a device derives it is its own), persist (whether the owner has a persisted layer), events_at (change events already published: [{t, count}], for the rate). start is the state before any step. Each step has t, seconds since 1970-01-01T00:00:00Z on the owner's clock, and do: set (group, request, call), confirm, cancel, extend or persist (request, call), due (every act owed at t: the undo when the deadline has passed, else each reach apply whose apply_at has come, earliest first), complete (the act left in flight finishes), or restart (instance: the new instance id; the persisted layer and the published events survive it). call is the O7 call metadata {actor, request_id}, or absent. device lists the results of the device acts the step makes, in order: \"ok\"; {\"refused\": words} for an apply; {\"failed\": words, \"readback\": {group: {parameter: value}}} for an undo, a parameter not in readback being unknown; \"hold\", which leaves the act in flight until a complete step. A missing result is \"ok\". expect.reply is the reply to the step's call (null for due and restart, and for a call whose act is held, whose reply comes with complete): {applied: S}, {pending: PendingReply}, {view: S}, {status: S}, each S being the status projection of the document replied (§2.19), or {refused: {code, field, cause, app}} as validation.json writes it. expect.acts lists the device acts the step started, \"apply\" or \"undo\". expect.events lists the change events published, as ConfigChangeEvent. expect.state is the owner's state after the step: status, its ConfigStatus; params, {group: {parameter: {source, startup}}} as the view shows them, each member present only when the view carries it; writable, the groups whose writable is true, in the schema's order.",

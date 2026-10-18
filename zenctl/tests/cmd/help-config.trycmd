@@ -1,0 +1,609 @@
+`config` (#768, CC) is `config.v1`'s client side
+(`spec/profiles/config/v1.md`), back on zk2 after FJ9 left v1's six verbs
+dark: `get` reads a service's view or compact status with §5's answers,
+`set` changes one group checked against the served schema first, and
+`confirm`, `cancel`, `extend` and `persist` drive a pending change to its
+end. A read exits 0 a document read, 1 one that does not decode, 2 nothing
+read; an act 0 answered, 1 refused, 2 silence or an input refused here.
+
+```console
+$ zenctl config --help
+A running service's configuration, through config.v1.
+
+config.v1 (spec/profiles/config/v1.md), through a session in the deployment's namespace: `get` reads a service's view (the served schema beside every running value, where each came from, and what a restart would run) or its compact status, with what a tool may conclude from them (§5); `set` changes one group, its values typed and checked against the served schema before anything is sent; `confirm`, `cancel`, `extend` and `persist` drive a pending change to its end. Each act is its own key, so a deployment grants each separately (§2.21).
+
+Usage: zenctl config <COMMAND>
+
+Commands:
+  get      Read a service's configuration: the view, or the compact status
+  set      Change one group's parameters, checked against the served schema first
+  confirm  Keep the pending change: it becomes the last change
+  cancel   Undo the pending change now, as its deadline would
+  extend   Move the pending change's deadline to now plus --confirm-s
+  persist  Make the last change survive a restart: its own key, its own grant
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl config get --help
+Read a service's configuration: the view, or the compact status.
+
+One S4 GET of the owner's config.v1 view and status (core §4.2), or of the status alone (--status: two radio frames where the view takes six, §2.19), after presence and the descriptor (the premise of every answer: a service implements config.v1 when its descriptor lists it, §2.1). Each document is judged fresh, stale or unobservable by freshness.v1 at its 60 s horizon: a reply's stamp is aged only against a clock trusted to the HLC delta, measured on a live put during --for, or on the deployment's word, --clocks-synced. Then what a tool may conclude (§5), each answer yes, no, not yet, unobservable or not asked: is a change pending; did a change land and was its undo clean (--token); is each group writable; will each value survive a restart; has the owner converged to its desired document. Only a fresh document is the owner's word: a stale one, or a GET that drew nothing, answers nothing, never no. A sensitive value is never shown. Exit 0 a document read, 1 the owner answered with one that does not decode, 2 nothing read (silence, an absent service, one whose descriptor does not list config.v1).
+
+Usage: zenctl config get [OPTIONS] <SYSTEM/SERVICE>
+
+Arguments:
+  <SYSTEM/SERVICE>
+          The service, `<system>/<service>`
+
+Options:
+      --status
+          Read the compact status alone: its values, instance, revision, floor, pending change, last change and desired report, never the view's schema (§2.19)
+
+      --token <TOKEN>
+          A change you made, by the token its set was answered with: did it land, and was its undo clean (§5)? Its events are read where a window hears them, or a union storage replays them
+
+      --instance <ID>
+          The instance that answered that set (the view's `instance`): a restart since is then a rollback this reader can name (§2.12)
+
+      --desired-revision <REVISION>
+          The revision of the desired document you put: has the owner converged to it (§2.18)? Default: the last document it acted on
+
+      --for <SECS>
+          Listen to the view, the status and the change events this many seconds before the GET: a put heard confirms its document on this host's clock and measures the owner's clock (freshness.v1 §2.5, §2.6). 31 hears every owner's re-put at least once
+
+      --clocks-synced
+          This host's clock and the owner's agree within the HLC delta (500 ms), as the deployment keeps them: a reply's stamp is then aged against this clock (freshness.v1 §2.6)
+
+      --across-face
+          The service sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements config.v1 (§2.19, R7)
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl config set --help
+Change one group's parameters, checked against the served schema first.
+
+The view is read first (S4), each NAME=VALUE typed as the kind the schema declares, and the change run through the owner's own checks (§2.5): what the owner would refuse is refused here, in its words, and nothing is sent (exit 2; --no-precheck sends it anyway, typed by spelling). A sensitive parameter is given only from a file or standard input, NAME=@FILE or NAME=@-, never inline, and is never echoed (§2.15); a text beginning with @ is written @@. A reach group can cut the link its reply travels on (§2.4): it needs --confirm-s (or --join), and the operator's yes at a terminal or --i-know from a script, as does any change with a window to a group whose class could not be read. A hot group answers `applied`, the read-back after the apply; a reach group `pending`, its token, apply_at and deadline on the owner's clock, before the apply: read the view over the new link, then `config confirm`. Exit 0 an answer of the reply type, 1 a refusal, 2 silence (a set that drew nothing started nothing a tool can name) or an input refused here.
+
+Usage: zenctl config set [OPTIONS] <SYSTEM/SERVICE> <GROUP> [NAME=VALUE]...
+
+Arguments:
+  <SYSTEM/SERVICE>
+          The service, `<system>/<service>`
+
+  <GROUP>
+          The group: the parameters that change together, the unit that has a class and that the key names (`@op/set/<GROUP>`)
+
+  [NAME=VALUE]...
+          The values, NAME=VALUE, NAME=@FILE or NAME=@- (standard input, once): a subset of the group changes those alone, and none at all is a change of nothing (§2.5)
+
+Options:
+      --confirm-s <SECS>
+          The window, seconds: the change is undone at its deadline unless confirmed, the window raised to the owner's floor (§2.8). Required for a reach group, unless --join
+
+      --join <TOKEN>
+          Join the pending change by its token (§2.7): the group is applied under its window, confirmed, cancelled or undone with it. A joining set takes no window of its own, and does not move the deadline
+
+      --expected-revision <REVISION>
+          Refused unless the owner's revision is this one: the revision you read (§2.5, row 7)
+
+      --idempotency-key <KEY>
+          A key that makes a resend safe for 300 s: the owner answers its first answer again, and applies nothing twice (§2.14)
+
+      --dry-run
+          Check, and answer the view as it would read with these values applied, touching nothing (§2.9)
+
+      --no-precheck
+          Send without reading the view first: values typed by their spelling, nothing checked here, and the class unread, so a window asks for the operator's yes as a reach change does (§2.4)
+
+      --across-face
+          The service sits across a constrained face: the status is read first rather than the view (two frames, not six; values typed by its values, the class unread), and a silence is unattributed, since presence does not cross (§2.19, R7)
+
+      --i-know
+          Send a change that can cut the link without being asked: a reach group, or a window to a group whose class could not be read (§2.4)
+
+      --actor <NAME>
+          Who is asking, as the change event records it: claimed, never authentication; the access control is the authority (§2.17). Default: $USER, when set
+
+      --request-id <ID>
+          The request id the change event records. Default: a fresh ULID
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl config confirm --help
+Keep the pending change: it becomes the last change.
+
+config.v1 §2.10. Answered with the view after the act, or the compact status with --status. A confirm before every group of the change is applied is `busy`; one after the deadline, `busy` until the undo has run and `not_found` after. No control operation is idempotent: a confirm retried after a lost reply finds nothing pending, so read the last change instead (`config get --token`). Exit 0 answered, 1 refused, 2 silence.
+
+Usage: zenctl config confirm [OPTIONS] <SYSTEM/SERVICE> <TOKEN>
+
+Arguments:
+  <SYSTEM/SERVICE>
+          The service, `<system>/<service>`
+
+  <TOKEN>
+          The change's token, as its set was answered (or the view's `pending` and `last_change` show it)
+
+Options:
+      --status
+          Answer with the compact status, not the view (`answer = "status"`): on a radio link the view is six frames, the status two (§2.10)
+
+      --across-face
+          The service sits across a constrained face: a silence is unattributed, since presence does not cross (§2.19, R7)
+
+      --actor <NAME>
+          Who is asking, as the change event records it: claimed, never authentication; the access control is the authority (§2.17). Default: $USER, when set
+
+      --request-id <ID>
+          The request id the change event records. Default: a fresh ULID
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl config cancel --help
+Undo the pending change now, as its deadline would.
+
+config.v1 §2.10, §2.11. Answered as `confirm` is. Exit 0 answered, 1 refused, 2 silence.
+
+Usage: zenctl config cancel [OPTIONS] <SYSTEM/SERVICE> <TOKEN>
+
+Arguments:
+  <SYSTEM/SERVICE>
+          The service, `<system>/<service>`
+
+  <TOKEN>
+          The change's token, as its set was answered (or the view's `pending` and `last_change` show it)
+
+Options:
+      --status
+          Answer with the compact status, not the view (`answer = "status"`): on a radio link the view is six frames, the status two (§2.10)
+
+      --across-face
+          The service sits across a constrained face: a silence is unattributed, since presence does not cross (§2.19, R7)
+
+      --actor <NAME>
+          Who is asking, as the change event records it: claimed, never authentication; the access control is the authority (§2.17). Default: $USER, when set
+
+      --request-id <ID>
+          The request id the change event records. Default: a fresh ULID
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl config extend --help
+Move the pending change's deadline to now plus --confirm-s.
+
+config.v1 §2.10: earlier or later than before; the window is raised to the owner's floor (§2.8). Answered as `confirm` is. Exit 0 answered, 1 refused, 2 silence.
+
+Usage: zenctl config extend [OPTIONS] --confirm-s <SECS> <SYSTEM/SERVICE> <TOKEN>
+
+Arguments:
+  <SYSTEM/SERVICE>
+          The service, `<system>/<service>`
+
+  <TOKEN>
+          The change's token, as its set was answered (or the view's `pending` and `last_change` show it)
+
+Options:
+      --status
+          Answer with the compact status, not the view (`answer = "status"`): on a radio link the view is six frames, the status two (§2.10)
+
+      --across-face
+          The service sits across a constrained face: a silence is unattributed, since presence does not cross (§2.19, R7)
+
+      --actor <NAME>
+          Who is asking, as the change event records it: claimed, never authentication; the access control is the authority (§2.17). Default: $USER, when set
+
+      --request-id <ID>
+          The request id the change event records. Default: a fresh ULID
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+      --confirm-s <SECS>
+          The new window, seconds from the owner's receipt of the extend, raised to its floor (§2.8, §2.10)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+$ zenctl config persist --help
+Make the last change survive a restart: its own key, its own grant.
+
+config.v1 §2.13: TOKEN is the last change's: the pending change's is `busy` (confirm it first), an older one `not_found`, one that set a sensitive value `forbidden`; an owner with no persisted layer answers `unavailable`, cause config. Answered as `confirm` is. A deployment can grant a change and withhold persist (§2.21): a refusal by access control is silence, never not_found. Exit 0 answered, 1 refused, 2 silence.
+
+Usage: zenctl config persist [OPTIONS] <SYSTEM/SERVICE> <TOKEN>
+
+Arguments:
+  <SYSTEM/SERVICE>
+          The service, `<system>/<service>`
+
+  <TOKEN>
+          The change's token, as its set was answered (or the view's `pending` and `last_change` show it)
+
+Options:
+      --status
+          Answer with the compact status, not the view (`answer = "status"`): on a radio link the view is six frames, the status two (§2.10)
+
+      --across-face
+          The service sits across a constrained face: a silence is unattributed, since presence does not cross (§2.19, R7)
+
+      --actor <NAME>
+          Who is asking, as the change event records it: claimed, never authentication; the access control is the authority (§2.17). Default: $USER, when set
+
+      --request-id <ID>
+          The request id the change event records. Default: a fresh ULID
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+What `set` refuses of its command line is refused before a session opens:
+a value that is not `NAME=VALUE`, and `--join` beside a window of its own (a
+joining change takes the pending change's window, §2.7):
+
+```console
+$ zenctl config set lab/rf0 duty fraction_ppm
+? 2
+Error: "fraction_ppm" is not NAME=VALUE (a value from a file is NAME=@FILE, from standard input NAME=@-)
+
+$ zenctl config set lab/rf0 radio frequency_hz=869525000 --confirm-s 5 --join lab-1
+? 2
+error: the argument '--confirm-s <SECS>' cannot be used with '--join <TOKEN>'
+
+Usage: zenctl config set --confirm-s <SECS> --namespace <NS> <SYSTEM/SERVICE> <GROUP> <NAME=VALUE>...
+
+For more information, try '--help'.
+
+$ zenctl config set lab/rf0 duty fraction_ppm=@/nonexistent/value
+? 2
+Error: fraction_ppm=@/nonexistent/value: the file could not be read: No such file or directory (os error 2)
+
+```
+
+A window is at least a second, and `extend` takes one (§2.8, §2.10):
+
+```console
+$ zenctl config set lab/rf0 radio frequency_hz=869525000 --confirm-s 0
+? 2
+error: invalid value '0' for '--confirm-s <SECS>': 0 is not in 1..18446744073709551615
+
+For more information, try '--help'.
+
+$ zenctl config extend lab/rf0 lab-1
+? 2
+error: the following required arguments were not provided:
+  --confirm-s <SECS>
+
+Usage: zenctl config extend --confirm-s <SECS> --namespace <NS> <SYSTEM/SERVICE> <TOKEN>
+
+For more information, try '--help'.
+
+```
+
+A command line that passes goes on to its session (the dead-bus fixture,
+so the 2 is the session's):
+
+```console
+$ zenctl config get lab/rf0 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+$ zenctl config confirm lab/rf0 lab-1 --status --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```

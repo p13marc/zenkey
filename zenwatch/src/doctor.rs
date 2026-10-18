@@ -184,6 +184,19 @@ pub fn coverage(r: &DoctorReport) -> String {
             }
         ),
     };
+    let config = match r.scope.config.as_option() {
+        None => "not asked".to_string(),
+        Some(c) => format!(
+            "{} service(s), {} reading(s), clocks {}",
+            c.services,
+            c.readings,
+            if c.clocks_synced {
+                "synced (the operator's word)"
+            } else {
+                "not vouched for"
+            }
+        ),
+    };
     let (mut est, mut unobs, mut not_asked) = (0, Vec::new(), 0);
     for c in &r.checks {
         match &c.verdict {
@@ -204,7 +217,7 @@ pub fn coverage(r: &DoctorReport) -> String {
     };
     format!(
         "coverage: {namespace}; presence: {presence}; routers: {routers}; health: {health}; \
-         checks: {est} established, {unobservable}, {not_asked} not asked"
+         config: {config}; checks: {est} established, {unobservable}, {not_asked} not asked"
     )
 }
 
@@ -695,6 +708,7 @@ mod tests {
             },
             routers: Asked::NotAsked,
             health: Asked::NotAsked,
+            config: Asked::NotAsked,
         }
     }
 
@@ -852,7 +866,7 @@ mod tests {
         );
         assert!(
             n.message
-                .contains("checks: 19 established, 0 unobservable, 0 not asked"),
+                .contains("checks: 23 established, 0 unobservable, 0 not asked"),
             "{}",
             n.message
         );
@@ -987,7 +1001,7 @@ mod tests {
             out[0]
                 .notification
                 .message
-                .contains("checks: 19 established"),
+                .contains("checks: 23 established"),
             "{}",
             out[0].notification.message
         );
@@ -1138,7 +1152,7 @@ mod tests {
         assert!(line.contains("routers: not asked"), "{line}");
         assert!(line.contains("health: not asked"), "{line}");
         assert!(
-            line.contains("checks: 1 established, 0 unobservable, 18 not asked"),
+            line.contains("checks: 1 established, 0 unobservable, 22 not asked"),
             "{line}"
         );
         assert!(line.contains("namespace \"prod\""), "{line}");
@@ -1163,6 +1177,7 @@ mod tests {
                     services: 1,
                     clocks_synced: true,
                 }),
+                config: Asked::NotAsked,
                 namespace: String::new(),
                 ..scope(true)
             },

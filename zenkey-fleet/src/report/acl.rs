@@ -225,7 +225,10 @@ pub struct CallsSpec {
     /// other one refuses it, and the grant lets that refusal through.
     #[serde(default)]
     pub providers: Vec<String>,
-    /// Operation templates. Default: every operation of the interface.
+    /// Operation templates, or templated operations with their parameters
+    /// given in place (`set/duty` for `set/{group}`): each a grant of its
+    /// own, so a deployment grants `config.v1`'s acts one by one, group by
+    /// group (config.v1 §2.21). Default: every operation of the interface.
     pub operations: Option<Vec<String>>,
     /// Template parameter → value, as a binding's (R2).
     #[serde(default)]

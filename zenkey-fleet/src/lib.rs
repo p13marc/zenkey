@@ -24,7 +24,7 @@
 //! **v1 left at FJ9** (#612). The registry slice sets, RFC 08 §6
 //! introspection, the v1 roster, the schema-aware decode seam, the v1
 //! judges (`why`, `cutover`, `retired`, `conform` and its registry checks)
-//! and the profile-backed features (configuration, blobs, the exporter,
+//! and the profile-backed features (v1's configuration, blobs, the exporter,
 //! alerts, kinds and budgets) live on the `v1` branch, which releases
 //! 0.14.x. Every frontend on `main` runs on this crate: zenctl since FJ9,
 //! zenwatch since FL3 and zengui since FL11b (#614), and none links the v1
@@ -54,8 +54,9 @@
 //!   nudged, #614 FL4), `why`
 //!   (the reads a silence is explained from, #702), `conform` (a
 //!   service's suite, #703), `stall` (what a window's reader sees of its
-//!   own receive path: its transports and a ticker, core §2.7 0.27) and
-//!   `health` (a `health.v1` reading, #721). The
+//!   own receive path: its transports and a ticker, core §2.7 0.27),
+//!   `health` (a `health.v1` reading, #721) and `config` (a `config.v1`
+//!   reading, and one act through the runtime's client, #768). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -89,7 +90,9 @@
 //!   it, held or gone per address a pattern matches: `instance-gone`'s in
 //!   zenctl and zenwatch alike, #747), `skeleton` (the declared keyspace a
 //!   tree starts from, merged with what was observed, #614 FL4), `identity`
-//!   (each key's resolution, kept and bounded), `timeline`, `snapshot` and
+//!   (each key's resolution, kept and bounded), `config` (a `config.v1`
+//!   reading's freshness and projection, a change typed, pre-checked and
+//!   redacted before it is sent, #768), `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
 //!   schema reaches fall to, `stats`, `tree` and `diff`, plus the two
@@ -101,8 +104,8 @@
 //! * **[`judge`]** — everything that takes a position. `doctor` and its
 //!   `doctor_delta`, `expect`, `probe`, `condition`, `field`, `why` (a
 //!   silence explained rung by rung, #702), `conform` (a service against
-//!   the revision it claims, #703) and `health` (`health.v1`'s verdicts,
-//!   #721), and
+//!   the revision it claims, #703), `health` (`health.v1`'s verdicts,
+//!   #721) and `config` (`config.v1`'s §5 answers, #768), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -235,10 +238,16 @@ pub use judge::conform::judge as judge_conform;
 // `health.v1` (#721, PF): every service's health, or one's, read as the
 // profile's reader reads it — the reads, the session-free judge, and the
 // two in a row.
+pub use bus::config::{
+    ConfigCall, ConfigGet, ConfigObservation, ConfigOp, ConfigSpec, ConfigTarget, ConfigWindow,
+    call as call_config, get as get_config, observe as observe_config, run_config,
+};
 pub use bus::health::{
     AcrossFace, HealthObservation, HealthSpec, HealthTarget, observe as observe_health, run_health,
 };
+pub use judge::config::judge as judge_config;
 pub use judge::health::judge as judge_health;
+pub use model::config::{Assignment, Given, TypedValues};
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};

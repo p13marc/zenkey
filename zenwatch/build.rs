@@ -1,7 +1,8 @@
 //! zenwatch's own contract (#614, FL3), compiled through zk2's
 //! `zenkey-build`: `contracts/zenwatch.v1.toml` linted (every error fails
 //! this build), checked against its append-only history
-//! (`contracts/.history`: breaking fails, review warns), its bundle
+//! (`contracts/.history`: breaking fails, review warns until the
+//! revision is published), its bundle
 //! embedded, and the typed `zenwatch_v1` module generated.
 //!
 //! **Rust-first.** The contract's JSON Schema types are the structs the

@@ -10,6 +10,7 @@
 //! ```text
 //! validate_set(schema, facts, group, req)  ─▶ Admitted │ Refusal{code, field, app}      §2.5 rows 0, 1, 3–11
 //! validate_control(op, facts, req)         ─▶ ()       │ Refusal                        §2.10, §2.13
+//! decode_set(body), decode_control(body)   ─▶ the request │ Refusal: outside its type, before row 1 (0.3)
 //! check_desired(schema, doc)               ─▶ ()       │ DesiredRefusal{code, group, parameter}   §2.18
 //! window(confirm_s, floor_s), deadline(t, w)                                            §2.8
 //! log_request, device_detail                                                            §2.15
@@ -1180,14 +1181,10 @@ fn check_set_shape(req: &SetRequest) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// A control request's own type, in the bytewise order of its members'
+/// names, as §2.5 takes a set's (§2.10; text 0.3): `confirm_s` before
+/// `token`. `answer` is its decode's.
 fn check_control_shape(req: &ControlRequest) -> Result<(), Refusal> {
-    if too_long(&req.token, MAX_TOKEN) {
-        return Err(Refusal::new(
-            Code::InvalidRequest,
-            Some(Field::member("token")),
-            format!("a token is 1 to {MAX_TOKEN} characters"),
-        ));
-    }
     if req.confirm_s == Some(0) {
         return Err(Refusal::new(
             Code::InvalidRequest,
@@ -1195,7 +1192,171 @@ fn check_control_shape(req: &ControlRequest) -> Result<(), Refusal> {
             "confirm_s is a window of at least 1 s",
         ));
     }
+    if too_long(&req.token, MAX_TOKEN) {
+        return Err(Refusal::new(
+            Code::InvalidRequest,
+            Some(Field::member("token")),
+            format!("a token is 1 to {MAX_TOKEN} characters"),
+        ));
+    }
     Ok(())
+}
+
+/// Whether `v` is an unsigned integer as core §3.3 reads one: a JSON number
+/// written without a fraction or an exponent, within the unsigned 64-bit
+/// range. `30.0`, `3e1` and `2^64` are integers to JSON Schema, and not
+/// this (text 0.3, F-115).
+fn is_u64(v: &Json) -> bool {
+    v.as_number().is_some_and(serde_json::Number::is_u64)
+}
+
+/// A request member's own check, before row 1 (§2.5, "A request outside its
+/// type"; text 0.3, F-115): the member's JSON form against its type.
+fn member_fits(name: &str, v: &Json) -> Result<(), Refusal> {
+    let refuse = |why: String| {
+        Err(Refusal::new(
+            Code::InvalidRequest,
+            Some(Field::member(name)),
+            why,
+        ))
+    };
+    match name {
+        "confirm_s" if !(is_u64(v) && v.as_u64() != Some(0)) => refuse(
+            "confirm_s is a window of at least 1 s, an integer written without a fraction or an \
+             exponent"
+                .to_owned(),
+        ),
+        "expected_revision" if !is_u64(v) => refuse(
+            "expected_revision is a revision, an unsigned integer written without a fraction or \
+             an exponent"
+                .to_owned(),
+        ),
+        "dry_run" if !v.is_boolean() => refuse("dry_run is true or false".to_owned()),
+        "idempotency_key" if !v.as_str().is_some_and(|k| !too_long(k, MAX_KEY)) => {
+            refuse(format!("an idempotency key is 1 to {MAX_KEY} characters"))
+        }
+        "token" if !v.as_str().is_some_and(|t| !too_long(t, MAX_TOKEN)) => {
+            refuse(format!("a token is 1 to {MAX_TOKEN} characters"))
+        }
+        "answer" if !matches!(v.as_str(), Some("view" | "status")) => {
+            refuse("answer is view or status".to_owned())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Decodes a `set`'s body as a `SetRequest`, refusing a request outside its
+/// type as §2.5 orders it, before row 1: its members in the bytewise order
+/// of their names, `values` last, and in `values` the first value outside
+/// `ParamValue` by name. A member it does not know is ignored (§3: each
+/// type is an open object). `confirm_s` and `expected_revision` are read as
+/// core §3.3 reads an integer, so `30.0` is outside the type, though a
+/// `2.0` in `values` is a `ParamValue` row 11 refuses (text 0.3, F-115).
+///
+/// # Errors
+///
+/// The first [`Refusal`], `invalid_request` naming the member.
+pub fn decode_set(body: &Json) -> Result<SetRequest, Refusal> {
+    let Some(members) = body.as_object() else {
+        return Err(Refusal::new(
+            Code::InvalidRequest,
+            None,
+            "a SetRequest is a JSON object",
+        ));
+    };
+    let mut names: Vec<&String> = members.keys().filter(|k| *k != "values").collect();
+    names.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+    for name in names {
+        member_fits(name, &members[name])?;
+    }
+    let Some(values) = members.get("values").and_then(Json::as_object) else {
+        return Err(Refusal::new(
+            Code::InvalidRequest,
+            Some(Field::member("values")),
+            "values is an object of parameter values",
+        ));
+    };
+    let mut names: Vec<&String> = values.keys().collect();
+    names.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+    if let Some(name) = names.into_iter().find(|n| !is_param_value(&values[*n])) {
+        return Err(Refusal::new(
+            Code::InvalidRequest,
+            Some(Field::value(name)),
+            format!(
+                "{name}: not a boolean, an integer or a string, so outside the request's type \
+                 (SetRequest's ParamValue)"
+            ),
+        ));
+    }
+    serde_json::from_value(body.clone())
+        .map_err(|e| Refusal::new(Code::InvalidRequest, None, format!("not a SetRequest: {e}")))
+}
+
+/// Decodes a control operation's body as a `ControlRequest`, refusing one
+/// outside its type in the bytewise order of its members' names (§2.10,
+/// "as §2.5 says of a set"; text 0.3).
+///
+/// # Errors
+///
+/// The first [`Refusal`], `invalid_request` naming the member.
+pub fn decode_control(body: &Json) -> Result<ControlRequest, Refusal> {
+    let Some(members) = body.as_object() else {
+        return Err(Refusal::new(
+            Code::InvalidRequest,
+            None,
+            "a ControlRequest is a JSON object",
+        ));
+    };
+    if !members.contains_key("token") {
+        return Err(Refusal::new(
+            Code::InvalidRequest,
+            Some(Field::member("token")),
+            format!("a token is 1 to {MAX_TOKEN} characters"),
+        ));
+    }
+    let mut names: Vec<&String> = members.keys().collect();
+    names.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+    for name in names {
+        member_fits(name, &members[name])?;
+    }
+    serde_json::from_value(body.clone()).map_err(|e| {
+        Refusal::new(
+            Code::InvalidRequest,
+            None,
+            format!("not a ControlRequest: {e}"),
+        )
+    })
+}
+
+/// [`validate_set`] over a body as it arrived: [`decode_set`], then the
+/// rows.
+///
+/// # Errors
+///
+/// The first [`Refusal`] that applies.
+pub fn validate_set_json(
+    schema: &Schema,
+    facts: &Facts<'_>,
+    group: &str,
+    body: &Json,
+) -> Result<Admitted, Refusal> {
+    let req = decode_set(body)?;
+    validate_set(schema, facts, group, &req)
+}
+
+/// [`validate_control`] over a body as it arrived: `persist`'s missing
+/// persisted layer first (§2.13, row 1: before the request's type), then
+/// [`decode_control`], then the rest.
+///
+/// # Errors
+///
+/// The first [`Refusal`] that applies.
+pub fn validate_control_json(op: ControlOp, facts: &Facts<'_>, body: &Json) -> Result<(), Refusal> {
+    if op == ControlOp::Persist && !facts.persist {
+        return validate_control(op, facts, &ControlRequest::default());
+    }
+    let req = decode_control(body)?;
+    validate_control(op, facts, &req)
 }
 
 fn in_flight() -> Refusal {

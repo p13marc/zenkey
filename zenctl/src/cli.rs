@@ -533,6 +533,19 @@ pub(crate) enum Command {
     /// No session is opened. RFC 03 §4's footguns, diagnosed.
     #[command(subcommand)]
     Key(KeyCmd),
+    /// A running service's configuration, through config.v1.
+    ///
+    /// config.v1 (spec/profiles/config/v1.md), through a session in the
+    /// deployment's namespace: `get` reads a service's view (the served schema
+    /// beside every running value, where each came from, and what a restart
+    /// would run) or its compact status, with what a tool may conclude from
+    /// them (§5); `set` changes one group, its values typed and checked
+    /// against the served schema before anything is sent; `confirm`,
+    /// `cancel`, `extend` and `persist` drive a pending change to its end.
+    /// Each act is its own key, so a deployment grants each separately
+    /// (§2.21).
+    #[command(subcommand)]
+    Config(ConfigCmd),
     /// This host's system, as hostid.v1 mints it from the machine id.
     ///
     /// The system a service on this host gets when it asks for
@@ -819,7 +832,7 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Nineteen checks, each a question whose finding is the yes: split-brain
+    /// Twenty-three checks, each a question whose finding is the yes: split-brain
     /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
     /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
     /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
@@ -830,9 +843,15 @@ pub(crate) enum Command {
     /// level) and health-inconsistent (a status better than a check, in both
     /// readings), a status's age read only with --clocks-synced; and
     /// hostid.v1's hostid-duplicate (two sessions claiming one minted
-    /// address, the cause undecided); and population-over-bound (§2.7, with
+    /// address, the cause undecided); population-over-bound (§2.7, with
     /// --deep: an owner holding more live members of a templated state than
-    /// its bound, by its own GET). The deployment is read through a
+    /// its bound, by its own GET); and config.v1's config-projection (a
+    /// status off its view's projection in both of two readings),
+    /// config-overdue (a view its owner's own clock put past its pending
+    /// change's deadline by more than 60 s), config-unpersisted (info: a
+    /// value a restart would not keep) and config-desired (a desired
+    /// document refused or failed), the last two read only with
+    /// --clocks-synced. The deployment is read through a
     /// session in its namespace; the routers' admin space and the presence
     /// domain through one in no namespace. A check whose input could not be
     /// had is unobservable, with the reason — never clean — and so is every
@@ -991,6 +1010,30 @@ pub(crate) enum CheckCmd {
     ///                    within it a pass only over a window of at least
     ///                    that span (--for), lost no delivery, the owner
     ///                    present throughout
+    ///   config-projection  when its descriptor lists config.v1, its status
+    ///                    is its view's projection: a mismatch as the window
+    ///                    opens and at its end is the finding (config.v1
+    ///                    §2.19)
+    ///   config-fresh     its view and its status are each confirmed within
+    ///                    60 s at the window's end, never deleted (§2.3)
+    ///   config-view      its view is well-formed: its own address and
+    ///                    instance, names unique, bounds ordered, no
+    ///                    sensitive value carried, no pending change past
+    ///                    its deadline by its own clock (§2.2, §2.15)
+    ///   config-refusal   each refusal checkable without changing anything,
+    ///                    one subject per probe: a set on an undeclared
+    ///                    group not_found, on a group outside the allowlist
+    ///                    unavailable (config), over the wildcard
+    ///                    fanout_forbidden; confirm, cancel and extend with
+    ///                    a token naming nothing not_found; persist listed
+    ///                    unavailable answered so (§2.5, §2.10, §2.13). Each
+    ///                    probe is a dry run against a revision no owner
+    ///                    holds; one a broken owner could act on (a control
+    ///                    while a change is pending, persist with a last
+    ///                    change) only under --i-know
+    ///   config-dry-run   a dry run of a hot group's running values answers
+    ///                    applied, the revision and the changes as they
+    ///                    were (§2.9)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
@@ -1237,7 +1280,8 @@ pub(crate) enum AclCmd {
     ///   [[service.calls]]
     ///   interface  = "nav.v2"
     ///   providers  = ["vehicle-01/navigation"]
-    ///   operations = ["set_origin"]            # default: every operation
+    ///   operations = ["set_origin"]            # default: every operation;
+    ///                                          #   "set/duty": one member
     ///   [[archive]]
     ///   address = "vehicle-01/archive"
     ///   records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"]
@@ -2528,6 +2572,235 @@ pub(crate) struct CheckConformArgs {
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl config`'s verbs (#768, CC): config.v1's reads and acts.
+#[derive(Subcommand)]
+pub(crate) enum ConfigCmd {
+    /// Read a service's configuration: the view, or the compact status.
+    ///
+    /// One S4 GET of the owner's config.v1 view and status (core §4.2), or of
+    /// the status alone (--status: two radio frames where the view takes
+    /// six, §2.19), after presence and the descriptor (the premise of every
+    /// answer: a service implements config.v1 when its descriptor lists it,
+    /// §2.1). Each document is judged fresh, stale or unobservable by
+    /// freshness.v1 at its 60 s horizon: a reply's stamp is aged only
+    /// against a clock trusted to the HLC delta, measured on a live put
+    /// during --for, or on the deployment's word, --clocks-synced. Then
+    /// what a tool may conclude (§5), each answer yes, no, not yet,
+    /// unobservable or not asked: is a change pending; did a change land
+    /// and was its undo clean (--token); is each group writable; will each
+    /// value survive a restart; has the owner converged to its desired
+    /// document. Only a fresh document is the owner's word: a stale one, or
+    /// a GET that drew nothing, answers nothing, never no. A sensitive value
+    /// is never shown. Exit 0 a document read, 1 the owner answered with one
+    /// that does not decode, 2 nothing read (silence, an absent service, one
+    /// whose descriptor does not list config.v1).
+    Get(ConfigGetArgs),
+    /// Change one group's parameters, checked against the served schema first.
+    ///
+    /// The view is read first (S4), each NAME=VALUE typed as the kind the
+    /// schema declares, and the change run through the owner's own checks
+    /// (§2.5): what the owner would refuse is refused here, in its words,
+    /// and nothing is sent (exit 2; --no-precheck sends it anyway, typed by
+    /// spelling). A sensitive parameter is given only from a file or
+    /// standard input, NAME=@FILE or NAME=@-, never inline, and is never
+    /// echoed (§2.15); a text beginning with @ is written @@. A reach group
+    /// can cut the link its reply travels on (§2.4): it needs --confirm-s
+    /// (or --join), and the operator's yes at a terminal or --i-know from a
+    /// script, as does any change with a window to a group whose class could
+    /// not be read. A hot group answers `applied`, the read-back after the
+    /// apply; a reach group `pending`, its token, apply_at and deadline on
+    /// the owner's clock, before the apply: read the view over the new link,
+    /// then `config confirm`. Exit 0 an answer of the reply type, 1 a
+    /// refusal, 2 silence (a set that drew nothing started nothing a tool
+    /// can name) or an input refused here.
+    Set(ConfigSetArgs),
+    /// Keep the pending change: it becomes the last change.
+    ///
+    /// config.v1 §2.10. Answered with the view after the act, or the compact
+    /// status with --status. A confirm before every group of the change is
+    /// applied is `busy`; one after the deadline, `busy` until the undo has
+    /// run and `not_found` after. No control operation is idempotent: a confirm
+    /// retried after a lost reply finds nothing pending, so read the last
+    /// change instead (`config get --token`). Exit 0 answered, 1 refused, 2
+    /// silence.
+    Confirm(ConfigTokenArgs),
+    /// Undo the pending change now, as its deadline would.
+    ///
+    /// config.v1 §2.10, §2.11. Answered as `confirm` is. Exit 0 answered, 1
+    /// refused, 2 silence.
+    Cancel(ConfigTokenArgs),
+    /// Move the pending change's deadline to now plus --confirm-s.
+    ///
+    /// config.v1 §2.10: earlier or later than before; the window is raised to the owner's
+    /// floor (§2.8). Answered as `confirm` is. Exit 0 answered, 1 refused, 2
+    /// silence.
+    Extend(ConfigExtendArgs),
+    /// Make the last change survive a restart: its own key, its own grant.
+    ///
+    /// config.v1 §2.13: TOKEN is the last change's: the pending change's is `busy` (confirm
+    /// it first), an older one `not_found`, one that set a sensitive value
+    /// `forbidden`; an owner with no persisted layer answers `unavailable`,
+    /// cause config. Answered as `confirm` is. A deployment can grant a
+    /// change and withhold persist (§2.21): a refusal by access control is
+    /// silence, never not_found. Exit 0 answered, 1 refused, 2 silence.
+    Persist(ConfigTokenArgs),
+}
+
+/// `zenctl config get`'s flags (#768, CC).
+#[derive(clap::Args)]
+pub(crate) struct ConfigGetArgs {
+    /// The service, `<system>/<service>`.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: zenkey_model::grammar::Addr,
+    /// Read the compact status alone: its values, instance, revision, floor,
+    /// pending change, last change and desired report, never the view's
+    /// schema (§2.19).
+    #[arg(long)]
+    pub(crate) status: bool,
+    /// A change you made, by the token its set was answered with: did it
+    /// land, and was its undo clean (§5)? Its events are read where a window
+    /// hears them, or a union storage replays them.
+    #[arg(long, value_name = "TOKEN")]
+    pub(crate) token: Option<String>,
+    /// The instance that answered that set (the view's `instance`): a
+    /// restart since is then a rollback this reader can name (§2.12).
+    #[arg(long, value_name = "ID", requires = "token")]
+    pub(crate) instance: Option<String>,
+    /// The revision of the desired document you put: has the owner
+    /// converged to it (§2.18)? Default: the last document it acted on.
+    #[arg(long, value_name = "REVISION")]
+    pub(crate) desired_revision: Option<u64>,
+    /// Listen to the view, the status and the change events this many
+    /// seconds before the GET: a put heard confirms its document on this
+    /// host's clock and measures the owner's clock (freshness.v1 §2.5,
+    /// §2.6). 31 hears every owner's re-put at least once.
+    #[arg(long = "for", value_name = "SECS")]
+    pub(crate) for_secs: Option<f64>,
+    /// This host's clock and the owner's agree within the HLC delta (500
+    /// ms), as the deployment keeps them: a reply's stamp is then aged
+    /// against this clock (freshness.v1 §2.6).
+    #[arg(long)]
+    pub(crate) clocks_synced: bool,
+    /// The service sits across a constrained face (spec §8.5), where
+    /// presence and descriptors do not cross: the deployment's word that it
+    /// implements config.v1 (§2.19, R7).
+    #[arg(long)]
+    pub(crate) across_face: bool,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// The call metadata an act claims (core O7): never authentication.
+#[derive(Args, Clone)]
+pub(crate) struct ClaimArgs {
+    /// Who is asking, as the change event records it: claimed, never
+    /// authentication; the access control is the authority (§2.17). Default:
+    /// $USER, when set.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) actor: Option<String>,
+    /// The request id the change event records. Default: a fresh ULID.
+    #[arg(long, value_name = "ID")]
+    pub(crate) request_id: Option<String>,
+}
+
+/// `zenctl config set`'s flags (#768, CC).
+#[derive(clap::Args)]
+pub(crate) struct ConfigSetArgs {
+    /// The service, `<system>/<service>`.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: zenkey_model::grammar::Addr,
+    /// The group: the parameters that change together, the unit that has a
+    /// class and that the key names (`@op/set/<GROUP>`).
+    #[arg(value_name = "GROUP")]
+    pub(crate) group: String,
+    /// The values, NAME=VALUE, NAME=@FILE or NAME=@- (standard input, once):
+    /// a subset of the group changes those alone, and none at all is a
+    /// change of nothing (§2.5).
+    #[arg(value_name = "NAME=VALUE")]
+    pub(crate) values: Vec<String>,
+    /// The window, seconds: the change is undone at its deadline unless
+    /// confirmed, the window raised to the owner's floor (§2.8). Required
+    /// for a reach group, unless --join.
+    #[arg(long, value_name = "SECS", value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) confirm_s: Option<u64>,
+    /// Join the pending change by its token (§2.7): the group is applied
+    /// under its window, confirmed, cancelled or undone with it. A joining
+    /// set takes no window of its own, and does not move the deadline.
+    #[arg(long, value_name = "TOKEN", conflicts_with = "confirm_s")]
+    pub(crate) join: Option<String>,
+    /// Refused unless the owner's revision is this one: the revision you
+    /// read (§2.5, row 7).
+    #[arg(long, value_name = "REVISION")]
+    pub(crate) expected_revision: Option<u64>,
+    /// A key that makes a resend safe for 300 s: the owner answers its first
+    /// answer again, and applies nothing twice (§2.14).
+    #[arg(long, value_name = "KEY")]
+    pub(crate) idempotency_key: Option<String>,
+    /// Check, and answer the view as it would read with these values
+    /// applied, touching nothing (§2.9).
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Send without reading the view first: values typed by their spelling,
+    /// nothing checked here, and the class unread, so a window asks for the
+    /// operator's yes as a reach change does (§2.4).
+    #[arg(long)]
+    pub(crate) no_precheck: bool,
+    /// The service sits across a constrained face: the status is read first
+    /// rather than the view (two frames, not six; values typed by its
+    /// values, the class unread), and a silence is unattributed, since
+    /// presence does not cross (§2.19, R7).
+    #[arg(long)]
+    pub(crate) across_face: bool,
+    /// Send a change that can cut the link without being asked: a reach
+    /// group, or a window to a group whose class could not be read (§2.4).
+    #[arg(long)]
+    pub(crate) i_know: bool,
+    #[command(flatten)]
+    pub(crate) claim: ClaimArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl config confirm|cancel|persist`'s flags (#768, CC): a change named
+/// by its token.
+#[derive(clap::Args)]
+pub(crate) struct ConfigTokenArgs {
+    /// The service, `<system>/<service>`.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: zenkey_model::grammar::Addr,
+    /// The change's token, as its set was answered (or the view's `pending`
+    /// and `last_change` show it).
+    #[arg(value_name = "TOKEN")]
+    pub(crate) token: String,
+    /// Answer with the compact status, not the view (`answer = "status"`):
+    /// on a radio link the view is six frames, the status two (§2.10).
+    #[arg(long)]
+    pub(crate) status: bool,
+    /// The service sits across a constrained face: a silence is
+    /// unattributed, since presence does not cross (§2.19, R7).
+    #[arg(long)]
+    pub(crate) across_face: bool,
+    #[command(flatten)]
+    pub(crate) claim: ClaimArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl config extend`'s flags (#768, CC).
+#[derive(clap::Args)]
+pub(crate) struct ConfigExtendArgs {
+    #[command(flatten)]
+    pub(crate) change: ConfigTokenArgs,
+    /// The new window, seconds from the owner's receipt of the extend,
+    /// raised to its floor (§2.8, §2.10).
+    #[arg(long, value_name = "SECS", required = true,
+          value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) confirm_s: u64,
 }
 
 /// `zenctl health`'s flags (#721, PF) — one struct the dispatcher hands over

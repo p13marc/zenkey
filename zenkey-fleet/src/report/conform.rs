@@ -23,7 +23,11 @@
 //! service healthy?" and "does its status agree with its checks?" (#721):
 //! unhealthy or stale, and a break of §2.2 seen in both readings, are the
 //! findings; a service whose descriptor does not list `health.v1` is not
-//! asked.
+//! asked. The `config-*` cases are `config.v1`'s (#768): the status the
+//! view's projection in both readings, both documents fresh, the view
+//! well-formed, each refusal the text makes checkable without changing
+//! anything, and a dry run; a service whose descriptor does not list
+//! `config.v1` is not asked them.
 
 use std::fmt;
 
@@ -98,11 +102,42 @@ pub enum CaseId {
     /// liveness span, nothing lost, the owner present throughout. One
     /// verdict per templated stream or event.
     BudgetWindow,
+    /// The service, implementing `config.v1`, holds a status that is its
+    /// view's projection (`config.v1` §2.19; #768): a mismatch in both of
+    /// the window's two readings is the finding. Not asked of a service
+    /// whose descriptor does not list `config.v1`, and so for every
+    /// `config-*` case.
+    ConfigProjection,
+    /// Its view and its status are each confirmed within their 60 s horizon
+    /// at the window's end, and never deleted (`config.v1` §2.3,
+    /// `freshness.v1`): stale or deleted is the finding.
+    ConfigFresh,
+    /// Its view is well-formed as the text reads it cold (`config.v1` §2.2,
+    /// §2.3, §2.15): its own address and instance, at most its groups'
+    /// bound, names unique, bounds ordered, no sensitive value or startup
+    /// value carried in it or the status, `startup` only where it differs,
+    /// no pending change listed past its deadline by the owner's own clock.
+    ConfigView,
+    /// Each refusal the text makes checkable without changing anything is
+    /// the one it names, one subject per probe (`config.v1` §2.5, §2.10,
+    /// §2.13, §2.16, core O2): a `set` on an undeclared group `not_found`,
+    /// on a group outside the allowlist `unavailable` with cause `config`,
+    /// over the template's wildcard `fanout_forbidden`; a control operation
+    /// with a token naming nothing `not_found`; `persist` listed unavailable
+    /// `unavailable` with cause `config`. Every probe is a dry run against a
+    /// revision no owner holds, so even an owner that skipped a row changes
+    /// nothing.
+    ConfigRefusal,
+    /// A dry run of a hot, writable group's running values answers
+    /// `applied` with the would-be view: the parameters at `source:
+    /// runtime`, the revision, the pending change and the last change as
+    /// they are (`config.v1` §2.9).
+    ConfigDryRun,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 14] = [
+    pub const ALL: [CaseId; 19] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -117,6 +152,11 @@ impl CaseId {
         CaseId::HealthAggregation,
         CaseId::Rate,
         CaseId::BudgetWindow,
+        CaseId::ConfigProjection,
+        CaseId::ConfigFresh,
+        CaseId::ConfigView,
+        CaseId::ConfigRefusal,
+        CaseId::ConfigDryRun,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -136,6 +176,11 @@ impl CaseId {
             CaseId::HealthAggregation => "health-aggregation",
             CaseId::Rate => "rate",
             CaseId::BudgetWindow => "budget-window",
+            CaseId::ConfigProjection => "config-projection",
+            CaseId::ConfigFresh => "config-fresh",
+            CaseId::ConfigView => "config-view",
+            CaseId::ConfigRefusal => "config-refusal",
+            CaseId::ConfigDryRun => "config-dry-run",
         }
     }
 
@@ -162,6 +207,11 @@ impl CaseId {
             CaseId::HealthAggregation => "health.v1 §2.2",
             CaseId::Rate => "§2.7 rate",
             CaseId::BudgetWindow => "§2.7 window",
+            CaseId::ConfigProjection => "config.v1 §2.19",
+            CaseId::ConfigFresh => "config.v1 §2.3",
+            CaseId::ConfigView => "config.v1 §2.2",
+            CaseId::ConfigRefusal => "config.v1 §2.5",
+            CaseId::ConfigDryRun => "config.v1 §2.9",
         }
     }
 }
@@ -354,6 +404,11 @@ mod tests {
                 "health-aggregation",
                 "rate",
                 "budget-window",
+                "config-projection",
+                "config-fresh",
+                "config-view",
+                "config-refusal",
+                "config-dry-run",
             ]
         );
         for c in CaseId::ALL {

@@ -60,6 +60,7 @@ use crate::bus::admin::{
 };
 use zenkey_model::health::{Level, Listing, Presence as HealthPresence, Reason, Verdict};
 
+use crate::bus::config::{ConfigGet, ConfigTarget, ServiceDocs};
 use crate::bus::contracts::BundleStore;
 use crate::bus::health::{HealthGet, HealthTarget};
 use crate::bus::presence::Scope;
@@ -69,9 +70,9 @@ use crate::model::catalog::{Catalog, ContractState, DescriptorRead, Observed, Re
 use crate::model::examples::Examples;
 use crate::model::health::{Got, Trust, agreement_over, listing, reading};
 use crate::report::{
-    Asked, CheckId, CheckReport, DoctorFinding, DoctorHealth, DoctorPresence, DoctorReport,
-    DoctorScope, DoctorSeverity, HealthAnswer, HealthAnswerToken, RouterInfo, StorageInfo,
-    Unjudged,
+    Asked, CheckId, CheckReport, ConfigPremise, DoctorConfig, DoctorFinding, DoctorHealth,
+    DoctorPresence, DoctorReport, DoctorScope, DoctorSeverity, HealthAnswer, HealthAnswerToken,
+    RouterInfo, StorageInfo, Unjudged,
 };
 
 /// How far apart the two presence reads are, by default. Above the one
@@ -99,6 +100,14 @@ const HEALTH_CHECKS: [CheckId; 4] = [
     CheckId::HealthDegraded,
     CheckId::HealthStale,
     CheckId::HealthInconsistent,
+];
+
+/// The checks that read `config.v1` (#768, CC).
+const CONFIG_CHECKS: [CheckId; 4] = [
+    CheckId::ConfigProjection,
+    CheckId::ConfigOverdue,
+    CheckId::ConfigUnpersisted,
+    CheckId::ConfigDesired,
 ];
 
 /// What a doctor run asks.
@@ -149,6 +158,12 @@ impl DoctorSpec {
     /// `health.v1/state/**` (#721, PF).
     fn asks_health(&self) -> bool {
         HEALTH_CHECKS.into_iter().any(|c| self.asks(c))
+    }
+
+    /// Whether the run asks a `config.v1` check, which reads every owner's
+    /// `config.v1/state/**` (#768, CC).
+    fn asks_config(&self) -> bool {
+        CONFIG_CHECKS.into_iter().any(|c| self.asks(c))
     }
 
     /// Whether the run asks `check`.
@@ -223,6 +238,11 @@ pub struct DoctorObservation {
     /// with the first when `health-inconsistent` is asked. Empty when no
     /// `health-*` check was asked.
     pub health: Vec<Result<HealthGet, String>>,
+    /// `config.v1`'s readings (#768, CC), the first first: one GET of every
+    /// owner's `config.v1/state/**` with the second presence read, and one
+    /// with the first when `config-projection` is asked. Empty when no
+    /// `config-*` check was asked.
+    pub config: Vec<Result<ConfigGet, String>>,
 }
 
 /// The routers' admin space, as two reads found it.
@@ -354,6 +374,7 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
                 zenkey::shm::Memlock::Unknown => Memlock::Unknown,
             }),
         health: p.health,
+        config: p.config,
     }
 }
 
@@ -366,18 +387,22 @@ struct PresencePhase {
     archives: BTreeMap<Addr, Result<ArchiveKeys, String>>,
     stamps: BTreeMap<(Addr, IfaceId), Result<StateStamps, String>>,
     health: Vec<Result<HealthGet, String>>,
+    config: Vec<Result<ConfigGet, String>>,
 }
 
 async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> PresencePhase {
     let (s, t) = (&bus.session, spec.timeout);
     let scope = Scope::all();
     let health = HealthTarget::All.state_selector();
+    let config = ConfigTarget::All.state_selector(false);
     let mut readings = Vec::new();
+    let mut config_readings = Vec::new();
     let before = if [
         CheckId::SplitBrain,
         CheckId::TokenMissing,
         CheckId::HostidDuplicate,
         CheckId::HealthInconsistent,
+        CheckId::ConfigProjection,
     ]
     .into_iter()
     .any(|c| spec.asks(c))
@@ -395,6 +420,13 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
                 None
             }
         };
+        let first_config = async {
+            if spec.asks(CheckId::ConfigProjection) {
+                Some(crate::bus::config::get(s, &config, t).await)
+            } else {
+                None
+            }
+        };
         let described = async {
             let mut read = read;
             if let (true, Ok(o)) = (spec.asks(CheckId::HostidDuplicate), &mut read) {
@@ -405,8 +437,14 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             }
             read
         };
-        let (_, first, read) = tokio::join!(tokio::time::sleep(spec.grace), first, described);
+        let (_, first, first_config, read) = tokio::join!(
+            tokio::time::sleep(spec.grace),
+            first,
+            first_config,
+            described
+        );
         readings.extend(first);
+        config_readings.extend(first_config);
         Some(read)
     } else {
         None
@@ -474,8 +512,17 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             None
         }
     };
-    let (contracts, archives, stamps, second) = tokio::join!(contracts, archives, stamps, second);
+    let second_config = async {
+        if spec.asks_config() {
+            Some(crate::bus::config::get(s, &config, t).await)
+        } else {
+            None
+        }
+    };
+    let (contracts, archives, stamps, second, second_config) =
+        tokio::join!(contracts, archives, stamps, second, second_config);
     readings.extend(second);
+    config_readings.extend(second_config);
     PresencePhase {
         before,
         after: Some(after),
@@ -483,6 +530,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         archives,
         stamps,
         health: readings,
+        config: config_readings,
     }
 }
 
@@ -749,6 +797,10 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::HealthInconsistent => health_inconsistent(p, spec),
                 CheckId::HostidDuplicate => hostid_duplicate(p),
                 CheckId::PopulationOverBound => population_over_bound(p),
+                CheckId::ConfigProjection => config_projection(p),
+                CheckId::ConfigOverdue => config_overdue(p),
+                CheckId::ConfigUnpersisted => config_unpersisted(p, spec),
+                CheckId::ConfigDesired => config_desired(p, spec),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -830,6 +882,24 @@ fn scope_of(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorScope {
                         .filter(|a| catalog.has_instance(a))
                         .filter(|a| matches!(listing(after, a), Listing::Listed { .. }))
                         .count(),
+                    clocks_synced: spec.clocks_synced,
+                })
+            }
+            _ => Asked::NotAsked,
+        },
+        config: match (&obs.after, obs.config.is_empty()) {
+            (Some(Ok(after)), false) => {
+                let catalog = Catalog::new(after);
+                Asked::Asked(DoctorConfig {
+                    selector: ConfigTarget::All.state_selector(false),
+                    services: catalog
+                        .addresses()
+                        .filter(|a| catalog.has_instance(a))
+                        .filter(|a| {
+                            crate::model::config::listing(after, a) == ConfigPremise::Listed
+                        })
+                        .count(),
+                    readings: obs.config.len(),
                     clocks_synced: spec.clocks_synced,
                 })
             }
@@ -2624,6 +2694,371 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
     )
 }
 
+// ─── config.v1 (#768, CC) ───────────────────────────────────────────────────
+
+/// One service the `config-*` checks judge: present in the second read, its
+/// descriptor listing `config.v1` (§2.1), with each reading's documents.
+struct ConfigSubject<'o> {
+    addr: Addr,
+    /// The first reading's documents, when one was taken and the first
+    /// presence read held the service's instance token.
+    first: Option<&'o ServiceDocs>,
+    /// The second reading's.
+    second: &'o ServiceDocs,
+    /// When the second reading's GET ended, this host's clock.
+    read_at: std::time::SystemTime,
+}
+
+/// What the `config-*` checks read: the subjects, the services they could
+/// not decide, and how many present services do not list `config.v1`.
+struct ConfigRead<'o> {
+    subjects: Vec<ConfigSubject<'o>>,
+    undecided: Vec<Unjudged>,
+    unlisted: usize,
+}
+
+/// Every present service's `config.v1` documents, two readings a grace
+/// apart when `config-projection` is asked, one otherwise: the premise from
+/// the instance token and the descriptor's listing (§2.1, §5).
+fn config_read<'o>(p: &Presence<'o>) -> ConfigRead<'o> {
+    let (first, second) = match p.obs.config.as_slice() {
+        [first, second] => (Some(first), second),
+        [second] => (None, second),
+        _ => {
+            return ConfigRead {
+                subjects: Vec::new(),
+                undecided: vec![unjudged(
+                    "config.v1",
+                    "no reading of the owners' config.v1/state/** was taken",
+                )],
+                unlisted: 0,
+            };
+        }
+    };
+    let catalog = Catalog::new(p.after);
+    let before = p.before.as_ref().ok().map(|b| Catalog::new(b));
+    let mut out = ConfigRead {
+        subjects: Vec::new(),
+        undecided: Vec::new(),
+        unlisted: 0,
+    };
+    static NONE: std::sync::LazyLock<ServiceDocs> = std::sync::LazyLock::new(ServiceDocs::default);
+    for addr in catalog.addresses().filter(|a| catalog.has_instance(a)) {
+        match crate::model::config::listing(p.after, addr) {
+            ConfigPremise::NotListed => {
+                out.unlisted += 1;
+                continue;
+            }
+            ConfigPremise::Listed => {}
+            _ => {
+                out.undecided.push(unjudged(
+                    addr.to_string(),
+                    "no descriptor of it read: whether it implements config.v1 cannot be told \
+                     (config.v1 §2.1)",
+                ));
+                continue;
+            }
+        }
+        let second = match second {
+            Ok(g) => g,
+            Err(e) => {
+                out.undecided.push(unjudged(
+                    addr.to_string(),
+                    format!("the reading's GET could not be made: {e}"),
+                ));
+                continue;
+            }
+        };
+        let first = match (first, &before) {
+            (Some(Ok(g)), Some(b)) if b.has_instance(addr) => {
+                Some(g.services.get(addr).unwrap_or(&NONE))
+            }
+            _ => None,
+        };
+        out.subjects.push(ConfigSubject {
+            addr: addr.clone(),
+            first,
+            second: second.services.get(addr).unwrap_or(&NONE),
+            read_at: second.read_at,
+        });
+    }
+    if !p.complete {
+        out.undecided
+            .push(incomplete("a service unseen may implement config.v1"));
+    }
+    out
+}
+
+/// The clean reason's tail: the services not asked.
+fn config_unlisted(n: usize) -> String {
+    if n == 0 {
+        String::new()
+    } else {
+        format!("; {n} present service(s) do not list config.v1, and are not asked")
+    }
+}
+
+/// `config-projection` (§2.19): an owner holding a status that is not its
+/// view's projection, in both of two readings a grace apart. One reading
+/// can pair a view and a status a put apart (§2.3, F-112), so one reading's
+/// mismatch is unjudged, never the finding; the last reading's match is
+/// clean.
+fn config_projection(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::ConfigProjection;
+    let r = config_read(p);
+    let mut findings = Vec::new();
+    let mut undecided = r.undecided;
+    let mut holds = 0usize;
+    for s in &r.subjects {
+        let last = crate::model::config::projection_of(s.second);
+        let first = s.first.and_then(crate::model::config::projection_of);
+        match (first, last) {
+            (_, Some(true)) => holds += 1,
+            (Some(false), Some(false)) => findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                s.addr.to_string(),
+                format!(
+                    "in both of two readings {:.1}s apart, its status is not its view's \
+                     projection: an owner keeps the status equal to the view's projection \
+                     (config.v1 §2.19)",
+                    p.grace_s()
+                ),
+            )),
+            (_, Some(false)) => undecided.push(unjudged(
+                s.addr.to_string(),
+                "its status is not its view's projection in the last reading only: one reading \
+                 can pair a view and a status a put apart (config.v1 §2.3)",
+            )),
+            (_, None) => undecided.push(unjudged(
+                s.addr.to_string(),
+                "its view and its status were not both read and decoded",
+            )),
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{holds} service(s) implementing config.v1, each status its view's projection{}",
+            config_unlisted(r.unlisted)
+        ),
+    )
+}
+
+/// How far past its pending change's deadline an owner's own stamp may put
+/// a view still listing it: the view's horizon, the time an owner takes to
+/// confirm it twice (§2.3), so an undo the device is still making is not
+/// the finding.
+pub const OVERDUE_GRACE: Duration = zenkey_model::config::TTL;
+
+/// `config-overdue` (§2.11): an owner whose view, stamped by its own clock
+/// more than [`OVERDUE_GRACE`] after its pending change's deadline, still
+/// lists that change. The deadline and the stamp are both the owner's clock
+/// (§2.8, S1), so no clock of this host's is trusted for it.
+fn config_overdue(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::ConfigOverdue;
+    let r = config_read(p);
+    let mut findings = Vec::new();
+    let mut undecided = r.undecided;
+    let mut fine = 0usize;
+    for s in &r.subjects {
+        let subject = s.addr.to_string();
+        let Some(reply) = &s.second.view else {
+            undecided.push(unjudged(subject, "its view was not read"));
+            continue;
+        };
+        let view = match &reply.value {
+            Some(Ok(v)) => v,
+            Some(Err(why)) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!("its view does not decode: {why}"),
+                ));
+                continue;
+            }
+            None => {
+                undecided.push(unjudged(subject, "its view was deleted"));
+                continue;
+            }
+        };
+        let Some(pending) = &view.pending else {
+            fine += 1;
+            continue;
+        };
+        let Some(stamp) = &reply.stamp else {
+            undecided.push(unjudged(
+                subject,
+                "its view's reply carries no stamp (core S2): when the owner put it cannot be \
+                 told",
+            ));
+            continue;
+        };
+        let Some(deadline) = zenkey_model::config::Time::parse(&pending.deadline) else {
+            undecided.push(unjudged(
+                subject,
+                format!(
+                    "its pending change's deadline {:?} is no RFC 3339 instant (config.v1 §2.8)",
+                    pending.deadline
+                ),
+            ));
+            continue;
+        };
+        let put = stamp
+            .time
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+            .unwrap_or(0);
+        let late = put - deadline.millis();
+        if late > i64::try_from(OVERDUE_GRACE.as_millis()).unwrap_or(i64::MAX) {
+            findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                format!("{} {}", s.addr, pending.token),
+                format!(
+                    "its view, put {:.1}s after the deadline {} by its own clock, still lists \
+                     change {} pending: at the deadline a change still pending is undone, once \
+                     (config.v1 §2.11)",
+                    late as f64 / 1000.0,
+                    pending.deadline,
+                    pending.token
+                ),
+            ));
+        } else {
+            fine += 1;
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{fine} service(s) implementing config.v1, none listing a change pending past its \
+             deadline by its own clock{}",
+            config_unlisted(r.unlisted)
+        ),
+    )
+}
+
+/// One subject's second reading as §5 reads it: the documents' freshness
+/// from the GET's reply alone, aged on the deployment's word or not at all,
+/// since the doctor listens to no document.
+fn config_reading(s: &ConfigSubject<'_>, spec: &DoctorSpec) -> crate::model::config::ConfigReading {
+    use crate::model::config::{Got, doc_read};
+    let trust = if spec.clocks_synced {
+        Trust::Word
+    } else {
+        Trust::None
+    };
+    crate::model::config::ConfigReading {
+        premise: ConfigPremise::Listed,
+        view: Some(doc_read(
+            Got::of(s.second.view.as_ref(), s.read_at),
+            None,
+            &trust,
+        )),
+        status: doc_read(Got::of(s.second.status.as_ref(), s.read_at), None, &trust),
+        events: Vec::new(),
+    }
+}
+
+/// Why a §5 answer leaves a subject to someone else, with the cure for an
+/// untrusted clock.
+fn config_unjudged(s: &ConfigSubject<'_>, a: &crate::report::ConfigAnswer) -> Unjudged {
+    let hint =
+        if a.says.contains("clock_untrusted") || a.says.contains("not trusted to the HLC delta") {
+            " — the doctor measures no clock: pass --clocks-synced on the deployment's word that \
+         this host's clock and the owners' agree (freshness.v1 §2.6)"
+        } else {
+            ""
+        };
+    unjudged(s.addr.to_string(), format!("{}{hint}", a.says))
+}
+
+/// `config-unpersisted` (§5, §2.3): a parameter a fresh view shows with a
+/// `startup` value, running a runtime change a restart would not keep. Info:
+/// "a divergence an operator may want persisted or undone" (§5), never a
+/// defect. A sensitive or unknown value is never shown, so never judged.
+fn config_unpersisted(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    use crate::report::ConfigAnswerToken as A;
+    const C: CheckId = CheckId::ConfigUnpersisted;
+    let r = config_read(p);
+    let mut findings = Vec::new();
+    let mut undecided = r.undecided;
+    let mut judged = 0usize;
+    for s in &r.subjects {
+        let reading = config_reading(s, spec);
+        let Some(view) = reading.fresh_view() else {
+            let a = crate::judge::config::none_fresh(&reading, true);
+            undecided.push(config_unjudged(s, &a));
+            continue;
+        };
+        judged += 1;
+        for g in &view.groups {
+            for prm in &g.parameters {
+                let a = crate::judge::config::survives(&reading, &g.name, &prm.name);
+                if a.answer == A::No {
+                    findings.push(finding(
+                        C,
+                        DoctorSeverity::Info,
+                        format!("{} {}.{}", s.addr, g.name, prm.name),
+                        format!("{}: a restart would not keep it", a.says),
+                    ));
+                }
+            }
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{judged} service(s) implementing config.v1, each fresh view running its startup \
+             values (a sensitive value is never shown, so never judged){}",
+            config_unlisted(r.unlisted)
+        ),
+    )
+}
+
+/// `config-desired` (§2.18, §5): an owner whose last desired document was
+/// refused, or failed to converge, by a fresh view or status. An owner that
+/// converges no desired state is clean here: the question is not asked of
+/// it.
+fn config_desired(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    use crate::report::ConfigAnswerToken as A;
+    const C: CheckId = CheckId::ConfigDesired;
+    let r = config_read(p);
+    let mut findings = Vec::new();
+    let mut undecided = r.undecided;
+    let (mut converged, mut none) = (0usize, 0usize);
+    for s in &r.subjects {
+        let reading = config_reading(s, spec);
+        let a = crate::judge::config::converged(&reading, None);
+        match a.answer {
+            A::No => findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                s.addr.to_string(),
+                format!("its desired document was {} (config.v1 §2.18)", a.says),
+            )),
+            A::Yes => converged += 1,
+            A::NotAsked => none += 1,
+            A::NotYet | A::Unobservable => undecided.push(config_unjudged(s, &a)),
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{converged} service(s) converged to the last desired document they acted on, {none} \
+             converging none{}",
+            config_unlisted(r.unlisted)
+        ),
+    )
+}
+
 // ─── the checks that read no presence ───────────────────────────────────────
 
 /// §8.3: the domain's token count against the budget. A read that ended at
@@ -4250,5 +4685,219 @@ mod tests {
             &[],
         );
         assert!(clean(&check(&o, CheckId::HostidDuplicate)).starts_with("2 address(es)"));
+    }
+
+    // ── config.v1 (#768, CC) ────────────────────────────────────────────
+
+    use crate::bus::config::{ConfigGet, ServiceDocs};
+    use zenkey_model::config::{ConfigStatus, ConfigView};
+
+    /// A descriptor of `service@instance` listing `config.v1`.
+    fn config_descriptor(service: &str, instance: &str) -> DescriptorRead {
+        descriptor(
+            service,
+            instance,
+            &[json!({"iface": "config.v1",
+                     "contract": format!("sha256:{}", zenkey::config_v1::FINGERPRINT),
+                     "minor": 0})],
+            &[],
+        )
+    }
+
+    /// A view of `lab/rf0`, its `duty` running `value` with `startup` when
+    /// given, and `extra` members over it.
+    fn rf_view(value: i64, startup: Option<i64>, extra: serde_json::Value) -> ConfigView {
+        let mut p = json!({"name": "fraction_ppm", "kind": "integer", "description": "p",
+                           "value": value, "source": "runtime"});
+        if let Some(s) = startup {
+            p["startup"] = json!(s);
+        }
+        let mut v = json!({"service": "lab/rf0", "instance": "i1", "revision": 1,
+                           "confirm_floor_s": 10,
+                           "groups": [{"name": "duty", "class": "hot", "description": "d",
+                                       "writable": true, "parameters": [p]}]});
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// One owner's documents: the view, stamped `age_s` before `now()`, and
+    /// its status, the view's projection unless `status` says otherwise.
+    fn docs(view: &ConfigView, status: Option<ConfigStatus>, age_s: u64) -> ServiceDocs {
+        let stamp = Some(Stamped {
+            time: now() - Duration::from_secs(age_s),
+            clock: "ab12".into(),
+        });
+        ServiceDocs {
+            view: Some(Replied {
+                value: Some(Ok(view.clone())),
+                stamp: stamp.clone(),
+            }),
+            status: Some(Replied {
+                value: Some(Ok(status.unwrap_or_else(|| ConfigStatus::of(view)))),
+                stamp,
+            }),
+        }
+    }
+
+    fn config_get(services: Vec<(&str, ServiceDocs)>) -> ConfigGet {
+        ConfigGet {
+            selector: "zk2/*/*/config.v1/state/**".into(),
+            read_at: now(),
+            complete: true,
+            services: services
+                .into_iter()
+                .map(|(a, d)| (a.parse().unwrap(), d))
+                .collect(),
+        }
+    }
+
+    /// `lab/rf0` implementing `config.v1`, and `lab/n` implementing nothing.
+    fn config_obs(
+        first: Vec<(&str, ServiceDocs)>,
+        second: Vec<(&str, ServiceDocs)>,
+    ) -> DoctorObservation {
+        let o = observed(
+            &[inst("lab/rf0", A), inst("lab/n", B)],
+            vec![
+                (("lab/rf0", A), config_descriptor("lab/rf0", A)),
+                (("lab/n", B), descriptor("lab/n", B, &[], &[])),
+            ],
+        );
+        let mut o = obs(o, &[], &[]);
+        o.config = vec![Ok(config_get(first)), Ok(config_get(second))];
+        o
+    }
+
+    fn config_check(o: &DoctorObservation, s: &DoctorSpec, id: CheckId) -> CheckReport {
+        judge(o, s).check(id).expect("every check").clone()
+    }
+
+    /// `config-projection` is two readings' finding; one reading's mismatch
+    /// is unjudged; a service whose descriptor does not list config.v1 is
+    /// not asked; the scope says what was read.
+    #[test]
+    fn config_projection_needs_both_readings() {
+        let v = rf_view(20000, None, json!({}));
+        let mut off = ConfigStatus::of(&v);
+        off.revision = 7;
+        let both = config_obs(
+            vec![("lab/rf0", docs(&v, Some(off.clone()), 5))],
+            vec![("lab/rf0", docs(&v, Some(off.clone()), 5))],
+        );
+        let r = config_check(&both, &spec(), CheckId::ConfigProjection);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/rf0", DoctorSeverity::Error)
+        );
+        assert!(f.evidence.contains("§2.19"), "{f:?}");
+        let once = config_obs(
+            vec![("lab/rf0", docs(&v, None, 5))],
+            vec![("lab/rf0", docs(&v, Some(off), 5))],
+        );
+        let r = config_check(&once, &spec(), CheckId::ConfigProjection);
+        assert!(unseen(&r).contains("last reading only"), "{r:#?}");
+        let fine = config_obs(
+            vec![("lab/rf0", docs(&v, None, 5))],
+            vec![("lab/rf0", docs(&v, None, 5))],
+        );
+        let why = clean(&config_check(&fine, &spec(), CheckId::ConfigProjection));
+        assert!(
+            why.starts_with("1 service(s)") && why.contains("1 present service(s) do not list"),
+            "{why}"
+        );
+        match judge(&fine, &spec()).scope.config {
+            Asked::Asked(c) => {
+                assert_eq!((c.services, c.readings), (1, 2));
+                assert_eq!(c.selector, "zk2/*/*/config.v1/state/**");
+            }
+            Asked::NotAsked => panic!("the config readings were taken"),
+        }
+    }
+
+    /// `config-overdue` reads the owner's own clock: a view stamped more
+    /// than 60 s past its pending change's deadline is the finding, one
+    /// within it is not, whatever this host's clock.
+    #[test]
+    fn config_overdue_reads_the_owners_own_clock() {
+        let deadline = |past_s: u64| {
+            let ms = (now() - Duration::from_secs(past_s))
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            zenkey_model::config::Time::from_millis(i64::try_from(ms).unwrap()).rfc3339()
+        };
+        let pending = |past_s: u64| {
+            rf_view(
+                20000,
+                Some(10000),
+                json!({"pending": {"token": "i1-2", "groups": ["duty"],
+                                   "deadline": deadline(past_s), "applied": true}}),
+            )
+        };
+        let late = config_obs(vec![], vec![("lab/rf0", docs(&pending(90), None, 0))]);
+        let f = found(&config_check(&late, &spec(), CheckId::ConfigOverdue)).clone();
+        assert_eq!(f.subject, "lab/rf0 i1-2");
+        assert!(f.evidence.contains("§2.11"), "{f:?}");
+        let undoing = config_obs(vec![], vec![("lab/rf0", docs(&pending(20), None, 0))]);
+        let why = clean(&config_check(&undoing, &spec(), CheckId::ConfigOverdue));
+        assert!(why.starts_with("1 service(s)"), "{why}");
+        let mut unstamped = docs(&pending(90), None, 0);
+        unstamped.view.as_mut().unwrap().stamp = None;
+        let o = config_obs(vec![], vec![("lab/rf0", unstamped)]);
+        assert!(unseen(&config_check(&o, &spec(), CheckId::ConfigOverdue)).contains("no stamp"));
+    }
+
+    /// `config-unpersisted` and `config-desired` conclude only from a fresh
+    /// document: on the deployment's word for the clock, each finds its §5
+    /// "no"; without it, every service is unjudged, the reason naming the
+    /// cure.
+    #[test]
+    fn config_findings_of_section_5_need_a_fresh_document() {
+        let v = rf_view(
+            20000,
+            Some(10000),
+            json!({"desired": {"observed_revision": 2, "outcome": "refused",
+                               "refusal": {"code": "reach", "group": "radio"}}}),
+        );
+        let o = config_obs(vec![], vec![("lab/rf0", docs(&v, None, 5))]);
+        let s = DoctorSpec {
+            clocks_synced: true,
+            ..spec()
+        };
+        let r = config_check(&o, &s, CheckId::ConfigUnpersisted);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/rf0 duty.fraction_ppm", DoctorSeverity::Info)
+        );
+        assert!(f.evidence.contains("10000"), "{f:?}");
+        let r = config_check(&o, &s, CheckId::ConfigDesired);
+        let f = found(&r);
+        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert!(f.evidence.contains("reach on radio"), "{f:?}");
+        for id in [CheckId::ConfigUnpersisted, CheckId::ConfigDesired] {
+            let r = config_check(&o, &spec(), id);
+            assert!(r.findings.is_empty(), "{id}");
+            assert!(
+                r.unjudged[0].reason.contains("--clocks-synced"),
+                "{id}: {r:#?}"
+            );
+        }
+        let kept = rf_view(10000, None, json!({}));
+        let o = config_obs(vec![], vec![("lab/rf0", docs(&kept, None, 5))]);
+        let why = clean(&config_check(&o, &s, CheckId::ConfigUnpersisted));
+        assert!(why.starts_with("1 service(s)"), "{why}");
+        let why = clean(&config_check(&o, &s, CheckId::ConfigDesired));
+        assert!(why.contains("1 converging none"), "{why}");
+        // A GET that drew nothing for the owner: undecided, never clean.
+        let o = config_obs(vec![], vec![]);
+        assert!(
+            config_check(&o, &s, CheckId::ConfigOverdue)
+                .verdict
+                .is_unobservable()
+        );
     }
 }

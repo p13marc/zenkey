@@ -7,6 +7,40 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the doctor's `config.v1` checks, and `zenwatch.v1` 1.1 (#768, CC)
+
+The scheduled doctor runs the four checks the doctor gained for
+`config.v1` (`spec/profiles/config/v1.md`): `config-projection`,
+`config-overdue`, `config-unpersisted` and `config-desired`. Its report,
+published on `state/doctor`, carries their verdicts and the scope's new
+`config` half, and every notification's coverage line names what they read
+(`config: <n> service(s), <n> reading(s), clocks …`, or `not asked`).
+
+`zenwatch.v1` is at **1.1** (`sha256:21433f7d…`, published in
+`contracts/.history`). The doctor report's types grew, and one change is a
+**review**, accepted by publishing 1.1: the build gate re-warns no review of
+a published revision (`zenkey-build`, #768), so zenwatch builds without a
+word:
+
+| 1.0 | 1.1 | Class |
+|---|---|---|
+| `CheckId`: a `oneOf` of the nineteen ids | `CheckId`: one branch, any string | review (`undecided_changed`): a human's call, taken here (below) |
+| `DoctorScope`: `namespace`, `presence`, `routers`, `health` | and `config`, optional (`DoctorConfig`) | compatible |
+
+**Why open, and what it costs.** The doctor's ids are an appendable
+vocabulary ("new checks append"), and a closed list made each appended
+check a `oneOf` branch added, which core §9.8 classifies breaking: every
+check after 1.0 would have been a new major of `zenwatch.v1`. A reader
+shows an id it does not know as written. What it costs: a reader that
+validates `state/doctor` against 1.0's bundle refuses a report naming a
+`config-*` id; one that retrieves the bundle the descriptor names (core
+§8.4) reads 1.1. The alternative was `zenwatch.v2`, not taken: the next
+appended check is a compatible change.
+
+| Before | Now | Notes |
+|---|---|---|
+| `coverage: …; health: …; checks: 19 established, …` | `coverage: …; health: …; config: …; checks: 23 established, …` | The coverage line every notification ends with |
+
 ## Unreleased (`main`, zk2) — `instance-gone`, one reading with zenctl (#747)
 
 The address form's reading — `instance-gone`, and `liveliness-gone

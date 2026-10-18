@@ -4,101 +4,9 @@
   "$comment": "zenwatch.v1 (#614, FL3), Rust-first: what zenwatch's structs (zenwatch/src/publish.rs) and the fleet's doctor report (zenkey-fleet/src/report/doctor.rs) derive through schemars, committed. zenwatch's check_schema tests keep each top-level type in step with this file; descriptions are the structs' doc comments, their rustdoc links spelled as code.",
   "$defs": {
     "CheckId": {
-      "description": "Every check zk2's doctor runs.\n\n**Stable API**: scripts key on these through `--format json`, a\nwatchdog's `doctor <CHECK-ID>` rule names one, and a notifier keys its\ndeltas on them. New checks append; nothing renames one.\n`CheckId::question` is each one's question, worded so that its finding\nis the yes.",
+      "description": "A check of zk2's doctor, by its stable id: an open vocabulary, since new checks append (`CheckId::ALL` lists them). A reader shows an id it does not know as written.",
       "oneOf": [
         {
-          "const": "split-brain",
-          "description": "Two instances of one service exposing an exclusive resource at once\n(§6), from two presence reads a grace period apart.",
-          "type": "string"
-        },
-        {
-          "const": "binding-unsatisfied",
-          "description": "A role whose bindings select no provider this reader can see (§3.2).",
-          "type": "string"
-        },
-        {
-          "const": "contract-drift",
-          "description": "Providers of one interface at revisions the classifier calls review\nor breaking against each other (§9.8).",
-          "type": "string"
-        },
-        {
-          "const": "contract-unavailable",
-          "description": "A revision a descriptor names that no holder serves verified (§8.4).",
-          "type": "string"
-        },
-        {
-          "const": "descriptor-invalid",
-          "description": "A descriptor that fails the descriptor check: the D-codes (§3.3).",
-          "type": "string"
-        },
-        {
-          "const": "token-missing",
-          "description": "An instance whose tokens disagree with its descriptor (§8.1).",
-          "type": "string"
-        },
-        {
-          "const": "presence-over-budget",
-          "description": "More tokens in the presence domain than its budget (§8.3).",
-          "type": "string"
-        },
-        {
-          "const": "storage-on-state",
-          "description": "A router storage answering on an owner's state keys (§4.2 S4).",
-          "type": "string"
-        },
-        {
-          "const": "archive-unaligned",
-          "description": "An archive serving keys its alignment has not confirmed (§4.4).",
-          "type": "string"
-        },
-        {
-          "const": "state-stamp-foreign",
-          "description": "An owner answering its state with a stamp that is not its own\n(§4.2 S1–S2). A data-plane read, asked under `deep` only.",
-          "type": "string"
-        },
-        {
-          "const": "shm-memlock-low",
-          "description": "This host's `RLIMIT_MEMLOCK` below what a shared-memory pool needs\n(§7.4).",
-          "type": "string"
-        },
-        {
-          "const": "admin-unreachable",
-          "description": "No router answering the admin space, which S4's check reads (§4.2).",
-          "type": "string"
-        },
-        {
-          "const": "router-version-skew",
-          "description": "Routers of the mesh at different zenoh versions (Appendix B).",
-          "type": "string"
-        },
-        {
-          "const": "health-failed",
-          "description": "A present service at `FAILED`, by its fresh status or a current check\nthat status vouches for (`health.v1` §2.1, §2.11; #721).",
-          "type": "string"
-        },
-        {
-          "const": "health-degraded",
-          "description": "A present service at `DEGRADED`, the same way (`health.v1` §2.1).",
-          "type": "string"
-        },
-        {
-          "const": "health-stale",
-          "description": "A present service whose status was not confirmed within its 60 s\nhorizon: stale, never a level (`health.v1` §2.4).",
-          "type": "string"
-        },
-        {
-          "const": "health-inconsistent",
-          "description": "An owner holding a status better than a current check, in both of\ntwo readings a grace apart (`health.v1` §2.2).",
-          "type": "string"
-        },
-        {
-          "const": "hostid-duplicate",
-          "description": "Two sessions claiming one address of a minted system, in both of two\npresence reads a grace apart, the cause undecided (`hostid.v1`\n§2.12).",
-          "type": "string"
-        },
-        {
-          "const": "population-over-bound",
-          "description": "An owner holding more live members of a templated state resource\nthan its bound, by its own complete GET (core §2.7, 0.24; #735). A\ndata-plane read, asked under `deep` only, from the GETs\n`state-stamp-foreign` reads.",
           "type": "string"
         }
       ]
@@ -190,6 +98,38 @@
         "grouped",
         "repeats",
         "evicted"
+      ],
+      "type": "object"
+    },
+    "DoctorConfig": {
+      "description": "The `config.v1` half of `DoctorScope` (#768, CC).",
+      "properties": {
+        "clocks_synced": {
+          "description": "Whether the run took the deployment's word that this host's clock\nand the owners' agree (`--clocks-synced`, `freshness.v1` §2.6).\nWithout it, a reply's age is unobservable, and so are the checks that\nconclude from a fresh document.",
+          "type": "boolean"
+        },
+        "readings": {
+          "description": "How many readings were taken: two, a grace apart, when\n`config-projection` was asked; one otherwise.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "selector": {
+          "description": "The selector the readings' GETs went out on, base-relative.",
+          "type": "string"
+        },
+        "services": {
+          "description": "Present services whose descriptor lists `config.v1` (§2.1).",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "selector",
+        "services",
+        "readings",
+        "clocks_synced"
       ],
       "type": "object"
     },
@@ -372,6 +312,10 @@
     "DoctorScope": {
       "description": "What one doctor run read: the scope that makes its silences legible.",
       "properties": {
+        "config": {
+          "$ref": "#/$defs/DoctorConfig",
+          "description": "What the `config.v1` checks read (#768, CC). Absent when none was\nasked."
+        },
         "health": {
           "$ref": "#/$defs/DoctorHealth",
           "description": "What the `health.v1` checks read (#721, PF). Absent when none was\nasked."

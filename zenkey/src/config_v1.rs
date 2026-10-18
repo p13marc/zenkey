@@ -519,10 +519,21 @@ impl Configuration {
     /// without a window per group whose values differ, waiting while a
     /// change is pending; the outcome is the `desired` report of the view
     /// and the status. A document whose revision the owner already acted
-    /// on is not acted on again.
+    /// on is not acted on again in this instance (text 0.3): a later `set`
+    /// that changes a value it names does not make it converge again.
     pub async fn set_desired(&self, doc: DesiredConfig) {
         self.inner.core.lock().await.desired = Some(doc);
         self.inner.wake.notify_one();
+    }
+
+    /// The desired document this instance holds, the latest given
+    /// ([`Configuration::set_desired`]). The binding is the deployment's,
+    /// so it survives a restart: an application hands it to the next
+    /// instance, which acts on it once, as the first did, its converged
+    /// values being runtime changes the restart rolled back (§2.18, §2.12;
+    /// text 0.3, F-114).
+    pub async fn desired_document(&self) -> Option<DesiredConfig> {
+        self.inner.core.lock().await.desired.clone()
     }
 
     /// When the change events of the last hour were published, on the

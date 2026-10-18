@@ -848,6 +848,7 @@ mod tests {
                 presence: zenkey_fleet::report::Asked::NotAsked,
                 routers: zenkey_fleet::report::Asked::Asked(1),
                 health: zenkey_fleet::report::Asked::NotAsked,
+                config: zenkey_fleet::report::Asked::NotAsked,
             },
             checks: vec![zenkey_fleet::report::CheckReport::not_asked(
                 zenkey_fleet::report::CheckId::SplitBrain,

@@ -826,21 +826,32 @@ fn compile_calls(
         .iter()
         .filter(|r| r.kind == Kind::Operation)
         .collect();
-    let called: Vec<&Resource> = match &spec.operations {
-        None => ops.clone(),
+    // Each operation named: a template, or a templated one with its
+    // parameters given in place (`set/duty` for `set/{group}`), one member
+    // granted (§11.1 Call; config.v1 §2.21, #768).
+    let called: Vec<(&Resource, BTreeMap<String, String>)> = match &spec.operations {
+        None => ops.iter().map(|r| (*r, BTreeMap::new())).collect(),
         Some(names) => {
+            let mut out = Vec::new();
             for n in names {
-                if !ops.iter().any(|r| r.template.as_str() == n) {
-                    return Err(refused(
-                        "§5",
-                        format!("{what}: {iface} declares no operation {n:?}"),
-                    ));
+                if let Some(r) = ops.iter().find(|r| r.template.as_str() == n) {
+                    out.push((*r, BTreeMap::new()));
+                    continue;
+                }
+                match ops.iter().find_map(|r| instance_of(r, n).map(|b| (*r, b))) {
+                    Some(member) => out.push(member),
+                    None => {
+                        return Err(refused(
+                            "§5",
+                            format!(
+                                "{what}: {iface} declares no operation {n:?}: name a template, \
+                                 or a templated one with its parameters given in place"
+                            ),
+                        ));
+                    }
                 }
             }
-            ops.iter()
-                .copied()
-                .filter(|r| names.iter().any(|n| n == r.template.as_str()))
-                .collect()
+            out
         }
     };
     if called.is_empty() {
@@ -849,16 +860,65 @@ fn compile_calls(
             format!("{what}: {iface} declares no operation to call"),
         ));
     }
-    let params = resolve_params(&spec.params, me, &called, &what)?;
+    let templates: Vec<&Resource> = called.iter().map(|(r, _)| *r).collect();
+    let params = resolve_params(&spec.params, me, &templates, &what)?;
+    for (r, member) in &called {
+        if let Some(k) = member.keys().find(|k| params.contains_key(*k)) {
+            return Err(refused(
+                "R2",
+                format!(
+                    "{what}: params {k:?} binds what operation {} names in place already",
+                    r.template
+                ),
+            ));
+        }
+    }
     for p in &providers {
         let addr = p.chunks();
-        for r in &called {
-            push_unique(&mut h.calls, resource_pattern(&addr, &iface, r, &params));
+        for (r, member) in &called {
+            let mut bound = params.clone();
+            bound.extend(member.iter().map(|(k, v)| (k.clone(), v.clone())));
+            push_unique(&mut h.calls, resource_pattern(&addr, &iface, r, &bound));
         }
         push_unique(&mut h.presence, format!("zk2/{addr}/@zk/**"));
         dep.check_provider(h, p, &iface, &what);
     }
     Ok(())
+}
+
+/// `name` as one member of `r`'s template: each literal chunk as written,
+/// each parameter bound to the chunk in its place (a rest parameter to the
+/// chunks left), at least one parameter bound. `None` when it is not one.
+fn instance_of(r: &Resource, name: &str) -> Option<BTreeMap<String, String>> {
+    let chunks: Vec<&str> = name.split('/').collect();
+    let mut out = BTreeMap::new();
+    let mut i = 0;
+    for seg in r.template.segments() {
+        match seg {
+            Segment::Literal(l) => {
+                if chunks.get(i) != Some(&l.as_str()) {
+                    return None;
+                }
+                i += 1;
+            }
+            Segment::Param(n) => {
+                let c = chunks
+                    .get(i)
+                    .filter(|c| !c.is_empty() && !c.contains('*'))?;
+                out.insert(n.clone(), (*c).to_owned());
+                i += 1;
+            }
+            Segment::Rest(n) => {
+                let rest = chunks.get(i..).filter(|r| !r.is_empty())?;
+                if rest.iter().any(|c| c.is_empty() || c.contains('*')) {
+                    return None;
+                }
+                out.insert(n.clone(), rest.join("/"));
+                i = chunks.len();
+            }
+        }
+    }
+    (i == chunks.len() && !out.is_empty()).then_some(out)
 }
 
 /// The roles the contracts a service implements declare, by name. One name
@@ -3972,5 +4032,34 @@ type = { raw = "text/plain" }
             assert!(kinds.contains(&k), "{k:?} in {kinds:?}");
         }
         assert_eq!(check.judgement, Judgement::Established);
+    }
+
+    /// A templated operation named with its parameters in place is one
+    /// member of it, `set/duty` of config.v1's `set/{group}` (config.v1
+    /// §2.21; #768, CC); a name of another shape is no member.
+    #[test]
+    fn an_operation_named_in_place_is_one_member() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/profiles/config/config.v1.toml");
+        let l = zenkey_model::contract::load_path(&path);
+        let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+        let set = c
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "set/{group}")
+            .expect("set/{group}");
+        assert_eq!(
+            instance_of(set, "set/duty"),
+            Some(BTreeMap::from([("group".to_owned(), "duty".to_owned())]))
+        );
+        for not in ["set", "set/duty/x", "set/*", "set/", "persist", "get/duty"] {
+            assert_eq!(instance_of(set, not), None, "{not}");
+        }
+        let persist = c
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "persist")
+            .expect("persist");
+        assert_eq!(instance_of(persist, "persist"), None, "no parameter bound");
     }
 }

@@ -1,6 +1,7 @@
 //! What fails a consumer's build (#611, `docs/zk2/codegen.md`): a lint
-//! error, and a breaking revision against the history; a review revision
-//! only warns (spec §9.7, §9.8).
+//! error, and a breaking revision against the history, published or not; a
+//! review revision only warns, and only until it is published (spec §9.7,
+//! §9.8; #768).
 
 use std::path::{Path, PathBuf};
 
@@ -86,6 +87,57 @@ fn a_review_revision_warns() {
         "{:?}",
         g.warnings
     );
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+/// Publishes `text` as a further revision of `d`'s history.
+fn publish(d: &Path, text: &str) {
+    let f = d.join("contracts/gate.v1.toml");
+    std::fs::write(&f, text).unwrap();
+    let c = load_path(&f).contract.unwrap();
+    let (_, written) = zenkey_model::history::append(&d.join("contracts/.history"), &c).unwrap();
+    assert!(written, "a new revision");
+}
+
+/// A review revision once published is accepted: building it again is
+/// silent, while a review change not yet published still warns against
+/// every entry (#768: zenwatch.v1 1.1 re-warned its accepted review on
+/// every build).
+#[test]
+fn a_published_review_revision_builds_without_a_word() {
+    let d = published("accepted");
+    let v1_1 = V0.replace("minor = 0\n", "minor = 1\nuses = [\"freshness.v1\"]\n");
+    publish(&d, &v1_1);
+    let g = revise(&d, &v1_1).unwrap();
+    assert!(g.warnings.is_empty(), "{:?}", g.warnings);
+
+    // 1.2, not yet published: review against 1.0 and against 1.1.
+    let v1_2 = V0.replace("minor = 0\n", "minor = 2\nuses = [\"health.v1\"]\n");
+    let g = revise(&d, &v1_2).unwrap();
+    let review: Vec<_> = g
+        .warnings
+        .iter()
+        .filter(|w| w.contains("review uses_changed"))
+        .collect();
+    assert_eq!(review.len(), 2, "{:?}", g.warnings);
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+/// Publishing runs no classifier, so a breaking revision can sit in a
+/// history; building it still fails.
+#[test]
+fn a_published_breaking_revision_still_fails_the_build() {
+    let d = published("breaking-published");
+    let removed = V0.replace(
+        "[resources.ping]\nkind = \"operation\"\nrequest = { raw = \"text/plain\" }\nresponse = { raw = \"text/plain\" }\n",
+        "",
+    );
+    publish(&d, &removed);
+    let e = revise(&d, &removed).unwrap_err();
+    let Error::Breaking { findings, .. } = &e else {
+        panic!("{e}")
+    };
+    assert!(findings.contains("resource_removed"), "{findings}");
     std::fs::remove_dir_all(d).unwrap();
 }
 

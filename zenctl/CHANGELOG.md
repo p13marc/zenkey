@@ -6,6 +6,36 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `config` back on zk2: `config.v1` (#768, CC)
+
+FJ9 left v1's six `config` verbs dark "until the configuration profile
+exists (#613)". It does (`spec/profiles/config/v1.md`, text 0.3), and the
+verbs return as `config.v1`'s: the configured resource is the service, so
+an address replaces v1's origin, producer and resource; each act is its own
+key and grant (§2.21); and every rule — the premise, freshness, §5's
+answers, the value typing, the owner's own validator, consent, redaction —
+is the engine's (`zenkey_fleet::{run_config, call_config}`). The doctor and
+`check conform` gain `config.v1`'s checks, and `acl gen` grants its acts
+one by one.
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| `config get <origin> <producer> <resource>` (a `@rpc` read) | `config get <SYSTEM/SERVICE> [--status] [--token T [--instance I]] [--desired-revision R] [--for SECS] [--clocks-synced] [--across-face]` | One S4 GET of the owner's view and status (`--status`: the compact status alone, two radio frames where the view takes six), after presence and the descriptor: the premise of every answer (`premise`: `listed`, `not_listed`, `descriptor_unread`, `absent`, `incomplete`, `across_face`). Each document's `freshness` is `freshness.v1`'s at 60 s: a reply's stamp is aged only against a trusted clock, measured during `--for` or on `--clocks-synced`'s word. §5's answers, each `yes`, `no`, `not_yet`, `unobservable` or `not_asked` with its reason: `pending` (and `pending_change`), `change.landed` and `change.undo_clean` (`--token`), a `group` row per group (writable?) and a `parameter` row per parameter (will it survive a restart?), `converged`; the window's change events as `event` rows. A stale document, or a GET that drew nothing, answers nothing, never no. Exit 0 a document read, 1 one that does not decode, 2 nothing read |
+| `config get '*' …` (a fan-out read) | — | one service per run; `doctor` reads every owner's `config.v1/state/**` |
+| `config set <o> <p> <r> <GROUP> NAME=VALUE... [--confirm S] [--token T] [--expect-revision N] [--idempotency-key K] [--dry-run] [--actor] [--request-id] [--yes] [--no-validate]` | `config set <SYSTEM/SERVICE> <GROUP> [NAME=VALUE...] [--confirm-s N] [--join T] [--expected-revision R] [--idempotency-key K] [--dry-run] [--no-precheck] [--across-face] [--i-know] [--actor] [--request-id]` | The view read first, each value typed as the kind its schema declares, and the owner's own `validate_set` run against `Schema::of_view` and the view's facts (§2.5): a change the owner would refuse is refused here in its words, exit 2, nothing sent. `--confirm` → `--confirm-s` (the request's member; at least 1), `--token` → `--join` (beside `--confirm-s`, a usage error), `--expect-revision` → `--expected-revision`, `--yes` → `--i-know` (one guard per verb), `--no-validate` → `--no-precheck` (typed by spelling). No values at all is legal: a change of nothing (§2.5). `--across-face` reads the status first (its values type the change; no class) and leaves a silence unattributed |
+| `NAME=VALUE` for a sensitive parameter | `NAME=@FILE` or `NAME=@-` only | inline is refused (exit 2) so a PIN never sits on a command line; the request shows it `"<redacted>"`, and what the owner sends back is scrubbed of it (§2.15). `@@…` is a text beginning with `@` |
+| `--yes` to send a reach change, or a windowed one to a group no read-back classed | `--i-know`, or a yes at a terminal | the class read from the view; with none (`--no-precheck`, `--across-face`, no view answered), a window or `--join` is taken as reach (§2.4) |
+| `--actor`, `--request-id` as `?actor=` selector parameters | `--actor` (default `$USER`), `--request-id` (default a fresh ULID) | core O7's call metadata, claimed only; the change event records the `set` that started a change (§2.17) |
+| a hot `set` answering the read-back, a reach one `{token, apply_at}` | `answer: applied` with the `view`, or `answer: pending` with `{token, apply_at, deadline}` | the reply union as §3 names it; a refusal is `answer: refused` with the envelope and its `ConfigError` (`restart-required`, `device-refused`); silence `answer: silent`, attributed through presence. One envelope, no rows (`config-act`). Exit 0 a reply of its type, 1 a refusal or a malformed reply, 2 silence (a set that drew nothing started nothing a tool can name) |
+| `config confirm\|cancel <o> <p> <r> <TOKEN>` | `config confirm\|cancel <SYSTEM/SERVICE> <TOKEN> [--status] [--across-face]` | `--status` asks `answer = "status"`, the compact status, for a constrained face (§2.10); the reply is `answer: view` or `answer: status` |
+| `config extend <o> <p> <r> <TOKEN> --by SECS` | `config extend <SYSTEM/SERVICE> <TOKEN> --confirm-s SECS [--status]` | the window from the owner's receipt, raised to its floor |
+| `config persist <o> <p> <r> [TOKEN]` (default: the read-back's `last_change`) | `config persist <SYSTEM/SERVICE> <TOKEN> [--status]` | the token is required: the last change's (§2.13). The pending change's is `busy`, an older one `not_found`, one that set a sensitive value `forbidden`, no persisted layer `unavailable` (config). A refusal by access control is silence, never `not_found` |
+| `config_change` events (`events/<producer>/config_change/<ulid>`) | `events/change/<ulid>`, read by `config get --for` and a replay where a union storage holds them | `{group, parameter, old, new}` per edit (§2.17) |
+| `doctor`: nineteen checks | twenty-three: `config-projection` (error: a status off its view's projection in both of two readings), `config-overdue` (error: a view its owner's own clock put more than 60 s past its pending change's deadline), `config-unpersisted` (info: a value a restart would not keep), `config-desired` (warning: a desired document refused or failed) | the last two only with `--clocks-synced`, else unobservable; the scope gains `config` (the GET selector, the services listing `config.v1`, the readings, the clock's word) |
+| `check conform`: fourteen cases | nineteen: `config-projection`, `config-fresh`, `config-view`, `config-refusal`, `config-dry-run` | asked of a service whose descriptor lists `config.v1`, whatever interface the run tests; one `not_asked` row each otherwise. `config-refusal` probes are dry runs against a revision no owner holds; a probe a broken owner could act on is made only under `--i-know` |
+| `acl gen` `[[calls]] operations = ["<template>"]` | also `"set/duty"`: a templated operation with its parameters in place | one member of `set/{group}` granted (config.v1 §2.21); `examples/zk2/acl/config.enrollment.toml` |
+| — | `doctor`'s JSON `CheckId` schema: one branch, any string | the ids are an appendable vocabulary; `zenwatch.v1` 1.1 carries it (zenwatch's CHANGELOG) |
+
 ## Unreleased (`main`, zk2) — `echo` prints a deletion as one in every form (#766)
 
 Since #765 raw `get` prints a tombstone in the words
@@ -191,7 +221,7 @@ question went, or that nothing on `main` asks it yet.
 | `check cutover --old-root <KEYEXPR> [--for]` | `compat <old> <new>`; `zk2 contract compat\|check-history` in CI | a zk2 migration is a contract revision, judged before it ships; there is no old keyspace to watch go quiet |
 | `check retired [--for]` over `deprecated.lock` | `zk2 contract check-history` | a `.history` is append-only, and the classifier says what a revision breaks |
 | `check conform --producer P [--origin] [--for] [--deep] [--junit]` | not yet; `check schema`, `check probe`, `check expect --valid-payload`, `doctor` meanwhile | a contract as a conformance suite is a follow-up; `--deep`'s freshness and `[budget]` judgements need the freshness profile (#613) |
-| `config get\|set\|confirm\|cancel\|extend\|persist <origin> <producer> <resource> …` | — | dark until the configuration profile exists (#613) |
+| `config get\|set\|confirm\|cancel\|extend\|persist <origin> <producer> <resource> …` | — | dark until the configuration profile exists (#613); back as `config.v1`'s since #768 (CC, above) |
 | `blob list [--producer] [--tier]`, `blob locate <id>`, `blob fetch <target> --origin [-o] [--root] [--allow-unpinned] [--overwrite] [-q]` | — | dark until the blob profile exists (#613) |
 | `export [selector] [--bind] [--validate] [--doctor-every] [--max-series] [--once] [--for] [--prom] [--i-know]` | — | dark until its profile exists (#613) |
 | `--registry <DIR>` (every verb that took it) | `--contracts <PATH>` where a verb reads contracts | `--contracts` takes an authoring file, a directory of them, or a `.history` root |

@@ -38,9 +38,14 @@ use serde::{Deserialize, Serialize};
 /// deltas on them. New checks append; nothing renames one.
 /// [`CheckId::question`] is each one's question, worded so that its finding
 /// is the yes.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
-)]
+///
+/// **Its JSON Schema is open** (#768, CC): one branch, any string. The
+/// tokens are stable and new checks append, so a closed list of them would
+/// make every appended check a `oneOf` branch added, which core §9.8 calls
+/// breaking, to every contract that carries the report Rust-first
+/// (`zenwatch.v1`'s `state/doctor`). A reader shows an id it does not know
+/// as written; [`CheckId::ALL`] is the list, pinned by `check_id_tests`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CheckId {
     /// Two instances of one service exposing an exclusive resource at once
@@ -93,11 +98,26 @@ pub enum CheckId {
     /// data-plane read, asked under `deep` only, from the GETs
     /// `state-stamp-foreign` reads.
     PopulationOverBound,
+    /// An owner holding a status that is not its view's projection, in both
+    /// of two readings a grace apart (`config.v1` §2.19; #768).
+    ConfigProjection,
+    /// An owner whose view, put by its own clock more than the view's
+    /// horizon after its pending change's deadline, still lists that change
+    /// pending: the undo at the deadline did not run (`config.v1` §2.11).
+    ConfigOverdue,
+    /// A parameter a fresh view shows running a runtime change a restart
+    /// would not keep: §5's "no" to "will this value survive a restart?"
+    /// (`config.v1` §2.3, §5). Worth knowing, never a defect.
+    ConfigUnpersisted,
+    /// An owner whose last desired document was refused, or failed to
+    /// converge, by a fresh view or status: §5's "no" to "has it converged
+    /// to its desired document?" (`config.v1` §2.18, §5).
+    ConfigDesired,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 19] = [
+    pub const ALL: [CheckId; 23] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -117,6 +137,10 @@ impl CheckId {
         CheckId::HealthInconsistent,
         CheckId::HostidDuplicate,
         CheckId::PopulationOverBound,
+        CheckId::ConfigProjection,
+        CheckId::ConfigOverdue,
+        CheckId::ConfigUnpersisted,
+        CheckId::ConfigDesired,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -141,6 +165,10 @@ impl CheckId {
             CheckId::HealthInconsistent => "health-inconsistent",
             CheckId::HostidDuplicate => "hostid-duplicate",
             CheckId::PopulationOverBound => "population-over-bound",
+            CheckId::ConfigProjection => "config-projection",
+            CheckId::ConfigOverdue => "config-overdue",
+            CheckId::ConfigUnpersisted => "config-unpersisted",
+            CheckId::ConfigDesired => "config-desired",
         }
     }
 
@@ -172,6 +200,10 @@ impl CheckId {
             CheckId::HealthInconsistent => "health.v1 §2.2",
             CheckId::HostidDuplicate => "hostid.v1 §2.12",
             CheckId::PopulationOverBound => "§2.7",
+            CheckId::ConfigProjection => "config.v1 §2.19",
+            CheckId::ConfigOverdue => "config.v1 §2.11",
+            CheckId::ConfigUnpersisted => "config.v1 §5",
+            CheckId::ConfigDesired => "config.v1 §2.18",
         }
     }
 
@@ -237,6 +269,22 @@ impl CheckId {
                 "does an owner hold more live members of a templated state resource than its \
                  bound, by its own answer to a GET?"
             }
+            CheckId::ConfigProjection => {
+                "does an owner hold a config.v1 status that is not its view's projection, in \
+                 both of two readings a grace apart?"
+            }
+            CheckId::ConfigOverdue => {
+                "does an owner's view, put by its own clock more than 60 s after its pending \
+                 change's deadline, still list that change pending?"
+            }
+            CheckId::ConfigUnpersisted => {
+                "does a fresh config.v1 view show a parameter running a value a restart would \
+                 not keep?"
+            }
+            CheckId::ConfigDesired => {
+                "was an owner's last desired document refused, or did converging it fail, by a \
+                 fresh view or status?"
+            }
         }
     }
 
@@ -263,6 +311,22 @@ impl CheckId {
                 | CheckId::AdminUnreachable
                 | CheckId::RouterVersionSkew
         )
+    }
+}
+
+impl JsonSchema for CheckId {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "CheckId".into()
+    }
+
+    /// An open vocabulary: any string, in one `oneOf` branch.
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A check of zk2's doctor, by its stable id: an open vocabulary, \
+                            since new checks append (`CheckId::ALL` lists them). A reader shows \
+                            an id it does not know as written.",
+            "oneOf": [{"type": "string"}],
+        })
     }
 }
 
@@ -432,6 +496,27 @@ pub struct DoctorScope {
     /// asked.
     #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
     pub health: Asked<DoctorHealth>,
+    /// What the `config.v1` checks read (#768, CC). Absent when none was
+    /// asked.
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub config: Asked<DoctorConfig>,
+}
+
+/// The `config.v1` half of [`DoctorScope`] (#768, CC).
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct DoctorConfig {
+    /// The selector the readings' GETs went out on, base-relative.
+    pub selector: String,
+    /// Present services whose descriptor lists `config.v1` (§2.1).
+    pub services: usize,
+    /// How many readings were taken: two, a grace apart, when
+    /// `config-projection` was asked; one otherwise.
+    pub readings: usize,
+    /// Whether the run took the deployment's word that this host's clock
+    /// and the owners' agree (`--clocks-synced`, `freshness.v1` §2.6).
+    /// Without it, a reply's age is unobservable, and so are the checks that
+    /// conclude from a fresh document.
+    pub clocks_synced: bool,
 }
 
 /// The `health.v1` half of [`DoctorScope`] (#721, PF).
@@ -608,6 +693,12 @@ mod tests {
                 services: 2,
                 clocks_synced: false,
             }),
+            config: Asked::Asked(DoctorConfig {
+                selector: "zk2/*/*/config.v1/state/**".into(),
+                services: 1,
+                readings: 2,
+                clocks_synced: false,
+            }),
         }
     }
 
@@ -672,6 +763,12 @@ mod tests {
                         "services": 2,
                         "clocks_synced": false,
                     },
+                    "config": {
+                        "selector": "zk2/*/*/config.v1/state/**",
+                        "services": 1,
+                        "readings": 2,
+                        "clocks_synced": false,
+                    },
                 },
                 "checks": [
                     {
@@ -715,6 +812,7 @@ mod tests {
                 presence: Asked::NotAsked,
                 routers: Asked::NotAsked,
                 health: Asked::NotAsked,
+                config: Asked::NotAsked,
             },
             checks: vec![],
             unobservable: Some("no zk2 token visible to this reader".into()),
@@ -873,6 +971,10 @@ mod check_id_tests {
                 "health-inconsistent",
                 "hostid-duplicate",
                 "population-over-bound",
+                "config-projection",
+                "config-overdue",
+                "config-unpersisted",
+                "config-desired",
             ]
         );
     }
@@ -941,7 +1043,8 @@ mod schema_tests {
     /// shape says: every list and the empty-scope reason absent when empty,
     /// a scope half absent when not asked (`Asked` is transparent), each
     /// verdict one of the four poles by its `answer` tag. `CheckId` is
-    /// spelled from [`CheckId::ALL`], whose tokens `check_id_tests` pin.
+    /// open: one branch, any string (#768, CC); its tokens are
+    /// `check_id_tests`'.
     #[test]
     fn the_report_schema_is_pinned() {
         let uint = json!({"type": "integer", "minimum": 0});
@@ -968,7 +1071,6 @@ mod schema_tests {
             }
             json!({"type": "object", "properties": properties, "required": required})
         };
-        let check_ids: Vec<&str> = CheckId::ALL.map(CheckId::as_str).to_vec();
         assert_eq!(
             schema_of::<DoctorReport>(),
             json!({
@@ -980,7 +1082,8 @@ mod schema_tests {
                 },
                 "required": ["scope", "checks"],
                 "$defs": {
-                    "CheckId": tokens(&check_ids),
+                    // Open (#768, CC): an appended check changes no schema.
+                    "CheckId": {"oneOf": [{"type": "string"}]},
                     "CheckReport": {
                         "type": "object",
                         "properties": {
@@ -991,6 +1094,16 @@ mod schema_tests {
                             "verdict": {"$ref": "#/$defs/Judgement"},
                         },
                         "required": ["check", "section", "verdict"],
+                    },
+                    "DoctorConfig": {
+                        "type": "object",
+                        "properties": {
+                            "clocks_synced": {"type": "boolean"},
+                            "readings": uint,
+                            "selector": string,
+                            "services": uint,
+                        },
+                        "required": ["selector", "services", "readings", "clocks_synced"],
                     },
                     "DoctorFinding": finding,
                     "DoctorHealth": {
@@ -1021,6 +1134,7 @@ mod schema_tests {
                     "DoctorScope": {
                         "type": "object",
                         "properties": {
+                            "config": {"$ref": "#/$defs/DoctorConfig"},
                             "health": {"$ref": "#/$defs/DoctorHealth"},
                             "namespace": string,
                             "presence": {"$ref": "#/$defs/DoctorPresence"},

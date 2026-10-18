@@ -92,6 +92,12 @@ pub fn doctor_report() -> DoctorReport {
                 services: 2,
                 clocks_synced: false,
             }),
+            config: Asked::Asked(DoctorConfig {
+                selector: "zk2/*/*/config.v1/state/**".into(),
+                services: 1,
+                readings: 2,
+                clocks_synced: false,
+            }),
         },
         checks: vec![
             CheckReport::of(
@@ -227,6 +233,44 @@ pub fn doctor_report() -> DoctorReport {
             ),
             // Deep, like state-stamp-foreign: not asked without --deep.
             CheckReport::not_asked(CheckId::PopulationOverBound),
+            // config.v1 (#768, CC): a status off its view's projection in
+            // both readings; a pending change in its deadline's grace; the
+            // two that conclude from a fresh view unobservable without
+            // --clocks-synced.
+            CheckReport::of(
+                CheckId::ConfigProjection,
+                vec![finding(
+                    CheckId::ConfigProjection,
+                    DoctorSeverity::Error,
+                    "lab/rf0",
+                    "in both of two readings 2.0s apart, its status is not its view's \
+                     projection: an owner keeps the status equal to the view's projection \
+                     (config.v1 §2.19)",
+                )],
+                vec![],
+                "unused",
+            ),
+            clean(
+                CheckId::ConfigOverdue,
+                "1 service(s) implementing config.v1, none listing a change pending past its \
+                 deadline by its own clock; 3 present service(s) do not list config.v1, and are \
+                 not asked",
+            ),
+            CheckReport::of(
+                CheckId::ConfigUnpersisted,
+                vec![],
+                vec![Unjudged {
+                    subject: "lab/rf0".into(),
+                    reason: "no fresh view: the status carries no class, no writable and no \
+                             startup value — the view this reader's clock is not trusted to the \
+                             HLC delta against the stamping clock (unobservable) — the doctor \
+                             measures no clock: pass --clocks-synced on the deployment's word \
+                             that this host's clock and the owners' agree (freshness.v1 §2.6)"
+                        .into(),
+                }],
+                "unused",
+            ),
+            CheckReport::not_asked(CheckId::ConfigDesired),
         ],
         unobservable: None,
     }
@@ -1988,4 +2032,340 @@ pub fn snapshot_staging() -> Snapshot {
 /// [`snapshot`] against itself: identical on every facet.
 pub fn snapshot_diff_identity() -> SnapshotDiff {
     zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
+}
+
+// --- config.v1 (#768, CC) ---------------------------------------------------
+
+/// `lab/rf0`'s view as `scenarios.md` §1 leaves it: `duty` changed at
+/// runtime from its startup 10000, `radio` from its file, `pin` sensitive,
+/// `queue` outside the allowlist, a reach change on `radio` pending.
+pub fn config_view() -> zenkey_model::config::ConfigView {
+    serde_json::from_value(serde_json::json!({
+        "service": "lab/rf0", "instance": "3fa9c2d41b7e0012", "revision": 1,
+        "confirm_floor_s": 10,
+        "pending": {"token": "3fa9c2d41b7e0012-2", "groups": ["radio"],
+                    "deadline": "2026-10-18T12:02:00.000Z", "applied": false},
+        "last_change": {"token": "3fa9c2d41b7e0012-1", "groups": ["duty"]},
+        "groups": [
+            {"name": "duty", "class": "hot", "description": "the transmit duty cycle",
+             "writable": true,
+             "parameters": [{"name": "fraction_ppm", "kind": "integer", "min": 0,
+                             "max": 1000000, "unit": "ppm", "description": "the share of airtime",
+                             "value": 20000, "source": "runtime", "startup": 10000}]},
+            {"name": "radio", "class": "reach", "description": "the radio channel",
+             "writable": true,
+             "parameters": [{"name": "frequency_hz", "kind": "integer", "unit": "Hz",
+                             "description": "the carrier frequency", "value": 868100000,
+                             "source": "file"}]},
+            {"name": "sim", "class": "hot", "description": "the SIM", "writable": true,
+             "parameters": [{"name": "pin", "kind": "text", "description": "the SIM's PIN",
+                             "sensitive": true, "source": "file"}]},
+            {"name": "queue", "class": "hot", "description": "the transmit queue",
+             "writable": false,
+             "parameters": [{"name": "tx_queue_len", "kind": "integer", "unit": "packets",
+                             "description": "the queue's length", "value": 100,
+                             "source": "default"}]}
+        ]
+    }))
+    .expect("a ConfigView")
+}
+
+fn config_answer(answer: ConfigAnswerToken, reason: &str, says: &str) -> ConfigAnswer {
+    ConfigAnswer::new(answer, reason, says)
+}
+
+/// A document confirmed within its horizon.
+fn fresh() -> ConfigFreshness {
+    ConfigFreshness {
+        verdict: FreshnessToken::Fresh,
+        reason: "within_horizon".into(),
+        says: "confirmed within its horizon".into(),
+    }
+}
+
+/// `zenctl config get lab/rf0 --token … --clocks-synced`: the view and the
+/// status fresh, a reach change pending, the change asked about not landed
+/// yet, every group's and parameter's answer — a sensitive value
+/// unobservable, a runtime change that would not survive a restart — and
+/// one change event read.
+pub fn config_report() -> ConfigReport {
+    use ConfigAnswerToken as A;
+    let view = config_view();
+    let status = zenkey_model::config::ConfigStatus::of(&view);
+    let stamp = Stamp {
+        time: "2026-10-18T12:00:05.000000000Z".into(),
+        clock: "751033f1fbbb816bc6f7bad180995fa2".into(),
+    };
+    ConfigReport {
+        namespace: "acme".into(),
+        service: "lab/rf0".into(),
+        premise: ConfigPremise::Listed,
+        presence: Some(ConfigPresenceRead {
+            selector: "zk2/lab/rf0/@zk/**".into(),
+            complete: true,
+            instances: vec!["3fa9c2d41b7e0012".into()],
+        }),
+        window_s: None,
+        clock: ClockGround::DeploymentWord,
+        asked: vec![
+            "zk2/lab/rf0/@zk/**".into(),
+            "zk2/lab/rf0/config.v1/state/**".into(),
+            "zk2/lab/rf0/config.v1/events/change/*".into(),
+        ],
+        pending_change: view.pending.clone(),
+        view: Asked::Asked(ConfigDocument {
+            value: Some(view),
+            undecodable: None,
+            via: Some(ConfigVia::Get),
+            stamp: Some(stamp.clone()),
+            freshness: fresh(),
+        }),
+        status: ConfigDocument {
+            value: Some(status),
+            undecodable: None,
+            via: Some(ConfigVia::Get),
+            stamp: Some(stamp),
+            freshness: fresh(),
+        },
+        projection: config_answer(
+            A::Yes,
+            "projection",
+            "the status is the view's projection (config.v1 §2.19)",
+        ),
+        pending: config_answer(
+            A::Yes,
+            "pending",
+            "change 3fa9c2d41b7e0012-2 is pending on radio, its deadline \
+             2026-10-18T12:02:00.000Z (the owner's clock), not every group applied yet — by the \
+             fresh view",
+        ),
+        change: Some(ChangeAnswers {
+            token: "3fa9c2d41b7e0012-2".into(),
+            instance: Some("3fa9c2d41b7e0012".into()),
+            landed: config_answer(
+                A::NotYet,
+                "still_pending",
+                "it is still pending, its deadline 2026-10-18T12:02:00.000Z (the owner's \
+                 clock): confirm it, or it is undone then",
+            ),
+            undo_clean: config_answer(
+                A::NotAsked,
+                "not_ended",
+                "it is still pending: no undo has run yet",
+            ),
+            event: None,
+        }),
+        writable: vec![
+            GroupAnswer {
+                group: "duty".into(),
+                answer: config_answer(A::Yes, "hot", "duty is hot and writable"),
+            },
+            GroupAnswer {
+                group: "queue".into(),
+                answer: config_answer(
+                    A::No,
+                    "outside_allowlist",
+                    "queue is outside this service's startup allowlist (config.v1 §2.16)",
+                ),
+            },
+        ],
+        survives_restart: vec![
+            ParameterAnswer {
+                group: "duty".into(),
+                parameter: "fraction_ppm".into(),
+                answer: config_answer(
+                    A::No,
+                    "startup_differs",
+                    "it runs 20000, and a restart would run 10000: a divergence an operator \
+                     may want persisted or undone (config.v1 §2.13)",
+                ),
+            },
+            ParameterAnswer {
+                group: "sim".into(),
+                parameter: "pin".into(),
+                answer: config_answer(
+                    A::Unobservable,
+                    "sensitive",
+                    "write-only: its startup value is never shown (config.v1 §2.15)",
+                ),
+            },
+        ],
+        converged: DesiredAnswer {
+            revision: None,
+            answer: config_answer(
+                A::NotAsked,
+                "no_desired",
+                "no desired member: the owner converges no desired state (config.v1 §2.18)",
+            ),
+        },
+        events: vec![
+            serde_json::from_value(serde_json::json!({
+                "service": "lab/rf0", "instance": "3fa9c2d41b7e0012", "revision": 1,
+                "token": "3fa9c2d41b7e0012-1", "outcome": "applied",
+                "edits": [{"group": "duty", "parameter": "fraction_ppm",
+                           "old": 10000, "new": 20000}],
+                "actor": "ops", "request_id": "r-1"
+            }))
+            .expect("a ConfigChangeEvent"),
+        ],
+        events_undecodable: 0,
+        unobservable: None,
+    }
+}
+
+/// `zenctl config get lab/rf0 --status --across-face`: the status alone,
+/// read by GET, with no trusted clock: every answer unobservable, never no.
+pub fn config_status_report() -> ConfigReport {
+    use ConfigAnswerToken as A;
+    let mut status = zenkey_model::config::ConfigStatus::of(&config_view());
+    status.pending = None;
+    let untrusted = ConfigFreshness {
+        verdict: FreshnessToken::Unobservable,
+        reason: "clock_untrusted".into(),
+        says: "this reader's clock is not trusted to the HLC delta against the stamping clock"
+            .into(),
+    };
+    let none_fresh = "neither the view nor the status is fresh — the view was not asked \
+                      (--status); the status this reader's clock is not trusted to the HLC \
+                      delta against the stamping clock (unobservable)";
+    ConfigReport {
+        namespace: String::new(),
+        service: "lab/rf0".into(),
+        premise: ConfigPremise::AcrossFace,
+        presence: None,
+        window_s: None,
+        clock: ClockGround::None,
+        asked: vec!["zk2/lab/rf0/config.v1/state/status".into()],
+        view: Asked::NotAsked,
+        status: ConfigDocument {
+            value: Some(status),
+            undecodable: None,
+            via: Some(ConfigVia::Get),
+            stamp: Some(Stamp {
+                time: "2026-10-18T12:00:05.000000000Z".into(),
+                clock: "751033f1fbbb816bc6f7bad180995fa2".into(),
+            }),
+            freshness: untrusted,
+        },
+        projection: config_answer(
+            A::NotAsked,
+            "view_not_asked",
+            "only the status was read (--status)",
+        ),
+        pending: config_answer(A::Unobservable, "no_fresh_document", none_fresh),
+        pending_change: None,
+        change: None,
+        writable: vec![],
+        survives_restart: vec![],
+        converged: DesiredAnswer {
+            revision: None,
+            answer: config_answer(A::Unobservable, "no_fresh_document", none_fresh),
+        },
+        events: vec![],
+        events_undecodable: 0,
+        unobservable: None,
+    }
+}
+
+fn config_act(
+    operation: &str,
+    request: serde_json::Value,
+    answer: ConfigActAnswer,
+) -> ConfigActReport {
+    ConfigActReport {
+        namespace: "acme".into(),
+        service: "lab/rf0".into(),
+        operation: operation.into(),
+        key: format!("zk2/lab/rf0/config.v1/@op/{operation}"),
+        request,
+        actor: Some("ops".into()),
+        request_id: Some("r-2".into()),
+        checked: None,
+        across_face: false,
+        timeout_s: 2.0,
+        answer,
+    }
+}
+
+/// `zenctl config set lab/rf0 radio frequency_hz=869525000 --confirm-s 120
+/// --i-know`: checked against the view, answered `pending` before the apply.
+pub fn config_act_pending() -> ConfigActReport {
+    ConfigActReport {
+        checked: Some(ConfigChecked {
+            read: ConfigCheckedRead::View,
+            typed_by: ConfigTyping::Schema,
+            instance: Some("3fa9c2d41b7e0012".into()),
+            revision: Some(1),
+            class: Some(zenkey_model::config::Class::Reach),
+        }),
+        ..config_act(
+            "set/radio",
+            serde_json::json!({"confirm_s": 120, "values": {"frequency_hz": 869525000}}),
+            ConfigActAnswer::Pending {
+                pending: zenkey_model::config::PendingReply {
+                    token: "3fa9c2d41b7e0012-2".into(),
+                    apply_at: "2026-10-18T12:00:01.000Z".into(),
+                    deadline: "2026-10-18T12:02:00.000Z".into(),
+                },
+            },
+        )
+    }
+}
+
+/// `zenctl config set lab/rf0 sim pin=@pin.txt`: the value redacted in the
+/// request shown, and the device's refusal, its words left out (§2.15).
+pub fn config_act_refused() -> ConfigActReport {
+    config_act(
+        "set/sim",
+        serde_json::json!({"values": {"pin": "<redacted>"}}),
+        ConfigActAnswer::Refused {
+            refusal: ConfigRefusal {
+                code: "app".into(),
+                message: "the device refused group \"sim\"".into(),
+                cause: None,
+                error: Some(zenkey_model::config::ConfigError {
+                    code: zenkey_model::config::ErrorCode::DeviceRefused,
+                    detail: None,
+                }),
+                detail_undecodable: None,
+            },
+        },
+    )
+}
+
+/// `zenctl config confirm lab/rf0 … --status --across-face`: the compact
+/// status after the act.
+pub fn config_act_status() -> ConfigActReport {
+    let mut status = zenkey_model::config::ConfigStatus::of(&config_view());
+    status.pending = None;
+    status.last_change = Some(zenkey_model::config::LastChange {
+        token: "3fa9c2d41b7e0012-2".into(),
+        groups: vec!["radio".into()],
+    });
+    ConfigActReport {
+        across_face: true,
+        ..config_act(
+            "confirm",
+            serde_json::json!({"answer": "status", "token": "3fa9c2d41b7e0012-2"}),
+            ConfigActAnswer::Status {
+                status: Box::new(status),
+            },
+        )
+    }
+}
+
+/// `zenctl config persist lab/rf0 …` that drew nothing: silence, attributed
+/// through presence, never a failure (core O5).
+pub fn config_act_silent() -> ConfigActReport {
+    config_act(
+        "set/duty",
+        serde_json::json!({"values": {"fraction_ppm": 30000}}),
+        ConfigActAnswer::Silent {
+            silence: SilenceView {
+                attempts: 1,
+                transport: Some("zenoh/string: Timeout".into()),
+                presence: PresenceAttribution::Present,
+            },
+        },
+    )
 }
