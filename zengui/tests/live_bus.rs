@@ -718,6 +718,15 @@ async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
 /// re-reads is a scratch one, never the user's — set once per process; run
 /// these with `--test-threads=1` beside the seed test, which sets its own.
 async fn booted(bus: &Bus, contracts: Vec<PathBuf>) -> zengui::app::Zengui {
+    booted_at(&bus.endpoint, &bus.namespace, contracts).await
+}
+
+/// [`booted`], against any endpoint, in `namespace`.
+async fn booted_at(
+    endpoint: &str,
+    namespace: &str,
+    contracts: Vec<PathBuf>,
+) -> zengui::app::Zengui {
     static HOME: std::sync::Once = std::sync::Once::new();
     HOME.call_once(|| {
         let home = std::env::temp_dir().join(format!("zengui-live-fl10-{}", std::process::id()));
@@ -727,8 +736,8 @@ async fn booted(bus: &Bus, contracts: Vec<PathBuf>) -> zengui::app::Zengui {
         unsafe { std::env::set_var("ZENKEY_EXPLORER_CONFIG_DIR", &home) };
     });
     let settings = zengui::config::Settings {
-        namespace: bus.namespace.clone(),
-        connect: vec![bus.endpoint.clone()],
+        namespace: namespace.to_owned(),
+        connect: vec![endpoint.to_owned()],
         listen: vec![],
         scouting: Some(false),
         zenoh_config: None,
@@ -1375,6 +1384,284 @@ fn shows_tall(app: &zengui::app::Zengui, text: &str) -> bool {
         app.view(iced::window::Id::unique()),
     );
     ui.find(text).is_ok()
+}
+
+// ── the Config tool on config.v1 (#768, CD) ─────────────────────────────────
+
+/// A device that holds what it is told: every apply and every undo
+/// succeeds (`config.v1` §2.9, §2.11).
+struct HeldDevice;
+
+impl zenkey::config_v1::Device for HeldDevice {
+    fn apply<'a>(
+        &'a self,
+        _group: &'a str,
+        _values: &'a std::collections::BTreeMap<String, zenkey::config_v1::Value>,
+    ) -> zenkey::call::BoxFuture<'a, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn undo<'a>(
+        &'a self,
+        _restore: &'a [zenkey::config_v1::Restore],
+    ) -> zenkey::call::BoxFuture<'a, Result<(), zenkey::config_v1::UndoFailed>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+/// `lab/rf0`'s startup, the profile's `rf` in miniature: `duty` hot and
+/// `radio` reach, both writable, from its file; a 2 s floor, and its device
+/// applying a reach change 300 ms after receiving it; no persisted layer.
+fn rf0_startup() -> zenkey::config_v1::Startup {
+    use zenkey::config_v1::{Class, GroupDecl, Kind, ParamDecl, Schema, Startup, Value};
+    let group = |name: &str, class, param: &str, min, max, unit: &str| GroupDecl {
+        name: name.to_owned(),
+        class,
+        description: format!("the {name} group"),
+        writable: true,
+        parameters: vec![ParamDecl {
+            name: param.to_owned(),
+            kind: Kind::Integer {
+                min: Some(min),
+                max: Some(max),
+                unit: Some(unit.to_owned()),
+            },
+            description: format!("the {param}"),
+            sensitive: false,
+        }],
+    };
+    let one = |g: &str, p: &str, v: i64| {
+        (
+            g.to_owned(),
+            std::collections::BTreeMap::from([(p.to_owned(), Value::Integer(v))]),
+        )
+    };
+    Startup {
+        schema: Schema {
+            groups: vec![
+                group("duty", Class::Hot, "fraction_ppm", 0, 1_000_000, "ppm"),
+                group(
+                    "radio",
+                    Class::Reach,
+                    "frequency_hz",
+                    150_000_000,
+                    960_000_000,
+                    "Hz",
+                ),
+            ],
+        },
+        defaults: Default::default(),
+        file: [
+            one("duty", "fraction_ppm", 10_000),
+            one("radio", "frequency_hz", 868_100_000),
+        ]
+        .into(),
+        persisted: None,
+        floor_s: 2,
+        apply_after: Duration::from_millis(300),
+        events: Vec::new(),
+    }
+}
+
+/// A reach change through the Config tool, against an in-process
+/// `zenkey::config_v1` owner (#768, CD; `config.v1` §2.4, §2.9–§2.11).
+/// Self-contained (NOT ignored): a router on port 0, the owner and the
+/// window its clients, in namespace `acme`.
+///
+/// The window reads `lab/rf0`, sets `radio` with a window and its consent,
+/// and is answered pending; its reading listens until the `apply_at` and
+/// shows the change applied; confirm is answered with the view, and the
+/// view read back runs the new frequency, the change its last. A second
+/// reach change is left unconfirmed: the tool's tick listens across its
+/// deadline, and the undo is seen — the frequency back, nothing pending,
+/// and the change's `rolled-back` event heard.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_reach_change_is_confirmed_and_another_rolls_back_at_its_deadline() {
+    use zengui::configure::Draft;
+    use zengui::message::{Message, PaneMsg, RightPane, Subject, SubjectMsg, WorkspaceMsg};
+    use zengui::view::configure::ConfigMsg;
+
+    // R1: a router on an ephemeral port, timestamping on (a router's
+    // default), and its loopback endpoint.
+    let mut c = zenoh::Config::default();
+    c.insert_json5("mode", "\"router\"").unwrap();
+    c.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:0\"]")
+        .unwrap();
+    c.insert_json5("scouting/multicast/enabled", "false")
+        .unwrap();
+    c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+    let router = zenoh::open(c).await.expect("the router");
+    let endpoint = router
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("a loopback listener");
+
+    // The owner, a client of R1 in the namespace.
+    let owners = zenkey_fleet::open_in_namespace(
+        "acme",
+        None,
+        std::slice::from_ref(&endpoint),
+        &[],
+        Some(false),
+    )
+    .await
+    .expect("the owner's session");
+    let rf0: zenkey_model::grammar::Addr = "lab/rf0".parse().expect("an address");
+    let mut b = zenkey::ServiceBuilder::new(&owners, zenkey::ServiceConfig::new(rf0.clone()));
+    b.config_v1(rf0_startup(), std::sync::Arc::new(HeldDevice))
+        .await
+        .expect("config.v1");
+    let service = b.start().await.expect("the owner starts");
+    let i = service.instance().to_string();
+
+    let mut app = booted_at(&endpoint, "acme", vec![]).await;
+    let config = |m: ConfigMsg| Message::Pane(PaneMsg::Config(m));
+    let step = |app: &mut zengui::app::Zengui, m: Message| app.update(m);
+    async fn settle(app: &mut zengui::app::Zengui, task: iced::Task<Message>) {
+        tokio::time::timeout(Duration::from_secs(30), drive(app, task))
+            .await
+            .expect("the tool's tasks settle");
+    }
+
+    // The tool, the address, and the operator's word on the clocks: each
+    // reading's stamps are aged, so §5 answers from a fresh view.
+    let t = step(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Config)),
+    );
+    settle(&mut app, t).await;
+    let t = step(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Address(rf0.clone()))),
+    );
+    settle(&mut app, t).await;
+    let t = step(&mut app, config(ConfigMsg::ClocksSynced(true)));
+    settle(&mut app, t).await;
+    assert!(shows_tall(&app, "reach — can cut the link"), "read");
+    assert!(shows_tall(&app, "868100000"), "the startup frequency");
+
+    // A reach change with a window and its consent: pending, then applied.
+    let t = step(
+        &mut app,
+        config(ConfigMsg::Draft {
+            group: "radio".into(),
+            param: "frequency_hz".into(),
+            draft: Draft::Text("869525000".into()),
+        }),
+    );
+    settle(&mut app, t).await;
+    let _ = step(
+        &mut app,
+        config(ConfigMsg::WindowChanged("radio".into(), "20".into())),
+    );
+    let _ = step(
+        &mut app,
+        config(ConfigMsg::ConsentToggled("radio".into(), true)),
+    );
+    let t = step(&mut app, config(ConfigMsg::Apply("radio".into())));
+    settle(&mut app, t).await;
+    let first = format!("{i}-1");
+    assert!(
+        shows_tall(
+            &app,
+            &format!("pending — change {first}, answered before its apply (§2.9)")
+        ),
+        "a reach set is answered before its apply"
+    );
+    assert!(
+        shows_tall(&app, &format!("pending change {first} on radio")),
+        "the reading after it shows the change"
+    );
+    assert!(
+        shows_tall(&app, "applied — confirm it over the new link"),
+        "listened until its apply_at: applied"
+    );
+
+    // Confirm: the owner's view after it, then the view read back.
+    let t = step(&mut app, config(ConfigMsg::Confirm));
+    settle(&mut app, t).await;
+    assert!(shows_tall(
+        &app,
+        "answered — the owner's view after the act (§2.10)"
+    ));
+    assert!(shows_tall(&app, "869525000"), "the new frequency runs");
+    assert!(
+        !shows_tall(&app, &format!("pending change {first} on radio")),
+        "nothing pending once confirmed"
+    );
+    assert!(
+        shows_tall(&app, &first),
+        "the last change is the confirmed one"
+    );
+    assert_eq!(
+        service
+            .config_v1()
+            .expect("config.v1")
+            .view()
+            .await
+            .last_change
+            .map(|l| l.token),
+        Some(first.clone()),
+        "and the owner agrees"
+    );
+
+    // A second reach change, never confirmed: the tick listens across its
+    // deadline, and the undo is seen.
+    let t = step(
+        &mut app,
+        config(ConfigMsg::Draft {
+            group: "radio".into(),
+            param: "frequency_hz".into(),
+            draft: Draft::Text("870000000".into()),
+        }),
+    );
+    settle(&mut app, t).await;
+    let _ = step(
+        &mut app,
+        config(ConfigMsg::WindowChanged("radio".into(), "6".into())),
+    );
+    let _ = step(
+        &mut app,
+        config(ConfigMsg::ConsentToggled("radio".into(), true)),
+    );
+    let t = step(&mut app, config(ConfigMsg::Apply("radio".into())));
+    settle(&mut app, t).await;
+    let second = format!("{i}-2");
+    assert!(shows_tall(
+        &app,
+        &format!("pending change {second} on radio")
+    ));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while shows_tall(&app, &format!("pending change {second} on radio")) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the deadline's rollback is never seen"
+        );
+        let t = step(
+            &mut app,
+            config(ConfigMsg::Tick(std::time::SystemTime::now())),
+        );
+        settle(&mut app, t).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(shows_tall(&app, "rolled-back"), "its change event, heard");
+    assert!(shows_tall(&app, &second), "named by its token");
+    assert!(
+        shows_tall(&app, "869525000"),
+        "the frequency before it, back"
+    );
+    assert!(
+        !shows_tall(&app, "870000000"),
+        "the unconfirmed frequency is gone"
+    );
+
+    let _ = service.close().await;
+    let _ = owners.close().await;
+    let _ = router.close().await;
 }
 
 /// The doctor, through the window (#614, FL9): booted against the spray,

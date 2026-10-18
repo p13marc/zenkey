@@ -156,14 +156,35 @@ through to the Inspector, export zk2's NDJSON rows with each key's
   is the finding, because a late joiner seeds from the owner and last-known
   state is an archive's (§4.4). "Not judged" is kept apart from clean.
 - **Mesh.** The router graph, with attached instances beside their router.
+- **Config.** One service's configuration through `config.v1`
+  (`spec/profiles/config/v1.md`), for an address whose descriptor lists
+  the profile — reached from its nodes card or its Inspector view
+  ("configure"), or from the strip with the address selected. It reads
+  what the owner serves: the view's groups by class (`hot`, `reach`,
+  `contract`), each parameter's value, source, startup value where it
+  differs, bounds and unit, whether the group is writable, the floor, the
+  last change, the change events a reading heard and the desired report —
+  and §5's answers in their three states, the engine's (`run_config`).
+  A pending change shows its deadline as the owner's instant and a
+  countdown read against this host's clock, labelled so; near the
+  deadline the tool listens across it, so an undo is seen. A form per
+  writable group is typed by the served schema and refused in the form by
+  the owner's own validator before anything is sent; a reach change asks
+  its consent, with the window it will ask — raised to the floor — shown
+  first, and a dry run touches nothing. Confirm is offered only once the
+  view shows the change applied; cancel, extend and persist beside it.
+  Each answer renders by its union: applied or pending, view or status,
+  the envelope with its `ConfigError`, or silence — a non-verdict. A
+  sensitive value is typed into a masked field and never shown back, in
+  the view, an answer or an event. Every act is refused during a replay.
 
 **Replay** loads a `.zrec` (versions 1 to 3) or scrubs the retained window,
 and resolves through an **offline lens**: no catalog, the offline contracts,
 and the capture's namespace, because the live catalog describes another
 world. The tree merges against the offline skeleton, verdicts are checked
 offline, and a v1 or v2 row reads "QoS not recorded". While a replay runs,
-publishing, calling, recording, why, fields and consumers are refused in
-every window. `record` writes `.zrec` version 3; the History section compares
+publishing, calling, every Config act, recording, why, fields and
+consumers are refused in every window. `record` writes `.zrec` version 3; the History section compares
 against a loaded `.zsnap` version 2.
 
 Beside them: a **connect pane** that selects and edits the named contexts
@@ -173,13 +194,13 @@ file will not parse; torn-off windows; and a **command palette** — Ctrl+P for
 actions, Ctrl+K for observed keys, `?` for the shortcut map, which is
 rendered from the same table that dispatches it.
 
-**Removed in #614: the Config tool (#481), the blob browser (#68) and the
-media viewer (#69).** They spoke v1's planes — RFC 05 §5.1's configuration
-calls, RFC 07 §2's `@blob` and RFC 07 §1's `@media` — and zk2 has no profile
-for any of them yet: `config.v1`, `blob.v1` and `media.v1` would come from
+**Removed in #614: the blob browser (#68) and the media viewer (#69).**
+They spoke v1's planes — RFC 07 §2's `@blob` and RFC 07 §1's `@media` — and
+zk2 has no profile for either yet: `blob.v1` and `media.v1` would come from
 #613, and each surface comes back with its profile, not before. There are no
 stub controls in the meantime, because a control that does nothing is a
-promise the window cannot keep.
+promise the window cannot keep. v1's Config tool (#481), which spoke RFC 05
+§5.1, went with them, and came back on `config.v1` (#768).
 
 No codec logic lives here: every decode, check and encode is the engine's,
 through the contract that declares the type.

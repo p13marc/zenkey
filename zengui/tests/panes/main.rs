@@ -93,6 +93,7 @@ fn render(keys: &[&str], presence: bool) -> (tree::Flattened, IdentityIndex) {
 
 mod admin;
 mod chrome;
+mod configure;
 mod detail;
 mod doctor;
 mod echo;

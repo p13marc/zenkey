@@ -121,7 +121,7 @@ fn address_card<'a>(
     d: &NodesData<'a>,
 ) -> Element<'a, Message> {
     let sp = d.sp;
-    let header = row![
+    let mut header = row![
         kit::link(kit::emphasis(addr.to_string()).font(face::MONO))
             .padding(iced::Padding::ZERO)
             // Straight to the workspace's subject (#181): a card is one of
@@ -133,17 +133,41 @@ fn address_card<'a>(
                 Subject::Address(addr.clone())
             }))),
         iced::widget::space::horizontal(),
-        kit::secondary(kit::caption("show in tree"))
-            .padding([0.0, sp.xs])
-            .on_press(msg(NodesMsg::ShowInTree(addr.clone()))),
     ]
     .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
+    if let Some(configure) = configure_button(addr, d.nodes, sp) {
+        header = header.push(configure);
+    }
+    let header = header.push(
+        kit::secondary(kit::caption("show in tree"))
+            .padding([0.0, sp.xs])
+            .on_press(msg(NodesMsg::ShowInTree(addr.clone()))),
+    );
     let mut body = column![header, presence_row(addr, live, basis, d.nodes, sp)].spacing(sp.xs);
     if selected {
         body = body.push(detail_section(addr, d.presence, d.nodes, sp));
     }
     kit::card(body)
+}
+
+/// "configure", where a served descriptor of the address lists `config.v1`
+/// (§2.1: the interface is the gate) — a link to a form nothing serves
+/// would be a promise this window cannot keep (#768, CD). Shared by the
+/// card and the Inspector's address view.
+fn configure_button<'a>(
+    addr: &Addr,
+    nodes: &NodesState,
+    sp: Spacing,
+) -> Option<Element<'a, Message>> {
+    nodes.lists_config(addr).then(|| {
+        kit::secondary(kit::labelled(kit::Icon::Config, "configure"))
+            .padding([0.0, sp.xs])
+            .on_press(Message::Pane(PaneMsg::Config(
+                crate::view::configure::ConfigMsg::Open(addr.clone()),
+            )))
+            .into()
+    })
 }
 
 /// One address's presence in a row: its status — up, down or unobservable,
@@ -222,6 +246,9 @@ pub fn address_sections<'a>(
     sp: Spacing,
 ) -> Column<'a, Message> {
     let mut col = column![].spacing(sp.xs);
+    if let Some(configure) = configure_button(addr, nodes, sp) {
+        col = col.push(configure);
+    }
     let Some(update) = presence else {
         // Health reads presence itself, so it stands without the link's.
         return col

@@ -235,6 +235,7 @@ pub(crate) fn tool_icon(p: RightPane) -> kit::Icon {
         RightPane::Nodes => kit::Icon::Nodes,
         RightPane::Admin => kit::Icon::Admin,
         RightPane::Mesh => kit::Icon::Mesh,
+        RightPane::Config => kit::Icon::Config,
         RightPane::Inspector => kit::Icon::Inspector,
     }
 }
@@ -436,6 +437,13 @@ fn workbench<'a>(
             view::admin::pane(&work.verdicts.admin, dep.admin_declared.as_deref(), sp)
         }
         RightPane::Mesh => view::mesh::pane(&work.verdicts.admin, sp),
+        RightPane::Config => view::configure::pane(view::configure::ConfigData {
+            state: &work.verdicts.config,
+            subject: sub.follow.current.address(),
+            replaying: work.replay.replay.is_some(),
+            session: dep.session.is_some(),
+            sp,
+        }),
         // Unreachable by construction — `PaneSelected(Inspector)` restores
         // the Inspector dock instead of writing `right_pane`, and the
         // default is `Call` — but a match must say what it would mean, and

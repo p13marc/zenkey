@@ -14,6 +14,7 @@ use crate::state::{Deployment, Observation, SubjectState, Workspace};
 use crate::update::Ctx;
 
 pub(crate) mod admin;
+pub(crate) mod configure;
 pub(crate) mod consumers;
 pub(crate) mod context;
 pub(crate) mod detail;
@@ -48,6 +49,14 @@ pub(crate) fn update(
         PaneMsg::Doctor(msg) => doctor::update(&mut work.verdicts, msg, cx),
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
         PaneMsg::Mesh(msg) => mesh::update(&work.verdicts.admin, msg),
+        // The replay lock rides in here too (#768, CD): while the panes show
+        // a capture, the Config tool acts on nothing live.
+        PaneMsg::Config(msg) => configure::update(
+            &mut work.verdicts.config,
+            work.replay.replay.is_some(),
+            msg,
+            cx,
+        ),
         PaneMsg::Traffic(msg) => traffic::update(&mut work.activity.traffic, msg, cx),
         // The four subject-slot sections (#257): the SlotId names which
         // Inspector spoke — the docked one is the follow slot, a pinned

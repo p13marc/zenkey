@@ -272,9 +272,18 @@ fn select(
         // The nodes pane's one data-plane cost, paid on selection (#614,
         // FL9; D11): one `health.v1` reading of the address, on the session
         // in the namespace — never polled.
+        // And the Config tool, when it is the Workbench's, follows the
+        // address (#768, CD): one more reading, of what the window points at.
         Subject::Address(addr) => {
             let addr = addr.clone();
-            super::pane::nodes::health(&mut work.verdicts, dep, addr)
+            let health = super::pane::nodes::health(&mut work.verdicts, dep, addr.clone());
+            let config = super::pane::configure::follow(
+                &mut work.verdicts.config,
+                work.right_pane,
+                dep,
+                addr,
+            );
+            Task::batch([health, config])
         }
         // A prefix is not a key, and neither is nothing.
         _ => Task::none(),

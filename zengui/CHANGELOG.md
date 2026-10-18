@@ -21,8 +21,9 @@ Workbench reads nodes from presence and runs zk2's doctor, and Send
 publishes foreign keys only and calls operations through their contracts.
 A replay resolves through an offline lens. v1 keys are foreign keys now
 (`not zk2`), with no v1 overlay. The surfaces that spoke v1's planes are
-deleted, not stubbed: no zk2 profile serves configuration, blobs or media
-yet (#613). The port landed in chunks FL5 to FL12 of #614 (epic #585).
+deleted, not stubbed: no zk2 profile serves blobs or media yet (#613). The
+port landed in chunks FL5 to FL12 of #614 (epic #585). The Config tool,
+deleted with them, is back on `config.v1` (#768, CD).
 
 ### Flags and the deployment
 
@@ -102,6 +103,27 @@ yet (#613). The port landed in chunks FL5 to FL12 of #614 (epic #585).
 | retire | a tombstone through zk2's `check_retire`: any concrete key needs `--i-know`, a wildcard is refused | |
 | the body as typed, or encoded by the ladder | the body as typed, or hex (two digits a byte, spaces ignored); bad hex is refused before anything is sent. The wire `Encoding` is what the form names, or none | The repeat stream and its matching badge stay; the send log stays bounded |
 
+### Config (#768, CD)
+
+The Config tool is back, on `config.v1` (`spec/profiles/config/v1.md`,
+text 0.3). FL11a deleted v1's (#481), which spoke RFC 05 §5.1; this one is
+built on the engine's reading, acts and §5 judgement
+(`zenkey_fleet::{run_config, call_config}`, `model::config`,
+`judge::config`), and holds no protocol logic of its own.
+
+| Before | Now | Notes |
+|---|---|---|
+| — (deleted at FL11a) | `config` on the Workbench's strip; "configure" on a nodes card and in the Inspector's address view, only where a served descriptor lists `config.v1` (§2.1) | Picking the tool with an address selected reads it; while it is the Workbench's tool it follows the selected address |
+| v1's read: one `@rpc` call, the producer's read-back | `run_config`: presence and the descriptor, one S4 GET of `config.v1/state/**`, each document judged by `freshness.v1`, §5's answers in their three states (`not yet`, `unobservable` and `not asked` kept apart) | A "clocks synced" toggle, as the nodes pane's: without it a reply's age is unobservable, and the tool says how to give it a ground |
+| a target typed as origin, producer and resource | the address (`<system>/<service>`), its instance, revision and floor | |
+| a pending change with the producer's deadline and a count from the send | the pending change's token, groups, deadline as the owner's instant (§2.8), and a countdown read against this host's clock, labelled so; this window's own margin (§2.8) and the reach reply's `apply_at` when it armed the change | The countdown ticks only while a change is pending. Near the deadline the tool listens across it once, so the undo's put and its `rolled-back` event are seen |
+| confirm, cancel, extend, persist, by token | the same, through `call_config`: confirm offered only once the view shows the change applied (§2.9), persist on the last change | |
+| a form per hot group | a form per writable group (§2.16), typed by the served schema (`type_values`) and refused in the form by `precheck` — the owner's own `validate_set` against the view read — before any task exists; the window asked, raised to the floor, shown before sending; a reach change behind the consent `consent` asks (§2.4); `dry run`; join the pending change | Each `set` carries the view's revision as `expected_revision`. An idempotency key is held only while its answer was silence, so a resend is a retry the owner answers once (§2.14) |
+| a reply classified by hand | each answer by its union (§3): `applied` or `pending`, `view` or `status`, the envelope with its `ConfigError`, malformed, undecodable, or silence — a non-verdict, never a failure; the call metadata claimed (`$USER`, a ULID) | |
+| a sensitive value write-only in the row | write-only everywhere (§2.15): a masked field never prefilled, held as a `Masked` whose `Debug` is `<redacted>`, sent as a value read, so it is `<redacted>` in the request shown and scrubbed from what comes back; a redacted edit in an event | Nothing of the tool is persisted in prefs |
+| — | every act refused during a replay, in every window, as publish and call are | Reads stay allowed |
+| the change events: none | the change events a reading heard (a window, a replay), kept for the service shown, bounded at 16, newest first | |
+
 ### Value (the Inspector)
 
 | Before | Now | Notes |
@@ -138,7 +160,7 @@ yet (#613). The port landed in chunks FL5 to FL12 of #614 (epic #585).
 
 | Before | Now | Notes |
 |---|---|---|
-| the Config tool (#481): RFC 05 §5.1 configuration calls | deleted | No `config.v1` yet (#613). No stub: a control that does nothing is a promise the window cannot keep. A prefs file naming the Config pane still loads, with the Workbench opening on Send |
+| the Config tool (#481): RFC 05 §5.1 configuration calls | deleted at FL11a, then back on `config.v1` (#768, CD; see Config above) | No stub while the profile was missing: a control that does nothing is a promise the window cannot keep. A prefs file naming the Config pane still loads, with the Workbench opening on Send |
 | the Blob browser (#68): RFC 07 §2's `@blob` | deleted | No `blob.v1` yet (#613) |
 | the Media viewer (#69): RFC 07 §1's `@media` | deleted | No `media.v1` yet (#613). An explicit `@stream` is the zk2 counterpart, reachable with the `explicit` scope |
 | `examples/spray_v1.rs` (the v1 demo traffic), and the `spray-v1`, `gui-demo-v1` and `gui-demo-no-registry` recipes | `examples/spray.rs`, a zk2 deployment in namespace `spray`; `gui-demo` (`--namespace spray --contracts examples/zk2/.history`), `gui-demo-no-contracts`, `gui-demo-bounded` | The spray serves its own bundles, so `gui-demo-no-contracts` shows retrieval from the bus |

@@ -43,6 +43,7 @@ pub mod admin;
 pub mod app;
 pub mod budget;
 pub mod config;
+pub mod configure;
 pub mod doctor;
 pub mod echo;
 pub mod expansion;

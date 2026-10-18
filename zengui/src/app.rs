@@ -247,6 +247,18 @@ impl Zengui {
                     .map(|_| Message::Pane(PaneMsg::Send(view::send::SendMsg::Tick))),
             );
         }
+        // The Config tool's countdown (#768, CD): a second's tick only while
+        // a change is pending on screen — nothing ticks otherwise. It
+        // carries this host's clock, so no view ever reads one.
+        if self.work.verdicts.config.ticking() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
+                    Message::Pane(PaneMsg::Config(view::configure::ConfigMsg::Tick(
+                        std::time::SystemTime::now(),
+                    )))
+                }),
+            );
+        }
         // Window geometry (issue #73; per window since #186): the main
         // window's size lands in the prefs, a torn-off dock's in the named
         // layout — `update::chrome` tells them apart by id.

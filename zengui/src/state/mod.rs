@@ -289,6 +289,13 @@ mod tests {
                     // per-address model over presence — descriptors, the
                     // freshness join and the selected address's health.
                     "nodes", "doctor", "admin", "payloads",
+                    // #768 (CD): the Config tool on config.v1 — a reading of
+                    // one address with §5's answers, and the forms typed
+                    // against its view. An address is namespace-relative,
+                    // so all of it describes the deployment pointed at and
+                    // goes with it. (#481's v1 form sat in `work.bench`, as
+                    // typed input; what this one holds is mostly evidence.)
+                    "config",
                 ],
             ),
             (
@@ -389,7 +396,8 @@ mod tests {
         // browser, the media viewer and the Config tool's form went with
         // their surfaces — 92. Then FL8a: a slot's read in flight and its
         // archive's last-known answer — 94. Then FL8b: v1's schema store
-        // went with the last v1 pane that read it, fields — 93.
-        assert_eq!(leaves, 93, "the split must place every field exactly once");
+        // went with the last v1 pane that read it, fields — 93. Then #768
+        // (CD): the Config tool came back on config.v1, as a verdict — 94.
+        assert_eq!(leaves, 94, "the split must place every field exactly once");
     }
 }

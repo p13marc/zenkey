@@ -14,12 +14,14 @@
 
 mod admin;
 mod budget;
+mod config;
 mod declared;
 mod doctor;
 mod nodes;
 
 pub use admin::admin;
 pub use budget::budget;
+pub use config::config;
 pub use declared::declared;
 pub use doctor::doctor;
 pub use nodes::{HEALTH_GRACE, health};
