@@ -508,6 +508,171 @@ def _health_clock(path: Path) -> list[Result]:
             for c in _load_json(path)["cases"]]
 
 
+def _config_facts(state: dict[str, Any]):
+    from . import config
+
+    p, last = state.get("pending"), state.get("last_change")
+    return config.Facts(revision=state["revision"], in_flight=state["in_flight"],
+                        pending_token=None if p is None else p["token"],
+                        pending_applied=True if p is None else p["applied"],
+                        deadline_passed=bool(p and p["deadline_passed"]),
+                        last_token=None if last is None else last["token"],
+                        last_sensitive=bool(last and last["set_sensitive"]), persist=state["persist"])
+
+
+def _config_validation(path: Path) -> list[Result]:
+    """config.v1 §2.5, §2.10, §2.13: one request against a schema and the
+    owner's state -> accepted, or the refusal the owner sends first."""
+    from . import config
+
+    data = _load_json(path)
+    out: list[Result] = []
+    for c in data["cases"]:
+        f, req = _config_facts(c["state"]), c["request"]
+        if c["op"] == "set":
+            r = config.decode_set(req) or config.check_set(data["schemas"][c["schema"]], c["group"], req, f)
+        elif c["op"] == "persist":
+            r = config.persist_unavailable(f) or config.decode_control(req) or config.check_persist(req, f)
+        else:
+            r = config.decode_control(req) or config.check_control(c["op"], req, f)
+        got = {"accepted": True} if r is None else {"refused": r.expect()}
+        out.append(_check(f"validation: {c['op']} {c.get('group') or ''} ({c['note']})", got, c["expect"]))
+    return out
+
+
+def _config_window(path: Path) -> list[Result]:
+    """config.v1 §2.8: confirm_s, the floor and the instant received -> the
+    window and the deadline, written as the owner writes it."""
+    from . import config
+
+    return [_check(f"window: {c['note']}",
+                   {"window_s": config.window(c["confirm_s"], c["floor_s"]),
+                    "deadline": config.write_time(config.deadline(config.parse_time(c["received"]), c["confirm_s"],
+                                                                  c["floor_s"]))},
+                   c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
+def _config_desired(path: Path) -> list[Result]:
+    """config.v1 §2.18: a desired document against a schema -> accepted, or
+    refused whole with the first problem."""
+    from . import config
+
+    data = _load_json(path)
+    out: list[Result] = []
+    for c in data["cases"]:
+        r = config.check_desired(data["schemas"][c["schema"]], c["document"])
+        out.append(_check(f"desired: {c['note']}", {"accepted": True} if r is None else {"refused": r},
+                          c["expect"]))
+    return out
+
+
+def _config_core(group: dict[str, Any], running: dict[str, Any], startup: dict[str, Any], device: Any = None):
+    from . import config
+
+    core = config.Core(service="lab/rf0", instance="i1", schema=[group],
+                       startup={group["name"]: {p: {"value": v, "source": "file"} for p, v in startup.items()}},
+                       floor_s=10, device=device)
+    for p, rv in running.items():
+        core.running[(group["name"], p)] = config.Param(rv["value"], rv["source"])
+    return core
+
+
+def _config_redaction(path: Path) -> list[Result]:
+    """config.v1 §2.15: what the view, the status, the event, the log and an
+    envelope carry for a sensitive value."""
+    from . import config
+
+    out: list[Result] = []
+    for c in _load_json(path)["cases"]:
+        g, req = c["group"], c["request"]
+        core = _config_core(g, c["running"], c["startup"])
+        step = core.set(g["name"], req, 0)
+        if "refused" in c["expect"]:
+            r = step.reply
+            if not isinstance(r, config.Refusal):
+                got: Any = {"accepted": config.project_reply(r)}
+            else:
+                name = r.field.rsplit("/", 1)[-1] if r.field else None
+                v = req["values"].get(name)
+                repeats = json.dumps(v) in r.message or (isinstance(v, str) and v in r.message)
+                got = {"refused": {"code": r.code, "field": r.field, "message_repeats_value": repeats}}
+            out.append(_check(f"redaction: {c['note']}", got, c["expect"]))
+            continue
+        reply = step.reply
+        doc = reply["applied"] if isinstance(reply, dict) and "applied" in reply else core.view()
+        view_params = next(x for x in doc["groups"] if x["name"] == g["name"])["parameters"]
+        status = config.status_of(doc)["values"].get(g["name"])
+        edits = step.events[0]["edits"] if step.events else None
+        logged = json.loads(core.log[-1])["request"] if core.log else None
+        detail = None
+        if c["device_words"] is not None:
+            refusing = _config_core(g, c["running"], c["startup"],
+                                    device=lambda act, w=c["device_words"]: {"refused": w})
+            r = refusing.set(g["name"], req, 0).reply
+            detail = r.detail if isinstance(r, config.Refusal) else "(not refused)"
+        got = {"view": view_params, "status": status, "edits": edits, "log": logged, "device_detail": detail}
+        out.append(_check(f"redaction: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _config_state(core: Any) -> dict[str, Any]:
+    from . import config
+
+    view = core.view()
+    params = {g["name"]: {p["name"]: {k: p[k] for k in ("source", "startup") if k in p} for p in g["parameters"]}
+              for g in view["groups"]}
+    return {"status": config.status_of(view), "params": params,
+            "writable": [g["name"] for g in view["groups"] if g["writable"]]}
+
+
+def _config_lifecycle(path: Path) -> list[Result]:
+    """config.v1 §2.3, §2.6 to §2.14, §2.17, §2.19: sequences of calls,
+    device results and instants on one owner -> its replies, acts, events
+    and state after each step."""
+    from . import config
+    from .freshness import seconds_to_ns
+
+    data = _load_json(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["cases"]):
+        s = c["setup"]
+        results: list[Any] = []
+
+        def device(act: tuple, results: list[Any] = results) -> Any:
+            return results.pop(0) if results else "ok"
+
+        events_at = [seconds_to_ns(e["t"]) for e in s["events_at"] for _ in range(e["count"])]
+        core = config.Core(service=s["service"], instance=s["instance"], schema=data["schemas"][s["schema"]],
+                           startup=s["startup"], overlay=json.loads(json.dumps(s["overlay"])), floor_s=s["floor_s"],
+                           apply_after_ns=s["apply_after_ms"] * config.MS, persist=s["persist"], device=device,
+                           events_at=events_at)
+        name = f"lifecycle {i}: {c['note']}"
+        out.append(_check(f"{name}: start", _config_state(core), c["start"]))
+        for j, st in enumerate(c["steps"]):
+            results[:] = list(st.get("device") or [])
+            t = seconds_to_ns(st["t"])
+            do = st["do"]
+            if do == "set":
+                step = core.set(st["group"], st["request"], t, st.get("call"))
+            elif do in ("confirm", "cancel", "extend"):
+                step = core.control(do, st["request"], t)
+            elif do == "persist":
+                step = core.persist(st["request"], t)
+            elif do == "due":
+                step = core.due(t)
+            elif do == "complete":
+                step = core.complete(results.pop(0) if results else "ok", t)
+            elif do == "restart":
+                step = core.restart(st["instance"])
+            else:
+                raise CannotRun(f"{path}: unknown step {do!r}")
+            got = {"reply": config.project_reply(step.reply), "acts": step.acts, "events": step.events,
+                   "state": _config_state(core)}
+            out.append(_check(f"{name}: step {j} ({do} at {st['t']})", got, st["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -517,6 +682,9 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                   "clock-trust.json": _freshness_clock_trust},
     "health": {"judgements.json": _health_judgements, "rollups.json": _health_rollups,
                "codes.json": _health_codes, "clock.json": _health_clock},
+    "config": {"validation.json": _config_validation, "window.json": _config_window,
+               "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
+               "redaction.json": _config_redaction},
 }
 
 
@@ -651,9 +819,18 @@ KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "cont
 
 
 def family_layout(root: Path) -> list[Result]:
-    return [(f"spec/conformance/{p.name}", p.name in KNOWN_ENTRIES,
-             "" if p.name in KNOWN_ENTRIES else "an entry no family reads")
-            for p in sorted(root.iterdir())]
+    """Every entry of ``spec/conformance/`` is read by a family, and every
+    profile with a ``conformance/`` directory has a family: a new profile's
+    fixtures fail here until zk2py reads them (profiles/README.md)."""
+    out = [(f"spec/conformance/{p.name}", p.name in KNOWN_ENTRIES,
+            "" if p.name in KNOWN_ENTRIES else "an entry no family reads")
+           for p in sorted(root.iterdir())]
+    profiles = root.parent / "profiles"
+    if profiles.is_dir():
+        out += [(f"spec/profiles/{p.name}/conformance", p.name in PROFILE_FIXTURES,
+                 "" if p.name in PROFILE_FIXTURES else "a profile's fixtures no family reads")
+                for p in sorted(profiles.iterdir()) if (p / "conformance").is_dir()]
+    return out
 
 
 FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
