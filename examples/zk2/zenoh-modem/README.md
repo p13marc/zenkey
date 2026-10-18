@@ -74,7 +74,7 @@ Example keys, for host `h-3fa9c2d41b7e` and device `rf0`:
 ```text
 zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total           a link-exposed counter
 zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-b          a templated state, cardinality 64
-zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/oper_change/01j9x3k7q2m4n5p6r7s8t9v0wx
+zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9x3k7q2m4n5p6r7s8t9v0wx
 zk2/h-3fa9c2d41b7e/sat0/modem.v3/@op/action/mailbox_check
 zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/set/radio                      a reach group: {token, apply_at} first
 zk2/h-3fa9c2d41b7e/rf0/config.v1/state/view                         the echo; GET is the read
@@ -85,9 +85,11 @@ zk2/*/*/@zk/alive/config.v1/**                                     "which device
 
 ## Decisions recorded here
 
-- **v1's events are occurrence-keyed streams, all five.** Each exists so that a reader arriving
-  after the fact still learns what happened (v1 RFC 04 §1.3), which is r3.2's definition of the
-  occurrence-keyed case. A reliable stream would lose them to a reader that was not connected.
+- **v1's events are zk2 events, all five:** `kind = "event"`, one key per occurrence,
+  `…/events/<template>/<ulid>` (draft 1, D3). Each exists so that a reader arriving after the
+  fact still learns what happened (v1 RFC 04 §1.3), which is the case r3.2 called
+  occurrence-keyed and r3.3 made the `events` kind. A reliable stream would lose them to a
+  reader that was not connected.
   - The reason and retention for each are on each resource in `modem.v3.toml`.
   - `device_fault` is edge-triggered raised/cleared, which is `alarms.v1`'s shape: a later option,
     not taken in a 1:1 mapping.
@@ -206,15 +208,15 @@ Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `
 | 8 | `device/{device}/radio` | `registration` | `modem.v3/state/radio` | `RadioState`, `freshness.ttl_s = 60`, v1 `refreshed` QoS |
 | 9 | `config/{device}` | `config` | `config.v1/state/view` | the echo: v1 `transition` QoS = the zk2 state default ([binding](config.v1-binding.md) §7) |
 
-### Events (5) → occurrence-keyed streams
+### Events (5) → events, one key per occurrence
 
 | # | v1 `events/modem/…` | Gate | v1 rate | zk2 | Retention · bound |
 |---|---|---|---|---|---|
-| 1 | `device/{device}/oper_change/{event_id}` | — | `rare` | `modem.v3/stream/oper_change/{occurrence}` | `7d` · 168 |
-| 2 | `device/{device}/device_fault/{event_id}` | — | `low` | `modem.v3/stream/device_fault/{occurrence}` | `1d` · 1,440 |
-| 3 | `device/{device}/identity_change/{event_id}` | — | `rare` | `modem.v3/stream/identity_change/{occurrence}` | `7d` · 168 |
+| 1 | `device/{device}/oper_change/{event_id}` | — | `rare` | `modem.v3/events/oper_change/<ulid>` | `7d` · 168 |
+| 2 | `device/{device}/device_fault/{event_id}` | — | `low` | `modem.v3/events/device_fault/<ulid>` | `1d` · 1,440 |
+| 3 | `device/{device}/identity_change/{event_id}` | — | `rare` | `modem.v3/events/identity_change/<ulid>` | `7d` · 168 |
 | 4 | `device/{device}/config_change/{event_id}` | `config` | `burst(600/h)` | `config.v1/stream/changes/{occurrence}` | `7d` · 100,800 (worst case) |
-| 5 | `device/{device}/action/{event_id}` | `actions` | `burst(600/h)` | `modem.v3/stream/action_event/{occurrence}` | `1d` · 14,400 |
+| 5 | `device/{device}/action/{event_id}` | `actions` | `burst(600/h)` | `modem.v3/events/action_event/<ulid>` | `1d` · 14,400 |
 
 ### Procedures (10)
 
@@ -275,8 +277,8 @@ v1's `[[deprecated]]` ledger retired the 1.x paths in 2.0 (#120). **None is carr
 | `link/{device}` | `device/{device}/sdu/link` | not carried; the successor is `modem.v3/state/sdu/link` |
 | `security/{device}` | `device/{device}/security` | not carried; the successor is `modem.v3/state/security` |
 | `endpoint/{device}/{endpoint}` | `device/{device}/sdu/endpoint/{endpoint}` | not carried; the successor is `modem.v3/state/sdu/endpoint/{endpoint}` |
-| `link_change/{event_id}` | `device/{device}/oper_change/{event_id}` | not carried; the successor is `modem.v3/stream/oper_change/{occurrence}` |
-| `device_fault/{event_id}` | `device/{device}/device_fault/{event_id}` | not carried; the successor is `modem.v3/stream/device_fault/{occurrence}` |
+| `link_change/{event_id}` | `device/{device}/oper_change/{event_id}` | not carried; the successor is `modem.v3/events/oper_change/<ulid>` |
+| `device_fault/{event_id}` | `device/{device}/device_fault/{event_id}` | not carried; the successor is `modem.v3/events/device_fault/<ulid>` |
 | `{device}/lanes` | `device/{device}/sdu/lanes` | not carried; the successor is `modem.v3/@op/sdu/lanes` |
 
 **Count.** 73 + 9 + 5 + 10 entries:
