@@ -50,6 +50,7 @@ KINDS = ("bool", "integer", "text")
 SOURCES = ("default", "file", "overlay", "runtime")
 OUTCOMES = ("applied", "confirmed", "rolled-back", "partial")
 I64_MIN, I64_MAX = -(2**63), 2**63 - 1
+U64_MAX = 2**64 - 1
 #: §2.14: "An owner MUST keep the first answer … for 300 s from that answer."
 KEY_TTL_NS = 300 * NS
 #: §2.17: the change event's rate, burst(600/h), kept by refusing busy.
@@ -215,11 +216,14 @@ def _bad(field: str | None, message: str) -> Refusal:
 # -- the requests' own types (§2.5 "A request outside its type", §2.10) ---------------
 
 def _check_member(name: str, v: Any) -> Refusal | None:
+    # The request's own integer members are read as core §3.3 reads an
+    # integer, within the unsigned 64-bit range: 30.0, 3e1 or 2^64 is
+    # outside the request's type (§2.5, text 0.3).
     if name in ("confirm_s",):
-        if not is_integer(v) or not 1 <= v <= I64_MAX:
+        if not is_integer(v) or not 1 <= v <= U64_MAX:
             return _bad(pointer(name), f"{name} is an integer number of seconds, at least 1 (§2.8)")
     elif name == "expected_revision":
-        if not is_integer(v) or not 0 <= v <= I64_MAX:
+        if not is_integer(v) or not 0 <= v <= U64_MAX:
             return _bad(pointer(name), "expected_revision is an integer, at least 0")
     elif name == "token":
         if type(v) is not str or not 1 <= len(v) <= 64:
@@ -897,8 +901,13 @@ class Core:
             if isinstance(result, dict) and "refused" in result:
                 sens = any(self._sensitive(group, n) for n in values)
                 words = result.get("refused")
-                answer(Refusal("app", "group", f"the device refused group {group!r} (§2.9)", app="device-refused",
-                               detail=None if sens or not isinstance(words, str) else words))
+                refusal = Refusal("app", "group", f"the device refused group {group!r} (§2.9)", app="device-refused",
+                                  detail=None if sens or not isinstance(words, str) else words)
+                partial = result.get("partial") or {}
+                if partial:
+                    self._restore_partial(group, partial, step, lambda: answer(refusal))
+                    return
+                answer(refusal)
                 return
             if joining:
                 change = self.pending
@@ -924,6 +933,33 @@ class Core:
 
         self._act("apply", ("apply", group, dict(values)), step, then)
         return step
+
+    def _restore_partial(self, group: str, partial: dict[str, Any], step: Step, done: Callable[[], None]) -> None:
+        """§2.9 "A hot group left part applied" (text 0.3): a device result
+        ``{"refused": words, "partial": {parameter: value}}`` left those
+        parameters applied. The owner restores them once, as an undo
+        restores, before it answers; the refusal still starts no change. A
+        restore that succeeds moves nothing, and is no act on the running
+        values; one that fails leaves the read-back the truth, and moves the
+        revision by one."""
+        restore = {group: {p: self.running[(group, p)].value for p in partial}}
+
+        def then(result: Any) -> None:
+            if result == "ok" or result is None:
+                done()
+                return
+            readback = ((result or {}).get("readback") or {}).get(group, {})
+            for p in partial:
+                before = self.running[(group, p)]
+                if p in readback:
+                    same = before.value is not UNKNOWN and json_equal(readback[p], before.value)
+                    self.running[(group, p)] = before if same else Param(readback[p], "runtime")
+                else:
+                    self.running[(group, p)] = Param(UNKNOWN, None)
+            self.revision += 1
+            done()
+
+        self._act("undo", ("undo", restore), step, then)
 
     def control(self, op: str, request: Any, now: int) -> Step:
         """``confirm``, ``cancel`` and ``extend`` (§2.10)."""
@@ -1090,9 +1126,16 @@ class Core:
 
 
 def _same_request(a: dict[str, Any], b: dict[str, Any]) -> bool:
-    """§2.14: "an equal request (every member of SetRequest equal)"."""
-    members = ("values", "confirm_s", "token", "expected_revision", "idempotency_key", "dry_run")
-    return all((m in a) == (m in b) and (m not in a or json_equal(a[m], b[m])) for m in members)
+    """§2.14: "an equal request (every member of SetRequest equal)", equal
+    as decoded (text 0.3): "A member at its default is the member absent, so
+    "dry_run": false and no dry_run are one request; every other member, and
+    each value of values, compares as the JSON value it is"."""
+    def decoded(r: dict[str, Any]) -> dict[str, Any]:
+        return {m: r[m] for m in ("values", "confirm_s", "token", "expected_revision", "idempotency_key", "dry_run")
+                if m in r and not (m == "dry_run" and r[m] is False)}
+
+    da, db = decoded(a), decoded(b)
+    return da.keys() == db.keys() and all(json_equal(da[m], db[m]) for m in da)
 
 
 def status_of(view: dict[str, Any]) -> dict[str, Any]:

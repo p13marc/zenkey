@@ -673,6 +673,59 @@ def _config_lifecycle(path: Path) -> list[Result]:
     return out
 
 
+def _link_interfaces(case: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """plan.json's deployment: the interfaces given inline, or loaded from
+    authoring files "relative to the repository root", as core §9 loads
+    them."""
+    from . import link
+    from .contract import load_contract
+
+    if "interfaces" in case:
+        return case["interfaces"]
+    repo = Path(__file__).resolve().parents[3]
+    out = {}
+    for rel in case.get("contracts", []):
+        c = load_contract(repo / rel)
+        if not c.valid or c.canonical is None:
+            raise CannotRun(f"{rel}: {c.codes}")
+        out[c.interface] = link.resources_of(c)
+    return out
+
+
+def _link_exposure(path: Path) -> list[Result]:
+    """link.v1 §2.2, §2.7: a resource and the face's expose -> its exposure
+    and whether its pushes cross."""
+    from . import link
+
+    return [_check(f"exposure: {c['note']}", link.exposure(c["token"], c["template"], c["annotations"], c["expose"]),
+                   c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
+def _link_plan(path: Path) -> list[Result]:
+    """link.v1 §2.3: a face policy and a deployment -> each face's plan, or
+    the findings that refuse it."""
+    from . import link
+
+    return [_check(f"plan: {c['note']}", link.plan(c["policy"], c["implements"], _link_interfaces(c)), c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
+def _link_lints(path: Path) -> list[Result]:
+    """link.v1 §2.1, §2.3, §2.11, §2.15: a policy, and optionally a
+    deployment, its windows and a router's block -> every finding."""
+    from . import link
+
+    out: list[Result] = []
+    for c in _load_json(path)["cases"]:
+        has = "implements" in c
+        got = link.lint(c["policy"], implements=c.get("implements") if has else None,
+                        interfaces=_link_interfaces(c) if has else None, windows=c.get("windows"),
+                        block=c.get("block"))
+        out.append(_check(f"lints: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -685,6 +738,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "config": {"validation.json": _config_validation, "window.json": _config_window,
                "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
                "redaction.json": _config_redaction},
+    "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints},
 }
 
 

@@ -75,16 +75,17 @@ case name. It exits with:
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
+| link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
 
 ```text
-layout         17 passed     0 failed
+layout         18 passed     0 failed
 keys           55 passed     0 failed
 slugs          42 passed     0 failed
 templates      11 passed     0 failed
-contracts      97 passed     0 failed
+contracts      99 passed     0 failed
 sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
@@ -97,12 +98,16 @@ examples      103 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
-config        319 passed     0 failed
-total        1240 passed     0 failed
+config        330 passed     0 failed
+link          119 passed     0 failed
+total        1373 passed     0 failed
 ```
 
-The figures are against `core.md` 0.28, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4 and `config.v1` 0.2. `config.v1` 0.1 added its five
+The figures are against `core.md` 0.29, `hostid.v1` 0.5, `freshness.v1`
+0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.1. `link.v1` 0.1
+added its three fixture files, core 0.29 `contracts/w105-link-downsample`,
+and `config.v1` 0.3 seven `validation.json` cases and one `lifecycle.json`
+case. `config.v1` 0.1 added its five
 fixture files and its standard contract (4 more `examples` checks), and
 `layout` checks the four profiles' directories. Core 0.28 added three
 `errors` cases, and `config.v1` 0.2 eight `validation.json` cases and two
@@ -124,9 +129,11 @@ fixtures:
   core 0.27 F-106.
 - `config.v1` 0.2 resolved F-107 to F-113, found against its 0.1, and
   overturned one of zk2py's guesses (F-107's values).
-- F-114 and F-115 are open: found against `config.v1` 0.2, read cold and
-  run live against the Rust owner example (`SPEC-FINDINGS.md`, "At
-  config.v1 0.2 and core 0.28").
+- `config.v1` 0.3 resolved F-114 and F-115, found against its 0.2, both as
+  zk2py guessed.
+- F-116 and F-117 are open: found against `link.v1` 0.1, read cold and run
+  on zenoh-python routers (`SPEC-FINDINGS.md`, "At link.v1 0.1, config.v1
+  0.3 and core 0.29").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -454,7 +461,8 @@ zk2py-owner runs:
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
 Result: `live interop: 423 passed, 0 failed, 0 known deviations of the Rust owner example`,
-its `config` run (`--only config`, below) 94 of them. Exit codes are as for the static runner. `--only <run>`
+its `config` run (`--only config`, below) 94 of them; that run is 97 since
+three of `config.v1` 0.3's probes joined it (round 30, which reran it alone). Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
 
@@ -745,7 +753,7 @@ just py-state
   - a GET that runs to its timeout, with the owner stopped, is possibly
     incomplete.
 
-## config.v1 (profile text 0.2, core 0.28)
+## config.v1 (profile text 0.3, core 0.29)
 
 ```bash
 just py-config                                   # against zk2py's owner
@@ -804,11 +812,11 @@ python -m zk2py.live_interop --only config       # the live runner's config run
     1 KB. The link is not shaped to a serial line.
   - §14's tool is the reader above, `lab/plain` a zk2py owner of `nav.v2`.
 - **Across the two implementations** (the live runner's `--only config`,
-  94 checks), zk2py the caller, tool and subscriber, the owner example the
+  97 checks), zk2py the caller, tool and subscriber, the owner example the
   owner:
   - its bring-up: the documents before the tokens, its descriptor and
     bundle against the standard contract, its schema;
-  - the order of refusals: 37 requests to an idle owner, each predicted by
+  - the order of refusals: 40 requests to an idle owner, each predicted by
     zk2py from the served view and answered by the owner example, every
     answer matching;
   - `scenarios.md` §1 to §14, all run, 51 of 51: its device through
@@ -816,6 +824,50 @@ python -m zk2py.live_interop --only config       # the live runner's config run
     `config restart`; §10's 300 s through `config offset 300000`; §12
     through `config desired`. It takes no credentials, so in §8 and §13 it
     sits on an open router linked to C's.
+
+- **0.3** made "an equal request" equal as decoded (`"dry_run": false` is
+  absent), read the request's integer members within the unsigned 64-bit
+  range, and restores a hot group left part applied once: zk2py's device
+  reports it as `{"refused": words, "partial": {…}}`.
+
+## link.v1 (profile text 0.1, core 0.29)
+
+```bash
+python -m zk2py.link_scenarios      # a `py-link` recipe is requested
+```
+
+- **`zk2py.link`**, from the text alone:
+  - the face policy (§2.1): `parse_policy` reads the TOML file and reports
+    the linter's findings, each `{code, severity, face, at}`, sorted;
+  - `link.exposure` (§2.2): `exposure`, and whether a resource's pushes
+    cross a face (§2.7, §2.8);
+  - the plan (§2.3, §2.5 to §2.12): `plan` derives each face's denies, with
+    §2.7's carve-out and its overlaps (`carve`), its downsampling rules, its
+    attachment, its window floors and its liveness evidence, or the findings
+    that refuse it;
+  - the checks: a deployment's tombstone windows (`check_windows`) and a
+    router's block (`check_block`, §2.15); `lint` is `lints.json`'s reading;
+  - a generator for zenoh-python routers: `compile_face` puts a plan's
+    denies in the far principal's policy of zk2py's generated block (§2.4),
+    and `router_extras` gives its `downsampling` and a south region's
+    `gateway`;
+  - §5's "Is this provider live across the face?" (`liveness_across`).
+- **The `link` conformance family:** 119 of 119, every case passing the
+  first time it ran.
+- **`python -m zk2py.link_scenarios`** runs `scenarios.md` §1 to §6, 22 of
+  22, every section, on zenoh-python routers: N with usrpwd and the block
+  zk2py compiles under `deny` from the enrollment, listening on TCP (the
+  near side) and on a `unixsock-stream` path (the face); G across the face,
+  L on the near side, zk2py owners of `interop/link/radio.v1.toml`, the
+  scenarios' contract.
+  - G and L subscribe to the selectors the enrollment grants them: the
+    text's `zk2/lab/*/**` is refused under `deny` (F-116).
+  - §2's far router F names its region and attaches over the face; the far
+    principal's `declare_queryable` egress grant names the owners'
+    `state/**` as well, without which a state GET gets no reply (F-117).
+  - §5's face goes down as G's session closing, its merged members kept.
+- **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
+  core S3).
 
 ## What it does not cover
 
@@ -917,13 +969,15 @@ impl/python/
     config.py         config.v1 time, values, the orders of refusals, desired state, redaction, Core,
                                 ConfigOwner, SimDevice, the reader of §5
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
+    link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
+    link_scenarios.py link.v1   scenarios.md §1–§6 on zenoh-python routers
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge
     state_scenarios.py §4.2     scenarios/state.md §10 against zk2py's owner, and §11's open cases
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1;
+                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1; link/ radio.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

@@ -289,7 +289,8 @@ class Owner:
                  hostid_ephemeral: bool | None = None, meta_host: str | None = None,
                  state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
                  initial: dict[str, bytes] | None = None, hlc: bool = True,
-                 cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True):
+                 cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
+                 tombstone_s: float = TOMBSTONE_WINDOW_S):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -412,6 +413,9 @@ class Owner:
         self.hlc = hlc
         self.cardinality = {k: dict(v) for k, v in (cardinality or {}).items()}
         self.budget = budget
+        #: core S3: the tombstone window, "60 s, unless the deployment
+        #: configures the owner with another" (link.v1 §2.11 floors it)
+        self.tombstone_s = tombstone_s
         #: §2.7: a templated member's resource, by key
         self._member_of: dict[str, tuple[Any, dict[str, Any]]] = {}
         #: a templated stream member's last publication (monotonic s)
@@ -935,7 +939,7 @@ class Owner:
         for key, held in list(self._held.items()):
             if not asked.intersects(zenoh.KeyExpr(key)):
                 continue
-            if held.payload is not None or now - held.at <= TOMBSTONE_WINDOW_S:
+            if held.payload is not None or now - held.at <= self.tombstone_s:
                 out.append((key, held))
         return out
 
