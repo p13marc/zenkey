@@ -54,8 +54,9 @@
 //!   nudged, #614 FL4), `why`
 //!   (the reads a silence is explained from, #702), `conform` (a
 //!   service's suite, #703), `stall` (what a window's reader sees of its
-//!   own receive path: its transports and a ticker, core §2.7 0.27) and
-//!   `health` (a `health.v1` reading, #721). The
+//!   own receive path: its transports and a ticker, core §2.7 0.27),
+//!   `health` (a `health.v1` reading, #721) and `config` (a `config.v1`
+//!   reading, and one act through the runtime's client, #768). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -101,8 +102,8 @@
 //! * **[`judge`]** — everything that takes a position. `doctor` and its
 //!   `doctor_delta`, `expect`, `probe`, `condition`, `field`, `why` (a
 //!   silence explained rung by rung, #702), `conform` (a service against
-//!   the revision it claims, #703) and `health` (`health.v1`'s verdicts,
-//!   #721), and
+//!   the revision it claims, #703), `health` (`health.v1`'s verdicts,
+//!   #721) and `config` (`config.v1`'s §5 answers, #768), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -235,10 +236,16 @@ pub use judge::conform::judge as judge_conform;
 // `health.v1` (#721, PF): every service's health, or one's, read as the
 // profile's reader reads it — the reads, the session-free judge, and the
 // two in a row.
+pub use bus::config::{
+    ConfigCall, ConfigGet, ConfigObservation, ConfigOp, ConfigSpec, ConfigTarget, ConfigWindow,
+    call as call_config, get as get_config, observe as observe_config, run_config,
+};
 pub use bus::health::{
     AcrossFace, HealthObservation, HealthSpec, HealthTarget, observe as observe_health, run_health,
 };
+pub use judge::config::judge as judge_config;
 pub use judge::health::judge as judge_health;
+pub use model::config::{Assignment, Given, TypedValues};
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};

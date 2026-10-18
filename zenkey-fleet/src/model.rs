@@ -62,6 +62,7 @@ pub mod attach;
 pub mod bounded;
 pub mod catalog;
 pub mod compat;
+pub mod config;
 pub mod diff;
 pub mod examples;
 pub mod health;
