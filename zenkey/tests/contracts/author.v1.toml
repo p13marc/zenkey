@@ -1,0 +1,15 @@
+# config.v1's scenarios.md section 12 (#768): an authoring service that puts
+# a desired document for a config.v1 owner as its own state (config.v1
+# 2.18). No config.v1 resource carries the type, so the author copies it.
+[interface]
+name = "author"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/desired.json"]
+
+[resources.desired]
+kind = "state"
+type = "json:DesiredConfig"
+doc  = "The desired document a deployment binds a config.v1 owner to."

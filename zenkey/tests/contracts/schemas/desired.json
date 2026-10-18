@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ParamValue": {
+      "description": "One parameter's value, copied from config.v1's schemas/config.json: a boolean, an integer or a string, untagged.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "integer" },
+        { "type": "string" }
+      ]
+    },
+    "DesiredConfig": {
+      "description": "A desired document for a config.v1 owner (config.v1 2.18), copied from its schemas/config.json, as the text says an author does.",
+      "type": "object",
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0 },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/ParamValue" }
+          }
+        }
+      },
+      "required": ["revision", "values"]
+    }
+  }
+}
