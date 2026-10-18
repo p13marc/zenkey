@@ -437,9 +437,13 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   (draft 1) and its lints with stable codes (`diag::CODES`), the canonical
   form, fingerprints,
   bundles and `.history`, the compatibility classifier (`compat`,
-  #618), and a late joiner's merge (`seed`, core 0.27: zenoh's timestamp
+  #618), a late joiner's merge (`seed`, core 0.27: zenoh's timestamp
   order spelled out, an unstamped sample below every stamp), which the
-  fleet's seeded subscription decides by. It depends on `zenoh-keyexpr` and no other zenoh crate
+  fleet's seeded subscription decides by, and `config.v1`'s session-free
+  half (`config`, #768 CA: the validators in the profile's order of
+  refusals, the window, redaction, and `Owner`, a pure state machine whose
+  device acts are two-phase, `Step::Act` then `finish`, which the runtime
+  wraps). It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
   as zenctl's). `tests/examples.rs` requires every contract in
