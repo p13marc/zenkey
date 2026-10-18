@@ -1121,12 +1121,41 @@ fn too_long(s: &str, max: usize) -> bool {
     s.is_empty() || s.chars().count() > max
 }
 
+/// Whether `v` is a `ParamValue`, the type of `SetRequest`'s values (§3):
+/// a boolean, a string, or an integer as JSON Schema reads one, a number
+/// with no fractional part. `2.0` and an integer beyond 64 bits are; row 11
+/// then refuses them against the parameter's kind (§2.5, text 0.2, F-107).
+fn is_param_value(v: &Json) -> bool {
+    match v {
+        Json::Bool(_) | Json::String(_) => true,
+        Json::Number(n) => {
+            n.is_i64()
+                || n.is_u64()
+                || n.as_f64()
+                    .is_some_and(|f| f.is_finite() && f.fract() == 0.0)
+        }
+        _ => false,
+    }
+}
+
+/// The request's own type, before row 1 (§2.5): its members in the
+/// bytewise order of their names, `values` last, and in it the first value
+/// outside `ParamValue` by name (text 0.2, F-107).
 fn check_set_shape(req: &SetRequest) -> Result<(), Refusal> {
     if req.confirm_s == Some(0) {
         return Err(Refusal::new(
             Code::InvalidRequest,
             Some(Field::member("confirm_s")),
             "confirm_s is a window of at least 1 s",
+        ));
+    }
+    if let Some(k) = &req.idempotency_key
+        && too_long(k, MAX_KEY)
+    {
+        return Err(Refusal::new(
+            Code::InvalidRequest,
+            Some(Field::member("idempotency_key")),
+            format!("an idempotency key is 1 to {MAX_KEY} characters"),
         ));
     }
     if let Some(t) = &req.token
@@ -1138,13 +1167,14 @@ fn check_set_shape(req: &SetRequest) -> Result<(), Refusal> {
             format!("a token is 1 to {MAX_TOKEN} characters"),
         ));
     }
-    if let Some(k) = &req.idempotency_key
-        && too_long(k, MAX_KEY)
-    {
+    if let Some((name, _)) = req.values.iter().find(|(_, v)| !is_param_value(v)) {
         return Err(Refusal::new(
             Code::InvalidRequest,
-            Some(Field::member("idempotency_key")),
-            format!("an idempotency key is 1 to {MAX_KEY} characters"),
+            Some(Field::value(name)),
+            format!(
+                "{name}: not a boolean, an integer or a string, so outside the request's type \
+                 (SetRequest's ParamValue)"
+            ),
         ));
     }
     Ok(())
@@ -1747,8 +1777,24 @@ struct Change {
 struct Last {
     token: String,
     groups: Vec<String>,
-    set: Vec<Key>,
+    /// The values the change set, as it set them: what `persist` writes,
+    /// whatever a pending change runs since (§2.13, text 0.2, F-111).
+    values: BTreeMap<Key, Value>,
     sensitive: bool,
+}
+
+impl Last {
+    fn of(token: String, groups: Vec<String>, edits: &BTreeMap<Key, EditRec>) -> Self {
+        Self {
+            token,
+            groups,
+            values: edits
+                .iter()
+                .map(|(k, r)| (k.clone(), r.new.clone()))
+                .collect(),
+            sensitive: edits.values().any(|r| r.sensitive),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2506,12 +2552,7 @@ impl Owner {
         let ch = self.pending.take().expect("validated: a change is pending");
         let edits = self.edits(&ch.groups, &ch.edits);
         let ev = self.event(now, &ch.token, Outcome::Confirmed, edits, &ch.call);
-        self.last = Some(Last {
-            token: ch.token.clone(),
-            groups: ch.groups.clone(),
-            set: ch.edits.keys().cloned().collect(),
-            sensitive: ch.edits.values().any(|r| r.sensitive),
-        });
+        self.last = Some(Last::of(ch.token.clone(), ch.groups.clone(), &ch.edits));
         Step::Done(Done {
             reply: Some(Ok(self.control_reply(req.answer.unwrap_or_default()))),
             events: vec![ev],
@@ -2559,14 +2600,14 @@ impl Owner {
     pub fn persist_plan(&self, now: Time, req: &ControlRequest) -> Result<PersistPlan, Refusal> {
         validate_control(ControlOp::Persist, &self.facts(now), req)?;
         let last = self.last.as_ref().expect("validated: a last change");
+        // The values the last change set, never the running ones: a pending
+        // change may run another since (§2.13, text 0.2, F-111).
         let mut entries: BTreeMap<String, BTreeMap<String, Value>> = BTreeMap::new();
-        for k in &last.set {
-            if let Some(v) = self.slots.get(k).and_then(|s| s.value.clone()) {
-                entries
-                    .entry(k.0.clone())
-                    .or_default()
-                    .insert(k.1.clone(), v);
-            }
+        for ((g, p), v) in &last.values {
+            entries
+                .entry(g.clone())
+                .or_default()
+                .insert(p.clone(), v.clone());
         }
         Ok(PersistPlan {
             token: last.token.clone(),
@@ -2575,14 +2616,27 @@ impl Owner {
         })
     }
 
-    /// Commits a `persist` whose entries the runtime wrote: they read
-    /// `source: overlay`. No revision, no event (§2.13).
+    /// Commits a `persist` whose entries the runtime wrote (§2.13): a
+    /// parameter that runs the value persisted reads `source: overlay`,
+    /// unless an applied group of a pending change holds it, which keeps
+    /// its value and source and shows the persisted value as `startup`;
+    /// and a pending change's value before it, when it is the value
+    /// persisted, restores at `source: overlay` (text 0.2, F-111). No
+    /// revision, no event.
     pub fn persisted(&mut self, plan: PersistPlan) -> Done {
         for (g, ps) in &plan.entries {
             for (p, v) in ps {
                 let k = key(g, p);
                 self.overlay.insert(k.clone(), v.clone());
-                if let Some(s) = self.slots.get_mut(&k)
+                let pending = self.pending.as_mut().and_then(|c| c.edits.get_mut(&k));
+                let held = pending.as_ref().is_some_and(|r| r.applied);
+                if let Some(r) = pending
+                    && r.old.as_ref() == Some(v)
+                {
+                    r.old_source = Some(Source::Overlay);
+                }
+                if !held
+                    && let Some(s) = self.slots.get_mut(&k)
                     && s.value.as_ref() == Some(v)
                 {
                     s.source = Some(Source::Overlay);
@@ -2822,12 +2876,7 @@ impl Owner {
             } else {
                 let list = self.edits(&groups, &edits);
                 events.push(self.event(now, &token, Outcome::Applied, list, call));
-                self.last = Some(Last {
-                    token,
-                    groups,
-                    set: edits.keys().cloned().collect(),
-                    sensitive: edits.values().any(|r| r.sensitive),
-                });
+                self.last = Some(Last::of(token, groups, &edits));
             }
         }
         Done {
