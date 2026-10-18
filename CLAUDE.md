@@ -152,7 +152,20 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   slot sections (Detail, History, Fields, Why) carry a `SlotId` on their
   `PaneMsg` so two Inspectors never write into each other's state.
   `view/inspector.rs` is the one surface that dispatches on a subject
-  (#182). Under `view/`, a `pane` returns an `Element`
+  (#182). The Workbench's **Config tool** (#768, CD; `configure.rs`,
+  `view/configure.rs`, `update/pane/configure.rs`) is `config.v1` over the
+  engine and holds no protocol logic: `run_config` reads (§5's answers
+  included), `type_values` and `precheck` — the owner's own
+  `validate_set` against the view read — refuse a `set` in the form
+  before any task exists, `consent` gates a reach change, `call_config`
+  acts, each answer rendered by its union. Its subject is an address
+  whose descriptor lists `config.v1` ("configure" on a nodes card and in
+  the Inspector's address view); its state is `work.verdicts.config`,
+  dropped with the deployment, the clock word kept. Time is a message:
+  the countdown reads the tick's clock, never `SystemTime::now()` in a
+  view, so a scene renders the same twice. A sensitive value is a
+  `Masked` (`Debug` is `<redacted>`), never echoed or persisted; every
+  act is refused during a replay. Under `view/`, a `pane` returns an `Element`
   and owns its scroll; a `section` returns a `Column` and is a piece of one; a
   `dock` (`view/activity.rs`, #183) is a region holding the session's parallel
   streams — echo, the publish log, doctor verdicts, replay transport, and
