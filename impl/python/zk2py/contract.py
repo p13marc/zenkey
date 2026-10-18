@@ -50,14 +50,17 @@ REQUIRED = {
 #: table replaces its interim one". W105 reads one of these first.
 PUBLISHED_VOCABULARY = {
     "freshness": {"ttl_s"},  # profiles/freshness/v1.md §4
+    # profiles/link/v1.md §4 (core 0.29): link.downsample_ms left with the
+    # interim row, "a face's rate is its face policy's interval_s".
+    "link": {"exposure"},
 }
 
 #: Appendix D, interim annotation vocabularies (W105 outside them, until each
-#: profile publishes its own). freshness's row moved to the published table.
+#: profile publishes its own). freshness's and link's rows moved to the
+#: published table.
 INTERIM_VOCABULARY = {
     "timing": {"period_ms", "deadline_ms", "lifespan_ms"},
     "telemetry": {"unit", "kind", "buckets", "semantic"},
-    "link": {"exposure", "downsample_ms"},
     "arbitration": {"policy"},
     "desired": {"target_param", "target"},
     "alarms": {"severity_default"},
