@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "desired.json",
+  "$comment": "config.v1's DesiredConfig (spec/profiles/config/v1.md section 3), copied: no config.v1 resource carries it, and until a contract can reference another's types an author copies it (section 2.18).",
+  "$defs": {
+    "ParamValue": {
+      "description": "One parameter's value, untagged: a boolean, a signed 64-bit integer, or text.",
+      "anyOf": [
+        { "type": "boolean" },
+        { "type": "integer" },
+        { "type": "string" }
+      ]
+    },
+    "DesiredConfig": {
+      "description": "A desired document for a config.v1 server: values by group and name, under the author's revision.",
+      "type": "object",
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0 },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/ParamValue" }
+          }
+        }
+      },
+      "required": ["revision", "values"]
+    }
+  }
+}

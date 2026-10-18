@@ -196,6 +196,8 @@ class OpCall:
         self.query, self.base, self.resource, self.enc = query, base, r, enc
         self.bound, self.key_expr = bound, key_expr
         self.payload = b"" if query.payload is None else query.payload.to_bytes()
+        #: the request's attachment, the call metadata's carrier (O7)
+        self.attachment = None if query.attachment is None else query.attachment.to_bytes()
         self.member_key: str | None = None if r["params"] else f"{base}/{r['token']}/{r['template']}"
         self.values = self.summaries = self.envelopes = 0
         self.refused_to_handler: list[str] = []
@@ -242,6 +244,20 @@ class OpCall:
         """A ``reply_err`` carrying the §5.2 envelope."""
         _refuse(self.query, self.enc, code, message, **kw)
         self.envelopes += 1
+
+    def metadata(self) -> dict[str, str]:
+        """Core O7 (§5.1 "Call metadata"): the attachment read as call
+        metadata "only when it is a JSON object whose actor and request_id,
+        each optional, are strings where present"; anything else is no
+        metadata, and never a reason to refuse."""
+        try:
+            doc = json.loads(self.attachment) if self.attachment else None
+        except ValueError:
+            return {}
+        if not isinstance(doc, dict) or any(k in doc and not isinstance(doc[k], str)
+                                            for k in ("actor", "request_id")):
+            return {}
+        return {k: doc[k] for k in ("actor", "request_id") if k in doc}
 
     def finish(self) -> None:
         """O3: "A handler that ends without replying is answered internal";
@@ -771,7 +787,11 @@ class Owner:
                     if b is not None and len(live) >= b:
                         raise self._refusal(member, c, r, len(live))
             key = f"{member}/{new_ulid(int(time.time() * 1000))}"
-            enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else "application/protobuf"
+            # §7.2: a raw type's media type, a JSON Schema type's JSON (or
+            # CBOR where the resource says so), protobuf's.
+            enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
+                ("application/cbor" if r.get("encoding") == "cbor" else "application/json")
+                if r["type"]["kind"] == "jsonschema" else "application/protobuf")
             self.session.put(key, payload, encoding=enc)
             self._occurrences.setdefault(member, []).append(now)
             self.events_put.append((key, payload))

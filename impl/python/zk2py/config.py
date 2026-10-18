@@ -244,7 +244,8 @@ def decode_set(request: Any) -> Refusal | None:
     members of their types. A member a reader does not know is ignored (the
     types are open, §3). The members are checked in the bytewise order of
     their names, ``values`` required. A value's kind and bounds are row 11's
-    (§2.5 "A value of the wrong kind"), not the decode's."""
+    (§2.5 "A value of the wrong kind"), not the decode's, ``null``, a
+    fraction and 2^63 included (SPEC-FINDINGS F-107)."""
     if not isinstance(request, dict):
         return _bad("", "the request is a SetRequest object")
     for name in bytewise(n for n in request if n in
@@ -311,18 +312,13 @@ def _busy_pending(f: Facts) -> Refusal:
                                  "status (§2.7)")
 
 
-def check_set(schema: list[dict[str, Any]], group_name: str, request: dict[str, Any], f: Facts,
-              held: Callable[[], Refusal | None] | None = None) -> Refusal | None:
-    """§2.5's rows 1 to 11, after the request's own type (:func:`decode_set`,
-    which the caller has run): the first that applies, or None. ``held``
-    is row 2, the idempotency key's check, which the owner's state holds
-    (:class:`Core`); it returns the refusal of row 2 or raises nothing."""
+def check_set(schema: list[dict[str, Any]], group_name: str, request: dict[str, Any], f: Facts) -> Refusal | None:
+    """§2.5's rows 1 and 3 to 11, after the request's own type
+    (:func:`decode_set`, which the caller has run): the first that applies,
+    or None. Row 2, an idempotency key's first answer, reads the owner's
+    state and is :class:`Core`'s, as are rows 12 to 14."""
     if f.in_flight:
         return Refusal("busy", None, "an act is in flight: call again once it ends (§2.7)")
-    if held is not None:
-        r = held()
-        if r is not None:
-            return r
     group = find_group(schema, group_name)
     if group is None:
         return Refusal("not_found", "group", f"the schema declares no group {group_name!r} (§2.2)")
@@ -536,7 +532,7 @@ class Core:
             raise ValueError("at most 16 groups (§2.2)")
         if apply_after_ns >= floor_s * NS:
             # §2.9: apply_at "MUST state one before the deadline"; a window
-            # is never shorter than the floor.
+            # is never shorter than the floor (SPEC-FINDINGS F-113).
             raise ValueError("apply_at would not come before the smallest window's deadline (§2.9)")
         self.service, self.schema = service, schema
         self.startup_file = startup
@@ -629,6 +625,8 @@ class Core:
                 if cur.value is not UNKNOWN and not decl.get("sensitive"):
                     p["value"] = cur.value
                 if cur.source is not None:
+                    # An unknown value has no source (lifecycle.json case 4,
+                    # SPEC-FINDINGS F-109).
                     p["source"] = cur.source
                 start, _ = self.startup_value(*key)
                 if not decl.get("sensitive") and cur.value is not UNKNOWN and start is not UNKNOWN \
@@ -690,7 +688,8 @@ class Core:
 
     def _rate_spent(self, now: int) -> bool:
         """§2.17: "while 600 change events were published within the last
-        hour": an event exactly an hour old no longer counts."""
+        hour": an event exactly an hour old no longer counts, as
+        lifecycle.json's case 19 says (SPEC-FINDINGS F-110)."""
         return sum(1 for t in self.events_at if now - RATE_PERIOD_NS < t <= now) >= RATE_N
 
     def _end(self, change: Change, outcome: str, step: Step, now: int) -> None:
@@ -782,25 +781,22 @@ class Core:
 
     # -- the calls ---------------------------------------------------------------------------
 
-    def _held_key(self, request: dict[str, Any], group: str, now: int) -> Callable[[], Refusal | None]:
-        """§2.5 row 2: the first answer for the same group and request;
-        ``invalid_request`` for another (not kept, §2.14)."""
-        def check() -> Refusal | None:
-            key = request.get("idempotency_key")
-            if key is None:
-                return None
-            kept = self.keys.get(key)
-            if kept is not None and now >= kept.at + KEY_TTL_NS:
-                # §2.14: "At 300 s and after, the key is forgotten".
-                del self.keys[key]
-                kept = None
-            if kept is None:
-                return None
-            if kept.group == group and _same_request(kept.request, request):
-                raise _FirstAnswer(kept.answer)
-            return _bad(pointer("idempotency_key"), "this idempotency key's first answer was to another "
-                                                    "group or request (§2.14)")
-        return check
+    def _row2(self, request: dict[str, Any], group: str, now: int) -> Any:
+        """§2.5 row 2: the key's first answer for the same group and an
+        equal request; ``invalid_request`` (never kept) for another; None
+        when no first answer is held under the key (§2.14)."""
+        key = request.get("idempotency_key")
+        kept = None if key is None else self.keys.get(key)
+        if kept is not None and now >= kept.at + KEY_TTL_NS:
+            # §2.14: "At 300 s and after, the key is forgotten".
+            del self.keys[key]
+            kept = None
+        if kept is None:
+            return None
+        if kept.group == group and _same_request(kept.request, request):
+            return kept.answer
+        return _bad(pointer("idempotency_key"), "this idempotency key's first answer was to another group or "
+                                                "request (§2.14)")
 
     def set(self, group: str, request: Any, now: int, call: dict[str, Any] | None = None) -> Step:
         """``@op/set/{group}`` (§2.5, §2.9): the request's type, rows 1 to
@@ -822,13 +818,9 @@ class Core:
             step.reply = check_set(self.schema, group, request, f)
             return step
         key = request.get("idempotency_key")
-        try:
-            r = self._held_key(request, group, now)()
-        except _FirstAnswer as fa:
-            step.reply = fa.answer
-            return step
-        if r is not None:
-            step.reply = r
+        first = self._row2(request, group, now)
+        if first is not None:
+            step.reply = first
             return step
         r = check_set(self.schema, group, request, f)
 
@@ -872,7 +864,8 @@ class Core:
             answer({"pending": {"token": change.token, "apply_at": write_time(apply_at),
                                 "deadline": write_time(change.deadline or 0)}})
             return step
-        # Hot: the apply now (rows 14 at its result).
+        # Hot: the apply now (row 14 at its result). An empty values is an
+        # apply of nothing, which moves the revision (SPEC-FINDINGS F-108).
 
         def then(result: Any) -> None:
             if isinstance(result, dict) and "refused" in result:
@@ -961,7 +954,8 @@ class Core:
             cur = self.running[(g, p)]
             if self.pending is not None and (g, p) in self.pending.before:
                 # Under another pending change, which an undo would restore
-                # to the persisted value: the restored source is overlay.
+                # to the persisted value: the restored source is overlay
+                # (SPEC-FINDINGS F-111).
                 b = self.pending.before[(g, p)]
                 if b.value is not UNKNOWN and json_equal(b.value, v):
                     self.pending.before[(g, p)] = Param(v, "overlay")
@@ -1060,12 +1054,6 @@ class Core:
         self._desired_waiting = False
 
 
-class _FirstAnswer(Exception):
-    def __init__(self, answer: Any):
-        super().__init__("a first answer")
-        self.answer = answer
-
-
 def _same_request(a: dict[str, Any], b: dict[str, Any]) -> bool:
     """§2.14: "an equal request (every member of SetRequest equal)"."""
     members = ("values", "confirm_s", "token", "expected_revision", "idempotency_key", "dry_run")
@@ -1107,3 +1095,462 @@ def encode_json(doc: Any) -> bytes:
     """A payload: compact JSON, integers as integers (64-bit values
     included, which RFC 8785's double range would refuse)."""
     return json.dumps(doc, separators=(",", ":"), ensure_ascii=False, sort_keys=True).encode()
+
+
+# -- the session half: a simulated device ------------------------------------------------
+
+class SimDevice:
+    """A simulated device (scenarios.md, "Its device is simulated: a test
+    sets each act's result, and reads what the device holds"). Each act is
+    logged with the owner's clock; ``next_apply`` and ``next_undo`` hold the
+    results of the next acts, ``"ok"`` when empty. A failed undo leaves the
+    device holding its read-back."""
+
+    def __init__(self, values: dict[str, dict[str, Any]] | None = None):
+        self.values: dict[str, dict[str, Any]] = {g: dict(v) for g, v in (values or {}).items()}
+        self.next_apply: list[Any] = []
+        self.next_undo: list[Any] = []
+        self.log: list[tuple[int, str, Any, Any]] = []
+        self.lock = threading.Lock()
+
+    def boot(self, values: dict[str, dict[str, Any]]) -> None:
+        """What an owner gives its device at start: its startup values."""
+        with self.lock:
+            self.values = {g: dict(v) for g, v in values.items()}
+            self.log.append((time.time_ns(), "boot", None, None))
+
+    def acts(self, kind: str) -> list[tuple[int, str, Any, Any]]:
+        with self.lock:
+            return [x for x in self.log if x[1] == kind]
+
+    def __call__(self, act: tuple) -> Any:
+        with self.lock:
+            now = time.time_ns()
+            if act[0] == "apply":
+                _, group, values = act
+                result = self.next_apply.pop(0) if self.next_apply else "ok"
+                if result == "ok":
+                    self.values.setdefault(group, {}).update(values)
+                self.log.append((now, "apply", (group, values), result))
+                return result
+            _, restore = act
+            result = self.next_undo.pop(0) if self.next_undo else "ok"
+            if result == "ok":
+                for g, ps in restore.items():
+                    self.values.setdefault(g, {}).update(ps)
+            else:
+                readback = (result.get("readback") or {}) if isinstance(result, dict) else {}
+                for g, ps in restore.items():
+                    for p in ps:
+                        if p in readback.get(g, {}):
+                            self.values.setdefault(g, {})[p] = readback[g][p]
+                        else:
+                            self.values.get(g, {}).pop(p, None)
+            self.log.append((now, "undo", restore, result))
+            return result
+
+
+# -- the session half: the owner ------------------------------------------------------
+
+class ConfigOwner:
+    """A service's ``config.v1`` over :class:`zk2py.owner.Owner`.
+
+    - Every resource is exposed, ``persist`` listed unavailable with cause
+      ``config`` when there is no persisted layer (§2.1, §2.13);
+      ``set/{group}`` by one queryable over the template.
+    - The view and the status are put before the tokens (§2.3, a MUST
+      here), on every change of either, and re-put every 30 s by the
+      owner's ``freshness.ttl_s`` refresh (freshness.v1 §2.4); never
+      deleted.
+    - Each change event is an occurrence on ``events/change/<ulid>``
+      (§2.17).
+    - Deadlines and reach applies run on a timer thread of the owner's
+      own, at their instants on its clock (§2.8, §2.9, §2.11).
+    - ``desired_key``: a key holding a ``DesiredConfig`` that the
+      deployment binds to this owner (§2.18), read by subscription and by
+      a GET at start.
+    - ``overlay`` and ``events_at`` are shared with a later instance of the
+      same service: what survives a restart (§2.12, §2.17).
+
+    The calls are serialized: the owner answers one act's call at a time
+    (§2.7)."""
+
+    def __init__(self, system: str, service: str, *, schema: list[dict[str, Any]],
+                 startup: dict[str, dict[str, dict[str, Any]]], overlay: dict[str, dict[str, Any]] | None = None,
+                 floor_s: int = 10, apply_after_s: float = 1.0, persist: bool = True,
+                 device: SimDevice | None = None, events_at: list[int] | None = None,
+                 desired_key: str | None = None, contracts: list[Any] | None = None, **owner_kw: Any):
+        from .contract import load_contract
+        from .owner import Owner
+
+        self.contract = load_contract(CONTRACT)
+        if not self.contract.valid:
+            raise ValueError(f"{CONTRACT}: {self.contract.codes}")
+        self.device = device or SimDevice()
+        self.persist_layer = persist
+        unavailable = dict(owner_kw.pop("unavailable", {}) or {})
+        if not persist:
+            unavailable["@op/persist"] = "config"
+        handlers = {"@op/set/{group}": self._on_set, "@op/confirm": self._on_control("confirm"),
+                    "@op/cancel": self._on_control("cancel"), "@op/extend": self._on_control("extend"),
+                    "@op/persist": self._on_persist}
+        self.owner = Owner(system, service, [self.contract, *(contracts or [])], handlers=handlers,
+                           unavailable=unavailable, **owner_kw)
+        self.core = Core(service=f"{system}/{service}", instance=self.owner.instance, schema=schema,
+                         startup=startup, overlay=overlay, floor_s=floor_s, apply_after_ns=int(apply_after_s * NS),
+                         persist=persist, device=self.device, events_at=events_at)
+        self.view_key = f"zk2/{system}/{service}/{IFACE}/state/view"
+        self.status_key = f"zk2/{system}/{service}/{IFACE}/state/status"
+        self.event_member = f"zk2/{system}/{service}/{IFACE}/events/change"
+        self._last_put: tuple[bytes, bytes] = (encode_json(self.core.view()), encode_json(self.core.status()))
+        self.owner.initial[f"{IFACE}/state/view"] = self._last_put[0]
+        self.owner.initial[f"{IFACE}/state/status"] = self._last_put[1]
+        self.desired_key = desired_key
+        self.cv = threading.Condition(threading.RLock())
+        self._stop = threading.Event()
+        self._timer: threading.Thread | None = None
+        self._entities: list[Any] = []
+        #: every reply sent and every event published, for a test to read
+        self.replies: list[bytes] = []
+        self.events: list[dict[str, Any]] = []
+        #: a test's loss: the next ``drop_replies`` value replies are made
+        #: (and kept as first answers) but never sent; ``dropped`` holds them
+        self.drop_replies = 0
+        self.dropped: list[bytes] = []
+
+    @property
+    def instance(self) -> str:
+        return self.owner.instance
+
+    def start(self) -> None:
+        values: dict[str, dict[str, Any]] = {}
+        for (g, p), prm in self.core.running.items():
+            if prm.value is not UNKNOWN:
+                values.setdefault(g, {})[p] = prm.value
+        self.device.boot(values)
+        self.owner.start()
+        self._timer = threading.Thread(target=self._run_timer, daemon=True)
+        self._timer.start()
+        if self.desired_key is not None:
+            import zenoh
+
+            from . import live
+
+            s = self.owner.session
+            assert s is not None
+            self._entities.append(s.declare_subscriber(self.desired_key, zenoh.handlers.Callback(
+                lambda smp: self._on_desired(smp.payload.to_bytes()))))
+            for r in live.get_state(s, self.desired_key).replies:
+                if not r.deleted:
+                    self._on_desired(r.payload)
+
+    def close(self) -> None:
+        self._stop.set()
+        with self.cv:
+            self.cv.notify_all()
+        if self._timer is not None:
+            self._timer.join(timeout=2.0)
+        for e in self._entities:
+            try:
+                e.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+        self.owner.close()
+
+    # -- after each step ------------------------------------------------------------------
+
+    def _after(self, step: Step) -> None:
+        """Events published, and the view and the status put when either
+        changed (§2.3), the view first; one revision may name several such
+        pairs (SPEC-FINDINGS F-112). The timer is told of a new due
+        instant."""
+        for ev in step.events:
+            self.owner.occur(self.event_member, encode_json(ev))
+            self.events.append(ev)
+        now = (encode_json(self.core.view()), encode_json(self.core.status()))
+        if now != self._last_put and self.owner.session is not None:
+            self.owner.set_state(self.view_key, now[0])
+            self.owner.set_state(self.status_key, now[1])
+            self._last_put = now
+        self.cv.notify_all()
+
+    def _send(self, call: Any, reply: Any) -> None:
+        from .owner import MemberRefused
+
+        if isinstance(reply, Refusal):
+            call.refuse(reply.code, reply.message, **reply.envelope_kw())
+            return
+        data = encode_json(reply)
+        if self.drop_replies > 0:
+            # Lost on its way: the call counts as answered, so O3's
+            # "internal" for a call left without its answer is not sent.
+            self.drop_replies -= 1
+            self.dropped.append(data)
+            call.values += 1
+            return
+        try:
+            call.reply(data, encoding="application/json")
+        except MemberRefused:
+            call.refuse("internal", "the reply has no member to go on")
+            return
+        self.replies.append(data)
+
+    @staticmethod
+    def _decode(call: Any) -> tuple[Any, Refusal | None]:
+        from . import jcs
+
+        try:
+            return jcs.loads(call.payload), None
+        except jcs.JsonError:
+            return None, Refusal("invalid_request", "", "the request does not decode as JSON (core §5.1)")
+
+    def _on_set(self, call: Any) -> None:
+        group = (call.bound.get("group") or [None])[0]
+        if group is None:
+            call.refuse("internal", "no group bound")
+            return
+        call.name(group=group)
+        request, bad = self._decode(call)
+        with self.cv:
+            step = Step(reply=bad) if bad is not None else self.core.set(group, request, time.time_ns(),
+                                                                          call.metadata())
+            if step.reply is not None:
+                self._send(call, step.reply)
+            self._after(step)
+
+    def _on_control(self, op: str):
+        def handle(call: Any) -> None:
+            request, bad = self._decode(call)
+            with self.cv:
+                step = Step(reply=bad) if bad is not None else self.core.control(op, request, time.time_ns())
+                if step.reply is not None:
+                    self._send(call, step.reply)
+                self._after(step)
+        return handle
+
+    def _on_persist(self, call: Any) -> None:
+        request, bad = self._decode(call)
+        with self.cv:
+            step = Step(reply=bad) if bad is not None else self.core.persist(request, time.time_ns())
+            if step.reply is not None:
+                self._send(call, step.reply)
+            self._after(step)
+
+    def _on_desired(self, payload: bytes) -> None:
+        from . import jcs
+
+        try:
+            doc = jcs.loads(payload)
+        except jcs.JsonError:
+            return
+        if not isinstance(doc, dict) or not is_integer(doc.get("revision")) or not isinstance(doc.get("values"), dict):
+            return
+        with self.cv:
+            current = self.core.desired_doc
+            if current is not None and current.get("revision") == doc["revision"]:
+                return  # §2.18: "It tries a failed document again when its revision changes."
+            self._after(self.core.desire(doc, time.time_ns()))
+
+    def _run_timer(self) -> None:
+        with self.cv:
+            while not self._stop.is_set():
+                nd = self.core.next_due()
+                now = time.time_ns()
+                if nd is None or self.core.in_flight is not None:
+                    self.cv.wait(0.5)
+                    continue
+                if nd > now:
+                    self.cv.wait(min((nd - now) / NS, 0.5))
+                    continue
+                self._after(self.core.due(now))
+
+
+# -- §5 what a tool may conclude ---------------------------------------------------------
+
+NOT_ASKED, UNOBSERVABLE = "not_asked", "unobservable"
+HORIZON = {"freshness.ttl_s": 60}
+
+
+@dataclass
+class Reading:
+    """One reading of a service for §5: the premise (presence and the
+    descriptor, or the deployment's word across a face), the view and the
+    status with their freshness (``freshness.v1`` at 60 s), and the change
+    events heard."""
+
+    premise: str                         # "ok", "not_asked" or "unobservable"
+    why: str = ""
+    view: dict[str, Any] | None = None
+    status: dict[str, Any] | None = None
+    view_fresh: bool = False
+    status_fresh: bool = False
+    events: list[dict[str, Any]] = field(default_factory=list)
+
+    def fresh_doc(self) -> dict[str, Any] | None:
+        """A fresh view, else a fresh status: what the questions that a
+        status can answer read."""
+        if self.view_fresh and self.view is not None:
+            return self.view
+        if self.status_fresh and self.status is not None:
+            return self.status
+        return None
+
+
+def read(session: Any, address: str, *, subscriber: Any = None, presence: bool = True,
+         lists: bool | None = None, trust: Any = None, timeout: float = 1.0) -> Reading:
+    """A reading of ``address`` (``<system>/<service>``) for §5. With
+    ``presence``, the premise is presence and the descriptor (core §8.1):
+    absent or not listing ``config.v1`` is not asked, incomplete or unread
+    unobservable. Without (across a face, or a reader that does not read
+    presence), ``lists`` is the deployment's word for the descriptor
+    (§2.19). The view and the status come from a GET (core S4) and from
+    ``subscriber`` (a :class:`zk2py.freshness.Subscriber`), each judged by
+    ``freshness.v1`` at 60 s; the events from ``subscriber``."""
+    from . import freshness as fr
+    from . import live
+
+    if presence:
+        pres = live.list_presence(session, f"zk2/{address}/@zk/**")
+        if not pres.instances:
+            return Reading(NOT_ASKED if pres.complete else UNOBSERVABLE,
+                           "presence shows the service absent" if pres.complete
+                           else "the presence read was possibly incomplete")
+        inst = pres.instances[0]["instance"]
+        d = live.get_descriptor(session, f"zk2/{address}/@zk/instance/{inst}", timeout=timeout)
+        if len(d) != 1 or not d[0].ok:
+            return Reading(UNOBSERVABLE, "its descriptor is unread")
+        doc = json.loads(d[0].payload)
+        if not any(e.get("iface") == IFACE for e in doc.get("interfaces") or []):
+            return Reading(NOT_ASKED, "its descriptor does not list config.v1")
+    elif lists is False:
+        return Reading(NOT_ASKED, "the deployment says it does not implement config.v1")
+    trust = trust or fr.ClockTrust(word=True)
+    out = Reading("ok")
+    for which in ("view", "status"):
+        key = f"zk2/{address}/{IFACE}/state/{which}"
+        observations: list[Any] = []
+        latest: tuple[int, bytes] | None = None
+        if subscriber is not None:
+            observations.append(subscriber.observation(key))
+            got = [x for x in subscriber.of(key) if x.kind == "put"]
+            if got:
+                latest = (got[-1].stamp_ns or 0, got[-1].payload)
+        g = fr.get_reading(session, key, timeout=timeout)
+        observations.append(g.observation(trust))
+        if g.reply == "put" and (latest is None or (g.stamp_ns or 0) >= latest[0]):
+            latest = (g.stamp_ns or 0, g.payload)
+        fresh = fr.judge("state", HORIZON, observations).verdict == fr.FRESH
+        docv = json.loads(latest[1]) if latest is not None else None
+        setattr(out, which, docv)
+        setattr(out, f"{which}_fresh", fresh and docv is not None)
+    if subscriber is not None:
+        prefix = f"zk2/{address}/{IFACE}/events/change/"
+        with subscriber.lock:
+            keys = [k for k in subscriber.deliveries if k.startswith(prefix)]
+        for k in sorted(keys):
+            for x in subscriber.of(k):
+                if x.kind == "put":
+                    out.events.append(json.loads(x.payload))
+    return out
+
+
+def _premise(r: Reading) -> tuple[str, str] | None:
+    return None if r.premise == "ok" else (r.premise, r.why)
+
+
+def answer_pending(r: Reading) -> tuple[str, Any]:
+    """§5 "Is a change pending?"."""
+    p = _premise(r)
+    if p:
+        return p
+    doc = r.fresh_doc()
+    if doc is None:
+        return UNOBSERVABLE, "neither the view nor the status is fresh"
+    return ("yes", doc["pending"]) if "pending" in doc else ("no", None)
+
+
+def answer_landed(r: Reading, token: str | None, instance: str | None) -> tuple[str, str]:
+    """§5 "Did my change land?", for a change named by its token, as the
+    instance ``instance`` answered the ``set`` that started it."""
+    p = _premise(r)
+    if p:
+        return p
+    if token is None:
+        return UNOBSERVABLE, "the set drew no reply, so no token is known (core O5)"
+    for ev in r.events:
+        if ev.get("token") == token:
+            return ("yes", ev["outcome"]) if ev["outcome"] in ("applied", "confirmed") else ("no", ev["outcome"])
+    doc = r.fresh_doc()
+    if doc is None:
+        return UNOBSERVABLE, "no fresh view or status"
+    if instance is not None and doc.get("instance") != instance:
+        return "no", "the instance that held it is gone: the restart rolled it back (§2.12)"
+    if doc.get("last_change", {}).get("token") == token:
+        return "yes", "its token is the last change"
+    if doc.get("pending", {}).get("token") == token:
+        return "not_yet", "its token is still pending"
+    return UNOBSERVABLE, "the last change is another token, and no event of this one was read"
+
+
+def answer_undo_clean(r: Reading, token: str) -> tuple[str, str]:
+    """§5 "Was its undo clean?", for a change that did not land."""
+    p = _premise(r)
+    if p:
+        return p
+    for ev in r.events:
+        if ev.get("token") == token:
+            if ev["outcome"] == "rolled-back":
+                return "yes", "rolled-back"
+            if ev["outcome"] == "partial":
+                return "no", "partial: the read-back is the truth"
+    return UNOBSERVABLE, "no event of it read"
+
+
+def answer_writable(r: Reading, group: str) -> tuple[str, str]:
+    """§5 "Is this group writable?": the view alone carries the class and
+    ``writable``."""
+    p = _premise(r)
+    if p:
+        return p
+    if not r.view_fresh or r.view is None:
+        return UNOBSERVABLE, "no fresh view: the status carries no class and no writable"
+    g = find_group(r.view["groups"], group)
+    if g is None:
+        return NOT_ASKED, "the schema declares no such group"
+    if g["writable"] and g["class"] in ("hot", "reach"):
+        return "yes", g["class"]
+    return "no", "outside the allowlist" if not g["writable"] else "contract"
+
+
+def answer_survives(r: Reading, group: str, param: str) -> tuple[str, Any]:
+    """§5 "Will this value survive a restart?"."""
+    p = _premise(r)
+    if p:
+        return p
+    if not r.view_fresh or r.view is None:
+        return UNOBSERVABLE, "no fresh view"
+    g = find_group(r.view["groups"], group)
+    prm = None if g is None else find_param(g, param)
+    if prm is None or prm.get("sensitive") or "value" not in prm:
+        return UNOBSERVABLE, "the value is unknown, or sensitive"
+    if "startup" in prm:
+        return "no", {"startup": prm["startup"]}
+    return "yes", None
+
+
+def answer_converged(r: Reading, revision: int) -> tuple[str, Any]:
+    """§5 "Has it converged to its desired document?"."""
+    p = _premise(r)
+    if p:
+        return p
+    doc = r.fresh_doc()
+    if doc is None:
+        return UNOBSERVABLE, "no fresh view or status"
+    d = doc.get("desired")
+    if d is None:
+        return NOT_ASKED, "the owner converges no desired state"
+    if d["observed_revision"] < revision:
+        return "not_yet", d
+    if d["outcome"] == "converged":
+        return "yes", d
+    return "no", d

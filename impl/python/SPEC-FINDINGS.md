@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twenty-six rounds.**
+**Twenty-seven rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -48,7 +48,11 @@ where that was not enough, or where the spec said two things.
 - Nothing new was found against core 0.25 (see "At 0.25").
 - F-106 was found against core 0.26's §4.2, a late joiner's seed (see "At
   0.26: a late joiner's seed"). Core 0.27 resolved it.
-- Nothing new was found against core 0.27 (see "At 0.27" at the end).
+- Nothing new was found against core 0.27 (see "At 0.27").
+- F-107 to F-113 were found against `config.v1`'s text 0.1, the fourth
+  profile, read cold with core 0.27 and `freshness.v1` 0.3 (see "At
+  config.v1 0.1" at the end). `freshness.v1` 0.3 changed only an appendix,
+  and nothing was found in it.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -58,8 +62,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.27, hostid.v1 0.5, freshness.v1 0.2 and health.v1 0.4:**
-106 entries, none open.
+**Counts at core 0.27, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4 and
+config.v1 0.1:** 113 entries, seven open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -145,11 +149,13 @@ where that was not enough, or where the spec said two things.
   so is R6 for a tool's seed. It overturned zk2py's order on equal times:
   ids compare as zenoh compares them, their 16 bytes little-endian from
   the first, where zk2py had compared them as integers.
+- F-107 to F-113: open, against `config.v1` 0.1. Two are fixture-decided
+  edges (F-109, F-110); five are guesses.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.27 | Location | In one line |
+| Id | Severity | Status at core 0.27, config.v1 0.1 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -257,6 +263,13 @@ by the spec section that now states the rule.
 | F-104 | gap | resolved by health 0.2 | health.v1 0.1 scenarios.md §5–§7, with freshness.v1 0.2 §2.6 | The tool T judges by GET, and nothing says how it trusts its clock: without that, every status is `clock_untrusted`, never healthy. |
 | F-105 | ambiguity | resolved by 0.25 | core 0.24 §2.7, "What a tool reads" and its table; budget/population.json, rate.json | A complete window and a rate's clean pole need a window that "lost no delivery": a fact a plain subscription cannot establish, only fail to see contradicted. |
 | F-106 | gap | resolved by 0.27 | core 0.26 §4.2 "The merge", with "A selector over several owners" | The merge orders by "the owner's stamp"; a foreign key in a tool's seed has no owner, and its samples may carry no stamp at all. |
+| F-107 | ambiguity | open | config.v1 0.1 §2.5, with core §5.1 "The request" and `SetRequest` | A `null`, a fraction, or an integer beyond 64 bits is outside `SetRequest`'s type, refused before row 1 by a decode that holds the schema, and listed under row 11 by the text: where it is refused depends on the decode. |
+| F-108 | ambiguity | open | config.v1 0.1 §2.5 "An empty values", against §2.3 and §2.11 | A change of nothing "applies nothing to the device", yet its revision is "as any other's", where the revision counts "the acts that moved the running values". |
+| F-109 | gap | open (fixture-decided) | config.v1 0.1 §2.3 and §2.11, lifecycle.json case 4 | A parameter the owner cannot read back after a failed undo has no value; the text gives it no `source`, and only the fixture says it has none. |
+| F-110 | gap | open (fixture-decided) | config.v1 0.1 §2.17, lifecycle.json case 19 | "600 change events … within the last hour": whether an event exactly an hour old counts is the fixture's, not the text's. |
+| F-111 | gap | open | config.v1 0.1 §2.13 "After it", with validation.json | `persist` is accepted while another change is pending; if that change set the same parameter, "its startup value is now its running value" is false, and its undo restores a source the persist made stale. |
+| F-112 | gap | open | config.v1 0.1 §2.3 "Two keys, one revision" | A reader pairs the view and the status "by instance and revision", but the documents change without the revision: arming, joining, extending, confirming, persisting. |
+| F-113 | gap | open | config.v1 0.1 §2.9, §2.5 row 13 | A reach `set` that starts a change "MUST state" an `apply_at` before the deadline; when its device cannot, no row refuses it, as row 13 refuses a join. |
 
 ---
 
@@ -3796,3 +3809,301 @@ the text.
   session's), four keep-alives per lease (zenoh's default), and
   `wait_before_close` as 5 s unless told. The last is the router's, which
   the reader cannot read from its session.
+
+## At config.v1 0.1: changing a running service's configuration (#609)
+
+`config.v1` (text 0.1, draft) is the fourth profile: the configuration of a
+running service, in groups classed hot, reach or contract, a change that
+can cut the link applied only under a window and undone once unless
+confirmed, persistence as a separate act, idempotency keys, redaction, the
+startup allowlist, the change event and desired state. `freshness.v1` 0.3
+corrected an appendix, and the profiles README's index lists `config.v1`.
+zk2py read them cold, from `spec/` alone. Core is still 0.27. No Rust
+owner of `config.v1` exists yet, so this round ran nothing across the two
+implementations, and built no Rust.
+
+**`just py-conformance`: 1209 of 1209.**
+- A new family, `config`, runs every file under
+  `spec/profiles/config/conformance/`. An unknown file there fails.
+  - `validation.json`: 99 cases.
+  - `window.json`: 18 cases.
+  - `lifecycle.json`: 24 cases, each checked at its start and after each of
+    its 113 steps: 137 checks.
+  - `desired.json`: 28 cases.
+  - `redaction.json`: 9 cases.
+
+  All 291 passed the first time they ran. A mutation check confirmed the
+  runner is not vacuous: an idempotency window of 299 s, a rate of 601, a
+  deadline a millisecond late and a reversed order each fail cases.
+- `examples` is 103: `config.v1.toml` loads with no finding, its bundle is
+  byte-identical to the one in `spec/profiles/.history/config.v1/`, and it
+  is compatible with it.
+- `layout` is 17: it now fails a profile whose `conformance/` no family
+  reads, so the next profile's fixtures cannot land unread.
+
+**`python -m zk2py.config_scenarios`** (new; a `py-config` recipe is
+requested): 51 of 51, against zk2py's owner of `config.v1`, through zk2py's
+operation server and client, on in-process zenoh-python routers.
+- **§1:** T's GETs at the instance token answer revision 0, nothing
+  pending, the floor 10, every group's `writable`, `pin` without a value.
+  The hot set's reply is the read-back at revision 1, with `startup` 10000.
+  One `applied` event, actor `ops`; V and St re-put within 30 s, unchanged,
+  and never deleted.
+- **§2:** the pending reply before the apply (the device's apply 1.000 s
+  after the reply's arrival); a confirm before `apply_at` is `busy`; the
+  confirm after it is kept, its event attributed to step 1's
+  `request_id`; a second confirm is `not_found`.
+- **§3, §4:** the floor raises a 5 s window to 10 s; the undo at the
+  deadline, once; a refused reach apply on `lab/rf1` ends `rolled-back`
+  with no undo and revision 0; a failed undo ends `partial`, the value
+  unknown, never retried.
+- **§5 to §7:** `busy` naming the token, joins in order with no event, one
+  `confirmed` with three groups' edits; `extend` from now, the undo 80 s
+  after the set within 0.5 s; a restart is a new instance at revision 0
+  from the startup file, and the late confirm `not_found`.
+- **§8:** under zk2py's generated `deny` block, `persist` granted to
+  `admin` reads `overlay` and survives the restart; withheld from `ops`,
+  it draws nothing, never `not_found`; an owner without a persisted layer
+  answers `unavailable`, cause `config`, and lists it so.
+- **§9 to §12:** the allowlist before the values; a dropped reply's retry
+  gets the first answer and no second apply, another request under the key
+  is `invalid_request`, and at 300 s the key is new; a sensitive value is
+  never carried, its device words left out, its persist `forbidden`, its
+  log line `"<redacted>"`; desired documents converge, or are refused
+  whole as `reach` or `sensitive`.
+- **§13:** across `constrained.md` §1 step 2's attachment, built as
+  `health.v1` §8's (C a client of the owner's router, which denies `@zk`
+  and the state subscription to C's principal, C's batch at 1 KB), the
+  pending reply is 118 bytes, the confirm's status 265 (the view would be
+  1139), and the status's `instance` shows the restart. No `@zk` delivery
+  crossed. The link is not shaped to a serial line.
+- **§14:** zk2py's §5 reader answers no, not asked, yes, not yet, no
+  (`rolled-back`), clean, "will not survive" with `startup` 10000, not asked
+  with the owner absent, and unobservable past the horizon without
+  presence.
+
+**The other runners.**
+- `py-budget`: 27 of 27, §4 to §7 on zk2py's owner alone. The owner
+  example's copy went with round 27's `target/` and was not rebuilt, so its
+  14 checks did not run.
+- `py-health` 29 of 29, `py-state` 15 of 15, `py-freshness` 21 of 21,
+  `py-hostid` 34 of 34.
+- The live runner's zk2py-only runs pass, 99 of 99: refusal, s1, bringup,
+  presence-refused, o1, fanout, tool-rules, 0.16 and acl. Its runs over the
+  Rust examples were not run this round (no Rust build).
+
+**What changed in zk2py.**
+- **`zk2py.config`**, new: the session-free half (time, values, the orders
+  of refusals, desired state, redaction, `Core`), `ConfigOwner`,
+  `SimDevice`, and the reader of §5.
+- **`zk2py.config_scenarios`**, new, and the author contract
+  `interop/config/zk2py_author.v1.toml`, which copies `DesiredConfig`.
+- **The owner:** `occur` published a JSON Schema event with the encoding
+  `application/protobuf`, a zk2py bug no earlier event had met: it now
+  writes the type's encoding (§7.2). `OpCall.metadata()` reads core O7's
+  call metadata, and `live.call` sends it as the attachment.
+- **The ACL generator** granted an event's template key, not its
+  occurrences (`…/events/change/<ulid>`, core §2.6): a zk2py bug, fixed;
+  no earlier deployment used an event.
+- **The runner's `layout`** checks the profiles' directories.
+
+### F-107 · ambiguity · config.v1 0.1 §2.5, with core §5.1 "The request" and `SetRequest`: where a value outside `ParamValue` is refused
+
+> §2.5: "**A request outside its type** (a `confirm_s` of 0, an empty
+> `token`, a `values` that is not an object) is refused `invalid_request`
+> before row 1: by the core's decode, or by the owner's own check of the
+> schema's bounds where its decode does not hold them (core §5.1, "The
+> request")."
+
+> §2.5: "**A value of the wrong kind** is any JSON value outside the
+> parameter's kind: `1` for a `bool`, `"1"` for an `integer`, `true` for a
+> `text`, `null` for any. … a value beyond 64 bits is out of every
+> parameter's bounds."
+
+> §2.5: "row 11 takes them in the bytewise order of their names (UTF-8),
+> and the first problem is the same everywhere."
+
+> core §5.1: "An owner MAY decode into a type generated from the schema, or
+> checked against it, and need not evaluate the JSON Schema itself; the
+> reference does not."
+
+`SetRequest.values` is `additionalProperties: ParamValue`, and `ParamValue`
+is `anyOf` boolean, integer, string. So `null`, `1.5` and an integer beyond
+64 bits are outside the request's type. A decode into a type generated
+from the schema (an untagged boolean, `i64` or string) refuses them before
+row 1. An owner that checks the request's structure and leaves the values
+to row 11 refuses them there, as the text lists them. The text knows the
+difference for `2.0`, which JSON Schema accepts ("That is stricter than
+JSON Schema 2020-12 … it is the owner's further check"), but not for the
+values JSON Schema itself refuses.
+
+The two readings answer differently whenever an earlier row applies:
+- `set/power` (no such group) with `{"values": {"x": null}}` is
+  `invalid_request /values/x` by the decode, `not_found group` by row 3;
+- the same with an act in flight is `invalid_request` against `busy`;
+- with a change pending, `invalid_request` against `busy` again.
+
+No fixture pins it: `validation.json`'s `null`, `1.5` and 2^63 cases have
+no earlier row applying.
+**Resolved:** a guess. zk2py's decode checks the request's members and
+their types, `values` an object, and leaves every value to row 11, as
+§2.5 lists them.
+
+### F-108 · ambiguity · config.v1 0.1 §2.5 "An empty values", against §2.3 and §2.11: a change of nothing
+
+> §2.5: "**An empty `values`** is a change of nothing. It is accepted, and
+> applies nothing to the device; its change, event and revision are as any
+> other's."
+
+> §2.3: "**The revision** counts the acts that moved the running values in
+> this instance: an owner MUST add one at each apply and each undo (§2.9,
+> §2.11), and at nothing else."
+
+> §2.11: "A change none of whose groups is applied yet … has nothing to
+> restore: no act is made, the revision does not move, and the change ends
+> `rolled-back`."
+
+A change of nothing moves no running value, so §2.3 counts no act, while
+§2.5 makes its revision "as any other's", one more. "Applies nothing to
+the device" says no device act is made, or a device act with nothing in
+it. Its undo, under a window, has nothing to restore: an act or not? No
+lifecycle case has an empty `values`.
+**Resolved:** a guess. zk2py makes the apply as an act with no values (the
+device is called), moves the revision by one, mints a token and publishes
+the event with no edits. Under a window its undo has no applied parameter,
+so no act is made and the revision does not move.
+
+### F-109 · gap · config.v1 0.1 §2.3 and §2.11, lifecycle.json case 4: a value not read back, and its source
+
+> §2.3: "`value`: the running value. It is absent … for one whose value the
+> owner cannot read back: absence is unknown, never a guessed value;" and
+> "`source`: where the running value came from".
+
+> §2.11: "the owner shows each parameter the change set as it reads it back
+> from the device, and with no value, unknown, where it cannot." … "A
+> parameter read back after a failed undo shows the value read: with the
+> source it had before the change when that is the value it had before,
+> and `runtime` otherwise."
+
+The text gives a source to a value read back, and says nothing of the
+source of one that is not. `lifecycle.json`'s case 4 ("an undo that fails
+ends partial; a value not read back is unknown") shows that parameter with
+no `source` at all (its `params` entry is `{}`).
+**Resolved:** by the fixture. zk2py shows an unknown value with no source.
+
+### F-110 · gap · config.v1 0.1 §2.17, lifecycle.json case 19: the edge of the rate's hour
+
+> §2.17: "It keeps it by refusing `busy` a `set` that would start a change
+> while 600 change events were published within the last hour (§2.5, row
+> 12)".
+
+`lifecycle.json`'s case 19 holds 600 events at t = -3000 s: a `set` at
+t = 599 is `busy`, and one at t = 600 is accepted. So an event exactly an
+hour old no longer counts. The text says so of the idempotency key ("At
+300 s and after, the key is forgotten"), not of the rate.
+**Resolved:** by the fixture. zk2py counts the events in (now - 1 h, now].
+
+### F-111 · gap · config.v1 0.1 §2.13 "After it", with validation.json: persist under another pending change
+
+> §2.13: "**After it.** Each parameter the change set reads `source:
+> overlay`, and `startup` leaves it (its startup value is now its running
+> value)."
+
+> §2.11: "The restored parameters read their values and sources from
+> before the change."
+
+`validation.json` accepts "persist the last change while another is
+pending". When that pending change set a parameter the last change set
+too, the parameter runs the pending change's value. Its startup value is
+then not its running value, and `source: overlay` would claim a runtime
+value comes from the persisted layer. If the pending change is then
+undone, §2.11 restores the value "from before the change", with the source
+`runtime`, though that value is now the persisted one, and `startup`
+would vanish while the source says `runtime`.
+**Resolved:** a guess. zk2py writes the last change's values to the
+persisted layer. A parameter the pending change holds keeps `runtime` and
+shows the persisted value as `startup`. Its value before the pending
+change, when equal to the persisted value, restores with `source:
+overlay`.
+
+### F-112 · gap · config.v1 0.1 §2.3 "Two keys, one revision": a pair the revision cannot name
+
+> §2.3: "**Two keys, one revision.** The view and the status are two keys,
+> and no two keys change at once (core §2.1). A reader that reads both
+> pairs them by `instance` and `revision`."
+
+> §2.3: "A confirm, an extend, a persist, a join that has not yet applied,
+> a dry run and a refusal leave it." "It MUST put both on every change of
+> either: a value, a source, the floor, the pending change (armed, applied,
+> joined, extended, ended), the last change, the desired report."
+
+The revision counts acts, not versions of the documents, so one
+(`instance`, `revision`) names several documents in turn. Arming a reach
+change, a reach join, an extend, a confirm, a cancel before any apply, a
+persist and a desired report each re-put both at the same revision
+(`lifecycle.json` case 2: revision 0 without and then with `pending`). A
+reader that pairs a view without `pending` with a status at the same
+revision showing one, or a view at `source: runtime` with a status after
+the persist, pairs two moments as one. The text gives no member that
+tells two documents of one revision apart, and no rule for which pair a
+reader may take.
+**Resolved:** a guess. zk2py's reader takes each document by itself, judged
+by its own freshness, and pairs nothing. It puts the view before the
+status on every change.
+
+### F-113 · gap · config.v1 0.1 §2.9, §2.5 row 13: a starting reach change the device cannot apply in time
+
+> §2.9: "`apply_at` is the device's to state. The owner MUST state it, and
+> MUST state one before the deadline … When its device cannot apply it
+> before the deadline, the `set` is refused `busy` (§2.5, row 13), and the
+> caller extends the change first."
+
+> §2.5, row 13: "Not a dry run, the group is `reach`, the request joins,
+> and the group could not apply before the change's deadline (§2.9)."
+
+Row 13 covers a join. A reach `set` that starts a change has a deadline at
+least the floor away, and nothing requires the floor to exceed the time
+the device needs before it can apply (the floor "is an instance fact, at
+least 1 s"). A device whose `apply_at` would fall at or after the deadline
+leaves the owner two MUSTs it cannot both keep, the device's `apply_at`
+and one before the deadline, and no row says what it answers.
+**Resolved:** a guess. zk2py refuses to construct an owner whose apply
+delay is not shorter than its floor, so every window has room for its
+`apply_at`.
+
+**Where zk2py's reading of `config.v1` 0.1 needed a guess, beyond the
+findings.**
+- **The decode's own order.** When several members of a request are
+  outside their types, zk2py names the first in the bytewise order of the
+  member names, `values` required. A request that is not an object is
+  refused with the pointer `""`. The core leaves the decode to the server.
+- **"An equal request"** (§2.14: "every member of `SetRequest` equal"):
+  a member absent and a member at its default (`dry_run: false`) are not
+  equal, and values compare with their kinds (`1` is not `true`, `2` is
+  not `2.0`).
+- **Time written to the millisecond** (§2.8): an instant finer than a
+  millisecond is truncated, not rounded.
+- **The binding of a desired document** (§2.18 defers it: "`desired.v1`,
+  a later profile, does"): zk2py's owner reads one key its configuration
+  names, by subscription and by a GET at start, acts on a document only
+  when its revision changes, and converges again in a new instance.
+- **"Did my change land?"** (§5): a change answered by an instance that is
+  gone counts as rolled back only when the tool has no event of it; zk2py
+  does not tell a windowless change from a pending one there.
+- **The log** (§2.15, scenarios §11 step 4): zk2py's owner logs each
+  decoded `set` as one JSON line, its sensitive values `"<redacted>"`.
+- **§10's dropped reply** is dropped at the owner, after it is kept as the
+  first answer. **§13's face** is the attachment of `constrained.md` §1
+  step 2 without a shaped link, as `health.v1` §8's was.
+
+**Observations, not findings.**
+- **The fixtures' `field`** ("group", a JSON pointer, or null) is what the
+  envelope's `message` names, and core §5.2 has no member for it ("The
+  `message` is for a person, never parsed"). It is checkable inside an
+  implementation, as zk2py's `Refusal.field`, and never on the wire.
+- **§2.5's integer rule needs a parser that keeps `2` and `2.0` apart.**
+  Python's does; a reader that decodes every number as a double cannot
+  apply it.
+- **scenarios §3 step 2** reads "`St`'s `frequency_hz` is 868100000 again,
+  at `source: file`": the status carries no source, so zk2py reads the
+  source from V.
