@@ -89,7 +89,7 @@ sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
 descriptors    42 passed     0 failed
-errors         42 passed     0 failed
+errors         45 passed     0 failed
 compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
@@ -97,14 +97,16 @@ examples      103 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
-config        291 passed     0 failed
-total        1209 passed     0 failed
+config        319 passed     0 failed
+total        1240 passed     0 failed
 ```
 
-The figures are against `core.md` 0.27, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4 and `config.v1` 0.1. `config.v1` 0.1 added its five
+The figures are against `core.md` 0.28, `hostid.v1` 0.5, `freshness.v1`
+0.3, `health.v1` 0.4 and `config.v1` 0.2. `config.v1` 0.1 added its five
 fixture files and its standard contract (4 more `examples` checks), and
-`layout` checks the four profiles' directories. 0.22 added `contracts/e002-two-majors`, 0.24
+`layout` checks the four profiles' directories. Core 0.28 added three
+`errors` cases, and `config.v1` 0.2 eight `validation.json` cases and two
+`lifecycle.json` cases. 0.22 added `contracts/e002-two-majors`, 0.24
 the `budget/` family, 0.25 its `lossless.json`, which 0.27 reshaped, and
 0.27 the `seed/` family. `freshness.v1` 0.2 added `clock-trust.json` and four
 judgement cases. `health.v1` 0.1 added three fixture files, and 0.3
@@ -120,8 +122,11 @@ fixtures:
   F-94 to F-97, core 0.22 F-98, `hostid.v1` 0.3 F-99, `freshness.v1` 0.2
   F-100 to F-102, `health.v1` 0.2 F-103 and F-104, core 0.25 F-105, and
   core 0.27 F-106.
-- F-107 to F-113 are open: found against `config.v1` 0.1, the fourth
-  profile, read cold (`SPEC-FINDINGS.md`, "At config.v1 0.1").
+- `config.v1` 0.2 resolved F-107 to F-113, found against its 0.1, and
+  overturned one of zk2py's guesses (F-107's values).
+- F-114 and F-115 are open: found against `config.v1` 0.2, read cold and
+  run live against the Rust owner example (`SPEC-FINDINGS.md`, "At
+  config.v1 0.2 and core 0.28").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -448,7 +453,8 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 329 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
+Result: `live interop: 423 passed, 0 failed, 0 known deviations of the Rust owner example`,
+its `config` run (`--only config`, below) 94 of them. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
 
@@ -739,10 +745,12 @@ just py-state
   - a GET that runs to its timeout, with the owner stopped, is possibly
     incomplete.
 
-## config.v1 (profile text 0.1, core 0.27)
+## config.v1 (profile text 0.2, core 0.28)
 
 ```bash
-python -m zk2py.config_scenarios      # a `py-config` recipe is requested
+just py-config                                   # against zk2py's owner
+python -m zk2py.config_scenarios --owner <exe>   # against the Rust owner example
+python -m zk2py.live_interop --only config       # the live runner's config run
 ```
 
 - **`zk2py.config`**, the session-free half, from the text alone:
@@ -750,10 +758,11 @@ python -m zk2py.config_scenarios      # a `py-config` recipe is requested
     written to the millisecond in UTC; the window, raised to the floor;
   - values (§2.2, §2.5): the three kinds, bounds inclusive, an integer
     written without a fraction or an exponent, within 64 bits;
-  - the orders of refusals: the requests' own types first, then `set`'s
-    rows 1 to 11 (`check_set`), the control operations' (`check_control`)
-    and `persist`'s (`check_persist`, its "no persisted layer" before the
-    request's type);
+  - the orders of refusals: the requests' own types first, a value outside
+    `ParamValue` among them (0.2), then `set`'s rows 1 to 11
+    (`check_set`), the control operations' (`check_control`) and
+    `persist`'s (`check_persist`, a persisted layer absent or unwritable
+    before the request's type);
   - desired state refused whole, the first problem in the stated order
     (`check_desired`), and redaction (§2.15);
   - **`Core`**, the owner as a state machine: calls, device results and the
@@ -762,10 +771,11 @@ python -m zk2py.config_scenarios      # a `py-config` recipe is requested
     the device), tokens, joins, the undo once, a restart, persist,
     idempotency keys and desired-state convergence. A device result can
     hold an act in flight, and every call meanwhile is `busy`.
-- **The `config` conformance family:** 291 of 291 (`validation.json` 99,
-  `window.json` 18, `lifecycle.json` 24 cases checked at their start and
-  after each of their 113 steps, `desired.json` 28, `redaction.json` 9).
-  Every case passed the first time it ran.
+- **The `config` conformance family:** 319 of 319 (`validation.json` 107,
+  `window.json` 18, `lifecycle.json` 26 cases checked at their start and
+  after each of their 131 steps, `desired.json` 28, `redaction.json` 9).
+  0.1's cases passed the first time they ran; 0.2's new ones once zk2py
+  followed F-107 and F-111.
 - **`ConfigOwner`**, the session half, over zk2py's owner: every resource
   exposed, `persist` listed unavailable (cause `config`) without a
   persisted layer; the view and the status put before the tokens, on every
@@ -776,10 +786,13 @@ python -m zk2py.config_scenarios      # a `py-config` recipe is requested
 - **The reader of §5:** `read` (presence and the descriptor, or the
   deployment's word; the view and the status judged by `freshness.v1` at
   60 s; the events heard) and one `answer_*` per question.
-- **`python -m zk2py.config_scenarios`** runs `scenarios.md` §1 to §14
-  against zk2py's owner, through zk2py's operation server and client,
-  51 of 51. The long sections (§1, §6, §10, §14) run beside the others, each
-  on a bus of its own; the run takes about six minutes.
+- **`just py-config`** (`python -m zk2py.config_scenarios`) runs
+  `scenarios.md` §1 to §14 against zk2py's owner, through zk2py's operation
+  server and client, 51 of 51. The long sections (§1, §6, §10, §14) run
+  beside the others, each on a bus of its own; the run takes about six
+  minutes. With `--owner <exe>` each section drives the Rust owner
+  example's `--config` instead, a black box, through its flags and stdin
+  (an adapter per owner).
   - §8 runs R1 under zk2py's generated `deny` block with usrpwd.
   - §10 drops step 1's reply at the owner, which keeps it as the key's
     first answer.
@@ -790,8 +803,19 @@ python -m zk2py.config_scenarios      # a `py-config` recipe is requested
     denies `@zk` and the state subscription to C's principal, C's batch at
     1 KB. The link is not shaped to a serial line.
   - §14's tool is the reader above, `lab/plain` a zk2py owner of `nav.v2`.
-- **No Rust owner of `config.v1` exists yet,** so nothing here runs across
-  the two implementations.
+- **Across the two implementations** (the live runner's `--only config`,
+  94 checks), zk2py the caller, tool and subscriber, the owner example the
+  owner:
+  - its bring-up: the documents before the tokens, its descriptor and
+    bundle against the standard contract, its schema;
+  - the order of refusals: 37 requests to an idle owner, each predicted by
+    zk2py from the served view and answered by the owner example, every
+    answer matching;
+  - `scenarios.md` §1 to §14, all run, 51 of 51: its device through
+    `config fail-apply`, `fail-undo unknown` and `device`; restarts through
+    `config restart`; §10's 300 s through `config offset 300000`; §12
+    through `config desired`. It takes no credentials, so in §8 and §13 it
+    sits on an open router linked to C's.
 
 ## What it does not cover
 
@@ -892,7 +916,7 @@ impl/python/
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
     config.py         config.v1 time, values, the orders of refusals, desired state, redaction, Core,
                                 ConfigOwner, SimDevice, the reader of §5
-    config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner
+    config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge
