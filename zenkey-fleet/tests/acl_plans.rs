@@ -190,3 +190,76 @@ fn walkthrough_with_the_ground_router_south() {
         ),
     );
 }
+
+/// `config.v1`'s acts, each its own grant (config.v1 §2.21; #768, CC): the
+/// standard contract alone, as `--contracts spec/profiles/config` gives it.
+fn config_plan(default_permission: AclPermission) -> AclPlan {
+    let (set, problems) = ContractSet::load_path(&root().join("spec/profiles/config"));
+    assert!(problems.is_empty(), "{problems:?}");
+    plan_acl(
+        &enrollment("config"),
+        &set,
+        &AclOptions {
+            namespace: String::new(),
+            default_permission,
+            face: None,
+        },
+    )
+    .expect("the config enrollment plans")
+}
+
+/// Under deny, the far side's operators hold rf0's `set/duty`,
+/// `set/radio`, `confirm`, `cancel` and `extend` and the GET of its view
+/// and status, one key each, and neither `persist` nor anything of sat0;
+/// the local operator holds every act of both.
+#[test]
+fn config_acts_under_deny() {
+    let plan = config_plan(AclPermission::Deny);
+    let keys = |principal: &str| -> Vec<String> {
+        plan.rules
+            .iter()
+            .filter(|r| r.id.contains(principal) && r.id.contains("call"))
+            .flat_map(|r| r.key_exprs.clone())
+            .collect()
+    };
+    let ops = keys("ops");
+    for want in [
+        "zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/set/duty",
+        "zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/set/radio",
+        "zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/confirm",
+        "zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/cancel",
+        "zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/extend",
+    ] {
+        assert!(ops.iter().any(|k| k == want), "{want}: {ops:#?}");
+    }
+    assert!(
+        !ops.iter()
+            .any(|k| k.contains("persist") || k.contains("sat0") || k.ends_with("set/*")),
+        "{ops:#?}"
+    );
+    let admin = keys("admin");
+    assert!(
+        admin
+            .iter()
+            .any(|k| k == "zk2/h-3fa9c2d41b7e/sat0/config.v1/@op/persist"),
+        "{admin:#?}"
+    );
+    pinned("config.deny.json5", &plan);
+}
+
+/// Under allow, the grants compile to denies of their complement: the
+/// operators' persist and everything of sat0 denied by name, and the
+/// members of `set/{group}` no grant names left callable, which the plan
+/// says (§11.3: deny works by inclusion).
+#[test]
+fn config_acts_under_allow() {
+    let plan = config_plan(AclPermission::Allow);
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|w| w.kind == zenkey_fleet::report::AclWarningKind::ComplementPartial),
+        "{:#?}",
+        plan.warnings
+    );
+    pinned("config.allow.json5", &plan);
+}

@@ -1,0 +1,71 @@
+# config.v1's acts, each its own grant (spec/profiles/config/v1.md §2.21;
+# #768, CC), as the zenoh-modem binding's §12 grants them
+# (examples/zk2/zenoh-modem/config.v1-binding.md): a host serving two radios
+# as services, `rf0` and `sat0`, each implementing config.v1; the far side's
+# operators granted rf0's `set` on two groups, `confirm`, `cancel` and
+# `extend`, and the GET of its view and status, with `persist` withheld and
+# nothing of `sat0`; a local operator granted every act on both, `persist`
+# included.
+#
+#   zenctl acl gen --enrollment examples/zk2/acl/config.enrollment.toml \
+#                  --contracts spec/profiles/config --json5
+#
+# A group is the `{group}` of `@op/set/{group}`, a runtime fact of the view
+# (§2.2), so the contract cannot list them: a grant names one in place,
+# `set/duty`, as the deployment knows its device's schema. Under
+# `default_permission: allow` the members no grant names cannot be denied by
+# inclusion (§11.3): the plan says so, as `complement_partial`.
+
+[[principal]]
+user     = "modem"
+services = ["h-3fa9c2d41b7e/rf0", "h-3fa9c2d41b7e/sat0"]
+
+[[service]]
+address    = "h-3fa9c2d41b7e/rf0"
+implements = ["config.v1"]
+
+[[service]]
+address    = "h-3fa9c2d41b7e/sat0"
+implements = ["config.v1"]
+
+# ── the far side's operators ───────────────────────────────────────────────
+
+[[principal]]
+user  = "ops"
+tools = ["ops"]
+
+[[tool]]
+name = "ops"
+
+# The GET of rf0's view and status: a reach change is confirmed over the new
+# link once the status shows it applied (§2.9, §2.19).
+[tool.bindings.config]
+interface = "config.v1"
+providers = ["h-3fa9c2d41b7e/rf0"]
+resources = ["view", "status"]
+
+# duty (hot) and radio (reach), one grant each; the rest of a pending
+# change's end; never persist.
+[[tool.calls]]
+interface  = "config.v1"
+providers  = ["h-3fa9c2d41b7e/rf0"]
+operations = ["set/duty", "set/radio", "confirm", "cancel", "extend"]
+
+# ── the local operator ─────────────────────────────────────────────────────
+
+[[principal]]
+user  = "admin"
+tools = ["admin"]
+
+[[tool]]
+name = "admin"
+
+[tool.bindings.config]
+interface = "config.v1"
+providers = ["h-3fa9c2d41b7e/rf0", "h-3fa9c2d41b7e/sat0"]
+resources = ["view", "status"]
+
+# Every operation of both: set over its whole template, and persist.
+[[tool.calls]]
+interface = "config.v1"
+providers = ["h-3fa9c2d41b7e/rf0", "h-3fa9c2d41b7e/sat0"]
