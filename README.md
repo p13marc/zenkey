@@ -58,6 +58,9 @@ See the [zenkey crate README](zenkey/README.md) for the full adoption story.
   interface contracts over Zenoh, for application architectures and not
   only observability. Its design record is in [`docs/zk2/`](docs/zk2/README.md)
   (epic [#585](https://git.marcpardo.eu/marcpardo/zenkey/issues/585)).
+- **Moving from v1.** [`docs/zk2/migration.md`](docs/zk2/migration.md) is
+  the note for a team on v1 weighing zk2: what maps to what, what a port
+  involves, and what zk2 does not have yet.
 - **v1 stays maintained.** The v1 convention below is frozen at RFC v1.50 and
   maintained on the `v1` branch as 0.14.x patch releases. Existing adopters
   stay on zenkey 0.11.x and zenkey-fleet 0.18.x until they port.
