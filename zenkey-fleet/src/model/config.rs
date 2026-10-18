@@ -117,6 +117,17 @@ impl<T> Clone for Got<'_, T> {
 
 impl<T> Copy for Got<'_, T> {}
 
+impl<'a, T> Got<'a, T> {
+    /// A GET's reply for the document, judged at `at`; silence when none
+    /// came.
+    pub fn of(reply: Option<&'a Replied<Doc<T>>>, at: SystemTime) -> Self {
+        match reply {
+            Some(reply) => Got::Answered { reply, at },
+            None => Got::Silent,
+        }
+    }
+}
+
 /// One document as a reading holds it: the latest value read (the GET's,
 /// else the window's last put), how it came, its stamp, and its freshness
 /// over every observation.
@@ -316,6 +327,14 @@ impl ConfigReading {
 /// projects from the view, member for member.
 pub fn projection_holds(view: &ConfigView, status: &ConfigStatus) -> bool {
     ConfigStatus::of(view) == *status
+}
+
+/// Whether one reading's status is its view's projection: `None` when the
+/// two were not both read and decoded.
+pub fn projection_of(docs: &crate::bus::config::ServiceDocs) -> Option<bool> {
+    let view = docs.view.as_ref()?.value.as_ref()?.as_ref().ok()?;
+    let status = docs.status.as_ref()?.value.as_ref()?.as_ref().ok()?;
+    Some(projection_holds(view, status))
 }
 
 /// A command line's value for one parameter: written on it, or read from a

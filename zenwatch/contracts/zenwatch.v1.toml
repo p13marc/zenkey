@@ -16,7 +16,7 @@
 [interface]
 name    = "zenwatch"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "A notifier's announced rules, its scheduled doctor's last report, and what its bounds cost"
 uses    = ["freshness.v1"]
 

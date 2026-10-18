@@ -138,6 +138,7 @@ mod tests {
                 presence: Asked::NotAsked,
                 routers: Asked::NotAsked,
                 health: Asked::NotAsked,
+                config: Asked::NotAsked,
             },
             checks: CheckId::ALL
                 .into_iter()

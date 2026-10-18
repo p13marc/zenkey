@@ -72,6 +72,7 @@ mod tests {
                 presence: Asked::NotAsked,
                 routers: Asked::NotAsked,
                 health: Asked::NotAsked,
+                config: Asked::NotAsked,
             },
             checks,
             unobservable: None,

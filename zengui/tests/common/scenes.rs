@@ -478,6 +478,7 @@ fn diagnose(theme: ThemeChoice) -> Zengui {
                 services: 0,
                 clocks_synced: false,
             }),
+            config: Asked::NotAsked,
         },
         checks,
         unobservable: None,

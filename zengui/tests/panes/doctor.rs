@@ -32,6 +32,7 @@ fn scope(presence: bool) -> DoctorScope {
         },
         routers: Asked::Asked(1),
         health: Asked::NotAsked,
+        config: Asked::NotAsked,
     }
 }
 

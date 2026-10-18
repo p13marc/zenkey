@@ -54,15 +54,18 @@ use zenkey_model::freshness::{
 };
 use zenkey_model::schema::TypeId;
 
-use crate::bus::conform::{Arrival, ConformObservation, FanoutSeen, Heard, OpObserved};
+use crate::bus::conform::{
+    Arrival, ConfigProbe, ConformObservation, FanoutSeen, Heard, OpObserved, ProbeExpect,
+    ProbeOutcome,
+};
 use crate::judge::common::s1_premise;
 use crate::judge::doctor::AdminSpace;
 use crate::model::catalog::{ContractState, Revision, zid_value};
 use crate::model::lens::conformance;
 use crate::report::{
-    CaseId, ConformCase, ConformReport, Conformance, HealthAnswerToken, HealthVerdict,
-    OperationAnswer, OperationReport, PayloadRendering, PresenceAttribution, Stamp, StateReport,
-    StateValue, WatchEvent,
+    CaseId, ConfigActAnswer, ConfigPremise, ConformCase, ConformReport, Conformance,
+    HealthAnswerToken, HealthVerdict, OperationAnswer, OperationReport, PayloadRendering,
+    PresenceAttribution, Stamp, StateReport, StateValue, WatchEvent,
 };
 
 /// Every case `obs` supports, in [`CaseId::ALL`] order per resource.
@@ -87,6 +90,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             why.clone(),
         ));
         report.cases.extend(health_cases(obs));
+        report.cases.extend(config_cases(obs));
         report.unobservable = Some(why);
         report
     };
@@ -144,6 +148,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             obs.iface
         ));
         report.cases.extend(health_cases(obs));
+        report.cases.extend(config_cases(obs));
         return report;
     };
     let owners: BTreeSet<String> = match &obs.presence {
@@ -228,6 +233,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.extend(rate_case(obs, r, &name, heard));
     }
     report.cases.extend(health_cases(obs));
+    report.cases.extend(config_cases(obs));
     let mut seen = BTreeSet::new();
     report.asked.retain(|s| seen.insert(s.clone()));
     report
@@ -958,6 +964,539 @@ fn health_cases(obs: &ConformObservation) -> [ConformCase; 2] {
         ),
     };
     [health, aggregation]
+}
+
+/// The `config.v1` cases (#768, CC), in [`CaseId::ALL`] order.
+const CONFIG_CASES: [CaseId; 5] = [
+    CaseId::ConfigProjection,
+    CaseId::ConfigFresh,
+    CaseId::ConfigView,
+    CaseId::ConfigRefusal,
+    CaseId::ConfigDryRun,
+];
+
+/// `config.v1` (#768, CC): the status its view's projection in both of the
+/// window's readings, both documents fresh at its end, the view
+/// well-formed, each refusal the text makes checkable without changing
+/// anything, and a dry run. Not asked of a service whose descriptor does
+/// not list `config.v1` (§2.1): one row per case, subject `service`.
+fn config_cases(obs: &ConformObservation) -> Vec<ConformCase> {
+    const S: &str = "service";
+    let every = |f: fn(CaseId, &'static str, String) -> ConformCase, why: String| {
+        CONFIG_CASES.map(|c| f(c, S, why.clone())).to_vec()
+    };
+    fn not(c: CaseId, s: &'static str, why: String) -> ConformCase {
+        ConformCase::not_asked(c, s, why)
+    }
+    fn unseen(c: CaseId, s: &'static str, why: String) -> ConformCase {
+        ConformCase::unobservable(c, s, why)
+    }
+    let Some(c) = &obs.config else {
+        return match &obs.presence {
+            Err(e) => every(unseen, format!("the presence read could not be made: {e}")),
+            Ok(o) => match crate::model::config::premise_in(o, &obs.address) {
+                ConfigPremise::Absent => every(
+                    not,
+                    format!(
+                        "no instance token of {} visible to this reader: absent, which is \
+                         presence's word",
+                        obs.address
+                    ),
+                ),
+                ConfigPremise::NotListed => every(
+                    not,
+                    "its descriptor does not list config.v1, so config.v1 is not asked of it \
+                     (config.v1 §2.1)"
+                        .to_owned(),
+                ),
+                _ => every(
+                    unseen,
+                    "its presence or its descriptor could not be read: whether it implements \
+                     config.v1 cannot be told (config.v1 §2.1)"
+                        .to_owned(),
+                ),
+            },
+        };
+    };
+    let present = matches!(&obs.presence, Ok(o) if !o.tokens.is_empty());
+    let granted = obs.spec.calls_granted;
+    let reading = crate::judge::config::reading(&c.reading);
+    let docs_of = |g: &std::result::Result<crate::bus::config::ConfigGet, String>| {
+        g.as_ref()
+            .ok()
+            .map(|g| g.services.get(&obs.address).cloned().unwrap_or_default())
+    };
+    let first = docs_of(&c.first);
+    let last = docs_of(&c.reading.get);
+    let mut out = vec![config_projection_case(
+        first.as_ref().and_then(crate::model::config::projection_of),
+        last.as_ref().and_then(crate::model::config::projection_of),
+    )];
+    if let Some(v) = &reading.view {
+        out.push(config_fresh_case("state/view", v.fresh));
+    }
+    out.push(config_fresh_case("state/status", reading.status.fresh));
+    let view = reading.view.as_ref().and_then(|v| v.value()).or_else(|| {
+        first
+            .as_ref()
+            .and_then(|d| d.view.as_ref())
+            .and_then(|r| r.value.as_ref())
+            .and_then(|v| v.as_ref().ok())
+    });
+    out.push(config_view_case(
+        obs,
+        view,
+        reading.status.value(),
+        last.as_ref()
+            .and_then(|d| d.view.as_ref())
+            .and_then(|r| r.stamp.as_ref()),
+    ));
+    for p in &c.probes {
+        out.push(match p.case {
+            CaseId::ConfigDryRun => config_dry_run_case(p, present, granted),
+            _ => config_refusal_case(p, present, granted),
+        });
+    }
+    out
+}
+
+/// `config-projection` (§2.19): the status is the view's projection in the
+/// last reading; a mismatch in both readings is the finding, and in the
+/// last alone unobservable, since one reading can pair a view and a status
+/// a put apart (§2.3).
+fn config_projection_case(first: Option<bool>, last: Option<bool>) -> ConformCase {
+    const C: CaseId = CaseId::ConfigProjection;
+    const S: &str = "service";
+    match (first, last) {
+        (_, Some(true)) => ConformCase::passed(
+            C,
+            S,
+            "the status is the view's projection, read together at the window's end",
+        ),
+        (Some(false), Some(false)) => ConformCase::failed(
+            C,
+            S,
+            "in both readings, as the window opened and at its end, the status is not the \
+             view's projection: an owner keeps the status equal to it (config.v1 §2.19)",
+        ),
+        (_, Some(false)) => ConformCase::unobservable(
+            C,
+            S,
+            "the status is not the view's projection at the window's end only: one reading can \
+             pair a view and a status a put apart (config.v1 §2.3)",
+        ),
+        (_, None) => ConformCase::unobservable(
+            C,
+            S,
+            "the view and the status were not both read and decoded at the window's end",
+        ),
+    }
+}
+
+/// `config-fresh` (§2.3): each document confirmed within its 60 s horizon
+/// at the window's end, by the window's subscription or the GET's reply
+/// against a trusted clock; stale, or deleted, is the finding.
+fn config_fresh_case(subject: &str, f: Judged) -> ConformCase {
+    const C: CaseId = CaseId::ConfigFresh;
+    match f.verdict {
+        Verdict::Fresh => ConformCase::passed(C, subject, f.reason.says()),
+        Verdict::Stale => ConformCase::failed(
+            C,
+            subject,
+            format!(
+                "{}: an owner confirms its view and its status at least every 30 s, by a change \
+                 or a re-put (config.v1 §2.3, freshness.v1 §2.4)",
+                f.reason.says()
+            ),
+        ),
+        Verdict::NotAsked => ConformCase::failed(
+            C,
+            subject,
+            "deleted while its owner runs: an owner MUST NOT delete it (config.v1 §2.3)",
+        ),
+        Verdict::Unobservable => ConformCase::unobservable(
+            C,
+            subject,
+            format!(
+                "{} ({}){}",
+                f.reason.says(),
+                f.reason.as_str(),
+                if f.reason == Reason::ClockUntrusted {
+                    "; a reply is aged only against a clock trusted to the HLC delta, measured \
+                     on a live put during the window (--for 31 hears a re-put) or on the \
+                     operator's word (--clocks-synced, freshness.v1 §2.6)"
+                } else {
+                    ""
+                }
+            ),
+        ),
+    }
+}
+
+/// `config-view` (§2.2, §2.3, §2.15): what a cold reader can check of a view
+/// without changing anything.
+fn config_view_case(
+    obs: &ConformObservation,
+    view: Option<&zenkey_model::config::ConfigView>,
+    status: Option<&zenkey_model::config::ConfigStatus>,
+    stamp: Option<&crate::bus::health::Stamped>,
+) -> ConformCase {
+    const C: CaseId = CaseId::ConfigView;
+    const S: &str = "state/view";
+    let Some(v) = view else {
+        return ConformCase::unobservable(C, S, "no view was read and decoded");
+    };
+    let mut broken: Vec<String> = Vec::new();
+    if v.service != obs.address.to_string() {
+        broken.push(format!(
+            "it names service {:?}, not {} (§2.3)",
+            v.service, obs.address
+        ));
+    }
+    if let Ok(o) = &obs.presence {
+        let instances: BTreeSet<String> = o
+            .instances()
+            .into_iter()
+            .filter(|(a, _)| a == &obs.address)
+            .map(|(_, i)| i.to_string())
+            .collect();
+        if !instances.is_empty() && !instances.contains(&v.instance) {
+            broken.push(format!(
+                "its instance {} is none of the instances presence shows ({}) (§2.3, core §1.5)",
+                v.instance,
+                instances.into_iter().collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+    let bound = stated(obs, zenkey::config_v1::SET)
+        .into_iter()
+        .flatten()
+        .max()
+        .map_or(zenkey_model::config::MAX_GROUPS, |b| {
+            usize::try_from(b)
+                .unwrap_or(usize::MAX)
+                .min(zenkey_model::config::MAX_GROUPS)
+        });
+    if v.groups.len() > bound {
+        broken.push(format!(
+            "{} groups, more than set/{{group}}'s bound of {bound} (§2.2)",
+            v.groups.len()
+        ));
+    }
+    let mut names = BTreeSet::new();
+    for g in &v.groups {
+        if g.name.is_empty() || !names.insert(g.name.as_str()) {
+            broken.push(format!(
+                "group name {:?} is empty or repeated (§2.2)",
+                g.name
+            ));
+        }
+        let mut params = BTreeSet::new();
+        for p in &g.parameters {
+            let at = format!("{}.{}", g.name, p.name);
+            if p.name.is_empty() || !params.insert(p.name.as_str()) {
+                broken.push(format!("parameter {at:?} is empty or repeated (§2.2)"));
+            }
+            if let zenkey_model::config::Kind::Integer {
+                min: Some(lo),
+                max: Some(hi),
+                ..
+            } = &p.kind
+                && lo > hi
+            {
+                broken.push(format!("{at}: min {lo} above max {hi} (§2.2)"));
+            }
+            if p.sensitive && (p.value.is_some() || p.startup.is_some()) {
+                broken.push(format!(
+                    "{at} is sensitive, and the view carries its value or startup value \
+                     (§2.15)"
+                ));
+            }
+            if p.startup.is_some() && p.startup == p.value {
+                broken.push(format!(
+                    "{at} shows a startup value equal to its running value: startup is present \
+                     only when they differ (§2.3)"
+                ));
+            }
+            if p.sensitive
+                && status
+                    .and_then(|s| s.values.get(&g.name))
+                    .is_some_and(|vals| vals.contains_key(&p.name))
+            {
+                broken.push(format!(
+                    "{at} is sensitive, and the status carries its value (§2.15)"
+                ));
+            }
+        }
+    }
+    if let (Some(p), Some(stamp)) = (&v.pending, stamp) {
+        match zenkey_model::config::Time::parse(&p.deadline) {
+            None => broken.push(format!(
+                "its pending change's deadline {:?} is no RFC 3339 instant (§2.8)",
+                p.deadline
+            )),
+            Some(deadline) => {
+                let put = stamp
+                    .time
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+                    .unwrap_or(0);
+                let grace = crate::judge::doctor::OVERDUE_GRACE.as_millis();
+                if put - deadline.millis() > i64::try_from(grace).unwrap_or(i64::MAX) {
+                    broken.push(format!(
+                        "put by its own clock more than {}s after its pending change's deadline \
+                         {}, it still lists change {} pending (§2.11)",
+                        crate::judge::doctor::OVERDUE_GRACE.as_secs(),
+                        p.deadline,
+                        p.token
+                    ));
+                }
+            }
+        }
+    }
+    if broken.is_empty() {
+        ConformCase::passed(
+            C,
+            S,
+            format!(
+                "{} group(s), {} parameter(s), well-formed: its own address and instance, \
+                 names unique, bounds ordered, no sensitive value carried",
+                v.groups.len(),
+                v.groups.iter().map(|g| g.parameters.len()).sum::<usize>()
+            ),
+        )
+    } else {
+        ConformCase::failed(C, S, broken.join("; "))
+    }
+}
+
+/// A silence on a probe: a present owner owes an answer (O3), unless access
+/// control refused the call, which no tool can observe (O5).
+fn config_silent(c: CaseId, subject: &str, present: bool, granted: bool) -> ConformCase {
+    if present && !granted {
+        ConformCase::unobservable(
+            c,
+            subject,
+            format!("the service holds its tokens, and the probe drew silence: {UNGRANTED}"),
+        )
+    } else if present {
+        ConformCase::failed(
+            c,
+            subject,
+            "the service holds its tokens, and the probe drew neither a value nor an envelope: \
+             every call that reaches an owner's queryable MUST get one or the other (O3)",
+        )
+    } else {
+        ConformCase::unobservable(
+            c,
+            subject,
+            "silence, and no token of the service visible to attribute it",
+        )
+    }
+}
+
+/// `config-refusal`: one probe, refused as the text names it.
+fn config_refusal_case(p: &ConfigProbe, present: bool, granted: bool) -> ConformCase {
+    const C: CaseId = CaseId::ConfigRefusal;
+    let s = p.subject.as_str();
+    let (codes, rule) = match &p.expect {
+        ProbeExpect::Refused { codes, rule } => (*codes, *rule),
+        _ => (&[][..], ""),
+    };
+    let report = match &p.outcome {
+        ProbeOutcome::NotMade(why) => return ConformCase::not_asked(C, s, why.clone()),
+        ProbeOutcome::Fanout(seen) => {
+            return fanout_refused_as(C, s, seen.as_ref(), present, granted);
+        }
+        ProbeOutcome::Call(Err(e)) => {
+            return ConformCase::unobservable(C, s, format!("the probe could not be made: {e}"));
+        }
+        ProbeOutcome::Call(Ok(r)) => r,
+    };
+    let expected = codes
+        .iter()
+        .map(|(code, cause)| match cause {
+            Some(c) => format!("{code}, cause {c}"),
+            None => (*code).to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(" or ");
+    match &report.answer {
+        ConfigActAnswer::Refused { refusal } => {
+            let said = match &refusal.cause {
+                Some(c) => format!("{}, cause {c}", refusal.code),
+                None => refusal.code.clone(),
+            };
+            if codes.iter().any(|(code, cause)| {
+                *code == refusal.code && cause.map(str::to_owned) == refusal.cause
+            }) {
+                ConformCase::passed(C, s, format!("refused {said}: {rule}"))
+            } else if refusal.code == "busy" {
+                ConformCase::unobservable(
+                    C,
+                    s,
+                    "refused busy: an act was in flight, which every row after it waits on \
+                     (config.v1 §2.5, row 1, §2.7); probe again",
+                )
+            } else {
+                ConformCase::failed(C, s, format!("refused {said}, not {expected}: {rule}"))
+            }
+        }
+        ConfigActAnswer::Applied { .. }
+        | ConfigActAnswer::Pending { .. }
+        | ConfigActAnswer::View { .. }
+        | ConfigActAnswer::Status { .. } => ConformCase::failed(
+            C,
+            s,
+            format!(
+                "answered with a value where {expected} is owed: {rule} (the probe was a dry run \
+                 against a revision no owner holds, so it changed nothing)"
+            ),
+        ),
+        ConfigActAnswer::Malformed { malformed } => ConformCase::failed(
+            C,
+            s,
+            format!(
+                "a reply_err claims {} and is no envelope: {} (core §5.2)",
+                malformed.encoding, malformed.error
+            ),
+        ),
+        ConfigActAnswer::Undecodable { reason, .. } => ConformCase::failed(
+            C,
+            s,
+            format!(
+                "a value reply that is not the reply type ({reason}), where {expected} is owed"
+            ),
+        ),
+        ConfigActAnswer::Silent { .. } => config_silent(C, s, present, granted),
+    }
+}
+
+/// `config-dry-run` (§2.9): a dry run of a hot, writable group's running
+/// value answers `applied`, the would-be view: that parameter at `source:
+/// runtime`, the revision, the pending change and the last change as they
+/// were.
+fn config_dry_run_case(p: &ConfigProbe, present: bool, granted: bool) -> ConformCase {
+    const C: CaseId = CaseId::ConfigDryRun;
+    let s = p.subject.as_str();
+    let report = match &p.outcome {
+        ProbeOutcome::NotMade(why) => return ConformCase::not_asked(C, s, why.clone()),
+        ProbeOutcome::Call(Err(e)) => {
+            return ConformCase::unobservable(C, s, format!("the dry run could not be made: {e}"));
+        }
+        ProbeOutcome::Call(Ok(r)) => r,
+        ProbeOutcome::Fanout(_) => {
+            return ConformCase::not_asked(C, s, "not a dry run");
+        }
+    };
+    let ProbeExpect::DryRun {
+        view,
+        group,
+        parameter,
+        value,
+    } = &p.expect
+    else {
+        return ConformCase::not_asked(C, s, "not a dry run");
+    };
+    match &report.answer {
+        ConfigActAnswer::Applied { view: got } => {
+            let mut broken = Vec::new();
+            if got.revision != view.revision {
+                broken.push(format!(
+                    "the revision moved, {} to {}",
+                    view.revision, got.revision
+                ));
+            }
+            if got.pending != view.pending {
+                broken.push("the pending change differs".to_owned());
+            }
+            if got.last_change != view.last_change {
+                broken.push("the last change differs".to_owned());
+            }
+            let shown = got
+                .groups
+                .iter()
+                .find(|g| &g.name == group)
+                .and_then(|g| g.parameters.iter().find(|q| &q.name == parameter));
+            match shown {
+                Some(q)
+                    if q.value.as_ref() == Some(value)
+                        && q.source == Some(zenkey_model::config::Source::Runtime) => {}
+                Some(q) => broken.push(format!(
+                    "{group}.{parameter} reads {} at source {}, not {value} at runtime",
+                    q.value
+                        .as_ref()
+                        .map_or("no value".to_owned(), ToString::to_string),
+                    q.source.map_or("none", |s| s.as_str())
+                )),
+                None => broken.push(format!("the would-be view lacks {group}.{parameter}")),
+            }
+            if broken.is_empty() {
+                ConformCase::passed(
+                    C,
+                    s,
+                    format!(
+                        "applied: {group}.{parameter} at runtime, revision {} and the changes as \
+                         they were",
+                        view.revision
+                    ),
+                )
+            } else {
+                ConformCase::failed(
+                    C,
+                    s,
+                    format!(
+                        "a dry run's view is the view with its values applied, touching nothing \
+                         else (config.v1 §2.9): {}",
+                        broken.join("; ")
+                    ),
+                )
+            }
+        }
+        ConfigActAnswer::Pending { .. } => ConformCase::failed(
+            C,
+            s,
+            "a dry run of a hot group answered pending: a dry run answers applied, the would-be \
+             view (config.v1 §2.9)",
+        ),
+        ConfigActAnswer::Refused { refusal } if refusal.code == "busy" => {
+            ConformCase::unobservable(
+                C,
+                s,
+                "refused busy: an act was in flight, or a change came pending since the view was \
+                 read (config.v1 §2.5, rows 1 and 5); probe again",
+            )
+        }
+        ConfigActAnswer::Refused { refusal } => ConformCase::failed(
+            C,
+            s,
+            format!(
+                "refused {}: a dry run of the running values passes every row a set is checked \
+                 by, 1 to 11 (config.v1 §2.9)",
+                refusal.code
+            ),
+        ),
+        ConfigActAnswer::View { .. } | ConfigActAnswer::Status { .. } => ConformCase::failed(
+            C,
+            s,
+            "answered a control operation's reply: a set answers applied or pending (config.v1 \
+             §3)",
+        ),
+        ConfigActAnswer::Malformed { malformed } => ConformCase::failed(
+            C,
+            s,
+            format!(
+                "a reply_err claims {} and is no envelope: {} (core §5.2)",
+                malformed.encoding, malformed.error
+            ),
+        ),
+        ConfigActAnswer::Undecodable { reason, .. } => ConformCase::failed(
+            C,
+            s,
+            format!("a value reply that is not a SetReply: {reason}"),
+        ),
+        ConfigActAnswer::Silent { .. } => config_silent(C, s, present, granted),
+    }
 }
 
 /// A stamp's time, as [`crate::bus::consume::stamp`] writes it (RFC 3339).
@@ -1748,16 +2287,27 @@ fn fanout_refused(
     present: bool,
     granted: bool,
 ) -> ConformCase {
-    const C: CaseId = CaseId::FanoutRefused;
+    fanout_refused_as(CaseId::FanoutRefused, name, seen, present, granted)
+}
+
+/// O2, as case `c` asks it: `fanout-refused`, or `config-refusal`'s
+/// wildcard probe (#768, CC).
+fn fanout_refused_as(
+    c: CaseId,
+    name: &str,
+    seen: Result<&FanoutSeen, &String>,
+    present: bool,
+    granted: bool,
+) -> ConformCase {
     let seen = match seen {
         Ok(s) => s,
         Err(e) => {
-            return ConformCase::unobservable(C, name, format!("the call could not be made: {e}"));
+            return ConformCase::unobservable(c, name, format!("the call could not be made: {e}"));
         }
     };
     if seen.values > 0 {
         return ConformCase::failed(
-            C,
+            c,
             name,
             format!(
                 "a call over `{}` ran: {} value repl(ies) to a fan-out the operation forbids — \
@@ -1767,7 +2317,7 @@ fn fanout_refused(
         );
     }
     if let Some(m) = seen.malformed.first() {
-        return ConformCase::failed(C, name, format!("a refusal is no envelope: {m} (§5.2)"));
+        return ConformCase::failed(c, name, format!("a refusal is no envelope: {m} (§5.2)"));
     }
     let other: Vec<&String> = seen
         .codes
@@ -1776,7 +2326,7 @@ fn fanout_refused(
         .collect();
     if let Some(code) = other.first() {
         return ConformCase::failed(
-            C,
+            c,
             name,
             format!(
                 "a call over `{}` was refused {code}, not fanout_forbidden: an owner refuses a \
@@ -1788,7 +2338,7 @@ fn fanout_refused(
     }
     if !seen.codes.is_empty() {
         return ConformCase::passed(
-            C,
+            c,
             name,
             format!(
                 "a call over `{}` was refused fanout_forbidden, {} time(s)",
@@ -1799,7 +2349,7 @@ fn fanout_refused(
     }
     if present && !granted {
         ConformCase::unobservable(
-            C,
+            c,
             name,
             format!(
                 "a call over `{}` drew no refusal while the service holds its tokens: {UNGRANTED}",
@@ -1808,7 +2358,7 @@ fn fanout_refused(
         )
     } else if present {
         ConformCase::failed(
-            C,
+            c,
             name,
             format!(
                 "a call over `{}` drew no refusal: the service holds its tokens, and a call \
@@ -1823,7 +2373,7 @@ fn fanout_refused(
             ),
         )
     } else {
-        ConformCase::unobservable(C, name, "no refusal, and no token visible to attribute it")
+        ConformCase::unobservable(c, name, "no refusal, and no token visible to attribute it")
     }
 }
 
@@ -2167,6 +2717,7 @@ mod tests {
             })),
             read_at: Some(read_at()),
             health: None,
+            config: None,
         };
         o.heard.insert(
             "stream/bandwidth/{dev}".into(),
@@ -3218,5 +3769,297 @@ mod tests {
             ..Heard::default()
         };
         assert_eq!(members_heard(Some(&c), items, &h).len(), 1);
+    }
+
+    /// config.v1 (#768, CC): a service whose descriptor does not list it is
+    /// not asked any `config-*` case, one row each; one that does is asked
+    /// the projection over both readings, each document's freshness, the
+    /// view's form, each probe's refusal and the dry run — each pole from
+    /// values.
+    #[test]
+    fn the_config_cases_read_config_v1_over_the_window() {
+        use crate::bus::config::{ConfigGet, ConfigObservation, ConfigSpec, ServiceDocs};
+        use crate::bus::conform::{ConfigConform, ConfigProbe, ProbeExpect, ProbeOutcome};
+        use crate::bus::health::{Replied, Stamped};
+        use crate::report::{ConfigActReport, ConfigRefusal, PresenceAttribution};
+        use zenkey_model::config::{ConfigStatus, ConfigView};
+
+        let r = judge(&conforming());
+        for id in CONFIG_CASES {
+            let c = case(&r, id, "service");
+            assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
+            assert!(
+                c.detail
+                    .as_deref()
+                    .unwrap()
+                    .contains("does not list config.v1")
+            );
+        }
+
+        let at = read_at();
+        let view = |sensitive_value: bool| -> ConfigView {
+            let mut pin = json!({"name": "pin", "kind": "text", "description": "p",
+                                 "sensitive": true, "source": "file"});
+            if sensitive_value {
+                pin["value"] = json!("0000");
+            }
+            serde_json::from_value(json!({
+                "service": "lab/m", "instance": INST, "revision": 3, "confirm_floor_s": 10,
+                "groups": [
+                    {"name": "duty", "class": "hot", "description": "d", "writable": true,
+                     "parameters": [{"name": "fraction_ppm", "kind": "integer",
+                                     "description": "p", "value": 10000, "source": "file"}]},
+                    {"name": "sim", "class": "hot", "description": "d", "writable": true,
+                     "parameters": [pin]},
+                    {"name": "queue", "class": "hot", "description": "d", "writable": false,
+                     "parameters": []}
+                ]
+            }))
+            .unwrap()
+        };
+        let docs = |v: &ConfigView, status: ConfigStatus, age_s: u64| ServiceDocs {
+            view: Some(Replied {
+                value: Some(Ok(v.clone())),
+                stamp: Some(Stamped {
+                    time: at - Duration::from_secs(age_s),
+                    clock: OWNER.into(),
+                }),
+            }),
+            status: Some(Replied {
+                value: Some(Ok(status)),
+                stamp: Some(Stamped {
+                    time: at - Duration::from_secs(age_s),
+                    clock: OWNER.into(),
+                }),
+            }),
+        };
+        let get = |d: ServiceDocs| ConfigGet {
+            selector: "zk2/lab/m/config.v1/state/**".into(),
+            read_at: at,
+            complete: true,
+            services: BTreeMap::from([("lab/m".parse().unwrap(), d)]),
+        };
+        let act = |op: &str, answer: ConfigActAnswer| {
+            ProbeOutcome::Call(Ok(Box::new(ConfigActReport {
+                namespace: String::new(),
+                service: "lab/m".into(),
+                operation: op.into(),
+                key: format!("zk2/lab/m/config.v1/@op/{op}"),
+                request: json!({}),
+                actor: None,
+                request_id: None,
+                checked: None,
+                across_face: false,
+                timeout_s: 1.0,
+                answer,
+            })))
+        };
+        let refused = |code: &str, cause: Option<&str>| ConfigActAnswer::Refused {
+            refusal: ConfigRefusal {
+                code: code.into(),
+                message: "m".into(),
+                cause: cause.map(str::to_owned),
+                error: None,
+                detail_undecodable: None,
+            },
+        };
+        let refusal = |subject: &str, codes, outcome| ConfigProbe {
+            case: CaseId::ConfigRefusal,
+            subject: subject.into(),
+            expect: ProbeExpect::Refused {
+                codes,
+                rule: "the rule",
+            },
+            outcome,
+        };
+        const NOT_FOUND: &[(&str, Option<&str>)] = &[("not_found", None)];
+        const UNAVAILABLE: &[(&str, Option<&str>)] = &[("unavailable", Some("config"))];
+        let with = |first: ServiceDocs, last: ServiceDocs, probes: Vec<ConfigProbe>| {
+            let mut o = conforming();
+            let mut p = presence(Some(OWNER));
+            if let Some(ds) = &mut p.descriptors {
+                for read in ds.values_mut() {
+                    if let DescriptorRead::Served(d) = read {
+                        d.interfaces.push(
+                            serde_json::from_value(json!({
+                                "iface": "config.v1",
+                                "contract": format!("sha256:{}", zenkey::config_v1::FINGERPRINT),
+                                "minor": 0,
+                            }))
+                            .unwrap(),
+                        );
+                    }
+                }
+            }
+            o.presence = Ok(p.clone());
+            o.config = Some(ConfigConform {
+                first: Ok(get(first)),
+                reading: ConfigObservation {
+                    namespace: String::new(),
+                    address: "lab/m".parse().unwrap(),
+                    spec: ConfigSpec {
+                        window: Some(WINDOW),
+                        clocks_synced: true,
+                        ..ConfigSpec::new(WINDOW)
+                    },
+                    presence: Some(Ok(p)),
+                    get: Ok(get(last)),
+                    window: None,
+                    replay: None,
+                },
+                probes,
+            });
+            judge(&o)
+        };
+        let v = view(false);
+        let mut dry_view = v.clone();
+        dry_view.groups[0].parameters[0].source = Some(zenkey_model::config::Source::Runtime);
+        let probes = vec![
+            refusal(
+                "@op/set/zk2-conform-none",
+                NOT_FOUND,
+                act("set/zk2-conform-none", refused("not_found", None)),
+            ),
+            refusal(
+                "@op/set/queue",
+                UNAVAILABLE,
+                act("set/queue", refused("invalid_request", None)),
+            ),
+            refusal(
+                "@op/confirm",
+                NOT_FOUND,
+                act(
+                    "confirm",
+                    ConfigActAnswer::Silent {
+                        silence: SilenceView {
+                            attempts: 1,
+                            transport: None,
+                            presence: PresenceAttribution::Present,
+                        },
+                    },
+                ),
+            ),
+            refusal(
+                "@op/cancel",
+                NOT_FOUND,
+                act("cancel", refused("busy", None)),
+            ),
+            refusal(
+                "@op/persist",
+                NOT_FOUND,
+                ProbeOutcome::NotMade("a last change exists".into()),
+            ),
+            ConfigProbe {
+                case: CaseId::ConfigRefusal,
+                subject: "@op/set/*".into(),
+                expect: ProbeExpect::Fanout,
+                outcome: ProbeOutcome::Fanout(Ok(FanoutSeen {
+                    selector: "zk2/lab/m/config.v1/@op/set/*".into(),
+                    codes: vec!["fanout_forbidden".into()],
+                    ..FanoutSeen::default()
+                })),
+            },
+            ConfigProbe {
+                case: CaseId::ConfigDryRun,
+                subject: "@op/set/duty".into(),
+                expect: ProbeExpect::DryRun {
+                    view: Box::new(v.clone()),
+                    group: "duty".into(),
+                    parameter: "fraction_ppm".into(),
+                    value: zenkey_model::config::Value::Integer(10000),
+                },
+                outcome: act(
+                    "set/duty",
+                    ConfigActAnswer::Applied {
+                        view: Box::new(dry_view),
+                    },
+                ),
+            },
+        ];
+        let ok = || docs(&v, ConfigStatus::of(&v), 5);
+        let r = with(ok(), ok(), probes.clone());
+        assert!(
+            case(&r, CaseId::ConfigProjection, "service")
+                .verdict
+                .conclusive()
+                == Some(false)
+        );
+        for s in ["state/view", "state/status"] {
+            let c = case(&r, CaseId::ConfigFresh, s);
+            assert_eq!(c.verdict.conclusive(), Some(false), "{c:#?}");
+        }
+        let c = case(&r, CaseId::ConfigView, "state/view");
+        assert_eq!(c.verdict.conclusive(), Some(false), "{c:#?}");
+        let passed =
+            |s: &str| case(&r, CaseId::ConfigRefusal, s).verdict.conclusive() == Some(false);
+        assert!(passed("@op/set/zk2-conform-none") && passed("@op/set/*"));
+        let wrong = case(&r, CaseId::ConfigRefusal, "@op/set/queue");
+        assert_eq!(wrong.verdict, Judgement::Established);
+        assert!(
+            wrong
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("not unavailable, cause config")
+        );
+        assert_eq!(
+            case(&r, CaseId::ConfigRefusal, "@op/confirm").verdict,
+            Judgement::Established,
+            "granted, present, and silent: O3"
+        );
+        assert!(
+            case(&r, CaseId::ConfigRefusal, "@op/cancel")
+                .verdict
+                .is_unobservable()
+        );
+        assert!(
+            case(&r, CaseId::ConfigRefusal, "@op/persist")
+                .verdict
+                .is_not_asked()
+        );
+        let dry = case(&r, CaseId::ConfigDryRun, "@op/set/duty");
+        assert_eq!(dry.verdict.conclusive(), Some(false), "{dry:#?}");
+
+        // Stale documents, a status off its view in both readings, a view
+        // carrying a sensitive value, a dry run that moved the revision.
+        let leaky = view(true);
+        let mut off = ConfigStatus::of(&leaky);
+        off.revision = 9;
+        let mut moved = v.clone();
+        moved.revision = 4;
+        let mut probes = probes;
+        probes.last_mut().unwrap().outcome = act(
+            "set/duty",
+            ConfigActAnswer::Applied {
+                view: Box::new(moved),
+            },
+        );
+        let bad = || docs(&leaky, off.clone(), 120);
+        let r = with(bad(), bad(), probes);
+        assert_eq!(
+            case(&r, CaseId::ConfigProjection, "service").verdict,
+            Judgement::Established
+        );
+        let stale = case(&r, CaseId::ConfigFresh, "state/view");
+        assert_eq!(stale.verdict, Judgement::Established, "{stale:#?}");
+        assert!(stale.detail.as_deref().unwrap().contains("every 30 s"));
+        let form = case(&r, CaseId::ConfigView, "state/view");
+        assert_eq!(form.verdict, Judgement::Established);
+        assert!(
+            form.detail
+                .as_deref()
+                .unwrap()
+                .contains("sim.pin is sensitive")
+        );
+        let dry = case(&r, CaseId::ConfigDryRun, "@op/set/duty");
+        assert_eq!(dry.verdict, Judgement::Established);
+        assert!(dry.detail.as_deref().unwrap().contains("revision moved"));
+        // One reading off only: unobservable, never the finding.
+        let r = with(ok(), bad(), vec![]);
+        assert!(
+            case(&r, CaseId::ConfigProjection, "service")
+                .verdict
+                .is_unobservable()
+        );
     }
 }

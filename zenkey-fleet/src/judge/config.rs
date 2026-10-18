@@ -68,8 +68,10 @@ pub fn premise(p: ConfigPremise) -> Option<ConfigAnswer> {
     }
 }
 
-/// Why no fresh document answered: each one read, and its freshness.
-fn none_fresh(r: &ConfigReading, need_view: bool) -> ConfigAnswer {
+/// Why no fresh document answered: each one read, and its freshness;
+/// `need_view` when only the view could answer (its class, `writable`,
+/// `startup`).
+pub fn none_fresh(r: &ConfigReading, need_view: bool) -> ConfigAnswer {
     let of = |name: &str, fresh: fresh::Judged, read: bool| {
         if read {
             format!("the {name} {} ({})", fresh.reason.says(), fresh.verdict)

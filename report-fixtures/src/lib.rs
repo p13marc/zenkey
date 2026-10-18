@@ -92,6 +92,7 @@ pub fn doctor_report() -> DoctorReport {
                 services: 2,
                 clocks_synced: false,
             }),
+            config: Asked::NotAsked,
         },
         checks: vec![
             CheckReport::of(

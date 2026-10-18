@@ -293,6 +293,10 @@ pub struct ConformObservation {
     /// The service's `health.v1` reading (#721, PF), over the same window,
     /// when a descriptor of it lists `health.v1` (§2.7); `None` otherwise.
     pub health: Option<crate::bus::health::HealthObservation>,
+    /// The service's `config.v1` reads and probes (#768, CC), over the same
+    /// window, when a descriptor of it lists `config.v1` (§2.1); `None`
+    /// otherwise.
+    pub config: Option<ConfigConform>,
 }
 
 impl ConformObservation {
@@ -370,7 +374,8 @@ pub async fn run_conform(
 /// the deployment's namespace, and the routers' admin space through
 /// `bus.raw`, in none (S1, §4.2, 0.17). When a descriptor of the service
 /// lists `health.v1`, its health is read over the same window, beside the
-/// suite (#721, PF).
+/// suite (#721, PF); when one lists `config.v1`, its configuration is read
+/// and probed over it too (#768, CC).
 pub async fn observe(
     bus: &DoctorBus,
     offline: &ContractSet,
@@ -414,6 +419,15 @@ pub async fn observe(
                 .await,
         )
     };
+    let config = async {
+        let Ok(o) = &presence else {
+            return None;
+        };
+        if crate::model::config::listing(o, &address) != crate::report::ConfigPremise::Listed {
+            return None;
+        }
+        Some(config_suite(session, &bus.namespace, &address, o, spec).await)
+    };
     let suite = suite(
         bus,
         offline,
@@ -424,8 +438,9 @@ pub async fn observe(
         presence.clone(),
         admin,
     );
-    let (mut obs, health) = tokio::join!(suite, health);
+    let (mut obs, health, config) = tokio::join!(suite, health, config);
     obs.health = health;
+    obs.config = config;
     obs
 }
 
@@ -461,6 +476,7 @@ async fn suite(
         admin: Some(admin),
         read_at: None,
         health: None,
+        config: None,
     };
     let Ok(fp) = obs.claimed() else {
         return obs;
@@ -829,4 +845,433 @@ async fn fanout_probe(
         }
     }
     Ok(seen)
+}
+
+// ─── config.v1 (#768, CC) ───────────────────────────────────────────────────
+
+/// The token a control probe carries: one no owner mints (the reference
+/// mints `<instance>-<n>`, §2.6), so it names nothing.
+pub const PROBE_TOKEN: &str = "zk2-conform-probe";
+
+/// The revision a refusal probe expects: one no owner reaches in an
+/// instance (an act at a time, 600 changes an hour, §2.17), so even an
+/// owner that skipped the row under test refuses it at row 7.
+pub const PROBE_REVISION: u64 = 1 << 40;
+
+/// What the text says a probe is answered (§2.5, §2.9, §2.10, §2.13).
+#[derive(Debug, Clone)]
+pub enum ProbeExpect {
+    /// A refusal: one of these codes, each with the `unavailable` cause it
+    /// carries, and the rule that names it.
+    Refused {
+        codes: &'static [(&'static str, Option<&'static str>)],
+        rule: &'static str,
+    },
+    /// A call over the template's wildcard: `fanout_forbidden`, before any
+    /// handler runs (core O2).
+    Fanout,
+    /// Nothing: the probe was not made.
+    Nothing,
+    /// A dry run of `parameter`'s running `value` in `group`: `applied`,
+    /// the would-be view against `view`, the one read first.
+    DryRun {
+        view: Box<zenkey_model::config::ConfigView>,
+        group: String,
+        parameter: String,
+        value: zenkey_model::config::Value,
+    },
+}
+
+/// What a probe drew.
+#[derive(Debug, Clone)]
+pub enum ProbeOutcome {
+    /// Not made, and why: the reason is the case's.
+    NotMade(String),
+    /// A call through the runtime's client, and its reply.
+    Call(std::result::Result<Box<crate::report::ConfigActReport>, String>),
+    /// A call over the wildcard, every reply kept apart.
+    Fanout(std::result::Result<FanoutSeen, String>),
+}
+
+/// One probe of `config.v1`, the case it answers and its subject.
+#[derive(Debug, Clone)]
+pub struct ConfigProbe {
+    pub case: crate::report::CaseId,
+    /// `@op/<operation>`, as the case's subject.
+    pub subject: String,
+    pub expect: ProbeExpect,
+    pub outcome: ProbeOutcome,
+}
+
+/// What `check conform` read of a service's `config.v1` (#768, CC): a GET
+/// as the window opens, the reading over the window (its subscription and
+/// the GET at its end), and the probes, made while the window listens.
+#[derive(Debug, Clone)]
+pub struct ConfigConform {
+    pub first: std::result::Result<crate::bus::config::ConfigGet, String>,
+    pub reading: crate::bus::config::ConfigObservation,
+    pub probes: Vec<ConfigProbe>,
+}
+
+/// Whether `address`'s descriptors list `config.v1`'s `persist` unavailable
+/// with cause `config` (§2.13, core §3.3).
+fn persist_unavailable(presence: &Observed, address: &Addr) -> bool {
+    presence
+        .descriptors
+        .iter()
+        .flatten()
+        .filter(|((a, _), _)| a == address)
+        .filter_map(|(_, r)| r.descriptor())
+        .flat_map(|d| d.interfaces.iter())
+        .filter(|e| e.iface == zenkey_model::config::IFACE)
+        .flat_map(|e| e.unavailable.iter())
+        .any(|u| {
+            u.resource == zenkey::config_v1::PERSIST
+                && u.cause == zenkey_model::descriptor::Cause::Config
+        })
+}
+
+/// One probe through the runtime's client, with the call metadata a tool
+/// claims (core O7).
+async fn probe_call(
+    session: &Session,
+    namespace: &str,
+    address: &Addr,
+    op: crate::bus::config::ConfigOp,
+    body: serde_json::Value,
+    timeout: Duration,
+) -> ProbeOutcome {
+    let call = crate::bus::config::ConfigCall {
+        namespace,
+        address,
+        op,
+        request: body.clone(),
+        shown: body,
+        secrets: Vec::new(),
+        sensitive: BTreeSet::new(),
+        metadata: Some(zenkey::CallMetadata {
+            actor: Some("zenctl check conform".to_owned()),
+            request_id: Some(zenkey::writer::ulid(SystemTime::now())),
+        }),
+        timeout,
+        across_face: false,
+        checked: None,
+    };
+    ProbeOutcome::Call(
+        crate::bus::config::call(session, call)
+            .await
+            .map(Box::new)
+            .map_err(|e| crate::one_line(&e)),
+    )
+}
+
+/// The probes of `config.v1` the text makes checkable without changing
+/// anything, against the view read first. Each refusal probe is a dry run
+/// against [`PROBE_REVISION`]; a probe a broken owner could act on (a
+/// control operation while a change is pending, `persist` while a last
+/// change exists) is made only under `call_all` (`--i-know`).
+async fn config_probes(
+    session: &Session,
+    namespace: &str,
+    address: &Addr,
+    presence: &Observed,
+    view: Option<&zenkey_model::config::ConfigView>,
+    spec: ConformSpec,
+) -> Vec<ConfigProbe> {
+    use crate::bus::config::ConfigOp;
+    use crate::report::CaseId;
+    let t = spec.timeout;
+    let refusal_body = serde_json::json!({
+        "values": {}, "dry_run": true, "expected_revision": PROBE_REVISION,
+    });
+    let mut out = Vec::new();
+    let probe = |case, subject: String, expect, outcome| ConfigProbe {
+        case,
+        subject,
+        expect,
+        outcome,
+    };
+    const NOT_FOUND: &[(&str, Option<&str>)] = &[("not_found", None)];
+    const UNAVAILABLE: &[(&str, Option<&str>)] = &[("unavailable", Some("config"))];
+    const NO_LAST: &[(&str, Option<&str>)] =
+        &[("not_found", None), ("unavailable", Some("config"))];
+    let controls = [
+        (ConfigOp::Confirm, "@op/confirm"),
+        (ConfigOp::Cancel, "@op/cancel"),
+        (ConfigOp::Extend, "@op/extend"),
+    ];
+    match view {
+        None => {
+            let why = "no view was read as the window opened: the groups and the state a probe \
+                       needs are the view's";
+            for subject in [
+                "@op/set/{group}: a group the schema does not declare",
+                "@op/set/{group}: a group outside the allowlist",
+                "@op/confirm",
+                "@op/cancel",
+                "@op/extend",
+                "@op/persist",
+            ] {
+                out.push(probe(
+                    CaseId::ConfigRefusal,
+                    subject.to_owned(),
+                    ProbeExpect::Nothing,
+                    ProbeOutcome::NotMade(why.to_owned()),
+                ));
+            }
+            out.push(probe(
+                CaseId::ConfigDryRun,
+                "@op/set/{group}".to_owned(),
+                ProbeExpect::Nothing,
+                ProbeOutcome::NotMade(why.to_owned()),
+            ));
+        }
+        Some(v) => {
+            let unknown = (0..)
+                .map(|i| match i {
+                    0 => "zk2-conform-none".to_owned(),
+                    i => format!("zk2-conform-none-{i}"),
+                })
+                .find(|n| !v.groups.iter().any(|g| &g.name == n))
+                .expect("a name the view does not declare");
+            out.push(probe(
+                CaseId::ConfigRefusal,
+                format!("@op/set/{unknown}"),
+                ProbeExpect::Refused {
+                    codes: NOT_FOUND,
+                    rule: "a set on a group the schema does not declare is refused not_found \
+                           (config.v1 §2.5, row 3)",
+                },
+                probe_call(
+                    session,
+                    namespace,
+                    address,
+                    ConfigOp::Set {
+                        group: unknown.clone(),
+                    },
+                    refusal_body.clone(),
+                    t,
+                )
+                .await,
+            ));
+            let shut = v.groups.iter().find(|g| !g.writable);
+            out.push(probe(
+                CaseId::ConfigRefusal,
+                match shut {
+                    Some(g) => format!("@op/set/{}", g.name),
+                    None => "@op/set/{group}: a group outside the allowlist".to_owned(),
+                },
+                ProbeExpect::Refused {
+                    codes: UNAVAILABLE,
+                    rule: "a set on a group outside the startup allowlist is refused \
+                           unavailable, cause config, before its values are read (config.v1 \
+                           §2.5, row 4; §2.16)",
+                },
+                match shut {
+                    Some(g) => {
+                        probe_call(
+                            session,
+                            namespace,
+                            address,
+                            ConfigOp::Set {
+                                group: g.name.clone(),
+                            },
+                            refusal_body.clone(),
+                            t,
+                        )
+                        .await
+                    }
+                    None => ProbeOutcome::NotMade(
+                        "every group the view declares is writable: no allowlist to probe".into(),
+                    ),
+                },
+            ));
+            let pending = v.pending.is_some();
+            for (op, subject) in controls {
+                let mut body = serde_json::json!({"token": PROBE_TOKEN});
+                if op == ConfigOp::Extend {
+                    body["confirm_s"] = serde_json::json!(1);
+                }
+                let outcome = if pending && !spec.call_all {
+                    ProbeOutcome::NotMade(
+                        "a change is pending, and an owner that skipped its token check would act \
+                         on it: a write, made only under --i-know"
+                            .into(),
+                    )
+                } else {
+                    probe_call(session, namespace, address, op, body, t).await
+                };
+                out.push(probe(
+                    CaseId::ConfigRefusal,
+                    subject.to_owned(),
+                    ProbeExpect::Refused {
+                        codes: NOT_FOUND,
+                        rule: "a control operation whose token names no pending change is \
+                               refused not_found (config.v1 §2.10)",
+                    },
+                    outcome,
+                ));
+            }
+            let body = serde_json::json!({"token": PROBE_TOKEN});
+            let (expect, outcome) = if persist_unavailable(presence, address) {
+                (
+                    ProbeExpect::Refused {
+                        codes: UNAVAILABLE,
+                        rule: "persist, listed unavailable with cause config, is answered \
+                               unavailable with that cause before any handler runs (config.v1 \
+                               §2.13, core O3)",
+                    },
+                    probe_call(session, namespace, address, ConfigOp::Persist, body, t).await,
+                )
+            } else {
+                let expect = ProbeExpect::Refused {
+                    codes: NO_LAST,
+                    rule: "persist with a token that is not the last change's is refused \
+                           not_found, or unavailable, cause config, by a persisted layer that \
+                           cannot be written now (config.v1 §2.13)",
+                };
+                if v.last_change.is_some() && !spec.call_all {
+                    (
+                        expect,
+                        ProbeOutcome::NotMade(
+                            "a last change exists, and an owner that skipped its token check \
+                             would persist it: a write, made only under --i-know"
+                                .into(),
+                        ),
+                    )
+                } else {
+                    (
+                        expect,
+                        probe_call(session, namespace, address, ConfigOp::Persist, body, t).await,
+                    )
+                }
+            };
+            out.push(probe(
+                CaseId::ConfigRefusal,
+                "@op/persist".to_owned(),
+                expect,
+                outcome,
+            ));
+            let candidate = v
+                .groups
+                .iter()
+                .filter(|g| g.writable && g.class == zenkey_model::config::Class::Hot)
+                .find_map(|g| {
+                    g.parameters
+                        .iter()
+                        .filter(|p| !p.sensitive)
+                        .find_map(|p| p.value.clone().map(|val| (g, p, val)))
+                });
+            match (pending, candidate) {
+                (true, _) => out.push(probe(
+                    CaseId::ConfigDryRun,
+                    "@op/set/{group}".to_owned(),
+                    ProbeExpect::Nothing,
+                    ProbeOutcome::NotMade(
+                        "a change is pending: a dry run is busy then (config.v1 §2.5, row 5)"
+                            .into(),
+                    ),
+                )),
+                (false, None) => out.push(probe(
+                    CaseId::ConfigDryRun,
+                    "@op/set/{group}".to_owned(),
+                    ProbeExpect::Nothing,
+                    ProbeOutcome::NotMade("no hot, writable group shows a value to run dry".into()),
+                )),
+                (false, Some((g, p, value))) => {
+                    let body = serde_json::json!({
+                        "values": {p.name.clone(): value.clone()}, "dry_run": true,
+                    });
+                    let outcome = probe_call(
+                        session,
+                        namespace,
+                        address,
+                        ConfigOp::Set {
+                            group: g.name.clone(),
+                        },
+                        body,
+                        t,
+                    )
+                    .await;
+                    out.push(probe(
+                        CaseId::ConfigDryRun,
+                        format!("@op/set/{}", g.name),
+                        ProbeExpect::DryRun {
+                            view: Box::new(v.clone()),
+                            group: g.name.clone(),
+                            parameter: p.name.clone(),
+                            value,
+                        },
+                        outcome,
+                    ));
+                }
+            }
+        }
+    }
+    let set = zenkey::config_v1::implementation()
+        .contract()
+        .resources
+        .iter()
+        .find(|r| zenkey::implementation::resource_name(r) == zenkey::config_v1::SET)
+        .cloned()
+        .expect("config.v1 declares set/{group}");
+    let bytes = serde_json::to_vec(&refusal_body).expect("a JSON body");
+    out.push(probe(
+        CaseId::ConfigRefusal,
+        "@op/set/*".to_owned(),
+        ProbeExpect::Fanout,
+        ProbeOutcome::Fanout(
+            fanout_probe(
+                session,
+                address,
+                &crate::bus::config::iface(),
+                &set,
+                bytes,
+                t,
+            )
+            .await,
+        ),
+    ));
+    out
+}
+
+/// `config.v1`'s reads and probes for `check conform` (#768, CC): a GET as
+/// the window opens, then the reading over the window and the probes, at
+/// once.
+async fn config_suite(
+    session: &Session,
+    namespace: &str,
+    address: &Addr,
+    presence: &Observed,
+    spec: ConformSpec,
+) -> ConfigConform {
+    let t = spec.timeout;
+    let selector = crate::bus::config::ConfigTarget::One(address.clone()).state_selector(false);
+    let first = crate::bus::config::get(session, &selector, t).await;
+    let view = first
+        .as_ref()
+        .ok()
+        .and_then(|g| g.services.get(address))
+        .and_then(|d| d.view.as_ref())
+        .and_then(|r| r.value.clone())
+        .and_then(|v| v.ok());
+    let cspec = crate::bus::config::ConfigSpec {
+        window: Some(spec.window),
+        clocks_synced: spec.clocks_synced,
+        ..crate::bus::config::ConfigSpec::new(t)
+    };
+    let reading = crate::bus::config::observe(
+        session,
+        namespace,
+        address.clone(),
+        cspec,
+        Some(presence.clone()),
+    );
+    let probes = config_probes(session, namespace, address, presence, view.as_ref(), spec);
+    let (reading, probes) = tokio::join!(reading, probes);
+    ConfigConform {
+        first,
+        reading,
+        probes,
+    }
 }
