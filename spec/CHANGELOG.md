@@ -3,6 +3,77 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.29 — 2026-10-18: what `link.v1` needed of the core (#769)
+
+`link.v1`'s first text (#769, LA) publishes the face policy that §8.5
+names, and the one annotation a contract keeps, `link.exposure`. The
+maintainer decided on #769 that the downsampling rate is the face
+policy's, so the interim `link.downsample_ms` of Appendix D goes. Writing
+the text against §8.5 found two more places where the core said less, or
+other, than the profile needs. No fixture case changed; one is added.
+
+**Changed: `link.v1`'s vocabulary published (Appendix D, §10).**
+- **The rule.** Appendix D's published table gains `link`, with the one
+  key `exposure`, published by `link.v1` §4. The interim `link` row, which
+  listed `exposure` and `downsample_ms`, is gone. W105 reads the published
+  table as it reads `freshness.v1`'s (0.21), so a contract that writes
+  `link.downsample_ms` now draws W105.
+  `[F: contracts/w105-link-downsample]`
+- **Why the key goes.** A rate is a fact of a face, not of a resource: two
+  faces of one network carry one resource at their own rates, and a
+  contract's author knows neither. The face policy states it,
+  `interval_s` (`link.v1` §2.8). No contract under `examples/zk2/` wrote
+  the key, and none of the core's fixtures did.
+- **§10** names `link.v1`'s as the second published vocabulary, and links
+  the profile where the core names it for face configuration.
+
+**Changed: a crossing counter's epoch (§1.5).**
+- **The gap.** §1.5 said that a counter crossing a face where neither the
+  new session's timestamps nor presence are visible "carries its epoch in
+  its value: a profile's counter type does", with no keyword. `link.v1`
+  §2.13 makes it a SHOULD, as #769 decided (architecture D9c, zenoh-modem's
+  gap 1), and allows the attachment, which crosses with the sample as the
+  value does.
+- **The rule.** Such a counter SHOULD carry its epoch in-band, in its value
+  or its attachment. Without one, a reader across the face reads a decrease
+  as a reset.
+
+**Changed: a batch's example made exact (§8.5).**
+- **The gap.** §8.5 said that at 2,400 bit/s with the 10 s lease "1 KB
+  batches qualify" for its third of the lease. A third of 10 s is 3.33 s,
+  which carries 1,000 B at 2,400 bit/s. The spike's batches were 1,024 B,
+  3.41 s each: they held the link, and they are a little over the bound.
+  `link.v1` §2.10 lints the bound in integers, so the example had to agree
+  with the arithmetic.
+- **The rule** is unchanged, a SHOULD. The example now says up to 1,000 B,
+  and why the spike's 1,024 B do not contradict it.
+
+**Changed: pointers.** §8.5's face configuration and its `@stream`
+exception, S3's maximum outage, and §12's Faces row point to `link.v1`.
+Appendix C lists its scenarios beside the core's.
+
+**Deliberately not changed.**
+- **S3 stays about archived state.** `link.v1` §2.11 floors the window of
+  every state behind a face, archived or not, since a far late joiner
+  seeds by a GET after each outage (§4.2). That binds a deployment that
+  uses the profile. The core keeps its MUST where the archive's evidence
+  put it, and points to the profile.
+- **R7 and §8.5's MUSTs.** `link.v1` restates what crosses and where its
+  denies go; the core's rules, the attachment shapes, the `@zk` deny, the
+  third of the lease and the south region's `declare_queryable`, are
+  unchanged. The batch bound stays a SHOULD, not architecture r4's "MUST
+  cross well within", as #769 decided.
+- **No face subject, no `@op` deny in the core.** `link.v1` §2.4 puts the
+  face's denies in every policy that can match a session on the face, and
+  §2.9 lets requests cross by grant. Both follow from §11 as it stands
+  (any allow wins across subjects, F-87; Call and Consume), so neither
+  needs a core rule.
+- **The reference generator** still denies `@stream` wholesale, and §8.5
+  says so: compiling a face policy is #769's next chunk.
+- **No core fixture for exposure.** What `link.exposure` means is the
+  profile's (`conformance/exposure.json` there); the core checks only
+  that its vocabulary is published (W105).
+
 ## 0.28 — 2026-10-18: what `config.v1` needed of the core (#768)
 
 `config.v1`'s first text (#768, CA) found four places where the core said

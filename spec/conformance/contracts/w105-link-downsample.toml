@@ -1,0 +1,13 @@
+# `link.v1` publishes its vocabulary (core 0.29): `exposure`, and nothing
+# else. The interim `downsample_ms` left with it, since a face's rate is the
+# face policy's `interval_s` (link.v1 §2.8): W105.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["link.v1"]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "link.exposure" = "link", "link.downsample_ms" = 60000 }
