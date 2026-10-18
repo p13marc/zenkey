@@ -123,8 +123,16 @@ def own_keys(service: str, history: bool = False) -> list[str]:
     return keys
 
 
+def resource_key(token: str, template: str) -> str:
+    """A resource's keys as a key expression: its template, and for an
+    event one chunk more, the occurrence's ULID (core §2.6:
+    ``<member>/<ulid>``)."""
+    key = f"{token}/{template_key(template)}"
+    return f"{key}/*" if token == "events" else key
+
+
 def use_selectors(use: Use) -> list[str]:
-    return [f"zk2/{p}/{use.interface}/{r.split('/', 1)[0]}/{template_key(r.split('/', 1)[1])}"
+    return [f"zk2/{p}/{use.interface}/{resource_key(*r.split('/', 1))}"
             for p in use.providers for r in use.resources]
 
 
@@ -151,7 +159,7 @@ def resource_keys(service: str, contracts: list[Contract]) -> list[str]:
     out = []
     for c in contracts:
         for r in c.canonical["resources"]:
-            out.append(f"zk2/{service}/{c.interface}/{r['token']}/{template_key(r['template'])}")
+            out.append(f"zk2/{service}/{c.interface}/{resource_key(r['token'], r['template'])}")
     return out
 
 

@@ -58,7 +58,7 @@ case name. It exits with:
 
 | Family | Spec | Module | What is checked |
 |---|---|---|---|
-| layout | App. E | | every entry of `spec/conformance/` is read by a family: a new one fails until it is |
+| layout | App. E | | every entry of `spec/conformance/` is read by a family, and every profile with a `conformance/` directory has one: a new one fails until it is |
 | keys | §1.1, §1.2 | `keys`, `lexical` | parse every key in `keys.json`, refuse the others, and build each accepted key back to the same string |
 | slugs | §1.4 | `slug` | slug and unslug, round trips, and refusal of non-canonical chunks |
 | templates | §2.2 | `templates` | match, then rank, with unslugged bindings |
@@ -74,12 +74,13 @@ case name. It exits with:
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
+| config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
 
 ```text
-layout         13 passed     0 failed
+layout         17 passed     0 failed
 keys           55 passed     0 failed
 slugs          42 passed     0 failed
 templates      11 passed     0 failed
@@ -92,15 +93,18 @@ errors         42 passed     0 failed
 compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
-examples       99 passed     0 failed
+examples      103 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
-total         910 passed     0 failed
+config        291 passed     0 failed
+total        1209 passed     0 failed
 ```
 
 The figures are against `core.md` 0.27, `hostid.v1` 0.5, `freshness.v1`
-0.2 and `health.v1` 0.4. 0.22 added `contracts/e002-two-majors`, 0.24
+0.3, `health.v1` 0.4 and `config.v1` 0.1. `config.v1` 0.1 added its five
+fixture files and its standard contract (4 more `examples` checks), and
+`layout` checks the four profiles' directories. 0.22 added `contracts/e002-two-majors`, 0.24
 the `budget/` family, 0.25 its `lossless.json`, which 0.27 reshaped, and
 0.27 the `seed/` family. `freshness.v1` 0.2 added `clock-trust.json` and four
 judgement cases. `health.v1` 0.1 added three fixture files, and 0.3
@@ -115,7 +119,9 @@ fixtures:
 - Amendments 0.5 to 0.18 resolved F-01 to F-93. `hostid.v1` 0.2 resolved
   F-94 to F-97, core 0.22 F-98, `hostid.v1` 0.3 F-99, `freshness.v1` 0.2
   F-100 to F-102, `health.v1` 0.2 F-103 and F-104, core 0.25 F-105, and
-  core 0.27 F-106. None is open.
+  core 0.27 F-106.
+- F-107 to F-113 are open: found against `config.v1` 0.1, the fourth
+  profile, read cold (`SPEC-FINDINGS.md`, "At config.v1 0.1").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -355,7 +361,11 @@ which a principal owning a service may hold too. `acl.generate(principals,
 - **the `@/**` queryable deny** is a rule in each principal's own policy
   under `allow`, never a catch-all subject's;
 - **the Tool's admin read** (0.15): `query` on `@/*/router` and
-  `@/*/router/**`, and their `reply`.
+  `@/*/router/**`, and their `reply`;
+- **an event's keys** are its occurrences, `…/events/<template>/<ulid>`
+  (core §2.6): a binding or a resource of kind event grants its template
+  and one chunk more (fixed in the `config.v1` round, which first granted
+  one).
 
 `zk2py.acl_interop` (`--only acl`) runs a deployment of:
 - two owners;
@@ -729,13 +739,69 @@ just py-state
   - a GET that runs to its timeout, with the owner stopped, is possibly
     incomplete.
 
+## config.v1 (profile text 0.1, core 0.27)
+
+```bash
+python -m zk2py.config_scenarios      # a `py-config` recipe is requested
+```
+
+- **`zk2py.config`**, the session-free half, from the text alone:
+  - time on the wire (§2.8): any RFC 3339 instant read, the owner's
+    written to the millisecond in UTC; the window, raised to the floor;
+  - values (§2.2, §2.5): the three kinds, bounds inclusive, an integer
+    written without a fraction or an exponent, within 64 bits;
+  - the orders of refusals: the requests' own types first, then `set`'s
+    rows 1 to 11 (`check_set`), the control operations' (`check_control`)
+    and `persist`'s (`check_persist`, its "no persisted layer" before the
+    request's type);
+  - desired state refused whole, the first problem in the stated order
+    (`check_desired`), and redaction (§2.15);
+  - **`Core`**, the owner as a state machine: calls, device results and the
+    owner's clock in; replies, device acts, change events and the view and
+    status out. Rows 12 to 14 (the event's rate, a reach join's deadline,
+    the device), tokens, joins, the undo once, a restart, persist,
+    idempotency keys and desired-state convergence. A device result can
+    hold an act in flight, and every call meanwhile is `busy`.
+- **The `config` conformance family:** 291 of 291 (`validation.json` 99,
+  `window.json` 18, `lifecycle.json` 24 cases checked at their start and
+  after each of their 113 steps, `desired.json` 28, `redaction.json` 9).
+  Every case passed the first time it ran.
+- **`ConfigOwner`**, the session half, over zk2py's owner: every resource
+  exposed, `persist` listed unavailable (cause `config`) without a
+  persisted layer; the view and the status put before the tokens, on every
+  change of either, and re-put every 30 s; each change's event on
+  `events/change/<ulid>`; deadlines and reach applies on a timer of the
+  owner's own; a desired document read from a key the deployment names.
+  Its device is `SimDevice`, which a test sets each act's result on.
+- **The reader of §5:** `read` (presence and the descriptor, or the
+  deployment's word; the view and the status judged by `freshness.v1` at
+  60 s; the events heard) and one `answer_*` per question.
+- **`python -m zk2py.config_scenarios`** runs `scenarios.md` §1 to §14
+  against zk2py's owner, through zk2py's operation server and client,
+  51 of 51. The long sections (§1, §6, §10, §14) run beside the others, each
+  on a bus of its own; the run takes about six minutes.
+  - §8 runs R1 under zk2py's generated `deny` block with usrpwd.
+  - §10 drops step 1's reply at the owner, which keeps it as the key's
+    first answer.
+  - §12's author is a zk2py owner of `interop/config/zk2py_author.v1`, its
+    `state/desired` bound to `lab/rf0` by the owner's configuration.
+  - §13's face is `constrained.md` §1 step 2's attachment, as `health.v1`
+    §8 runs it: C a client of the owner's router, whose access control
+    denies `@zk` and the state subscription to C's principal, C's batch at
+    1 KB. The link is not shaped to a serial line.
+  - §14's tool is the reader above, `lab/plain` a zk2py owner of `nav.v2`.
+- **No Rust owner of `config.v1` exists yet,** so nothing here runs across
+  the two implementations.
+
 ## What it does not cover
 
 - **The rest of the live half:**
   - archives and alignment (§4.4);
   - deletes and tombstones (S3);
   - clocks beyond minting (S7's drift);
-  - O6's summaries, retries (O4) and call metadata (O7);
+  - O6's summaries and retries (O4). Call metadata (O7) is sent by the
+    client (`live.call(attachment=…)`) and read by the owner
+    (`OpCall.metadata()`), for `config.v1`'s attribution;
   - serving roles (§6);
   - constrained faces (§8.5);
   - the scenarios other than presence.md, retrieval.md and parts of
@@ -824,13 +890,16 @@ impl/python/
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
+    config.py         config.v1 time, values, the orders of refusals, desired state, redaction, Core,
+                                ConfigOwner, SimDevice, the reader of §5
+    config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge
     state_scenarios.py §4.2     scenarios/state.md §10 against zk2py's owner, and §11's open cases
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1;
+                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

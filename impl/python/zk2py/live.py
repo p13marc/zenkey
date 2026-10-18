@@ -881,7 +881,8 @@ class CallResult:
 
 
 def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool = False,
-         encoding: str | None = None, timeout: float = GET_TIMEOUT_S, first: bool = False) -> CallResult:
+         encoding: str | None = None, timeout: float = GET_TIMEOUT_S, first: bool = False,
+         attachment: bytes | None = None) -> CallResult:
     """Call an operation (§5.1).
 
     - A concrete call uses target ``BestMatching`` (O1); a call to a fan-out
@@ -898,6 +899,7 @@ def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool
       ``application/protobuf;zk2.core.v1.Error`` carry an envelope; any
       other is the transport's (§5.2 "Transport errors").
     - No reply is silence, never a verdict (O5).
+    - ``attachment``: the call metadata (O7), ``{"actor", "request_id"}``.
     """
     from . import envelope
 
@@ -910,6 +912,8 @@ def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool
     }
     if encoding is not None:
         kwargs["encoding"] = encoding
+    if attachment is not None:
+        kwargs["attachment"] = attachment
     t0 = time.monotonic()
     session.get(key, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)), **kwargs)
     out = CallResult()

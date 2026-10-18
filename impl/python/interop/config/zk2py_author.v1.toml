@@ -1,0 +1,18 @@
+# config.v1 scenarios.md section 12 (#609): the author service lab/author,
+# which puts a desired document for lab/rf0 as its own state. config.v1
+# defines no desired-state resource (v1.md section 2.18): an authoring
+# service's own contract carries DesiredConfig, copied into
+# schemas/desired.json. It must load with no finding at all.
+[interface]
+name    = "zk2py_author"
+major   = 1
+minor   = 0
+summary = "an authoring service's desired configuration documents"
+
+[schemas]
+jsonschema = ["schemas/desired.json"]
+
+[resources.desired]
+kind = "state"
+type = "json:DesiredConfig"
+doc  = "The desired document a deployment binds to a config.v1 server."

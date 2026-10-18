@@ -319,3 +319,13 @@ py-health:
     protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
     ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
         target/py-venv/bin/python -m zk2py.health_scenarios
+
+# The Python implementation's config.v1 scenarios (spec/profiles/config/
+# scenarios.md §1–§14) against zk2py's own owner, server and client, on
+# in-process zenoh-python routers: no Rust build. About 6 minutes.
+py-config:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
+    ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
+        target/py-venv/bin/python -m zk2py.config_scenarios
