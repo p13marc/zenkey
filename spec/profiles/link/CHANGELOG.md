@@ -7,7 +7,7 @@ file, never an entry here ([`../README.md`](../README.md)).
 ## 0.2 — 2026-10-18: what compiling it into live routers found (#769, LB)
 
 The reference generator (`zenctl acl gen --face-policy`, LB) and the
-spec-only implementation (zk2py, round 29) each compiled the profile into
+spec-only implementation (zk2py, round 30) each compiled the profile into
 zenoh 1.10.1 routers and ran the six scenario sections. zk2py passed every
 fixture (119) and filed two findings, F-116 and F-117; the reference
 confirmed F-117 in its own §2. Written against core 0.30, which corrects

@@ -7,7 +7,7 @@ deliberately did not, and why.
 
 Compiling `link.v1` into live routers (#769, LB: the reference generator,
 `zenctl acl gen --face-policy`, and the spec-only implementation, zk2py
-round 29) ran §8.5's south region under `deny` with grants narrower than
+round 30) ran §8.5's south region under `deny` with grants narrower than
 the owners' queryables, which the measurement of 0.14 had not. zk2py filed
 F-117 against `link.v1` §2.5, which restates §8.5; the core's sentence had
 the same gap. `link.v1` text 0.2 answers it beside this amendment. No
