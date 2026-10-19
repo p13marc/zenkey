@@ -99,12 +99,13 @@ hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
-link          119 passed     0 failed
-total        1377 passed     0 failed
+link          128 passed     0 failed
+total        1386 passed     0 failed
 ```
 
 The figures are against `core.md` 0.30, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.2. `link.v1` 0.2
+0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.3. `link.v1` 0.3
+added one `plan.json` case and eight `lints.json` cases. `link.v1` 0.2
 added the scenarios' radio as an example (`examples/zk2/link/radio.v1.toml`,
 4 more `examples` checks). `link.v1` 0.1 added its three fixture files, core 0.29 `contracts/w105-link-downsample`,
 and `config.v1` 0.3 seven `validation.json` cases and one `lifecycle.json`
@@ -134,9 +135,13 @@ fixtures:
   zk2py guessed.
 - `link.v1` 0.2 and core 0.30 resolved F-116 and F-117, found against
   `link.v1` 0.1, both as zk2py measured.
-- F-118 and F-119 are open: found against `link.v1` 0.2, reading four
-  questions the reference had answered by reading (`SPEC-FINDINGS.md`, "At
-  link.v1 0.2 and core 0.30").
+- `link.v1` 0.3 resolved F-118 and F-119, found against its 0.2. F-119
+  went as zk2py guessed. F-118 kept zk2py's guess and added what it
+  lacked: every other principal's subject narrowed off the face, and under
+  `allow` the face's own subject.
+- F-120 is open: found against `link.v1` 0.3. §2.15's two subject checks
+  pass three blocks §2.4 forbids, each measured on a router
+  (`SPEC-FINDINGS.md`, "At link.v1 0.3").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -833,7 +838,7 @@ python -m zk2py.live_interop --only config       # the live runner's config run
   range, and restores a hot group left part applied once: zk2py's device
   reports it as `{"refused": words, "partial": {…}}`.
 
-## link.v1 (profile text 0.2, core 0.30)
+## link.v1 (profile text 0.3, core 0.30)
 
 ```bash
 just py-link
@@ -847,22 +852,31 @@ just py-link
   - the plan (§2.3, §2.5 to §2.12): `plan` derives each face's denies, with
     §2.7's carve-out and its overlaps (`carve`), its downsampling rules, its
     attachment, its window floors and its liveness evidence, or the findings
-    that refuse it;
+    that refuse it. Every revision of an interface it is given is read
+    together (`merge_revisions`, 0.3): a resource crosses only where every
+    revision declaring it reads `link`, else `exposure_disagrees`, and its
+    horizon is the least, where every one gives one;
   - the checks: a deployment's tombstone windows (`check_windows`) and a
-    router's block (`check_block`, §2.15); `lint` is `lints.json`'s reading;
-  - a generator for zenoh-python routers: `compile_face` puts a plan's
-    denies in the far principal's policy of zk2py's generated block (§2.4),
-    and `router_extras` gives its `downsampling` and a south region's
-    `gateway`;
+    router's block (`check_block`, §2.15), with its subjects and posture
+    when given (`check_subjects`: `near_subject_on_face`,
+    `face_subject_missing`, 0.3); `lint` is `lints.json`'s reading;
+  - a generator for zenoh-python routers: `compile_faces` puts a plan's
+    denies in the far principal's policy of zk2py's generated block,
+    narrows every other principal's subject off the face, and under
+    `allow` adds the face's own subject to the far principal's policy
+    (§2.4, 0.3). `compile_face` is 0.2's, kept for §7's control.
+    `router_extras` gives its `downsampling` and a south region's
+    `gateway`, and `compare_block` compares a block with the plan;
   - §2.5's declaration grant for a south region (`declaration_grant`, 0.2):
     the owner's `state/**` and `@state/**` for a state GET, an operation's
     template pattern for a call;
   - §5's "Is this provider live across the face?" (`liveness_across`).
-- **The `link` conformance family:** 119 of 119, every case passing the
+- **The `link` conformance family:** 128 of 128, every case passing the
   first time it ran.
 - **`just py-link`** (`python -m zk2py.link_scenarios`) runs `scenarios.md`
-  §1 to §6 as 0.2 writes them, 23 of 23, every section, on zenoh-python
-  routers: N with usrpwd and the block zk2py compiles under `deny`,
+  §1 to §8 as 0.3 writes them, 41 of 41, every section, on zenoh-python
+  routers: N with usrpwd and the block zk2py compiles under `deny` (and
+  `allow` in §7),
   listening on TCP (the near side) and on a `unixsock-stream` path (the
   face); G across the face, L on the near side, zk2py owners of `radio.v1`.
   - The deployment is `examples/zk2/link/`, read as given: the contract,
@@ -874,9 +888,16 @@ just py-link
     three grants: none, neither G's GET nor its call answered; G's own
     selectors, the call answered and the GET not; §2.5's, both answered
     (0.2, F-117).
-  - §1 also measures a near principal's credentials on the face: they see
-    the tokens and every push, the plan's denies being the far principal's
-    alone (F-118).
+  - §7 runs X, `local`'s credentials over the face, against five blocks
+    and both postures: nothing at all under 0.3's `deny` block, the far
+    principal's share under its `allow` block, `local`'s own grants under
+    0.2's block (F-118's measurement), and everything with no face
+    subject under `allow`. Step 5's control holds: a face subject in a
+    policy of its own lets G's puts on the owner's key reach L. It also
+    measures F-120's three blocks, as `NOTE` lines.
+  - §8 runs two owners on two minors that disagree on `air/frames_total`:
+    from both revisions it crosses for neither, and from the newer alone
+    for both (F-119).
   - §5's face goes down as G's session closing, its merged members kept.
 - **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
   core S3).
@@ -982,7 +1003,7 @@ impl/python/
                                 ConfigOwner, SimDevice, the reader of §5
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
-    link_scenarios.py link.v1   scenarios.md §1–§6 on zenoh-python routers, over examples/zk2/link/
+    link_scenarios.py link.v1   scenarios.md §1–§8 on zenoh-python routers, over examples/zk2/link/
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge

@@ -1,4 +1,4 @@
-"""``link.v1``, text 0.1 (``spec/profiles/link/v1.md``): what crosses a
+"""``link.v1``, text 0.3 (``spec/profiles/link/v1.md``): what crosses a
 constrained face.
 
 From the text alone:
@@ -9,16 +9,19 @@ From the text alone:
 - **the plan** (§2.3, §2.5 to §2.12): :func:`plan` derives each face's
   denies, with §2.7's carve-out (:func:`carve`), its downsampling rules,
   its attachment, its window floors and its liveness evidence, or the
-  findings that refuse it;
+  findings that refuse it; every revision of an interface it is given is
+  read together (0.3, :func:`merge_revisions`);
 - **the checks**: a deployment's tombstone windows (§2.11,
   :func:`check_windows`) and a router's block (§2.15, :func:`check_block`);
   :func:`lint` is ``lints.json``'s whole reading;
-- **a generator** for zenoh-python routers (:func:`compile_face`): the
-  plan's denies in the far principal's policy (§2.4), its downsampling
+- **a generator** for zenoh-python routers (:func:`compile_faces`): the
+  plan's denies in the far principal's policy, every other principal's
+  subject narrowed off the face, and under ``allow`` the face's own
+  subject in the far principal's policy (§2.4, 0.3), its downsampling
   block, and the near router's ``gateway`` for a south region (§2.5).
 
 Where the text left a choice, zk2py's is named in ``SPEC-FINDINGS.md``
-("At link.v1 0.1").
+("At link.v1 0.1", "0.2", "0.3").
 """
 
 from __future__ import annotations
@@ -37,8 +40,10 @@ PUSH = ["put", "delete", "declare_subscriber"]
 FLOWS = ["egress", "ingress"]
 #: §2.7: the exposure denies "per kind token K, in the order".
 KIND_TOKENS = ["stream", "@stream", "state", "@state", "events"]
-#: §2.1: zenoh 1.10.1's link protocol names.
-LINK_PROTOCOLS = {"tcp", "udp", "tls", "quic", "serial", "unixpipe", "unixsock-stream", "vsock", "ws"}
+#: §2.1: zenoh 1.10.1's link protocol names, "§2.1's closed list", in its
+#: order (§2.4: a narrowed subject names them "in that list's order").
+LINK_PROTOCOL_ORDER = ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "unixsock-stream", "vsock", "ws"]
+LINK_PROTOCOLS = set(LINK_PROTOCOL_ORDER)
 U32_MAX = 2**32 - 1
 DEFAULT_LEASE_MS = 10_000
 #: core S3: a window not given is 60 s (§2.11).
@@ -270,7 +275,10 @@ def exposure(token: str, template: str, annotations: dict[str, Any], expose: str
     """exposure.json's reading: the exposure, whether the pushes cross, and
     "the first of these that holds, in this order: requests_only; invalid;
     host; face_closed; templated; exposed"."""
-    e = exposure_of(token, annotations)
+    return _reading(token, template, exposure_of(token, annotations), expose)
+
+
+def _reading(token: str, template: str, e: str, expose: str) -> dict[str, str]:
     if e == "ignored":
         return {"exposure": e, "pushes": "none", "reason": "requests_only"}
     if e in ("invalid", "host"):
@@ -361,17 +369,86 @@ def carve(root: str, items: list[tuple[str, str, bool]]) -> tuple[list[str], set
 
 @dataclass
 class Resource:
+    """One resource of a listed interface, read over every revision given
+    that declares it (§2.3, 0.3). ``annotations`` are the first declaring
+    revision's; ``exp`` and ``merged_horizon`` are the revisions' together."""
     iface: str
     token: str
     template: str
     annotations: dict[str, Any]
+    #: §2.2 over every declaring revision: "link" only where every one
+    #: reads link; else the one revision's reading, or host.
+    exp: str = ""
+    #: "one reading link and another not" (exposure_disagrees).
+    disagrees: bool = False
+    #: §2.12 over every declaring revision: "only where every revision that
+    #: declares it gives one above 0; its horizon is then the least".
+    merged_horizon: freshness.Horizon | None = None
 
     @property
     def name(self) -> str:
         return f"{self.iface}/{self.token}/{self.template}"
 
+    def exposure(self) -> str:
+        return self.exp or exposure_of(self.token, self.annotations)
+
+    def crossing(self, expose: str) -> bool:
+        return _reading(self.token, self.template, self.exposure(), expose)["reason"] == "exposed"
+
     def horizon(self) -> freshness.Horizon:
+        if self.merged_horizon is not None:
+            return self.merged_horizon
         return freshness.horizon(_KIND_OF_TOKEN[self.token], self.annotations)
+
+
+def revisions_of(entry: Any) -> list[list[dict[str, Any]]]:
+    """plan.json's interface entry: "one revision's resources, or
+    {revisions: [resources, ...]}" (0.3)."""
+    if isinstance(entry, dict) and "revisions" in entry:
+        return [list(r) for r in entry["revisions"]]
+    return [list(entry)]
+
+
+def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[Resource]:
+    """§2.3 "Revisions read together" (0.3): "Its resources are those any
+    revision declares, paired by kind token and template. A revision that
+    does not declare a resource says nothing of it"; "A resource is exposed
+    only where every revision that declares it reads link … Where one reads
+    link and another does not … it is read as host"; "A resource has a
+    horizon (§2.12) only where every revision that declares it gives one
+    above 0; its horizon is then the least of them". Resources keep the
+    order of their first declaration. One revision is read as itself."""
+    if len(revisions) == 1:
+        return [Resource(iface, r["token"], r["template"], r.get("annotations") or {}) for r in revisions[0]]
+    order: list[tuple[str, str]] = []
+    declared: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for rev in revisions:
+        for r in rev:
+            k = (r["token"], r["template"])
+            if k not in declared:
+                order.append(k)
+                declared[k] = []
+            declared[k].append(r.get("annotations") or {})
+    out = []
+    for token, template in order:
+        anns = declared[(token, template)]
+        exps = [exposure_of(token, a) for a in anns]
+        disagrees = False
+        if all(e == "link" for e in exps):
+            exp = "link"
+        elif any(e == "link" for e in exps):
+            exp, disagrees = "host", True
+        else:
+            # none reads link: host, invalid and ignored are alike to the
+            # plan; keep the first's.
+            exp = exps[0]
+        hs = [freshness.horizon(_KIND_OF_TOKEN[token], a) for a in anns]
+        if all(h.horizon == "within" for h in hs):
+            h = freshness.Horizon("within", min(x.ttl_s for x in hs))
+        else:
+            h = freshness.Horizon("none")
+        out.append(Resource(iface, token, template, anns[0], exp, disagrees, h))
+    return out
 
 
 def resources_of(contract: Any) -> list[dict[str, Any]]:
@@ -380,8 +457,7 @@ def resources_of(contract: Any) -> list[dict[str, Any]]:
             for r in contract.canonical["resources"]]
 
 
-def plan(policy_text: str, implements: dict[str, list[str]],
-         interfaces: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any]) -> dict[str, Any]:
     """§2.3: ``{faces: [...]}``, or ``{refused: [findings]}``."""
     policy, findings = parse_policy(policy_text)
     if policy is None:
@@ -400,14 +476,17 @@ def plan(policy_text: str, implements: dict[str, list[str]],
 
 
 def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
-              interfaces: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+              interfaces: dict[str, Any]) -> dict[str, Any]:
     listed = sorted({i for s in policy.services for i in implements[s]}, key=_bytes)
-    res = {i: [Resource(i, r["token"], r["template"], r.get("annotations") or {}) for r in interfaces[i]]
-           for i in listed}
+    res = {i: merge_revisions(i, revisions_of(interfaces[i])) for i in listed}
     expose = face.expose
-    crosses = {(r.iface, r.token, r.template): crossing(r.token, r.template, r.annotations, expose)
-               for i in listed for r in res[i]}
+    crosses = {(r.iface, r.token, r.template): r.crossing(expose) for i in listed for r in res[i]}
     warnings: list[dict[str, Any]] = []
+    if expose == "link":
+        # §2.3 (0.3): "On a face that exposes, a resource the revisions of
+        # its interface disagree on, one reading link and another not".
+        warnings += [finding("exposure_disagrees", face.name, r.name, "warning")
+                     for i in listed for r in res[i] if r.disagrees]
     overlapped: set[str] = set()
     deny = [{"id": i, "flows": list(FLOWS), "messages": list(MESSAGES), "key_exprs": [k]}
             for i, k in (("zk", "zk2/**/@zk/**"), ("adv", "zk2/**/@adv/**"), ("admin", "@/**"))]
@@ -436,8 +515,7 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
     if expose == "link":
         for i in listed:
             for r in res[i]:
-                if r.token in ("stream", "@stream") and exposure_of(r.token, r.annotations) == "link" \
-                        and has_parameter(r.template):
+                if r.token in ("stream", "@stream") and r.exposure() == "link" and has_parameter(r.template):
                     warnings.append(finding("templated_exposure", face.name, r.name, "warning"))
                 if r.token in ("stream", "@stream") and crossing_res(r):
                     h = r.horizon()
@@ -501,10 +579,12 @@ def _concrete(text: str) -> bool:
     return not any(c in ("*", "**") or "$*" in c for c in text.split("/"))
 
 
-def check_block(block: dict[str, Any]) -> list[dict[str, Any]]:
+def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dict[str, Any]]:
     """§2.15: a router's block for one face against the face it guards:
     ``zk_not_denied``, ``wildcard_downsampling`` and
-    ``intersecting_downsampling``."""
+    ``intersecting_downsampling``; and, given the block's subjects and its
+    ``default_permission`` (0.3), ``near_subject_on_face`` and
+    ``face_subject_missing`` (:func:`check_subjects`)."""
     face, ns = block["face"], block.get("namespace") or ""
     target = _keyexpr(f"{ns}/zk2/**/@zk/**" if ns else "zk2/**/@zk/**")
     out = []
@@ -527,11 +607,45 @@ def check_block(block: dict[str, Any]) -> list[dict[str, Any]]:
             if kes[i] is not None and kes[j] is not None and kes[i].intersects(kes[j]):
                 out.append(finding("intersecting_downsampling", face, r["key_expr"]))
                 break
+    if policy is not None and "subjects" in block and "default_permission" in block:
+        guarded = next((f for f in policy.faces if f.name == face), None)
+        if guarded is not None:
+            out += check_subjects(guarded, block["subjects"], block["default_permission"])
+    return out
+
+
+def _names(subject: dict[str, Any], prop: str) -> list[str]:
+    return list(subject.get(prop) or [])
+
+
+def check_subjects(face: Face, subjects: list[dict[str, Any]], default_permission: str) -> list[dict[str, Any]]:
+    """§2.15 (0.3, F-118):
+    - ``near_subject_on_face``: "a subject bound by a user name or a CN,
+      none of them the face's far principal, whose link_protocols are
+      absent or name one of the face's, whatever else it names";
+    - ``face_subject_missing``: "under allow, a link protocol of the face
+      that no subject bound by no user name, CN, interface or zid names in
+      its link_protocols". "A subject that names no property at all is not
+      one". A list given empty is read as absent ("each list absent when
+      the subject names none")."""
+    out = []
+    mine = set(face.link_protocols)
+    for s in subjects:
+        names = _names(s, "usernames") + _names(s, "cert_common_names")
+        lps = _names(s, "link_protocols")
+        if names and face.far not in names and (not lps or mine & set(lps)):
+            out.append(finding("near_subject_on_face", face.name, str(s.get("id"))))
+    if default_permission == "allow":
+        own = [s for s in subjects
+               if not any(_names(s, p) for p in ("usernames", "cert_common_names", "interfaces", "zids"))]
+        for lp in face.link_protocols:
+            if not any(lp in _names(s, "link_protocols") for s in own):
+                out.append(finding("face_subject_missing", face.name, lp))
     return out
 
 
 def lint(policy_text: str, *, implements: dict[str, list[str]] | None = None,
-         interfaces: dict[str, list[dict[str, Any]]] | None = None, windows: dict[str, int] | None = None,
+         interfaces: dict[str, Any] | None = None, windows: dict[str, int] | None = None,
          block: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """lints.json's reading: the policy's findings; when it has no error,
     the plan's (with ``implements``), the windows' (with ``windows``) and
@@ -550,28 +664,154 @@ def lint(policy_text: str, *, implements: dict[str, list[str]] | None = None,
             if windows is not None:
                 out += check_windows(p, windows)
     if block is not None:
-        out += check_block(block)
+        out += check_block(block, policy)
     return sort_findings(out)
 
 
 # -- a generator for zenoh-python routers (§2.4, §2.5, §2.8) ------------------------------------
 
+class Refused(ValueError):
+    """§2.4: "A principal left with no link protocol could connect over
+    none, and a generator refuses it"."""
+
+
+def _copy(block: dict[str, Any]) -> dict[str, Any]:
+    return {**block, "rules": list(block["rules"]), "subjects": [dict(s) for s in block["subjects"]],
+            "policies": [dict(p, rules=list(p["rules"]), subjects=list(p["subjects"])) for p in block["policies"]]}
+
+
 def compile_face(face_plan: dict[str, Any], block: dict[str, Any], far_subject: str) -> dict[str, Any]:
-    """Put a face's plan into a router's ``access_control`` block (zk2py's
-    generated grants, ``zk2py.acl``): every deny of the plan as a rule in
-    the far principal's policy (§2.4: "the far principal's, at least"),
-    and no subject of the face's own. Returns the block; the downsampling
-    and the gateway are :func:`router_extras`'."""
-    out = {**block, "rules": list(block["rules"]), "policies": [dict(p) for p in block["policies"]]}
+    """0.2's generator, kept for scenarios §7's step 2 control: every deny
+    of the plan as a rule in the far principal's policy, no subject
+    narrowed and no subject of the face's own. :func:`compile_faces` is
+    0.3's."""
+    return _with_denies(face_plan, _copy(block), far_subject)
+
+
+def _with_denies(face_plan: dict[str, Any], out: dict[str, Any], far_subject: str) -> dict[str, Any]:
     ids = []
     for d in face_plan["deny"]:
         rid = f"face-{face_plan['name']}-{d['id']}"
-        out["rules"].append({"id": rid, "messages": list(d["messages"]), "flows": list(d["flows"]),
-                             "permission": "deny", "key_exprs": list(d["key_exprs"])})
+        if not any(r["id"] == rid for r in out["rules"]):
+            out["rules"].append({"id": rid, "messages": list(d["messages"]), "flows": list(d["flows"]),
+                                 "permission": "deny", "key_exprs": list(d["key_exprs"])})
         ids.append(rid)
     for p in out["policies"]:
         if far_subject in p["subjects"]:
-            p["rules"] = list(p["rules"]) + ids
+            p["rules"] = list(p["rules"]) + [i for i in ids if i not in p["rules"]]
+    return out
+
+
+def face_subject_id(face: str) -> str:
+    """The face's own subject's id. The text names none; its scenarios (§7
+    step 3) and Appendix B call the radio's ``face:radio``, and zk2py
+    follows."""
+    return f"face:{face}"
+
+
+def compile_faces(policy: Policy, face_plans: list[dict[str, Any]], block: dict[str, Any], *,
+                  narrow: bool = True, face_subject: str | None = "far", any_posture: bool = False) -> dict[str, Any]:
+    """§2.4 (0.3) over a router's block (zk2py's generated grants, one
+    subject per principal, bound by its user name), for each face of
+    ``policy`` with its plan:
+    - every deny of its plan as a rule in the far principal's policy
+      ("Into the far principal's policy"), the far principal's subjects
+      being those whose user names or CNs name it;
+    - with ``narrow``, "A subject bound to a principal is selected by the
+      link protocols of §2.1's closed list outside every face whose far
+      principal it is not, in that list's order", the far principal's
+      subject narrowed off the other faces only ("and no further");
+    - under ``allow``, "a subject of its own, selected by its link
+      protocols alone and bound to no principal, which the far principal's
+      policy lists beside the far principal's own subject"
+      (``face_subject="far"``). The controls of scenarios §7:
+      ``face_subject=None`` defines none (step 4), ``"own"`` gives it a
+      policy of its own holding the plan's denies alone (step 5), and
+      ``any_posture`` adds it under ``deny`` too (zk2py's measurement).
+    Raises :class:`Refused` for a principal left with no link protocol, or
+    a face whose far principal has no subject."""
+    out = _copy(block)
+    allow = out.get("default_permission") == "allow"
+    faces = {f.name: f for f in policy.faces}
+
+    def names_of(s: dict[str, Any]) -> list[str]:
+        return _names(s, "usernames") + _names(s, "cert_common_names")
+
+    def bound_to(name: str) -> list[str]:
+        return [s["id"] for s in out["subjects"] if name in names_of(s)]
+
+    for fp in face_plans:
+        fars = bound_to(fp["far"])
+        if not fars:
+            raise Refused(f"face {fp['name']}: no subject is bound to its far principal {fp['far']}")
+        for far in fars:
+            _with_denies(fp, out, far)
+    if narrow:
+        for s in out["subjects"]:
+            names = names_of(s)
+            if not names:
+                continue
+            off = {lp for fp in face_plans if fp["far"] not in names for lp in faces[fp["name"]].link_protocols}
+            if not off:
+                continue
+            keep = [lp for lp in LINK_PROTOCOL_ORDER if lp not in off
+                    and (not s.get("link_protocols") or lp in s["link_protocols"])]
+            if not keep:
+                raise Refused(f"subject {s['id']}: no link protocol is left outside the faces it is kept off")
+            s["link_protocols"] = keep
+    if (allow or any_posture) and face_subject is not None:
+        for fp in face_plans:
+            sid = face_subject_id(fp["name"])
+            out["subjects"].append({"id": sid, "link_protocols": list(faces[fp["name"]].link_protocols)})
+            if face_subject == "far":
+                fars = set(bound_to(fp["far"]))
+                for p in out["policies"]:
+                    if fars & set(p["subjects"]):
+                        p["subjects"].append(sid)
+            else:
+                ids = [f"face-{fp['name']}-{d['id']}" for d in fp["deny"]]
+                out["policies"].append({"id": f"{sid}-policy", "rules": ids, "subjects": [sid]})
+    return out
+
+
+def compare_block(policy: Policy, face_plans: list[dict[str, Any]], block: dict[str, Any]) -> list[str]:
+    """§2.15's last paragraph, zk2py's version of it: "Whether a block holds
+    the whole plan, every deny and every rule, and whether a face's own
+    subject rides the far principal's policy, is a comparison of the block
+    with the plan, which a generator makes". The text gives it no shape;
+    this returns one line per difference: a deny of the plan missing from a
+    policy listing the far principal's subject, and under ``allow`` a face
+    without a subject of its own in such a policy, naming the policies
+    that list its subject instead."""
+    out = []
+    faces = {f.name: f for f in policy.faces}
+    rules = {r["id"]: r for r in block.get("rules", [])}
+
+    def names_of(s: dict[str, Any]) -> list[str]:
+        return _names(s, "usernames") + _names(s, "cert_common_names")
+
+    for fp in face_plans:
+        fars = {s["id"] for s in block.get("subjects", []) if fp["far"] in names_of(s)}
+        far_policies = [p for p in block.get("policies", []) if fars & set(p["subjects"])]
+        for p in far_policies:
+            held = [rules[r] for r in p["rules"] if r in rules and rules[r].get("permission") == "deny"]
+            for d in fp["deny"]:
+                if not any(set(d["key_exprs"]) <= set(r["key_exprs"]) and set(d["messages"]) <= set(r["messages"])
+                           and set(d["flows"]) <= set(r["flows"]) for r in held):
+                    out.append(f"face {fp['name']}: policy {p['id']} lacks the plan's deny {d['id']}")
+        if block.get("default_permission") == "allow":
+            mine = set(faces[fp["name"]].link_protocols)
+            own = [s["id"] for s in block.get("subjects", [])
+                   if not any(_names(s, k) for k in ("usernames", "cert_common_names", "interfaces", "zids"))
+                   and mine <= set(_names(s, "link_protocols"))]
+            if not own:
+                out.append(f"face {fp['name']}: no subject of its own")
+                continue
+            for sid in own:
+                if not any(sid in p["subjects"] for p in far_policies):
+                    elsewhere = [p["id"] for p in block.get("policies", []) if sid in p["subjects"]]
+                    out.append(f"face {fp['name']}: its subject {sid} rides {elsewhere or 'no policy'}, not the far "
+                               f"principal's")
     return out
 
 
