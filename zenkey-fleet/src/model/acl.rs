@@ -4961,6 +4961,16 @@ type = { raw = "text/plain" }
         let ids: Vec<&str> = plan.subjects.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["ground"]);
         assert!(plan.subjects[0].link_protocols.is_empty());
+        // Nor a policy, nor a rule no policy lists.
+        let pids: Vec<&str> = plan.policies.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(pids, ["ground"]);
+        for r in &plan.rules {
+            assert!(
+                plan.policies.iter().any(|p| p.rules.contains(&r.id)),
+                "{}",
+                r.id
+            );
+        }
     }
 
     /// `check face` (link.v1 §2.15): the generated block is clean; each
