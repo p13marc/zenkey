@@ -673,23 +673,25 @@ def _config_lifecycle(path: Path) -> list[Result]:
     return out
 
 
-def _link_interfaces(case: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    """plan.json's deployment: the interfaces given inline, or loaded from
+def _link_interfaces(case: dict[str, Any]) -> dict[str, Any]:
+    """plan.json's deployment: the interfaces given inline ("one revision's
+    resources, or {revisions: [resources, ...]}", 0.3), or loaded from
     authoring files "relative to the repository root", as core §9 loads
-    them."""
+    them; "two files in contracts with one interface id are two revisions
+    of it"."""
     from . import link
     from .contract import load_contract
 
     if "interfaces" in case:
         return case["interfaces"]
     repo = Path(__file__).resolve().parents[3]
-    out = {}
+    revisions: dict[str, list[list[dict[str, Any]]]] = {}
     for rel in case.get("contracts", []):
         c = load_contract(repo / rel)
         if not c.valid or c.canonical is None:
             raise CannotRun(f"{rel}: {c.codes}")
-        out[c.interface] = link.resources_of(c)
-    return out
+        revisions.setdefault(c.interface, []).append(link.resources_of(c))
+    return {i: {"revisions": revs} for i, revs in revisions.items()}
 
 
 def _link_exposure(path: Path) -> list[Result]:

@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Thirty rounds.**
+**Thirty-one rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -63,7 +63,9 @@ where that was not enough, or where the spec said two things.
   resolved F-116 and F-117.
 - F-118 and F-119 were found against `link.v1` 0.2, reading four questions
   the reference had to answer by reading (see "At link.v1 0.2 and core
-  0.30" at the end). Nothing was found in core 0.30.
+  0.30"). Nothing was found in core 0.30. `link.v1` 0.3 resolved them.
+- F-120 was found against `link.v1` 0.3, reading four more questions and
+  running its scenarios §7 and §8 (see "At link.v1 0.3" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -74,7 +76,7 @@ where that was not enough, or where the spec said two things.
 - **blocker:** zk2py could not implement the rule. None was found.
 
 **Counts at core 0.30, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4,
-config.v1 0.3 and link.v1 0.2:** 119 entries, two open.
+config.v1 0.3 and link.v1 0.3:** 120 entries, one open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -178,12 +180,17 @@ config.v1 0.3 and link.v1 0.2:** 119 entries, two open.
 - F-116 and F-117: resolved by `link.v1` 0.2 and core 0.30, both as zk2py
   measured and guessed: the scenarios' readers subscribe to their grants,
   and the declaration grant covers the owner's queryables as declared.
-- F-118 and F-119: open, against `link.v1` 0.2.
+- F-118 and F-119: resolved by `link.v1` 0.3. F-119 as zk2py guessed,
+  failing closed over every revision given, with the least horizon and a
+  warning added. F-118 kept zk2py's guess, the denies in the far
+  principal's policy, and added what it lacked: every other principal's
+  subject narrowed off the face, and under `allow` the face's own subject.
+- F-120: open, against `link.v1` 0.3.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at core 0.30, config.v1 0.3, link.v1 0.2 | Location | In one line |
+| Id | Severity | Status at core 0.30, config.v1 0.3, link.v1 0.3 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -302,8 +309,9 @@ by the spec section that now states the rule.
 | F-115 | ambiguity | resolved by config 0.3 | config.v1 0.2 §2.5 "A request outside its type", with `SetRequest` and `ControlRequest` | `confirm_s` or `expected_revision` written `30.0`, or beyond 64 bits, is of the request's type by 0.2's own reading of `values`, yet both implementations refuse it at the decode, and no row would refuse it otherwise. |
 | F-116 | gap | resolved by link 0.2 | link.v1 0.1 scenarios.md "Conventions" and §5, with core §11.1, §11.2 | G and L subscribe to `zk2/lab/*/**` under N's `deny` block compiled from per-binding grants; zenoh 1.10.1 refuses a declaration or a GET no grant includes, so as written they receive nothing. |
 | F-117 | gap | resolved by link 0.2, core 0.30 | link.v1 0.1 §2.5, restating core §8.5, with core S2 | The far principal's `declare_queryable` egress grant "for what its side may query" does not include the owner's state queryable, declared over `state/**`: a state GET across a south region gets no reply, a call does. |
-| F-118 | ambiguity | open | link.v1 0.2 §2.4 | The denies go into "each subject that can match a session on the face", yet a near principal's subject, matched by its user name alone, can: measured, `local`'s credentials over the face see the tokens and every push. |
-| F-119 | gap | open | link.v1 0.2 §2.2, §2.3, §2.7, with core §9.8 | Two revisions of one interface, which may differ in `link.exposure` (an annotation change is a review), can run in one deployment; the plan's denies are per interface, and the text names no revision. |
+| F-118 | ambiguity | resolved by link 0.3 | link.v1 0.2 §2.4 | The denies go into "each subject that can match a session on the face", yet a near principal's subject, matched by its user name alone, can: measured, `local`'s credentials over the face see the tokens and every push. |
+| F-119 | gap | resolved by link 0.3 | link.v1 0.2 §2.2, §2.3, §2.7, with core §9.8 | Two revisions of one interface, which may differ in `link.exposure` (an annotation change is a review), can run in one deployment; the plan's denies are per interface, and the text names no revision. |
+| F-120 | gap | open | link.v1 0.3 §2.15, with §2.4 | The two subject checks pass three blocks §2.4 forbids, measured on a router: a subject bound to the far principal and a near one, a face subject that also names a near link protocol, and under `allow` the far principal's subject narrowed to its face. |
 
 ---
 
@@ -4607,6 +4615,8 @@ credentials.
 **Resolved:** a guess. zk2py puts the denies in the far principal's policy
 alone, as the scenarios' block does, and records the measurement.
 
+**Status at link.v1 0.3: resolved by 0.3, zk2py's guess kept and completed.** §2.4: "A session over a face that is not the far principal's MUST get nothing across the face that the plan denies, and never more than the far principal gets there." And: "A subject bound to a principal is selected by the link protocols of §2.1's closed list outside every face whose far principal it is not, in that list's order." "Under `deny`, that is all: a session that matches no subject is granted nothing (core §11.3)." Under `allow`, "Each face therefore has a subject of its own, selected by its link protocols alone and bound to no principal, which the far principal's policy lists beside the far principal's own subject." §2.15 adds `near_subject_on_face` and `face_subject_missing`. zk2py's generator is now `link.compile_faces`; scenarios §7 step 2 is this entry's measurement, and §1's measurement row is gone.
+
 ### F-119 · gap · link.v1 0.2 §2.2, §2.3, §2.7, with core §9.8: two revisions of one interface
 
 > §2.3: "A generator derives a plan for each face of a policy, from the
@@ -4637,6 +4647,8 @@ id, as `plan.json` gives it. Were two given, it would let a resource cross
 only where every revision present marks it `link`, failing closed as §2.2
 fails closed on an invalid value.
 
+**Status at link.v1 0.3: resolved by 0.3, as zk2py guessed, with two rules more.** §2.3: "The plan reads each listed interface once, over every revision of it the generator is given." "A resource is exposed only where every revision that declares it reads `link` (§2.2). Where one reads `link` and another does not (`host`, absent, or no exposure at all), it is read as `host`, and a face that exposes reports it (`exposure_disagrees`, below)." "A resource has a horizon (§2.12) only where every revision that declares it gives one above 0; its horizon is then the least of them." The horizons and the warning are new to zk2py. `plan.json`'s fixture format takes `{revisions: [resources, ...]}`, and zk2py reads two `contracts` of one interface id as two revisions (`link.merge_revisions`). Scenarios §8 runs it.
+
 **Where zk2py's reading of link.v1 0.2 needed a guess, beyond the
 findings.**
 - **The enrollment's format** is the reference generator's own (core §11.1,
@@ -4645,3 +4657,243 @@ findings.**
   of its interface.
 - **§2.5's grant for a state GET** names both `state/**` and `@state/**` at
   each provider as bound whenever a binding names a state resource.
+
+## At link.v1 0.3 (#609)
+
+`link.v1` 0.3 answers F-118 and F-119. For F-118, every other principal's
+subject is narrowed off a face, and under `allow` the face has a subject
+of its own in the far principal's policy; two §2.15 checks judge a block's
+subjects. For F-119, every revision given is read together, failing
+closed, with the warning `exposure_disagrees`. It adds scenarios §7 and §8,
+and changes a comment of `examples/zk2/link/radio.enrollment.toml`. Core
+stays at 0.30. zk2py read it cold, and four questions.
+
+**`just py-conformance`: 1386 of 1386,** with no unknown file. The `link`
+family is 128: `exposure.json` 31, `plan.json` 12 (one new, two revisions)
+and `lints.json` 85 (eight new: two with revisions, six with a block's
+subjects and posture). Every new case passed the first time it ran. Each
+mutant of the new rules fails at least one case:
+- no subject check, four;
+- the far principal's subject not exempted, six;
+- CNs ignored, or interfaces ignored, one each;
+- one revision read (the first or the last), or any `link` winning, two;
+- the greatest horizon in place of the least, one.
+
+**`just py-link`: 41 of 41,** all eight sections, with `NOTE` lines, not
+counted, for what the text states no expectation for. §1 to §6 run on
+0.3's generator, every subject but the far principal's narrowed off the
+face (§1 now checks it), and pass as before.
+
+**§7**, X being `local`'s credentials over the face. "§1's share" is 5 of
+`air/dropped_total` and of `frames`, none of `air/frames_total` or `raw`,
+all 10 `oper` puts, the 5 `fault` occurrences and no `change`. "`local`'s
+share" is 100 of `air/frames_total` and of `raw`, the 5 `change`
+occurrences, the owner's two tokens and its descriptor, and still 5 of
+`air/dropped_total` and of `frames` (the face's downsampling).
+
+| Step | Posture, block | G | X |
+|---|---|---|---|
+| 1 | `deny`, 0.3's | §1's share, no token or descriptor, its GET and call answered; its puts do not reach L | nothing at all: no push, token, descriptor or reply; its puts do not reach L |
+| 2, control | `deny`, 0.2's | §1's share | `local`'s share, its GET and call answered; its puts do not reach L |
+| 3 | `allow`, 0.3's (`face:radio` in `ground`'s policy) | §1's share, no token, its GET and call answered; its puts do not reach L | the same as G |
+| 4, control | `allow`, narrowed, no face subject | §1's share | `local`'s share, its GET and call answered, and its 5 puts reach L |
+| 5, control | `allow`, `face:radio` in a policy of its own | §1's share, its GET and call answered, and its 5 puts reach L | the same as G |
+| 2 under `allow` | `allow`, 0.2's | §1's share | `local`'s share; its puts do not reach L |
+| 5 under `deny` | `deny`, `face:radio` in a policy of its own | §1's share; its puts do not reach L | nothing at all |
+
+- **Both postures.** Steps 1 and 3 are each other's, and step 4's block
+  under `deny` is step 1's byte for byte (no face subject under `deny`), so
+  it was not run twice. Steps 2 and 5 were also run under the other
+  posture (the last two rows).
+- **L**, in step 1: 100 of each stream, 10 `oper`, 5 `fault` and 5
+  `change`.
+- **Step 5's control does what the text says.** G's 5 puts on
+  `lab/radio-a`'s `air/dropped_total` reach L, where under step 3's block
+  none do. The face subject's own policy allows what its denies do not
+  include, and any allow wins across subjects, so `ground`'s deny of other
+  services' writes is undone.
+- **Step 6.**
+  - Steps 1 and 3: no finding.
+  - Step 2: `near_subject_on_face` for `ground-router`, `local`, `radio-a`
+    and `radio-b`.
+  - Step 4: `face_subject_missing` at `unixsock-stream`.
+  - Step 5: no §2.15 finding. zk2py's comparison with the plan
+    (`link.compare_block`, a shape of its own) names `face:radio-policy`.
+  - 0.2's block under `allow` gets both checks' findings.
+- **A session with no credential at all** over the face, under step 3's
+  block: N refuses it at the link (usrpwd), as core §11.3 requires under
+  `allow`.
+
+**§8.** Both owners publish `air/frames_total` and `air/dropped_total` at
+20 Hz for 5 s. `lab/radio-a` runs minor 1, written beside the run from the
+example with `minor = 1` and the annotation, and `lab/radio-b` runs minor 0.
+- **Both revisions given:** the plan warns `exposure_disagrees` at
+  `radio.v1/stream/air/frames_total`, and its denies and rules are minor
+  0's alone. G receives none of `air/frames_total` from either owner and 5
+  of `air/dropped_total` from each. L receives 100 of `air/frames_total`
+  from each.
+- **Minor 1 alone:** a rule for each owner's `air/frames_total`, and no
+  deny of it. G receives 5 of `air/frames_total` from each owner,
+  `lab/radio-b`'s among them though minor 0 keeps it home, and 5 of
+  `air/dropped_total` from each.
+
+**What changed in zk2py.**
+- **`zk2py.link`:**
+  - `merge_revisions` reads every revision given, and the plan warns
+    `exposure_disagrees`;
+  - `check_subjects` holds the two checks, which `check_block` runs when
+    the block carries its subjects and posture;
+  - `compile_faces` is 0.3's generator: the denies, the narrowing, the
+    face's subject. `compile_face` stays as 0.2's, for §7's control;
+  - `compare_block` is zk2py's comparison of a block with the plan.
+- **`zk2py.link_scenarios`:** §7 and §8, every section on 0.3's
+  generator, and §1's F-118 measurement removed (§7's step 2 is it).
+- **`zk2py.conformance`:** two `contracts` of one interface id are two
+  revisions of it.
+
+**The four questions, read from the text alone.**
+1. **§2.4 under `allow`, a session over the face with no credential at
+   all.** It gets the far principal's share, from the face's own subject
+   (`face:radio`), which the far principal's policy lists. §2.4: "A session
+   over the face matches it, and gets what the far principal gets there,
+   never more". It matches no other subject: each is bound by a user name,
+   and the far principal's, the only one left on the face, needs its user
+   name. Under `deny` it matches no subject and gets nothing. Core §11.3
+   also requires that "A deployment under `allow` MUST refuse
+   unauthenticated sessions at the link", and N does (measured above), so
+   the face subject is a second guard. Decided.
+2. **§2.15, a subject whose user names include both the far principal and
+   a near one.** Not reported: "none of them the face's far principal" is
+   false when one of them is. That is decided. But such a subject matches
+   the near principal's session over the face, and what that session gets
+   is whatever the policies listing the subject grant, which §2.15 says it
+   cannot see. Measured: listed in `local`'s policy alone, it gives X
+   `local`'s share over the face, and the tool reports nothing. That is
+   F-120 (a), with two more blocks of the same kind.
+3. **§2.3, "every revision that declares it", for a resource the older
+   minor does not declare.** It is read from the revisions that declare
+   it, here the newer alone: "A revision that does not declare a resource
+   says nothing of it: a resource a later minor adds is read from the
+   revisions that declare it." Decided.
+   - It crosses where the newer exposes it (`plan.json`'s `air/snr`), for
+     every listed service of the interface, including the older minor's.
+     That service never publishes it: its rule names a key with no
+     traffic, and its liveness evidence a member that never turns fresh,
+     so at worst unobservable, never down (core R7).
+   - §2.3 pairs resources "by kind token and template", and core §9.8 by
+     kind and template. An `explicit` cleared between minors
+     (`explicit_cleared`, a review) moves a resource from `@stream` to
+     `stream`, which link.v1 reads as two resources, each from the revision
+     that declares it. Their keys differ, so that is right for a router.
+     No finding.
+4. **§2.4, the block's subjects for §7's deployment** (from
+   `radio.enrollment.toml` and `radio.face.toml`):
+   - `radio-a`, `radio-b`, `local` and `ground-router`, each bound by its
+     user name and selected by `["tcp", "udp", "tls", "quic", "serial",
+     "unixpipe", "vsock", "ws"]`: §2.1's list without `unixsock-stream`, in
+     its order. `ground-router` is narrowed too: it is a principal of the
+     block, though another policy's far principal (§2);
+   - `ground`, bound by its user name, with no `link_protocols`: it is
+     narrowed off no face. Under `deny` §2.4 lets a generator narrow it to
+     `unixsock-stream`. Under `allow` it MUST NOT;
+   - under `allow`, one more subject, selected by `["unixsock-stream"]` and
+     bound to no user name, CN, interface or zid, which `ground`'s policy
+     lists beside `ground`'s subject. Under `deny`, none.
+
+   What the text leaves to the generator:
+   - every subject's id, the face subject's included: `face:radio` comes
+     from §7 and Appendix B, not from a rule;
+   - the policies' ids, and the order of the subjects in the block and in
+     `ground`'s policy;
+   - whether `ground`'s subject is narrowed under `deny`. zk2py does not
+     narrow it.
+
+   §7's expected 1 and 3 fix the protocols and the face subject's place,
+   and zk2py's generator writes exactly those.
+
+### F-120 · gap · link.v1 0.3 §2.15, with §2.4: blocks the subject checks pass that §2.4 forbids
+
+> §2.15: "`near_subject_on_face` (error, `at` the subject's id): a subject
+> bound by a user name or a CN, none of them the face's far principal,
+> whose `link_protocols` are absent or name one of the face's, whatever
+> else it names" … "`face_subject_missing` (error, `at` the link protocol):
+> under `allow`, a link protocol of the face that no subject bound by no
+> user name, CN, interface or zid names in its `link_protocols`"
+
+> §2.4: "A session over a face that is not the far principal's MUST get
+> nothing across the face that the plan denies, and never more than the
+> far principal gets there." … "Each face therefore has a subject of its
+> own, selected by its link protocols alone and bound to no principal" …
+> "Under `allow` it MUST NOT be narrowed to its own faces' link protocols:
+> outside them, its session would match no subject, and be allowed
+> everything."
+
+> §2.15: "Whether a block holds the whole plan, every deny and every rule,
+> and whether a face's own subject rides the far principal's policy, is a
+> comparison of the block with the plan" … "§2.15 cannot tell which of a
+> policy's denies are the far principal's own."
+
+The two checks pass three blocks that §2.4 forbids. Each is a hand edit of
+zk2py's 0.3 block for §7's deployment, measured on N (the `NOTE` lines of
+`just py-link`'s §7):
+- **(a) A subject bound to the far principal and a near one.** Under
+  `deny`, `local`'s subject is replaced by one bound to `ground` and
+  `local` both, listed in `local`'s policy. X, `local`'s credentials over
+  the face, receives `local`'s share there: 100 of `air/frames_total` and
+  of `raw`, the 5 `change` occurrences and both tokens. That is more than
+  the far principal gets. `near_subject_on_face` exempts the subject,
+  since one of its names is the far principal's. G kept §1's share.
+- **(b) A face subject that also names a near protocol.** Under `allow`,
+  the face's own subject names `tcp` beside `unixsock-stream`. It then
+  matches the near side's sessions, which get the far principal's grants
+  beside their own, since any allow wins. A session with `radio-a`'s
+  credentials over TCP reads `lab/radio-b`'s `air/dropped_total`, 20 of 20
+  samples, where 0.3's block allows it none. `face_subject_missing` is
+  satisfied, since the subject names the face's protocol. Yet §2.15 says a
+  subject with no property is not the face's own because "it matches
+  every session, the near side's included (core §11.2, F-87)".
+- **(c) The far principal narrowed to its face.** Under `allow`,
+  `ground`'s subject is narrowed to `unixsock-stream`. `ground`'s
+  credentials over TCP then match no subject, and its 5 puts on
+  `lab/radio-a`'s key reach L (none under 0.3's block). Neither check
+  looks at the far principal's subject.
+
+The tool reports no finding on any of the three. 0.3's generator writes
+none of them, but a router can run each, and §0 says "checks read what a
+router runs". The text gives two other properties to the comparison with
+the plan, and says nothing of these three. Each can be decided from the
+block, the policy and the posture alone: a subject's names and link
+protocols.
+**Resolved:** open. zk2py's checks report exactly what §2.15 lists, and the
+three blocks pass them. A reading that would catch them:
+- `near_subject_on_face` for a subject bound to any principal other than
+  the far one, whatever else it names;
+- under `allow`, a finding for a subject bound to no principal that names
+  a link protocol outside the face;
+- under `allow`, a finding for the far principal's subject whose link
+  protocols are all the face's.
+
+**Where zk2py's reading of link.v1 0.3 needed a guess, beyond the
+findings.**
+- **The face subject's id** is `face:<face>`, after §7 and Appendix B. The
+  far principal's subject is not narrowed under `deny`: zk2py does not
+  take the MAY.
+- **A list given empty** in a block's subject (`link_protocols: []`) reads
+  as absent. `lints.json`'s description writes "each list absent when the
+  subject names none", and no case has an empty list.
+- **Two refusals have no code.** zk2py's generator refuses a face whose
+  far principal has no subject in the block (`link.Refused`). It also
+  refuses a principal left with no link protocol, which the text says a
+  generator refuses.
+- **The comparison with the plan** (`link.compare_block`) has no shape in
+  the text. zk2py's lists, per face:
+  - a deny of the plan missing from the far principal's policy;
+  - under `allow`, a face whose own subject does not ride that policy,
+    naming the policies that list it instead.
+- **A subject bound to the far principal and a near one** never comes
+  from zk2py's generator, which writes one subject per principal. Were it
+  given one, it would not narrow it, since the subject names the far
+  principal.
+- **Revisions.** A resource no revision exposes keeps the first declaring
+  revision's reading, since host, invalid and ignored are alike to the
+  plan. One revision is read as itself.
