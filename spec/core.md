@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.30** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.31** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -29,8 +29,9 @@ what `config.v1` needed: the error codes defined, `forbidden` among
 them, `unavailable` from a handler for one member, and a rate across a
 restart, in 0.29 what `link.v1` needed: its vocabulary published
 without `downsample_ms`, a crossing counter's epoch, and a batch's
-example made exact, and in 0.30 what a south region's declaration
-grant covers, as compiling `link.v1` measured).
+example made exact, in 0.30 what a south region's declaration grant
+covers, as compiling `link.v1` measured, and in 0.31 whether a
+principal's own keys are in its complement).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -2939,6 +2940,18 @@ The format is the generator's own. The reference reads an enrollment file
   deployment's own keys: each resource the enrolled services' contracts
   declare, each service's `…/@zk/**`, and the contract keys. Keys no
   contract declares stay open under `allow`.
+  - **A principal's own keys** (0.31, F-122). A generator MUST deny, in
+    each principal's policy, the keys of the services it does not run
+    that its grants do not name. The keys of the services it runs, which
+    P3 makes it their only writer, it MAY leave out of its own complement,
+    so that under `allow` it may also read and receive them on the
+    messages and flows its Own grant's rows do not name; under `deny` it
+    gets those rows alone. A generator that denies them too, per message
+    and flow, is stricter, and conforms. Beyond the principal's own
+    sessions, the two differ only for a subject that two principals'
+    policies list, which no grant shape of §11.1 writes, and which
+    `link.v1` reports on a face. The reference leaves them out.
+    `[Sc: link.v1 scenarios §11]`
 - **"Every principal" compiles into each principal's own policy** (0.15,
   F-87). In zenoh 1.10.1, a subject that matches every session (one with
   no attribute, or `link_protocols: ["tcp"]`) makes the per-user subjects

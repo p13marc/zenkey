@@ -41,7 +41,9 @@ complement.
 
 **Expected.**
 - Every unauthorized action is blocked, except a put on a wildcard key,
-  which R6 discards at the consumer.
+  which R6 discards at the consumer, and, where the generator leaves a
+  principal's own keys out of its complement (core §11.2, 0.31), that
+  principal's reads and deliveries of its own services' keys.
 - Allow rules alone, under `allow`, block nothing.
 
 *Spike S14: confirmed live.*

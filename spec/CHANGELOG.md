@@ -3,6 +3,52 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.31 — 2026-10-19: whether a principal's own keys are in its complement (#769)
+
+The spec-only implementation (zk2py, round 34) read `link.v1` 0.5 and
+filed F-122 against its scenario §11, expected 7. The cause is here:
+§11.2 compiled a grant under `allow` into "denies of its complement" over
+the deployment's keys, and never said whether the keys of the services the
+principal runs are in it. `link.v1` text 0.6 answers the scenario beside
+this amendment. No fixture case changed, and none is added.
+
+**Changed: a principal's own keys (§11.2, the complement's key set).**
+- **The two readings.**
+  - **The reference** takes a principal's complement over the other
+    services' keys. A principal's own keys are written by it alone (P3),
+    and its policy denies it none of them.
+  - **zk2py** takes it per message and flow, over every key the principal
+    holds no grant for, its own services' keys included. Own's rows name
+    no `put` toward the holder, so `radio-a`'s policy denies `radio-a`
+    the deliveries of its own stream.
+- **Where they differ.** For the principal's own sessions, which the
+  stricter reading keeps to its Own grant's rows, as `deny` does. And for
+  a subject two principals' policies list, which holds both policies'
+  rules: `link.v1`'s §11 step 7, a face subject in `ground`'s policy and
+  `radio-a`'s, where X received §1's share under the reference and
+  nothing under zk2py. No grant shape of §11.1 writes such a subject, and
+  `link.v1` §2.15 reports one on a face.
+- **The rule.** A generator MUST deny, in each principal's policy, the
+  keys of the services it does not run that its grants do not name. It
+  MAY leave the keys of the services it runs out of its complement, and a
+  generator that denies them too conforms. The reference leaves them out.
+  `[Sc: link.v1 scenarios §11]`
+
+**Deliberately not changed.**
+- **The `deny` posture.** Under `deny` a principal gets its grants' rows
+  and nothing else, its own keys included; that is unchanged, and stays
+  RECOMMENDED.
+- **The reference.** Denying a principal its own keys per message and
+  flow would lengthen every principal's policy, and protect nothing P3
+  does not: no other principal writes them, and §11.1's grants for
+  reading them are each consumer's own.
+- **One reading for every generator.** The difference shows only for a
+  subject that two principals' policies list, which §11.1's shapes never
+  write. Requiring one reading would make a conforming generator wrong
+  for a block no generator writes.
+- **`security.md` §2** keeps its steps; its first expectation now names
+  this exception beside the wildcard put.
+
 ## 0.30 — 2026-10-18: what a south region's declaration grant covers (#769)
 
 Compiling `link.v1` into live routers (#769, LB: the reference generator,
