@@ -84,6 +84,9 @@ tokio = { workspace = true, features = ["test-util"] }
 # The engine's hot paths are benched here rather than in a consumer, because
 # they are the paths BOTH explorers run per sample and per tick (#44).
 criterion = { workspace = true }
+# `tests/link_face.rs` §11: certificates for a session that presents a CN
+# beside its user name (`link.v1` 0.5, #769 LE).
+rcgen = { workspace = true }
 
 [[bench]]
 name = "fleet"

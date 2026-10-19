@@ -1,9 +1,11 @@
 //! `link.v1`'s scenarios, run against live routers
-//! (`spec/profiles/link/scenarios.md` §1–§10, text 0.4; #769, LB, LC and
-//! LD): one test per section, named after it. §7 runs under both postures,
-//! §8 gives the generator two revisions of `radio.v1`, and §9 and §10 run
-//! hand edits of the generator's block that §2.15's subject checks refuse
-//! (0.4, F-120), each with what it leaks.
+//! (`spec/profiles/link/scenarios.md` §1–§11, text 0.5; #769, LB, LC, LD
+//! and LE): one test per section, named after it. §7 runs under both
+//! postures, §8 gives the generator two revisions of `radio.v1`, and §9 to
+//! §11 run hand edits of the generator's block that §2.15's subject checks
+//! refuse (0.4, F-120; 0.5, F-121), each with what it leaks. §11's N also
+//! listens on TLS with mTLS, so that a session presents a certificate CN
+//! beside its user name; its certificates are minted per run (`rcgen`).
 //!
 //! The generator is the reference's: `plan_acl` over the example of
 //! `examples/zk2/link/` (the `radio.v1` contract, its enrollment and the
@@ -180,11 +182,13 @@ fn scratch(name: &str) -> PathBuf {
     ))
 }
 
-/// N, running `plan`'s block: its near-side and face endpoints.
+/// N, running `plan`'s block: its near-side and face endpoints, and with
+/// [`near_with`] a TLS endpoint, on the near side too.
 struct Near {
     _router: zenoh::Session,
     tcp: String,
     face: String,
+    tls: Option<String>,
     files: Vec<PathBuf>,
 }
 
@@ -197,6 +201,13 @@ impl Drop for Near {
 }
 
 async fn near(plan: &AclPlan) -> Near {
+    near_with(plan, None).await
+}
+
+/// [`near`], with a TLS listener on `127.0.0.1` running mTLS with `pki`'s
+/// certificates when given: a session over it presents its certificate's
+/// CN beside its user name (§11).
+async fn near_with(plan: &AclPlan, pki: Option<&Pki>) -> Near {
     let dict = scratch("near.txt");
     std::fs::write(
         &dict,
@@ -208,10 +219,23 @@ async fn near(plan: &AclPlan) -> Near {
     .unwrap();
     let sock = scratch("face.sock");
     let face = format!("unixsock-stream/{}", sock.display());
+    let (tls_listen, tls_link) = match pki {
+        None => (String::new(), String::new()),
+        Some(p) => (
+            ", \"tls/127.0.0.1:0\"".to_owned(),
+            format!(
+                ", link: {{ tls: {{ root_ca_certificate: {:?}, listen_certificate: {:?}, \
+                 listen_private_key: {:?}, enable_mtls: true }} }}",
+                p.file("ca.pem"),
+                p.file("n.pem"),
+                p.file("n.key"),
+            ),
+        ),
+    };
     let text = format!(
         "{{\n  mode: \"router\",\n  scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
-         listen: {{ endpoints: [\"{}\", \"{face}\"] }},\n  \
-         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }} }},\n{}}}\n",
+         listen: {{ endpoints: [\"{}\", \"{face}\"{tls_listen}] }},\n  \
+         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }}{tls_link} }},\n{}}}\n",
         util::ANY_PORT,
         dict.display().to_string(),
         acl_plan_json5(plan)
@@ -223,12 +247,98 @@ async fn near(plan: &AclPlan) -> Near {
     .await
     .expect("N runs the block");
     let tcp = util::bound(&router).await;
+    let tls = match pki {
+        None => None,
+        Some(_) => Some(
+            router
+                .info()
+                .locators()
+                .await
+                .into_iter()
+                .map(|l| l.to_string())
+                .find(|l| l.starts_with("tls/127.0.0.1:"))
+                .expect("a loopback tls listener"),
+        ),
+    };
     Near {
         _router: router,
         tcp,
         face,
+        tls,
         files: vec![dict, sock],
     }
+}
+
+/// §11's certificates, minted for the run: a CA, N's own for `127.0.0.1`,
+/// and one per client CN, each a `.pem` and a `.key` in a scratch
+/// directory.
+struct Pki {
+    dir: PathBuf,
+}
+
+impl Pki {
+    fn mint(cns: &[&str]) -> Pki {
+        let dir = scratch("pki");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ca_key = rcgen::KeyPair::generate().unwrap();
+        let mut ca = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+        ca.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        ca.distinguished_name
+            .push(rcgen::DnType::CommonName, "lab-ca");
+        std::fs::write(dir.join("ca.pem"), ca.self_signed(&ca_key).unwrap().pem()).unwrap();
+        let issuer = rcgen::Issuer::new(ca, ca_key);
+        let leaf = |name: &str, sans: Vec<String>| {
+            let key = rcgen::KeyPair::generate().unwrap();
+            let mut p = rcgen::CertificateParams::new(sans).unwrap();
+            p.distinguished_name.push(rcgen::DnType::CommonName, name);
+            let cert = p.signed_by(&key, &issuer).unwrap();
+            std::fs::write(dir.join(format!("{name}.pem")), cert.pem()).unwrap();
+            std::fs::write(dir.join(format!("{name}.key")), key.serialize_pem()).unwrap();
+        };
+        leaf("n", vec!["127.0.0.1".to_owned()]);
+        for cn in cns {
+            leaf(cn, Vec::new());
+        }
+        Pki { dir }
+    }
+
+    fn file(&self, name: &str) -> String {
+        self.dir.join(name).display().to_string()
+    }
+}
+
+impl Drop for Pki {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// A client of N's TLS endpoint, as `user`, presenting the certificate of
+/// the CN `cn`.
+async fn tls_client(n: &Near, pki: &Pki, user: &str, cn: &str) -> zenoh::Session {
+    let ep = n.tls.as_deref().expect("N listens on tls");
+    let mut c = base("client");
+    c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
+        .unwrap();
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        &format!("{{ user: \"{user}\", password: \"{user}-pw\" }}"),
+    )
+    .unwrap();
+    c.insert_json5(
+        "transport/link/tls",
+        &format!(
+            "{{ root_ca_certificate: {:?}, connect_certificate: {:?}, connect_private_key: {:?}, \
+             enable_mtls: true }}",
+            pki.file("ca.pem"),
+            pki.file(&format!("{cn}.pem")),
+            pki.file(&format!("{cn}.key")),
+        ),
+    )
+    .unwrap();
+    zenoh::open(c)
+        .await
+        .unwrap_or_else(|e| panic!("{user} with the CN {cn} connects to {ep}: {e}"))
 }
 
 fn base(mode: &str) -> zenoh::Config {
@@ -1783,4 +1893,228 @@ async fn s10_the_faces_own_subject() {
     // Reported though harmless: §2.15 reads which policies list a subject,
     // not what their rules say.
     assert_eq!(found(check(&split, &text, None)), [misplaced]);
+}
+
+/// A subject a hand edit adds: its user names, CNs and link protocols.
+fn subject(id: &str, usernames: &[&str], cns: &[&str], links: &[&str]) -> AclSubject {
+    let v = |l: &[&str]| l.iter().map(|s| (*s).to_owned()).collect();
+    AclSubject {
+        id: id.into(),
+        cert_common_names: v(cns),
+        usernames: v(usernames),
+        link_protocols: v(links),
+        runs: Vec::new(),
+    }
+}
+
+/// `plan` with `s` added, listed by the policies `to`.
+fn adding(plan: &AclPlan, s: AclSubject, to: &[&str]) -> AclPlan {
+    let mut p = plan.clone();
+    let id = s.id.clone();
+    p.subjects.push(s);
+    listed_in(&p, &id, to)
+}
+
+/// What each session over N's TLS endpoint, as `local` presenting each of
+/// `cns`, and one over its TCP endpoint with no certificate, makes of five
+/// puts on `lab/radio-a`'s `air/dropped_total`: how many reach L.
+async fn tls_forged(plan: &AclPlan, pki: &Pki, cns: &[&str]) -> Vec<usize> {
+    let sel = selectors();
+    let n = near_with(plan, Some(pki)).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let l = client(&n.tcp, "local").await;
+    let lr = reader(&l, plan, Some(&sel)).await;
+    o.settle(&[&lr.seen], &[]).await;
+    let mut out = Vec::new();
+    for cn in cns {
+        let s = tls_client(&n, pki, "local", cn).await;
+        out.push(forged(&s, &lr.seen).await);
+    }
+    let s = client(&n.tcp, "local").await;
+    out.push(forged(&s, &lr.seen).await);
+    out
+}
+
+/// How many of five puts a session over N's face with each of `users`'
+/// credentials makes on `lab/radio-a`'s `air/dropped_total` reach L, the
+/// owner silent.
+async fn face_forged(plan: &AclPlan, users: &[&str]) -> Vec<usize> {
+    let sel = selectors();
+    let n = near(plan).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let l = client(&n.tcp, "local").await;
+    let lr = reader(&l, plan, Some(&sel)).await;
+    o.settle(&[&lr.seen], &[]).await;
+    let mut out = Vec::new();
+    for user in users {
+        let s = client(&n.face, user).await;
+        out.push(forged(&s, &lr.seen).await);
+    }
+    out
+}
+
+/// §11 A subject naming both kinds (§2.4, §2.15).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s11_a_subject_naming_both_kinds() {
+    let text = policy(&[]);
+    let deny = plan(&text);
+    let allow = plan_with(&text, &contracts(), AclPermission::Allow);
+    let near8 = [
+        "tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws",
+    ];
+    // 1. F-121 (i): under allow, local narrowed off tcp too, and a subject
+    //    naming ground as its user name and local as its CN, in ground's
+    //    policy. 2. F-121 (ii): the same with a subject naming local as a
+    //    CN, off the face, in local's policy. 3, control: local narrowed off
+    //    tcp alone, and the generator's allow block.
+    let off_tcp = with_subject(&allow, "local", |s| {
+        s.link_protocols.retain(|p| p != "tcp");
+    });
+    let beside = adding(
+        &off_tcp,
+        subject("ground-local", &["ground"], &["local"], &[]),
+        &["ground"],
+    );
+    let as_cn = adding(
+        &off_tcp,
+        subject("local-cn", &[], &["local"], &near8),
+        &["local"],
+    );
+    // 4. Under allow, local's subject naming local as its user name and as
+    //    its CN, as a generator given both writes it.
+    let both_kinds = with_subject(&allow, "local", |s| {
+        s.cert_common_names = vec!["local".into()];
+    });
+    // 5. Under deny, a subject naming ground as its user name and `other`
+    //    as its CN, in other's policy, and a face subject in ground's policy
+    //    and other's: 0.4 read other's policy as one of the far principal's.
+    //    6: other = local. 7: under allow, other = radio-a. 8: as 5, with
+    //    radio-a's policy holding the face's zk rule too.
+    let stray = |p: &AclPlan, other: &str| {
+        let mut b = adding(
+            p,
+            subject(&format!("ground-{other}"), &["ground"], &[other], &[]),
+            &[other],
+        );
+        if !b.subjects.iter().any(|s| s.id == "face:radio") {
+            b.subjects.push(face_subject());
+        }
+        listed_in(&b, "face:radio", &["ground", other])
+    };
+    let via_radio = stray(&deny, "radio-a");
+    let via_local = stray(&deny, "local");
+    let via_radio_allow = stray(&allow, "radio-a");
+    let mut via_radio_zk = via_radio.clone();
+    via_radio_zk
+        .policies
+        .iter_mut()
+        .find(|p| p.id == "radio-a")
+        .unwrap()
+        .rules
+        .push("face:radio:zk".into());
+
+    let local_tcp = [
+        near_forged(&beside, &["local"]).await,
+        near_forged(&as_cn, &["local"]).await,
+        near_forged(&off_tcp, &["local"]).await,
+        near_forged(&allow, &["local"]).await,
+    ];
+    let pki = Pki::mint(&["local", "other"]);
+    let tls = tls_forged(&both_kinds, &pki, &["local", "other"]).await;
+    let tls_control = tls_forged(&allow, &pki, &["local", "other"]).await;
+    let under_radio = on_face(&via_radio, &[("ground", true), ("local", true)]).await;
+    let under_local = on_face(&via_local, &[("ground", true), ("local", true)]).await;
+    let under_radio_allow = on_face(&via_radio_allow, &[("ground", true), ("local", true)]).await;
+    let zk_forged = face_forged(&via_radio_zk, &["ground", "local"]).await;
+
+    // 1–3. local over tcp, presenting its user name alone, matches no
+    //    subject in (i), (ii) and the control: all five of its puts reach L.
+    //    Under the generator's block, none does.
+    assert_eq!(
+        local_tcp,
+        [[5], [5], [5], [0]],
+        "(i), (ii), control, generator"
+    );
+    // 4. zenoh matches a subject naming both kinds only for a session
+    //    presenting both: over TLS with the CN local, local's denies hold;
+    //    with the CN other, or over tcp with no certificate, the session
+    //    matches no subject. Under the generator's block, every one matches
+    //    local's subject, bound by its user name alone.
+    assert_eq!(tls, [0, 5, 5], "the CN local, the CN other, no certificate");
+    assert_eq!(tls_control, [0, 0, 0], "the generator's block");
+    // 5. Every session over the face matches the face subject, whose rules
+    //    are ground's and radio-a's together, deny first: ground's face
+    //    denies hold, and radio-a's Own lets each write radio-a's key.
+    assert_far(&under_radio[0].0);
+    assert_far(&under_radio[1].0);
+    assert_eq!(
+        (under_radio[0].1, under_radio[1].1),
+        (5, 5),
+        "radio-a's Own"
+    );
+    // 6. local's grants are ground's here, under ground's face denies:
+    //    nothing more crosses.
+    assert_far(&under_local[0].0);
+    assert_far(&under_local[1].0);
+    assert_eq!((under_local[0].1, under_local[1].1), (0, 0), "no forgery");
+    // 7. Under allow every rule is a deny, and a subject two policies list
+    //    holds both's: nothing more crosses.
+    assert_far(&under_radio_allow[0].0);
+    assert_far(&under_radio_allow[1].0);
+    assert_eq!(
+        (under_radio_allow[0].1, under_radio_allow[1].1),
+        (0, 0),
+        "no forgery under allow"
+    );
+    // 8. With @zk denied in radio-a's policy too, the writes still cross.
+    assert_eq!(zk_forged, [5, 5], "radio-a's Own, @zk denied");
+
+    // 9. A tool checks each block (§2.15, 0.5). 0.4 reported nothing of
+    //    (i), (ii), step 4 and step 8, and only zk_not_denied of steps 5 to
+    //    7: the stray subject's policy holds no @zk deny.
+    let found = |c: zenkey_fleet::report::FaceCheck| -> Vec<(link::Code, Option<String>, String)> {
+        c.findings
+            .into_iter()
+            .map(|f| (f.code, f.face, f.at))
+            .collect()
+    };
+    let at = |code, face: bool, at: &str| (code, face.then(|| "radio".to_owned()), at.to_owned());
+    let narrowed = |name: &str| at(link::Code::NarrowedTooFar, false, name);
+    let near = |id: &str| at(link::Code::NearSubjectOnFace, true, id);
+    let zk = at(link::Code::ZkNotDenied, true, "@zk");
+    let misplaced = at(link::Code::FaceSubjectMisplaced, true, "face:radio");
+    assert_eq!(
+        found(check_against(&beside, &allow, &text, None)),
+        [narrowed("local"), near("ground-local")]
+    );
+    for b in [&as_cn, &off_tcp, &both_kinds] {
+        assert_eq!(
+            found(check_against(b, &allow, &text, None)),
+            [narrowed("local")]
+        );
+    }
+    assert_eq!(
+        found(check(&via_radio, &text, None)),
+        [zk.clone(), misplaced.clone(), near("ground-radio-a")]
+    );
+    assert_eq!(
+        found(check(&via_local, &text, None)),
+        [zk.clone(), misplaced.clone(), near("ground-local")]
+    );
+    // Reported though nothing more crosses (steps 6, 7): §2.15 reads which
+    // policies list a subject, not their rules; and under allow radio-a, a
+    // CN the stray subject binds, is answered by no subject naming CNs.
+    assert_eq!(
+        found(check_against(&via_radio_allow, &allow, &text, None)),
+        [
+            narrowed("radio-a"),
+            zk,
+            misplaced.clone(),
+            near("ground-radio-a")
+        ]
+    );
+    assert_eq!(
+        found(check(&via_radio_zk, &text, None)),
+        [misplaced, near("ground-radio-a")]
+    );
 }

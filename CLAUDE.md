@@ -266,7 +266,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   its presence, history, admin-space and contract grants; every other
   principal's subject narrowed to the link protocols outside the faces
   whose far principal it is not (`AclSubject::link_protocols`; one left
-  with none refused), since zenoh ties no credential to a link, and under
+  with none refused; on a router with a face, a principal enrolled with a
+  `user` and a `cn` both is refused, and a face's far principal is placed
+  by its user name or CN, never by its id: link.v1 0.5, F-121, #769 LE),
+  since zenoh ties no credential to a link, and under
   `allow` a subject `face:<face>` per face, selected by its link protocols
   alone and listed in the far principal's policy (link.v1 0.3, F-118, #769
   LC); zenoh's `downsampling` block beside `access_control`, one rule per
@@ -281,20 +284,25 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (`zenkey_fleet::check_face`, report `FaceCheck`): `link.v1` §2.15 per face,
   the denies read subject by subject; over every subject and the subject
   list of every policy (text 0.4, F-120, #769 LD), `near_subject_on_face`
-  (bound to another principal, whatever else it names),
+  (bound to another principal, whatever else it names, or naming a user
+  name and a CN both: text 0.5, F-121, #769 LE),
   `face_subject_beyond_face` and `face_subject_misplaced` (a subject bound
   to nobody on the face must select its link protocols alone and ride
-  exactly the far principal's policies), and under `allow`
+  exactly the far principal's policies, those of its subjects naming it
+  alone in one list and nothing in the other), and under `allow`
   `face_subject_missing` and `narrowed_too_far` (no face: a name whose
-  session over a link protocol it is not kept off matches no subject); the
+  session over a link protocol it is not kept off matches no subject, user
+  names and CNs read apart since 0.5); the
   windows of §2.11 when given, and `acl gen --check`'s comparison, which
   now covers the downsampling items and a subject's link protocols. Its
   plans are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`; every face plan
   passes its own `check face` in both postures) and judged by a live router
   (`tests/acl_live.rs`, `tests/acl_face.rs`, and `tests/link_face.rs`,
-  `link.v1`'s scenarios §1–§10 one test per section over a `unixsock-stream`
+  `link.v1`'s scenarios §1–§11 one test per section over a `unixsock-stream`
   face, §7 in both postures, §9 and §10 the hand-edited blocks 0.4
-  refuses, each with what it leaks).
+  refuses, §11 those 0.5 refuses, one session over mTLS presenting a CN
+  beside its user name, with certificates minted per run by `rcgen`; each
+  with what it leaks).
   FJ8a's writes and captures: `gen <address>` and `serve <address> <iface>
   <operation>` are mock owners — real zk2 services through
   `zenkey::ServiceBuilder` (`zenkey_fleet::tape::{generate, mock}`), refused
@@ -532,7 +540,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   (`BlockPolicy`), `near_subject_on_face` widened to any subject bound to
   another principal, `face_subject_beyond_face`, `face_subject_misplaced`,
   and `check_narrowing`'s `narrowed_too_far`, a block-wide finding with no
-  face).
+  face; text 0.5, F-121, #769 LE: one kind of name per subject, the far
+  principal's subject naming it alone in one list and nothing in the
+  other, and `narrowed_too_far` reading user names and CNs apart).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2

@@ -145,6 +145,12 @@ json5 = "1.0"
 # files, through exactly this crate. Already in the lock (zenoh-config's own
 # YAML reader), so the explorer reads a YAML file with the parser zenoh did.
 serde_yaml = "0.9"
+# `link.v1`'s live scenarios (§11, #769 LE): a session presenting a
+# certificate CN beside its user name, to a router running mTLS. The tests
+# mint a CA and each certificate per run, so no key is kept in the tree.
+# Already in the lock, with these features: zenoh-link-commons mints its
+# own certificates with it.
+rcgen = "0.14"
 
 # Internal
 # The strangler layout (#615), complete. `main` is the zk2 line, and no

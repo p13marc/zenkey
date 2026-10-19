@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — one kind of name per subject: `link.v1` 0.5 (#769, LE)
+
+zk2py's round 33 found that `narrowed_too_far` credited a name to a
+subject naming it beside a name of the other kind, or as the other kind,
+which zenoh matches only for a session presenting both (F-121): `local`
+narrowed off `tcp` matched no subject over TCP, its puts reached the near
+side, and `check face` said nothing. The reference found the same hole in
+the far principal's subject, where every session over the face wrote an
+owner's keys. `link.v1` 0.5 reads a subject's two lists apart.
+
+| Before | Now | Notes |
+|---|---|---|
+| the far principal's subject named it alone in one list, whatever the other named | it names it alone in one list and nothing in the other; a subject naming a user name and a CN both is `near_subject_on_face` on the face, and gives the far principal no policy | under 0.4, `ground` as a user name beside `radio-a` as a CN, in `radio-a`'s policy, let a face subject ride that policy: G and X over the face wrote `radio-a`'s keys, and only `zk_not_denied` was reported, by accident |
+| `narrowed_too_far` credited a name to any subject naming it | a user name is answered by subjects naming user names and no CN, a CN by those naming CNs and no user name, or by a subject bound to nobody; still one finding per name | F-121's (i) and (ii), and a subject naming `local` as both, which a session presenting one of the two does not match (measured over mTLS) |
+| `acl gen --face-policy` wrote a principal enrolled with a `user` and a `cn` as one subject naming both, and placed a face's far principal by its enrollment `id` too | on a router with a face, such a principal is refused, and the far principal is placed by its user name or CN alone | the first block failed 0.5's checks, the second already failed 0.4's. Without `--face-policy` a principal with both is planned as before |
+
 ## Unreleased (`main`, zk2) — what the subject checks let through: `link.v1` 0.4 (#769, LD)
 
 zk2py's round 32 found three blocks `check face` passed that `link.v1`

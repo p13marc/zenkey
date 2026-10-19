@@ -47,7 +47,7 @@ against the plan: 4 difference(s)
   ✗ downsampling_differs  radio   planned link_protocols unixsock-stream egress put zk2/lab/radio-a/radio.v1/@stream/frames@1Hz zk2/lab/radio-a/radio.v1/stream/air/dropped_total@1Hz; configured link_protocols unixsock-stream egress put zk2/lab/*/radio.v1/stream/air/dropped_total@1Hz
 FAIL
 zk_not_denied [face radio] @zk: a pair of the nine messages and both flows is not denied on @zk: presence, descriptors or bundles cross the face (§2.6, §2.15)
-near_subject_on_face [face radio] local: a subject bound to another principal than the face's far one, whatever else it names, and not kept off the face's link protocols: zenoh ties no credential to a link, so that principal's credentials over the face match it, and get its grants there (§2.4, §2.15)
+near_subject_on_face [face radio] local: a subject bound to another principal than the face's far one, whatever else it names, or naming a user name and a CN both, and not kept off the face's link protocols: zenoh ties no credential to a link, so a session over the face presenting the names it binds matches it, and gets its grants there (§2.4, §2.15)
 wildcard_downsampling [face radio] zk2/lab/*/radio.v1/stream/air/dropped_total: a downsampling rule that is not one concrete key: every key it covers shares one timer (§2.8, §2.15)
 judged against the config file tests/cmd/fixtures/link/router-drifted.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
@@ -79,7 +79,7 @@ against the plan: 5 difference(s)
 FAIL
 zk_not_denied [face radio] @zk: a pair of the nine messages and both flows is not denied on @zk: presence, descriptors or bundles cross the face (§2.6, §2.15)
 face_subject_misplaced [face radio] face:radio: a subject bound by no identity that a session over the face matches, not listed in exactly the policies of the far principal's subjects on the face: every session over the face gets another policy's grants, misses a deny of the far principal's, or, listed in none, is allowed by default (§2.4, §2.15)
-near_subject_on_face [face radio] local: a subject bound to another principal than the face's far one, whatever else it names, and not kept off the face's link protocols: zenoh ties no credential to a link, so that principal's credentials over the face match it, and get its grants there (§2.4, §2.15)
+near_subject_on_face [face radio] local: a subject bound to another principal than the face's far one, whatever else it names, or naming a user name and a CN both, and not kept off the face's link protocols: zenoh ties no credential to a link, so a session over the face presenting the names it binds matches it, and gets its grants there (§2.4, §2.15)
 judged against the config file tests/cmd/fixtures/link/router-stray.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
 
@@ -105,8 +105,8 @@ against the plan: 3 difference(s)
   ✗ subject_differs             face:radio  planned cns [] usernames [] link_protocols ["unixsock-stream"]; configured cns [] usernames [] link_protocols ["unixsock-stream", "tcp"]
   ✗ subject_unplanned_property  ground      configured link_protocols: ["unixsock-stream"]
 FAIL
-narrowed_too_far ground: under allow, this principal's session over a link protocol it is not kept off matches no subject, so it is allowed everything there: a subject narrowed further than the faces it is kept off (§2.4, §2.15)
-narrowed_too_far radio-b: under allow, this principal's session over a link protocol it is not kept off matches no subject, so it is allowed everything there: a subject narrowed further than the faces it is kept off (§2.4, §2.15)
+narrowed_too_far ground: under allow, a session presenting this name alone, over a link protocol it is not kept off, matches no subject, so it is allowed everything there: no subject naming no interface and no zid selects that link protocol, among those naming it in the list of its kind and nothing in the other, or no user name and no CN (§2.4, §2.15)
+narrowed_too_far radio-b: under allow, a session presenting this name alone, over a link protocol it is not kept off, matches no subject, so it is allowed everything there: no subject naming no interface and no zid selects that link protocol, among those naming it in the list of its kind and nothing in the other, or no user name and no CN (§2.4, §2.15)
 face_subject_beyond_face [face radio] face:radio: a subject bound by no identity that a session over the face matches, and that selects a link protocol outside the face's, or every one: sessions off the face match it too, and get what its policies grant beside their own (§2.4, §2.15)
 judged against the config file tests/cmd/fixtures/link/router-allow-narrowed.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)

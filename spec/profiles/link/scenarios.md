@@ -6,7 +6,7 @@ a setup, steps, and expected observations. They are a generator's and a
 router's: the reference runs them as tests of the tool that compiles a
 face policy into a router's configuration (`zenctl acl gen`), against live
 routers, one test per section, named after it (#769, LB; §7 and §8 since
-0.3, LC; §9 and §10 since 0.4, LD).
+0.3, LC; §9 and §10 since 0.4, LD; §11 since 0.5, LE).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -470,3 +470,86 @@ another policy than the far principal's, or none, hands sessions what
    listing it hold no `@zk` deny. Step 6: `face_subject_misplaced` alone,
    though the block grants nothing more: §2.15 reads which policies list a
    subject, not their rules.
+
+## §11 A subject naming both kinds (§2.4, §2.15)
+
+zenoh matches one value of each property a subject names, so a subject
+naming user names and CNs matches only a session presenting one of each.
+0.4 read such a subject as binding each name it lists, and as the far
+principal's when one of its lists named the far principal alone (0.5,
+F-121). Each step but step 4 is a hand edit of the generator's block.
+
+**Setup.** As §9. For step 4, N also listens on
+`tls/127.0.0.1:<port>`, on the near side, with mTLS: its certificate and
+a client certificate per CN, `local` and `other`, are signed by one CA
+minted for the run. A session over TLS presents its certificate's CN
+beside its user name.
+
+**Steps.**
+1. F-121 (i). Under `allow`, `local`'s subject narrowed off `tcp` too,
+   and a subject naming `ground` as its user name and `local` as its CN,
+   with no link protocol, listed in `ground`'s policy. A session over TCP
+   with `local`'s credentials puts five times on
+   `zk2/lab/radio-a/radio.v1/stream/air/dropped_total`, and L counts what
+   reaches it.
+2. F-121 (ii). Under `allow`, `local`'s subject narrowed off `tcp` too,
+   and a subject naming `local` as a CN, selected by the eight near link
+   protocols, listed in `local`'s policy. As step 1.
+3. **Control:** under `allow`, `local`'s subject narrowed off `tcp`, and
+   nothing else; then the generator's `allow` block. As step 1.
+4. Under `allow`, `local`'s subject naming `local` as its user name and as
+   its CN, as a generator given both writes it. Over TLS, a session with
+   `local`'s credentials presenting the CN `local`, then one presenting
+   the CN `other`; then one over TCP with no certificate. Each as step 1.
+   **Control:** the generator's `allow` block, the same three sessions.
+5. Under `deny`, a subject naming `ground` as its user name and `radio-a`
+   as its CN, listed in `radio-a`'s policy, and a subject selected by
+   `unixsock-stream` alone, bound to nothing, listed in `ground`'s policy
+   and `radio-a`'s. The owner's traffic; G and X as §7's step 1.
+6. As step 5, with `local` in place of `radio-a`.
+7. As step 5, under `allow`: the face's subject listed in `radio-a`'s
+   policy too.
+8. As step 5, with `radio-a`'s policy also listing the face's `zk` rule.
+   G and X each put five times as in §7's step 1, and L counts what
+   reaches it.
+9. A tool checks the blocks of steps 1 to 8 (§2.15).
+
+**Expected.**
+1. The session matches neither `local`'s subject, which `tcp` no longer
+   selects, nor the added one, which it presents no CN for: all five puts
+   reach L.
+2. The same: the added subject names `local` as a CN, and the session
+   presents it as a user name. All five reach L.
+3. All five reach L; under the generator's block, none does.
+4. Over TLS with the CN `local`, the session matches `local`'s subject,
+   and none of its puts reaches L. With the CN `other`, or over TCP with
+   no certificate, it matches no subject: all five reach L. Under the
+   generator's block, `local`'s subject names the user name alone, and
+   none of the three sessions' puts reaches L.
+5. G and X each match the face's subject, whose rules are `ground`'s and
+   `radio-a`'s together, deny first: each receives what §1's G receives,
+   and all five of each one's puts reach L, under `radio-a`'s Own grant,
+   which no face deny includes.
+6. G and X each receive what §1's G receives, and neither's puts reach L:
+   `local`'s grants are `ground`'s here, and `ground`'s face denies hold
+   over them.
+7. G and X each receive what §1's G receives, and neither's puts reach L:
+   under `allow` every rule is a deny, and a subject two policies list
+   holds both's.
+8. All five of each one's puts reach L: denying `@zk` in `radio-a`'s
+   policy changes nothing of step 5's writes.
+9. 0.4 reported nothing for steps 1, 2, 4 and 8, `narrowed_too_far` at
+   `local` for step 3, and only `zk_not_denied` for steps 5 to 7, because
+   the added subject's policy holds no `@zk` deny. 0.5 reports:
+   - step 1: `narrowed_too_far` at `local`, and `near_subject_on_face`
+     at the added subject, which is on the face and names both kinds;
+   - steps 2 to 4: `narrowed_too_far` at `local`;
+   - steps 5 and 6: `near_subject_on_face` at the added subject,
+     `face_subject_misplaced` at the face's subject, whose far principal's
+     policies are `ground`'s alone, and `zk_not_denied`;
+   - step 7: the same, and `narrowed_too_far` at `radio-a`, a CN the added
+     subject binds and no subject naming CNs alone answers; reported
+     though nothing more crosses, since §2.15 reads which policies list a
+     subject, not their rules;
+   - step 8: `near_subject_on_face` and `face_subject_misplaced`, with no
+     `zk_not_denied`.
