@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.31** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.32** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -30,8 +30,9 @@ them, `unavailable` from a handler for one member, and a rate across a
 restart, in 0.29 what `link.v1` needed: its vocabulary published
 without `downsample_ms`, a crossing counter's epoch, and a batch's
 example made exact, in 0.30 what a south region's declaration grant
-covers, as compiling `link.v1` measured, and in 0.31 whether a
-principal's own keys are in its complement).
+covers, as compiling `link.v1` measured, in 0.31 whether a principal's
+own keys are in its complement, and in 0.32 that its complement is taken
+per message and flow).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -2940,9 +2941,12 @@ The format is the generator's own. The reference reads an enrollment file
   deployment's own keys: each resource the enrolled services' contracts
   declare, each service's `…/@zk/**`, and the contract keys. Keys no
   contract declares stay open under `allow`.
-  - **A principal's own keys** (0.31, F-122). A generator MUST deny, in
-    each principal's policy, the keys of the services it does not run
-    that its grants do not name.
+  - **A principal's own keys** (0.31, F-122; per message and flow, 0.32,
+    F-123). A generator MUST deny, in each principal's policy, on each
+    message and flow, the keys of the services it does not run that its
+    grants do not name for that message and flow. A Consume grant on
+    another service's key names it for reading and receiving only, so the
+    principal's writes to it are denied (the table above).
   - It MAY leave the keys of the services the principal runs out of that
     principal's complement: P3 makes the principal their only writer.
     Under `allow`, the principal then also reads and receives its own
