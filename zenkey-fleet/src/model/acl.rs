@@ -59,12 +59,21 @@
 //!
 //! - **the denies** (`zk`, `adv`, `admin`, then the exposure denies of
 //!   every push that does not cross, §2.6, §2.7) as rules
-//!   `face:<face>:<id>` in the far principal's policy, the only one that
-//!   can match a session on the face (§2.4), under the namespace except the
-//!   admin space's `@/**`. The far principal keeps its own grants where no
-//!   deny includes them, without the presence, history and admin-space ones
-//!   the `zk`, `adv` and `admin` denies would cut, and without the open
-//!   contract bundles;
+//!   `face:<face>:<id>` in the far principal's policy, under the namespace
+//!   except the admin space's `@/**`. The far principal keeps its own
+//!   grants where no deny includes them, without the presence, history and
+//!   admin-space ones the `zk`, `adv` and `admin` denies would cut, and
+//!   without the open contract bundles;
+//! - **every other principal kept off the face** (§2.4, 0.3, F-118): zenoh
+//!   ties no credential to a link, so each subject is selected by the link
+//!   protocols outside the faces whose far principal it is not, and a near
+//!   credential presented over the face matches none of its own. Under
+//!   `deny` that session is granted nothing; under `allow` it would be
+//!   allowed everything, so each face gets a subject of its own, selected
+//!   by its link protocols alone, listed in the far principal's policy: a
+//!   policy of its own with the plan's denies alone would undo the far
+//!   principal's own denies, since any allow wins across subjects
+//!   (measured, `tests/link_face.rs` §7);
 //! - **the `downsampling` block** (§2.8): one item per face, one rule per
 //!   concrete key of a crossing stream, egress, `put`;
 //! - **the attachment** (§2.5): a client needs nothing more; a far router
@@ -336,6 +345,10 @@ const CITE_FACE_EXPOSURE: &str = "link.v1 §2.7: the pushes (put, delete, declar
 const CITE_FACE_DOWNSAMPLING: &str = "link.v1 §2.8: at most one put per crossing stream key per \
      interval toward the far side, egress, put only so a delete still crosses; one rule per \
      concrete key, since zenoh gives each rule one timer";
+const CITE_FACE_NEAR: &str = "link.v1 §2.4 (0.3, F-118): zenoh ties no credential to a link, so \
+     a subject bound by a user name or a CN alone matches that principal's session over a face \
+     too; each principal's subject is selected by the link protocols outside the faces whose \
+     far principal it is not";
 
 const CITE_IDENTITY: &str = "§11.3: `zids` subjects are unauthenticated; principals are bound by \
      certificate CN or username";
@@ -511,40 +524,6 @@ impl<'c> Contracts<'c> {
 
     fn contracts(&self, iface: &IfaceId) -> Vec<&'c Contract> {
         self.set.of_iface(iface).map(|r| r.contract()).collect()
-    }
-
-    /// Every resource of `iface`, as `link.v1`'s plan reads it (§2.3),
-    /// across the revisions given; `None` when no revision was given. With
-    /// one revision this is `link::Deployment::add_contract`'s reading. A
-    /// resource several revisions declare is exposed only where every one
-    /// of them exposes it, so a disagreement fails closed (§2.2).
-    fn link_resources(&mut self, iface: &IfaceId) -> Option<Vec<link::Res>> {
-        let mut out: Vec<link::Res> = Vec::new();
-        let mut any = false;
-        for r in self.set.of_iface(iface) {
-            any = true;
-            self.used
-                .insert(format!("{}@{}", r.iface(), r.fingerprint()));
-            for res in &r.contract().resources {
-                match out
-                    .iter_mut()
-                    .find(|x| x.token == res.token && x.template == res.template)
-                {
-                    None => out.push(link::Res::from(res)),
-                    Some(held) => {
-                        if link::exposure_of(res)
-                            != link::exposure(link::kind_of(held.token), &held.annotations)
-                        {
-                            held.annotations.insert(
-                                link::EXPOSURE.to_owned(),
-                                serde_json::Value::String("host".to_owned()),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        any.then_some(out)
     }
 }
 
@@ -1489,6 +1468,79 @@ pub fn plan_acl(
             }
         }
     }
+    // Every other principal kept off each face (link.v1 §2.4, 0.3): zenoh
+    // ties no credential to a link, so a subject bound by a user name or a
+    // CN alone matches that principal's session over the face as well.
+    // Each subject is selected by the link protocols outside the faces whose
+    // far principal it is not; one left with none is refused.
+    let mut face_subjects: Vec<AclSubject> = Vec::new();
+    if let Some(p) = policy {
+        let mut kept = Vec::with_capacity(placed.len());
+        for mut pl in placed {
+            let mine: Vec<&str> = far_of
+                .get(&pl.subject.id)
+                .into_iter()
+                .flatten()
+                .map(|f| f.name.as_str())
+                .collect();
+            match link::narrowed(p, |face| mine.contains(&face)) {
+                Some(l) if l.is_empty() => refusals.push(AclRefusal {
+                    principal: pl.subject.id.clone(),
+                    reason: "every link protocol zenoh 1.10.1 names is a constrained face whose \
+                             far principal it is not, so its subject would be selected by none"
+                        .to_owned(),
+                    cite: CITE_FACE_NEAR.to_owned(),
+                }),
+                l => {
+                    pl.subject.link_protocols = l.unwrap_or_default();
+                    kept.push(pl);
+                }
+            }
+        }
+        placed = kept;
+        // Under allow, a session matching no subject is allowed everything
+        // (§11.3), a narrowed credential over the face among them: each face
+        // gets a subject of its own, selected by its link protocols alone,
+        // which the far principal's policy lists beside its own subject.
+        if opts.default_permission == AclPermission::Allow {
+            for f in &faces {
+                let id = format!("face:{}", f.name);
+                if placed.iter().any(|pl| pl.subject.id == id) {
+                    return Err(Error::unaskable(
+                        "--face-policy",
+                        format!(
+                            "face {:?}: its own subject would be {id:?}, a principal's id \
+                             already (link.v1 §2.4)",
+                            f.name
+                        ),
+                    ));
+                }
+                face_subjects.push(AclSubject {
+                    id,
+                    cert_common_names: Vec::new(),
+                    usernames: Vec::new(),
+                    link_protocols: p.faces[&f.name].link_protocols.clone(),
+                    runs: Vec::new(),
+                });
+            }
+        }
+    }
+    // The subjects of a far principal's policy: its own, and under allow
+    // its faces' (link.v1 §2.4).
+    let subjects_of = |id: &str| -> Vec<String> {
+        let mut out = vec![id.to_owned()];
+        if opts.default_permission == AclPermission::Allow {
+            out.extend(
+                far_of
+                    .get(id)
+                    .into_iter()
+                    .flatten()
+                    .map(|f| format!("face:{}", f.name)),
+            );
+        }
+        out
+    };
+
     // Every deny of the faces a principal is the far side of, as rules of
     // its policy (link.v1 §2.4), in face order then the plan's.
     let face_rules = |rules: &mut Rules, id: &str| -> Vec<String> {
@@ -1781,7 +1833,7 @@ pub fn plan_acl(
                 policies.push(AclPolicy {
                     id: pl.subject.id.clone(),
                     rules: ids,
-                    subjects: vec![pl.subject.id.clone()],
+                    subjects: subjects_of(&pl.subject.id),
                 });
             }
         }
@@ -1878,7 +1930,7 @@ pub fn plan_acl(
                 policies.push(AclPolicy {
                     id: id.to_owned(),
                     rules: ids,
-                    subjects: vec![id.to_owned()],
+                    subjects: subjects_of(id),
                 });
             }
         }
@@ -1919,7 +1971,11 @@ pub fn plan_acl(
         contracts: contracts.used.into_iter().collect(),
         faces,
         rules,
-        subjects: placed.into_iter().map(|p| p.subject).collect(),
+        subjects: placed
+            .into_iter()
+            .map(|p| p.subject)
+            .chain(face_subjects)
+            .collect(),
         policies,
         downsampling,
         gateway,
@@ -1980,16 +2036,22 @@ fn plan_faces(
                 .extend(s.implements.iter().cloned());
         }
     }
+    // Every revision given of each listed interface: the plan reads them
+    // together, and lets a resource cross only where every one exposes it
+    // (link.v1 §2.3, 0.3, F-119), warning of each it does not.
     for s in &policy.services {
         for i in dep.implements.get(s).cloned().unwrap_or_default() {
             if dep.interfaces.contains_key(&i) {
                 continue;
             }
-            if let Some(res) = IfaceId::from_str(&i)
-                .ok()
-                .and_then(|id| contracts.link_resources(&id))
-            {
-                dep.interfaces.insert(i, res);
+            let Ok(id) = IfaceId::from_str(&i) else {
+                continue;
+            };
+            for r in contracts.set.of_iface(&id) {
+                contracts
+                    .used
+                    .insert(format!("{}@{}", r.iface(), r.fingerprint()));
+                dep.add_contract(r.contract());
             }
         }
     }
@@ -2121,6 +2183,21 @@ pub fn link_says(code: link::Code) -> &'static str {
             "two downsampling rules intersect: zenoh picks one of them for a key they share \
              (§2.8, §2.15)"
         }
+        C::ExposureDisagrees => {
+            "the revisions given of the interface disagree on the resource's exposure, one \
+             link and another not: it crosses only where every one exposes it, so it does not \
+             (§2.3)"
+        }
+        C::NearSubjectOnFace => {
+            "a subject bound to another principal than the face's far one, and not kept off \
+             the face's link protocols: zenoh ties no credential to a link, so that principal's \
+             credentials over the face match it, and get its grants there (§2.4, §2.15)"
+        }
+        C::FaceSubjectMissing => {
+            "under allow, no subject bound by no identity selects this link protocol of the \
+             face: a session over it that matches no other subject is allowed everything \
+             (§2.4, §2.15)"
+        }
         _ => "the face policy's linter refuses it (§2.1)",
     }
 }
@@ -2230,6 +2307,7 @@ fn place(
             id,
             cert_common_names: cn.map(|c| vec![c.to_owned()]).unwrap_or_default(),
             usernames: user.map(|u| vec![u.to_owned()]).unwrap_or_default(),
+            link_protocols: Vec::new(),
             runs: runs.clone(),
         },
         holders: runs,
@@ -2458,6 +2536,19 @@ pub fn to_json5(plan: &AclPlan) -> String {
     }
     let _ = writeln!(out, "  ],");
     let _ = writeln!(out, "  subjects: [");
+    if plan.subjects.iter().any(|s| !s.link_protocols.is_empty()) {
+        let _ = writeln!(
+            out,
+            "    // {CITE_FACE_NEAR}{}.",
+            match plan.default_permission {
+                AclPermission::Deny =>
+                    "; under deny, a session matching no subject is granted nothing",
+                AclPermission::Allow =>
+                    "; under allow, each face has a subject of its own, in its far principal's policy, \
+                 since a session matching no subject is allowed everything",
+            }
+        );
+    }
     for s in &plan.subjects {
         let _ = write!(out, "    {{ id: {}", js(&s.id));
         if !s.usernames.is_empty() {
@@ -2474,7 +2565,21 @@ pub fn to_json5(plan: &AclPlan) -> String {
                 js_list(s.cert_common_names.iter().map(String::as_str))
             );
         }
-        let _ = writeln!(out, " }},  // runs {}", s.runs.join(", "));
+        if !s.link_protocols.is_empty() {
+            let _ = write!(
+                out,
+                ", link_protocols: {}",
+                js_list(s.link_protocols.iter().map(String::as_str))
+            );
+        }
+        if s.runs.is_empty() {
+            let _ = writeln!(
+                out,
+                " }},  // every session over the face's transports (link.v1 §2.4)"
+            );
+        } else {
+            let _ = writeln!(out, " }},  // runs {}", s.runs.join(", "));
+        }
     }
     let _ = writeln!(out, "  ],");
     let _ = writeln!(out, "  policies: [");
@@ -2796,23 +2901,37 @@ pub fn check_acl(
                 .chain(s.usernames.iter().map(|u| format!("user {u}")))
         })
         .collect();
-    let shape = |cns: &[String], users: &[String]| format!("cns {cns:?} usernames {users:?}");
+    // A subject's identities, and the link protocols it is selected by when
+    // it names any (link.v1 §2.4, 0.3).
+    let shape = |cns: &[String], users: &[String], links: &[String]| {
+        if links.is_empty() {
+            format!("cns {cns:?} usernames {users:?}")
+        } else {
+            format!("cns {cns:?} usernames {users:?} link_protocols {links:?}")
+        }
+    };
     for p in &plan.subjects {
-        let planned = shape(&p.cert_common_names, &p.usernames);
+        let planned = shape(&p.cert_common_names, &p.usernames, &p.link_protocols);
         match observed_subjects.get(p.id.as_str()) {
             None => finding(AclFindingKind::SubjectMissing, &p.id, Some(planned), None),
             Some(o) => {
                 let o_cns = o.cert_common_names.clone().unwrap_or_default();
                 let o_users = o.usernames.clone().unwrap_or_default();
+                let o_links = o.link_protocols.clone().unwrap_or_default();
                 let differs = |a: &[String], b: &[String]| {
                     set(a.iter().map(String::as_str)) != set(b.iter().map(String::as_str))
                 };
-                if differs(&o_cns, &p.cert_common_names) || differs(&o_users, &p.usernames) {
+                // Link protocols the plan does not carry are an unplanned
+                // property, below.
+                if differs(&o_cns, &p.cert_common_names)
+                    || differs(&o_users, &p.usernames)
+                    || (!p.link_protocols.is_empty() && differs(&o_links, &p.link_protocols))
+                {
                     finding(
                         AclFindingKind::SubjectDiffers,
                         &p.id,
                         Some(planned),
-                        Some(shape(&o_cns, &o_users)),
+                        Some(shape(&o_cns, &o_users, &o_links)),
                     );
                 }
             }
@@ -2830,16 +2949,18 @@ pub fn check_acl(
                 Some(shape(
                     &o.cert_common_names.clone().unwrap_or_default(),
                     &o.usernames.clone().unwrap_or_default(),
+                    &o.link_protocols.clone().unwrap_or_default(),
                 )),
             );
         }
         // A property the plan never carries (zids are refused, §11.3;
-        // faces are bound by identity), or one it does not carry for this
-        // subject.
+        // faces are selected by link protocol, never by interface, link.v1
+        // §2.14), or one it does not carry for this subject.
         let carried = |prop: &str| {
             planned.is_some_and(|p| match prop {
                 "usernames" => !p.usernames.is_empty(),
                 "cert_common_names" => !p.cert_common_names.is_empty(),
+                "link_protocols" => !p.link_protocols.is_empty(),
                 _ => false,
             })
         };
@@ -3069,21 +3190,46 @@ pub fn check_acl(
 /// Whether a subject of a router's block can match a session of `far` on a
 /// face selected by `link_protocols` (`link.v1` §2.4): bound by an identity
 /// the far principal holds (a user name or a CN, as the policy names it),
-/// or by no identity at all and, if it names link protocols, one of the
+/// or by no identity at all; and, if it names link protocols, one of the
 /// face's. A subject bound by interfaces alone is not one: a face is
 /// selected by link protocol (§2.14), and the link may report none.
 fn matches_far(s: &crate::report::AclSubjectDoc, far: &str, link_protocols: &[String]) -> bool {
     let named = |v: &Option<Vec<String>>| v.as_ref().is_some_and(|v| !v.is_empty());
     let has = |v: &Option<Vec<String>>| v.as_ref().is_some_and(|v| v.iter().any(|x| x == far));
+    let on_face = match &s.link_protocols {
+        Some(p) if !p.is_empty() => p.iter().any(|x| link_protocols.contains(x)),
+        _ => true,
+    };
     if named(&s.usernames) || named(&s.cert_common_names) {
-        return has(&s.usernames) || has(&s.cert_common_names);
+        return (has(&s.usernames) || has(&s.cert_common_names)) && on_face;
     }
     if named(&s.zids) || named(&s.interfaces) {
         return false;
     }
-    match &s.link_protocols {
-        Some(p) if !p.is_empty() => p.iter().any(|x| link_protocols.contains(x)),
-        _ => true,
+    on_face
+}
+
+/// A router's subjects and posture, as `link.v1` §2.15 reads them.
+fn block_subjects(observed: &AclConfigDoc) -> link::BlockSubjects {
+    let list = |v: &Option<Vec<String>>| v.clone().unwrap_or_default();
+    link::BlockSubjects {
+        posture: if observed.default_permission == AclPermission::Allow.as_str() {
+            link::Posture::Allow
+        } else {
+            link::Posture::Deny
+        },
+        subjects: observed
+            .subjects
+            .iter()
+            .map(|s| link::BlockSubject {
+                id: s.id.clone(),
+                usernames: list(&s.usernames),
+                cert_common_names: list(&s.cert_common_names),
+                link_protocols: s.link_protocols.clone().filter(|p| !p.is_empty()),
+                interfaces: list(&s.interfaces),
+                zids: list(&s.zids),
+            })
+            .collect(),
     }
 }
 
@@ -3105,8 +3251,12 @@ fn applies_to(d: &DownsamplingDoc, link_protocols: &[String]) -> bool {
 /// For each face of `policy`, the block read is, per subject that can match
 /// a session of the far principal on the face, the deny rules of that
 /// subject's policies: any allow wins across subjects (§2.4), so `@zk` must
-/// be denied in each. The downsampling rules are those of every item that
-/// applies to the face's transports, in the block's order. `windows` are
+/// be denied in each. Every other subject is read too
+/// (`link::check_subjects`, 0.3): one bound to another principal must be
+/// kept off the face's link protocols, and under `allow` each of them needs
+/// a subject bound by no identity. The downsampling rules are those of
+/// every item that applies to the face's transports, in the block's order.
+/// `windows` are
 /// the tombstone windows the deployment configures, by address (§2.11):
 /// `None` is not asked. `plan` is the plan the same policy compiled to.
 pub fn check_face(
@@ -3123,7 +3273,11 @@ pub fn check_face(
         observed.rules.iter().map(|r| (r.id.as_str(), r)).collect();
     let mut findings: Vec<link::Finding> = Vec::new();
     let mut faces = Vec::new();
+    let all_subjects = block_subjects(observed);
     for (name, face) in &policy.faces {
+        // No other principal's subject on the face, and under allow the
+        // face's own (§2.4, 0.3).
+        findings.extend(link::check_subjects(name, face, &all_subjects));
         let subjects: Vec<&crate::report::AclSubjectDoc> = observed
             .subjects
             .iter()
@@ -3172,6 +3326,7 @@ pub fn check_face(
                     namespace: plan.namespace.clone(),
                     deny,
                     downsampling: ds.clone(),
+                    subjects: None,
                 },
             ));
         }
@@ -4239,7 +4394,19 @@ type = { raw = "text/plain" }
             assert_eq!(deny.messages, [AclMessage::DeclareQueryable]);
             assert_eq!(deny.key_exprs, [ADMIN_SPACE], "never namespaced");
             assert!(includes(&deny.key_exprs[0], router));
-            assert_eq!(plan.policies.len(), plan.subjects.len());
+            // One policy per principal; a face's own subject (link.v1 §2.4,
+            // 0.3) rides its far principal's.
+            assert_eq!(
+                plan.policies.len(),
+                plan.subjects.iter().filter(|s| !s.runs.is_empty()).count()
+            );
+            for s in &plan.subjects {
+                assert!(
+                    plan.policies.iter().any(|p| p.subjects.contains(&s.id)),
+                    "{}",
+                    s.id
+                );
+            }
             for p in &plan.policies {
                 assert!(p.rules.contains(&DENY_ADMIN_SPACE.to_owned()), "{}", p.id);
             }
@@ -4765,6 +4932,45 @@ type = { raw = "text/plain" }
         assert!(ground.rules.contains(&"deny-write:ground".to_owned()));
         assert!(ground.rules.contains(&DENY_ADMIN_SPACE.to_owned()));
         let _ = e;
+    }
+
+    /// A principal every link protocol of which is a face whose far
+    /// principal it is not could connect over none: it is refused, never
+    /// written with an empty list, which zenoh's loader refuses (link.v1
+    /// §2.4, 0.3). The far principal keeps every protocol.
+    #[test]
+    fn a_principal_every_protocol_of_which_is_another_face_is_refused() {
+        let (e, set, policy) = radio();
+        let every = policy.replace(
+            "select       = { link_protocols = [\"unixsock-stream\"] }",
+            &format!(
+                "select       = {{ link_protocols = {:?} }}",
+                link::LINK_PROTOCOLS
+            ),
+        );
+        assert_ne!(every, policy);
+        let plan = plan_acl(
+            &e,
+            &set,
+            &face_opts(AclPermission::Deny, link::parse(&every)),
+        )
+        .unwrap();
+        let refused: Vec<&str> = plan.refusals.iter().map(|r| r.principal.as_str()).collect();
+        assert_eq!(refused, ["radio-a", "radio-b", "local", "ground-router"]);
+        assert!(plan.refusals.iter().all(|r| r.cite == CITE_FACE_NEAR));
+        let ids: Vec<&str> = plan.subjects.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["ground"]);
+        assert!(plan.subjects[0].link_protocols.is_empty());
+        // Nor a policy, nor a rule no policy lists.
+        let pids: Vec<&str> = plan.policies.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(pids, ["ground"]);
+        for r in &plan.rules {
+            assert!(
+                plan.policies.iter().any(|p| p.rules.contains(&r.id)),
+                "{}",
+                r.id
+            );
+        }
     }
 
     /// `check face` (link.v1 §2.15): the generated block is clean; each

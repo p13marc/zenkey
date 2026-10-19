@@ -1203,8 +1203,24 @@ fn findings_json(f: &[link::Finding]) -> Value {
     serde_json::to_value(f).unwrap()
 }
 
+/// One revision's resources, as `link/conformance/` writes them.
+fn link_resources(rs: &Value) -> Vec<link::Res> {
+    rs.as_array()
+        .expect("resources")
+        .iter()
+        .map(|r| link::Res {
+            template: Template::parse(r["template"].as_str().expect("template"))
+                .expect("a template"),
+            token: link_token(&r["token"]),
+            annotations: annotations(&r["annotations"]),
+        })
+        .collect()
+}
+
 /// A case's deployment, as `link/conformance/` writes it: `implements`, and
-/// the interfaces inline or loaded from `contracts`.
+/// the interfaces inline or loaded from `contracts`. An interface inline is
+/// one revision's resources, or `{revisions: [[...], ...]}` (0.3, F-119);
+/// two contracts of one interface id are two revisions of it.
 fn link_deployment(case: &Value) -> Option<link::Deployment> {
     let implements = case.get("implements")?;
     let mut d = link::Deployment {
@@ -1230,18 +1246,14 @@ fn link_deployment(case: &Value) -> Option<link::Deployment> {
         .into_iter()
         .flatten()
     {
-        let rs = rs
-            .as_array()
-            .expect("resources")
-            .iter()
-            .map(|r| link::Res {
-                template: Template::parse(r["template"].as_str().expect("template"))
-                    .expect("a template"),
-                token: link_token(&r["token"]),
-                annotations: annotations(&r["annotations"]),
-            })
-            .collect();
-        d.interfaces.insert(iface.clone(), rs);
+        match rs.get("revisions") {
+            Some(revs) => {
+                for rev in revs.as_array().expect("revisions") {
+                    d.add_revision(iface.clone(), link_resources(rev));
+                }
+            }
+            None => d.add_revision(iface.clone(), link_resources(rs)),
+        }
     }
     Some(d)
 }
@@ -1299,6 +1311,7 @@ fn plan_as_block(p: &link::FacePlan) -> link::Block {
                 freq: r.freq,
             })
             .collect(),
+        subjects: None,
     }
 }
 
@@ -1373,6 +1386,34 @@ fn link_block(b: &Value) -> (String, link::Block) {
                 freq: r["freq"].as_f64().expect("freq"),
             })
             .collect(),
+        // `default_permission` and `subjects`, together or neither (0.3).
+        subjects: match (b.get("default_permission"), b.get("subjects")) {
+            (None, None) => None,
+            (Some(p), Some(subjects)) => Some(link::BlockSubjects {
+                posture: match p.as_str().expect("default_permission") {
+                    "deny" => link::Posture::Deny,
+                    "allow" => link::Posture::Allow,
+                    other => panic!("default_permission {other:?}"),
+                },
+                subjects: subjects
+                    .as_array()
+                    .expect("subjects")
+                    .iter()
+                    .map(|s| {
+                        let list = |k: &str| s.get(k).map(&strings).unwrap_or_default();
+                        link::BlockSubject {
+                            id: s["id"].as_str().expect("a subject's id").to_owned(),
+                            usernames: list("usernames"),
+                            cert_common_names: list("cert_common_names"),
+                            link_protocols: s.get("link_protocols").map(&strings),
+                            interfaces: list("interfaces"),
+                            zids: list("zids"),
+                        }
+                    })
+                    .collect(),
+            }),
+            _ => panic!("block: default_permission and subjects go together"),
+        },
     };
     (b["face"].as_str().expect("block.face").to_owned(), block)
 }

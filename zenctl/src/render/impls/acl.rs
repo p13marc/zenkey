@@ -80,6 +80,11 @@ impl Render for AclPlan {
                 if !s.cert_common_names.is_empty() {
                     bound.push(format!("cn {}", s.cert_common_names.join(", ")));
                 }
+                // Narrowed off a face, or a face's own subject (link.v1
+                // §2.4).
+                if !s.link_protocols.is_empty() {
+                    bound.push(format!("over {}", s.link_protocols.join(", ")));
+                }
                 let rules = self
                     .policies
                     .iter()
@@ -186,11 +191,16 @@ impl Render for AclPlan {
                 .collect();
             notes.push(Note::caveat(format!(
                 "face {} to {} ({}): its policy carries the face's denies and no presence, \
-                 history, admin-space or contract grant; requests cross by grant, never by exposure \
+                 history, admin-space or contract grant; every other principal's subject is kept \
+                 off the face's link protocols{}; requests cross by grant, never by exposure \
                  (link.v1 §2.4, §2.9){}",
                 f.name,
                 f.far,
                 attach_word(&f.attach),
+                match self.default_permission {
+                    AclPermission::Deny => "",
+                    AclPermission::Allow => ", and the face's own subject rides that policy",
+                },
                 if unobservable.is_empty() {
                     String::new()
                 } else {

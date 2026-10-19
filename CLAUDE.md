@@ -263,20 +263,30 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--face/--attach/--far/--region` are refused by name, exit 2): each
   face's plan (`zenkey_model::link`, carried whole in `AclPlan::faces`) as
   rules `face:<face>:<id>` in the far principal's policy alone, which loses
-  its presence, history, admin-space and contract grants; zenoh's
-  `downsampling` block beside `access_control`, one rule per crossing
-  stream key; for a south region `gateway.south` and `face-declarations`
-  over every queryable the far side may query as its owner declares it
-  (`state/**`, an operation's pattern; core §8.5, 0.30). Router to router
-  is the policy's `router_attach`, refused. `check face <ROUTER-CONFIG>
-  --face-policy … --enrollment … [--window ADDRESS=SECS]` is its judgement
+  its presence, history, admin-space and contract grants; every other
+  principal's subject narrowed to the link protocols outside the faces
+  whose far principal it is not (`AclSubject::link_protocols`; one left
+  with none refused), since zenoh ties no credential to a link, and under
+  `allow` a subject `face:<face>` per face, selected by its link protocols
+  alone and listed in the far principal's policy (link.v1 0.3, F-118, #769
+  LC); zenoh's `downsampling` block beside `access_control`, one rule per
+  crossing stream key; for a south region `gateway.south` and
+  `face-declarations` over every queryable the far side may query as its
+  owner declares it (`state/**`, an operation's pattern; core §8.5, 0.30).
+  Several revisions of a listed interface go to the model, which lets a
+  resource cross only where every one exposes it and warns
+  `exposure_disagrees` (F-119). Router to router is the policy's
+  `router_attach`, refused. `check face <ROUTER-CONFIG> --face-policy …
+  --enrollment … [--window ADDRESS=SECS]` is its judgement
   (`zenkey_fleet::check_face`, report `FaceCheck`): `link.v1` §2.15 per face,
-  read subject by subject, the windows of §2.11 when given, and `acl gen
-  --check`'s comparison, which now covers the downsampling items. Its plans
-  are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`) and judged by a live
-  router (`tests/acl_live.rs`, `tests/acl_face.rs`, and `tests/link_face.rs`,
-  `link.v1`'s scenarios §1–§6 one test per section over a `unixsock-stream`
-  face).
+  read subject by subject, `near_subject_on_face` and under `allow`
+  `face_subject_missing` over every subject, the windows of §2.11 when
+  given, and `acl gen --check`'s comparison, which now covers the
+  downsampling items and a subject's link protocols. Its plans are pinned
+  (`tests/fixtures/acl/`, `ACL_BLESS=1`) and judged by a live router
+  (`tests/acl_live.rs`, `tests/acl_face.rs`, and `tests/link_face.rs`,
+  `link.v1`'s scenarios §1–§8 one test per section over a `unixsock-stream`
+  face, §7 in both postures).
   FJ8a's writes and captures: `gen <address>` and `serve <address> <iface>
   <operation>` are mock owners — real zk2 services through
   `zenkey::ServiceBuilder` (`zenkey_fleet::tape::{generate, mock}`), refused
@@ -505,8 +515,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   downsampling rule per concrete key, the attachment, window floors and
   liveness evidence, and the checks of a router's block; text 0.2, F-116
   and F-117, with core 0.30; `zenctl acl gen --face-policy` compiles a plan
-  into a router's block, and `check face` judges one, #769 LB). It depends on
-  `zenoh-keyexpr` and no other zenoh crate
+  into a router's block, and `check face` judges one, #769 LB; text 0.3,
+  F-118 and F-119, #769 LC: every revision of an interface read together,
+  failing closed, `exposure_disagrees`; `narrowed`, the link protocols a
+  principal's subject keeps off the faces whose far principal it is not;
+  `check_subjects`, `near_subject_on_face` and `face_subject_missing`).
+  It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
   as zenctl's). `tests/examples.rs` requires every contract in

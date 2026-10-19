@@ -13,7 +13,7 @@ and `examples/zk2/`.
 | [`freshness.v1`](freshness/v1.md) | 0.3 | draft | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
 | [`health.v1`](health/v1.md) | 0.4 | draft | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
 | [`config.v1`](config/v1.md) | 0.3 | draft | 0.28 | 1: [`config.v1.toml`](config/config.v1.toml); 4 through `uses` (`freshness.v1`) | Changing a running service's configuration without locking it out: groups with classes, a change that can cut the link applied only under a window and undone once unless confirmed, persistence as a separate act, and the compact status a constrained face can afford (core §5, §6, O7) |
-| [`link.v1`](link/v1.md) | 0.2 | draft | 0.30 | 2: `link.exposure`; 4 through `uses` | What crosses a constrained face: a deployment's face policy, one per router, and the contract's exposure, compiled into named denies, one downsampling rule per concrete key, the attachment, window floors and liveness evidence; `@zk` never crosses (core §8.5, R7, S3) |
+| [`link.v1`](link/v1.md) | 0.3 | draft | 0.30 | 2: `link.exposure`; 4 through `uses` | What crosses a constrained face: a deployment's face policy, one per router, and the contract's exposure, compiled into named denies, one downsampling rule per concrete key, the attachment, window floors and liveness evidence; `@zk` never crosses, and no other principal's credentials get across it (core §8.5, R7, S3) |
 
 ## Layout
 
@@ -105,7 +105,10 @@ thing in the same place.
   publishes its vocabulary, `exposure`, and drops the interim
   `downsample_ms`, the rate being the face policy's; its text 0.2 needed
   0.30, so that §8.5 says what a south region's declaration grant covers:
-  every queryable as its owner declares it.
+  every queryable as its owner declares it. Its text 0.3 needed no change:
+  keeping every other credential off a face, and reading two revisions of
+  one interface together, rest on what core §11.2, §11.3 and §9.8 already
+  say.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in

@@ -1,6 +1,7 @@
 //! `link.v1`'s scenarios, run against live routers
-//! (`spec/profiles/link/scenarios.md` §1–§6, text 0.2; #769, LB): one test
-//! per section, named after it.
+//! (`spec/profiles/link/scenarios.md` §1–§8, text 0.3; #769, LB and LC):
+//! one test per section, named after it. §7 runs under both postures, and
+//! §8 gives the generator two revisions of `radio.v1`.
 //!
 //! The generator is the reference's: `plan_acl` over the example of
 //! `examples/zk2/link/` (the `radio.v1` contract, its enrollment and the
@@ -9,7 +10,9 @@
 //! timestamping on (a router's default) and usrpwd authentication. N listens
 //! on `tcp/127.0.0.1:0`, the near side, and on a `unixsock-stream` socket,
 //! the face, which is what the downsampling block selects (`link.v1` §2.14).
-//! Every session authenticates as a user of its own, under `deny`.
+//! Every session authenticates as a user of its own, under `deny` unless a
+//! section says `allow`; §7's X presents `local`'s credentials over the
+//! face, which is the point (0.3, F-118).
 //!
 //! **The readers subscribe to what they are granted** (0.2, F-116): under
 //! `deny`, zenoh admits a subscription or a GET only when a grant includes
@@ -35,7 +38,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use util::zk2::{T, eventually};
-use zenkey_fleet::report::{AclConfigDoc, AclPermission, AclPlan, DownsamplingDoc, Enrollment};
+use zenkey_fleet::report::{
+    AclConfigDoc, AclPermission, AclPlan, AclPolicy, DownsamplingDoc, Enrollment,
+};
 use zenkey_fleet::{AclOptions, ContractSet, acl_plan_json5, check_face, plan_acl};
 use zenkey_model::freshness::{self, Last, Observation, Verdict};
 use zenkey_model::link;
@@ -100,13 +105,13 @@ const CLOSED: (&str, &str) = (
     "expose       = \"none\"\n",
 );
 
-/// The generator: the block for `policy`, under `deny`.
-fn plan(policy: &str) -> AclPlan {
+/// The generator: the block for `policy` from `contracts`, under `posture`.
+fn plan_with(policy: &str, contracts: &ContractSet, posture: AclPermission) -> AclPlan {
     let plan = plan_acl(
         &enrollment(),
-        &contracts(),
+        contracts,
         &AclOptions {
-            default_permission: AclPermission::Deny,
+            default_permission: posture,
             face_policy: Some(link::parse(policy)),
             ..AclOptions::default()
         },
@@ -114,6 +119,11 @@ fn plan(policy: &str) -> AclPlan {
     .expect("the radio example plans");
     assert!(plan.refusals.is_empty(), "{:#?}", plan.refusals);
     plan
+}
+
+/// The generator: the block for `policy`, under `deny`.
+fn plan(policy: &str) -> AclPlan {
+    plan_with(policy, &contracts(), AclPermission::Deny)
 }
 
 /// A tool checking the block N runs (§2.15): the fragment `block` wrote,
@@ -125,7 +135,16 @@ fn check(
     policy: &str,
     windows: Option<&BTreeMap<String, u64>>,
 ) -> zenkey_fleet::report::FaceCheck {
-    let planned = self::plan(policy);
+    check_against(block, &self::plan(policy), policy, windows)
+}
+
+/// [`check`], against the plan `planned`.
+fn check_against(
+    block: &AclPlan,
+    planned: &AclPlan,
+    policy: &str,
+    windows: Option<&BTreeMap<String, u64>>,
+) -> zenkey_fleet::report::FaceCheck {
     let block = acl_plan_json5(block);
     let c = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
     let acl: AclConfigDoc = serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
@@ -140,7 +159,7 @@ fn check(
         .and_then(|g| serde_json::from_str(&g).ok());
     let parsed = link::parse(policy);
     check_face(
-        &planned,
+        planned,
         parsed.policy.as_ref().unwrap(),
         &acl,
         &ds,
@@ -518,40 +537,50 @@ async fn one(o: &Owner, g: &zenoh::Session, plan: &AclPlan, l: Option<&zenoh::Se
     o.settle(&ready, &[]).await;
     traffic(o).await;
     tokio::time::sleep(SILENCE).await;
-    let r = "radio-a/radio.v1/";
     if let Some(lr) = &lr {
-        // L receives every sample, put and occurrence.
-        let l = &lr.seen;
-        for res in [
-            "stream/air/dropped_total",
-            "stream/air/frames_total",
-            "@stream/frames",
-            "@stream/raw",
-        ] {
-            let n = l.puts(&format!("{r}{res}"));
-            assert!(n >= 80, "L receives about 100 of {res}: {n}");
-        }
-        assert_eq!(l.puts(&format!("{r}state/oper")), 10);
-        assert_eq!(l.puts(&format!("{r}events/fault/")), 5);
-        assert_eq!(l.puts(&format!("{r}events/change/")), 5);
+        assert_near(&lr.seen);
     }
-    let s = &gr.seen;
-    let read = zenkey::presence::liveliness_read(g, "zk2/lab/*/@zk/**", T)
+    far1(g, &gr.seen, Duration::from_secs(5)).await
+}
+
+/// L receives every sample, put and occurrence of the owner's traffic.
+fn assert_near(l: &Seen) {
+    let r = "radio-a/radio.v1/";
+    for res in [
+        "stream/air/dropped_total",
+        "stream/air/frames_total",
+        "@stream/frames",
+        "@stream/raw",
+    ] {
+        let n = l.puts(&format!("{r}{res}"));
+        assert!(n >= 80, "L receives about 100 of {res}: {n}");
+    }
+    assert_eq!(l.puts(&format!("{r}state/oper")), 10);
+    assert_eq!(l.puts(&format!("{r}events/fault/")), 5);
+    assert_eq!(l.puts(&format!("{r}events/change/")), 5);
+}
+
+/// What the reader `s` saw of the owner's traffic (`seen`), and what it may
+/// ask: the GET and the call, each retried for `within`; the tokens; the
+/// descriptor.
+async fn far1(s: &zenoh::Session, seen: &Seen, within: Duration) -> Far1 {
+    let r = "radio-a/radio.v1/";
+    let read = zenkey::presence::liveliness_read(s, "zk2/lab/*/@zk/**", T)
         .await
         .unwrap();
     assert!(read.complete, "a refused read is complete (§8.1): {read:?}");
     Far1 {
-        dropped: s.puts(&format!("{r}stream/air/dropped_total")),
-        frames: s.puts(&format!("{r}@stream/frames")),
-        frames_total: s.puts(&format!("{r}stream/air/frames_total")),
-        raw: s.puts(&format!("{r}@stream/raw")),
-        oper: s.puts(&format!("{r}state/oper")),
-        fault: s.puts(&format!("{r}events/fault/")),
-        change: s.puts(&format!("{r}events/change/")),
-        get: answered(g, PEERS_X, false, Duration::from_secs(5)).await,
-        call: answered(g, RESET, true, Duration::from_secs(5)).await,
+        dropped: seen.puts(&format!("{r}stream/air/dropped_total")),
+        frames: seen.puts(&format!("{r}@stream/frames")),
+        frames_total: seen.puts(&format!("{r}stream/air/frames_total")),
+        raw: seen.puts(&format!("{r}@stream/raw")),
+        oper: seen.puts(&format!("{r}state/oper")),
+        fault: seen.puts(&format!("{r}events/fault/")),
+        change: seen.puts(&format!("{r}events/change/")),
+        get: answered(s, PEERS_X, false, within).await,
+        call: answered(s, RESET, true, within).await,
         tokens: read.keys.len(),
-        descriptor: values(g, INSTANCE, false).await,
+        descriptor: values(s, INSTANCE, false).await,
     }
 }
 
@@ -1080,4 +1109,337 @@ async fn s6_liveness_across_the_face() {
     //    publishes, and nothing of it reaches G.
     assert_eq!(from_start, "unobservable");
     assert_eq!(nothing, 0, "G receives nothing of the owner");
+}
+
+/// The console's Consume selectors, as the `deny` block grants them
+/// (F-116): what every reader subscribes to, under either posture.
+fn selectors() -> Vec<String> {
+    plan(&policy(&[]))
+        .rules
+        .into_iter()
+        .find(|r| r.id == "consume-in:tool.console")
+        .expect("the console's Consume")
+        .key_exprs
+}
+
+/// How many of five puts `s` makes on `lab/radio-a`'s `air/dropped_total`,
+/// a write only `lab/radio-a` may make (core §11.1, Own), reach L's reader
+/// `l`, the owner silent.
+async fn forged(s: &zenoh::Session, l: &Seen) -> usize {
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    l.clear();
+    for i in 0..5 {
+        s.put(
+            "zk2/lab/radio-a/radio.v1/stream/air/dropped_total",
+            format!("forged {i}"),
+        )
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    l.puts("radio-a/radio.v1/stream/air/dropped_total")
+}
+
+/// §7's steps on `plan`: L near, and a session over the face for each of
+/// `users`, `true` for one that must hear the owner before the traffic
+/// starts. What each one over the face receives of the owner's traffic and
+/// may ask, and how many of its forged puts reach L.
+async fn on_face(plan: &AclPlan, users: &[(&str, bool)]) -> Vec<(Far1, usize)> {
+    let sel = selectors();
+    let n = near(plan).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let l = client(&n.tcp, "local").await;
+    let lr = reader(&l, plan, Some(&sel)).await;
+    let mut sessions = Vec::new();
+    let mut readers = Vec::new();
+    for (user, _) in users {
+        let s = client(&n.face, user).await;
+        readers.push(reader(&s, plan, Some(&sel)).await);
+        sessions.push(s);
+    }
+    let mut ready = vec![&lr.seen];
+    let mut quiet = Vec::new();
+    for ((_, hears), r) in users.iter().zip(&readers) {
+        if *hears {
+            ready.push(&r.seen);
+        } else {
+            quiet.push(&r.seen);
+        }
+    }
+    o.settle(&ready, &quiet).await;
+    traffic(&o).await;
+    tokio::time::sleep(SILENCE).await;
+    assert_near(&lr.seen);
+    let mut out = Vec::new();
+    for (s, r) in sessions.iter().zip(&readers) {
+        let seen = far1(s, &r.seen, Duration::from_secs(3)).await;
+        out.push((seen, forged(s, &lr.seen).await));
+    }
+    out
+}
+
+/// What a session over the face gets when nothing guards the face from it:
+/// every push, the tokens, its requests answered (F-118's measurement).
+/// The downsampling still applies: it selects by link protocol.
+fn assert_unguarded(x: &Far1) {
+    assert!(
+        x.frames_total >= 80 && x.raw >= 80,
+        "what stays home: {x:?}"
+    );
+    assert!(
+        (4..=6).contains(&x.dropped) && (4..=6).contains(&x.frames),
+        "downsampled all the same: {x:?}"
+    );
+    assert_eq!((x.oper, x.fault, x.change), (10, 5, 5), "{x:?}");
+    assert!(x.get && x.call, "{x:?}");
+    assert_eq!(
+        x.tokens, 2,
+        "the owner's instance and interface tokens: {x:?}"
+    );
+}
+
+/// §7 A near principal's credentials on the face (§2.4).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_a_near_principals_credentials_on_the_face() {
+    let text = policy(&[]);
+    let deny = plan(&text);
+    let allow = plan_with(&text, &contracts(), AclPermission::Allow);
+    // 1. Every subject but the far principal's is narrowed off the face;
+    //    under allow, the face has a subject of its own, in ground's policy.
+    for p in [&deny, &allow] {
+        for s in &p.subjects {
+            match s.id.as_str() {
+                "ground" => assert!(s.link_protocols.is_empty(), "{s:?}"),
+                "face:radio" => assert_eq!(s.link_protocols, ["unixsock-stream"]),
+                _ => assert_eq!(
+                    s.link_protocols,
+                    [
+                        "tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"
+                    ],
+                    "{}",
+                    s.id
+                ),
+            }
+        }
+    }
+    assert!(!deny.subjects.iter().any(|s| s.id == "face:radio"));
+    let ground = allow.policies.iter().find(|p| p.id == "ground").unwrap();
+    assert_eq!(ground.subjects, ["ground", "face:radio"]);
+
+    // The controls. 2: 0.2's block, no subject narrowed. 4: under allow,
+    // the subjects narrowed and no face subject. 5: under allow, the face's
+    // subject with the plan's denies alone, in a policy of its own.
+    let mut old = deny.clone();
+    for s in &mut old.subjects {
+        s.link_protocols.clear();
+    }
+    let mut open = allow.clone();
+    open.subjects.retain(|s| s.id != "face:radio");
+    for p in &mut open.policies {
+        p.subjects.retain(|s| s != "face:radio");
+    }
+    let mut split = open.clone();
+    split.subjects.push(
+        allow
+            .subjects
+            .iter()
+            .find(|s| s.id == "face:radio")
+            .unwrap()
+            .clone(),
+    );
+    split.policies.push(AclPolicy {
+        id: "face:radio".into(),
+        rules: ground
+            .rules
+            .iter()
+            .filter(|r| r.starts_with("face:radio:"))
+            .cloned()
+            .collect(),
+        subjects: vec!["face:radio".into()],
+    });
+
+    let under_deny = on_face(&deny, &[("ground", true), ("local", false)]).await;
+    let under_old = on_face(&old, &[("local", true)]).await;
+    let under_allow = on_face(&allow, &[("ground", true), ("local", true)]).await;
+    let under_open = on_face(&open, &[("local", true)]).await;
+    let under_split = on_face(&split, &[("ground", true)]).await;
+
+    // 1. Under deny, `local` over the face matches no subject: nothing at
+    //    all, its requests unanswered. G as §1.
+    assert_far(&under_deny[0].0);
+    let nothing = Far1 {
+        dropped: 0,
+        frames: 0,
+        frames_total: 0,
+        raw: 0,
+        oper: 0,
+        fault: 0,
+        change: 0,
+        get: false,
+        call: false,
+        tokens: 0,
+        descriptor: 0,
+    };
+    assert_eq!(under_deny[1], (nothing, 0), "local over the face, deny");
+    // 2. 0.2's block: local's subject matches over the face, and its
+    //    grants carry everything there (F-118).
+    assert_unguarded(&under_old[0].0);
+    // 3. Under allow, `local` over the face matches the face's subject, in
+    //    ground's policy: what G gets, never more. Neither may write
+    //    radio-a's keys.
+    assert_far(&under_allow[0].0);
+    assert_far(&under_allow[1].0);
+    assert_eq!((under_allow[0].1, under_allow[1].1), (0, 0), "no forgery");
+    // 4. Narrowed with no face subject, under allow: no subject, the
+    //    default, everything, its writes included.
+    assert_unguarded(&under_open[0].0);
+    assert_eq!(under_open[0].1, 5, "a session matching no subject writes");
+    // 5. A face subject with the plan's denies alone undoes ground's own:
+    //    any allow wins across subjects, so its writes reach L.
+    assert_far(&under_split[0].0);
+    assert_eq!(under_split[0].1, 5, "ground's deny-write undone");
+
+    // 6. A tool checks each block (§2.15).
+    let clean = check(&deny, &text, None);
+    assert!(clean.findings.is_empty(), "{:?}", clean.findings);
+    assert!(clean.comparison.findings.is_empty());
+    let c = check(&old, &text, None);
+    let near: Vec<(link::Code, &str)> =
+        c.findings.iter().map(|f| (f.code, f.at.as_str())).collect();
+    assert_eq!(
+        near,
+        [
+            (link::Code::NearSubjectOnFace, "ground-router"),
+            (link::Code::NearSubjectOnFace, "local"),
+            (link::Code::NearSubjectOnFace, "radio-a"),
+            (link::Code::NearSubjectOnFace, "radio-b"),
+        ]
+    );
+    let clean = check_against(&allow, &allow, &text, None);
+    assert!(clean.findings.is_empty(), "{:?}", clean.findings);
+    assert!(clean.comparison.findings.is_empty());
+    let c = check_against(&open, &allow, &text, None);
+    assert_eq!(
+        c.findings,
+        [link::Finding::new(
+            link::Code::FaceSubjectMissing,
+            Some("radio"),
+            "unixsock-stream"
+        )]
+    );
+    // The face subject's policy is the comparison's: §2.15 cannot tell
+    // which denies are the far principal's.
+    let c = check_against(&split, &allow, &text, None);
+    assert!(c.findings.is_empty(), "{:?}", c.findings);
+    assert!(!c.comparison.findings.is_empty());
+}
+
+/// `radio.v1` minor 1: minor 0 with `air/frames_total` marked `link`, an
+/// annotation changed, which core §9.8 classes a review.
+fn minor_1() -> ContractSet {
+    let text = std::fs::read_to_string(dir().join("radio.v1.toml")).unwrap();
+    let from = "[resources.\"air/frames_total\"]                # stays home\n\
+                kind = \"stream\"\n\
+                type = { raw = \"text/plain\" }\n";
+    assert!(text.contains(from) && text.contains("minor = 0"));
+    let text = text.replace("minor = 0", "minor = 1").replace(
+        from,
+        "[resources.\"air/frames_total\"]\n\
+         kind        = \"stream\"\n\
+         type        = { raw = \"text/plain\" }\n\
+         annotations = { \"link.exposure\" = \"link\" }\n",
+    );
+    let path = scratch("radio.v1.toml");
+    std::fs::write(&path, text).unwrap();
+    let (set, problems) = ContractSet::load_path(&path);
+    let _ = std::fs::remove_file(&path);
+    assert!(problems.is_empty(), "{problems:?}");
+    set
+}
+
+/// Both owners' `air/frames_total` and `air/dropped_total` at 20 Hz for
+/// 5 s, after the settle: what G receives of each owner's two streams, and
+/// what L receives of each owner's `air/frames_total`.
+async fn two_minors(plan: &AclPlan) -> ([usize; 2], [usize; 2], [usize; 2]) {
+    let sel = selectors();
+    let n = near(plan).await;
+    let a = owner(&n.tcp, "radio-a").await;
+    let b = owner(&n.tcp, "radio-b").await;
+    let g = client(&n.face, "ground").await;
+    let l = client(&n.tcp, "local").await;
+    let gr = reader(&g, plan, Some(&sel)).await;
+    let lr = reader(&l, plan, Some(&sel)).await;
+    eventually("G and L hear both owners' oper", || async {
+        a.put("state/oper", "probe").await;
+        b.put("state/oper", "probe").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        [&gr.seen, &lr.seen].iter().all(|s| {
+            s.puts("radio-a/radio.v1/state/oper") > 0 && s.puts("radio-b/radio.v1/state/oper") > 0
+        })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    gr.seen.clear();
+    lr.seen.clear();
+    for i in 0..100u64 {
+        for o in [&a, &b] {
+            o.put("stream/air/frames_total", i.to_string()).await;
+            o.put("stream/air/dropped_total", i.to_string()).await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(SILENCE).await;
+    let of = |s: &Seen, stream: &str| {
+        ["radio-a", "radio-b"].map(|o| s.puts(&format!("{o}/radio.v1/stream/air/{stream}")))
+    };
+    (
+        of(&gr.seen, "frames_total"),
+        of(&gr.seen, "dropped_total"),
+        of(&lr.seen, "frames_total"),
+    )
+}
+
+/// §8 Two minors that disagree on a stream's exposure (§2.3, §2.7).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s8_two_minors_that_disagree_on_a_streams_exposure() {
+    let text = policy(&[BOTH_LISTED]);
+    let mut both = contracts();
+    both.extend(minor_1());
+    let together = plan_with(&text, &both, AclPermission::Deny);
+    let newer = plan_with(&text, &minor_1(), AclPermission::Deny);
+    let older = plan(&text);
+    // 1. From both revisions: the warning, and minor 0's denies and rules.
+    assert_eq!(together.contracts.len(), 2, "{:?}", together.contracts);
+    assert_eq!(
+        together.faces[0].findings,
+        [link::Finding::new(
+            link::Code::ExposureDisagrees,
+            Some("radio"),
+            "radio.v1/stream/air/frames_total"
+        )]
+    );
+    assert_eq!(together.faces[0].deny, older.faces[0].deny);
+    assert_eq!(together.downsampling, older.downsampling);
+    // 2. The control, minor 1 alone: frames_total crosses for both owners,
+    //    and radio-b's, `host` in the minor it runs, with it.
+    assert!(newer.faces[0].findings.is_empty());
+    for o in ["radio-a", "radio-b"] {
+        let k = format!("zk2/lab/{o}/radio.v1/stream/air/frames_total");
+        assert!(
+            newer.downsampling[0].rules.iter().any(|r| r.key_expr == k),
+            "{k}"
+        );
+    }
+
+    let (g1, d1, l1) = two_minors(&together).await;
+    let (g2, d2, _) = two_minors(&newer).await;
+    // 1. Neither owner's frames_total crosses; dropped_total does, at 1 Hz;
+    //    L receives every sample.
+    assert_eq!(g1, [0, 0], "frames_total from neither owner");
+    assert!(d1.iter().all(|n| (4..=6).contains(n)), "{d1:?}");
+    assert!(l1.iter().all(|n| *n >= 80), "{l1:?}");
+    // 2. Minor 1 alone lets both owners' cross (F-119).
+    assert!(g2.iter().all(|n| (4..=6).contains(n)), "{g2:?}");
+    assert!(d2.iter().all(|n| (4..=6).contains(n)), "{d2:?}");
 }

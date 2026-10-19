@@ -117,11 +117,12 @@ access_control: {
       key_exprs: ["zk2/*/*/radio.v1/events/change/**"] },
   ],
   subjects: [
-    { id: "radio-a", usernames: ["radio-a"] },  // runs lab/radio-a
-    { id: "radio-b", usernames: ["radio-b"] },  // runs lab/radio-b
-    { id: "local", usernames: ["local"] },  // runs tool.console
+    // link.v1 §2.4 (0.3, F-118): zenoh ties no credential to a link, so a subject bound by a user name or a CN alone matches that principal's session over a face too; each principal's subject is selected by the link protocols outside the faces whose far principal it is not; under deny, a session matching no subject is granted nothing.
+    { id: "radio-a", usernames: ["radio-a"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs lab/radio-a
+    { id: "radio-b", usernames: ["radio-b"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs lab/radio-b
+    { id: "local", usernames: ["local"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs tool.console
     { id: "ground", usernames: ["ground"] },  // runs tool.console
-    { id: "ground-router", usernames: ["ground-router"] },  // runs tool.console
+    { id: "ground-router", usernames: ["ground-router"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs tool.console
   ],
   policies: [
     { id: "radio-a", rules: ["own-in:lab/radio-a", "own-out:lab/radio-a", "fan-in-presence:lab/radio-a", "fan-in:lab/radio-a", "fan-in-reply:lab/radio-a", "contracts-in", "contracts-out"],

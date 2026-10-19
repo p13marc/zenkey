@@ -538,7 +538,10 @@ ground  query  zk2/vehicle-01/navigation/nav.v2/state/status
 carves around what crosses, and the fragment gains the `downsampling`
 block, zenoh's, one rule per crossing stream key at the face's rate. Only
 `ground`'s policy carries the face; `local` and `ground-router` run the
-same console without it.
+same console without it. zenoh ties no credential to a link, so every
+subject but the far principal's is narrowed off the face's link protocol
+(link.v1 §2.4, 0.3): `local`'s credentials over the face match no subject,
+and under `deny` get nothing.
 
 ```console
 $ zenctl acl gen --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --face-policy ../examples/zk2/link/radio.face.toml --json5
@@ -548,6 +551,15 @@ $ zenctl acl gen --enrollment ../examples/zk2/link/radio.enrollment.toml --contr
     { id: "face:radio:stream:radio.v1", permission: "deny", flows: ["egress", "ingress"],
       messages: ["put", "delete", "declare_subscriber"],
       key_exprs: ["zk2/*/*/radio.v1/stream/air/frames_total/**"] },
+...
+  subjects: [
+    // link.v1 §2.4 (0.3, F-118): zenoh ties no credential to a link, so a subject bound by a user name or a CN alone matches that principal's session over a face too; each principal's subject is selected by the link protocols outside the faces whose far principal it is not; under deny, a session matching no subject is granted nothing.
+    { id: "radio-a", usernames: ["radio-a"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs lab/radio-a
+    { id: "radio-b", usernames: ["radio-b"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs lab/radio-b
+    { id: "local", usernames: ["local"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs tool.console
+    { id: "ground", usernames: ["ground"] },  // runs tool.console
+    { id: "ground-router", usernames: ["ground-router"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs tool.console
+  ],
 ...
 downsampling: [
   // face radio: 2 rule(s) at 1 Hz

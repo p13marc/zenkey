@@ -845,9 +845,14 @@ not mark `link.exposure = "link"`. Its crossing streams get zenoh's
 `downsampling` block, one rule per concrete key at the face's rate. A south
 region adds the near router's `gateway.south` and the declarations of
 every queryable the far side may query, as its owner declares it (core
-§8.5, 0.30). GETs and calls cross by grant, never by exposure. Router to
-router is refused, because a deny there lets the denied key strings cross.
-`zenctl check face` judges a router's config file against the face policy.
+§8.5, 0.30). GETs and calls cross by grant, never by exposure. zenoh ties
+no credential to a link, so every other principal's subject is selected
+by the link protocols outside the face's, and under `allow` the face gets
+a subject of its own in the far principal's policy (`link.v1` §2.4, 0.3):
+a near principal's credentials over the face get nothing, or under
+`allow` what the far principal gets. Router to router is refused, because
+a deny there lets the denied key strings cross. `zenctl check face`
+judges a router's config file against the face policy.
 
 ```
 $ zenctl acl gen --enrollment examples/zk2/acl/tcgui.enrollment.toml \

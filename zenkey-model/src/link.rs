@@ -3,8 +3,10 @@
 //!
 //! The profile's session-free half: the exposure a contract gives a
 //! resource (§2.2), the face policy a deployment writes and its lints
-//! (§2.1), the plan a generator derives from both (§2.3–§2.12), and the
-//! checks of a router's block (§2.15).
+//! (§2.1), the plan a generator derives from both (§2.3–§2.12), every
+//! revision of an interface read together, how a generator keeps every
+//! other principal's subject off a face (§2.4), and the checks of a
+//! router's block (§2.15).
 //!
 //! ```text
 //! exposure(kind, annotations)       ─▶ host │ link │ invalid │ ignored
@@ -12,7 +14,9 @@
 //! parse(face policy TOML)           ─▶ the policy, or the findings that refuse it
 //! plan(policy, deployment)          ─▶ per face: denies, downsampling, attachment,
 //!                                      window floors, liveness evidence, warnings
-//! check_windows / check_block       ─▶ findings
+//! narrowed(policy, is_far)          ─▶ the link protocols a principal's subject keeps
+//! check_windows / check_block /
+//!   check_subjects                  ─▶ findings
 //! ```
 //!
 //! There is no session here and no router: a generator writes the plan
@@ -334,6 +338,9 @@ pub enum Code {
     /// A crossing stream whose horizon is below twice the interval
     /// (§2.12).
     IntervalOverHorizon,
+    /// Revisions of a listed interface that disagree on a resource's
+    /// exposure, one `link` and another not: it does not cross (§2.3, 0.3).
+    ExposureDisagrees,
     /// A listed owner's tombstone window below the outage (§2.11).
     WindowUnderOutage,
     /// A block whose denies leave a pair of `@zk` open (§2.15).
@@ -342,6 +349,12 @@ pub enum Code {
     WildcardDownsampling,
     /// Two downsampling rules that intersect (§2.15).
     IntersectingDownsampling,
+    /// A subject bound to another principal than the face's far one that
+    /// can match a session on the face (§2.4, §2.15, 0.3).
+    NearSubjectOnFace,
+    /// Under `allow`, a link protocol of the face that no subject bound by
+    /// no identity selects (§2.4, §2.15, 0.3).
+    FaceSubjectMissing,
 }
 
 impl Code {
@@ -363,10 +376,13 @@ impl Code {
             Self::TemplatedExposure => "templated_exposure",
             Self::CarveOutOverlap => "carve_out_overlap",
             Self::IntervalOverHorizon => "interval_over_horizon",
+            Self::ExposureDisagrees => "exposure_disagrees",
             Self::WindowUnderOutage => "window_under_outage",
             Self::ZkNotDenied => "zk_not_denied",
             Self::WildcardDownsampling => "wildcard_downsampling",
             Self::IntersectingDownsampling => "intersecting_downsampling",
+            Self::NearSubjectOnFace => "near_subject_on_face",
+            Self::FaceSubjectMissing => "face_subject_missing",
         }
     }
 
@@ -377,7 +393,8 @@ impl Code {
             Self::BatchOverLease
             | Self::TemplatedExposure
             | Self::CarveOutOverlap
-            | Self::IntervalOverHorizon => Severity::Warning,
+            | Self::IntervalOverHorizon
+            | Self::ExposureDisagrees => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -896,23 +913,89 @@ impl From<&Resource> for Res {
 }
 
 /// What the plan needs of the deployment (§2.3): the interfaces each listed
-/// service implements, and each interface's resources.
+/// service implements, and the revisions given of each interface.
 #[derive(Debug, Clone, Default)]
 pub struct Deployment {
     /// A service's name → the interface ids it implements.
     pub implements: BTreeMap<String, Vec<String>>,
-    /// An interface id → its resources.
-    pub interfaces: BTreeMap<String, Vec<Res>>,
+    /// An interface id → each revision given of it, as its resources. Two
+    /// minors of one major are two revisions of one id: an annotation
+    /// changed between them is a review (core §9.8), and two services of
+    /// one deployment may run either (core §3.3). The plan reads them
+    /// together, failing closed where they disagree (§2.3).
+    pub interfaces: BTreeMap<String, Vec<Vec<Res>>>,
 }
 
 impl Deployment {
-    /// Adds a contract's resources under its interface id.
+    /// Adds a contract's resources as a revision of its interface id.
     pub fn add_contract(&mut self, c: &Contract) {
-        self.interfaces.insert(
+        self.add_revision(
             c.iface.to_string(),
             c.resources.iter().map(Res::from).collect(),
         );
     }
+
+    /// Adds one revision of `iface`, as its resources.
+    pub fn add_revision(&mut self, iface: impl Into<String>, resources: Vec<Res>) {
+        self.interfaces
+            .entry(iface.into())
+            .or_default()
+            .push(resources);
+    }
+}
+
+/// An interface's resources as the plan reads them across its revisions
+/// (§2.3): each resource any revision declares, paired by kind token and
+/// template, first revision first. A resource several revisions declare is
+/// exposed only where every one of them reads `link` (§2.2 fails closed),
+/// and has a horizon only where every one gives it a horizon above 0, the
+/// least of them (§2.12). The set holds the indices of the resources the
+/// revisions disagree on: one reads `link`, another does not.
+fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
+    let mut out: Vec<Res> = Vec::new();
+    let mut readings: Vec<Vec<&Res>> = Vec::new();
+    for rev in revisions {
+        for r in rev {
+            match out
+                .iter()
+                .position(|x| x.token == r.token && x.template == r.template)
+            {
+                Some(i) => readings[i].push(r),
+                None => {
+                    out.push(r.clone());
+                    readings.push(vec![r]);
+                }
+            }
+        }
+    }
+    let mut disagree = BTreeSet::new();
+    for (i, rs) in readings.iter().enumerate() {
+        let links = rs
+            .iter()
+            .filter(|r| exposure(kind_of(r.token), &r.annotations) == Exposure::Link)
+            .count();
+        if links > 0 && links < rs.len() {
+            disagree.insert(i);
+            out[i]
+                .annotations
+                .insert(EXPOSURE.to_owned(), Value::String("host".to_owned()));
+        }
+        let ttls: Vec<Option<std::time::Duration>> = rs.iter().map(|r| horizon(r).ttl()).collect();
+        if ttls.windows(2).any(|w| w[0] != w[1]) {
+            match ttls.into_iter().collect::<Option<Vec<_>>>() {
+                Some(all) => {
+                    let least = all.into_iter().min().unwrap_or_default();
+                    out[i]
+                        .annotations
+                        .insert(freshness::TTL_S.to_owned(), Value::from(least.as_secs()));
+                }
+                None => {
+                    out[i].annotations.remove(freshness::TTL_S);
+                }
+            }
+        }
+    }
+    (out, disagree)
 }
 
 // ── The plan (§2.3–§2.12) ────────────────────────────────────────────────
@@ -1016,7 +1099,11 @@ pub fn plan(policy: &FacePolicy, deployment: &Deployment) -> Result<Vec<FacePlan
             None => errors.push(Finding::new(Code::ServiceUnknown, None, s.clone())),
             Some(ifaces) => {
                 for i in ifaces {
-                    if deployment.interfaces.contains_key(i) {
+                    if deployment
+                        .interfaces
+                        .get(i)
+                        .is_some_and(|revs| !revs.is_empty())
+                    {
                         listed.insert(i);
                     } else {
                         errors.push(Finding::new(Code::ContractUnknown, None, i.clone()));
@@ -1031,22 +1118,33 @@ pub fn plan(policy: &FacePolicy, deployment: &Deployment) -> Result<Vec<FacePlan
     }
     let mut services: Vec<&String> = policy.services.iter().collect();
     services.sort_by_key(|s| policy.address(s));
+    // Each listed interface read once across its revisions (§2.3).
+    let view: View = listed
+        .iter()
+        .map(|i| ((*i).to_owned(), merge(&deployment.interfaces[*i])))
+        .collect();
     Ok(policy
         .faces
         .iter()
-        .map(|(name, face)| plan_face(policy, deployment, &services, &listed, name, face))
+        .map(|(name, face)| plan_face(policy, deployment, &view, &services, &listed, name, face))
         .collect())
 }
+
+/// Each listed interface's resources across its revisions, and the ones
+/// they disagree on ([`merge`]).
+type View = BTreeMap<String, (Vec<Res>, BTreeSet<usize>)>;
 
 fn plan_face(
     policy: &FacePolicy,
     deployment: &Deployment,
+    view: &View,
     services: &[&String],
     listed: &BTreeSet<&str>,
     name: &str,
     face: &Face,
 ) -> FacePlan {
     let mut findings = Vec::new();
+    let resources_of = |iface: &str| -> &[Res] { &view[iface].0 };
     // Whether each resource of each listed interface crosses (§2.7).
     let crossing_of = |r: &Res| {
         crossing(
@@ -1057,10 +1155,18 @@ fn plan_face(
         )
     };
     for iface in listed {
-        for r in &deployment.interfaces[*iface] {
+        let (resources, disagree) = &view[*iface];
+        for (i, r) in resources.iter().enumerate() {
             if crossing_of(r).reason == Reason::Templated {
                 findings.push(Finding::new(
                     Code::TemplatedExposure,
+                    Some(name),
+                    res_name(iface, r),
+                ));
+            }
+            if face.expose == Expose::Link && disagree.contains(&i) {
+                findings.push(Finding::new(
+                    Code::ExposureDisagrees,
                     Some(name),
                     res_name(iface, r),
                 ));
@@ -1077,7 +1183,7 @@ fn plan_face(
     let mut overlapped: BTreeSet<String> = BTreeSet::new();
     for token in PUSH_TOKENS {
         let any = listed.iter().any(|i| {
-            deployment.interfaces[*i]
+            resources_of(i)
                 .iter()
                 .any(|r| r.token == token && crossing_of(r).crosses())
         });
@@ -1089,7 +1195,7 @@ fn plan_face(
             continue;
         }
         for iface in listed {
-            let items: Vec<Item<'_>> = deployment.interfaces[*iface]
+            let items: Vec<Item<'_>> = resources_of(iface)
                 .iter()
                 .filter(|r| r.token == token)
                 .map(|r| Item {
@@ -1131,7 +1237,7 @@ fn plan_face(
     if let Some(freq) = face.freq() {
         for s in services {
             for iface in &deployment.implements[s.as_str()] {
-                for r in &deployment.interfaces[iface] {
+                for r in resources_of(iface) {
                     if is_stream(r.token) && crosses(iface, r) {
                         rules.push(Rule {
                             key_expr: format!(
@@ -1149,7 +1255,7 @@ fn plan_face(
         rules.sort_by(|a, b| a.key_expr.cmp(&b.key_expr));
         rules.dedup_by(|a, b| a.key_expr == b.key_expr);
         for iface in listed {
-            for r in &deployment.interfaces[*iface] {
+            for r in resources_of(iface) {
                 if let (true, Some(ttl), Some(n)) = (
                     is_stream(r.token) && crosses(iface, r),
                     horizon(r).ttl(),
@@ -1181,7 +1287,7 @@ fn plan_face(
         let resources = || {
             ifaces
                 .iter()
-                .flat_map(|i| deployment.interfaces[i].iter().map(move |r| (i, r)))
+                .flat_map(|i| resources_of(i).iter().map(move |r| (i, r)))
         };
         if resources().any(|(_, r)| is_state(r.token)) {
             windows.push(Window {
@@ -1413,7 +1519,7 @@ pub fn check_windows(
             deployment
                 .interfaces
                 .get(i)
-                .is_some_and(|rs| rs.iter().any(|r| is_state(r.token)))
+                .is_some_and(|revs| revs.iter().flatten().any(|r| is_state(r.token)))
         });
         if !owns_state {
             continue;
@@ -1451,14 +1557,54 @@ pub struct BlockRule {
     pub freq: f64,
 }
 
+/// zenoh's `default_permission`, as a router's block runs it (core §11.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Posture {
+    Deny,
+    Allow,
+}
+
+/// One subject of a router's block, as read (§2.4, §2.15): zenoh 1.10.1's
+/// `AclConfigSubjects`. A session matches it when it matches every property
+/// the subject names, and one value of each.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockSubject {
+    pub id: String,
+    pub usernames: Vec<String>,
+    pub cert_common_names: Vec<String>,
+    /// `None` when the subject names no link protocol: it selects every one.
+    pub link_protocols: Option<Vec<String>>,
+    pub interfaces: Vec<String>,
+    pub zids: Vec<String>,
+}
+
+impl BlockSubject {
+    /// Whether it is bound to a principal: a user name or a CN.
+    fn bound(&self) -> bool {
+        !self.usernames.is_empty() || !self.cert_common_names.is_empty()
+    }
+}
+
+/// A block's posture and every subject it defines, when they were read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockSubjects {
+    pub posture: Posture,
+    pub subjects: Vec<BlockSubject>,
+}
+
 /// What a router runs for one face, as somebody read it (§2.15).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Block {
     /// The deployment's namespace, empty for none (core §1.6).
     pub namespace: String,
+    /// The denies of a policy whose subject can match the far principal's
+    /// sessions on the face.
     pub deny: Vec<BlockDeny>,
     /// In the block's order.
     pub downsampling: Vec<BlockRule>,
+    /// The block's posture and subjects, which [`check_subjects`] reads;
+    /// `None` when they were not read.
+    pub subjects: Option<BlockSubjects>,
 }
 
 /// Checks a router's block for the face `face` (§2.15).
@@ -1523,6 +1669,81 @@ fn zk_denied(target: &str, deny: &[BlockDeny]) -> bool {
     })
 }
 
+/// Checks a router's subjects against the face `name` they must keep to
+/// its far principal (§2.4, §2.15):
+/// - `near_subject_on_face`, each subject bound by a user name or a CN,
+///   none of them the face's far principal, whose `link_protocols` are
+///   absent or name one of the face's: zenoh ties no credential to a link,
+///   so a session with its credentials over the face matches it;
+/// - `face_subject_missing`, under `allow`, each link protocol of the face
+///   that no subject bound by no identity, no interface and no zid names in
+///   its `link_protocols`: a session over it that matches no other subject
+///   gets the default, everything.
+#[must_use]
+pub fn check_subjects(name: &str, face: &Face, block: &BlockSubjects) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for s in &block.subjects {
+        let far = s
+            .usernames
+            .iter()
+            .chain(&s.cert_common_names)
+            .any(|x| *x == face.far);
+        let on_face = s
+            .link_protocols
+            .as_ref()
+            .is_none_or(|p| p.iter().any(|x| face.link_protocols.contains(x)));
+        if s.bound() && !far && on_face {
+            out.push(Finding::new(
+                Code::NearSubjectOnFace,
+                Some(name),
+                s.id.clone(),
+            ));
+        }
+    }
+    if block.posture == Posture::Allow {
+        for p in &face.link_protocols {
+            let selected = block.subjects.iter().any(|s| {
+                !s.bound()
+                    && s.interfaces.is_empty()
+                    && s.zids.is_empty()
+                    && s.link_protocols.as_ref().is_some_and(|l| l.contains(p))
+            });
+            if !selected {
+                out.push(Finding::new(
+                    Code::FaceSubjectMissing,
+                    Some(name),
+                    p.clone(),
+                ));
+            }
+        }
+    }
+    sort_findings(&mut out);
+    out
+}
+
+/// The link protocols a subject bound to a principal is selected by, on the
+/// router of `policy` (§2.4): every one of §2.1's closed list outside the
+/// faces whose far principal it is not (`is_far`, by the face's name), in
+/// the list's order. `None` when no face excludes any: the subject names
+/// none. Empty when every protocol is excluded: the principal could
+/// connect over none.
+#[must_use]
+pub fn narrowed(policy: &FacePolicy, is_far: impl Fn(&str) -> bool) -> Option<Vec<String>> {
+    let excluded: BTreeSet<&str> = policy
+        .faces
+        .iter()
+        .filter(|(name, _)| !is_far(name))
+        .flat_map(|(_, f)| f.link_protocols.iter().map(String::as_str))
+        .collect();
+    (!excluded.is_empty()).then(|| {
+        LINK_PROTOCOLS
+            .iter()
+            .filter(|p| !excluded.contains(*p))
+            .map(|p| (*p).to_owned())
+            .collect()
+    })
+}
+
 // ── Lint (§2.1, §2.3, §2.11, §2.15) ──────────────────────────────────────
 
 /// What a linter is given: the policy's text, and what else it has.
@@ -1559,6 +1780,9 @@ pub fn lint(input: &LintInput<'_>) -> Vec<Finding> {
     }
     if let Some((face, block)) = input.block {
         out.extend(check_block(face, block));
+        if let (Some(s), Some(f)) = (&block.subjects, policy.faces.get(face)) {
+            out.extend(check_subjects(face, f, s));
+        }
     }
     sort_findings(&mut out);
     out
@@ -1598,6 +1822,108 @@ mod tests {
         );
         assert_eq!(key("r", &[], "/**"), "r/**");
         assert_eq!(key("r", &[Seg::Lit("a".into())], "/*/**"), "r/a/*/**");
+    }
+
+    fn res(template: &str, annotations: Value) -> Res {
+        Res {
+            template: Template::parse(template).unwrap(),
+            token: KindToken::Stream,
+            annotations: serde_json::from_value(annotations).unwrap(),
+        }
+    }
+
+    /// Two revisions read together (§2.3, 0.3): exposed only where every
+    /// one that declares a resource exposes it, a horizon only where every
+    /// one gives one, the least; a resource one revision adds is its own.
+    #[test]
+    fn revisions_are_read_together_failing_closed() {
+        let a = vec![
+            res(
+                "x",
+                serde_json::json!({"link.exposure": "link", "freshness.ttl_s": 10}),
+            ),
+            res(
+                "y",
+                serde_json::json!({"link.exposure": "link", "freshness.ttl_s": 10}),
+            ),
+            res("w", serde_json::json!({"link.exposure": "LINK"})),
+        ];
+        let b = vec![
+            res("x", serde_json::json!({"freshness.ttl_s": 4})),
+            res(
+                "y",
+                serde_json::json!({"link.exposure": "link", "freshness.ttl_s": 0}),
+            ),
+            res("w", serde_json::json!({})),
+            res("z", serde_json::json!({"link.exposure": "link"})),
+        ];
+        let (m, disagree) = merge(&[a, b]);
+        let read = |t: &str| {
+            let r = m.iter().find(|r| r.template.as_str() == t).unwrap();
+            (exposure_of_res(r), horizon(r).ttl().map(|d| d.as_secs()))
+        };
+        assert_eq!(read("x"), (Exposure::Host, Some(4)));
+        assert_eq!(read("y"), (Exposure::Link, None));
+        assert_eq!(read("z"), (Exposure::Link, None));
+        // Two readings of host, one invalid: no disagreement to report.
+        assert_eq!(disagree, BTreeSet::from([0]));
+    }
+
+    fn exposure_of_res(r: &Res) -> Exposure {
+        match exposure(kind_of(r.token), &r.annotations) {
+            Exposure::Invalid(_) => Exposure::Host,
+            e => e,
+        }
+    }
+
+    fn face(far: &str, protocols: &[&str]) -> Face {
+        Face {
+            far: far.to_owned(),
+            attach: Attach::Client,
+            link_protocols: protocols.iter().map(|p| (*p).to_owned()).collect(),
+            expose: Expose::Link,
+            interval_s: Some(1),
+            max_outage_s: 1,
+            batch_bytes: 1,
+            link_bps: 1,
+            lease_ms: DEFAULT_LEASE_MS,
+        }
+    }
+
+    /// A subject keeps the closed list outside every face whose far
+    /// principal it is not (§2.4, 0.3).
+    #[test]
+    fn a_subject_is_narrowed_off_the_faces_it_is_not_far_of() {
+        let policy = |faces: Vec<(&str, Face)>| FacePolicy {
+            system: "lab".into(),
+            services: vec![],
+            faces: faces.into_iter().map(|(n, f)| (n.to_owned(), f)).collect(),
+        };
+        let two = policy(vec![
+            ("radio", face("ground", &["unixsock-stream"])),
+            ("sat", face("sat", &["serial", "unixpipe"])),
+        ]);
+        let of = |p: &str| narrowed(&two, |name| two.faces[name].far == p);
+        assert_eq!(
+            of("local").unwrap(),
+            ["tcp", "udp", "tls", "quic", "vsock", "ws"]
+        );
+        assert_eq!(
+            of("ground").unwrap(),
+            [
+                "tcp",
+                "udp",
+                "tls",
+                "quic",
+                "unixsock-stream",
+                "vsock",
+                "ws"
+            ]
+        );
+        let one = policy(vec![("radio", face("ground", &["unixsock-stream"]))]);
+        assert_eq!(narrowed(&one, |_| true), None);
+        let all = policy(vec![("x", face("x", LINK_PROTOCOLS))]);
+        assert_eq!(narrowed(&all, |_| false), Some(Vec::new()));
     }
 
     #[test]
