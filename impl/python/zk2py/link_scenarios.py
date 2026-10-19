@@ -1,28 +1,31 @@
 """The ``link.v1`` scenarios (``spec/profiles/link/scenarios.md``, text
-0.1) on zenoh-python routers: ``python -m zk2py.link_scenarios [--only 1
-…]``.
+0.2) on zenoh-python routers: ``just py-link`` (``python -m
+zk2py.link_scenarios [--only 1 …]``).
 
-- **The generator** is zk2py's: :func:`zk2py.link.plan` over the face
-  policy and ``interop/link/radio.v1.toml`` (the scenarios' contract),
-  compiled into N's ``access_control`` block under ``deny`` from the
-  enrollment by ``zk2py.acl``, the plan's denies in the far principal's
-  policy (§2.4, :func:`zk2py.link.compile_face`), the plan's
-  ``downsampling`` block beside it, and N's ``gateway`` for a south region
+- **The deployment** is the reference's example, ``examples/zk2/link/``,
+  read as given: the ``radio.v1`` contract, the lab router's face policy
+  (``radio.face.toml``, each section's changes applied to it) and the
+  enrollment (``radio.enrollment.toml``: the two radios, and the console
+  tool bound to every stream, state and event of ``radio.v1`` on ``lab/*``
+  and calling ``reset`` there, run by ``local``, ``ground`` and
+  ``ground-router``), read into ``zk2py.acl``'s principals.
+- **The generator** is zk2py's: :func:`zk2py.link.plan`, compiled into N's
+  ``access_control`` block under ``deny`` by ``zk2py.acl``, the plan's
+  denies in the far principal's policy (§2.4,
+  :func:`zk2py.link.compile_face`), the plan's ``downsampling`` block beside
+  it, and N's ``gateway`` for a south region
   (:func:`zk2py.link.router_extras`).
 - **The bus** is the text's: N, a zenoh-python router with timestamping and
   usrpwd, listening on ``tcp/127.0.0.1`` (the near side) and on a
   ``unixsock-stream`` path (the face). Every session authenticates as a
   user of its own. The owners are zk2py owners of ``radio.v1``.
-- **G and L subscribe to what the enrollment grants them**, each binding's
-  selector, and hold a liveliness subscriber on each provider's ``@zk/**``.
-  The text's ``zk2/lab/*/**`` is wider than every grant, and under ``deny``
-  zenoh 1.10.1 refuses a declaration no grant includes (measured; see
-  SPEC-FINDINGS, "At link.v1 0.1"). For the same reason §5's G seeds by a
-  GET of each granted state selector, not of ``state/**``.
+- **G and L subscribe to the selectors their grants name** (0.2), one per
+  stream, state and event resource, ``zk2/lab/*/radio.v1/<token>/<pattern>``,
+  and hold a liveliness subscriber on ``zk2/lab/*/@zk/**``.
 - **A south region** (§2): the far router F, user ``ground-router``, names
   its region ``ground`` and attaches to N over the face; G is a client of
-  F. Its ``declare_queryable`` egress grant (core §8.5) is written beside
-  zk2py's generated grants, which have none.
+  F. Its ``declare_queryable`` egress grant is §2.5's (0.2,
+  :func:`zk2py.link.declaration_grant`), with the two controls.
 - **The face going down** (§5) is G's session closed and opened again, as
   the reference does, G keeping the members it merged.
 
@@ -38,6 +41,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -45,30 +49,76 @@ from . import freshness as fr
 from . import link
 
 REPO = Path(__file__).resolve().parents[3]
-RADIO = REPO / "impl" / "python" / "interop" / "link" / "radio.v1.toml"
+EXAMPLE = REPO / "examples" / "zk2" / "link"
+RADIO = EXAMPLE / "radio.v1.toml"
+FACE = EXAMPLE / "radio.face.toml"
+ENROLLMENT = EXAMPLE / "radio.enrollment.toml"
 PLAN_JSON = REPO / "spec" / "profiles" / "link" / "conformance" / "plan.json"
 IFACE = "radio.v1"
-#: The enrollment's bindings: "every stream, state and event of radio.v1",
-#: and the call.
-BINDS = ["stream/air/dropped_total", "stream/air/frames_total", "@stream/frames", "@stream/raw", "state/oper",
-         "state/peers/{peer}", "events/fault", "events/change"]
-CALLS = ["@op/reset"]
-PROVIDERS = ["lab/radio-a", "lab/radio-b"]
+#: The kind tokens a binding's default resources are of: "Every stream,
+#: state and event (the default resources)".
+BOUND_TOKENS = ("stream", "@stream", "state", "@state", "events")
 
 
-def policy(services: list[str] | None = None, *, far: str = "ground", attach: str = "client",
-           region: str | None = None, expose: str = "link", interval_s: int | None = 1) -> str:
-    """The scenarios' face policy, with a section's changes."""
-    lines = ['system   = "lab"', f"services = {json.dumps(services if services is not None else ['radio-a'])}", "",
-             "[face.radio]", f'far          = "{far}"', f'attach       = "{attach}"']
-    if region is not None:
-        lines.append(f'region       = "{region}"')
-    lines += ['select       = { link_protocols = ["unixsock-stream"] }', 'class        = "constrained"',
-              f'expose       = "{expose}"']
-    if interval_s is not None:
-        lines.append(f"interval_s   = {interval_s}")
-    lines += ["max_outage_s = 6", "batch_bytes  = 1000", "link_bps     = 1000000", ""]
-    return "\n".join(lines)
+#: ``policy()``'s "leave ``interval_s`` as the example writes it".
+_KEEP = object()
+
+
+class PolicyDrift(RuntimeError):
+    """A section's change to ``radio.face.toml`` could not be applied: the
+    example no longer has the line it rewrites."""
+
+
+def policy(services: list[str] | None = None, *, far: str | None = None, attach: str | None = None,
+           region: str | None = None, expose: str | None = None, interval_s: Any = _KEEP) -> str:
+    """``radio.face.toml``, with a section's changes: each named key's line
+    replaced, ``region`` added after ``attach``, ``interval_s`` removed with
+    ``None``. Every requested change must find its line, and the result must
+    read back with each requested value, else :class:`PolicyDrift`: a
+    section never runs on the unmodified policy."""
+    out = []
+    changes: dict[str, Any] = {"far": far, "attach": attach, "expose": expose}
+    requested = {k for k, v in changes.items() if v is not None}
+    requested |= {"services"} if services is not None else set()
+    requested |= {"region"} if region is not None else set()
+    requested |= {"interval_s"} if interval_s is not _KEEP else set()
+    applied: set[str] = set()
+    for line in FACE.read_text().splitlines():
+        key = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith("#") else None
+        if key == "services" and services is not None:
+            line = f"services = {json.dumps(services)}"
+            applied.add(key)
+        elif key in changes and changes[key] is not None:
+            line = f'{key:<12} = "{changes[key]}"'
+            applied.add(key)
+        elif key == "interval_s" and interval_s is not _KEEP:
+            applied.add(key)
+            if interval_s is None:
+                continue
+            line = f"interval_s   = {interval_s}"
+        out.append(line)
+        if key == "attach" and region is not None:
+            out.append(f'region       = "{region}"')
+            applied.add("region")
+    missing = requested - applied
+    if missing:
+        raise PolicyDrift(f"{FACE}: no line for {sorted(missing)}, so the section's change cannot be applied")
+    text = "\n".join(out) + "\n"
+    doc = tomllib.loads(text)
+    faces = doc.get("face") or {}
+    if len(faces) != 1:
+        raise PolicyDrift(f"{FACE}: the scenarios expect one face, found {sorted(faces)}")
+    face = next(iter(faces.values()))
+    want = {**{k: v for k, v in changes.items() if v is not None},
+            **({"region": region} if region is not None else {})}
+    wrong = {k: face.get(k) for k, v in want.items() if face.get(k) != v}
+    if services is not None and doc.get("services") != services:
+        wrong["services"] = doc.get("services")
+    if interval_s is not _KEEP and face.get("interval_s") != interval_s:
+        wrong["interval_s"] = face.get("interval_s")
+    if wrong:
+        raise PolicyDrift(f"{FACE}: the rewritten policy reads {wrong}, not the section's values")
+    return text
 
 
 class Report:
@@ -92,6 +142,90 @@ def _contract():
     return c
 
 
+def enrollment(contract: Any) -> tuple[list[Any], dict[str, Any]]:
+    """``radio.enrollment.toml`` read into ``zk2py.acl``'s principals. The
+    format is the reference generator's own (core §11.1, "The input"), read
+    from the example as it reads: a principal runs ``services`` or
+    ``tools``; a tool's ``bindings`` name an interface and its providers,
+    and with no ``resources`` take every stream, state and event resource of
+    it; its ``calls`` name operations. Returns the principals and, per tool,
+    its (consume, call) uses. Anything it cannot resolve raises
+    :class:`EnrollmentError`, naming it: an enrollment read wrongly would
+    test a deployment that is not the example's."""
+    from . import acl
+
+    def need(table: dict[str, Any], key: str, where: str) -> Any:
+        if key not in table:
+            raise EnrollmentError(f"{ENROLLMENT}: {where} has no {key!r}")
+        return table[key]
+
+    def contract_of(iface: str, where: str) -> Any:
+        if iface not in contracts:
+            raise EnrollmentError(f"{ENROLLMENT}: {where} names interface {iface!r}, whose contract is not given "
+                                  f"(given: {sorted(contracts)})")
+        return contracts[iface]
+
+    doc = tomllib.loads(ENROLLMENT.read_text())
+    contracts = {contract.interface: contract}
+    implements = {need(s, "address", "a [[service]]"): need(s, "implements", f"service {s.get('address')}")
+                  for s in doc.get("service", [])}
+    tools: dict[str, tuple[list[Any], list[Any]]] = {}
+    for tool in doc.get("tool", []):
+        tname = need(tool, "name", "a [[tool]]")
+        consumes = []
+        for role, b in (tool.get("bindings") or {}).items():
+            where = f"tool {tname}'s binding {role}"
+            iface = need(b, "interface", where)
+            c = contract_of(iface, where)
+            declared = {f"{r['token']}/{r['template']}" for r in c.canonical["resources"]
+                        if r["token"] in BOUND_TOKENS}
+            resources = b.get("resources") or sorted(declared)
+            unknown = [r for r in resources if r not in declared]
+            if unknown:
+                raise EnrollmentError(f"{ENROLLMENT}: {where} binds {unknown}, which {iface} does not declare")
+            consumes.append(acl.Use(iface, list(need(b, "providers", where)), resources))
+        calls = []
+        for cl in tool.get("calls", []):
+            where = f"tool {tname}'s calls"
+            iface = need(cl, "interface", where)
+            c = contract_of(iface, where)
+            names = {r["template"] for r in c.canonical["resources"] if r["token"] == "@op"}
+            ops = list(need(cl, "operations", where))
+            unknown = [op for op in ops if op not in names]
+            if unknown:
+                raise EnrollmentError(f"{ENROLLMENT}: {where} name operations {unknown}, which {iface} does not "
+                                      f"declare (it declares {sorted(names)})")
+            calls.append(acl.Use(iface, list(need(cl, "providers", where)), [f"@op/{op}" for op in ops]))
+        tools[tname] = (consumes, calls)
+    principals = []
+    for pr in doc.get("principal", []):
+        user = need(pr, "user", "a [[principal]]")
+        services = pr.get("services") or []
+        if len(services) > 1:
+            raise EnrollmentError(f"{ENROLLMENT}: principal {user} runs {services}; zk2py.acl takes one service "
+                                  "per principal")
+        consumes, calls = [], []
+        for name in pr.get("tools") or []:
+            if name not in tools:
+                raise EnrollmentError(f"{ENROLLMENT}: principal {user} runs tool {name!r}, which the enrollment "
+                                      f"does not define (it defines {sorted(tools)})")
+            consumes += tools[name][0]
+            calls += tools[name][1]
+        impl: list[Any] = []
+        if services:
+            if services[0] not in implements:
+                raise EnrollmentError(f"{ENROLLMENT}: principal {user} runs service {services[0]!r}, which no "
+                                      "[[service]] describes")
+            impl = [contract_of(i, f"service {services[0]}") for i in implements[services[0]]]
+        principals.append(acl.Principal(user, user, service=services[0] if services else None, implements=impl,
+                                        consumes=consumes, calls=calls))
+    return principals, tools
+
+
+class EnrollmentError(RuntimeError):
+    """``radio.enrollment.toml`` names something zk2py cannot resolve."""
+
+
 def derive(policy_text: str) -> dict[str, Any]:
     """The plan, from the policy, the deployment and the contract (§2.3)."""
     c = _contract()
@@ -110,11 +244,16 @@ class Tokens:
 
 class World:
     """N with the generated block, G across the face (or F and G for a
-    south region), L on the near side, and the owners on demand."""
+    south region), L on the near side, and the owners on demand.
+    ``queryable_grant`` (a south region): ``None`` for none, ``"selectors"``
+    for G's own GET and call selectors, ``"owner"`` for §2.5's.
+    ``face_local``: also a session with ``local``'s credentials over the
+    face (§2.4's question)."""
 
     def __init__(self, policy_text: str, *, far: str = "ground", attach: str = "client",
-                 queryable_grant: bool | str = True, deny_override: tuple[str, list[str]] | None = None,
-                 downsampling_override: list[dict[str, Any]] | None = None, tombstone_s: float = 60.0):
+                 queryable_grant: str | None = "owner", deny_override: tuple[str, list[str]] | None = None,
+                 downsampling_override: list[dict[str, Any]] | None = None, tombstone_s: float = 60.0,
+                 face_local: bool = False):
         import zenoh
 
         from . import acl, live
@@ -126,13 +265,9 @@ class World:
             raise ValueError(f"the generator refuses the policy: {p['refused']}")
         self.plan = p["faces"][0]
         self.tombstone_s = tombstone_s
-        consume = acl.Use(IFACE, PROVIDERS, BINDS)
-        call = acl.Use(IFACE, PROVIDERS, CALLS)
-        self.selectors = acl.use_selectors(consume)
-        principals = [acl.Principal(s.split("/")[1], s.split("/")[1], service=s, implements=[self.contract])
-                      for s in PROVIDERS]
-        principals += [acl.Principal(far, far, consumes=[consume], calls=[call]),
-                       acl.Principal("local", "local", consumes=[consume], calls=[call])]
+        principals, tools = enrollment(self.contract)
+        consumes, calls = tools["console"]
+        self.selectors = [s for u in consumes for s in acl.use_selectors(u)]
         block = acl.generate(principals, "deny").block
         block = link.compile_face(self.plan, block, far)
         if deny_override is not None:
@@ -140,15 +275,20 @@ class World:
             for r in block["rules"]:
                 if r["id"] == f"face-{self.plan['name']}-{rid}":
                     r["key_exprs"] = keys
+        self.queryable_keys: list[str] = []
         if attach == "south-region" and queryable_grant:
-            # Core §8.5: "the far side's principal MUST be granted
-            # declare_queryable on egress for what its side may query".
-            # "selectors": its bindings' selectors, what it may query. "owner":
-            # the queryables the owners declare, their state/** and
-            # @state/** (core S2) beside the operations (SPEC-FINDINGS F-117).
-            keys = acl.use_selectors(consume) + acl.use_selectors(call)
             if queryable_grant == "owner":
-                keys += [f"zk2/{p}/{IFACE}/{t}/**" for p in PROVIDERS for t in ("state", "@state")]
+                # §2.5 (0.2): "over every queryable its side may query, as
+                # the owner declares it".
+                keys = link.declaration_grant(
+                    [(u.interface, u.providers) for u in consumes
+                     if any(r.split("/", 1)[0] in ("state", "@state") for r in u.resources)],
+                    [(u.interface, u.providers, r.split("/", 1)[1]) for u in calls for r in u.resources])
+            else:
+                # scenarios.md §2 step 3: "G's own GET and call selectors
+                # only, …/state/peers/* and …/@op/reset".
+                keys = [f"zk2/lab/*/{IFACE}/state/peers/*", f"zk2/lab/*/{IFACE}/@op/reset"]
+            self.queryable_keys = keys
             block["rules"].append({"id": "far-queryables", "messages": ["declare_queryable"], "flows": ["egress"],
                                    "permission": "allow", "key_exprs": keys})
             for pol in block["policies"]:
@@ -184,8 +324,15 @@ class World:
         self.l = live.open_client(self.near, ("local", "local-pw"))
         self.gs = fr.Subscriber(self.g, self.selectors)
         self.ls = fr.Subscriber(self.l, self.selectors)
-        presence = [f"zk2/{p}/@zk/**" for p in PROVIDERS]
+        presence = ["zk2/lab/*/@zk/**"]
         self.gt, self.lt = Tokens(self.g, presence), Tokens(self.l, presence)
+        self.fl: Any = None
+        self.fls: Any = None
+        self.flt: Any = None
+        if face_local:
+            self.fl = live.open_client(f"unixsock-stream/{self.sock}", ("local", "local-pw"))
+            self.fls = fr.Subscriber(self.fl, self.selectors)
+            self.flt = Tokens(self.fl, presence)
         self.owners: dict[str, Any] = {}
         time.sleep(0.5)
 
@@ -254,9 +401,10 @@ class World:
                 o.close()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
-        for s in (self.gs, self.ls):
+        for s in (self.gs, self.ls) + ((self.fls,) if self.fls is not None else ()):
             s.close()
-        for x in (self.g, self.l, self.n) + ((self.far_router[0],) if self.far_router else ()):
+        for x in (self.g, self.l, self.n) + ((self.far_router[0],) if self.far_router else ()) \
+                + ((self.fl,) if self.fl is not None else ()):
             try:
                 x.close()
             except Exception:  # noqa: BLE001
@@ -270,8 +418,8 @@ def base_of(name: str = "radio-a") -> str:
 def traffic(o: Any, name: str = "radio-a", *, streams: tuple[str, ...] = ("all",), seconds: float = 5.0,
             oper: bool = True, events: bool = True) -> None:
     """"The owner's traffic": for 5 s the streams at 20 Hz (the @streams with
-    1 KB payloads), oper put 10 times a second apart, peers/x put, and
-    fault and change 5 times each within one second."""
+    1 KB payloads), oper put 10 times "one every half second" (0.2), peers/x
+    put, and fault and change 5 times each within one second."""
     base = base_of(name)
     stop = threading.Event()
     which = ["stream/air/dropped_total", "stream/air/frames_total", "@stream/frames", "@stream/raw"] \
@@ -297,7 +445,7 @@ def traffic(o: Any, name: str = "radio-a", *, streams: tuple[str, ...] = ("all",
         o.set_state(f"{base}/state/peers/x", b"peer x")
         for i in range(10):
             o.set_state(f"{base}/state/oper", f"oper {i}".encode())
-            time.sleep(1.0)
+            time.sleep(0.5)
     th.join()
     time.sleep(1.0)
 
@@ -314,7 +462,7 @@ def section1(report: Report) -> None:
     from . import live
 
     sec = "§1 a face compiled and enforced, the far side a client"
-    w = World(policy())
+    w = World(policy(), face_local=True)
     try:
         ground_rules = {r for pol in w.block["policies"] if "ground" in pol["subjects"] for r in pol["rules"]}
         denies = [d["id"] for d in w.plan["deny"]]
@@ -357,6 +505,20 @@ def section1(report: Report) -> None:
                      f"L {len(w.lt.rows)} tokens, G {len(w.gt.rows)} tokens, G descriptor {len(g_desc)} replies")
         found = link.check_block(w.block_view())
         report.check(sec, "step 5: a tool checking the block reports no finding (§2.15)", not found, str(found))
+        # §2.4's question (SPEC-FINDINGS F-118): a near principal's
+        # credentials on the face, whose policy carries none of the denies.
+        fl = {k: sum(1 for x in w.fls.of(f"{b}/{k}") if x.kind == "put")
+              for k in ("stream/air/frames_total", "@stream/raw", "stream/air/dropped_total")}
+        fl_changes = w.g_events(b, "change", w.fls)
+        # Not a conformance gate: it records what an open finding measures,
+        # and is expected to flip when a later text (link 0.3) answers F-118.
+        report.check(sec, "MEASUREMENT of open SPEC-FINDINGS F-118, not a conformance check (expected to flip when "
+                          "link 0.3 answers it): a session with local's credentials over the face, a principal whose "
+                          "policy carries none of the plan's denies, sees the owner's tokens and receives every push: "
+                          "the denies hold only for the far principal",
+                     any("/@zk/instance/" in k for k in w.flt.rows) and fl["stream/air/frames_total"] >= 90
+                     and fl["@stream/raw"] >= 90 and len(fl_changes) == 5,
+                     f"tokens {len(w.flt.rows)}, pushes {fl}, change {len(fl_changes)}")
     finally:
         w.close()
 
@@ -368,7 +530,7 @@ def section2(report: Report) -> None:
 
     sec = "§2 a far router in a south region"
     pol = policy(far="ground-router", attach="south-region", region="ground")
-    for grant in ("owner", "selectors", False):
+    for grant in ("owner", None, "selectors"):
         w = World(pol, far="ground-router", attach="south-region", queryable_grant=grant)
         try:
             o = w.owner()
@@ -397,25 +559,25 @@ def section2(report: Report) -> None:
             res = live.call(w.g, f"{b}/@op/reset", b"now", first=True)
             answered = ([r.payload for r in st.replies], [r.payload for r in res.replies if r.kind == "value"])
             if grant == "owner":
-                report.check(sec, "step 1: with the far principal granted declare_queryable egress on the owners' "
-                                  "queryables (their state/** and @state/**, core S2, and the operation), G sees no "
-                                  "token and no descriptor, and its GET and its call are answered",
+                report.check(sec, "step 1: with §2.5's declaration grant (0.2), over every queryable G may query as "
+                                  "the owner declares it, G sees no token and no descriptor, and its GET and its call "
+                                  "are answered",
                              not w.gt.rows and not [d for d in live.get_descriptor(w.g, o.instance_key) if d.ok]
-                             and answered == ([b"peer x"], [b"now"]), f"G tokens {len(w.gt.rows)}; {answered}")
-            elif grant == "selectors":
-                report.check(sec, "step 1 (measured, SPEC-FINDINGS F-117): granted declare_queryable egress on what "
-                                  "its side may query, its bindings' selectors alone, G's call is answered and its GET "
-                                  "of peers/x is not: the owner declares its state queryable over state/** (core "
-                                  "S2), which no grant on the selector includes",
-                             answered == ([], [b"now"]), str(answered))
-            else:
+                             and answered == ([b"peer x"], [b"now"]),
+                             f"grant {w.queryable_keys}; G tokens {len(w.gt.rows)}; {answered}")
+            elif grant is None:
                 report.check(sec, "step 2 (control): without the far principal's declare_queryable egress grant, G's "
                                   "GET and its call get no reply: F learns of no queryable (core §8.5)",
                              answered == ([], []), str(answered))
+            else:
+                report.check(sec, "step 3 (control, 0.2): the grant over G's own GET and call selectors only, "
+                                  "…/state/peers/* and …/@op/reset: G's call is answered and its GET is not, the "
+                                  "declaration being checked by inclusion against the owner's state/** (core §11.3)",
+                             answered == ([], [b"now"]), f"grant {w.queryable_keys}; {answered}")
         finally:
             w.close()
     refused = derive(policy(far="ground-router", attach="router"))
-    report.check(sec, "step 3 (control): with attach = \"router\", the generator refuses the policy (router_attach) "
+    report.check(sec, "step 4 (control): with attach = \"router\", the generator refuses the policy (router_attach) "
                       "and writes no block",
                  refused.get("refused") == [link.finding("router_attach", "radio", "attach")], json.dumps(refused))
 

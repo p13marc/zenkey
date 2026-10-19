@@ -94,18 +94,19 @@ errors         45 passed     0 failed
 compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
-examples      103 passed     0 failed
+examples      107 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
 link          119 passed     0 failed
-total        1373 passed     0 failed
+total        1377 passed     0 failed
 ```
 
-The figures are against `core.md` 0.29, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.1. `link.v1` 0.1
-added its three fixture files, core 0.29 `contracts/w105-link-downsample`,
+The figures are against `core.md` 0.30, `hostid.v1` 0.5, `freshness.v1`
+0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.2. `link.v1` 0.2
+added the scenarios' radio as an example (`examples/zk2/link/radio.v1.toml`,
+4 more `examples` checks). `link.v1` 0.1 added its three fixture files, core 0.29 `contracts/w105-link-downsample`,
 and `config.v1` 0.3 seven `validation.json` cases and one `lifecycle.json`
 case. `config.v1` 0.1 added its five
 fixture files and its standard contract (4 more `examples` checks), and
@@ -131,9 +132,11 @@ fixtures:
   overturned one of zk2py's guesses (F-107's values).
 - `config.v1` 0.3 resolved F-114 and F-115, found against its 0.2, both as
   zk2py guessed.
-- F-116 and F-117 are open: found against `link.v1` 0.1, read cold and run
-  on zenoh-python routers (`SPEC-FINDINGS.md`, "At link.v1 0.1, config.v1
-  0.3 and core 0.29").
+- `link.v1` 0.2 and core 0.30 resolved F-116 and F-117, found against
+  `link.v1` 0.1, both as zk2py measured.
+- F-118 and F-119 are open: found against `link.v1` 0.2, reading four
+  questions the reference had answered by reading (`SPEC-FINDINGS.md`, "At
+  link.v1 0.2 and core 0.30").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -830,10 +833,10 @@ python -m zk2py.live_interop --only config       # the live runner's config run
   range, and restores a hot group left part applied once: zk2py's device
   reports it as `{"refused": words, "partial": {…}}`.
 
-## link.v1 (profile text 0.1, core 0.29)
+## link.v1 (profile text 0.2, core 0.30)
 
 ```bash
-python -m zk2py.link_scenarios      # a `py-link` recipe is requested
+just py-link
 ```
 
 - **`zk2py.link`**, from the text alone:
@@ -851,20 +854,29 @@ python -m zk2py.link_scenarios      # a `py-link` recipe is requested
     denies in the far principal's policy of zk2py's generated block (§2.4),
     and `router_extras` gives its `downsampling` and a south region's
     `gateway`;
+  - §2.5's declaration grant for a south region (`declaration_grant`, 0.2):
+    the owner's `state/**` and `@state/**` for a state GET, an operation's
+    template pattern for a call;
   - §5's "Is this provider live across the face?" (`liveness_across`).
 - **The `link` conformance family:** 119 of 119, every case passing the
   first time it ran.
-- **`python -m zk2py.link_scenarios`** runs `scenarios.md` §1 to §6, 22 of
-  22, every section, on zenoh-python routers: N with usrpwd and the block
-  zk2py compiles under `deny` from the enrollment, listening on TCP (the
-  near side) and on a `unixsock-stream` path (the face); G across the face,
-  L on the near side, zk2py owners of `interop/link/radio.v1.toml`, the
-  scenarios' contract.
-  - G and L subscribe to the selectors the enrollment grants them: the
-    text's `zk2/lab/*/**` is refused under `deny` (F-116).
-  - §2's far router F names its region and attaches over the face; the far
-    principal's `declare_queryable` egress grant names the owners'
-    `state/**` as well, without which a state GET gets no reply (F-117).
+- **`just py-link`** (`python -m zk2py.link_scenarios`) runs `scenarios.md`
+  §1 to §6 as 0.2 writes them, 23 of 23, every section, on zenoh-python
+  routers: N with usrpwd and the block zk2py compiles under `deny`,
+  listening on TCP (the near side) and on a `unixsock-stream` path (the
+  face); G across the face, L on the near side, zk2py owners of `radio.v1`.
+  - The deployment is `examples/zk2/link/`, read as given: the contract,
+    the face policy (each section's changes applied to it) and the
+    enrollment, read into zk2py's principals.
+  - G and L subscribe to the selectors their grants name,
+    `zk2/lab/*/radio.v1/<token>/<pattern>` (0.2, F-116).
+  - §2's far router F names its region and attaches over the face. Its
+    three grants: none, neither G's GET nor its call answered; G's own
+    selectors, the call answered and the GET not; §2.5's, both answered
+    (0.2, F-117).
+  - §1 also measures a near principal's credentials on the face: they see
+    the tokens and every push, the plan's denies being the far principal's
+    alone (F-118).
   - §5's face goes down as G's session closing, its merged members kept.
 - **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
   core S3).
@@ -970,14 +982,14 @@ impl/python/
                                 ConfigOwner, SimDevice, the reader of §5
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
-    link_scenarios.py link.v1   scenarios.md §1–§6 on zenoh-python routers
+    link_scenarios.py link.v1   scenarios.md §1–§6 on zenoh-python routers, over examples/zk2/link/
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge
     state_scenarios.py §4.2     scenarios/state.md §10 against zk2py's owner, and §11's open cases
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1; link/ radio.v1;
+                      sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

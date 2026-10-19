@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twenty-nine rounds.**
+**Thirty rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -58,8 +58,12 @@ where that was not enough, or where the spec said two things.
   config.v1 0.2 and core 0.28"). `config.v1` 0.3 resolved them.
 - F-116 and F-117 were found against `link.v1`'s text 0.1, the fifth
   profile, read cold with core 0.29 and run on zenoh-python routers (see
-  "At link.v1 0.1, config.v1 0.3 and core 0.29" at the end). Nothing was
-  found in `config.v1` 0.3 or core 0.29 themselves.
+  "At link.v1 0.1, config.v1 0.3 and core 0.29"). Nothing was found in
+  `config.v1` 0.3 or core 0.29 themselves. `link.v1` 0.2 and core 0.30
+  resolved F-116 and F-117.
+- F-118 and F-119 were found against `link.v1` 0.2, reading four questions
+  the reference had to answer by reading (see "At link.v1 0.2 and core
+  0.30" at the end). Nothing was found in core 0.30.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -69,8 +73,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.29, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4,
-config.v1 0.3 and link.v1 0.1:** 117 entries, two open.
+**Counts at core 0.30, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4,
+config.v1 0.3 and link.v1 0.2:** 119 entries, two open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -171,13 +175,15 @@ config.v1 0.3 and link.v1 0.1:** 117 entries, two open.
 - F-114 and F-115: resolved by `config.v1` 0.3, both as zk2py guessed
   and as the owner example behaved. F-115's range is the unsigned 64-bit
   one, where zk2py had used the signed; no case falls between.
-- F-116 and F-117: open, against `link.v1` 0.1 (its scenarios, and core
-  §8.5's grant as its §2.5 restates it).
+- F-116 and F-117: resolved by `link.v1` 0.2 and core 0.30, both as zk2py
+  measured and guessed: the scenarios' readers subscribe to their grants,
+  and the declaration grant covers the owner's queryables as declared.
+- F-118 and F-119: open, against `link.v1` 0.2.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at core 0.29, config.v1 0.3, link.v1 0.1 | Location | In one line |
+| Id | Severity | Status at core 0.30, config.v1 0.3, link.v1 0.2 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -294,8 +300,10 @@ by the spec section that now states the rule.
 | F-113 | gap | resolved by config 0.2 | config.v1 0.1 §2.9, §2.5 row 13 | A reach `set` that starts a change "MUST state" an `apply_at` before the deadline; when its device cannot, no row refuses it, as row 13 refuses a join. |
 | F-114 | gap | resolved by config 0.3 | config.v1 0.2 §2.18 with §2.12 | A restart rolls back the values a bound document converged, at the same revision: whether the new instance converges it again, and what its `desired` reads meanwhile, is unsaid. |
 | F-115 | ambiguity | resolved by config 0.3 | config.v1 0.2 §2.5 "A request outside its type", with `SetRequest` and `ControlRequest` | `confirm_s` or `expected_revision` written `30.0`, or beyond 64 bits, is of the request's type by 0.2's own reading of `values`, yet both implementations refuse it at the decode, and no row would refuse it otherwise. |
-| F-116 | gap | open | link.v1 0.1 scenarios.md "Conventions" and §5, with core §11.1, §11.2 | G and L subscribe to `zk2/lab/*/**` under N's `deny` block compiled from per-binding grants; zenoh 1.10.1 refuses a declaration or a GET no grant includes, so as written they receive nothing. |
-| F-117 | gap | open | link.v1 0.1 §2.5, restating core §8.5, with core S2 | The far principal's `declare_queryable` egress grant "for what its side may query" does not include the owner's state queryable, declared over `state/**`: a state GET across a south region gets no reply, a call does. |
+| F-116 | gap | resolved by link 0.2 | link.v1 0.1 scenarios.md "Conventions" and §5, with core §11.1, §11.2 | G and L subscribe to `zk2/lab/*/**` under N's `deny` block compiled from per-binding grants; zenoh 1.10.1 refuses a declaration or a GET no grant includes, so as written they receive nothing. |
+| F-117 | gap | resolved by link 0.2, core 0.30 | link.v1 0.1 §2.5, restating core §8.5, with core S2 | The far principal's `declare_queryable` egress grant "for what its side may query" does not include the owner's state queryable, declared over `state/**`: a state GET across a south region gets no reply, a call does. |
+| F-118 | ambiguity | open | link.v1 0.2 §2.4 | The denies go into "each subject that can match a session on the face", yet a near principal's subject, matched by its user name alone, can: measured, `local`'s credentials over the face see the tokens and every push. |
+| F-119 | gap | open | link.v1 0.2 §2.2, §2.3, §2.7, with core §9.8 | Two revisions of one interface, which may differ in `link.exposure` (an annotation change is a review), can run in one deployment; the plan's denies are per interface, and the text names no revision. |
 
 ---
 
@@ -4427,6 +4435,8 @@ the enrollment grants them (each binding's, at each provider), hold a
 liveliness subscriber on each provider's `@zk/**`, and §5's G seeds by a
 GET of each granted state selector.
 
+**Status at link.v1 0.2: resolved by 0.2, as zk2py measured and did.** scenarios.md, Conventions: "Each subscribes to the selectors its grants name, one per stream, state and event resource of `radio.v1`, `zk2/lab/*/radio.v1/<token>/<pattern>` … Under `deny`, zenoh admits a subscription or a GET only when a grant includes its key expression (core §11.3): a reader subscribed wider than its grants, to `zk2/lab/*/**`, would receive nothing at all, so the readers subscribe exactly to what they are granted (0.2, F-116)." §5: "G seeds: it subscribes to its granted selectors over `lab/radio-a`'s state, `…/radio.v1/state/oper` and `…/radio.v1/state/peers/*`, then GETs each as core S4 says (0.2: never `state/**`, which no grant includes, F-116)." zk2py's readers now take their selectors from the example's enrollment, `lab/*` where zk2py had named each radio.
+
 ### F-117 · gap · link.v1 0.1 §2.5, restating core §8.5, with core S2: the far principal's queryable grant
 
 > link.v1 §2.5: "**A south region needs declarations sent toward it.** The
@@ -4456,6 +4466,8 @@ include the owner's declarations, which are wider.
 `state/**` and `@state/**`, and records the narrower grant's result as a
 measurement.
 
+**Status at link.v1 0.2 and core 0.30: resolved by both, as zk2py measured and guessed.** §2.5: "core §8.5 requires the far principal to be granted `declare_queryable` on egress over every queryable its side may query, as the owner declares it (core 0.30)", covering "the owner's state queryables over its interface's `state/**` and `@state/**` (core S2), with the providers as bound" and "the operation's queryable over its template's pattern (core §5), `@op/set/*` for a call of `set/duty`". Core §8.5: "MUST be granted `declare_queryable` on egress over every queryable its side may query, as the owner declares it (0.30, measured)". scenarios.md §2 adds zk2py's control, step 3: "G's call is answered and its GET is not: a declaration is checked by inclusion against the queryable's own key expression, which the GET's selector does not include (core §11.3)." zk2py's grant is now `link.declaration_grant`, and §2 runs the three grants.
+
 **Where zk2py's reading of link.v1 0.1 needed a guess, beyond the
 findings.**
 - **A face whose name is not a plain chunk:** its keys are still checked
@@ -4482,3 +4494,154 @@ findings.**
   `region_name` for a south region. A router with usrpwd credentials for
   its own outgoing link authenticates its incoming clients too, so §2's G
   is a user of F's.
+
+## At link.v1 0.2 and core 0.30 (#609)
+
+`link.v1` 0.2 answers F-116 (the scenarios' readers subscribe to their
+grants) and F-117 (the declaration grant covers the owner's queryables as
+it declares them), fits the owner's traffic in its 5 s, and points at the
+scenarios' radio, now an example (`examples/zk2/link/`: the contract, its
+enrollment and the lab router's face policy). Core 0.30 spells §8.5's
+declaration grant out the same way. No fixture changed. zk2py read both
+cold, and four questions the reference had to answer by reading.
+
+**`just py-conformance`: 1377 of 1377.** `examples` is 107:
+`examples/zk2/link/radio.v1.toml` loads with no finding, its bundle
+byte-identical to `examples/zk2/.history`'s, and compatible with it. zk2py's
+linter reads `radio.face.toml` and `walkthrough.face.toml` with no finding.
+
+**The example's files against zk2py's copies.**
+- **`radio.v1.toml`:** the body is the one zk2py had copied from
+  scenarios.md, byte for byte; only the header comment differs. zk2py's
+  copy under `impl/python/interop/link/` is removed, and the scenarios read
+  the example.
+- **`radio.face.toml`:** the policy zk2py had built from scenarios.md, the
+  same keys and values. The scenarios now read it, each section's changes
+  applied to it.
+- **`radio.enrollment.toml`:** zk2py had built its principals in code,
+  binding each radio by name (`lab/radio-a`, `lab/radio-b`). The example
+  binds one tool on `lab/*`, run by `local`, `ground` and
+  `ground-router`. zk2py reads it into its principals (a small reader of
+  the reference's format, which core §11.1 leaves to the generator), so
+  the readers' selectors are now `zk2/lab/*/radio.v1/<token>/<pattern>`,
+  as 0.2 writes them.
+
+**`just py-link`** (the recipe now exists): 23 of 23, all six sections as
+0.2 writes them, and one measurement for F-118.
+- **§2's three grants**, the far principal's `declare_queryable` egress
+  over:
+  - **none** (step 2): neither G's GET nor its call is answered;
+  - **G's own selectors**, `zk2/lab/*/radio.v1/state/peers/*` and
+    `zk2/lab/*/radio.v1/@op/reset` (step 3): the call is answered, the GET
+    is not;
+  - **0.2's grant**, `zk2/lab/*/radio.v1/state/**`, `…/@state/**` and
+    `…/@op/reset` (step 1): both are answered.
+- **§1, §3 to §6** as in round 30, with `oper` every half second: G
+  receives 5 samples of each crossing stream, all 10 `oper` puts, 5 `fault`
+  and no `change`; one rule per key; the sketch's event deny leaks; a 6 s
+  window answers the deletes across a 4 s outage and a 2 s one loses them;
+  liveness live, then unobservable, never down.
+
+**What changed in zk2py.**
+- **`zk2py.link.declaration_grant`**, §2.5's grant (0.2).
+- **`zk2py.link_scenarios`** reads `examples/zk2/link/`, runs §2's three
+  grants as 0.2 numbers them, and measures F-118.
+
+**The four questions, read from the text alone.**
+1. **§2.4, which subjects "can match a session on the face".** By zenoh's
+   rule as §2.4 quotes it ("a session matches every subject whose properties
+   all match it"), every subject none of whose properties excludes the
+   face's transport: the far principal's, and any other principal's
+   selected by its user name or CN alone, since zenoh ties no credential to
+   a link. §2.4 then sets the near principals aside by a fact of the
+   deployment ("connect elsewhere"), which nothing in the plan or the
+   router enforces. The text decides the far principal's, and leaves a near
+   principal on the face undecided: F-118.
+2. **§2.15, whether rules in two separate `downsampling` items can
+   "intersect".** No. §2.8 makes a face's downsampling one block, one item
+   (`{id: <face>, link_protocols: …, rules}`), and §2.15 checks "a router's
+   block for one face", its rules "in the block's order". Two items are two
+   faces' blocks, and §2.14 keeps their link protocols disjoint, so no link
+   meets both. zk2py's checker takes one face's block. The text says
+   nothing of a hand-written configuration with two items on one face's
+   protocol, which is outside the plan's shape; zk2py did not measure what
+   zenoh does with one.
+3. **§2.3 and Appendix D, two revisions of one interface disagreeing on
+   `link.exposure`.** The text does not decide: F-119.
+4. **§2.11, "a window not given is 60 s", beside the table's "not asked: no
+   windows were given".** Two absences, both decided. The table's is the
+   linter given no windows at all: the question is not put. §2.11's is a
+   windows map given that names no window for a service: that service has
+   core S3's 60 s. `lints.json` agrees: its description ("windows, present
+   only with implements … an address it does not name has the core's 60
+   s"), cases 53 and 54 with no `windows` and no window finding, and case
+   56 with `windows = {}` and `window_under_outage`. zk2py reads it so, and
+   files nothing.
+
+### F-118 · ambiguity · link.v1 0.2 §2.4: a near principal on the face
+
+> §2.4: "In zenoh 1.10.1, a session matches every subject whose properties
+> all match it, and across those subjects any allow wins" … "A generator
+> MUST therefore put every deny of a face's plan into the policy of each
+> subject that can match a session on the face: the far principal's, at
+> least." … "The near side's principals connect elsewhere, so their
+> policies carry none of it."
+
+> §2.4: "A session on the face is a principal's" … "A generator MAY also
+> narrow the far principal's subject to the face's link protocols."
+
+A subject selected by a user name or a CN alone matches that principal's
+session on whatever link it arrives, so a near principal's subject "can
+match a session on the face": its credentials are accepted there. The text
+then puts none of the denies in its policy, because the near principals
+"connect elsewhere": a fact of the deployment the generator cannot see, and
+the router does not enforce. Measured in scenarios.md §1's deployment: a
+session with `local`'s credentials over the `unixsock-stream` face sees the
+owner's instance and interface tokens and receives every push, 100 of
+`air/frames_total` and of `raw`, all 5 `change` occurrences, while `ground`
+on the same face receives none of them. The text does not say whether a
+generator narrows each near principal's subject to its own transports (the
+counterpart of §2.4's MAY for the far principal), puts the denies in every
+policy whose subject is not so narrowed, or leaves it to the deployment's
+credentials.
+**Resolved:** a guess. zk2py puts the denies in the far principal's policy
+alone, as the scenarios' block does, and records the measurement.
+
+### F-119 · gap · link.v1 0.2 §2.2, §2.3, §2.7, with core §9.8: two revisions of one interface
+
+> §2.3: "A generator derives a plan for each face of a policy, from the
+> policy, the interfaces each listed service implements (the deployment's,
+> as core §11.1's input names them), and the contracts of those
+> interfaces."
+
+> §2.2: "Exposure is the contract's, for every deployment."
+
+> core §9.8: "| `cardinality`, `epoch`, `gate` or `annotations` changed |
+> review |"
+
+An annotation changed between two revisions is a review, not a breaking
+change, so one major's minors may differ in a resource's `link.exposure`,
+and two services of one deployment may run different minors (each
+instance's descriptor states the minor it runs, core §3.3). The plan's exposure denies
+are per interface id, `zk2/*/*/I/K/…`, the same keys for every service that
+implements `I`, while its downsampling rules and liveness evidence are per
+service. When `radio-a` runs a minor that marks `air/frames_total` `link`
+and `radio-b` one that leaves it `host`, the text names no revision to
+derive from: the newer's carve-out lets `radio-b`'s `host` stream cross,
+the older's denies `radio-a`'s exposed one. §2.7's "What a later minor
+adds" covers a resource added, not an exposure changed, and Appendix D
+publishes the key, not a rule across revisions. `plan.json`'s deployment
+gives one resource list per interface id, so no case has two.
+**Resolved:** a guess. zk2py derives a plan from one revision per interface
+id, as `plan.json` gives it. Were two given, it would let a resource cross
+only where every revision present marks it `link`, failing closed as §2.2
+fails closed on an invalid value.
+
+**Where zk2py's reading of link.v1 0.2 needed a guess, beyond the
+findings.**
+- **The enrollment's format** is the reference generator's own (core §11.1,
+  "The input"): zk2py reads `radio.enrollment.toml` as its comments say, a
+  binding without `resources` taking every stream, state and event resource
+  of its interface.
+- **§2.5's grant for a state GET** names both `state/**` and `@state/**` at
+  each provider as bound whenever a binding names a state resource.
