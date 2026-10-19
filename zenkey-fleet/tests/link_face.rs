@@ -1,11 +1,14 @@
 //! `link.v1`'s scenarios, run against live routers
-//! (`spec/profiles/link/scenarios.md` §1–§11, text 0.5; #769, LB, LC, LD
-//! and LE): one test per section, named after it. §7 runs under both
+//! (`spec/profiles/link/scenarios.md` §1–§13, text 0.7; #769, LB, LC, LD,
+//! LE and LH): one test per section, named after it. §7 runs under both
 //! postures, §8 gives the generator two revisions of `radio.v1`, and §9 to
 //! §11 run hand edits of the generator's block that §2.15's subject checks
 //! refuse (0.4, F-120; 0.5, F-121), each with what it leaks. §11's N also
 //! listens on TLS with mTLS, so that a session presents a certificate CN
 //! beside its user name; its certificates are minted per run (`rcgen`).
+//! §12 runs the block's text with what zenoh defaults taken out of it,
+//! `enabled`, `default_permission` and rules' `flows` (0.7, F-124), and §13
+//! gives two faces of one policy one far principal (0.7, F-125).
 //!
 //! The generator is the reference's: `plan_acl` over the example of
 //! `examples/zk2/link/` (the `radio.v1` contract, its enrollment and the
@@ -43,7 +46,8 @@ use std::time::{Duration, Instant};
 
 use util::zk2::{T, eventually};
 use zenkey_fleet::report::{
-    AclConfigDoc, AclPermission, AclPlan, AclPolicy, AclSubject, DownsamplingDoc, Enrollment,
+    AclConfigDoc, AclFindingKind, AclPermission, AclPlan, AclPolicy, AclSubject, DownsamplingDoc,
+    Enrollment,
 };
 use zenkey_fleet::{AclOptions, ContractSet, acl_plan_json5, check_face, plan_acl};
 use zenkey_model::freshness::{self, Last, Observation, Verdict};
@@ -149,7 +153,18 @@ fn check_against(
     policy: &str,
     windows: Option<&BTreeMap<String, u64>>,
 ) -> zenkey_fleet::report::FaceCheck {
-    let block = acl_plan_json5(block);
+    check_text(&acl_plan_json5(block), planned, policy, windows)
+}
+
+/// [`check_against`], the block given as the text N runs: a hand edit of
+/// what `acl_plan_json5` wrote, which zenoh's loader reads as it reads N's
+/// (§12: what a block omits).
+fn check_text(
+    block: &str,
+    planned: &AclPlan,
+    policy: &str,
+    windows: Option<&BTreeMap<String, u64>>,
+) -> zenkey_fleet::report::FaceCheck {
     let c = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
     let acl: AclConfigDoc = serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
     let ds: Vec<DownsamplingDoc> = c
@@ -208,6 +223,12 @@ async fn near(plan: &AclPlan) -> Near {
 /// certificates when given: a session over it presents its certificate's
 /// CN beside its user name (§11).
 async fn near_with(plan: &AclPlan, pki: Option<&Pki>) -> Near {
+    near_text(&acl_plan_json5(plan), pki).await
+}
+
+/// [`near_with`], running the block given as text: what `acl_plan_json5`
+/// wrote, or a hand edit of it (§12: what a block omits).
+async fn near_text(block: &str, pki: Option<&Pki>) -> Near {
     let dict = scratch("near.txt");
     std::fs::write(
         &dict,
@@ -238,7 +259,7 @@ async fn near_with(plan: &AclPlan, pki: Option<&Pki>) -> Near {
          transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }}{tls_link} }},\n{}}}\n",
         util::ANY_PORT,
         dict.display().to_string(),
-        acl_plan_json5(plan)
+        block
     );
     let router = zenoh::open(
         zenoh::Config::from_json5(&text)
@@ -449,7 +470,6 @@ struct Reader {
 }
 
 async fn reader(s: &zenoh::Session, plan: &AclPlan, only: Option<&[String]>) -> Reader {
-    let seen = Seen::default();
     let selectors: Vec<String> = match only {
         Some(o) => o.to_vec(),
         None => plan
@@ -460,6 +480,12 @@ async fn reader(s: &zenoh::Session, plan: &AclPlan, only: Option<&[String]>) -> 
             .key_exprs
             .clone(),
     };
+    subscribed(s, selectors).await
+}
+
+/// A reader subscribed to `selectors`.
+async fn subscribed(s: &zenoh::Session, selectors: Vec<String>) -> Reader {
+    let seen = Seen::default();
     let mut subs = Vec::new();
     for sel in selectors {
         let s2 = seen.clone();
@@ -1238,11 +1264,16 @@ fn selectors() -> Vec<String> {
 /// a write only `lab/radio-a` may make (core §11.1, Own), reach L's reader
 /// `l`, the owner silent.
 async fn forged(s: &zenoh::Session, l: &Seen) -> usize {
+    forged_on(s, l, "stream/air/dropped_total").await
+}
+
+/// [`forged`], on `lab/radio-a`'s resource `rel`.
+async fn forged_on(s: &zenoh::Session, l: &Seen, rel: &str) -> usize {
     tokio::time::sleep(Duration::from_millis(300)).await;
     l.clear();
     for i in 0..5 {
         s.put(
-            "zk2/lab/radio-a/radio.v1/stream/air/dropped_total",
+            format!("zk2/lab/radio-a/radio.v1/{rel}"),
             format!("forged {i}"),
         )
         .await
@@ -1250,7 +1281,7 @@ async fn forged(s: &zenoh::Session, l: &Seen) -> usize {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     tokio::time::sleep(Duration::from_millis(500)).await;
-    l.puts("radio-a/radio.v1/stream/air/dropped_total")
+    l.puts(&format!("radio-a/radio.v1/{rel}"))
 }
 
 /// §7's steps on `plan`: L near, and a session over the face for each of
@@ -1258,16 +1289,21 @@ async fn forged(s: &zenoh::Session, l: &Seen) -> usize {
 /// starts. What each one over the face receives of the owner's traffic and
 /// may ask, and how many of its forged puts reach L.
 async fn on_face(plan: &AclPlan, users: &[(&str, bool)]) -> Vec<(Far1, usize)> {
+    on_face_text(&acl_plan_json5(plan), users).await
+}
+
+/// [`on_face`], N running the block given as text (§12).
+async fn on_face_text(block: &str, users: &[(&str, bool)]) -> Vec<(Far1, usize)> {
     let sel = selectors();
-    let n = near(plan).await;
+    let n = near_text(block, None).await;
     let o = owner(&n.tcp, "radio-a").await;
     let l = client(&n.tcp, "local").await;
-    let lr = reader(&l, plan, Some(&sel)).await;
+    let lr = subscribed(&l, sel.clone()).await;
     let mut sessions = Vec::new();
     let mut readers = Vec::new();
     for (user, _) in users {
         let s = client(&n.face, user).await;
-        readers.push(reader(&s, plan, Some(&sel)).await);
+        readers.push(subscribed(&s, sel.clone()).await);
         sessions.push(s);
     }
     let mut ready = vec![&lr.seen];
@@ -2117,4 +2153,262 @@ async fn s11_a_subject_naming_both_kinds() {
         found(check(&via_radio_zk, &text, None)),
         [misplaced, near("ground-radio-a")]
     );
+}
+
+/// What a session that gets nothing across the face sees: no push, no
+/// token, no descriptor, no reply.
+const NOTHING: Far1 = Far1 {
+    dropped: 0,
+    frames: 0,
+    frames_total: 0,
+    raw: 0,
+    oper: 0,
+    fault: 0,
+    change: 0,
+    get: false,
+    call: false,
+    tokens: 0,
+    descriptor: 0,
+};
+
+/// The text `acl_plan_json5` wrote for `plan`, each edit applied.
+fn edited(plan: &AclPlan, edits: &[(&str, &str)]) -> String {
+    let mut text = acl_plan_json5(plan);
+    for (from, to) in edits {
+        assert!(text.contains(from), "{from:?} in the block");
+        text = text.replace(from, to);
+    }
+    text
+}
+
+/// `block` without its lines that start with `prefix`.
+fn without_line(block: &str, prefix: &str) -> String {
+    let kept: String = block
+        .lines()
+        .filter(|l| !l.starts_with(prefix))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_ne!(kept.lines().count(), block.lines().count(), "{prefix:?}");
+    kept
+}
+
+/// `block` with `flows` taken out of each rule whose id `strip` accepts.
+fn without_flows(block: &str, strip: impl Fn(&str) -> bool) -> String {
+    block
+        .lines()
+        .map(|line| {
+            let id = line
+                .trim_start()
+                .strip_prefix("{ id: \"")
+                .and_then(|r| r.split('"').next());
+            match (id, line.find(", flows: [")) {
+                (Some(id), Some(at)) if strip(id) => {
+                    let end = at + line[at..].find(']').expect("a flows list") + 1;
+                    format!("{}{}\n", &line[..at], &line[end..])
+                }
+                _ => format!("{line}\n"),
+            }
+        })
+        .collect()
+}
+
+/// How many of five puts a session over N's face as `user` makes on each
+/// of `lab/radio-a`'s resources `rels` reach L, N running `block`, the
+/// owner silent.
+async fn face_forged_text(block: &str, user: &str, rels: &[&str]) -> Vec<usize> {
+    let n = near_text(block, None).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let l = client(&n.tcp, "local").await;
+    let lr = subscribed(&l, selectors()).await;
+    o.settle(&[&lr.seen], &[]).await;
+    let s = client(&n.face, user).await;
+    let mut out = Vec::new();
+    for rel in rels {
+        out.push(forged_on(&s, &lr.seen, rel).await);
+    }
+    out
+}
+
+/// §12 What a block omits (§2.15).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s12_what_a_block_omits() {
+    let text = policy(&[]);
+    let deny = plan(&text);
+    let block = acl_plan_json5(&deny);
+    // 1. F-124: the generator's deny block with `enabled: false`; 2. with
+    //    `enabled` absent; 3. with `default_permission` absent; 4. with
+    //    `flows` taken out of the console's Consume egress rule, which
+    //    ground's and local's policies list, and out of every face deny.
+    let disabled = edited(&deny, &[("  enabled: true,\n", "  enabled: false,\n")]);
+    let absent = edited(&deny, &[("  enabled: true,\n", "")]);
+    let no_default = without_line(&block, "  default_permission:");
+    let flowless = without_flows(&block, |id| {
+        id == "consume-out:tool.console" || id.starts_with("face:radio:")
+    });
+    assert_eq!(
+        flowless.matches("flows:").count() + 1 + deny.faces[0].deny.len(),
+        block.matches("flows:").count(),
+        "{flowless}"
+    );
+
+    let under_disabled = on_face_text(&disabled, &[("ground", true), ("local", true)]).await;
+    let under_absent = on_face_text(&absent, &[("ground", true), ("local", true)]).await;
+    let under_default = on_face_text(&no_default, &[("ground", true), ("local", false)]).await;
+    let under_flowless = on_face_text(&flowless, &[("ground", true)]).await;
+    let keys = ["stream/air/dropped_total", "stream/air/frames_total"];
+    let flowless_puts = face_forged_text(&flowless, "ground", &keys).await;
+    let generator_puts = face_forged_text(&block, "ground", &keys).await;
+
+    // 1, 2. Access control off: no rule is enforced. G and X each get
+    //    everything, the owner's descriptor among it, and write radio-a's
+    //    keys; the face's downsampling, a block of its own, still applies.
+    for (under, what) in [
+        (&under_disabled, "enabled false"),
+        (&under_absent, "enabled absent"),
+    ] {
+        for (x, puts) in under.iter() {
+            assert_unguarded(x);
+            assert_eq!(x.descriptor, 1, "{what}: {x:?}");
+            assert_eq!(*puts, 5, "{what}: every put reaches L");
+        }
+    }
+    // 3. No default_permission is deny: G gets §1's share, X matches no
+    //    subject and gets nothing, and neither's puts reach L.
+    assert_far(&under_default[0].0);
+    assert_eq!(under_default[0].1, 0, "no forgery");
+    assert_eq!(under_default[1], (NOTHING, 0), "X: deny by default");
+    // 4. A rule with no flows holds on both: G still receives §1's share
+    //    through the Consume rule (egress) and nothing the face denies
+    //    (egress); its puts on dropped_total now reach L through the same
+    //    Consume rule (ingress), and none on frames_total, which the face's
+    //    deny holds (ingress). Under the generator's block, neither.
+    assert_far(&under_flowless[0].0);
+    assert_eq!(under_flowless[0].1, 5, "the Consume rule allows ingress");
+    assert_eq!(flowless_puts, [5, 0], "dropped_total, frames_total");
+    assert_eq!(generator_puts, [0, 0], "the generator's block");
+
+    // 5. A tool checks each block (§2.15), reading what each omits as
+    //    zenoh's loader does.
+    for b in [&disabled, &absent] {
+        let c = check_text(b, &deny, &text, None);
+        assert_eq!(
+            c.findings,
+            [link::Finding::new(
+                link::Code::BlockDisabled,
+                Some("radio"),
+                "enabled"
+            )]
+        );
+        let kinds: Vec<AclFindingKind> = c.comparison.findings.iter().map(|f| f.kind).collect();
+        assert_eq!(kinds, [AclFindingKind::Disabled]);
+    }
+    let c = check_text(&no_default, &deny, &text, None);
+    assert!(c.findings.is_empty(), "{:?}", c.findings);
+    assert!(
+        c.comparison.findings.is_empty(),
+        "{:?}",
+        c.comparison.findings
+    );
+    let c = check_text(&flowless, &deny, &text, None);
+    assert!(c.findings.is_empty(), "{:?}", c.findings);
+    let differs: Vec<(AclFindingKind, &str)> = c
+        .comparison
+        .findings
+        .iter()
+        .map(|f| (f.kind, f.id.as_str()))
+        .collect();
+    assert_eq!(
+        differs,
+        [(AclFindingKind::RuleDiffers, "consume-out:tool.console")]
+    );
+}
+
+/// The scenarios' face policy with a second face, `sat`, over `tls`,
+/// exposing none, whose far principal is `far` (§13).
+fn with_sat(far: &str) -> String {
+    format!(
+        "{}\n[face.sat]\nfar          = \"{far}\"\nattach       = \"client\"\n\
+         select       = {{ link_protocols = [\"tls\"] }}\nclass        = \"constrained\"\n\
+         expose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\n\
+         link_bps     = 1000000\n",
+        policy(&[])
+    )
+}
+
+/// §13 Two faces, one far principal (§2.4).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s13_two_faces_one_far_principal() {
+    let one_text = with_sat("ground");
+    let apart_text = with_sat("ground-router");
+    let one = plan(&one_text);
+    let apart = plan(&apart_text);
+    // 1. Each face's plan is its own: radio's is §1's, and sat's denies
+    //    every push wholesale. ground's policy carries both, and the plan
+    //    carries the linter's warning, refusing nothing.
+    let alone = plan(&policy(&[]));
+    assert_eq!(one.faces[0].name, "radio");
+    assert_eq!(one.faces[0].deny, alone.faces[0].deny);
+    assert_eq!(one.faces[1].name, "sat");
+    assert!(
+        one.faces[1]
+            .deny
+            .iter()
+            .any(|d| d.id == "stream" && d.key_exprs == ["zk2/*/*/*/stream/**"]),
+        "{:?}",
+        one.faces[1].deny
+    );
+    let ground = one.policies.iter().find(|p| p.id == "ground").unwrap();
+    for f in &one.faces {
+        for d in &f.deny {
+            let id = format!("face:{}:{}", f.name, d.id);
+            assert!(ground.rules.contains(&id), "{id}");
+        }
+    }
+    let warned = |p: &AclPlan| {
+        p.warnings
+            .iter()
+            .filter(|w| w.text.starts_with("far_of_two_faces at "))
+            .count()
+    };
+    assert_eq!((warned(&one), warned(&apart)), (1, 0));
+    // 2, control: sat's far principal is ground-router, whose policy then
+    //    carries sat's denies, and ground's radio's alone.
+    let ground = apart.policies.iter().find(|p| p.id == "ground").unwrap();
+    assert!(!ground.rules.iter().any(|r| r.starts_with("face:sat:")));
+
+    // G is not waited for under the union: it hears no `oper`. Its GET,
+    // answered, shows its session stands.
+    let under_one = on_face(&one, &[("ground", false)]).await;
+    let under_apart = on_face(&apart, &[("ground", true)]).await;
+
+    // 1. Over the radio face, G carries sat's wholesale denies too: no
+    //    push at all, where §1's G receives each crossing resource. Its
+    //    GET and call are answered, by grant (§2.9). Fails closed.
+    assert_eq!(
+        under_one[0],
+        (
+            Far1 {
+                get: true,
+                call: true,
+                ..NOTHING
+            },
+            0
+        ),
+        "the union of both plans' denies"
+    );
+    // 2. With a far principal per face, G receives §1's share.
+    assert_far(&under_apart[0].0);
+    assert_eq!(under_apart[0].1, 0, "no forgery");
+
+    // 3. A tool checks each block (§2.15): no finding, since the checks
+    //    read no plan, and each block is its plan whole.
+    for (b, t) in [(&one, &one_text), (&apart, &apart_text)] {
+        let c = check(b, t, None);
+        assert!(c.findings.is_empty(), "{:?}", c.findings);
+        assert!(
+            c.comparison.findings.is_empty(),
+            "{:?}",
+            c.comparison.findings
+        );
+    }
 }

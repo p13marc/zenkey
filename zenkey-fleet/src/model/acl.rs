@@ -1462,7 +1462,10 @@ pub fn plan_acl(
     // Each face's far principal must be placed: its policy is where the
     // face lives (link.v1 §2.4). A face names it by user name or CN (§2.1),
     // never by the enrollment's id, since §2.15 reads the block's names.
-    // Subject id → the faces it is the far side of.
+    // Subject id → the faces it is the far side of. A subject far of two or
+    // more faces gets every one of their plans' denies in its one policy,
+    // and so carries them all on each face: no zenoh rule is limited to a
+    // link protocol (§2.4, 0.7, F-125; the linter's `far_of_two_faces`).
     let mut far_of: BTreeMap<String, Vec<&FacePlan>> = BTreeMap::new();
     for face in &faces {
         let found = placed.iter().find(|pl| {
@@ -1620,13 +1623,18 @@ pub fn plan_acl(
     }
 
     // The face policy's own warnings (link.v1 §2.1); each plan's are its
-    // face's `findings`.
+    // face's `findings`. A far principal two faces name is written as §2.4
+    // says, the union of their plans' denies in its policy, and warned of
+    // (0.7, F-125).
     if let Some(parsed) = &opts.face_policy {
         for f in &parsed.findings {
             warnings.push(warn(
                 AclWarningKind::FacePolicy,
                 f.face.as_deref(),
-                "link.v1 §2.1, §2.10",
+                match f.code {
+                    link::Code::FarOfTwoFaces => "link.v1 §2.1, §2.4",
+                    _ => "link.v1 §2.1, §2.10",
+                },
                 format!("{} at {}: {}", f.code, f.at, link_says(f.code)),
             ));
         }
@@ -2218,6 +2226,17 @@ pub fn link_says(code: link::Code) -> &'static str {
         C::IntersectingDownsampling => {
             "two downsampling rules intersect: zenoh picks one of them for a key they share \
              (§2.8, §2.15)"
+        }
+        C::BlockDisabled => {
+            "the block's access control is not enabled, `enabled` false or absent, which zenoh \
+             reads as false: the router enforces none of its rules, under either posture, so \
+             everything crosses the face; its other findings read the block as written (§2.15)"
+        }
+        C::FarOfTwoFaces => {
+            "two or more faces name this far principal: its policy carries every one of their \
+             plans' denies, and no zenoh rule is limited to a link protocol, so each of its \
+             faces carries them all, failing closed, and a face that exposes lets across only \
+             what every one of them does (§2.4)"
         }
         C::ExposureDisagrees => {
             "the revisions given of the interface disagree on the resource's exposure, one \
@@ -3321,7 +3340,10 @@ fn applies_to(d: &DownsamplingDoc, link_protocols: &[String]) -> bool {
 /// For each face of `policy`, the block read is, per subject that can match
 /// a session of the far principal on the face, the deny rules of that
 /// subject's policies: any allow wins across subjects (§2.4), so `@zk` must
-/// be denied in each (§2.15 states this reduction since 0.4). Every other
+/// be denied in each (§2.15 states this reduction since 0.4). A block whose
+/// access control is not enabled, `enabled` false or absent, is
+/// `block_disabled` on each face, beside every other finding (0.7, F-124),
+/// as the comparison's `disabled` also says. Every other
 /// subject is read too, with which policies list it
 /// (`link::check_subjects`, 0.3, 0.4): one bound to another principal, or
 /// naming a user name and a CN both (0.5), must be kept off the face's link
@@ -5019,6 +5041,73 @@ type = { raw = "text/plain" }
         let _ = e;
     }
 
+    /// Two faces naming one far principal (link.v1 §2.4, 0.7, F-125): each
+    /// face has its own plan, both plans' denies go into the far
+    /// principal's one policy, and the plan carries the linter's warning,
+    /// refusing nothing. The block passes its own checks, which read no
+    /// plan.
+    #[test]
+    fn a_far_principal_of_two_faces_carries_both_plans_and_is_warned() {
+        let (e, set, policy) = radio();
+        let two = format!(
+            "{policy}\n[face.sat]\nfar          = \"ground\"\nattach       = \"client\"\n\
+             select       = {{ link_protocols = [\"tls\"] }}\nclass        = \"constrained\"\n\
+             expose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\n\
+             link_bps     = 1000000\n"
+        );
+        let parsed = link::parse(&two);
+        let p = parsed.policy.clone().expect("a warning refuses nothing");
+        for posture in [AclPermission::Deny, AclPermission::Allow] {
+            let plan = plan_acl(&e, &set, &face_opts(posture, parsed.clone())).unwrap();
+            assert!(plan.refusals.is_empty(), "{:?}", plan.refusals);
+            let names: Vec<&str> = plan.faces.iter().map(|f| f.name.as_str()).collect();
+            assert_eq!(names, ["radio", "sat"]);
+            let ground = policy_of(&plan, "ground");
+            for f in &plan.faces {
+                for d in &f.deny {
+                    let id = format!("face:{}:{}", f.name, d.id);
+                    assert!(ground.rules.contains(&id), "{id} in ground's policy");
+                }
+            }
+            let warned: Vec<&AclWarning> = plan
+                .warnings
+                .iter()
+                .filter(|w| w.kind == AclWarningKind::FacePolicy)
+                .collect();
+            assert_eq!(warned.len(), 1, "{warned:?}");
+            assert!(warned[0].about.is_none());
+            assert!(
+                warned[0].text.starts_with("far_of_two_faces at ground: "),
+                "{}",
+                warned[0].text
+            );
+            assert_eq!(warned[0].cite, "link.v1 §2.1, §2.4");
+            // ground is far of both faces: narrowed off neither. Under
+            // allow, its policy lists both faces' own subjects.
+            let s = plan.subjects.iter().find(|s| s.id == "ground").unwrap();
+            assert!(s.link_protocols.is_empty(), "{s:?}");
+            if posture == AclPermission::Allow {
+                assert_eq!(ground.subjects, ["ground", "face:radio", "face:sat"]);
+            }
+            let block = to_json5(&plan);
+            let c = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
+            let acl: AclConfigDoc =
+                serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
+            let ds: Vec<DownsamplingDoc> = c
+                .get_json("downsampling")
+                .ok()
+                .and_then(|d| serde_json::from_str(&d).ok())
+                .unwrap_or_default();
+            let checked = check_face(&plan, &p, &acl, &ds, None, None, "router.json5");
+            assert!(checked.findings.is_empty(), "{:?}", checked.findings);
+            assert!(
+                checked.comparison.findings.is_empty(),
+                "{:?}",
+                checked.comparison.findings
+            );
+        }
+    }
+
     /// A principal every link protocol of which is a face whose far
     /// principal it is not could connect over none: it is refused, never
     /// written with an empty list, which zenoh's loader refuses (link.v1
@@ -5244,6 +5333,29 @@ type = { raw = "text/plain" }
                 .iter()
                 .any(|f| f.kind == AclFindingKind::DownsamplingDiffers)
         );
+
+        // Access control not enabled, `false` or absent, which zenoh's
+        // loader reads as false: block_disabled from §2.15's own checks
+        // (0.7, F-124), and the comparison's `disabled` beside it.
+        for edited in [
+            block.replace("  enabled: true,\n", "  enabled: false,\n"),
+            block.replace("  enabled: true,\n", ""),
+        ] {
+            assert_ne!(edited, block);
+            let (acl, ds, gw) = read(&edited);
+            let c = check_face(&plan, p, &acl, &ds, gw.as_ref(), None, "router.json5");
+            assert_eq!(
+                c.findings,
+                [link::Finding::new(
+                    link::Code::BlockDisabled,
+                    Some("radio"),
+                    "enabled"
+                )]
+            );
+            let kinds: Vec<AclFindingKind> = c.comparison.findings.iter().map(|f| f.kind).collect();
+            assert_eq!(kinds, [AclFindingKind::Disabled]);
+            assert_eq!(c.judgement, Judgement::Established);
+        }
 
         // The block without its downsampling item: missing from the plan.
         let (acl, _, gw) = read(&block);
