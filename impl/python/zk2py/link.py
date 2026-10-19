@@ -1,4 +1,4 @@
-"""``link.v1``, text 0.3 (``spec/profiles/link/v1.md``): what crosses a
+"""``link.v1``, text 0.4 (``spec/profiles/link/v1.md``): what crosses a
 constrained face.
 
 From the text alone:
@@ -12,8 +12,10 @@ From the text alone:
   findings that refuse it; every revision of an interface it is given is
   read together (0.3, :func:`merge_revisions`);
 - **the checks**: a deployment's tombstone windows (§2.11,
-  :func:`check_windows`) and a router's block (§2.15, :func:`check_block`);
-  :func:`lint` is ``lints.json``'s whole reading;
+  :func:`check_windows`) and a router's block (§2.15, :func:`check_block`,
+  with 0.4's subject checks, :func:`check_subjects` and
+  :func:`narrowed_too_far`, and the denies a block holds,
+  :func:`subject_denies`); :func:`lint` is ``lints.json``'s whole reading;
 - **a generator** for zenoh-python routers (:func:`compile_faces`): the
   plan's denies in the far principal's policy, every other principal's
   subject narrowed off the face, and under ``allow`` the face's own
@@ -21,7 +23,7 @@ From the text alone:
   block, and the near router's ``gateway`` for a south region (§2.5).
 
 Where the text left a choice, zk2py's is named in ``SPEC-FINDINGS.md``
-("At link.v1 0.1", "0.2", "0.3").
+("At link.v1 0.1", "0.2", "0.3", "0.4").
 """
 
 from __future__ import annotations
@@ -581,10 +583,11 @@ def _concrete(text: str) -> bool:
 
 def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dict[str, Any]]:
     """§2.15: a router's block for one face against the face it guards:
-    ``zk_not_denied``, ``wildcard_downsampling`` and
-    ``intersecting_downsampling``; and, given the block's subjects and its
-    ``default_permission`` (0.3), ``near_subject_on_face`` and
-    ``face_subject_missing`` (:func:`check_subjects`)."""
+    ``zk_not_denied`` (over ``deny``, "one subject's", lints.json),
+    ``wildcard_downsampling`` and ``intersecting_downsampling``; and, given
+    the block's ``default_permission``, ``subjects`` and ``policies``, "all
+    three or none" (0.4), the subject checks (:func:`check_subjects`, per
+    the block's face) and :func:`narrowed_too_far` (every face at once)."""
     face, ns = block["face"], block.get("namespace") or ""
     target = _keyexpr(f"{ns}/zk2/**/@zk/**" if ns else "zk2/**/@zk/**")
     out = []
@@ -607,41 +610,173 @@ def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dic
             if kes[i] is not None and kes[j] is not None and kes[i].intersects(kes[j]):
                 out.append(finding("intersecting_downsampling", face, r["key_expr"]))
                 break
-    if policy is not None and "subjects" in block and "default_permission" in block:
+    if policy is not None and all(k in block for k in ("default_permission", "subjects", "policies")):
         guarded = next((f for f in policy.faces if f.name == face), None)
         if guarded is not None:
-            out += check_subjects(guarded, block["subjects"], block["default_permission"])
+            out += check_subjects(guarded, block["subjects"], block["policies"], block["default_permission"])
+        out += narrowed_too_far(policy, block["subjects"], block["default_permission"])
     return out
 
 
 def _names(subject: dict[str, Any], prop: str) -> list[str]:
+    """A subject's list, "a check given one reads it as absent" when empty
+    (0.4: "An empty list … is refused when the configuration loads")."""
     return list(subject.get(prop) or [])
 
 
-def check_subjects(face: Face, subjects: list[dict[str, Any]], default_permission: str) -> list[dict[str, Any]]:
-    """§2.15 (0.3, F-118):
-    - ``near_subject_on_face``: "a subject bound by a user name or a CN,
-      none of them the face's far principal, whose link_protocols are
-      absent or name one of the face's, whatever else it names";
+def _user_names(subject: dict[str, Any]) -> list[str]:
+    return _names(subject, "usernames") + _names(subject, "cert_common_names")
+
+
+def on_face(subject: dict[str, Any], face: Face) -> bool:
+    """§2.15 (0.4): "A subject is on the face when its link_protocols are
+    absent or name one of the face's"."""
+    lps = _names(subject, "link_protocols")
+    return not lps or bool(set(lps) & set(face.link_protocols))
+
+
+def far_principals(subject: dict[str, Any], far: str) -> bool:
+    """§2.15 (0.4): "the far principal's when it names the far principal
+    alone, as its user names or as its CNs: one of the two lists is not
+    empty, and every name in it is the face's far"."""
+    return any(names and all(n == far for n in names)
+               for names in (_names(subject, "usernames"), _names(subject, "cert_common_names")))
+
+
+def is_face_subject(subject: dict[str, Any], face: Face) -> bool:
+    """§2.15 (0.4): "a subject on the face that names no user name and no
+    CN, whatever its id"."""
+    return on_face(subject, face) and not _user_names(subject)
+
+
+def _listing(subjects: list[dict[str, Any]], policies: list[dict[str, Any]]) -> dict[str, set[int]]:
+    """Each subject id -> the policies (by index) that list it."""
+    out: dict[str, set[int]] = {str(s.get("id")): set() for s in subjects}
+    for i, p in enumerate(policies):
+        for sid in p.get("subjects") or []:
+            out.setdefault(str(sid), set()).add(i)
+    return out
+
+
+def far_policies(face: Face, subjects: list[dict[str, Any]], policies: list[dict[str, Any]]) -> set[int]:
+    """§2.15 (0.4): "The far principal's policies are those that list one
+    of its subjects on the face"."""
+    listing = _listing(subjects, policies)
+    return {i for s in subjects if on_face(s, face) and far_principals(s, face.far) for i in listing[str(s.get("id"))]}
+
+
+def check_subjects(face: Face, subjects: list[dict[str, Any]], policies: list[dict[str, Any]],
+                   default_permission: str) -> list[dict[str, Any]]:
+    """§2.15's subject checks for one face (0.3, F-118; 0.4, F-120):
+    - ``near_subject_on_face``: "a subject on the face bound to another
+      principal, whatever else it names, the far principal's name among
+      them";
+    - ``face_subject_beyond_face``: "a face subject whose link_protocols are
+      absent, or name one outside the face's";
+    - ``face_subject_misplaced``: "a face subject not listed in exactly the
+      far principal's policies, at least one";
     - ``face_subject_missing``: "under allow, a link protocol of the face
-      that no subject bound by no user name, CN, interface or zid names in
-      its link_protocols". "A subject that names no property at all is not
-      one". A list given empty is read as absent ("each list absent when
-      the subject names none")."""
+      that no face subject naming no interface and no zid names in its
+      link_protocols"."""
     out = []
     mine = set(face.link_protocols)
+    listing = _listing(subjects, policies)
+    theirs = far_policies(face, subjects, policies)
     for s in subjects:
-        names = _names(s, "usernames") + _names(s, "cert_common_names")
+        sid = str(s.get("id"))
+        if not on_face(s, face):
+            continue
+        if _user_names(s):
+            if not far_principals(s, face.far):
+                out.append(finding("near_subject_on_face", face.name, sid))
+            continue
         lps = _names(s, "link_protocols")
-        if names and face.far not in names and (not lps or mine & set(lps)):
-            out.append(finding("near_subject_on_face", face.name, str(s.get("id"))))
+        if not lps or set(lps) - mine:
+            out.append(finding("face_subject_beyond_face", face.name, sid))
+        if not theirs or listing[sid] != theirs:
+            out.append(finding("face_subject_misplaced", face.name, sid))
     if default_permission == "allow":
-        own = [s for s in subjects
-               if not any(_names(s, p) for p in ("usernames", "cert_common_names", "interfaces", "zids"))]
+        own = [s for s in subjects if is_face_subject(s, face) and not _names(s, "interfaces") and not _names(s, "zids")]
         for lp in face.link_protocols:
             if not any(lp in _names(s, "link_protocols") for s in own):
                 out.append(finding("face_subject_missing", face.name, lp))
     return out
+
+
+def narrowed_too_far(policy: Policy, subjects: list[dict[str, Any]], default_permission: str) -> list[dict[str, Any]]:
+    """§2.15 (0.4): "under allow, a name the block's subjects bind, or a
+    face's far, and a link protocol of §2.1's list outside every face whose
+    far principal it is not, that no subject naming no interface and no zid
+    selects, among those that name it or no user name and no CN". One
+    finding per name, with no face."""
+    if default_permission != "allow":
+        return []
+    names: list[str] = []
+    for n in [n for s in subjects for n in _user_names(s)] + [f.far for f in policy.faces]:
+        if n not in names:
+            names.append(n)
+    usable = [s for s in subjects if not _names(s, "interfaces") and not _names(s, "zids")]
+    out = []
+    for n in names:
+        off = {lp for f in policy.faces if f.far != n for lp in f.link_protocols}
+        for lp in LINK_PROTOCOL_ORDER:
+            if lp in off:
+                continue
+            if not any((n in _user_names(s) or not _user_names(s))
+                       and (not _names(s, "link_protocols") or lp in _names(s, "link_protocols")) for s in usable):
+                out.append(finding("narrowed_too_far", None, n))
+                break
+    return out
+
+
+def subject_denies(block: dict[str, Any], face: Face) -> dict[str, list[dict[str, Any]]]:
+    """§2.15 (0.4), "The denies a face's block holds", over a router's
+    ``access_control`` block (rules with ids and permissions, policies
+    listing rule and subject ids): for each subject "that can match the far
+    principal's session on the face" — on the face, and naming the far
+    principal among its user names or CNs, or naming no user name, CN,
+    interface or zid — "the deny rules of every policy that lists it", by
+    subject id. "With no such subject, the denies are none": an empty
+    mapping."""
+    rules = {r["id"]: r for r in block.get("rules", [])}
+    out: dict[str, list[dict[str, Any]]] = {}
+    for s in block.get("subjects", []):
+        if not on_face(s, face):
+            continue
+        names = _user_names(s)
+        if names and face.far not in names:
+            continue
+        if not names and (_names(s, "interfaces") or _names(s, "zids")):
+            continue
+        out[s["id"]] = [{"flows": rules[r]["flows"], "messages": rules[r]["messages"],
+                         "key_exprs": rules[r]["key_exprs"]}
+                        for p in block.get("policies", []) if s["id"] in p.get("subjects", [])
+                        for r in p.get("rules", []) if r in rules and rules[r].get("permission") == "deny"]
+    return out
+
+
+def check_router_block(block: dict[str, Any], policy: Policy, face_name: str, downsampling: list[dict[str, Any]],
+                       namespace: str = "") -> list[dict[str, Any]]:
+    """§2.15 over a router's whole ``access_control`` block: each subject's
+    denies (:func:`subject_denies`) "checked alone", one ``zk_not_denied``
+    when any of them, or none at all, misses a pair; and every other check
+    as :func:`check_block` reads lints.json's shape. Sorted."""
+    face = next(f for f in policy.faces if f.name == face_name)
+    view = {"face": face_name, "namespace": namespace, "downsampling": downsampling,
+            "default_permission": block.get("default_permission", "deny"),
+            "subjects": [{"id": s["id"], **{k: list(s[k]) for k in SUBJECT_PROPS if s.get(k)}}
+                         for s in block.get("subjects", [])],
+            "policies": [{"subjects": list(p.get("subjects", []))} for p in block.get("policies", [])]}
+    out: list[dict[str, Any]] = []
+    for denies in list(subject_denies(block, face).values()) or [[]]:
+        for f in check_block({**view, "deny": denies}, policy):
+            if f not in out:
+                out.append(f)
+    return sort_findings(out)
+
+
+#: zenoh 1.10.1's AclConfigSubjects properties, as lints.json writes a subject.
+SUBJECT_PROPS = ("usernames", "cert_common_names", "link_protocols", "interfaces", "zids")
 
 
 def lint(policy_text: str, *, implements: dict[str, list[str]] | None = None,
@@ -775,14 +910,13 @@ def compile_faces(policy: Policy, face_plans: list[dict[str, Any]], block: dict[
 
 
 def compare_block(policy: Policy, face_plans: list[dict[str, Any]], block: dict[str, Any]) -> list[str]:
-    """§2.15's last paragraph, zk2py's version of it: "Whether a block holds
-    the whole plan, every deny and every rule, and whether a face's own
-    subject rides the far principal's policy, is a comparison of the block
-    with the plan, which a generator makes". The text gives it no shape;
-    this returns one line per difference: a deny of the plan missing from a
-    policy listing the far principal's subject, and under ``allow`` a face
-    without a subject of its own in such a policy, naming the policies
-    that list its subject instead."""
+    """§2.15's comparison with the plan, zk2py's shape of it (0.4: "Its
+    shape is the generator's"): "Whether a block holds the whole plan, every
+    deny and every rule". One line per difference: a deny of the plan
+    missing from a policy listing the far principal's subject. Under
+    ``allow`` it also names a face whose own subject rides no such policy,
+    which 0.4's ``face_subject_misplaced`` now reports from the block
+    alone."""
     out = []
     faces = {f.name: f for f in policy.faces}
     rules = {r["id"]: r for r in block.get("rules", [])}

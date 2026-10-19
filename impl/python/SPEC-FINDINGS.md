@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Thirty-one rounds.**
+**Thirty-two rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -65,7 +65,10 @@ where that was not enough, or where the spec said two things.
   the reference had to answer by reading (see "At link.v1 0.2 and core
   0.30"). Nothing was found in core 0.30. `link.v1` 0.3 resolved them.
 - F-120 was found against `link.v1` 0.3, reading four more questions and
-  running its scenarios §7 and §8 (see "At link.v1 0.3" at the end).
+  running its scenarios §7 and §8 (see "At link.v1 0.3"). `link.v1` 0.4
+  resolved it.
+- F-121 was found against `link.v1` 0.4, reading three questions and
+  running its scenarios §9 and §10 (see "At link.v1 0.4" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -76,7 +79,7 @@ where that was not enough, or where the spec said two things.
 - **blocker:** zk2py could not implement the rule. None was found.
 
 **Counts at core 0.30, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4,
-config.v1 0.3 and link.v1 0.3:** 120 entries, one open.
+config.v1 0.3 and link.v1 0.4:** 121 entries, one open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -185,12 +188,16 @@ config.v1 0.3 and link.v1 0.3:** 120 entries, one open.
   warning added. F-118 kept zk2py's guess, the denies in the far
   principal's policy, and added what it lacked: every other principal's
   subject narrowed off the face, and under `allow` the face's own subject.
-- F-120: open, against `link.v1` 0.3.
+- F-120: resolved by `link.v1` 0.4. Its three blocks are reported as
+  zk2py measured them, with two more of the same kind, and its reading for
+  each is the rule, with `face_subject_misplaced` in place of a check of
+  the far principal's policy.
+- F-121: open, against `link.v1` 0.4.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at core 0.30, config.v1 0.3, link.v1 0.3 | Location | In one line |
+| Id | Severity | Status at core 0.30, config.v1 0.3, link.v1 0.4 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -311,7 +318,8 @@ by the spec section that now states the rule.
 | F-117 | gap | resolved by link 0.2, core 0.30 | link.v1 0.1 §2.5, restating core §8.5, with core S2 | The far principal's `declare_queryable` egress grant "for what its side may query" does not include the owner's state queryable, declared over `state/**`: a state GET across a south region gets no reply, a call does. |
 | F-118 | ambiguity | resolved by link 0.3 | link.v1 0.2 §2.4 | The denies go into "each subject that can match a session on the face", yet a near principal's subject, matched by its user name alone, can: measured, `local`'s credentials over the face see the tokens and every push. |
 | F-119 | gap | resolved by link 0.3 | link.v1 0.2 §2.2, §2.3, §2.7, with core §9.8 | Two revisions of one interface, which may differ in `link.exposure` (an annotation change is a review), can run in one deployment; the plan's denies are per interface, and the text names no revision. |
-| F-120 | gap | open | link.v1 0.3 §2.15, with §2.4 | The two subject checks pass three blocks §2.4 forbids, measured on a router: a subject bound to the far principal and a near one, a face subject that also names a near link protocol, and under `allow` the far principal's subject narrowed to its face. |
+| F-120 | gap | resolved by link 0.4 | link.v1 0.3 §2.15, with §2.4 | The two subject checks pass three blocks §2.4 forbids, measured on a router: a subject bound to the far principal and a near one, a face subject that also names a near link protocol, and under `allow` the far principal's subject narrowed to its face. |
+| F-121 | gap | open | link.v1 0.4 §2.15 `narrowed_too_far`, with §2.4 | `narrowed_too_far` credits a name to a subject that names it beside a name of the other kind, or as the other kind, which zenoh matches only for a session presenting both: measured, `local` narrowed off `tcp` matches no subject over TCP, its puts reach the near side, and the tool reports nothing. |
 
 ---
 
@@ -4873,6 +4881,8 @@ three blocks pass them. A reading that would catch them:
 - under `allow`, a finding for the far principal's subject whose link
   protocols are all the face's.
 
+**Status at link.v1 0.4: resolved by 0.4, every block reported as zk2py measured it.** §2.15: "`near_subject_on_face` (`at` the subject's id): a subject on the face bound to another principal, whatever else it names, the far principal's name among them (0.4)." "`face_subject_beyond_face` (`at` the subject's id): a face subject whose `link_protocols` are absent, or name one outside the face's". "`narrowed_too_far` (no face, `at` the user name or CN): under `allow`, a name the block's subjects bind, or a face's `far`, and a link protocol of §2.1's list outside every face whose far principal it is not, that no subject naming no interface and no zid selects, among those that name it or no user name and no CN (0.4)." And for two more blocks of the same kind, a face subject in a near principal's policy or in none: "`face_subject_misplaced` (`at` the subject's id): a face subject not listed in exactly the far principal's policies, at least one (0.4)." §2.15 also explains why G kept §1's share in (a): "equal combinations, across subjects, are one subject, whose rules are their policies' together, deny first". zk2py's §9 step 2 confirms it on zenoh-python: with `ground`'s subject narrowed, G gets `local`'s share. `lints.json`'s 18 new cases pass, and scenarios §9 and §10 run each block.
+
 **Where zk2py's reading of link.v1 0.3 needed a guess, beyond the
 findings.**
 - **The face subject's id** is `face:<face>`, after §7 and Appendix B. The
@@ -4897,3 +4907,244 @@ findings.**
 - **Revisions.** A resource no revision exposes keeps the first declaring
   revision's reading, since host, invalid and ignored are alike to the
   plan. One revision is read as itself.
+
+**Status at link.v1 0.4:** 0.4 settles four of these guesses (the
+changelog's "The guesses round 32 listed, settled"):
+- every subject id is the generator's: "no check depends on what it says";
+- an empty list "is refused when the configuration loads, so no router
+  runs one. A generator never writes one, and a check given one reads it as
+  absent", as zk2py read it. zk2py's §9 step 6 measures the refusal;
+- the generator's refusals are its own, "this text gives them no code";
+- the comparison's shape is "the generator's".
+
+## At link.v1 0.4 (#609)
+
+`link.v1` 0.4 answers F-120. §2.15 now reads which policies list each
+subject, defines a subject on the face, the far principal's, a face
+subject and the far principal's policies, and reports every block of
+F-120's kind:
+- `near_subject_on_face` is widened;
+- three checks are new: `face_subject_beyond_face`,
+  `face_subject_misplaced` and `narrowed_too_far` (no face);
+- it states the denies a face's block holds, each subject that can match
+  the far principal's session checked alone.
+
+It records three zenoh facts: the split into combinations, a subject no
+policy lists, and an empty list refused at load. It settles round 32's
+guesses and adds scenarios §9 and §10. Core stays at 0.30. zk2py read it
+cold, and three questions.
+
+**`just py-conformance`: 1404 of 1404,** with no unknown file. The `link`
+family is 146: `exposure.json` 31, `plan.json` 12, `lints.json` 103 (18
+new). Every case passed the first time it ran.
+
+**Mutating the new rules** (`lints.json`), 15 mutants. Ten fail at least
+one case:
+- `near_subject_on_face` not widened, 2;
+- "the far principal's" read as the far principal among the names, 2, or
+  with CNs ignored, 2;
+- `face_subject_beyond_face` for absent link protocols only, 1, or for
+  protocols outside the face only, 2;
+- `face_subject_missing` answered by a face subject naming an interface,
+  1;
+- absent link protocols read as off the face, 11;
+- `narrowed_too_far` ignoring a face's `far`, 1; requiring every link
+  protocol, 1; under `deny` too, 2.
+
+Five survive, rules no case pins:
+- `face_subject_misplaced` comparing "contains" for "exactly": no case
+  lists a face subject in every policy of the far principal's and in one
+  more;
+- `face_subject_misplaced` without "at least one": no case has a face
+  subject in no policy while the far principal has none either;
+- `narrowed_too_far` ignoring the subjects that name no user name and no
+  CN: no case has one answering a link protocol the name's own subjects do
+  not;
+- `narrowed_too_far` counting subjects that name an interface or a zid: no
+  case has one under `allow`;
+- an empty list read as empty, not absent: "No list is ever empty" in the
+  fixture, by design.
+
+**`just py-link`: 63 of 63,** all ten sections, with `NOTE` lines for
+measurements the text states no expectation for. §1 to §8 pass as before,
+and §7's step 6 now reports `face_subject_misplaced` for step 5. The tool
+is `link.check_router_block`, which reads N's whole block, each subject
+that can match the far principal's session checked alone.
+
+**§9**, X being `local`'s credentials over the face:
+- **Step 1** (`deny`, `local`'s subject bound to `ground` and `local`, in
+  `local`'s policy). X gets `local`'s share: 100 of `air/frames_total` and
+  of `raw`, the 5 `change` occurrences, both tokens and the descriptor,
+  its GET and call answered, and 5 of `air/dropped_total` and of `frames`.
+  G gets §1's share. Neither's puts reach L.
+- **Step 2** (the same, `ground`'s subject narrowed to `unixsock-stream`).
+  G gets `local`'s share too, exactly as X does, and neither's puts reach
+  L. The combination-merging explanation holds on zenoh-python: round 32's
+  G kept §1's share only because the combined subject's `ground` part was
+  `ground`'s own subject.
+- **Steps 3 and 4** (`allow`): `ground` narrowed to `unixsock-stream`, and
+  `radio-b` narrowed off `tcp` too. Each one's session over TCP puts 5
+  times, and all 5 reach L.
+- **Step 5** (the generator's `allow` block): 0 of either's.
+- **Step 6:** zenoh-python refuses both empty lists, `link_protocols: []`
+  and `usernames: []`, at `Config.insert_json5` ("Given collection was
+  empty"), before any session opens. The same subject without the list
+  loads.
+- **Step 7:**
+  - steps 1 and 2: `near_subject_on_face` at `local`, and `zk_not_denied`;
+  - step 3: `narrowed_too_far` at `ground`, and step 4 at `radio-b`, each
+    with no face;
+  - the generator's `allow` block with `ground`'s subject removed:
+    `narrowed_too_far` at `ground` and `face_subject_misplaced` at
+    `face:radio`;
+  - step 5's block: no finding.
+
+**§10**:
+- **Step 1**, under each posture: a face subject selected by `tcp` beside
+  `unixsock-stream`, in `ground`'s policy. The `radio-a` session over TCP
+  receives all 20 of `lab/radio-b`'s samples, and so does L.
+- **Step 2** (the generator's blocks): it receives none under either
+  posture, and L all 20.
+- **Step 3** (`deny`, a face subject in `local`'s policy) and **step 4**
+  (`allow`, the face's subject moved to `local`'s policy): G and X each get
+  `local`'s share, and neither's puts reach L.
+- **Step 5** (`allow`, the face's subject in no policy): G and X each get
+  `local`'s share, and all 5 of each one's puts reach L.
+- **Step 6** (`deny`, the face's subject in a policy of its own holding
+  the plan's denies): G gets §1's share and X nothing at all, with no token
+  and no reply. Neither's puts reach L.
+- **Step 7:**
+  - step 1, each posture: `face_subject_beyond_face` at `face:radio`;
+  - steps 3 to 5: `face_subject_misplaced` at `face:radio`, and
+    `zk_not_denied`;
+  - step 6: `face_subject_misplaced` alone;
+  - the control blocks: no finding.
+
+**What changed in zk2py.**
+- **`zk2py.link`:**
+  - `check_subjects` reads the policies' subject lists, with `on_face`,
+    `far_principals`, `is_face_subject` and `far_policies` as §2.15
+    defines them;
+  - `narrowed_too_far` reads every face;
+  - `subject_denies` and `check_router_block` read a router's whole block,
+    each subject's denies alone;
+  - `compare_block` keeps the denies, its shape zk2py's.
+- **`zk2py.link_scenarios`:** §9 and §10, §7's step 6 for 0.4, and F-121's
+  measurements. Round 32's F-120 measurements became §9's and §10's steps.
+
+**The three questions, read from the text alone.**
+1. **`narrowed_too_far`: which link protocols a name must be selected by.**
+   The check names "a link protocol of §2.1's list outside every face
+   whose far principal it is not". In §7's deployment there is one face, `radio`, with far
+   principal `ground`, over `unixsock-stream`.
+   - **`radio-b`** is not its far principal, so it must be selected over
+     the other eight: `tcp`, `udp`, `tls`, `quic`, `serial`, `unixpipe`,
+     `vsock` and `ws`. The generator's subject for `radio-b` names exactly
+     those, and §9's step 4 removes `tcp`.
+   - **`ground`** is the far principal of every face, so it is kept off
+     none and must be selected over all nine. Over `unixsock-stream`, the
+     face's subject answers, since it names no user name and no CN. Over
+     the eight others, only `ground`'s own subject answers, unless another
+     subject names no user name and no CN.
+   - Decided. One note: a subject that names no user name and no CN and
+     selects near protocols alone answers every name over them. Such a
+     subject is off the face, so no check of 0.4 reports it, and the
+     changelog leaves it to core §11.2 (F-87).
+2. **A subject naming `usernames = ["ground"]` and `cert_common_names =
+   ["local"]`.**
+   - **§2.15 decides that it is the far principal's alone.** Its
+     user-name list is not empty and every name in it is `ground`, and "A
+     subject bound to another principal names a user name or a CN, and is
+     not the far principal's". So it is not both. `lints.json`'s case 86
+     pins this: its subject with user name `local` and CN `ground` is the
+     far principal's and draws no finding.
+   - **zenoh matches it only for a session presenting the user name
+     `ground` and the CN `local`.** "zenoh 1.10.1 matches one value of each
+     property a subject names". Measured with usrpwd: listed in `local`'s
+     policy under `deny`, it gives G (user name `ground`, no certificate)
+     §1's share and nothing of `local`'s, and X nothing.
+   - **Two other passages read it otherwise.** §2.4's "A subject that names
+     the far principal and another principal binds the other too … the
+     other's session over the face matches it, whatever else it names" is
+     true of names in one property, not across the two. And
+     `narrowed_too_far` credits the subject to `local`, as its CN. That is
+     F-121.
+3. **`face_subject_misplaced` when the far principal has no subject on
+   the face at all.** Then the far principal's policies are none, and
+   every face subject is misplaced, wherever it is listed: "not listed in
+   exactly the far principal's policies, at least one". `lints.json`'s
+   cases 101 (`ground`'s subject in no policy) and 102 (no subject for
+   `ground`) pin it, as does §9's block with `ground`'s subject removed.
+   Under `deny` with no face subject, nothing is reported, and the far
+   principal gets nothing across the face, failing closed. Decided.
+
+### F-121 · gap · link.v1 0.4 §2.15 `narrowed_too_far`, with §2.4: a name beside, or as, the other kind
+
+> §2.15: "`narrowed_too_far` (no face, `at` the user name or CN): under
+> `allow`, a name the block's subjects bind, or a face's `far`, and a link
+> protocol of §2.1's list outside every face whose far principal it is
+> not, that no subject naming no interface and no zid selects, among those
+> that name it or no user name and no CN (0.4). A session with that name
+> over that link protocol matches no subject, and is allowed everything
+> (core §11.3): the far principal narrowed to its own faces (§2.4's MUST
+> NOT), or left with no subject at all, or any principal narrowed further
+> than §2.4 narrows it."
+
+> §2.15: "A subject is the far principal's when it names the far principal
+> alone, as its user names or as its CNs: one of the two lists is not
+> empty, and every name in it is the face's `far`. zenoh 1.10.1 matches
+> one value of each property a subject names, so every session such a
+> subject matches presents the far principal's name."
+
+> §2.4: "A subject that names the far principal and another principal
+> binds the other too: zenoh 1.10.1 matches one value of each property a
+> subject names, so the other's session over the face matches it,
+> whatever else it names, and gets the grants of every policy listing it."
+
+The check's "those that name it" counts a subject that names the name
+anywhere in its user names or CNs. By the zenoh fact §2.15 itself states, such a subject
+matches a session with that name only when the session presents every
+other property the subject names. Two blocks therefore pass the check
+while a session with the name matches no subject. Both are hand edits of
+the generator's `allow` block for §7's deployment, with `local`'s subject
+narrowed off `tcp` too. Measured on N (`NOTE` lines of `just py-link`'s
+§9); every session authenticates by user name and password:
+- **(i) the name beside a name of the other kind.** A subject
+  `usernames = ["ground"]`, `cert_common_names = ["local"]`, in `ground`'s
+  policy. `narrowed_too_far` credits it to `local` over `tcp` and reports
+  nothing. `local`'s session over TCP, with no certificate, matches no
+  subject: its 5 puts on `lab/radio-a`'s key reach L. Without the subject,
+  the tool reports `narrowed_too_far` at `local`, for the same 5 puts.
+- **(ii) the name as the other kind.** A subject `cert_common_names =
+  ["local"]`, selected by the eight near link protocols and so off the
+  face, in `local`'s policy. The check credits it to `local` and reports
+  nothing. `local`'s session, presenting the user name `local`, matches
+  neither subject: its 5 puts reach L.
+
+§2.4's "binds the other too … whatever else it names" reads names the
+same way. For names in one property it is right, since one value of that
+property is matched. Across the two properties it is not: a session with
+the other principal's name alone does not match. §2.15's definition of
+the far principal's subject, and `lints.json`'s case 86, decide that a
+subject naming `ground` as its user name and another principal as its CN
+is the far principal's. So the checks read it consistently, and only
+`narrowed_too_far` credits a name a session does not satisfy.
+**Resolved:** open. zk2py's `narrowed_too_far` reports exactly what
+§2.15 says, and passes both blocks. A reading that would catch them: a
+subject answers for a name only where it names that name in one list,
+user names or CNs, and names no other list; and a name the block binds as
+a user name is answered among user names, a CN among CNs. A face's `far`
+that no subject binds would take either.
+
+**Where zk2py's reading of link.v1 0.4 needed a guess, beyond the
+findings.**
+- **One `zk_not_denied` for the whole block.** zk2py's tool reports a
+  single `zk_not_denied` (`at` `@zk`) when the denies of any subject that
+  can match the far principal's session, or of none, miss a pair.
+  `lints.json` gives one subject's denies, so it pins no count.
+- **One `narrowed_too_far` per name**, whichever link protocols are
+  missed, since `at` is the name.
+- **A block with one or two of `default_permission`, `subjects` and
+  `policies`** has its subjects checked by none of the subject checks: the
+  fixture gives all three or none.
+- **Policies are told apart by position:** the fixture's carry no id.
