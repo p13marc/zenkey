@@ -349,6 +349,9 @@ const CITE_FACE_NEAR: &str = "link.v1 §2.4 (0.3, F-118): zenoh ties no credenti
      a subject bound by a user name or a CN alone matches that principal's session over a face \
      too; each principal's subject is selected by the link protocols outside the faces whose \
      far principal it is not";
+const CITE_FACE_KIND: &str = "link.v1 §2.4 (0.5, F-121): zenoh matches one value of each \
+     property a subject names, so a subject naming a user name and a CN matches only a session \
+     presenting both, and no check of a router's block can tell whose sessions those are";
 
 const CITE_IDENTITY: &str = "§11.3: `zids` subjects are unauthenticated; principals are bound by \
      certificate CN or username";
@@ -1437,26 +1440,69 @@ pub fn plan_acl(
         }
     }
 
+    // On a router with a face, a subject names one kind of name (link.v1
+    // §2.4, 0.5, F-121): one naming a user name and a CN matches only a
+    // session presenting both, which §2.15's checks cannot attribute to one
+    // principal, so the block would fail them. Such a principal is refused.
+    if policy.is_some() {
+        let (one, both): (Vec<Placed>, Vec<Placed>) = placed.into_iter().partition(|pl| {
+            pl.subject.usernames.is_empty() || pl.subject.cert_common_names.is_empty()
+        });
+        placed = one;
+        for pl in both {
+            let i = enrollment
+                .principal
+                .iter()
+                .position(|p| {
+                    nonempty(&p.id).or(nonempty(&p.user)).or(nonempty(&p.cn))
+                        == Some(pl.subject.id.as_str())
+                })
+                .expect("a placed principal is enrolled");
+            refusals.push(AclRefusal {
+                principal: principal_name(i, &enrollment.principal[i]),
+                reason: "it is bound by a user name and a CN both, and on a router with a \
+                         constrained face a subject names one of them: bind it by `user` or by \
+                         `cn`"
+                    .to_owned(),
+                cite: CITE_FACE_KIND.to_owned(),
+            });
+        }
+    }
+
     // Each face's far principal must be placed: its policy is where the
-    // face lives (link.v1 §2.4). Subject id → the faces it is the far side
-    // of.
+    // face lives (link.v1 §2.4). A face names it by user name or CN (§2.1),
+    // never by the enrollment's id, since §2.15 reads the block's names.
+    // Subject id → the faces it is the far side of.
     let mut far_of: BTreeMap<String, Vec<&FacePlan>> = BTreeMap::new();
     for face in &faces {
         let found = placed.iter().find(|pl| {
-            pl.subject.id == face.far
-                || pl.subject.usernames.contains(&face.far)
+            pl.subject.usernames.contains(&face.far)
                 || pl.subject.cert_common_names.contains(&face.far)
         });
         match found {
             Some(pl) => far_of.entry(pl.subject.id.clone()).or_default().push(face),
             None => {
-                let why = refusals
+                let far = Some(face.far.as_str());
+                let enrolled = enrollment
+                    .principal
                     .iter()
-                    .find(|r| r.principal == face.far)
-                    .map_or_else(
-                        || "the enrollment has no such principal".to_owned(),
-                        |r| format!("it was refused: {}", r.reason),
-                    );
+                    .enumerate()
+                    .find(|(_, p)| nonempty(&p.user) == far || nonempty(&p.cn) == far);
+                let why = match enrolled {
+                    Some((i, p)) => {
+                        let name = principal_name(i, p);
+                        refusals.iter().find(|r| r.principal == name).map_or_else(
+                            || "the enrollment has no such principal".to_owned(),
+                            |r| format!("it was refused: {}", r.reason),
+                        )
+                    }
+                    None if enrollment.principal.iter().any(|p| nonempty(&p.id) == far) => {
+                        "that is a principal's id, and link.v1 §2.1 names a far principal by its \
+                         user name or CN"
+                            .to_owned()
+                    }
+                    None => "the enrollment has no such principal".to_owned(),
+                };
                 return Err(Error::unaskable(
                     "--face-policy",
                     format!(
@@ -2190,9 +2236,10 @@ pub fn link_says(code: link::Code) -> &'static str {
         }
         C::NearSubjectOnFace => {
             "a subject bound to another principal than the face's far one, whatever else it \
-             names, and not kept off the face's link protocols: zenoh ties no credential to a \
-             link, so that principal's credentials over the face match it, and get its grants \
-             there (§2.4, §2.15)"
+             names, or naming a user name and a CN both, and not kept off the face's link \
+             protocols: zenoh ties no credential to a link, so a session over the face \
+             presenting the names it binds matches it, and gets its grants there (§2.4, \
+             §2.15)"
         }
         C::FaceSubjectMissing => {
             "under allow, no subject bound by no identity selects this link protocol of the \
@@ -2211,9 +2258,10 @@ pub fn link_says(code: link::Code) -> &'static str {
              principal's, or, listed in none, is allowed by default (§2.4, §2.15)"
         }
         C::NarrowedTooFar => {
-            "under allow, this principal's session over a link protocol it is not kept off \
-             matches no subject, so it is allowed everything there: a subject narrowed \
-             further than the faces it is kept off (§2.4, §2.15)"
+            "under allow, a session presenting this name alone, over a link protocol it is not \
+             kept off, matches no subject, so it is allowed everything there: no subject naming \
+             no interface and no zid selects that link protocol, among those naming it in the \
+             list of its kind and nothing in the other, or no user name and no CN (§2.4, §2.15)"
         }
         _ => "the face policy's linter refuses it (§2.1)",
     }
@@ -3210,6 +3258,13 @@ pub fn check_acl(
 /// or by no identity at all; and, if it names link protocols, one of the
 /// face's. A subject bound by interfaces alone is not one: a face is
 /// selected by link protocol (§2.14), and the link may report none.
+///
+/// This reads more subjects than the far principal's (§2.15, 0.5), on
+/// purpose: a subject naming `far` beside a name of the other kind matches
+/// the far principal's session when it presents both, which the block
+/// cannot rule out, so its denies are checked too. On the face such a
+/// subject is `near_subject_on_face` besides, and it gives the far
+/// principal no policy (`link::check_subjects`).
 fn matches_far(s: &crate::report::AclSubjectDoc, far: &str, link_protocols: &[String]) -> bool {
     let named = |v: &Option<Vec<String>>| v.as_ref().is_some_and(|v| !v.is_empty());
     let has = |v: &Option<Vec<String>>| v.as_ref().is_some_and(|v| v.iter().any(|x| x == far));
@@ -3278,15 +3333,16 @@ fn applies_to(d: &DownsamplingDoc, link_protocols: &[String]) -> bool {
 /// subject's policies: any allow wins across subjects (§2.4), so `@zk` must
 /// be denied in each (§2.15 states this reduction since 0.4). Every other
 /// subject is read too, with which policies list it
-/// (`link::check_subjects`, 0.3, 0.4): one bound to another principal must
-/// be kept off the face's link protocols whatever else it names, a face
-/// subject must select the face's link protocols alone and ride exactly the
-/// far principal's policies, and under `allow` each of the face's link
-/// protocols needs one; and, once over every face, under `allow` each
-/// principal's session over a link protocol it is not kept off must match
-/// one of its subjects (`link::check_narrowing`). The downsampling rules are
-/// those of every item that applies to the face's transports, in the
-/// block's order.
+/// (`link::check_subjects`, 0.3, 0.4): one bound to another principal, or
+/// naming a user name and a CN both (0.5), must be kept off the face's link
+/// protocols whatever else it names, a face subject must select the face's
+/// link protocols alone and ride exactly the far principal's policies, and
+/// under `allow` each of the face's link protocols needs one; and, once
+/// over every face, under `allow` each name's session over a link protocol
+/// it is not kept off must match a subject naming it in the list of its
+/// kind alone, or one bound to nobody (`link::check_narrowing`, 0.5). The
+/// downsampling rules are those of every item that applies to the face's
+/// transports, in the block's order.
 /// `windows` are
 /// the tombstone windows the deployment configures, by address (§2.11):
 /// `None` is not asked. `plan` is the plan the same policy compiled to.
@@ -5007,6 +5063,105 @@ type = { raw = "text/plain" }
                 r.id
             );
         }
+    }
+
+    /// On a router with a face, a principal bound by a user name and a CN
+    /// both is refused (link.v1 §2.4, 0.5, F-121): its subject would match
+    /// only a session presenting both, which §2.15's checks cannot
+    /// attribute, so the block would fail them. The far principal refused
+    /// so leaves its face unplaceable; without a face policy the principal
+    /// is planned as before.
+    #[test]
+    fn a_principal_bound_by_both_kinds_is_refused_on_a_router_with_a_face() {
+        let (base, set, policy) = radio();
+        let with_cn = |user: &str, cn: &str| {
+            let mut e = base.clone();
+            let p = e
+                .principal
+                .iter_mut()
+                .find(|p| p.user.as_deref() == Some(user))
+                .unwrap();
+            p.cn = Some(cn.to_owned());
+            e
+        };
+        for posture in [AclPermission::Deny, AclPermission::Allow] {
+            let plan = plan_acl(
+                &with_cn("local", "local.example"),
+                &set,
+                &face_opts(posture, link::parse(&policy)),
+            )
+            .unwrap();
+            assert_eq!(plan.refusals.len(), 1, "{:?}", plan.refusals);
+            assert_eq!(plan.refusals[0].principal, "local");
+            assert_eq!(plan.refusals[0].cite, CITE_FACE_KIND);
+            assert!(!plan.subjects.iter().any(|s| s.id == "local"));
+            let err = plan_acl(
+                &with_cn("ground", "ground.example"),
+                &set,
+                &face_opts(posture, link::parse(&policy)),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                err.contains("far principal \"ground\" cannot be placed")
+                    && err.contains("a user name and a CN both"),
+                "{err}"
+            );
+        }
+        let plain = plan_acl(
+            &with_cn("local", "local.example"),
+            &set,
+            &AclOptions::default(),
+        )
+        .unwrap();
+        assert!(plain.refusals.is_empty(), "{:?}", plain.refusals);
+        let local = plain.subjects.iter().find(|s| s.id == "local").unwrap();
+        assert_eq!(
+            (&local.usernames[..], &local.cert_common_names[..]),
+            (&["local".to_owned()][..], &["local.example".to_owned()][..])
+        );
+    }
+
+    /// A face names its far principal by user name or CN (link.v1 §2.1),
+    /// never by the enrollment's id: §2.15 reads the block's names, so a
+    /// far principal placed by its id alone would fail every check
+    /// (`near_subject_on_face` at its own subject).
+    #[test]
+    fn a_face_never_places_its_far_principal_by_id() {
+        let (mut e, set, policy) = radio();
+        let ground = e
+            .principal
+            .iter_mut()
+            .find(|p| p.user.as_deref() == Some("ground"))
+            .unwrap();
+        ground.id = Some("ground".to_owned());
+        ground.user = None;
+        ground.cn = Some("ground.example".to_owned());
+        let err = plan_acl(
+            &e,
+            &set,
+            &face_opts(AclPermission::Deny, link::parse(&policy)),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("far principal \"ground\" cannot be placed")
+                && err.contains("that is a principal's id"),
+            "{err}"
+        );
+        // Named by its CN, it is placed.
+        let by_cn = policy.replace(
+            "far          = \"ground\"",
+            "far          = \"ground.example\"",
+        );
+        assert_ne!(by_cn, policy);
+        let plan = plan_acl(
+            &e,
+            &set,
+            &face_opts(AclPermission::Deny, link::parse(&by_cn)),
+        )
+        .unwrap();
+        assert!(plan.refusals.is_empty(), "{:?}", plan.refusals);
     }
 
     /// `check face` (link.v1 §2.15): the generated block is clean; each
