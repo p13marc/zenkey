@@ -1978,7 +1978,452 @@
       },
       "note": "an interface whose contract is not given (§2.3)",
       "policy": "# zenoh-modem's RF node (link.v1 Appendix B)\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 3600\nbatch_bytes  = 220\nlink_bps     = 2400\n"
+    },
+    {
+      "expect": {
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/stream/air/frames_total/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": {
+              "flows": [
+                "egress"
+              ],
+              "id": "radio",
+              "link_protocols": [
+                "unixsock-stream"
+              ],
+              "messages": [
+                "put"
+              ],
+              "rules": [
+                {
+                  "freq": 1.0,
+                  "key_expr": "zk2/lab/radio-a/radio.v1/stream/air/dropped_total"
+                },
+                {
+                  "freq": 1.0,
+                  "key_expr": "zk2/lab/radio-a/radio.v1/stream/air/snr"
+                },
+                {
+                  "freq": 1.0,
+                  "key_expr": "zk2/lab/radio-b/radio.v1/stream/air/dropped_total"
+                },
+                {
+                  "freq": 1.0,
+                  "key_expr": "zk2/lab/radio-b/radio.v1/stream/air/snr"
+                }
+              ]
+            },
+            "far": "ground",
+            "findings": [
+              {
+                "at": "radio.v1/stream/air/dropped_total",
+                "code": "interval_over_horizon",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/stream/air/frames_total",
+                "code": "exposure_disagrees",
+                "face": "radio",
+                "severity": "warning"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "radio.v1/stream/air/dropped_total"
+                ],
+                "service": "lab/radio-a"
+              },
+              {
+                "evidence": [
+                  "radio.v1/stream/air/dropped_total"
+                ],
+                "service": "lab/radio-b"
+              }
+            ],
+            "name": "radio",
+            "windows": [
+              {
+                "min_s": 6,
+                "service": "lab/radio-a"
+              },
+              {
+                "min_s": 6,
+                "service": "lab/radio-b"
+              }
+            ]
+          },
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream",
+                "key_exprs": [
+                  "zk2/*/*/*/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "sat-gateway",
+            "findings": [],
+            "liveness": [
+              {
+                "evidence": [],
+                "service": "lab/radio-a"
+              },
+              {
+                "evidence": [],
+                "service": "lab/radio-b"
+              }
+            ],
+            "name": "sat",
+            "windows": [
+              {
+                "min_s": 600,
+                "service": "lab/radio-a"
+              },
+              {
+                "min_s": 600,
+                "service": "lab/radio-b"
+              }
+            ]
+          }
+        ]
+      },
+      "implements": {
+        "radio-a": [
+          "radio.v1"
+        ],
+        "radio-b": [
+          "radio.v1"
+        ]
+      },
+      "interfaces": {
+        "radio.v1": {
+          "revisions": [
+            [
+              {
+                "annotations": {
+                  "freshness.ttl_s": 4,
+                  "link.exposure": "link"
+                },
+                "template": "air/dropped_total",
+                "token": "stream"
+              },
+              {
+                "annotations": {},
+                "template": "air/frames_total",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "freshness.ttl_s": 4,
+                  "link.exposure": "link"
+                },
+                "template": "oper",
+                "token": "state"
+              }
+            ],
+            [
+              {
+                "annotations": {
+                  "freshness.ttl_s": 1,
+                  "link.exposure": "link"
+                },
+                "template": "air/dropped_total",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "air/frames_total",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "oper",
+                "token": "state"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "air/snr",
+                "token": "stream"
+              }
+            ]
+          ]
+        }
+      },
+      "note": "two revisions of one interface, two minors two services may run (core §9.8, §3.3): a stream one exposes and the other not is denied, and the plan warns; a resource one revision adds is its own; a horizon counts as evidence only where every revision gives one, and the interval is held against the least; a face that exposes none says nothing of the disagreement (§2.3, §2.7, §2.12)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\", \"radio-b\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sat]\nfar          = \"sat-gateway\"\nattach       = \"client\"\nselect       = { link_protocols = [\"serial\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 600\nbatch_bytes  = 270\nlink_bps     = 2400\n"
     }
   ],
-  "description": "link.v1 §2.3, §2.5-§2.12: a face policy and a deployment -> each face's plan, or the findings that refuse it. policy is the face policy's TOML text (§2.1). implements maps each listed service's name to the interface ids it implements. The interfaces' resources are given inline in interfaces (interface id -> resources, each {template, token, annotations}, token one of stream, @stream, state, @state, events, @op, annotations resolved), or loaded from contracts, paths of authoring files relative to the repository root, loaded as core §9 loads them (defaults resolved, core §9.3). expect is {faces: [...]}, each face's plan as §2.3 states it, faces sorted by name: name, far, attach ({shape: client}, or {shape: south-region, region, gateway}), deny (each {id, flows, messages, key_exprs}: zk, adv, admin, then the exposure denies by kind token in the order stream, @stream, state, @state, events, each wholesale with id <token> or per listed interface with id <token>:<iface>, sorted by interface id, an empty one left out), downsampling ({id, link_protocols, flows, messages, rules: [{key_expr, freq}]}, or null), windows ([{service, min_s}]), liveness ([{service, evidence}]) and findings (warnings, each {code, severity, face, at}). Key expressions within a rule, rules, windows, liveness entries and evidence are sorted by their bytes; findings by face (null first), at, then code. freq is 1/interval_s as an IEEE 754 double. Or expect is {refused: [finding...]}: the policy's errors and warnings (§2.1), or the deployment's errors (service_unknown, contract_unknown), sorted the same way."
+  "description": "link.v1 §2.3, §2.5-§2.12: a face policy and a deployment -> each face's plan, or the findings that refuse it. policy is the face policy's TOML text (§2.1). implements maps each listed service's name to the interface ids it implements. The interfaces' resources are given inline in interfaces (interface id -> resources, each {template, token, annotations}, token one of stream, @stream, state, @state, events, @op, annotations resolved), or loaded from contracts, paths of authoring files relative to the repository root, loaded as core §9 loads them (defaults resolved, core §9.3). An interface inline is one revision's resources, or {revisions: [resources, ...]}, several revisions of one interface id (0.3, F-119); two files in contracts with one interface id are two revisions of it. The plan reads every revision of an interface together (§2.3). expect is {faces: [...]}, each face's plan as §2.3 states it, faces sorted by name: name, far, attach ({shape: client}, or {shape: south-region, region, gateway}), deny (each {id, flows, messages, key_exprs}: zk, adv, admin, then the exposure denies by kind token in the order stream, @stream, state, @state, events, each wholesale with id <token> or per listed interface with id <token>:<iface>, sorted by interface id, an empty one left out), downsampling ({id, link_protocols, flows, messages, rules: [{key_expr, freq}]}, or null), windows ([{service, min_s}]), liveness ([{service, evidence}]) and findings (warnings, each {code, severity, face, at}). Key expressions within a rule, rules, windows, liveness entries and evidence are sorted by their bytes; findings by face (null first), at, then code. freq is 1/interval_s as an IEEE 754 double. Or expect is {refused: [finding...]}: the policy's errors and warnings (§2.1), or the deployment's errors (service_unknown, contract_unknown), sorted the same way."
 }

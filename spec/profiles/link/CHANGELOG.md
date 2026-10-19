@@ -4,6 +4,126 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-19: a near credential on the face, and two revisions of one interface (#769, LC)
+
+The spec-only implementation (zk2py, round 31) read 0.2 cold, passed
+every fixture and all six scenario sections, and filed two findings,
+F-118 and F-119. The reference answers both in the text, the model, the
+generator, the fixtures and two new scenario sections, run live. Written
+against core 0.30, unchanged (below).
+
+**Changed: every other credential is kept off the face (F-118; §0, §2.4,
+§2.14, §2.15, §5, Appendices A and B).**
+- **The finding.** 0.2's §2.4 put the plan's denies into "each subject
+  that can match a session on the face", then set the near principals
+  aside because they "connect elsewhere": a fact of the deployment that
+  the generator cannot see and the router does not enforce. zenoh ties no
+  credential to a link, so a subject bound by a user name alone matches
+  that principal's session over the face too. zk2py measured `local`'s
+  credentials over the face receiving 100 of `air/frames_total` and of
+  `raw` and all 5 `change` occurrences, and seeing the owner's tokens,
+  while `ground` on the same face received none of them. The reference
+  measured the same (scenarios §7, step 2).
+- **The rule.** A session over a face that is not the far principal's
+  MUST get nothing across the face that the plan denies, and never more
+  than the far principal gets there. Who holds a near principal's
+  credentials is not a guard: a generator MUST make this hold in the block
+  it writes. "The near side's principals connect elsewhere" is gone.
+- **The mechanism, measured in both postures** (scenarios §7):
+  - every subject bound to a principal is selected by the link protocols
+    of §2.1's closed list outside every face whose far principal it is
+    not; a principal left with none is refused;
+  - under `deny`, that is all: a near credential over the face matches no
+    subject, and gets nothing at all, not even what the far principal
+    gets;
+  - under `allow`, a session that matches no subject is allowed
+    everything, a narrowed credential over the face among them (measured,
+    its writes to an owner's key included), so each face has a subject of
+    its own, selected by its link protocols alone and listed in the far
+    principal's policy. A near credential over the face then gets what the
+    far principal gets there, its writes to an owner's key denied as the
+    far principal's are.
+- **What the measurement overturned.** The suggestion was a face subject
+  under `allow` carrying the plan's denies alone, in a policy of its own.
+  It failed live: under `allow`, a subject is allowed whatever its own
+  denies do not include, and any allow wins across subjects, so it undid
+  the far principal's own denies for every session over the face, and
+  `ground`'s put on `lab/radio-a`'s key reached the near side (step 5).
+  0.1's objection to a link subject (F-87's mechanism) was that implicit
+  allow, which a deny-only policy still has under `allow`. Listed in the
+  far principal's policy, the subject undoes nothing.
+- **0.2's MAY**, narrowing the far principal's subject to its face, now
+  holds under `deny` only: under `allow`, its session elsewhere would
+  match no subject, and be allowed everything.
+- **Two checks** (§2.15, errors), given the block's subjects and posture:
+  `near_subject_on_face`, at the subject's id, and `face_subject_missing`,
+  at the link protocol. They are link.v1's, decided by the block and the
+  policy alone, as `zk_not_denied` is. Whether the face's subject rides
+  the far principal's policy is the generator's comparison: §2.15 cannot
+  tell which of a policy's denies are the far principal's own.
+- **§2.14** says a face's link protocol is the face's alone: a near
+  principal connecting over it is on the face.
+- **Fixtures.** `lints.json`'s block may carry `default_permission` and
+  `subjects` (zenoh's `AclConfigSubjects`), together or neither; absent,
+  the subjects are not checked. Six new cases.
+
+**Changed: two revisions of one interface (F-119; §0, §2.2, §2.3, §2.7,
+§5).**
+- **The finding.** An annotation changed between two minors is a review,
+  not a breaking change (core §9.8), so one major's minors may differ in a
+  resource's exposure, and two services of one deployment may run either
+  (core §3.3). The plan's exposure denies are per interface id, the same
+  keys for every service, while its downsampling rules and liveness
+  evidence are per service, and the text named no revision to derive
+  from. §2.7's "What a later minor adds" covered a resource added, not an
+  exposure changed. The reference generator (LB) already read several
+  revisions fail-closed, silently.
+- **The rule.** The plan reads every revision of a listed interface it is
+  given together. A resource crosses only where every revision that
+  declares it reads `link`, failing closed as §2.2 does on a value that is
+  no exposure. A revision that does not declare a resource says nothing of
+  it, so a resource a later minor adds is read from the minors that
+  declare it. Liveness evidence follows the same reading: a horizon counts
+  only where every revision that declares the resource gives one above 0,
+  and the least of them is the one the interval is held against (§2.12).
+- **The warning**: `exposure_disagrees`, at the resource's name, on a face
+  that exposes, so an operator sees why an exposed resource does not
+  cross.
+- **The fixture format**, kept minimal: an interface in `interfaces`
+  (`plan.json`, `lints.json`) is one revision's resources, as before, or
+  `{revisions: [resources, ...]}`; two files in `contracts` with one
+  interface id are two revisions of it. `plan.json` gains one case (two
+  revisions that disagree on a stream, a resource the later one adds, two
+  horizons, and a face that exposes none, which says nothing of it);
+  `lints.json` two. No 0.2 case changed.
+- **Scenarios §8**: two owners running two minors that disagree on
+  `air/frames_total`; it crosses for neither. Derived from the newer minor
+  alone, it crosses for both, the older minor's owner's `host` stream with
+  it.
+
+**Deliberately not changed.**
+- **The core** (0.30). §11.3 already says a session that matches no
+  subject gets `default_permission`, everything under `allow`, and §11.2
+  says why a subject that matches every session undoes per-user denies.
+  Selecting a principal's subject by link protocol is a generator's use
+  of a subject property the core's grant shapes (§11.1) leave to it, and
+  only a constrained face needs it. §8.5's gateway, "the only session on
+  its side that talks across the face", is a deployment's shape, which
+  §2.4 now enforces rather than assumes.
+- **The plan's shape** (§2.3): the narrowed subjects and the face's own
+  are the block's, written from the policy's faces and the enrollment's
+  principals, which no plan member carries; a plan member listing them was
+  considered and left out, as 0.2 left out the declarations a south region
+  needs.
+- **A carve-out per service, by its minor.** The deployment (core §11.1's
+  input) names the interfaces a service implements, not the minor it runs,
+  and a service upgrades without its router's block being written again,
+  while a router reads keys, never descriptors. Failing closed over every
+  revision given holds whichever minor each service runs.
+- **A warning for two horizons**: the least is read, and
+  `interval_over_horizon` reports what it costs.
+- **Exposure per principal**: still deferred (§2.14).
+
 ## 0.2 — 2026-10-18: what compiling it into live routers found (#769, LB)
 
 The reference generator (`zenctl acl gen --face-policy`, LB) and the

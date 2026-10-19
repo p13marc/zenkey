@@ -1461,7 +1461,545 @@
       "note": "everything at once: a batch over a third, a window short, no @zk deny, a wildcard rule",
       "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 2048\nlink_bps = 2400\n",
       "windows": {}
+    },
+    {
+      "expect": [
+        {
+          "at": "s.v1/stream/x",
+          "code": "exposure_disagrees",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "implements": {
+        "radio-a": [
+          "s.v1"
+        ]
+      },
+      "interfaces": {
+        "s.v1": {
+          "revisions": [
+            [
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "x",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "LINK"
+                },
+                "template": "y",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "z",
+                "token": "stream"
+              }
+            ],
+            [
+              {
+                "annotations": {},
+                "template": "x",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "host"
+                },
+                "template": "y",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "z",
+                "token": "stream"
+              }
+            ]
+          ]
+        }
+      },
+      "note": "two revisions of an interface disagree on x's exposure, one link and one not: exposure_disagrees; y read as host by both (an invalid value and host), and z exposed by both, are no disagreement (§2.2, §2.3)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [],
+      "implements": {
+        "radio-a": [
+          "s.v1"
+        ]
+      },
+      "interfaces": {
+        "s.v1": {
+          "revisions": [
+            [
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "x",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "LINK"
+                },
+                "template": "y",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "z",
+                "token": "stream"
+              }
+            ],
+            [
+              {
+                "annotations": {},
+                "template": "x",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "host"
+                },
+                "template": "y",
+                "token": "stream"
+              },
+              {
+                "annotations": {
+                  "link.exposure": "link"
+                },
+                "template": "z",
+                "token": "stream"
+              }
+            ]
+          ]
+        }
+      },
+      "note": "the same revisions behind a face that exposes none: nothing crosses there anyway, and the plan says nothing of the disagreement (§2.3)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "deny",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "subjects": [
+          {
+            "id": "radio-a",
+            "usernames": [
+              "radio-a"
+            ]
+          },
+          {
+            "id": "local",
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "local",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "radio-a",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "0.2's block: the near principals' subjects bound by a user name alone match their sessions over the face (§2.4, §2.15; F-118)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "deny",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "subjects": [
+          {
+            "id": "radio-a",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "radio-a"
+            ]
+          },
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          }
+        ]
+      },
+      "expect": [],
+      "note": "every subject but the far principal's narrowed off the face: no finding, and under deny no subject of the face's own is needed (§2.4)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "deny",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "unixpipe"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "cert_common_names": [
+              "ops"
+            ],
+            "id": "ops"
+          },
+          {
+            "cert_common_names": [
+              "ground"
+            ],
+            "id": "far"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "local",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "ops",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a subject narrowed but keeping one of the face's link protocols, and one bound by a CN alone: each matches over the face (§2.4, §2.15)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\", \"unixpipe\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixpipe"
+            ]
+          },
+          {
+            "id": "by-interface",
+            "interfaces": [
+              "eth0"
+            ],
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "unixsock-stream",
+          "code": "face_subject_missing",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "under allow, a face subject for one of its two link protocols, and one that names an interface too: the other protocol has none (§2.4, §2.15)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\", \"unixpipe\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          }
+        ]
+      },
+      "expect": [],
+      "note": "under allow, the face's own subject, selected by its link protocols alone: no finding (§2.4)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "everyone"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "unixsock-stream",
+          "code": "face_subject_missing",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "under allow, a catch-all subject with no property is not the face's own: it selects no link protocol (§2.4, §2.15; core §11.2, F-87)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
     }
   ],
-  "description": "link.v1 §2.1, §2.3, §2.11, §2.15: a face policy, and optionally a deployment, the windows it configures and a router's block -> every finding, sorted by face (null first), at, then code, each by its bytes. policy is the face policy's TOML text. implements and interfaces or contracts are plan.json's: when implements is present, the plan is derived and its findings (errors that refuse it, or its warnings) are included. windows, present only with implements, maps a listed service's address (<system>/<service>) to the tombstone window the deployment configures, in seconds; an address it does not name has the core's 60 s (S3). block is a router's block for one face: {face, namespace, deny: [{flows, messages, key_exprs}], downsampling: [{key_expr, freq}]}, in the block's order. The plan, the windows and the block are checked only when the policy has no error. A finding is {code, severity, face, at}: severity is error or warning; face is the face's name, or null for the top level and the deployment; at is the key within the face (select.link_protocols), the top-level key, the service or interface, the resource's name (<iface>/<token>/<template>), the service's address for window_under_outage, @zk for zk_not_denied, or the rule's key expression for a downsampling finding, and empty for toml and a face itself."
+  "description": "link.v1 §2.1, §2.3, §2.11, §2.15: a face policy, and optionally a deployment, the windows it configures and a router's block -> every finding, sorted by face (null first), at, then code, each by its bytes. policy is the face policy's TOML text. implements and interfaces or contracts are plan.json's: when implements is present, the plan is derived and its findings (errors that refuse it, or its warnings) are included. windows, present only with implements, maps a listed service's address (<system>/<service>) to the tombstone window the deployment configures, in seconds; an address it does not name has the core's 60 s (S3). block is a router's block for one face: {face, namespace, deny: [{flows, messages, key_exprs}], downsampling: [{key_expr, freq}]}, in the block's order; and, together or neither (0.3, F-118), default_permission (deny or allow) and subjects, every subject of the block as zenoh's AclConfigSubjects carries it, {id, usernames, cert_common_names, link_protocols, interfaces, zids}, each list absent when the subject names none; when they are absent, the subjects are not checked. The plan, the windows and the block are checked only when the policy has no error. A finding is {code, severity, face, at}: severity is error or warning; face is the face's name, or null for the top level and the deployment; at is the key within the face (select.link_protocols), the top-level key, the service or interface, the resource's name (<iface>/<token>/<template>), the service's address for window_under_outage, @zk for zk_not_denied, the rule's key expression for a downsampling finding, the subject's id for near_subject_on_face, the link protocol for face_subject_missing, and empty for toml and a face itself."
 }

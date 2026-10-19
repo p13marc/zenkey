@@ -5,7 +5,8 @@ the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. They are a generator's and a
 router's: the reference runs them as tests of the tool that compiles a
 face policy into a router's configuration (`zenctl acl gen`), against live
-routers, one test per section, named after it (#769, LB).
+routers, one test per section, named after it (#769, LB; §7 and §8 since
+0.3, LC).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -14,11 +15,12 @@ routers, one test per section, named after it (#769, LB).
   and `usrpwd` authentication. It listens on `tcp/127.0.0.1:<port>`, the
   near side, and on `unixsock-stream/<path>`, the face. Every session
   authenticates as a user of its own. Timeouts are 1 s unless stated.
-- **The generator** compiles N's `access_control` block, under `deny`,
-  from the enrollment below, the contract and the face policy, with the
-  plan's denies in the far principal's policy (§2.4) and the plan's
-  `downsampling` block beside it, and N's `gateway` block for a south
-  region (§2.5). "The block" is what it wrote.
+- **The generator** compiles N's `access_control` block, under `deny`
+  unless a section says `allow`, from the enrollment below, the contract
+  and the face policy, with the plan's denies in the far principal's
+  policy and every other principal's subject narrowed off the face (§2.4,
+  0.3), the plan's `downsampling` block beside it, and N's `gateway` block
+  for a south region (§2.5). "The block" is what it wrote.
 - **The contract** is `radio.v1`:
 
   ```toml
@@ -138,6 +140,8 @@ routers, one test per section, named after it (#769, LB).
    `adv`, `admin` and the exposure denies, and the downsampling block has
    one rule per crossing stream of `lab/radio-a` at 1 Hz, as `plan.json`'s
    third case derives them, with this policy's attachment and interval.
+   Every subject but `ground`'s is selected by the link protocols other
+   than `unixsock-stream` (§2.4, 0.3).
 2. L receives every sample, put and occurrence, about 100 of each stream.
    G receives:
    - `air/dropped_total` 4 to 6 times, and `frames` 4 to 6 times: one per
@@ -285,3 +289,83 @@ opens a new one, keeping G's merged members.
 3. The plan lists no evidence, and G receives nothing of the owner. The
    tool reports liveness unobservable from the start, whatever the owner
    publishes.
+
+## §7 A near principal's credentials on the face (§2.4)
+
+zenoh ties no credential to a link: a subject bound by a user name alone
+matches that principal's session over the face too (0.3, F-118). This
+section shows that 0.2's block let a near credential across the face
+carrying its own grants, and that 0.3's keeps it to nothing under `deny`
+and to the far principal's share under `allow`.
+
+**Setup.** As §1. X is a client of N over the face with `local`'s
+credentials. Each of G, X and L subscribes as the Conventions say, to the
+console's selectors under either posture.
+
+**Steps.**
+1. The owner's traffic, under the block. G and X each GET
+   `…/state/peers/x`, call `…/@op/reset`, read `zk2/lab/*/@zk/**` by
+   liveliness and GET the owner's descriptor. Then, the owner silent, each
+   puts five times on `zk2/lab/radio-a/radio.v1/stream/air/dropped_total`,
+   a key only `lab/radio-a` may write (core §11.1), and L counts what
+   reaches it.
+2. **Control:** 0.2's block, the same with no subject narrowed. X as in
+   step 1.
+3. Under `allow`: as step 1.
+4. **Control:** under `allow`, the subjects narrowed and no subject of the
+   face's own. X as in step 1.
+5. **Control:** under `allow`, the face's subject in a policy of its own,
+   holding the plan's denies alone. G as in step 1.
+6. A tool checks the blocks of steps 1 to 5 (§2.15).
+
+**Expected.**
+1. Every subject but `ground`'s is selected by `tcp`, `udp`, `tls`,
+   `quic`, `serial`, `unixpipe`, `vsock` and `ws`. G receives what §1's G
+   receives. X matches no subject: it receives nothing at all, sees no
+   token and no descriptor, and gets no reply. Neither's puts reach L. L
+   receives every sample, put and occurrence.
+2. X matches `local`'s subject over the face and gets its grants there:
+   about 100 of `air/frames_total` and of `raw`, all 5 occurrences of
+   `change`, the owner's two tokens, and its GET and call answered. The
+   face's downsampling still applies to it: it selects by link protocol.
+3. The block has a subject `face:radio`, selected by `unixsock-stream`
+   alone, which `ground`'s policy lists beside `ground`. G and X each
+   receive what §1's G receives, see no token, and have their GET and call
+   answered. Neither's puts reach L: `ground`'s deny of other services'
+   writes holds for both.
+4. X matches no subject and is allowed everything: as in step 2, and its
+   five puts reach L.
+5. G receives what §1's G receives, and its five puts reach L: the face
+   subject's policy allows what its denies do not include, and any allow
+   wins across subjects, so `ground`'s own deny of other services' writes
+   is undone.
+6. Steps 1 and 3: no finding. Step 2: `near_subject_on_face` for
+   `ground-router`, `local`, `radio-a` and `radio-b`. Step 4:
+   `face_subject_missing` at `unixsock-stream`. Step 5: no §2.15 finding,
+   and the comparison with the plan names the policy (§2.15).
+
+## §8 Two minors that disagree on a stream's exposure (§2.3, §2.7)
+
+**Setup.** As §1, with both owners, `services = ["radio-a", "radio-b"]`.
+The generator is given `radio.v1` minor 0, the Conventions' contract, and
+minor 1, which differs from it only in `air/frames_total`'s annotations,
+`{ "link.exposure" = "link" }`: an annotation changed, a review (core
+§9.8). `lab/radio-a` runs minor 1 and `lab/radio-b` minor 0 (core §3.3);
+N reads keys, never descriptors.
+
+**Steps.**
+1. The generator compiles the block from both revisions. Both owners
+   publish `air/frames_total` and `air/dropped_total` at 20 Hz for 5 s.
+2. **Control:** the block from minor 1 alone. Both owners publish as in
+   step 1.
+
+**Expected.**
+1. The plan warns `exposure_disagrees` at
+   `radio.v1/stream/air/frames_total`, and its denies and rules are minor
+   0's: `air/frames_total` denied, and no rule for it. G receives nothing
+   of `air/frames_total` from either owner, and 4 to 6 samples of
+   `air/dropped_total` from each. L receives about 100 of
+   `air/frames_total` from each.
+2. The plan has a rule for each owner's `air/frames_total`, and no deny of
+   it: G receives 4 to 6 from each owner, `lab/radio-b`'s among them,
+   though the minor it runs keeps it home (F-119).
