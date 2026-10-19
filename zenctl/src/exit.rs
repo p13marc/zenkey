@@ -42,7 +42,7 @@
 //!    [`Unanswered`] for a question nothing on the bus answered (a zk2
 //!    revision no holder serves, FJ4).
 //! 2. [`asked`] — the verdict verbs' pre-run guard. `check expect`, `check
-//!    cutover`, `check retired`, `check probe`, `check conform`, `check
+//!    cutover`, `check retired`, `check probe`, `check conform`, `check face`, `check
 //!    schema`, `compat`, `doctor`, `health` and `why` give their 0 **and their 1** meanings, so a
 //!    `?` on their setup path would *claim a verdict the run never reached*. Every
 //!    pre-run failure of theirs — resolution, session, registry, the

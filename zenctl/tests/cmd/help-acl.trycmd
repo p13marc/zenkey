@@ -80,6 +80,29 @@ The enrollment file (examples/zk2/acl/ holds two):
   admin    = true                        # the routers' admin space
   inspects = ["*/*"]                     # presence alone, no data
 
+With --face-policy, the router's constrained faces (link.v1, #769;
+examples/zk2/link/ holds one):
+
+  system   = "lab"                       # the near router's system
+  services = ["radio-a"]                 # the services it carries
+  [face.radio]
+  far          = "ground"                # the far principal: its policy gets the denies
+  attach       = "client"                # or "south-region", with region = "…"
+  select       = { link_protocols = ["unixsock-stream"] }
+  class        = "constrained"
+  expose       = "link"                  # or "none": no push crosses
+  interval_s   = 1                       # one put per exposed stream key per second
+  max_outage_s = 6                       # each listed owner's tombstone window floor
+  batch_bytes  = 1000
+  link_bps     = 1000000
+
+The plan (link.v1 §2.3) denies @zk, @adv and the admin space, and the
+pushes of every resource whose contract does not mark it
+link.exposure = "link", in the far principal's policy; downsamples
+each crossing stream key of a listed service, egress, put; and lets
+GETs and calls cross by grant. `zenctl check face` judges a router's
+config against it.
+
 Usage: zenctl acl gen [OPTIONS] --enrollment <FILE>
 
 Options:
@@ -112,25 +135,8 @@ Options:
       --explain <PRINCIPAL> <KEY> <MESSAGE>
           Does PRINCIPAL (a subject id, user or CN) hold MESSAGE on KEY (the wire key, namespace included), via which rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0
 
-      --face <constrained>
-          Guard a constrained face too (spec §8.5): the far principal's policy carries the `@zk` and `@stream` denies, and loses its presence and contract grants (bindings resolve statically there, R7)
-
-          Possible values:
-          - constrained: A bandwidth-limited link: radio, cell, tactical, satellite
-
-      --attach <ATTACHMENT>
-          With --face: how the far side attaches. `client`: one far-side or gateway session, a client of this router. `south-region`: a far router in a south region of this one (`gateway.south`; needs --region). `router` is refused: a deny on a router-to-router link hides the declarations but lets their key strings cross
-
-          Possible values:
-          - client:       One far-side session, or a gateway session, as a client
-          - south-region: A far router in a south region of this router
-          - router:       A far router linked router to router: refused, with why
-
-      --far <PRINCIPAL>
-          With --face: the far side's principal (its id, user or CN): the gateway session, or the far router
-
-      --region <NAME>
-          With --attach south-region: the far router's `region_name`, which this router's `gateway.south` lists
+      --face-policy <FILE>
+          Guard the router's constrained faces too: its face policy (TOML, `link.v1` §2.1). Each face's denies (`@zk`, `@adv`, the admin space, and every push its exposure does not let cross) go into its far principal's policy, which loses its presence, history, admin-space and contract grants; its crossing streams get one downsampling rule per key; a south region gets `gateway.south` and the declarations of every queryable it may query. Router to router is refused
 
       --namespace <NS>
           The deployment namespace: the session is opened in it.

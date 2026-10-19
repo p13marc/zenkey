@@ -1266,6 +1266,131 @@ PASS
     assert_eq!(out.lines().count(), 3, "envelope + two findings");
 }
 
+/// A face policy's plan (link.v1, #769): each face's section after the
+/// rules (its far principal, its downsampling, its window floors, its
+/// liveness evidence), the face's denies among the rules, and on the
+/// stream a `face` row carrying link.v1's plan and a `downsampling` row
+/// carrying zenoh's item.
+#[test]
+fn an_acl_plan_with_a_face_draws_the_face_and_rows_its_plan() {
+    let plan = fx::acl_plan_face();
+    let t = table(&plan);
+    let face = t
+        .split("\nface radio:")
+        .nth(1)
+        .map(|s| format!("face radio:{s}"))
+        .expect("the face's section");
+    assert_data_eq!(
+        face,
+        str![[r#"
+face radio: far ground (client), 8 deny rule(s) in its policy
+  downsampling on unixsock-stream (egress, put):
+    zk2/lab/radio-a/radio.v1/@stream/frames            1 Hz
+    zk2/lab/radio-a/radio.v1/stream/air/dropped_total  1 Hz
+  tombstone window floors (§2.11):
+    lab/radio-a  at least 6 s
+  liveness across the face (§2.12):
+    lab/radio-a  radio.v1/state/oper, radio.v1/stream/air/dropped_total
+
+"#]]
+    );
+    assert!(t.contains("✗ face:radio:zk"), "the face's denies are rules");
+    assert_data_eq!(
+        notes(&plan),
+        str![[r#"
+face radio to ground (client): its policy carries the face's denies and no presence, history, admin-space or contract grant; requests cross by grant, never by exposure (link.v1 §2.4, §2.9)
+what a router runs is not on the bus: `zenctl check face <router.json5> --face-policy …` judges the file it is said to run (link.v1 §2.14, §2.15); each listed owner of state must run with a tombstone window of at least the face's outage (§2.11), which no tool can observe
+18 rule(s), 3 subject(s), 3 polic(y/ies), 1 face(s), 2 downsampling rule(s), compiled from 1 contract revision(s)
+write the fragment: `zenctl acl gen --enrollment … --contracts … --json5 > router-acl.json5`, merge it at the router config's top level, restart the router, and regenerate on every contract revision (spec §11.2)
+
+"#]]
+    );
+    let out = ndjson(&plan);
+    let rows: Vec<serde_json::Value> = out
+        .lines()
+        .skip(1)
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let face = rows
+        .iter()
+        .find(|r| r["row"] == "face")
+        .expect("a face row");
+    assert_eq!(face["name"], "radio");
+    assert_eq!(face["attach"]["shape"], "client");
+    assert_eq!(face["deny"][0]["id"], "zk");
+    let ds = rows
+        .iter()
+        .find(|r| r["row"] == "downsampling")
+        .expect("a downsampling row");
+    assert_eq!(ds["id"], "radio");
+    assert_eq!(ds["rules"].as_array().unwrap().len(), 2);
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert!(envelope.get("faces").is_none(), "the faces are rows");
+}
+
+/// `check face` (link.v1 §2.15): the faces read, each finding, the windows
+/// when asked, the differences from the plan, and the verdict word; the
+/// running block's absence from the bus in every medium.
+#[test]
+fn a_face_check_names_its_findings_windows_and_differences() {
+    assert_data_eq!(
+        table(&fx::face_check()),
+        str![[r#"
+router.json5: face radio (far ground): 7 deny rule(s) across subject(s) ground; 1 downsampling rule(s) on its transports
+  ✗ zk_not_denied          face radio  @zk
+  ✗ wildcard_downsampling  face radio  zk2/lab/*/radio.v1/stream/air/dropped_total
+    window lab/radio-a  6 s  face radio: at least 6 s
+against the plan: 2 difference(s)
+  ✗ policy_missing        ground  planned rules [call-in:tool.console, face:radio:zk] subjects [ground]
+  ✗ downsampling_differs  radio   planned link_protocols unixsock-stream egress put zk2/lab/radio-a/radio.v1/@stream/frames@1Hz zk2/lab/radio-a/radio.v1/stream/air/dropped_total@1Hz; configured link_protocols unixsock-stream egress put zk2/lab/*/radio.v1/stream/air/dropped_total@1Hz
+FAIL
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&fx::face_check_clean()),
+        str![[r#"
+router.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
+PASS
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&fx::face_check()),
+        str![[r#"
+zk_not_denied [face radio] @zk: a pair of the nine messages and both flows is not denied on @zk: presence, descriptors or bundles cross the face (§2.6, §2.15)
+wildcard_downsampling [face radio] zk2/lab/*/radio.v1/stream/air/dropped_total: a downsampling rule that is not one concrete key: every key it covers shares one timer (§2.8, §2.15)
+judged against the config file router.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+the windows are the ones given: whether each owner runs with its window is its configuration, not on the bus (link.v1 §2.11, §5)
+
+"#]]
+    );
+    let n = notes(&fx::face_check_clean());
+    assert!(n.contains("tombstone windows not asked"), "{n}");
+    let out = ndjson(&fx::face_check());
+    let kinds: Vec<String> = out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| v.get("row").and_then(|r| r.as_str()).map(str::to_string))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "face",
+            "finding",
+            "finding",
+            "window",
+            "difference",
+            "difference"
+        ]
+    );
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["report"], "face-check");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert_eq!(envelope["comparison"]["answer"], "established");
+    assert!(envelope.get("windows").is_none(), "the windows are rows");
+}
+
 /// The explanation answers per direction with the rules that decided, deny
 /// first, and its ndjson is one row per direction, tagged with the flow.
 #[test]
@@ -1713,6 +1838,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "context-list",
         "doctor",
         "expect",
+        "face-check",
         "field",
         "gen",
         "gen-plan",
