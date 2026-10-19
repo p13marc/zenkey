@@ -359,7 +359,11 @@ window: samples, rates, values against their type, the declared QoS,
 presence) · `zenctl check probe <address> <iface> <resource>` (a resource
 read the way a consumer reads it: did a value arrive, and if not, who was up
 and silent) · `zenctl check schema <iface> <resource> --from …` (one payload
-against a type of a revision) · `zenctl check conform <address> <iface>` (one
+against a type of a revision) · `zenctl check face <router.json5>
+--face-policy …` (a router's config file against the constrained faces it
+guards, `link.v1` §2.15: `@zk` denied on every pair for the far side, each
+downsampling rule one concrete key, the windows given at least the outage,
+and the block against the whole plan; no session) · `zenctl check conform <address> <iface>` (one
 service against the revision it claims, as a suite: served, typed, on its QoS,
 its operations answering as O1–O7 say, its state stamped by its own session
 and answering a GET, its populations within their bounds and its events
@@ -829,17 +833,31 @@ call. `examples/zk2/acl/` holds the walkthrough's and the tcgui pilot's.
 
 Under `--default-permission allow` zenoh evaluates no allow rule, so each
 grant becomes denies of its complement, enumerated from the contracts, and
-every principal is denied queryables in the admin space (#684). With
-`--face constrained --attach client|south-region --far <principal>`, the far
-side's policy carries the `@zk` and `@stream` denies (§8.5), and a south
-region adds the near router's `gateway.south`; `--attach router` is refused,
-because a deny on a router-to-router link lets the denied key strings cross.
+every principal is denied queryables in the admin space (#684).
+
+With `--face-policy <FILE>` (`link.v1`, #769) the block also guards the
+router's constrained faces. The face policy names each face's far
+principal, its attachment and link protocols, what crosses and at what
+rate; `examples/zk2/link/` holds one. Each face's plan goes into the far
+principal's policy, as rules `face:<face>:<id>`: the `@zk`, `@adv` and
+admin-space denies, then the pushes of every resource its contract does
+not mark `link.exposure = "link"`. Its crossing streams get zenoh's
+`downsampling` block, one rule per concrete key at the face's rate. A south
+region adds the near router's `gateway.south` and the declarations of
+every queryable the far side may query, as its owner declares it (core
+§8.5, 0.30). GETs and calls cross by grant, never by exposure. Router to
+router is refused, because a deny there lets the denied key strings cross.
+`zenctl check face` judges a router's config file against the face policy.
 
 ```
 $ zenctl acl gen --enrollment examples/zk2/acl/tcgui.enrollment.toml \
     --contracts examples/zk2/.history --json5 > router-acl.json5
 $ zenctl acl gen … --check --against router.json5      # exit 0 / 1 / 2
 $ zenctl acl gen … --explain tcgui-frontend 'zk2/*/tc/tc.netif.v1/state/**' query
+$ zenctl acl gen --enrollment examples/zk2/link/radio.enrollment.toml \
+    --contracts examples/zk2/link/radio.v1.toml \
+    --face-policy examples/zk2/link/radio.face.toml --json5
+$ zenctl check face router.json5 --face-policy … --enrollment … --contracts …
 ```
 
 A principal the plan cannot place is refused by name with its reason, never
