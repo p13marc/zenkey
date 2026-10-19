@@ -1,0 +1,27 @@
+# The near router's face policy (link.v1 §2.1; #769, LB), the scenarios'
+# (spec/profiles/link/scenarios.md): the lab's router carries radio-a, and
+# its radio link, a unix socket bridged to the modem, is a constrained face
+# to the ground, attached as a client.
+#
+#   zenctl acl gen --enrollment examples/zk2/link/radio.enrollment.toml \
+#                  --contracts examples/zk2/link/radio.v1.toml \
+#                  --face-policy examples/zk2/link/radio.face.toml --json5
+#
+# Across the face: `air/dropped_total` and `frames` at one put a second
+# each, `oper` and `fault` whole; nothing else of radio.v1 is pushed, and
+# no presence, history or admin space crosses. GETs and calls cross by
+# grant. radio-a must keep deletes for the outage: a tombstone window of at
+# least `max_outage_s` (§2.11).
+system   = "lab"
+services = ["radio-a"]
+
+[face.radio]
+far          = "ground"
+attach       = "client"
+select       = { link_protocols = ["unixsock-stream"] }
+class        = "constrained"
+expose       = "link"
+interval_s   = 1
+max_outage_s = 6
+batch_bytes  = 1000
+link_bps     = 1000000

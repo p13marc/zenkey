@@ -1627,6 +1627,160 @@ pub fn acl_explain() -> AclExplain {
     .expect("an enrolled principal and a valid key")
 }
 
+/// `link.v1`'s example (`examples/zk2/link/`, #769 LB): the lab router with
+/// its radio face to the ground, as a client, the plan built through the
+/// planner from the example's contract and face policy. The enrollment is
+/// the example's, cut to one radio: `radio-a`, and the console the near
+/// side's `local` and the far side's `ground` both run.
+pub fn acl_plan_face() -> AclPlan {
+    let contract = zenkey_model::contract::load_str(
+        include_str!("../../examples/zk2/link/radio.v1.toml"),
+        std::path::Path::new("."),
+        None,
+    )
+    .contract
+    .expect("the example contract loads");
+    let mut contracts = zenkey_fleet::ContractSet::new();
+    contracts.insert(zenkey_fleet::Revision::from_contract(
+        contract,
+        ContractSource::File,
+    ));
+    let console = |user: &str| PrincipalSpec {
+        user: Some(user.into()),
+        tools: vec!["console".into()],
+        ..Default::default()
+    };
+    let enrollment = Enrollment {
+        namespace: None,
+        principal: vec![
+            PrincipalSpec {
+                user: Some("radio-a".into()),
+                services: vec!["lab/radio-a".into()],
+                ..Default::default()
+            },
+            console("local"),
+            console("ground"),
+        ],
+        service: vec![ServiceSpec {
+            address: "lab/radio-a".into(),
+            implements: vec!["radio.v1".into()],
+            ..Default::default()
+        }],
+        tool: vec![ToolSpec {
+            name: "console".into(),
+            bindings: [(
+                "radio".to_string(),
+                BindingSpec {
+                    interface: Some("radio.v1".into()),
+                    providers: vec!["lab/radio-a".into()],
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            calls: vec![CallsSpec {
+                interface: "radio.v1".into(),
+                providers: vec!["lab/radio-a".into()],
+                operations: Some(vec!["reset".into()]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    zenkey_fleet::plan_acl(
+        &enrollment,
+        &contracts,
+        &zenkey_fleet::AclOptions {
+            face_policy: Some(zenkey_model::link::parse(include_str!(
+                "../../examples/zk2/link/radio.face.toml"
+            ))),
+            ..zenkey_fleet::AclOptions::default()
+        },
+    )
+    .expect("the example's face policy plans")
+}
+
+/// `check face` over a hand-edited router config: the `zk` deny taken out
+/// of the far principal's policy, and a wildcard downsampling rule in place
+/// of the face's two (link.v1 §2.15), with the comparison naming both.
+pub fn face_check() -> FaceCheck {
+    use zenkey_model::link::{Code, Finding};
+    FaceCheck {
+        namespace: String::new(),
+        against: "router.json5".into(),
+        faces: vec![FaceBlock {
+            face: "radio".into(),
+            far: "ground".into(),
+            subjects: vec!["ground".into()],
+            denies: 7,
+            rules: 1,
+        }],
+        findings: vec![
+            Finding::new(Code::ZkNotDenied, Some("radio"), "@zk"),
+            Finding::new(
+                Code::WildcardDownsampling,
+                Some("radio"),
+                "zk2/lab/*/radio.v1/stream/air/dropped_total",
+            ),
+        ],
+        windows: Asked::Asked(vec![FaceWindow {
+            face: "radio".into(),
+            service: "lab/radio-a".into(),
+            window_s: 6,
+            given: true,
+            min_s: 6,
+        }]),
+        comparison: AclCheck {
+            namespace: String::new(),
+            against: "router.json5".into(),
+            planned_rules: 18,
+            observed_rules: 18,
+            planned_subjects: 3,
+            observed_subjects: 3,
+            findings: vec![
+                AclFinding {
+                    kind: AclFindingKind::PolicyMissing,
+                    id: "ground".into(),
+                    planned: Some("rules [call-in:tool.console, face:radio:zk] subjects [ground]".into()),
+                    observed: None,
+                },
+                AclFinding {
+                    kind: AclFindingKind::DownsamplingDiffers,
+                    id: "radio".into(),
+                    planned: Some(
+                        "link_protocols unixsock-stream egress put zk2/lab/radio-a/radio.v1/@stream/frames@1Hz zk2/lab/radio-a/radio.v1/stream/air/dropped_total@1Hz"
+                            .into(),
+                    ),
+                    observed: Some(
+                        "link_protocols unixsock-stream egress put zk2/lab/*/radio.v1/stream/air/dropped_total@1Hz"
+                            .into(),
+                    ),
+                },
+            ],
+            judgement: Judgement::Established,
+        },
+        judgement: Judgement::Established,
+    }
+}
+
+/// A clean `check face`: the generated block, as the plan wrote it;
+/// windows not asked.
+pub fn face_check_clean() -> FaceCheck {
+    let mut c = face_check();
+    c.faces[0].denies = 8;
+    c.faces[0].rules = 2;
+    c.findings.clear();
+    c.windows = Asked::NotAsked;
+    c.comparison.findings.clear();
+    c.comparison.judgement = Judgement::NotEstablished {
+        reason: "router.json5 carries the plan whole: 18 rule(s), 3 subject(s), 3 polic(y/ies), enabled, default deny, 1 downsampling item(s)".into(),
+    };
+    c.judgement = Judgement::NotEstablished {
+        reason: "router.json5 guards 1 face(s) as planned".into(),
+    };
+    c
+}
+
 // ── The fleet timeline (#216) ─────────────────────────────────────────────
 
 fn timeline_lane() -> LaneId {

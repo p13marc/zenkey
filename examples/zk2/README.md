@@ -29,7 +29,8 @@ cargo run -p zenkey-model --bin zk2 -- contract bundle <file> --history examples
 | [`zenoh-modem/`](zenoh-modem/) | zenoh-modem's management contract, mapped | #623 |
 | [`zensight/`](zensight/) | ZenSight's 22 registries, mapped, with a representative cut | #622 |
 | [`shapes.md`](shapes.md) | Deployment shapes: natural system/service names (S8 on paper) | #604 |
-| [`acl/`](acl/) | Access-control enrollments (spec §11) for the walkthrough's vehicle router and the tcgui pilot: principals, the services, archives and tools they run, their bindings and calls. `zenctl acl gen` plans them; `*.enrollment.toml` is a deployment file, not a contract | #612 |
+| [`acl/`](acl/) | Access-control enrollments (spec §11) for the walkthrough's vehicle router and the tcgui pilot: principals, the services, archives and tools they run, their bindings and calls; and the vehicle router's face policy toward the ground (`walkthrough.face.toml`, `link.v1`). `zenctl acl gen` plans them; `*.enrollment.toml` and `*.face.toml` are deployment files, not contracts | #612, #769 |
+| [`link/`](link/) | `link.v1`'s scenarios as an example: the `radio.v1` contract, every kind exposed in part, with its enrollment and the lab router's face policy. `zenctl acl gen --face-policy` compiles them into the `access_control` and `downsampling` blocks; `zenctl check face` judges a router's block against them | #769 |
 
 ## The authoring format (draft 1, r3.3)
 

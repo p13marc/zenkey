@@ -2,29 +2,40 @@
 //! asks for, the router block it compiles to, and how a router's configured
 //! block compares.
 //!
-//! Five documents cross the wire here. [`Enrollment`] comes *in*: the TOML
+//! Six documents cross the wire here. [`Enrollment`] comes *in*: the TOML
 //! a deployment writes, binding transport identities (certificate CNs,
 //! usrpwd user names) to the services, archives and tools they run, with
 //! each one's bindings and calls. It is here rather than beside the planner
 //! because a `Deserialize` shape is somebody else's file format, which is
 //! the placement rule's whole test. [`AclPlan`] goes *out* as the plan,
 //! [`AclCheck`] as `--check`'s verdict, [`AclExplain`] as `--explain`'s
-//! answer, and [`AclConfigDoc`] is the `access_control` block as zenoh's own
-//! loader parsed it, the observed side of a check.
+//! answer, [`FaceCheck`] as `check face`'s verdict on a router's
+//! constrained faces (`link.v1` §2.15), and [`AclConfigDoc`] and
+//! [`DownsamplingDoc`] are the `access_control` and `downsampling` blocks
+//! as zenoh's own loader parsed them, the observed side of a check.
+//!
+//! A face policy's plan is `link.v1`'s own shape (§2.3, `plan.json`),
+//! [`FacePlan`], carried whole in [`AclPlan::faces`]: `zenkey-model` owns
+//! it, and its conformance fixture pins it field for field. What is pinned
+//! here is where it sits in the plan, and the router's `downsampling` block
+//! beside the `access_control` one (#769, LB).
 //!
 //! The rule, subject and policy vocabulary is **zenoh 1.10's**, verbatim:
 //! `zenoh-config-1.10.1/src/lib.rs`, `AclConfig` (`enabled`,
 //! `default_permission`, `rules`, `subjects`, `policies`), `AclConfigRule`
 //! (`id`, `key_exprs`, `messages`, `flows`, `permission`), `AclMessage` (the
 //! nine snake_case message kinds), `InterceptorFlow` (`egress`, `ingress`),
-//! `AclConfigSubjects` and `AclConfigPolicyEntry`; the gateway's is
-//! `zenoh-config-1.10.1/src/gateway.rs`. The planner is
+//! `AclConfigSubjects`, `AclConfigPolicyEntry` and `DownsamplingItemConf`;
+//! the gateway's is `zenoh-config-1.10.1/src/gateway.rs`. The planner is
 //! [`crate::model::acl`]; nothing here computes.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub use zenkey_model::link::{Downsampling, FacePlan, Finding as LinkFinding};
+
+use super::asked::Asked;
 use super::judgement::Judgement;
 
 // ── The enrollment file ───────────────────────────────────────────────────
@@ -339,13 +350,20 @@ pub struct AclPlan {
     /// these revisions' resources: a later revision's new ones are not
     /// denied until the plan is regenerated (§11.2).
     pub contracts: Vec<String>,
-    /// The constrained face this block also guards (§8.5), when one was
-    /// planned.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub face: Option<AclFace>,
+    /// The constrained faces this block also guards (§8.5), from a face
+    /// policy: each one's `link.v1` plan (§2.3), faces sorted by name. Its
+    /// denies are rules `face:<face>:<id>` in the far principal's policy
+    /// (`link.v1` §2.4).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub faces: Vec<FacePlan>,
     pub rules: Vec<AclRule>,
     pub subjects: Vec<AclSubject>,
     pub policies: Vec<AclPolicy>,
+    /// The router's `downsampling` block, as `DownsamplingItemConf` will
+    /// carry it: one item per face whose plan has a rule (`link.v1` §2.8),
+    /// its key expressions under the namespace.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub downsampling: Vec<Downsampling>,
     /// The near router's `gateway` block, for a far router attached in a
     /// south region (§8.5, U23).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -428,10 +446,19 @@ pub enum AclGrantKind {
     /// over what the far side may query, declared toward it, without which
     /// it routes no query here (measured, #612 FJ7).
     FaceDeclarations,
-    /// A constrained face (§8.5): no `@zk` traffic across it.
+    /// A constrained face's `zk` deny (§8.5, `link.v1` §2.6): no `@zk`
+    /// traffic across it, never omitted.
     FacePresence,
-    /// A constrained face (§8.5): no `@stream` keys across it.
-    FaceStream,
+    /// A constrained face's `adv` deny (`link.v1` §2.6): advanced
+    /// publication's tokens, heartbeats and history stay home.
+    FaceAdv,
+    /// A constrained face's `admin` deny (`link.v1` §2.6): the routers'
+    /// admin space, never namespaced.
+    FaceAdmin,
+    /// A constrained face's exposure denies (`link.v1` §2.7): the pushes of
+    /// every resource that does not cross, wholesale per kind token or per
+    /// interface.
+    FaceExposure,
 }
 
 impl AclGrantKind {
@@ -452,7 +479,9 @@ impl AclGrantKind {
             AclGrantKind::AdminRead => "admin_read",
             AclGrantKind::FaceDeclarations => "face_declarations",
             AclGrantKind::FacePresence => "face_presence",
-            AclGrantKind::FaceStream => "face_stream",
+            AclGrantKind::FaceAdv => "face_adv",
+            AclGrantKind::FaceAdmin => "face_admin",
+            AclGrantKind::FaceExposure => "face_exposure",
         }
     }
 }
@@ -476,43 +505,6 @@ pub struct AclPolicy {
     pub id: String,
     pub rules: Vec<String>,
     pub subjects: Vec<String>,
-}
-
-/// The constrained face planned with the block (§8.5).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct AclFace {
-    pub attach: FaceAttach,
-    /// The far side's principal: the gateway session, or the far router.
-    pub far: String,
-    /// The far router's `region_name`, for a south region.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub region: Option<String>,
-}
-
-/// How the far side of a constrained face attaches (§8.5, U23).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FaceAttach {
-    /// One far-side session, or a gateway session, as a client of the near
-    /// router: it receives only the declarations its interests ask for.
-    Client,
-    /// A far router in a south region of the near router (`gateway.south`):
-    /// declarations cross on interest, as to a client.
-    SouthRegion,
-    /// A far router linked router to router. **Never planned**: a deny there
-    /// hides the declarations from the far side, but their key strings still
-    /// cross (§8.5, §11.3). Here so the refusal can name it.
-    Router,
-}
-
-impl FaceAttach {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            FaceAttach::Client => "client",
-            FaceAttach::SouthRegion => "south-region",
-            FaceAttach::Router => "router",
-        }
-    }
 }
 
 /// The near router's `gateway` block, as `GatewayConf` will carry it
@@ -581,6 +573,14 @@ pub enum AclWarningKind {
     /// denied by inclusion (§11.3), so the members no other principal is
     /// granted stay readable.
     ComplementPartial,
+    /// A warning of the face policy's linter (`link.v1` §2.1): a batch that
+    /// takes more than a third of the lease to cross (§2.10). The plan's
+    /// own warnings are each face's `findings`.
+    FacePolicy,
+    /// A far principal reads with history: across a constrained face the
+    /// plan denies `@adv` (`link.v1` §2.6), so its history grant is
+    /// withheld, and it reads live.
+    HistoryAcrossFace,
 }
 
 impl AclWarningKind {
@@ -594,6 +594,8 @@ impl AclWarningKind {
             AclWarningKind::HistoryNotDeclared => "history_not_declared",
             AclWarningKind::ContractNotGiven => "contract_not_given",
             AclWarningKind::ComplementPartial => "complement_partial",
+            AclWarningKind::FacePolicy => "face_policy",
+            AclWarningKind::HistoryAcrossFace => "history_across_face",
         }
     }
 }
@@ -688,6 +690,36 @@ pub struct AclPolicyDoc {
     pub subjects: Vec<String>,
 }
 
+/// One item of the router's `downsampling` block, as zenoh's loader parsed
+/// it: `DownsamplingItemConf` (`zenoh-config-1.10.1/src/lib.rs`), field for
+/// field, the observed side of a face's downsampling (`link.v1` §2.8).
+///
+/// An item with neither `interfaces` nor `link_protocols` applies to every
+/// transport; one with `flows` absent to both directions.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DownsamplingDoc {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub interfaces: Option<Vec<String>>,
+    #[serde(default)]
+    pub link_protocols: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub messages: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub rules: Vec<DownsamplingRuleDoc>,
+    #[serde(default)]
+    pub flows: Option<Vec<String>>,
+}
+
+/// `DownsamplingRuleConf`, as parsed: a key expression and its maximum
+/// frequency, in hertz.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DownsamplingRuleDoc {
+    pub key_expr: String,
+    pub freq: f64,
+}
+
 // ── --check ───────────────────────────────────────────────────────────────
 
 /// `zenctl acl gen --check --against <router.json5>`: the plan against the
@@ -749,6 +781,13 @@ pub enum AclFindingKind {
     /// The near router's `gateway.south` does not place the far region as
     /// planned (§8.5).
     GatewayDiffers,
+    /// A planned `downsampling` item (one face's, `link.v1` §2.8) the
+    /// block does not carry.
+    DownsamplingMissing,
+    /// A configured `downsampling` item the plan does not carry.
+    DownsamplingExtra,
+    /// Same id, a different selection, flows, messages or rules.
+    DownsamplingDiffers,
 }
 
 impl AclFindingKind {
@@ -767,8 +806,74 @@ impl AclFindingKind {
             AclFindingKind::PolicyExtra => "policy_extra",
             AclFindingKind::UnknownIdentity => "unknown_identity",
             AclFindingKind::GatewayDiffers => "gateway_differs",
+            AclFindingKind::DownsamplingMissing => "downsampling_missing",
+            AclFindingKind::DownsamplingExtra => "downsampling_extra",
+            AclFindingKind::DownsamplingDiffers => "downsampling_differs",
         }
     }
+}
+
+// ── check face ────────────────────────────────────────────────────────────
+
+/// `zenctl check face <router.json5> --face-policy <FILE>`: a router's
+/// configuration against the constrained faces it guards (`link.v1`
+/// §2.15), and against the whole plan.
+///
+/// The claim judged is *the router does not guard its faces as planned*: a
+/// finding of §2.15, a window below the outage (§2.11, when windows were
+/// given), or a difference from the plan is `established`; none is
+/// `not_established`. What the router runs is not on the bus (core §11.3):
+/// the block judged is the file somebody says it runs.
+#[derive(Debug, Clone, Serialize)]
+pub struct FaceCheck {
+    pub namespace: String,
+    /// Where the block came from.
+    pub against: String,
+    /// What of the block was read for each face of the policy.
+    pub faces: Vec<FaceBlock>,
+    /// The findings of `link.v1` §2.15 over each face's block, and of
+    /// §2.11 over the windows given, sorted as the profile sorts them.
+    pub findings: Vec<LinkFinding>,
+    /// Each listed owner of state's window against each face's outage
+    /// (§2.11). Absent when no window was given: not asked (§5).
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub windows: Asked<Vec<FaceWindow>>,
+    /// The block against the plan, as `acl gen --check` compares them.
+    pub comparison: AclCheck,
+    pub judgement: Judgement,
+}
+
+/// One face, and the part of the block that guards it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FaceBlock {
+    pub face: String,
+    /// The far principal, as the policy names it.
+    pub far: String,
+    /// The block's subjects that can match a session of the far principal
+    /// on the face (`link.v1` §2.4): bound by an identity it holds, or by
+    /// no identity and a link protocol of the face's. Their policies' denies
+    /// are what §2.15 reads, subject by subject.
+    pub subjects: Vec<String>,
+    /// The deny rules those subjects' policies carry.
+    pub denies: usize,
+    /// The downsampling rules of the items that apply to the face's
+    /// transports, in the block's order.
+    pub rules: usize,
+}
+
+/// One listed owner of state's tombstone window against one face's outage
+/// (`link.v1` §2.11).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FaceWindow {
+    pub face: String,
+    /// `<system>/<service>`.
+    pub service: String,
+    /// The window, in seconds: as given, or the core's 60 (S3).
+    pub window_s: u64,
+    /// Whether the window was given, or is the default.
+    pub given: bool,
+    /// The face's `max_outage_s`: the window's floor.
+    pub min_s: u64,
 }
 
 // ── --explain ─────────────────────────────────────────────────────────────
@@ -951,7 +1056,7 @@ history   = true
             namespace: "fleet-a".into(),
             default_permission: AclPermission::Deny,
             contracts: vec!["tc.netif.v1@sha256:00".into()],
-            face: None,
+            faces: vec![],
             rules: vec![AclRule {
                 id: "own-in:h1/tc".into(),
                 permission: AclPermission::Allow,
@@ -973,6 +1078,7 @@ history   = true
                 rules: vec!["own-in:h1/tc".into()],
                 subjects: vec!["tc-h1".into()],
             }],
+            downsampling: vec![],
             gateway: None,
             warnings: vec![AclWarning {
                 kind: AclWarningKind::RoleUnbound,
@@ -1024,16 +1130,47 @@ history   = true
                     "cite": "§11.3",
                 }],
             }),
-            "no face, no gateway: absent; empty CNs: absent"
+            "no face, no downsampling, no gateway: absent; empty CNs: absent"
         );
 
-        // A south-region face, and a shared rule without a holder.
+        // A south-region face, its downsampling, and a shared rule without
+        // a holder. The face is link.v1's own plan, carried whole (§2.3).
         let mut plan = plan;
-        plan.face = Some(AclFace {
-            attach: FaceAttach::SouthRegion,
+        let gateway = zenkey_model::link::gateway("ground");
+        plan.faces = vec![FacePlan {
+            name: "rf".into(),
             far: "ground".into(),
-            region: Some("ground".into()),
-        });
+            attach: zenkey_model::link::AttachPlan::SouthRegion {
+                region: "ground".into(),
+                gateway: gateway.clone(),
+            },
+            deny: vec![zenkey_model::link::Deny {
+                id: "zk".into(),
+                flows: vec!["egress", "ingress"],
+                messages: vec!["put"],
+                key_exprs: vec!["zk2/**/@zk/**".into()],
+            }],
+            downsampling: None,
+            windows: vec![zenkey_model::link::Window {
+                service: "lab/radio-a".into(),
+                min_s: 600,
+            }],
+            liveness: vec![zenkey_model::link::Liveness {
+                service: "lab/radio-a".into(),
+                evidence: vec![],
+            }],
+            findings: vec![],
+        }];
+        plan.downsampling = vec![Downsampling {
+            id: "rf".into(),
+            link_protocols: vec!["unixsock-stream".into()],
+            flows: vec!["egress"],
+            messages: vec!["put"],
+            rules: vec![zenkey_model::link::Rule {
+                key_expr: "fleet-a/zk2/lab/radio-a/radio.v1/stream/air/dropped_total".into(),
+                freq: 1.0 / 60.0,
+            }],
+        }];
         plan.gateway = Some(AclGateway {
             south: vec![
                 GatewaySouth {
@@ -1055,8 +1192,41 @@ history   = true
         plan.refusals.clear();
         let v = serde_json::to_value(&plan).unwrap();
         assert_eq!(
-            v["face"],
-            json!({"attach": "south_region", "far": "ground", "region": "ground"})
+            v["faces"],
+            json!([{
+                "name": "rf",
+                "far": "ground",
+                "attach": {
+                    "shape": "south-region",
+                    "region": "ground",
+                    "gateway": serde_json::to_value(&gateway).unwrap(),
+                },
+                "deny": [{
+                    "id": "zk",
+                    "flows": ["egress", "ingress"],
+                    "messages": ["put"],
+                    "key_exprs": ["zk2/**/@zk/**"],
+                }],
+                "downsampling": null,
+                "windows": [{"service": "lab/radio-a", "min_s": 600}],
+                "liveness": [{"service": "lab/radio-a", "evidence": []}],
+                "findings": [],
+            }]),
+            "link.v1's plan.json shape, base-relative"
+        );
+        assert_eq!(
+            v["downsampling"],
+            json!([{
+                "id": "rf",
+                "link_protocols": ["unixsock-stream"],
+                "flows": ["egress"],
+                "messages": ["put"],
+                "rules": [{
+                    "key_expr": "fleet-a/zk2/lab/radio-a/radio.v1/stream/air/dropped_total",
+                    "freq": 1.0 / 60.0,
+                }],
+            }]),
+            "zenoh's DownsamplingItemConf, under the namespace"
         );
         assert_eq!(
             v["gateway"],
@@ -1137,6 +1307,121 @@ history   = true
                 }],
                 "judgement": { "answer": "established" },
             })
+        );
+    }
+
+    /// The `downsampling` block as zenoh's loader hands it back: an item's
+    /// optional selectors absent or null, its rules with their frequency.
+    #[test]
+    fn the_observed_downsampling_parses_zenohs_shape() {
+        let items: Vec<DownsamplingDoc> = serde_json::from_value(json!([
+            {
+                "id": "radio",
+                "interfaces": null,
+                "link_protocols": ["unixsock-stream"],
+                "messages": ["put"],
+                "rules": [{"key_expr": "zk2/lab/radio-a/radio.v1/stream/air/dropped_total", "freq": 1.0}],
+                "flows": ["egress"],
+            },
+            { "messages": ["put", "delete"], "rules": [{"key_expr": "a/**", "freq": 0.5}] },
+        ]))
+        .unwrap();
+        assert_eq!(items[0].id.as_deref(), Some("radio"));
+        assert_eq!(items[0].interfaces, None);
+        assert_eq!(
+            items[0].link_protocols.as_deref(),
+            Some(&["unixsock-stream".to_owned()][..])
+        );
+        assert_eq!(items[0].rules[0].freq, 1.0);
+        assert_eq!(items[1].id, None);
+        assert_eq!(items[1].flows, None, "absent flows: both");
+    }
+
+    #[test]
+    fn the_face_check_pins_its_shape() {
+        let comparison = AclCheck {
+            namespace: String::new(),
+            against: "router.json5".into(),
+            planned_rules: 2,
+            observed_rules: 2,
+            planned_subjects: 1,
+            observed_subjects: 1,
+            findings: vec![],
+            judgement: Judgement::NotEstablished {
+                reason: "whole".into(),
+            },
+        };
+        let check = FaceCheck {
+            namespace: String::new(),
+            against: "router.json5".into(),
+            faces: vec![FaceBlock {
+                face: "radio".into(),
+                far: "ground".into(),
+                subjects: vec!["ground".into()],
+                denies: 8,
+                rules: 1,
+            }],
+            findings: vec![LinkFinding::new(
+                zenkey_model::link::Code::WildcardDownsampling,
+                Some("radio"),
+                "zk2/lab/*/radio.v1/stream/air/dropped_total",
+            )],
+            windows: Asked::NotAsked,
+            comparison,
+            judgement: Judgement::Established,
+        };
+        let v = serde_json::to_value(&check).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "namespace": "",
+                "against": "router.json5",
+                "faces": [{
+                    "face": "radio",
+                    "far": "ground",
+                    "subjects": ["ground"],
+                    "denies": 8,
+                    "rules": 1,
+                }],
+                "findings": [{
+                    "code": "wildcard_downsampling",
+                    "severity": "error",
+                    "face": "radio",
+                    "at": "zk2/lab/*/radio.v1/stream/air/dropped_total",
+                }],
+                "comparison": {
+                    "namespace": "",
+                    "against": "router.json5",
+                    "planned_rules": 2,
+                    "observed_rules": 2,
+                    "planned_subjects": 1,
+                    "observed_subjects": 1,
+                    "findings": [],
+                    "judgement": { "answer": "not_established", "reason": "whole" },
+                },
+                "judgement": { "answer": "established" },
+            }),
+            "windows not asked: absent"
+        );
+        let asked = FaceCheck {
+            windows: Asked::Asked(vec![FaceWindow {
+                face: "radio".into(),
+                service: "lab/radio-a".into(),
+                window_s: 2,
+                given: true,
+                min_s: 6,
+            }]),
+            ..check
+        };
+        assert_eq!(
+            serde_json::to_value(&asked).unwrap()["windows"],
+            json!([{
+                "face": "radio",
+                "service": "lab/radio-a",
+                "window_s": 2,
+                "given": true,
+                "min_s": 6,
+            }])
         );
     }
 

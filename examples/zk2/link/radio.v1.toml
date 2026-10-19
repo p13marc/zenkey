@@ -1,0 +1,58 @@
+# A radio's management contract, the scenarios' (spec/profiles/link/
+# scenarios.md; #769, LB): every kind link.v1 reads, exposed in part. Its
+# face policy and enrollment sit beside it (radio.face.toml,
+# radio.enrollment.toml); `zenctl acl gen --face-policy` compiles them.
+[interface]
+name  = "radio"
+major = 1
+minor = 0
+uses  = ["link.v1", "freshness.v1"]
+
+[resources."air/dropped_total"]               # crosses, downsampled
+kind        = "stream"
+type        = { raw = "text/plain" }
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 4 }
+
+[resources."air/frames_total"]                # stays home
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.frames]                            # an @stream that crosses, downsampled
+kind        = "stream"
+explicit    = true
+type        = { raw = "application/octet-stream" }
+annotations = { "link.exposure" = "link" }
+
+[resources.raw]                               # an @stream that stays home
+kind     = "stream"
+explicit = true
+type     = { raw = "application/octet-stream" }
+
+[resources.oper]                              # a state that crosses whole
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 4 }
+
+[resources."peers/{peer}"]                    # a state that stays home; a GET crosses by grant
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { peer = "string" }
+cardinality = 16
+
+[resources.fault]                             # an event that crosses whole
+kind        = "event"
+type        = { raw = "text/plain" }
+rate        = "burst(3600/h)"
+retention   = "1h"
+annotations = { "link.exposure" = "link" }
+
+[resources.change]                            # an event that stays home
+kind      = "event"
+type      = { raw = "text/plain" }
+rate      = "burst(3600/h)"
+retention = "1h"
+
+[resources.reset]                             # an operation, called by grant
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }

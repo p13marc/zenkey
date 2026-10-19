@@ -51,17 +51,38 @@
 //! answers there can turn a tool's admin-space read into a false clean.
 //! Under `deny`, no grant reaches the admin space at all.
 //!
-//! **A constrained face** (§8.5) is the far side's principal, a gateway
-//! session or a far router, with the `@zk` and `@stream` denies on its
-//! policy. Attached as a client, or in a south region of the near router
-//! (`gateway.south`, U23); router to router is refused, because a deny
-//! there hides the declarations but lets their key strings cross.
+//! **A constrained face** (§8.5) is compiled from a face policy, `link.v1`
+//! (`spec/profiles/link/v1.md`, #769 LB). `zenkey_model::link` derives each
+//! face's plan from the policy, the interfaces the enrollment's listed
+//! services implement and their contracts (§2.3); this planner writes it
+//! into the router's configuration:
+//!
+//! - **the denies** (`zk`, `adv`, `admin`, then the exposure denies of
+//!   every push that does not cross, §2.6, §2.7) as rules
+//!   `face:<face>:<id>` in the far principal's policy, the only one that
+//!   can match a session on the face (§2.4), under the namespace except the
+//!   admin space's `@/**`. The far principal keeps its own grants where no
+//!   deny includes them, without the presence, history and admin-space ones
+//!   the `zk`, `adv` and `admin` denies would cut, and without the open
+//!   contract bundles;
+//! - **the `downsampling` block** (§2.8): one item per face, one rule per
+//!   concrete key of a crossing stream, egress, `put`;
+//! - **the attachment** (§2.5): a client needs nothing more; a far router
+//!   in a south region of the near router gets `gateway.south` and the
+//!   declarations of every queryable it may query, as the owner declares it
+//!   (`state/**`, an operation's pattern; core §8.5, 0.30). Router to router
+//!   is refused (the policy's `router_attach`), because a deny there hides
+//!   the declarations but lets their key strings cross.
+//!
+//! Requests cross by grant, never by exposure (§2.9): no face deny names a
+//! query, a reply or a queryable outside `@zk`, `@adv` and the admin space.
 //!
 //! Pure, like everything in [`crate::model`]: values in hand, no session.
 //! [`plan_acl`] reads bindings from the enrollment only (descriptors read off
 //! a live bus would serve too, R3; this planner does not ask the bus).
 //! [`check_acl`] compares a plan with a block somebody else read off a
-//! router's config file, [`explain_acl`] answers "does this principal hold
+//! router's config file, [`check_face`] adds `link.v1` §2.15's checks of
+//! each face's block, [`explain_acl`] answers "does this principal hold
 //! this message on this key, via which rule, in which direction" over the
 //! plan alone, inclusion by `zenoh-keyexpr`, and [`to_json5`] is the one
 //! rendering that is not zenkey's: it is `zenohd`'s, field for field.
@@ -73,20 +94,22 @@ use zenkey_model::authoring::Kind;
 use zenkey_model::chunk::{is_ident, is_plain_chunk};
 use zenkey_model::contract::{Body, Contract, Requirement, Resource};
 use zenkey_model::grammar::{Addr, IfaceId, KindToken};
+use zenkey_model::link::{self, FacePlan, FacePolicy};
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::Segment;
 use zenoh::key_expr::{OwnedKeyExpr, keyexpr};
 
 use crate::model::catalog::ContractSet;
 use crate::report::{
-    AclCheck, AclConfigDoc, AclDecision, AclDirection, AclExplain, AclFace, AclFinding,
-    AclFindingKind, AclFlow, AclGateway, AclGrantKind, AclMessage, AclPermission, AclPlan,
-    AclPolicy, AclRefusal, AclRule, AclSubject, AclVia, AclWarning, AclWarningKind, BindingSpec,
-    CallsSpec, Enrollment, FaceAttach, GatewayFilter, GatewaySouth, Judgement, PrincipalSpec,
+    AclCheck, AclConfigDoc, AclDecision, AclDirection, AclExplain, AclFinding, AclFindingKind,
+    AclFlow, AclGateway, AclGrantKind, AclMessage, AclPermission, AclPlan, AclPolicy, AclRefusal,
+    AclRule, AclSubject, AclVia, AclWarning, AclWarningKind, Asked, BindingSpec, CallsSpec,
+    DownsamplingDoc, Enrollment, FaceBlock, FaceCheck, FaceWindow, GatewayFilter, GatewaySouth,
+    Judgement, PrincipalSpec,
 };
 use crate::{Error, Result};
 
-/// What the caller decided: the namespace, the posture, and the face.
+/// What the caller decided: the namespace, the posture, and the faces.
 #[derive(Debug, Clone)]
 pub struct AclOptions {
     /// The deployment namespace every key is planned under (§1.6); empty
@@ -94,9 +117,11 @@ pub struct AclOptions {
     pub namespace: String,
     /// The router's `default_permission` (§11.2).
     pub default_permission: AclPermission,
-    /// A constrained face this router guards (§8.5): the far principal, how
-    /// it attaches, and its region.
-    pub face: Option<AclFace>,
+    /// The router's face policy, as `zenkey_model::link::parse` read it
+    /// (`link.v1` §2.1): its constrained faces, each one's far principal,
+    /// attachment, exposure and rate. A policy its linter refused is an
+    /// [`Error::Unaskable`], its findings named.
+    pub face_policy: Option<link::Parsed>,
 }
 
 impl Default for AclOptions {
@@ -104,7 +129,7 @@ impl Default for AclOptions {
         AclOptions {
             namespace: String::new(),
             default_permission: AclPermission::Deny,
-            face: None,
+            face_policy: None,
         }
     }
 }
@@ -215,6 +240,7 @@ const READ_GRANTS: [ReadGrant; 4] = [
 
 const IN: &[AclFlow] = &[AclFlow::Ingress];
 const OUT: &[AclFlow] = &[AclFlow::Egress];
+#[cfg(test)]
 const BOTH: &[AclFlow] = &[AclFlow::Egress, AclFlow::Ingress];
 
 /// Every contract bundle (§8.4), relative to the namespace.
@@ -296,11 +322,20 @@ const CITE_FACE_DECLARATIONS: &str = "§8.5, U23: a far router in a south region
      has learnt; the queryables over what the far side may GET or call are declared toward it \
      (measured, #612 FJ7: without this rule its GET gets no reply). A client principal needs \
      none: it sends every query to its router";
-const CITE_FACE_PRESENCE: &str = "§8.5: no `@zk` traffic across a constrained face. Bindings \
-     resolve statically (R7), bundles are held on each side, and presence never crosses";
-const CITE_FACE_STREAM: &str = "§8.5: `@stream` keys denied across the face unless `link.v1` \
-     downsamples them (not modelled here: every one is denied). A named key's frames are \
-     queued, not dropped, and every request waits behind them";
+const CITE_FACE_PRESENCE: &str = "link.v1 §2.6, §8.5: no `@zk` traffic across a constrained \
+     face, never omitted. Bindings resolve statically (R7), bundles are held on each side, and \
+     presence never crosses; `**` matches zero chunks, so the contract keys are included";
+const CITE_FACE_ADV: &str = "link.v1 §2.6: across a face an exposed resource is read live, \
+     never with history: advanced publication's tokens are presence of publishers, and its \
+     replay is bounded by no face's rate";
+const CITE_FACE_ADMIN: &str = "link.v1 §2.6: the routers' admin space, never namespaced; a \
+     check that needs it runs on the near side, and across the face it is unobservable";
+const CITE_FACE_EXPOSURE: &str = "link.v1 §2.7: the pushes (put, delete, declare_subscriber) of \
+     every resource that does not cross, wholesale per kind token when nothing of it crosses, \
+     else per interface, carved around what is exposed. Requests cross by grant (§2.9)";
+const CITE_FACE_DOWNSAMPLING: &str = "link.v1 §2.8: at most one put per crossing stream key per \
+     interval toward the far side, egress, put only so a delete still crosses; one rule per \
+     concrete key, since zenoh gives each rule one timer";
 
 const CITE_IDENTITY: &str = "§11.3: `zids` subjects are unauthenticated; principals are bound by \
      certificate CN or username";
@@ -477,6 +512,40 @@ impl<'c> Contracts<'c> {
     fn contracts(&self, iface: &IfaceId) -> Vec<&'c Contract> {
         self.set.of_iface(iface).map(|r| r.contract()).collect()
     }
+
+    /// Every resource of `iface`, as `link.v1`'s plan reads it (§2.3),
+    /// across the revisions given; `None` when no revision was given. With
+    /// one revision this is `link::Deployment::add_contract`'s reading. A
+    /// resource several revisions declare is exposed only where every one
+    /// of them exposes it, so a disagreement fails closed (§2.2).
+    fn link_resources(&mut self, iface: &IfaceId) -> Option<Vec<link::Res>> {
+        let mut out: Vec<link::Res> = Vec::new();
+        let mut any = false;
+        for r in self.set.of_iface(iface) {
+            any = true;
+            self.used
+                .insert(format!("{}@{}", r.iface(), r.fingerprint()));
+            for res in &r.contract().resources {
+                match out
+                    .iter_mut()
+                    .find(|x| x.token == res.token && x.template == res.template)
+                {
+                    None => out.push(link::Res::from(res)),
+                    Some(held) => {
+                        if link::exposure_of(res)
+                            != link::exposure(link::kind_of(held.token), &held.annotations)
+                        {
+                            held.annotations.insert(
+                                link::EXPOSURE.to_owned(),
+                                serde_json::Value::String("host".to_owned()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        any.then_some(out)
+    }
 }
 
 // ── Holders: services, archives, tools ────────────────────────────────────
@@ -501,6 +570,13 @@ struct Holder {
     history: Vec<String>,
     presence: Vec<String>,
     calls: Vec<String>,
+    /// The queryables its GETs and calls reach, as their owners declare
+    /// them: an owner's state queryables over `<iface>/state/**` and
+    /// `<iface>/@state/**` (S2), an archive's over its `@state` forms (§4.4),
+    /// an operation's over its template's pattern (§5). A far router in a
+    /// south region is sent their declarations (§8.5, 0.30): a grant over
+    /// the consumer's own selectors does not include them.
+    declared: Vec<String>,
     /// A tool that reads the routers' admin space (0.15).
     admin: bool,
     warnings: Vec<AclWarning>,
@@ -517,6 +593,7 @@ impl Holder {
             history: Vec::new(),
             presence: Vec::new(),
             calls: Vec::new(),
+            declared: Vec::new(),
             admin: false,
             warnings: Vec::new(),
         }
@@ -783,6 +860,15 @@ fn compile_binding(
                 push_unique(&mut h.data, pattern);
             }
         }
+        // The owner's state queryables, as it declares them (S2).
+        for t in [KindToken::State, KindToken::ExplicitState] {
+            if consumed.iter().any(|r| r.token == t) {
+                push_unique(
+                    &mut h.declared,
+                    format!("zk2/{addr}/{iface}/{}/**", t.as_str()),
+                );
+            }
+        }
         push_unique(&mut h.presence, format!("zk2/{addr}/@zk/**"));
         dep.check_provider(h, p, &iface, &what);
     }
@@ -879,6 +965,12 @@ fn compile_calls(
             let mut bound = params.clone();
             bound.extend(member.iter().map(|(k, v)| (k.clone(), v.clone())));
             push_unique(&mut h.calls, resource_pattern(&addr, &iface, r, &bound));
+            // The operation's queryable is over its template's pattern (§5),
+            // whatever member is called.
+            push_unique(
+                &mut h.declared,
+                resource_pattern(&addr, &iface, r, &BTreeMap::new()),
+            );
         }
         push_unique(&mut h.presence, format!("zk2/{addr}/@zk/**"));
         dep.check_provider(h, p, &iface, &what);
@@ -1087,8 +1179,14 @@ fn compile_archive(
             &mut h.presence,
             format!("zk2/{}/{}/@zk/**", chunks[1], chunks[2]),
         );
+        // The owner's state queryable over the record's kind token (S2).
+        if matches!(chunks[4], "state" | "@state") {
+            push_unique(&mut h.declared, format!("{}/**", chunks[..5].join("/")));
+        }
         for peer in &peers {
             push_unique(&mut h.data, canon(zenkey::archive::archive_key(peer, r)));
+            // A peer archive's queryable is over its `@state` forms (§4.4).
+            push_unique(&mut h.declared, format!("zk2/{peer}/archive.v1/@state/**"));
         }
     }
     for peer in &peers {
@@ -1216,9 +1314,11 @@ fn warn(kind: AclWarningKind, about: Option<&str>, cite: &str, text: String) -> 
 /// A principal the plan cannot place (no CN or user, a zid, a service its
 /// file does not declare, a binding its contracts cannot compile) is left
 /// out of `subjects` and `policies` and named in `refusals`; the plan is
-/// still emitted around it. An input no plan can be made from (a
-/// router-to-router face, a namespace that is not a key expression, a face
-/// whose far principal is not placed) is an [`Error::Unaskable`].
+/// still emitted around it. An input no plan can be made from (a face
+/// policy its linter refuses, router to router among them; one whose
+/// listed services or interfaces the enrollment and contracts do not give;
+/// a namespace that is not a key expression; a face whose far principal is
+/// not placed) is an [`Error::Unaskable`].
 pub fn plan_acl(
     enrollment: &Enrollment,
     contracts: &ContractSet,
@@ -1233,12 +1333,14 @@ pub fn plan_acl(
             format!("namespace {ns:?} is not a concrete key expression (§1.6)"),
         ));
     }
-    if let Some(face) = &opts.face {
-        check_face(face)?;
-    }
+    let policy = opts.face_policy.as_ref().map(face_policy).transpose()?;
     let mut contracts = Contracts {
         set: contracts,
         used: BTreeSet::new(),
+    };
+    let faces: Vec<FacePlan> = match policy {
+        None => Vec::new(),
+        Some(p) => plan_faces(p, enrollment, &mut contracts)?,
     };
 
     // The enrolled addresses, and what each implements: every holder's
@@ -1356,35 +1458,47 @@ pub fn plan_acl(
         }
     }
 
-    // The far principal must be placed: its policy is where the face lives.
-    let far = match &opts.face {
-        None => None,
-        Some(face) => {
-            let found = placed.iter().position(|pl| {
-                pl.subject.id == face.far
-                    || pl.subject.usernames.contains(&face.far)
-                    || pl.subject.cert_common_names.contains(&face.far)
-            });
-            match found {
-                Some(i) => Some(placed[i].subject.id.clone()),
-                None => {
-                    let why = refusals
-                        .iter()
-                        .find(|r| r.principal == face.far)
-                        .map_or_else(
-                            || "the enrollment has no such principal".to_owned(),
-                            |r| format!("it was refused: {}", r.reason),
-                        );
-                    return Err(Error::unaskable(
-                        "acl gen",
-                        format!(
-                            "the face's far principal {:?} cannot be placed: {why} (§8.5)",
-                            face.far
-                        ),
-                    ));
-                }
+    // Each face's far principal must be placed: its policy is where the
+    // face lives (link.v1 §2.4). Subject id → the faces it is the far side
+    // of.
+    let mut far_of: BTreeMap<String, Vec<&FacePlan>> = BTreeMap::new();
+    for face in &faces {
+        let found = placed.iter().find(|pl| {
+            pl.subject.id == face.far
+                || pl.subject.usernames.contains(&face.far)
+                || pl.subject.cert_common_names.contains(&face.far)
+        });
+        match found {
+            Some(pl) => far_of.entry(pl.subject.id.clone()).or_default().push(face),
+            None => {
+                let why = refusals
+                    .iter()
+                    .find(|r| r.principal == face.far)
+                    .map_or_else(
+                        || "the enrollment has no such principal".to_owned(),
+                        |r| format!("it was refused: {}", r.reason),
+                    );
+                return Err(Error::unaskable(
+                    "--face-policy",
+                    format!(
+                        "face {:?}: its far principal {:?} cannot be placed: {why} (link.v1 \
+                         §2.4: the face's denies go into its policy)",
+                        face.name, face.far
+                    ),
+                ));
             }
         }
+    }
+    // Every deny of the faces a principal is the far side of, as rules of
+    // its policy (link.v1 §2.4), in face order then the plan's.
+    let face_rules = |rules: &mut Rules, id: &str| -> Vec<String> {
+        let mut ids = Vec::new();
+        for face in far_of.get(id).into_iter().flatten() {
+            for d in &face.deny {
+                ids.push(rules.push(face_rule(&ns, face, d, id)));
+            }
+        }
+        ids
     };
 
     // Which holders run, in first-run order.
@@ -1417,34 +1531,42 @@ pub fn plan_acl(
         }
     }
 
+    // The face policy's own warnings (link.v1 §2.1); each plan's are its
+    // face's `findings`.
+    if let Some(parsed) = &opts.face_policy {
+        for f in &parsed.findings {
+            warnings.push(warn(
+                AclWarningKind::FacePolicy,
+                f.face.as_deref(),
+                "link.v1 §2.1, §2.10",
+                format!("{} at {}: {}", f.code, f.at, link_says(f.code)),
+            ));
+        }
+    }
+    // A far principal's history grants are cut by its faces' `adv` deny
+    // (link.v1 §2.6): withheld, and said.
+    for id in far_of.keys() {
+        let pl = placed
+            .iter()
+            .find(|pl| &pl.subject.id == id)
+            .expect("a far principal is placed");
+        for label in &pl.holders {
+            if !compiled(label).history.is_empty() {
+                warnings.push(warn(
+                    AclWarningKind::HistoryAcrossFace,
+                    Some(label),
+                    "link.v1 §2.6",
+                    format!(
+                        "{id} is a face's far principal, and {label} reads with history: the face \
+                         denies `@adv`, so its history grant is withheld, and it reads live"
+                    ),
+                ));
+            }
+        }
+    }
+
     let mut rules = Rules::default();
     let mut policies = Vec::new();
-    let face_rules = |rules: &mut Rules, far: &str| -> Vec<String> {
-        vec![
-            rules.push(rule(
-                format!("face-presence:{far}"),
-                AclPermission::Deny,
-                BOTH,
-                &AclMessage::ALL,
-                &ns,
-                &["zk2/**/@zk/**".to_owned()],
-                AclGrantKind::FacePresence,
-                Some(far),
-                CITE_FACE_PRESENCE,
-            )),
-            rules.push(rule(
-                format!("face-stream:{far}"),
-                AclPermission::Deny,
-                BOTH,
-                &AclMessage::ALL,
-                &ns,
-                &["zk2/*/*/*/@stream/**".to_owned()],
-                AclGrantKind::FaceStream,
-                Some(far),
-                CITE_FACE_STREAM,
-            )),
-        ]
-    };
 
     match opts.default_permission {
         AclPermission::Deny => {
@@ -1595,13 +1717,24 @@ pub fn plan_acl(
                 CITE_CONTRACTS,
             ));
             for pl in &placed {
-                let is_far = far.as_deref() == Some(pl.subject.id.as_str());
+                let my_faces = far_of.get(&pl.subject.id);
+                let is_far = my_faces.is_some();
                 let mut ids: Vec<String> = Vec::new();
                 for h in &pl.holders {
                     for (id, grant) in &by_holder[h] {
                         // Across the face, presence never crosses (§8.5):
-                        // the far side binds statically (R7).
-                        if is_far && *grant == AclGrantKind::Presence {
+                        // the far side binds statically (R7); nor do
+                        // history and the routers' admin space (link.v1
+                        // §2.6). The faces' `zk`, `adv` and `admin` denies
+                        // would cut all three.
+                        if is_far
+                            && matches!(
+                                grant,
+                                AclGrantKind::Presence
+                                    | AclGrantKind::History
+                                    | AclGrantKind::AdminRead
+                            )
+                        {
                             continue;
                         }
                         if !ids.contains(id) {
@@ -1610,14 +1743,19 @@ pub fn plan_acl(
                     }
                 }
                 if is_far {
-                    let south = opts
-                        .face
-                        .as_ref()
-                        .is_some_and(|f| f.attach == FaceAttach::SouthRegion);
+                    let south = my_faces
+                        .into_iter()
+                        .flatten()
+                        .any(|f| matches!(f.attach, link::AttachPlan::SouthRegion { .. }));
+                    // What it may GET or call, and the queryables those
+                    // reach as their owners declare them (§8.5, 0.30: a
+                    // declaration is checked by inclusion, so a grant over
+                    // the GET's own selector does not send the owner's
+                    // `state/**`). Its history is withheld.
                     let mut queried = Vec::new();
                     for h in &pl.holders {
                         let h = held(&holders, h);
-                        for k in h.data.iter().chain(&h.history).chain(&h.calls) {
+                        for k in h.data.iter().chain(&h.calls).chain(&h.declared) {
                             push_unique(&mut queried, k.clone());
                         }
                     }
@@ -1735,9 +1873,7 @@ pub fn plan_acl(
                         CITE_DENY_RECEIVE,
                     )));
                 }
-                if far.as_deref() == Some(id) {
-                    ids.extend(face_rules(&mut rules, id));
-                }
+                ids.extend(face_rules(&mut rules, id));
                 ids.push(admin.clone());
                 policies.push(AclPolicy {
                     id: id.to_owned(),
@@ -1748,25 +1884,22 @@ pub fn plan_acl(
         }
     }
 
-    let gateway = opts.face.as_ref().and_then(|f| match f.attach {
-        FaceAttach::SouthRegion => Some(AclGateway {
-            south: vec![
-                GatewaySouth {
-                    filters: vec![GatewayFilter {
-                        modes: vec!["peer".to_owned(), "client".to_owned()],
-                        region_names: Vec::new(),
-                    }],
-                },
-                GatewaySouth {
-                    filters: vec![GatewayFilter {
-                        modes: Vec::new(),
-                        region_names: vec![f.region.clone().unwrap_or_default()],
-                    }],
-                },
-            ],
-        }),
-        FaceAttach::Client | FaceAttach::Router => None,
-    });
+    let gateway = face_gateway(&faces);
+    let downsampling: Vec<link::Downsampling> = faces
+        .iter()
+        .filter_map(|f| f.downsampling.as_ref())
+        .map(|d| link::Downsampling {
+            rules: d
+                .rules
+                .iter()
+                .map(|r| link::Rule {
+                    key_expr: wire(&ns, &r.key_expr),
+                    freq: r.freq,
+                })
+                .collect(),
+            ..d.clone()
+        })
+        .collect();
 
     // A rule no policy holds is left out: the far principal's presence grants,
     // which the face withholds, are the case.
@@ -1784,58 +1917,211 @@ pub fn plan_acl(
         namespace: ns,
         default_permission: opts.default_permission,
         contracts: contracts.used.into_iter().collect(),
-        face: opts.face.as_ref().map(|f| AclFace {
-            attach: f.attach,
-            far: far.clone().unwrap_or_default(),
-            region: f.region.clone(),
-        }),
+        faces,
         rules,
         subjects: placed.into_iter().map(|p| p.subject).collect(),
         policies,
+        downsampling,
         gateway,
         warnings,
         refusals,
     })
 }
 
-/// A face no plan can be made from is refused here, with its reason.
-fn check_face(face: &AclFace) -> Result<()> {
-    match face.attach {
-        FaceAttach::Router => Err(Error::unaskable(
-            "acl gen --face",
+// ── Faces (link.v1) ───────────────────────────────────────────────────────
+
+/// The policy a linter accepted, or its error findings as a refusal
+/// (`link.v1` §2.1). Router to router says why it is refused (§2.5).
+fn face_policy(parsed: &link::Parsed) -> Result<&FacePolicy> {
+    match &parsed.policy {
+        Some(p) => Ok(p),
+        None => {
+            let errors: Vec<&link::Finding> =
+                parsed.findings.iter().filter(|f| f.is_error()).collect();
+            let mut detail = format!(
+                "the face policy is refused (link.v1 §2.1): {}",
+                errors
+                    .iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+            if errors.iter().any(|f| f.code == link::Code::RouterAttach) {
+                detail.push_str(&format!(
+                    ". Router to router is refused ({CITE_ROUTER_FACE}): attach the far router \
+                     in a south region (attach = \"south-region\", region = \"<name>\"), or the \
+                     far session as a client (attach = \"client\")"
+                ));
+            }
+            Err(Error::unaskable("--face-policy", detail))
+        }
+    }
+}
+
+/// Each face's plan (`link.v1` §2.3): `implements` from the enrollment's
+/// services on the policy's system, each listed interface's resources from
+/// the contracts given. A listed service the enrollment does not declare
+/// (`service_unknown`), or an interface no contract was given for
+/// (`contract_unknown`), refuses it.
+fn plan_faces(
+    policy: &FacePolicy,
+    enrollment: &Enrollment,
+    contracts: &mut Contracts<'_>,
+) -> Result<Vec<FacePlan>> {
+    let mut dep = link::Deployment::default();
+    for s in &enrollment.service {
+        let Ok(a) = Addr::from_str(&s.address) else {
+            continue;
+        };
+        if a.system.as_str() == policy.system {
+            dep.implements
+                .entry(a.service.to_string())
+                .or_default()
+                .extend(s.implements.iter().cloned());
+        }
+    }
+    for s in &policy.services {
+        for i in dep.implements.get(s).cloned().unwrap_or_default() {
+            if dep.interfaces.contains_key(&i) {
+                continue;
+            }
+            if let Some(res) = IfaceId::from_str(&i)
+                .ok()
+                .and_then(|id| contracts.link_resources(&id))
+            {
+                dep.interfaces.insert(i, res);
+            }
+        }
+    }
+    link::plan(policy, &dep).map_err(|errors| {
+        Error::unaskable(
+            "--face-policy",
             format!(
-                "a router-to-router face is refused: a deny there hides the far side's view of \
-                 the denied declarations, but their key strings still cross the link, so access \
-                 control is not a confidentiality boundary there ({CITE_ROUTER_FACE}). Attach \
-                 the far router in a south region (--attach south-region --region <NAME>), or \
-                 the far session as a client (--attach client)"
+                "the face policy cannot be planned (link.v1 §2.3): {}. A listed service is \
+                 one the enrollment declares as `{}/<service>`, and every interface it \
+                 implements needs its contract (--contracts)",
+                errors
+                    .iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                policy.system
             ),
-        )),
-        FaceAttach::SouthRegion => match face.region.as_deref() {
-            None | Some("") => Err(Error::unaskable(
-                "acl gen --face",
-                "--attach south-region needs --region <NAME>: the far router's region_name, \
-                 which the near router's gateway.south lists (§8.5, U23)",
-            )),
-            Some(r) if r.len() > 32 => Err(Error::unaskable(
-                "acl gen --face",
-                format!(
-                    "region {r:?} is longer than zenoh's 32 bytes for a region_name \
-                     (zenoh-1.10.1 DEFAULT_CONFIG.json5)"
-                ),
-            )),
-            Some(_) => Ok(()),
-        },
-        FaceAttach::Client => match &face.region {
-            Some(r) => Err(Error::unaskable(
-                "acl gen --face",
-                format!(
-                    "--region {r:?} names a far router's region; a client attachment has none \
-                     (§8.5)"
-                ),
-            )),
-            None => Ok(()),
-        },
+        )
+    })
+}
+
+/// One deny of a face's plan as a rule of the far principal's policy
+/// (`link.v1` §2.4): its id prefixed with the face's, its key expressions
+/// under the namespace except the admin space's, which has none (§0).
+fn face_rule(ns: &str, face: &FacePlan, d: &link::Deny, holder: &str) -> AclRule {
+    let (grant, cite) = match d.id.as_str() {
+        "zk" => (AclGrantKind::FacePresence, CITE_FACE_PRESENCE),
+        "adv" => (AclGrantKind::FaceAdv, CITE_FACE_ADV),
+        "admin" => (AclGrantKind::FaceAdmin, CITE_FACE_ADMIN),
+        _ => (AclGrantKind::FaceExposure, CITE_FACE_EXPOSURE),
+    };
+    AclRule {
+        id: format!("face:{}:{}", face.name, d.id),
+        permission: AclPermission::Deny,
+        flows: d
+            .flows
+            .iter()
+            .map(|f| match *f {
+                "egress" => AclFlow::Egress,
+                _ => AclFlow::Ingress,
+            })
+            .collect(),
+        messages: d
+            .messages
+            .iter()
+            .map(|m| AclMessage::parse(m).expect("link.v1's messages are zenoh's"))
+            .collect(),
+        key_exprs: d
+            .key_exprs
+            .iter()
+            .map(|k| {
+                if k == link::ADMIN_DENY {
+                    k.clone()
+                } else {
+                    wire(ns, k)
+                }
+            })
+            .collect(),
+        grant,
+        holder: Some(holder.to_owned()),
+        cite: cite.to_owned(),
+    }
+}
+
+/// The near router's `gateway` block for the faces attached in a south
+/// region (`link.v1` §2.5): its own peers and clients south first, then
+/// each far router's region, in face order. `None` when no face is one.
+fn face_gateway(faces: &[FacePlan]) -> Option<AclGateway> {
+    let mut south: Vec<link::South> = Vec::new();
+    for f in faces {
+        if let link::AttachPlan::SouthRegion { gateway, .. } = &f.attach {
+            if south.is_empty() {
+                south.extend(gateway.south.iter().cloned());
+            } else {
+                south.extend(gateway.south.iter().skip(1).cloned());
+            }
+        }
+    }
+    (!south.is_empty()).then(|| AclGateway {
+        south: south
+            .into_iter()
+            .map(|s| GatewaySouth {
+                filters: s
+                    .filters
+                    .into_iter()
+                    .map(|f| GatewayFilter {
+                        modes: f.modes,
+                        region_names: f.region_names,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    })
+}
+
+/// A `link.v1` finding's code in words, for a warning or a note.
+pub fn link_says(code: link::Code) -> &'static str {
+    use link::Code as C;
+    match code {
+        C::BatchOverLease => {
+            "a batch takes more than a third of the lease to cross the face; a shorter batch \
+             keeps the lease's failure detection (§2.10)"
+        }
+        C::TemplatedExposure => {
+            "an exposed stream whose template has a parameter: no rule names its members' keys, \
+             so it is denied (§2.8)"
+        }
+        C::CarveOutOverlap => {
+            "an exposed resource a deny must include, since zenoh denies by inclusion: it does \
+             not cross (§2.7)"
+        }
+        C::IntervalOverHorizon => {
+            "a crossing stream whose horizon is below twice the interval: the far side can \
+             judge it stale between two samples (§2.12)"
+        }
+        C::WindowUnderOutage => {
+            "a listed owner of state's tombstone window is below the face's outage: a delete \
+             made during a longer outage is lost across the face (§2.11)"
+        }
+        C::ZkNotDenied => {
+            "a pair of the nine messages and both flows is not denied on @zk: presence, \
+             descriptors or bundles cross the face (§2.6, §2.15)"
+        }
+        C::WildcardDownsampling => {
+            "a downsampling rule that is not one concrete key: every key it covers shares one \
+             timer (§2.8, §2.15)"
+        }
+        C::IntersectingDownsampling => {
+            "two downsampling rules intersect: zenoh picks one of them for a key they share \
+             (§2.8, §2.15)"
+        }
+        _ => "the face policy's linter refuses it (§2.1)",
     }
 }
 
@@ -2203,15 +2489,68 @@ pub fn to_json5(plan: &AclPlan) -> String {
     }
     let _ = writeln!(out, "  ],");
     let _ = writeln!(out, "}},");
-    if let (Some(face), Some(gw)) = (&plan.face, &plan.gateway) {
-        let region = face.region.as_deref().unwrap_or_default();
+    if !plan.downsampling.is_empty() {
         let _ = writeln!(
             out,
-            "// A far router in a south region (§8.5, U23): declarations cross on interest, and\n\
-             // the face's denies keep the denied families off the link. This router's own peers\n\
-             // and clients stay south, as the `auto` preset places them. On the far router:\n\
-             // region_name: {}",
-            js(region)
+            "// Field names: zenoh 1.10 (DownsamplingItemConf, DownsamplingRuleConf). One item per\n\
+             // constrained face, selected by link protocol, never by interface (link.v1 §2.14).\n\
+             // {CITE_FACE_DOWNSAMPLING}."
+        );
+        let _ = writeln!(out, "downsampling: [");
+        for d in &plan.downsampling {
+            let interval = d
+                .rules
+                .first()
+                .map_or(String::new(), |r| format!(" at {} Hz", r.freq));
+            let _ = writeln!(
+                out,
+                "  // face {}: {} rule(s){interval}",
+                d.id,
+                d.rules.len()
+            );
+            let _ = writeln!(
+                out,
+                "  {{ id: {}, link_protocols: {}, flows: {}, messages: {},",
+                js(&d.id),
+                js_list(d.link_protocols.iter().map(String::as_str)),
+                js_list(d.flows.iter().copied()),
+                js_list(d.messages.iter().copied())
+            );
+            let _ = writeln!(out, "    rules: [");
+            for r in &d.rules {
+                let _ = writeln!(
+                    out,
+                    "      {{ key_expr: {}, freq: {} }},",
+                    js(&r.key_expr),
+                    r.freq
+                );
+            }
+            let _ = writeln!(out, "    ] }},");
+        }
+        let _ = writeln!(out, "],");
+    }
+    let south: Vec<&FacePlan> = plan
+        .faces
+        .iter()
+        .filter(|f| matches!(f.attach, link::AttachPlan::SouthRegion { .. }))
+        .collect();
+    if let (false, Some(gw)) = (south.is_empty(), &plan.gateway) {
+        let regions: Vec<String> = south
+            .iter()
+            .filter_map(|f| match &f.attach {
+                link::AttachPlan::SouthRegion { region, .. } => {
+                    Some(format!("{} (face {}, far {})", js(region), f.name, f.far))
+                }
+                link::AttachPlan::Client => None,
+            })
+            .collect();
+        let _ = writeln!(
+            out,
+            "// A far router in a south region (link.v1 §2.5, §8.5, U23): declarations cross on\n\
+             // interest, and the face's denies keep the denied families off the link. This\n\
+             // router's own peers and clients stay south, as the `auto` preset places them. On\n\
+             // the far router, region_name: {}",
+            regions.join(", ")
         );
         let _ = writeln!(out, "gateway: {{");
         let _ = writeln!(out, "  south: [");
@@ -2240,13 +2579,17 @@ pub fn to_json5(plan: &AclPlan) -> String {
         }
         let _ = writeln!(out, "  ],");
         let _ = writeln!(out, "}},");
-    } else if let Some(face) = &plan.face {
-        let _ = writeln!(
-            out,
-            "// The far side ({}) attaches as a client of this router (§8.5): it receives only the\n\
-             // declarations its interests ask for, and the face's denies keep @zk and @stream off it.",
-            face.far
-        );
+    }
+    for f in &plan.faces {
+        if matches!(f.attach, link::AttachPlan::Client) {
+            let _ = writeln!(
+                out,
+                "// Face {}: the far side ({}) attaches as a client of this router (link.v1 §2.5):\n\
+                 // it receives only the declarations its interests ask for, and the face's denies\n\
+                 // keep @zk, @adv, the admin space and every push that does not cross off it.",
+                f.name, f.far
+            );
+        }
     }
     out
 }
@@ -2318,15 +2661,59 @@ fn observed_south(gateway: Option<&serde_json::Value>) -> Option<South> {
     )
 }
 
+/// A `downsampling` item's comparable form: its selection, flows (absent =
+/// both), messages and rules, each as a set (no two planned rules
+/// intersect, so their order decides nothing, `link.v1` §2.8).
+fn downsampling_shape(
+    interfaces: Option<&[String]>,
+    link_protocols: Option<&[String]>,
+    flows: Option<&[String]>,
+    messages: &[String],
+    rules: &[(String, f64)],
+) -> String {
+    let join = |v: BTreeSet<String>| v.into_iter().collect::<Vec<_>>().join(",");
+    let select = match (interfaces, link_protocols) {
+        (None, None) => "every link".to_owned(),
+        (i, p) => {
+            let mut parts = Vec::new();
+            if let Some(p) = p {
+                parts.push(format!(
+                    "link_protocols {}",
+                    join(set(p.iter().map(String::as_str)))
+                ));
+            }
+            if let Some(i) = i {
+                parts.push(format!(
+                    "interfaces {}",
+                    join(set(i.iter().map(String::as_str)))
+                ));
+            }
+            parts.join(" ")
+        }
+    };
+    let flows = match flows {
+        Some(f) => join(set(f.iter().map(String::as_str))),
+        None => "egress,ingress".to_owned(),
+    };
+    let rules: BTreeSet<String> = rules.iter().map(|(k, f)| format!("{k}@{f}Hz")).collect();
+    format!(
+        "{select} {flows} {} {}",
+        join(set(messages.iter().map(String::as_str))),
+        rules.into_iter().collect::<Vec<_>>().join(" ")
+    )
+}
+
 /// The plan against the block a router's config file carries.
 ///
-/// `observed` is what zenoh's own loader parsed, and `gateway` the config's
-/// `gateway` value, when it has one; `against` names the file. The claim
-/// judged is *the block differs from the plan*: a finding is `Established`,
-/// a block that carries the plan whole is `NotEstablished`.
+/// `observed` is what zenoh's own loader parsed, `downsampling` its
+/// `downsampling` items, and `gateway` the config's `gateway` value, when it
+/// has one; `against` names the file. The claim judged is *the block
+/// differs from the plan*: a finding is `Established`, a block that carries
+/// the plan whole is `NotEstablished`.
 pub fn check_acl(
     plan: &AclPlan,
     observed: &AclConfigDoc,
+    downsampling: &[DownsamplingDoc],
     gateway: Option<&serde_json::Value>,
     against: &str,
 ) -> AclCheck {
@@ -2573,15 +2960,88 @@ pub fn check_acl(
         }
     }
 
+    // The faces' downsampling (link.v1 §2.8), item by item, keyed by id.
+    let planned_items: BTreeMap<&str, String> = plan
+        .downsampling
+        .iter()
+        .map(|d| {
+            let link_protocols = d.link_protocols.clone();
+            let flows: Vec<String> = d.flows.iter().map(|f| (*f).to_owned()).collect();
+            let messages: Vec<String> = d.messages.iter().map(|m| (*m).to_owned()).collect();
+            let rules: Vec<(String, f64)> = d
+                .rules
+                .iter()
+                .map(|r| (r.key_expr.clone(), r.freq))
+                .collect();
+            (
+                d.id.as_str(),
+                downsampling_shape(None, Some(&link_protocols), Some(&flows), &messages, &rules),
+            )
+        })
+        .collect();
+    let mut observed_items: BTreeMap<String, String> = BTreeMap::new();
+    for (i, d) in downsampling.iter().enumerate() {
+        let id =
+            d.id.clone()
+                .unwrap_or_else(|| format!("downsampling #{}", i + 1));
+        let rules: Vec<(String, f64)> = d
+            .rules
+            .iter()
+            .map(|r| (r.key_expr.clone(), r.freq))
+            .collect();
+        observed_items.insert(
+            id,
+            downsampling_shape(
+                d.interfaces.as_deref(),
+                d.link_protocols.as_deref(),
+                d.flows.as_deref(),
+                &d.messages,
+                &rules,
+            ),
+        );
+    }
+    for (id, shape) in &planned_items {
+        match observed_items.get(*id) {
+            None => finding(
+                AclFindingKind::DownsamplingMissing,
+                id,
+                Some(shape.clone()),
+                None,
+            ),
+            Some(o) if o != shape => finding(
+                AclFindingKind::DownsamplingDiffers,
+                id,
+                Some(shape.clone()),
+                Some(o.clone()),
+            ),
+            Some(_) => {}
+        }
+    }
+    for (id, shape) in &observed_items {
+        if !planned_items.contains_key(id.as_str()) {
+            finding(
+                AclFindingKind::DownsamplingExtra,
+                id,
+                None,
+                Some(shape.clone()),
+            );
+        }
+    }
+
     let judgement = if findings.is_empty() {
         Judgement::NotEstablished {
             reason: format!(
                 "{against} carries the plan whole: {} rule(s), {} subject(s), {} polic(y/ies), \
-                 enabled, default {}{}",
+                 enabled, default {}{}{}",
                 plan.rules.len(),
                 plan.subjects.len(),
                 plan.policies.len(),
                 plan.default_permission.as_str(),
+                if plan.downsampling.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {} downsampling item(s)", plan.downsampling.len())
+                },
                 if plan.gateway.is_some() {
                     ", the far region south"
                 } else {
@@ -2600,6 +3060,190 @@ pub fn check_acl(
         planned_subjects: plan.subjects.len(),
         observed_subjects: observed.subjects.len(),
         findings,
+        judgement,
+    }
+}
+
+// ── check face ────────────────────────────────────────────────────────────
+
+/// Whether a subject of a router's block can match a session of `far` on a
+/// face selected by `link_protocols` (`link.v1` §2.4): bound by an identity
+/// the far principal holds (a user name or a CN, as the policy names it),
+/// or by no identity at all and, if it names link protocols, one of the
+/// face's. A subject bound by interfaces alone is not one: a face is
+/// selected by link protocol (§2.14), and the link may report none.
+fn matches_far(s: &crate::report::AclSubjectDoc, far: &str, link_protocols: &[String]) -> bool {
+    let named = |v: &Option<Vec<String>>| v.as_ref().is_some_and(|v| !v.is_empty());
+    let has = |v: &Option<Vec<String>>| v.as_ref().is_some_and(|v| v.iter().any(|x| x == far));
+    if named(&s.usernames) || named(&s.cert_common_names) {
+        return has(&s.usernames) || has(&s.cert_common_names);
+    }
+    if named(&s.zids) || named(&s.interfaces) {
+        return false;
+    }
+    match &s.link_protocols {
+        Some(p) if !p.is_empty() => p.iter().any(|x| link_protocols.contains(x)),
+        _ => true,
+    }
+}
+
+/// Whether a `downsampling` item applies to a face's transports: it selects
+/// none (every transport), or a link protocol of the face's. One selecting
+/// by interface alone is not known to (§2.14).
+fn applies_to(d: &DownsamplingDoc, link_protocols: &[String]) -> bool {
+    match (&d.interfaces, &d.link_protocols) {
+        (_, Some(p)) if !p.is_empty() => p.iter().any(|x| link_protocols.contains(x)),
+        (Some(i), _) if !i.is_empty() => false,
+        _ => true,
+    }
+}
+
+/// A router's configuration against the constrained faces it guards
+/// (`link.v1` §2.15), and against the whole plan (`acl gen --check`'s
+/// comparison, [`check_acl`]).
+///
+/// For each face of `policy`, the block read is, per subject that can match
+/// a session of the far principal on the face, the deny rules of that
+/// subject's policies: any allow wins across subjects (§2.4), so `@zk` must
+/// be denied in each. The downsampling rules are those of every item that
+/// applies to the face's transports, in the block's order. `windows` are
+/// the tombstone windows the deployment configures, by address (§2.11):
+/// `None` is not asked. `plan` is the plan the same policy compiled to.
+pub fn check_face(
+    plan: &AclPlan,
+    policy: &FacePolicy,
+    observed: &AclConfigDoc,
+    downsampling: &[DownsamplingDoc],
+    gateway: Option<&serde_json::Value>,
+    windows: Option<&BTreeMap<String, u64>>,
+    against: &str,
+) -> FaceCheck {
+    let comparison = check_acl(plan, observed, downsampling, gateway, against);
+    let rules: BTreeMap<&str, &crate::report::AclRuleDoc> =
+        observed.rules.iter().map(|r| (r.id.as_str(), r)).collect();
+    let mut findings: Vec<link::Finding> = Vec::new();
+    let mut faces = Vec::new();
+    for (name, face) in &policy.faces {
+        let subjects: Vec<&crate::report::AclSubjectDoc> = observed
+            .subjects
+            .iter()
+            .filter(|s| matches_far(s, &face.far, &face.link_protocols))
+            .collect();
+        let ds: Vec<link::BlockRule> = downsampling
+            .iter()
+            .filter(|d| applies_to(d, &face.link_protocols))
+            .flat_map(|d| {
+                d.rules.iter().map(|r| link::BlockRule {
+                    key_expr: r.key_expr.clone(),
+                    freq: r.freq,
+                })
+            })
+            .collect();
+        let deny_of = |subject: &str| -> Vec<link::BlockDeny> {
+            observed
+                .policies
+                .iter()
+                .filter(|p| p.subjects.iter().any(|s| s == subject))
+                .flat_map(|p| p.rules.iter())
+                .filter_map(|id| rules.get(id.as_str()))
+                .filter(|r| r.permission == "deny")
+                .map(|r| link::BlockDeny {
+                    flows: r
+                        .flows
+                        .clone()
+                        .unwrap_or_else(|| link::FLOWS.iter().map(|f| (*f).to_owned()).collect()),
+                    messages: r.messages.clone(),
+                    key_exprs: r.key_exprs.clone(),
+                })
+                .collect()
+        };
+        let mut denies = 0;
+        // No subject matches: the far side's sessions meet no deny at all.
+        let blocks: Vec<Vec<link::BlockDeny>> = if subjects.is_empty() {
+            vec![Vec::new()]
+        } else {
+            subjects.iter().map(|s| deny_of(&s.id)).collect()
+        };
+        for deny in blocks {
+            denies += deny.len();
+            findings.extend(link::check_block(
+                name,
+                &link::Block {
+                    namespace: plan.namespace.clone(),
+                    deny,
+                    downsampling: ds.clone(),
+                },
+            ));
+        }
+        faces.push(FaceBlock {
+            face: name.clone(),
+            far: face.far.clone(),
+            subjects: subjects.iter().map(|s| s.id.clone()).collect(),
+            denies,
+            rules: ds.len(),
+        });
+    }
+    // §2.11 over the plan's window floors: each listed owner of state, the
+    // window given or the core's 60 s, against each face's outage, as
+    // `link::check_windows` reads it.
+    let windows = match windows {
+        None => Asked::NotAsked,
+        Some(given) => {
+            let mut rows = Vec::new();
+            for f in &plan.faces {
+                for w in &f.windows {
+                    let (window_s, was_given) = match given.get(&w.service) {
+                        Some(s) => (*s, true),
+                        None => (link::DEFAULT_WINDOW_S, false),
+                    };
+                    if window_s < w.min_s {
+                        findings.push(link::Finding::new(
+                            link::Code::WindowUnderOutage,
+                            Some(&f.name),
+                            w.service.clone(),
+                        ));
+                    }
+                    rows.push(FaceWindow {
+                        face: f.name.clone(),
+                        service: w.service.clone(),
+                        window_s,
+                        given: was_given,
+                        min_s: w.min_s,
+                    });
+                }
+            }
+            Asked::Asked(rows)
+        }
+    };
+    link::sort_findings(&mut findings);
+    let judgement = if findings.is_empty() && comparison.findings.is_empty() {
+        Judgement::NotEstablished {
+            reason: format!(
+                "{against} guards {} face(s) as planned: @zk denied on every pair of the nine \
+                 messages and both flows, every downsampling rule one concrete key, no two \
+                 intersecting{}; {}",
+                policy.faces.len(),
+                if windows.is_asked() {
+                    ", every listed owner's window at least the outage"
+                } else {
+                    ""
+                },
+                match &comparison.judgement {
+                    Judgement::NotEstablished { reason } => reason.clone(),
+                    _ => "the block carries the plan whole".to_owned(),
+                }
+            ),
+        }
+    } else {
+        Judgement::Established
+    };
+    FaceCheck {
+        namespace: plan.namespace.clone(),
+        against: against.to_owned(),
+        faces,
+        findings,
+        windows,
+        comparison,
         judgement,
     }
 }
@@ -2849,6 +3493,57 @@ mod tests {
             default_permission,
             ..AclOptions::default()
         }
+    }
+
+    /// The walkthrough's face policy (`examples/zk2/acl/walkthrough.face.toml`,
+    /// a south region), or the same face attached as a client.
+    fn walkthrough_face(south: bool) -> link::Parsed {
+        let text = std::fs::read_to_string(examples().join("acl/walkthrough.face.toml")).unwrap();
+        let text = if south {
+            text
+        } else {
+            text.replace(
+                "attach       = \"south-region\"\nregion       = \"ground\"\n",
+                "attach       = \"client\"\n",
+            )
+        };
+        let parsed = link::parse(&text);
+        assert!(parsed.policy.is_some(), "{:?}", parsed.findings);
+        parsed
+    }
+
+    fn face_opts(default_permission: AclPermission, parsed: link::Parsed) -> AclOptions {
+        AclOptions {
+            default_permission,
+            face_policy: Some(parsed),
+            ..AclOptions::default()
+        }
+    }
+
+    /// `examples/zk2/link/`: the radio.v1 contract, its enrollment and the
+    /// lab router's face policy, the scenarios'.
+    fn radio() -> (Enrollment, ContractSet, String) {
+        let dir = examples().join("link");
+        let e =
+            toml::from_str(&std::fs::read_to_string(dir.join("radio.enrollment.toml")).unwrap())
+                .unwrap();
+        let (set, problems) = ContractSet::load_path(&dir.join("radio.v1.toml"));
+        assert!(problems.is_empty(), "{problems:?}");
+        let policy = std::fs::read_to_string(dir.join("radio.face.toml")).unwrap();
+        (e, set, policy)
+    }
+
+    fn radio_plan(default_permission: AclPermission, policy: &str, namespace: &str) -> AclPlan {
+        let (e, set, _) = radio();
+        plan_acl(
+            &e,
+            &set,
+            &AclOptions {
+                namespace: namespace.to_owned(),
+                ..face_opts(default_permission, link::parse(policy))
+            },
+        )
+        .unwrap()
     }
 
     fn tcgui(default_permission: AclPermission) -> AclPlan {
@@ -3502,12 +4197,7 @@ type = { raw = "text/plain" }
                 &contracts(&["walkthrough"]),
                 &AclOptions {
                     namespace: "fleet-a".into(),
-                    default_permission,
-                    face: Some(AclFace {
-                        attach: FaceAttach::SouthRegion,
-                        far: "ground".into(),
-                        region: Some("ground".into()),
-                    }),
+                    ..face_opts(default_permission, walkthrough_face(true))
                 },
             )
             .unwrap()
@@ -3527,7 +4217,15 @@ type = { raw = "text/plain" }
             }
             for s in &plan.subjects {
                 let x = explain_acl(&plan, &s.id, router, AclMessage::DeclareQueryable).unwrap();
-                assert_eq!(x.ingress.decision, AclDecision::DeniedByDefault, "{}", s.id);
+                if plan.faces.iter().any(|f| f.far == s.id) {
+                    // Across a face, the admin plane is denied outright
+                    // (link.v1 §2.6), never namespaced.
+                    assert_eq!(x.ingress.decision, AclDecision::Denied, "{}", s.id);
+                    assert_eq!(x.ingress.via[0].grant, AclGrantKind::FaceAdmin);
+                    assert_eq!(x.ingress.via[0].key_expr, ADMIN_SPACE);
+                } else {
+                    assert_eq!(x.ingress.decision, AclDecision::DeniedByDefault, "{}", s.id);
+                }
             }
         }
         for plan in [
@@ -3778,130 +4476,435 @@ type = { raw = "text/plain" }
         }
     }
 
-    /// §8.5: a router-to-router face is refused, with why; a south region
-    /// needs its region, a client attachment has none, and the far principal
-    /// must be one the plan places.
+    /// A face policy no plan can be made from is refused with its findings
+    /// (link.v1 §2.1, §2.3): router to router with why (§2.5), a south
+    /// region without its region, a client with one, a far principal the
+    /// plan does not place, a listed service the enrollment does not
+    /// declare, an interface no contract was given for.
     #[test]
-    fn a_face_that_cannot_be_planned_is_refused() {
-        let face = |attach, region: Option<&str>, far: &str| AclOptions {
-            face: Some(AclFace {
-                attach,
-                far: far.into(),
-                region: region.map(str::to_owned),
-            }),
-            ..AclOptions::default()
-        };
+    fn a_face_policy_that_cannot_be_planned_is_refused() {
         let set = contracts(&["walkthrough"]);
         let e = enrollment("walkthrough");
-        let err = plan_acl(&e, &set, &face(FaceAttach::Router, None, "ground"))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("key strings still cross"), "{err}");
-        assert!(err.contains("south-region"), "{err}");
-        for (attach, region, far, why) in [
-            (FaceAttach::SouthRegion, None, "ground", "--region"),
-            (
-                FaceAttach::Client,
-                Some("ground"),
-                "ground",
-                "a client attachment has none",
-            ),
-            (FaceAttach::Client, None, "nobody", "no such principal"),
-        ] {
-            let err = plan_acl(&e, &set, &face(attach, region, far))
+        let text = std::fs::read_to_string(examples().join("acl/walkthrough.face.toml")).unwrap();
+        let refused = |text: String, set: &ContractSet| {
+            plan_acl(&e, set, &face_opts(AclPermission::Deny, link::parse(&text)))
                 .unwrap_err()
-                .to_string();
+                .to_string()
+        };
+        let err = refused(
+            text.replace(
+                "attach       = \"south-region\"\nregion       = \"ground\"\n",
+                "attach       = \"router\"\n",
+            ),
+            &set,
+        );
+        assert!(err.contains("router_attach"), "{err}");
+        assert!(err.contains("key string still crosses"), "{err}");
+        assert!(err.contains("south-region"), "{err}");
+        for (from, to, why) in [
+            (
+                "region       = \"ground\"\n",
+                "",
+                "missing_field [face ground] region",
+            ),
+            (
+                "attach       = \"south-region\"",
+                "attach       = \"client\"",
+                "bad_value [face ground] region",
+            ),
+            (
+                "far          = \"ground\"",
+                "far          = \"nobody\"",
+                "no such principal",
+            ),
+            (
+                "\"zenwatch\",\n]",
+                "\"zenwatch\",\n  \"ghost\",\n]",
+                "service_unknown ghost",
+            ),
+        ] {
+            let err = refused(text.replace(from, to), &set);
             assert!(err.contains(why), "{why}: {err}");
         }
+        let err = refused(text.clone(), &contracts(&[]));
+        assert!(err.contains("contract_unknown nav.v2"), "{err}");
     }
 
-    /// §8.5: the far principal's policy carries the `@zk` and `@stream`
-    /// denies, and no presence or contract grant; a south region adds the
-    /// near router's gateway.
+    /// The walkthrough exposes nothing: under its face policy every push
+    /// across the face is denied wholesale per kind token, beside `zk`,
+    /// `adv` and the admin space, all in the far principal's policy alone,
+    /// which keeps its own grants where no deny includes them and loses its
+    /// presence and contract grants. A south region adds the near router's
+    /// gateway and the declarations of what the far router may query.
     #[test]
     fn the_far_principal_carries_the_face() {
-        for (attach, region) in [
-            (FaceAttach::Client, None),
-            (FaceAttach::SouthRegion, Some("ground".to_owned())),
-        ] {
+        for south in [false, true] {
             let plan = plan_acl(
                 &enrollment("walkthrough"),
                 &contracts(&["walkthrough"]),
-                &AclOptions {
-                    face: Some(AclFace {
-                        attach,
-                        far: "ground".into(),
-                        region: region.clone(),
-                    }),
-                    ..AclOptions::default()
-                },
+                &face_opts(AclPermission::Deny, walkthrough_face(south)),
             )
             .unwrap();
+            assert_eq!(plan.faces.len(), 1);
+            let ids: Vec<&str> = plan.faces[0].deny.iter().map(|d| d.id.as_str()).collect();
+            assert_eq!(
+                ids,
+                [
+                    "zk", "adv", "admin", "stream", "@stream", "state", "@state", "events"
+                ],
+                "nothing crosses: every token wholesale (link.v1 §2.7 step 1)"
+            );
+            assert!(plan.downsampling.is_empty(), "no stream crosses");
             let ground = policy_of(&plan, "ground");
-            assert!(ground.rules.contains(&"face-presence:ground".to_owned()));
-            assert!(ground.rules.contains(&"face-stream:ground".to_owned()));
+            for id in &ids {
+                let rule = format!("face:ground:{id}");
+                assert!(ground.rules.contains(&rule), "{rule}");
+                for p in plan.policies.iter().filter(|p| p.id != "ground") {
+                    assert!(!p.rules.contains(&rule), "{}: {rule}", p.id);
+                }
+            }
             assert!(!ground.rules.iter().any(|r| r.starts_with("presence-")));
+            assert!(!ground.rules.iter().any(|r| r.starts_with("history-")));
+            assert!(!ground.rules.iter().any(|r| r.starts_with("admin-read-")));
             assert!(!ground.rules.iter().any(|r| r.starts_with("contracts-")));
-            let zk = rule_of(&plan, "face-presence:ground");
+            assert!(ground.rules.iter().any(|r| r.starts_with("consume-in:")));
+            let zk = rule_of(&plan, "face:ground:zk");
             assert_eq!(zk.permission, AclPermission::Deny);
             assert_eq!(zk.flows, BOTH);
+            assert_eq!(zk.messages, AclMessage::ALL);
+            assert_eq!(zk.grant, AclGrantKind::FacePresence);
             for k in [
                 "zk2/vehicle-01/teleop/@zk/instance/0123456789abcdef",
                 "zk2/@zk/contract/nav.v2/00",
             ] {
                 assert!(includes(&zk.key_exprs[0], k), "{k}");
             }
+            let state = rule_of(&plan, "face:ground:state");
+            assert_eq!(state.grant, AclGrantKind::FaceExposure);
+            assert_eq!(
+                state.messages,
+                [
+                    AclMessage::Put,
+                    AclMessage::Delete,
+                    AclMessage::DeclareSubscriber
+                ],
+                "pushes only: a GET crosses by grant (link.v1 §2.9)"
+            );
             assert!(includes(
-                &rule_of(&plan, "face-stream:ground").key_exprs[0],
+                &state.key_exprs[0],
+                "zk2/vehicle-01/navigation/nav.v2/state/status"
+            ));
+            assert!(includes(
+                &rule_of(&plan, "face:ground:@stream").key_exprs[0],
                 "zk2/vehicle-01/cam-front/camera.v1/@stream/image"
             ));
+            // The ground's GET of navigation's status is still granted, and
+            // crosses: no face deny names a query or a reply.
+            let get = explain_acl(
+                &plan,
+                "ground",
+                "zk2/vehicle-01/navigation/nav.v2/state/status",
+                AclMessage::Query,
+            )
+            .unwrap();
+            assert_eq!(get.ingress.decision, AclDecision::Allowed);
+            let push = explain_acl(
+                &plan,
+                "ground",
+                "zk2/vehicle-01/navigation/nav.v2/state/status",
+                AclMessage::Put,
+            )
+            .unwrap();
+            assert_eq!(push.egress.decision, AclDecision::Denied);
+            assert_eq!(push.egress.via[0].rule, "face:ground:state");
             // The near side keeps its presence and contracts.
             assert!(
                 policy_of(&plan, "executor")
                     .rules
                     .contains(&"contracts-in".to_owned())
             );
-            match attach {
-                FaceAttach::SouthRegion => {
-                    let gw = plan.gateway.as_ref().expect("a gateway");
-                    assert_eq!(gw.south.len(), 2);
-                    assert_eq!(gw.south[1].filters[0].region_names, ["ground"]);
-                    // A far router learns of what it may query by
-                    // declaration: those queryables are declared toward it.
-                    let d = rule_of(&plan, "face-declarations:ground");
-                    assert_eq!(
-                        (d.permission, d.flows.as_slice(), d.messages.as_slice()),
-                        (
-                            AclPermission::Allow,
-                            &[AclFlow::Egress][..],
-                            &[AclMessage::DeclareQueryable][..]
-                        )
-                    );
-                    assert!(
-                        d.key_exprs
-                            .contains(&"zk2/vehicle-01/navigation/nav.v2/state/**".to_owned())
-                    );
-                    assert!(
-                        d.key_exprs
-                            .contains(&"zk2/vehicle-01/thruster-l/thruster.v1/@op/arm".to_owned())
-                    );
-                    assert!(
-                        ground
-                            .rules
-                            .contains(&"face-declarations:ground".to_owned())
-                    );
-                }
-                _ => {
-                    assert!(plan.gateway.is_none());
-                    assert!(
-                        !ground
-                            .rules
-                            .iter()
-                            .any(|r| r.starts_with("face-declarations"))
-                    );
+            if south {
+                let gw = plan.gateway.as_ref().expect("a gateway");
+                assert_eq!(gw.south.len(), 2);
+                assert_eq!(gw.south[0].filters[0].modes, ["peer", "client"]);
+                assert_eq!(gw.south[1].filters[0].region_names, ["ground"]);
+                let d = rule_of(&plan, "face-declarations:ground");
+                assert_eq!(
+                    (d.permission, d.flows.as_slice(), d.messages.as_slice()),
+                    (
+                        AclPermission::Allow,
+                        &[AclFlow::Egress][..],
+                        &[AclMessage::DeclareQueryable][..]
+                    )
+                );
+                assert!(
+                    d.key_exprs
+                        .contains(&"zk2/vehicle-01/navigation/nav.v2/state/**".to_owned())
+                );
+                assert!(
+                    d.key_exprs
+                        .contains(&"zk2/vehicle-01/thruster-l/thruster.v1/@op/arm".to_owned())
+                );
+                // The thrusters' state queryable as each owner declares it,
+                // over `state/**`, which the binding's `state/status`
+                // selector does not include (core §8.5, 0.30; F-117).
+                assert!(
+                    d.key_exprs
+                        .contains(&"zk2/vehicle-01/*/thruster.v1/state/**".to_owned()),
+                    "{:?}",
+                    d.key_exprs
+                );
+                assert!(includes(
+                    "zk2/vehicle-01/*/thruster.v1/state/**",
+                    "zk2/vehicle-01/thruster-l/thruster.v1/state/**"
+                ));
+                assert!(
+                    ground
+                        .rules
+                        .contains(&"face-declarations:ground".to_owned())
+                );
+            } else {
+                assert!(plan.gateway.is_none());
+                assert!(
+                    !ground
+                        .rules
+                        .iter()
+                        .any(|r| r.starts_with("face-declarations"))
+                );
+            }
+        }
+    }
+
+    /// The radio example: the plan is link.v1's own, carried whole; its
+    /// denies are the far principal's rules, under the namespace except the
+    /// admin space's; its downsampling is zenoh's block, one rule per key;
+    /// under allow they join the complement's denies.
+    #[test]
+    fn a_face_policy_compiles_its_plan_into_the_block() {
+        let (e, set, policy) = radio();
+        let plan = radio_plan(AclPermission::Deny, &policy, "fleet-a");
+        // The plan is zenkey_model::link's, unchanged.
+        let mut dep = link::Deployment::default();
+        dep.implements
+            .insert("radio-a".into(), vec!["radio.v1".into()]);
+        for r in set.iter() {
+            dep.add_contract(r.contract());
+        }
+        let want = link::plan(link::parse(&policy).policy.as_ref().unwrap(), &dep).unwrap();
+        assert_eq!(plan.faces, want);
+        let face = &plan.faces[0];
+        assert_eq!(face.name, "radio");
+        assert!(face.findings.is_empty(), "{:?}", face.findings);
+        assert_eq!(
+            face.liveness[0].evidence,
+            ["radio.v1/state/oper", "radio.v1/stream/air/dropped_total"]
+        );
+        // Every deny, a rule of ground's policy, under the namespace.
+        let ground = policy_of(&plan, "ground");
+        for d in &face.deny {
+            let r = rule_of(&plan, &format!("face:radio:{}", d.id));
+            assert!(ground.rules.contains(&r.id));
+            assert_eq!(r.holder.as_deref(), Some("ground"));
+            for (k, want) in r.key_exprs.iter().zip(&d.key_exprs) {
+                if want == link::ADMIN_DENY {
+                    assert_eq!(k, ADMIN_SPACE, "never namespaced");
+                } else {
+                    assert_eq!(k, &format!("fleet-a/{want}"));
                 }
             }
         }
+        assert!(
+            !policy_of(&plan, "local")
+                .rules
+                .iter()
+                .any(|r| r.starts_with("face:")),
+            "the near side's principals carry none of it"
+        );
+        assert_eq!(
+            rule_of(&plan, "face:radio:events:radio.v1").key_exprs,
+            ["fleet-a/zk2/*/*/radio.v1/events/change/**"]
+        );
+        // The downsampling block: one item, the face's, its keys namespaced.
+        assert_eq!(plan.downsampling.len(), 1);
+        let d = &plan.downsampling[0];
+        assert_eq!(
+            (
+                d.id.as_str(),
+                d.link_protocols.as_slice(),
+                d.flows.as_slice(),
+                d.messages.as_slice()
+            ),
+            (
+                "radio",
+                &["unixsock-stream".to_owned()][..],
+                &["egress"][..],
+                &["put"][..]
+            )
+        );
+        let keys: Vec<&str> = d.rules.iter().map(|r| r.key_expr.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "fleet-a/zk2/lab/radio-a/radio.v1/@stream/frames",
+                "fleet-a/zk2/lab/radio-a/radio.v1/stream/air/dropped_total",
+            ]
+        );
+        assert!(d.rules.iter().all(|r| r.freq == 1.0));
+        // zenoh reads the whole fragment.
+        let block = to_json5(&plan);
+        let c = zenoh::Config::from_json5(&format!("{{\n{block}}}"))
+            .unwrap_or_else(|e| panic!("{e}\n{block}"));
+        let ds: Vec<DownsamplingDoc> =
+            serde_json::from_str(&c.get_json("downsampling").unwrap()).unwrap();
+        assert_eq!(ds.len(), 1);
+        assert_eq!(ds[0].rules.len(), 2);
+        // Under allow, the face's denies join ground's complement.
+        let allow = radio_plan(AclPermission::Allow, &policy, "");
+        let ground = policy_of(&allow, "ground");
+        assert!(ground.rules.contains(&"face:radio:zk".to_owned()));
+        assert!(ground.rules.contains(&"deny-write:ground".to_owned()));
+        assert!(ground.rules.contains(&DENY_ADMIN_SPACE.to_owned()));
+        let _ = e;
+    }
+
+    /// `check face` (link.v1 §2.15): the generated block is clean; each
+    /// change a deployment must not make is named, and a window below the
+    /// outage when windows are given, as `link::check_windows` reads it.
+    #[test]
+    fn check_face_names_what_the_block_does_not_hold() {
+        let read = |block: &str| -> (
+            AclConfigDoc,
+            Vec<DownsamplingDoc>,
+            Option<serde_json::Value>,
+        ) {
+            let c = zenoh::Config::from_json5(&format!("{{\n{block}}}"))
+                .unwrap_or_else(|e| panic!("{e}\n{block}"));
+            let acl = serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
+            let ds = c
+                .get_json("downsampling")
+                .ok()
+                .and_then(|d| serde_json::from_str(&d).ok())
+                .unwrap_or_default();
+            let gw = c
+                .get_json("gateway")
+                .ok()
+                .and_then(|g| serde_json::from_str(&g).ok());
+            (acl, ds, gw)
+        };
+        let (e, set, policy) = radio();
+        let parsed = link::parse(&policy);
+        let p = parsed.policy.as_ref().unwrap();
+        let plan = radio_plan(AclPermission::Deny, &policy, "");
+        let block = to_json5(&plan);
+        let (acl, ds, gw) = read(&block);
+        let clean = check_face(&plan, p, &acl, &ds, gw.as_ref(), None, "router.json5");
+        assert!(clean.findings.is_empty(), "{:?}", clean.findings);
+        assert!(
+            clean.comparison.findings.is_empty(),
+            "{:?}",
+            clean.comparison.findings
+        );
+        assert_eq!(clean.judgement.conclusive(), Some(false));
+        assert!(clean.windows.is_not_asked());
+        assert_eq!(clean.faces[0].subjects, ["ground"]);
+        assert_eq!(clean.faces[0].denies, plan.faces[0].deny.len());
+        assert_eq!(clean.faces[0].rules, 2);
+
+        // The zk deny gone: zk_not_denied, and the comparison misses it.
+        // (out of ground's policy: the rule itself stays defined)
+        let (acl, ds, gw) = read(&block.replace(
+            "\"face:radio:zk\", \"face:radio:adv\"",
+            "\"face:radio:adv\"",
+        ));
+        let c = check_face(&plan, p, &acl, &ds, gw.as_ref(), None, "router.json5");
+        let codes: Vec<link::Code> = c.findings.iter().map(|f| f.code).collect();
+        assert_eq!(codes, [link::Code::ZkNotDenied]);
+        assert_eq!(c.judgement, Judgement::Established);
+        assert!(
+            c.comparison
+                .findings
+                .iter()
+                .any(|f| f.kind == AclFindingKind::PolicyMissing)
+        );
+
+        // A wildcard rule in place of the two: wildcard_downsampling, and
+        // the item differs from the plan (scenarios §3, step 2).
+        let wild = block
+            .replace(
+                "      { key_expr: \"zk2/lab/radio-a/radio.v1/@stream/frames\", freq: 1 },\n",
+                "",
+            )
+            .replace(
+                "zk2/lab/radio-a/radio.v1/stream/air/dropped_total",
+                "zk2/lab/*/radio.v1/stream/air/dropped_total",
+            );
+        let (acl, ds, gw) = read(&wild);
+        let c = check_face(&plan, p, &acl, &ds, gw.as_ref(), None, "router.json5");
+        assert_eq!(
+            c.findings,
+            [link::Finding::new(
+                link::Code::WildcardDownsampling,
+                Some("radio"),
+                "zk2/lab/*/radio.v1/stream/air/dropped_total"
+            )]
+        );
+        assert!(
+            c.comparison
+                .findings
+                .iter()
+                .any(|f| f.kind == AclFindingKind::DownsamplingDiffers)
+        );
+
+        // The block without its downsampling item: missing from the plan.
+        let (acl, _, gw) = read(&block);
+        let c = check_face(&plan, p, &acl, &[], gw.as_ref(), None, "router.json5");
+        assert!(c.findings.is_empty(), "no rule is no wrong rule");
+        assert!(
+            c.comparison
+                .findings
+                .iter()
+                .any(|f| f.kind == AclFindingKind::DownsamplingMissing)
+        );
+
+        // Windows (§2.11), against link's own reading.
+        let (acl, ds, gw) = read(&block);
+        let mut dep = link::Deployment::default();
+        dep.implements
+            .insert("radio-a".into(), vec!["radio.v1".into()]);
+        for r in set.iter() {
+            dep.add_contract(r.contract());
+        }
+        for window in [2, 6, 60] {
+            let given = BTreeMap::from([("lab/radio-a".to_owned(), window)]);
+            let c = check_face(
+                &plan,
+                p,
+                &acl,
+                &ds,
+                gw.as_ref(),
+                Some(&given),
+                "router.json5",
+            );
+            assert_eq!(c.findings, link::check_windows(p, &dep, &given), "{window}");
+            let rows = c.windows.as_option().unwrap();
+            assert_eq!(rows[0].window_s, window);
+            assert!(rows[0].given);
+            assert_eq!(rows[0].min_s, 6);
+            assert_eq!(c.judgement.conclusive(), Some(window < 6), "{window}");
+        }
+        let none = BTreeMap::new();
+        let c = check_face(
+            &plan,
+            p,
+            &acl,
+            &ds,
+            gw.as_ref(),
+            Some(&none),
+            "router.json5",
+        );
+        assert!(c.findings.is_empty(), "a window not given is 60 s");
+        assert!(!c.windows.as_option().unwrap()[0].given);
+        let _ = e;
     }
 
     /// `--explain`: per direction, the rules that decided, deny first.
@@ -3991,21 +4994,29 @@ type = { raw = "text/plain" }
         let plan = plan_acl(
             &enrollment("walkthrough"),
             &contracts(&["walkthrough"]),
-            &AclOptions {
-                face: Some(AclFace {
-                    attach: FaceAttach::SouthRegion,
-                    far: "ground".into(),
-                    region: Some("ground".into()),
-                }),
-                ..AclOptions::default()
-            },
+            &face_opts(AclPermission::Deny, walkthrough_face(true)),
         )
         .unwrap();
         let block = to_json5(&plan);
         let (acl, gw) = read(&block);
-        let clean = check_acl(&plan, &acl, gw.as_ref(), "router.json5");
+        let clean = check_acl(&plan, &acl, &[], gw.as_ref(), "router.json5");
         assert!(clean.findings.is_empty(), "{:#?}", clean.findings);
         assert_eq!(clean.judgement.conclusive(), Some(false));
+        // A downsampling item the plan does not carry: extra.
+        let extra = [DownsamplingDoc {
+            id: Some("hand".into()),
+            messages: vec!["put".into()],
+            rules: vec![crate::report::DownsamplingRuleDoc {
+                key_expr: "zk2/a".into(),
+                freq: 1.0,
+            }],
+            ..DownsamplingDoc::default()
+        }];
+        let c = check_acl(&plan, &acl, &extra, gw.as_ref(), "router.json5");
+        assert_eq!(
+            c.findings.iter().map(|f| f.kind).collect::<Vec<_>>(),
+            [AclFindingKind::DownsamplingExtra]
+        );
 
         // A fan-in selector narrowed, an unknown user bound with a zid, and
         // no gateway.
@@ -4020,7 +5031,7 @@ type = { raw = "text/plain" }
                 "  subjects: [\n    { id: \"stranger\", usernames: [\"stranger\"], zids: [\"a1b2c3\"] },\n",
             );
         let (acl, _) = read(&drifted);
-        let check = check_acl(&plan, &acl, None, "router.json5");
+        let check = check_acl(&plan, &acl, &[], None, "router.json5");
         let kinds: Vec<AclFindingKind> = check.findings.iter().map(|f| f.kind).collect();
         for k in [
             AclFindingKind::RuleDiffers,

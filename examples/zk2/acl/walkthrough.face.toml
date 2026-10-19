@@ -1,0 +1,46 @@
+# The walkthroughs' constrained face (link.v1, spec/profiles/link/v1.md;
+# #769, LB), as vehicle-01's router sees it: the radio link to the ground
+# segment, whose router attaches in a south region of the vehicle's, as the
+# `ground` principal of walkthrough.enrollment.toml.
+#
+#   zenctl acl gen --enrollment examples/zk2/acl/walkthrough.enrollment.toml \
+#                  --contracts examples/zk2/.history \
+#                  --contracts zenwatch/contracts/zenwatch.v1.toml \
+#                  --face-policy examples/zk2/acl/walkthrough.face.toml --json5
+#
+# None of the walkthrough's contracts uses link.v1, so nothing is exposed:
+# the plan denies every push across the face, wholesale per kind token
+# (§2.7), and the ground's bindings cross as GETs and calls, by grant
+# (§2.9). That is the profile's fail-closed default. A contract that marks
+# a resource `link.exposure = "link"` is what lets its pushes cross.
+#
+# The services are every service the vehicle's router carries; the
+# archive is not a service of the policy (it implements no interface the
+# plan reads). Each owner of state keeps deletes for the outage: a
+# tombstone window of at least an hour (§2.11).
+system   = "vehicle-01"
+services = [
+  "autopilot",
+  "cam-front",
+  "detector",
+  "executor",
+  "navigation",
+  "safety",
+  "teleop",
+  "thruster-l",
+  "thruster-r",
+  "tracker",
+  "zenwatch",
+]
+
+[face.ground]
+far          = "ground"
+attach       = "south-region"
+region       = "ground"
+select       = { link_protocols = ["unixsock-stream"] }
+class        = "constrained"
+expose       = "link"
+interval_s   = 10
+max_outage_s = 3600
+batch_bytes  = 1000
+link_bps     = 9600
