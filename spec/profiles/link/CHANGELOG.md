@@ -4,6 +4,141 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-19: a block not enabled, and two faces of one far principal (#769, LH)
+
+The spec-only implementation (zk2py, round 36) read 0.6 cold, passed
+every fixture (1414) and all eleven scenario sections (79 checks), and
+filed two findings, both gaps, each measured: F-124, a block whose access
+control is not enabled, which no check read; and F-125, two faces of one
+policy naming one far principal, which nothing described. It also named
+two zenoh defaults the text left unstated. The reference confirms each
+live and answers them in the text, the model, the generator's warnings,
+`zenctl check face`, the fixtures and two new scenario sections. Written
+against core 0.32, unchanged (below).
+
+**Changed: `block_disabled`, a check of §2.15's own (F-124; §2.15, §5).**
+- **The finding.** zenoh enforces none of a block's rules when its
+  `access_control.enabled` is false, or absent, zenoh's default. zk2py
+  measured the generator's `deny` block both ways: G and X each got
+  `local`'s share, and each one's five puts reached L, while its tool
+  reported nothing. §2.15, `lints.json`'s block and §5 never named
+  `enabled`, and §5's "whether the router runs the block read" is about
+  another case: here the file itself says the block is off. The
+  reference's `check face` reported it only through its comparison with
+  the plan (`check_acl`'s `disabled`), whose shape the text leaves to the
+  generator, so a second implementation need not report it at all.
+- **What the reference measured** (scenarios §12, steps 1 and 2): with
+  `enabled: false`, and with the line taken out, G and X each received 100
+  of `air/frames_total` and of `raw`, all 10 puts of `oper`, all 5
+  occurrences of `fault` and of `change`, the owner's two tokens and its
+  descriptor, and had their GET and call answered; 5 or 6 of
+  `air/dropped_total` and 5 of `frames` each, since the downsampling block
+  is not the access control's; all five of each one's puts reached L.
+- **The rule.** `block_disabled` (error, `at` `enabled`): a block whose
+  `enabled` is false, or absent from the router's configuration. A tool
+  reading a configuration reads an absent `enabled` as zenoh does, false.
+  It is reported beside the block's other findings, which read the block
+  as written, since the block may be wrong too. §5 gains its row.
+- **The fixture format.** A `lints.json` block gains an optional
+  `enabled`: `false` is the finding, `true` none, and absent means it was
+  not read, so every earlier case stands as it was.
+- **`zenctl check face`** reports `block_disabled` from §2.15's checks,
+  read through zenoh's loader, beside the comparison's `disabled`, which
+  stays: it is the generator's. The generator writes `enabled: true`, so
+  `every_face_block_passes_its_own_checks` passes in both postures
+  unchanged.
+
+**Changed: a far principal of two faces carries both plans' denies, and a
+warning says so (F-125; §2.1, §2.4, §5).**
+- **The finding.** §2.4 puts every deny of a face's plan into the far
+  principal's policy; a zenoh rule cannot be limited to a link protocol;
+  and the far principal's subject is narrowed off no face of its own. So
+  each of two faces naming one `far` carries the union of both plans'
+  denies. zk2py measured it under `deny`, with a second face `sat` to
+  `ground` over TLS, exposing none: G over the radio face received
+  nothing pushed, its GET and call still answered, and nothing reported
+  it. No lint, refusal or rule covered it, so a second implementation had
+  to choose between refusing the policy, accepting the union, and
+  splitting the far principal's subject per face. zk2py's generator, and
+  the reference's (`far_of`, subject id to faces), wrote the union.
+- **What the reference measured** (scenarios §13): G over the radio face
+  received 0 of `air/dropped_total`, of `frames`, of `oper` and of
+  `fault`, where §1's G receives 4 to 6, 4 to 6, 10 and 5; its GET and call
+  were answered; it saw no token and no descriptor, and none of its puts
+  reached L.
+  With `ground-router` as `sat`'s far principal, G received 5, 5, 10 and 5.
+  Neither block has a finding: §2.15 reads no plan.
+- **The rule.**
+  - §2.4: a far principal of two or more faces carries every one of their
+    plans' denies on each of them, the stricter, failing closed. A
+    deployment that wants each face to carry its own plan names a far
+    principal per face.
+  - §2.1: `far_of_two_faces`, a warning on the policy itself, one per name
+    two or more faces give as `far`, with no face, `at` the name. It reads
+    every face whose `far` is a non-empty string, whatever else the policy
+    holds. A generator derives each face's plan as before, writes the
+    union, and reports the warning with its plans: it refuses nothing,
+    since nothing leaks.
+  - §5 gains its row; Appendix B notes zenoh-modem's RF and SBD faces, on
+    one router with one ground principal.
+
+**Changed: what zenoh 1.10.1 does with what a block omits (§2.15).** Each
+measured live (scenarios §12), and stated in "What zenoh 1.10.1 does with
+a block", with a tool's reading beside them:
+- access control not enabled, or absent, enforces nothing (above);
+- a block without `default_permission` is `deny`: the generator's `deny`
+  block without it gave G §1's share, and X nothing at all (step 3);
+- a rule without `flows` applies to both flows: with `flows` taken out of
+  the console's Consume rule for the samples it receives and out of every
+  face deny, G received §1's share and nothing the face denies, and of its
+  five puts on `air/dropped_total` all reached L, of its five on
+  `air/frames_total` none; under the generator's block, none of either
+  (step 4).
+
+**Fixtures.** `lints.json`:
+- the description: the block's optional `enabled`, `block_disabled`'s
+  `at`, and `far_of_two_faces`'s face and `at`;
+- cases 30, 31 and 60, two faces each naming `ground`, now also expect
+  `far_of_two_faces`; their policies are unchanged. Case 31 was the one
+  two-face policy with no finding, and case 119 is one now;
+- thirteen new cases, 113 to 125:
+  - F-124, 113 to 117: case 62's block with `enabled` false, then true;
+    case 63's with it false, beside `zk_not_denied`; cases 80 and 83, a
+    block with its subjects under `deny` and under `allow`, with it false;
+  - F-125, 118 to 125: the scenarios' policy with `sat` to `ground`, and
+    to `ground-router` (no finding); three faces, one name twice; four
+    faces, two names twice each; a shared link protocol beside it; an
+    unknown link protocol beside it (each key checked alone); an empty
+    `far`, compared with none; and case 53's deployment behind two faces
+    of one far principal, the plan's warnings beside the linter's.
+
+  `plan.json` is unchanged: its two-face cases name distinct far
+  principals, and the warning is the linter's, not the plan's.
+
+**Deliberately not changed.**
+- **Splitting the far principal's subject per face.** A subject per face's
+  link protocols, each in a policy with that face's denies, would let each
+  face carry its own plan. It would change §2.4's "and no further"
+  narrowing, and which policy a face subject rides under `allow`. A later
+  version may.
+- **Refusing two faces of one far principal.** Nothing leaks: the union
+  fails closed, and the warning names it.
+- **`default_permission` and `flows` in `lints.json`.** A block's
+  `default_permission` stays with its subjects, all three or none, and a
+  deny's `flows` stays required: a fixture states what it means, and a
+  tool reading a router's configuration reads what is absent as zenoh
+  does.
+- **§5's "Unobservable: whether the router runs the block read".** It
+  stays: a file that says the block is off is `block_disabled`, and
+  whether the router runs that file is still not on the bus.
+- **The core** (0.32). The text is right without it: `block_disabled` is
+  a check of the block this text reads, and zenoh's defaults are facts of
+  that block, measured here. Core §11 compiles grants into rules and never
+  names `enabled`; whether it should say a generator writes access control
+  enabled is a core question no finding has asked. The reference's
+  generator writes `enabled: true`, a `default_permission` and every
+  rule's `flows`.
+
 ## 0.6 — 2026-10-19: what a subject in two policies receives (#769, LF)
 
 The spec-only implementation (zk2py, round 34) read 0.5 cold, passed

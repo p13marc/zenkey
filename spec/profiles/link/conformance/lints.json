@@ -320,6 +320,12 @@
     {
       "expect": [
         {
+          "at": "ground",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        },
+        {
           "at": "select.link_protocols",
           "code": "shared_protocol",
           "face": "a",
@@ -332,12 +338,19 @@
           "severity": "error"
         }
       ],
-      "note": "two faces with a common protocol: each has the finding (§2.14)",
+      "note": "two faces with a common protocol: each has the finding (§2.14); both name ground, and far_of_two_faces, a warning with no face, is beside them (§2.4, 0.7)",
       "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.a]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\", \"unixpipe\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n\n[face.b]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\"] }\nclass = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
     },
     {
-      "expect": [],
-      "note": "two faces on distinct protocols: no finding",
+      "expect": [
+        {
+          "at": "ground",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        }
+      ],
+      "note": "two faces on distinct protocols: no shared_protocol; both name ground, so far_of_two_faces, a warning with no face, at the name: ground's policy carries both plans' denies, and a carries b's, which push nothing (§2.4, 0.7, F-125)",
       "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.a]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixpipe\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n\n[face.b]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\"] }\nclass = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
     },
     {
@@ -808,6 +821,12 @@
       ],
       "expect": [
         {
+          "at": "ground",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        },
+        {
           "at": "h-3fa9c2d41b7e/rf0",
           "code": "window_under_outage",
           "face": "b",
@@ -821,7 +840,7 @@
           "health.v1"
         ]
       },
-      "note": "two faces: the window is held against each one's outage (§2.11)",
+      "note": "two faces: the window is held against each one's outage (§2.11); both name ground: far_of_two_faces (§2.4, 0.7)",
       "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.a]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixpipe\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 600\nbatch_bytes = 220\nlink_bps = 2400\n\n[face.b]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"serial\"] }\nclass = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 7200\nbatch_bytes = 220\nlink_bps = 2400\n",
       "windows": {
         "h-3fa9c2d41b7e/rf0": 3600
@@ -4880,7 +4899,451 @@
       ],
       "note": "under allow, local and ops, a CN, each narrowed off tcp, and a subject selected by tcp naming local as its user name and ops as its CN: it matches only a session presenting both, so it answers for neither name over tcp (§2.15, 0.5)",
       "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "enabled": false,
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "enabled",
+          "code": "block_disabled",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "case 62's block, its @zk deny whole, with enabled false: block_disabled, at enabled; zenoh enforces none of its rules, under either posture (§2.15, 0.7, F-124)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "enabled": true,
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [],
+      "note": "the same block with enabled true: no finding (§2.15, 0.7)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/*/@stream/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "enabled": false,
+        "face": "rf",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "rf",
+          "severity": "error"
+        },
+        {
+          "at": "enabled",
+          "code": "block_disabled",
+          "face": "rf",
+          "severity": "error"
+        }
+      ],
+      "note": "case 63's block, with no @zk deny, and enabled false: both findings, block_disabled reported beside the rest, which read the block as written (§2.15, 0.7)",
+      "policy": "system   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar = \"ground\"\nattach = \"client\"\nselect = { link_protocols = [\"unixsock-stream\"] }\nclass = \"constrained\"\nexpose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 220\nlink_bps = 2400\n"
+    },
+    {
+      "block": {
+        "default_permission": "deny",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "enabled": false,
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "radio-a"
+            ]
+          },
+          {
+            "subjects": [
+              "local"
+            ]
+          },
+          {
+            "subjects": [
+              "ground"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "radio-a",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "radio-a"
+            ]
+          },
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "enabled",
+          "code": "block_disabled",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "case 80's block under deny, every subject but the far principal's narrowed off the face, with enabled false: block_disabled alone; X and G each get everything, and their puts reach the near side (measured, scenarios §12) (§2.15, 0.7, F-124)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "enabled": false,
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "local"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "enabled",
+          "code": "block_disabled",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "case 83's block under allow, the face's own subject in place, with enabled false: block_disabled alone (§2.15, 0.7)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "ground",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        }
+      ],
+      "note": "the scenarios' radio face and sat, over tls, exposing none, both naming ground: far_of_two_faces, a warning with no face, at the name; the policy is accepted, and over the radio face ground's session carries sat's wholesale denies too (measured, scenarios §13) (§2.1, §2.4, 0.7, F-125)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sat]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"tls\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [],
+      "note": "the same with sat naming ground-router: distinct far principals, no finding (§2.4)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sat]\nfar          = \"ground-router\"\nattach       = \"client\"\nselect       = { link_protocols = [\"tls\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "ground",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        }
+      ],
+      "note": "three faces, two naming ground and one ground-router: one finding, for the name two faces name (§2.1, 0.7)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sat]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"tls\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sbd]\nfar          = \"ground-router\"\nattach       = \"client\"\nselect       = { link_protocols = [\"serial\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "ground",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        },
+        {
+          "at": "ground-router",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        }
+      ],
+      "note": "four faces, two naming ground and two ground-router: one finding per name, sorted by at (§2.1, 0.7)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sat]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"tls\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sbd]\nfar          = \"ground-router\"\nattach       = \"client\"\nselect       = { link_protocols = [\"serial\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.vhf]\nfar          = \"ground-router\"\nattach       = \"client\"\nselect       = { link_protocols = [\"udp\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "ground",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        },
+        {
+          "at": "select.link_protocols",
+          "code": "shared_protocol",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "select.link_protocols",
+          "code": "shared_protocol",
+          "face": "sat",
+          "severity": "error"
+        }
+      ],
+      "note": "two faces naming ground and selecting a common link protocol: shared_protocol on each, errors that refuse the policy, and far_of_two_faces beside them (§2.1, §2.14)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sat]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"tls\", \"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "ground",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        },
+        {
+          "at": "select.link_protocols",
+          "code": "unknown_protocol",
+          "face": "sat",
+          "severity": "error"
+        }
+      ],
+      "note": "each key is checked alone: sat names ground and a link protocol zenoh does not name; unknown_protocol, and far_of_two_faces all the same, since it reads far alone (§2.1)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sat]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"tls\", \"lora\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "far",
+          "code": "bad_value",
+          "face": "sat",
+          "severity": "error"
+        }
+      ],
+      "note": "a far that is not a far principal is compared with none: sat's far empty, bad_value alone (§2.1)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n\n[face.sat]\nfar          = \"\"\nattach       = \"client\"\nselect       = { link_protocols = [\"tls\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "gateway",
+          "code": "far_of_two_faces",
+          "face": null,
+          "severity": "warning"
+        },
+        {
+          "at": "probe.v1/stream/lane/{lane}",
+          "code": "templated_exposure",
+          "face": "lora",
+          "severity": "warning"
+        },
+        {
+          "at": "probe.v1/stream/level",
+          "code": "interval_over_horizon",
+          "face": "lora",
+          "severity": "warning"
+        }
+      ],
+      "implements": {
+        "p1": [
+          "probe.v1"
+        ]
+      },
+      "interfaces": {
+        "probe.v1": [
+          {
+            "annotations": {
+              "freshness.ttl_s": 60,
+              "link.exposure": "link"
+            },
+            "template": "level",
+            "token": "stream"
+          },
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "lane/{lane}",
+            "token": "stream"
+          }
+        ]
+      },
+      "note": "case 53's deployment behind two faces naming gateway, lora exposing and sat not: each face's plan is derived, lora's warnings beside far_of_two_faces, which refuses nothing (§2.3, §2.4, 0.7, F-125)",
+      "policy": "system   = \"site\"\nservices = [\"p1\"]\n\n[face.lora]\nfar          = \"gateway\"\nattach       = \"client\"\nselect       = { link_protocols = [\"serial\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 120\nbatch_bytes  = 64\nlink_bps     = 300\n\n[face.sat]\nfar          = \"gateway\"\nattach       = \"client\"\nselect       = { link_protocols = [\"tls\"] }\nclass        = \"constrained\"\nexpose       = \"none\"\nmax_outage_s = 120\nbatch_bytes  = 64\nlink_bps     = 300\n"
     }
   ],
-  "description": "link.v1 §2.1, §2.3, §2.11, §2.15: a face policy, and optionally a deployment, the windows it configures and a router's block -> every finding, sorted by face (null first), at, then code, each by its bytes. policy is the face policy's TOML text. implements and interfaces or contracts are plan.json's: when implements is present, the plan is derived and its findings (errors that refuse it, or its warnings) are included. windows, present only with implements, maps a listed service's address (<system>/<service>) to the tombstone window the deployment configures, in seconds; an address it does not name has the core's 60 s (S3). block is a router's block for one face: {face, namespace, deny: [{flows, messages, key_exprs}], downsampling: [{key_expr, freq}]}, deny being the denies of every policy that lists one subject that can match the far principal's session on the face (§2.15), downsampling in the block's order; and, all three or none (0.3, F-118; policies since 0.4, F-120), default_permission (deny or allow), subjects, every subject of the block as zenoh's AclConfigSubjects carries it, {id, usernames, cert_common_names, link_protocols, interfaces, zids}, each list absent when the subject names none, and policies, every policy of the block, {subjects}, the ids of the subjects it lists; when they are absent, the subjects are not checked. No list is ever empty: zenoh 1.10.1 refuses an empty one (§2.15), and a check reads one as absent. A subject's id joins it to the policies that list it, and is where a finding points; no check depends on what an id says. The plan, the windows and the block are checked only when the policy has no error. A finding is {code, severity, face, at}: severity is error or warning; face is the face's name, or null for the top level, the deployment and narrowed_too_far; at is the key within the face (select.link_protocols), the top-level key, the service or interface, the resource's name (<iface>/<token>/<template>), the service's address for window_under_outage, @zk for zk_not_denied, the rule's key expression for a downsampling finding, the subject's id for near_subject_on_face, face_subject_beyond_face and face_subject_misplaced, the link protocol for face_subject_missing, the user name or CN for narrowed_too_far, and empty for toml and a face itself."
+  "description": "link.v1 §2.1, §2.3, §2.11, §2.15: a face policy, and optionally a deployment, the windows it configures and a router's block -> every finding, sorted by face (null first), at, then code, each by its bytes. policy is the face policy's TOML text. implements and interfaces or contracts are plan.json's: when implements is present, the plan is derived and its findings (errors that refuse it, or its warnings) are included. windows, present only with implements, maps a listed service's address (<system>/<service>) to the tombstone window the deployment configures, in seconds; an address it does not name has the core's 60 s (S3). block is a router's block for one face: {face, namespace, enabled, deny: [{flows, messages, key_exprs}], downsampling: [{key_expr, freq}]}, enabled being optional (0.7, F-124): the block's access_control.enabled, false the finding block_disabled, true none, and absent not read (a tool reading a router's configuration reads an absent enabled as zenoh 1.10.1 does, false); deny being the denies of every policy that lists one subject that can match the far principal's session on the face (§2.15), downsampling in the block's order; and, all three or none (0.3, F-118; policies since 0.4, F-120), default_permission (deny or allow), subjects, every subject of the block as zenoh's AclConfigSubjects carries it, {id, usernames, cert_common_names, link_protocols, interfaces, zids}, each list absent when the subject names none, and policies, every policy of the block, {subjects}, the ids of the subjects it lists; when they are absent, the subjects are not checked. No list is ever empty: zenoh 1.10.1 refuses an empty one (§2.15), and a check reads one as absent. A subject's id joins it to the policies that list it, and is where a finding points; no check depends on what an id says. The plan, the windows and the block are checked only when the policy has no error. A finding is {code, severity, face, at}: severity is error or warning; face is the face's name, or null for the top level, the deployment, narrowed_too_far and far_of_two_faces; at is the key within the face (select.link_protocols), the top-level key, the far principal's name for far_of_two_faces, the service or interface, the resource's name (<iface>/<token>/<template>), the service's address for window_under_outage, @zk for zk_not_denied, enabled for block_disabled, the rule's key expression for a downsampling finding, the subject's id for near_subject_on_face, face_subject_beyond_face and face_subject_misplaced, the link protocol for face_subject_missing, the user name or CN for narrowed_too_far, and empty for toml and a face itself."
 }
