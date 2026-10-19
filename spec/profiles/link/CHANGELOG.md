@@ -59,6 +59,10 @@ scenarios.md Conventions, §5).**
   plan's shape is unchanged. The reference pins it in its generator's
   fixtures (`walkthrough.face-south-deny.json5`) and runs it in §2.
 
+**Changed: the owner's traffic fits its 5 s (scenarios.md Conventions).**
+0.1 had `oper` put 10 times "one a second apart" within 5 s, which
+takes 9 s. It is one every half second, as the reference runs it.
+
 **Changed: pointers.** §2.15 names `zenctl check face` beside `acl gen
 --check`; Appendix B names the walkthrough's face policy and the radio
 example (`examples/zk2/link/`).

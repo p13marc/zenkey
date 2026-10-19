@@ -118,8 +118,8 @@ routers, one test per section, named after it (#769, LB).
   exactly to what they are granted (0.2, F-116).
 - **"The owner's traffic"**: for 5 s, the owner publishes
   `air/dropped_total` and `air/frames_total` at 20 Hz, `frames` and `raw`
-  at 20 Hz with 1 KB payloads, puts `oper` 10 times, one a second apart
-  from a new value each, puts `peers/x`, and publishes `fault` and
+  at 20 Hz with 1 KB payloads, puts `oper` 10 times, one every half
+  second, each a new value, puts `peers/x`, and publishes `fault` and
   `change` 5 times each, all within one second.
 
 ## §1 A face compiled and enforced, the far side a client (§2.4–§2.9)
