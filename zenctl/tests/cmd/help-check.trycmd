@@ -3,7 +3,9 @@ contract, three leaves since #612's FJ9. They were scattered before:
 `expect` and `probe` at the root, `check` under `schema`, and nothing but
 habit tying their exit codes together. v1's `cutover`, `retired` and
 `conform` (the registry as a conformance suite) left with the v1 registry;
-the `v1` branch keeps them.
+the `v1` branch keeps them. `face` joined in #769: a router's config file
+against the constrained faces its face policy names (`link.v1` §2.15),
+judged offline, since what a router runs is not on the bus.
 
 The contract is written once, in `zenctl/src/exit.rs`, and every one of these
 cites it: **0** asked and clean, **1** asked and the answer is a finding,
@@ -24,6 +26,7 @@ Commands:
   probe    Read a zk2 resource as a consumer does; do values arrive in a window?
   conform  Run one service against the contract revision it claims, as a suite
   schema   Check one payload against a type of a zk2 contract, exit-coded for CI
+  face     Check a router's config against its constrained faces, exit-coded
   help     Print this message or the help of the given subcommand(s)
 
 Options:

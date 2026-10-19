@@ -14,7 +14,8 @@ fn examples() -> PathBuf {
 }
 
 /// Every contract file: `*.toml`, except deployment files (`*.bindings.toml`,
-/// and the access-control enrollments, `*.enrollment.toml`, #612 FJ7).
+/// the access-control enrollments, `*.enrollment.toml`, #612 FJ7, and the
+/// routers' face policies, `*.face.toml`, link.v1 §2.1, #769 LB).
 fn contract_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for e in std::fs::read_dir(dir).unwrap().flatten() {
@@ -25,6 +26,7 @@ fn contract_files(dir: &Path) -> Vec<PathBuf> {
             && n.ends_with(".toml")
             && !n.ends_with(".bindings.toml")
             && !n.ends_with(".enrollment.toml")
+            && !n.ends_with(".face.toml")
         {
             out.push(p);
         }

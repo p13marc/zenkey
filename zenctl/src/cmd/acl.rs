@@ -1,7 +1,9 @@
 //! `zenctl acl gen` (#612, FJ7): zk2's grant shapes (spec §11), compiled
 //! from an enrollment and the contracts into a router's `access_control`
-//! block, and checked, and explained. With `--face constrained`, the block
-//! also guards the face to the far side (§8.5).
+//! block, and checked, and explained. With `--face-policy`, the block also
+//! guards the router's constrained faces (§8.5, `link.v1`, #769 LB): each
+//! face's plan in its far principal's policy, and the `downsampling` block
+//! beside it. The old `--face/--attach/--far/--region` are refused by name.
 //!
 //! Thin by design. The grants, the fan-in, the complement, the face, the
 //! check and the explanation are all judgement over values in hand, so they
@@ -39,7 +41,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use zenkey_fleet::report::{AclFace, AclPermission, FaceAttach};
+use zenkey_fleet::report::{AclConfigDoc, AclPermission, DownsamplingDoc};
 
 use crate::bus::Deployment;
 use crate::cmd::zk2;
@@ -48,6 +50,45 @@ use crate::render::Note;
 
 /// This verb's name, spelled once (#355).
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("acl gen --check");
+
+/// The face policy file, read through `link.v1`'s own reader (§2.1). The
+/// linter's verdict is the planner's to refuse, with every finding named.
+pub(crate) fn load_face_policy(path: &Path) -> Result<zenkey_model::link::Parsed> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("face policy {}", path.display()))
+        .map_err(|e| unaskable!("{e:#}"))?;
+    Ok(zenkey_model::link::parse(&text))
+}
+
+/// The posture flag, as the planner takes it.
+pub(crate) fn permission(p: crate::cli::DefaultPermission) -> AclPermission {
+    match p {
+        crate::cli::DefaultPermission::Deny => AclPermission::Deny,
+        crate::cli::DefaultPermission::Allow => AclPermission::Allow,
+    }
+}
+
+/// The face flags `--face-policy` replaced (#769), refused by name: a face
+/// policy states everything they did, and exposure and downsampling too.
+fn refuse_old_face_flags(given: &[(&str, &Option<String>)]) -> Result<()> {
+    let named: Vec<&str> = given
+        .iter()
+        .filter(|(_, v)| v.is_some())
+        .map(|(n, _)| *n)
+        .collect();
+    if named.is_empty() {
+        return Ok(());
+    }
+    Err(unaskable!(
+        "{} {} replaced by --face-policy <FILE> (link.v1 §2.1, #769): a face policy names each \
+         constrained face's far principal (`far`), its attachment (`attach`, `region`) and its \
+         link protocols (`select`), and adds what crosses (`expose`), its rate (`interval_s`), \
+         its outage, batch and link rate. examples/zk2/link/radio.face.toml is one; see `zenctl \
+         acl gen --help`",
+        named.join(", "),
+        if named.len() == 1 { "was" } else { "were" }
+    ))
+}
 
 /// The enrollment file, parsed: a shape the engine owns
 /// (`report::Enrollment`) and a file only the frontend reads.
@@ -64,14 +105,19 @@ pub(crate) fn load_enrollment(path: &Path) -> Result<zenkey_fleet::report::Enrol
     })
 }
 
-/// The router config's `access_control` block, as zenoh's loader parsed it,
-/// and its `gateway` block, which a south-region face is checked against.
-fn load_against(
-    path: &Path,
-) -> Result<(
-    zenkey_fleet::report::AclConfigDoc,
-    Option<serde_json::Value>,
-)> {
+/// A router config's blocks, as zenoh's loader parsed them.
+pub(crate) struct Against {
+    pub(crate) acl: AclConfigDoc,
+    /// The `downsampling` items a face's are checked against (`link.v1`
+    /// §2.8); empty when the config has none.
+    pub(crate) downsampling: Vec<DownsamplingDoc>,
+    /// The `gateway` block a south-region face is checked against.
+    pub(crate) gateway: Option<serde_json::Value>,
+}
+
+/// The router config's `access_control`, `downsampling` and `gateway`
+/// blocks, as zenoh's loader parsed them.
+pub(crate) fn load_against(path: &Path) -> Result<Against> {
     let config = zenoh::Config::from_file(path)
         .map_err(|e| unaskable!("{}: zenoh refused the config: {e}", path.display()))?;
     let json = config
@@ -83,23 +129,52 @@ fn load_against(
             path.display()
         )
     })?;
+    let downsampling = match config.get_json("downsampling") {
+        Err(_) => Vec::new(),
+        Ok(d) => serde_json::from_str(&d).map_err(|e| {
+            unaskable!(
+                "{}: downsampling does not parse as zenoh 1.10's DownsamplingItemConf list: {e}",
+                path.display()
+            )
+        })?,
+    };
     let gateway = config
         .get_json("gateway")
         .ok()
         .and_then(|g| serde_json::from_str(&g).ok());
-    Ok((acl, gateway))
+    Ok(Against {
+        acl,
+        downsampling,
+        gateway,
+    })
 }
 
 /// The plan's warnings and refusals as stderr notes, for the modes that
 /// render something *other* than the plan (`--json5`, `--explain`, the
 /// check), so the honesty rides every path.
-fn plan_notes(plan: &zenkey_fleet::report::AclPlan) {
+pub(crate) fn plan_notes(plan: &zenkey_fleet::report::AclPlan) {
     for w in &plan.warnings {
         eprintln!("{}", warning_note(w).to_line());
+    }
+    for f in plan.faces.iter().flat_map(|f| &f.findings) {
+        eprintln!("{}", face_finding_note(f).to_line());
     }
     for r in &plan.refusals {
         eprintln!("{}", refusal_note(r).to_line());
     }
+}
+
+/// A face plan's warning (`link.v1` §2.3) as a note: what does not cross
+/// that a contract exposed, or crosses without a verdict on liveness, is a
+/// coverage claim.
+pub(crate) fn face_finding_note(f: &zenkey_fleet::report::LinkFinding) -> Note {
+    Note::coverage(format!(
+        "face {}: {} {}: {}",
+        f.face.as_deref().unwrap_or("-"),
+        f.code,
+        f.at,
+        zenkey_fleet::link_says(f.code)
+    ))
 }
 
 /// A warning as a note. What the plan could not narrow (a contract not
@@ -145,6 +220,7 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
         check,
         against,
         explain,
+        face_policy,
         face,
         attach,
         far,
@@ -152,28 +228,29 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
         ns,
     } = cli;
 
+    ask(
+        check,
+        refuse_old_face_flags(&[
+            ("--face", &face),
+            ("--attach", &attach),
+            ("--far", &far),
+            ("--region", &region),
+        ]),
+    )?;
     let dep = ask(check, Deployment::resolve(&ns))?;
     let enrollment = ask(check, load_enrollment(&enrollment))?;
     let contracts = ask(check, zk2::load_contracts(&contracts))?;
-    let face = face.map(|crate::cli::Face::Constrained| AclFace {
-        attach: match attach.expect("clap: --face requires --attach") {
-            crate::cli::Attach::Client => FaceAttach::Client,
-            crate::cli::Attach::SouthRegion => FaceAttach::SouthRegion,
-            crate::cli::Attach::Router => FaceAttach::Router,
-        },
-        far: far.expect("clap: --face requires --far"),
-        region,
-    });
+    let face_policy = match &face_policy {
+        None => None,
+        Some(p) => Some(ask(check, load_face_policy(p))?),
+    };
     let opts = zenkey_fleet::AclOptions {
         namespace: enrollment
             .namespace
             .clone()
             .unwrap_or_else(|| dep.namespace().to_owned()),
-        default_permission: match default_permission {
-            crate::cli::DefaultPermission::Deny => AclPermission::Deny,
-            crate::cli::DefaultPermission::Allow => AclPermission::Allow,
-        },
-        face,
+        default_permission: permission(default_permission),
+        face_policy,
     };
     let plan = ask(
         check,
@@ -182,11 +259,12 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
 
     if check {
         let against = against.expect("clap: --check requires --against");
-        let (observed, gateway) = ASKING.ask(load_against(&against));
+        let observed = ASKING.ask(load_against(&against));
         let report = zenkey_fleet::check_acl(
             &plan,
-            &observed,
-            gateway.as_ref(),
+            &observed.acl,
+            &observed.downsampling,
+            observed.gateway.as_ref(),
             &against.display().to_string(),
         );
         plan_notes(&plan);

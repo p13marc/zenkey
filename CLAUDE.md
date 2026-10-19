@@ -257,10 +257,26 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   holds the union of what it runs) in `zenkey_fleet::model::acl`; a
   wildcard presence selector joins each provider's egress, since the
   descriptor read travels to it (0.27); `--default-permission allow` compiles each
-  grant into denies of its complement, `--face constrained --attach
-  client|south-region` guards a constrained face (router to router is
-  refused). Its plans are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`) and
-  judged by a live router (`tests/acl_live.rs`, `tests/acl_face.rs`).
+  grant into denies of its complement. `--face-policy <FILE>` (#769 LB)
+  guards the router's constrained faces from a `link.v1` face policy
+  (`examples/zk2/link/`, `examples/zk2/acl/walkthrough.face.toml`; the old
+  `--face/--attach/--far/--region` are refused by name, exit 2): each
+  face's plan (`zenkey_model::link`, carried whole in `AclPlan::faces`) as
+  rules `face:<face>:<id>` in the far principal's policy alone, which loses
+  its presence, history, admin-space and contract grants; zenoh's
+  `downsampling` block beside `access_control`, one rule per crossing
+  stream key; for a south region `gateway.south` and `face-declarations`
+  over every queryable the far side may query as its owner declares it
+  (`state/**`, an operation's pattern; core §8.5, 0.30). Router to router
+  is the policy's `router_attach`, refused. `check face <ROUTER-CONFIG>
+  --face-policy … --enrollment … [--window ADDRESS=SECS]` is its judgement
+  (`zenkey_fleet::check_face`, report `FaceCheck`): `link.v1` §2.15 per face,
+  read subject by subject, the windows of §2.11 when given, and `acl gen
+  --check`'s comparison, which now covers the downsampling items. Its plans
+  are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`) and judged by a live
+  router (`tests/acl_live.rs`, `tests/acl_face.rs`, and `tests/link_face.rs`,
+  `link.v1`'s scenarios §1–§6 one test per section over a `unixsock-stream`
+  face).
   FJ8a's writes and captures: `gen <address>` and `serve <address> <iface>
   <operation>` are mock owners — real zk2 services through
   `zenkey::ServiceBuilder` (`zenkey_fleet::tape::{generate, mock}`), refused
@@ -348,7 +364,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `rate`, `field`, `record`, `replay`, `timeline`, `snapshot`, `graph`,
   `serve`, `gen`, `scout`); `compat` compares two contract revisions
   offline, exit-coded like a judgement; a **judgement** is exit-coded
-  (`check expect|probe|schema`, `doctor`, `health`, `watchdog`).
+  (`check expect|probe|schema|face`, `doctor`, `health`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
   alone), `--watch` is a bare bool with `--every` as the one period,
@@ -487,8 +503,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   policy a deployment writes per router and its lints, the plan a generator
   derives from both, named denies with `zk` never omitted, one
   downsampling rule per concrete key, the attachment, window floors and
-  liveness evidence, and the checks of a router's block; `acl gen`
-  compiling a plan into a router's block is LB's). It depends on
+  liveness evidence, and the checks of a router's block; text 0.2, F-116
+  and F-117, with core 0.30; `zenctl acl gen --face-policy` compiles a plan
+  into a router's block, and `check face` judges one, #769 LB). It depends on
   `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -605,7 +622,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.29 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.30 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

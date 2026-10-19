@@ -25,6 +25,7 @@ pub mod conform;
 pub mod doctor;
 pub mod echo;
 pub mod expect;
+pub mod face;
 pub mod field;
 pub mod generate;
 pub mod get;

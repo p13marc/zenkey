@@ -97,22 +97,29 @@ routers, one test per section, named after it (#769, LB).
   batch_bytes  = 1000
   link_bps     = 1000000
   ```
-- **The enrollment** (informative; core §11.1's input): the services
-  `lab/radio-a` and `lab/radio-b`; a principal `ground` that binds every
-  stream, state and event of `radio.v1` from both, and calls `reset` on
-  both; a principal `local` with the same bindings and calls. Every grant
-  a resource could need is there, so that what the face denies is the
+- **The enrollment** (informative; core §11.1's input; the reference's is
+  `examples/zk2/link/radio.enrollment.toml`): the services `lab/radio-a`
+  and `lab/radio-b`; a tool that binds every stream, state and event of
+  `radio.v1` on `lab/*`, and calls `reset` there; the principals `ground`,
+  `ground-router` (§2) and `local`, each running it. Every grant a
+  resource could need is there, so that what the face denies is the
   face's.
 - **G** is the far session, user `ground`, a client of N over the face.
   **L** is the control, user `local`, a client of N on the near side.
-  Each subscribes to `zk2/lab/*/**`, `zk2/lab/*/radio.v1/@stream/**` and
-  `zk2/lab/*/radio.v1/events/**`, and holds a liveliness subscriber on
+  Each subscribes to the selectors its grants name, one per stream, state
+  and event resource of `radio.v1`, `zk2/lab/*/radio.v1/<token>/<pattern>`
+  (`…/stream/air/dropped_total`, `…/@stream/frames`, `…/state/peers/*`,
+  `…/events/fault/*` and the rest), and holds a liveliness subscriber on
   `zk2/lab/*/@zk/**`, before the owner starts. Each records every
-  delivery's arrival, key and kind.
+  delivery's arrival, key and kind. Under `deny`, zenoh admits a
+  subscription or a GET only when a grant includes its key expression
+  (core §11.3): a reader subscribed wider than its grants, to
+  `zk2/lab/*/**`, would receive nothing at all, so the readers subscribe
+  exactly to what they are granted (0.2, F-116).
 - **"The owner's traffic"**: for 5 s, the owner publishes
   `air/dropped_total` and `air/frames_total` at 20 Hz, `frames` and `raw`
-  at 20 Hz with 1 KB payloads, puts `oper` 10 times, one a second apart
-  from a new value each, puts `peers/x`, and publishes `fault` and
+  at 20 Hz with 1 KB payloads, puts `oper` 10 times, one every half
+  second, each a new value, puts `peers/x`, and publishes `fault` and
   `change` 5 times each, all within one second.
 
 ## §1 A face compiled and enforced, the far side a client (§2.4–§2.9)
@@ -154,12 +161,20 @@ names its region `ground`, and attaches to N over the face. G is a client
 of F, not of N. The enrollment's principal `ground` becomes
 `ground-router`, with the same bindings and calls.
 
+The owner serves its state as core S2 says, one queryable over
+`…/radio.v1/state/**`, and `reset` over its own key (core §5). The block
+grants the far principal `declare_queryable` on egress over both, as the
+owner declares them (§2.5, core §8.5, 0.30).
+
 **Steps.**
 1. As §1, steps 1 to 3.
 2. **Control:** the generator compiles the block without the far
    principal's `declare_queryable` egress grant (core §8.5), and G repeats
    its GET and its call.
-3. **Control:** the policy says `attach = "router"`.
+3. **Control:** the grant covers G's own GET and call selectors only,
+   `…/state/peers/*` and `…/@op/reset`, and not the owner's
+   `…/radio.v1/state/**` (0.2, F-117). G repeats its GET and its call.
+4. **Control:** the policy says `attach = "router"`.
 
 **Expected.**
 1. The block's `gateway` is the plan's: N's own peers and clients south,
@@ -167,7 +182,10 @@ of F, not of N. The enrollment's principal `ground` becomes
    and no descriptor, and its GET and its call are answered.
 2. Without the grant, G's GET and its call get no reply: F learns of no
    queryable to route them to (core §8.5).
-3. The generator refuses the policy (`router_attach`), and writes no
+3. G's call is answered and its GET is not: a declaration is checked by
+   inclusion against the queryable's own key expression, which the GET's
+   selector does not include (core §11.3).
+4. The generator refuses the policy (`router_attach`), and writes no
    block.
 
 ## §3 One rule per key, and a service not listed (§2.8)
@@ -227,8 +245,11 @@ opens a new one, keeping G's merged members.
 
 **Steps.**
 1. The owner, configured with a tombstone window of 6 s, the plan's floor,
-   puts `oper` and `peers/x`. G seeds: it subscribes to
-   `zk2/lab/radio-a/radio.v1/state/**`, then GETs it as core S4 says.
+   puts `oper` and `peers/x`. G seeds: it subscribes to its granted
+   selectors over `lab/radio-a`'s state, `…/radio.v1/state/oper` and
+   `…/radio.v1/state/peers/*`, then GETs each as core S4 says (0.2: never
+   `state/**`, which no grant includes, F-116). The face denies the
+   subscription to `peers/*`, which does not cross; the GET crosses.
 2. The face goes down for 4 s. Meanwhile the owner deletes `oper` and
    `peers/x`.
 3. The face comes back, and G seeds again.

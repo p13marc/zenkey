@@ -1,0 +1,53 @@
+# The lab's access control (spec §11; link.v1's scenarios, #769 LB), as its
+# router sees it: two radios, each a service of its own, and the console
+# every operator runs, bound to every stream, state and event of radio.v1
+# from both radios and calling `reset` on both. Every grant a resource
+# could need is here, so that what a face denies is the face's.
+#
+# One tool, three principals (core §11.1, 0.27): `local` on the near side,
+# `ground` across the face as a client, and `ground-router`, the far router
+# of a south region, which carries the ground's sessions. A face policy
+# names one of them its far principal; that principal's policy alone
+# carries the face's denies (link.v1 §2.4).
+
+[[principal]]
+user     = "radio-a"
+services = ["lab/radio-a"]
+
+[[principal]]
+user     = "radio-b"
+services = ["lab/radio-b"]
+
+[[principal]]
+user  = "local"
+tools = ["console"]
+
+[[principal]]
+user  = "ground"
+tools = ["console"]
+
+[[principal]]
+user  = "ground-router"
+tools = ["console"]
+
+[[service]]
+address    = "lab/radio-a"
+implements = ["radio.v1"]
+
+[[service]]
+address    = "lab/radio-b"
+implements = ["radio.v1"]
+
+# Every stream, state and event (the default resources), of every radio on
+# the lab's system.
+[[tool]]
+name = "console"
+
+[tool.bindings.radio]
+interface = "radio.v1"
+providers = ["lab/*"]
+
+[[tool.calls]]
+interface  = "radio.v1"
+providers  = ["lab/*"]
+operations = ["reset"]

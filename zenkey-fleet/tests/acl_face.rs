@@ -1,15 +1,21 @@
-//! A constrained face, planned and run (spec §8.5, U23; #612, FJ7).
+//! A constrained face, planned and run (spec §8.5, U23; #612, FJ7; its face
+//! policy, `link.v1`, #769 LB).
 //!
 //! The walkthrough's vehicle router holds the plan of
-//! `examples/zk2/acl/walkthrough.enrollment.toml` with the ground segment as
-//! its far side, in both attachments: a far router in a south region
-//! (`--face constrained --attach south-region --far ground --region
-//! ground`), which names its region, authenticates to the vehicle router as
-//! the `ground` principal and serves a ground client of its own; and one
-//! ground session as a client (`--attach client`). What is asked of the
-//! running routers is what the unit tests can only read off the block:
-//! zenoh accepts the near router's `gateway.south`, the data the ground is
-//! granted crosses, and presence does not (the `@zk` deny on the face).
+//! `examples/zk2/acl/walkthrough.enrollment.toml` and its face policy,
+//! `walkthrough.face.toml`, with the ground segment as its far side, in both
+//! attachments: a far router in a south region (`attach = "south-region"`,
+//! `region = "ground"`), which names its region, authenticates to the
+//! vehicle router as the `ground` principal and serves a ground client of
+//! its own; and one ground session as a client (`attach = "client"`). What
+//! is asked of the running routers is what the unit tests can only read off
+//! the block: zenoh accepts the near router's `gateway.south`, the GET the
+//! ground is granted crosses, and presence does not (the face's `zk` deny).
+//! The walkthrough exposes nothing, so every push across the face is
+//! denied: the GET is what crosses (link.v1 §2.9). The face's denies sit in
+//! the far principal's policy, so they hold over whichever transport it
+//! attaches by; the walkthrough has no downsampling for the link protocol
+//! to select.
 //!
 //! Measured here, and the reason for the plan's `face-declarations` rule: a
 //! far router learns of the vehicle's queryables by declaration, and routes
@@ -22,7 +28,7 @@ mod util;
 use std::time::Duration;
 
 use util::zk2::{T, eventually};
-use zenkey_fleet::report::{AclFace, AclPermission, AclPlan, Enrollment, FaceAttach};
+use zenkey_fleet::report::{AclPermission, AclPlan, Enrollment};
 use zenkey_fleet::{AclOptions, ContractSet, acl_plan_json5, plan_acl};
 use zenoh::Wait;
 use zenoh::query::{ConsolidationMode, QueryTarget};
@@ -76,8 +82,19 @@ async fn values(s: &zenoh::Session, selector: &str) -> usize {
     n
 }
 
-fn face_plan(attach: FaceAttach) -> AclPlan {
+/// The walkthrough's plan under its face policy, its far router south or,
+/// when not `south`, the ground as one client session.
+fn face_plan(south: bool) -> AclPlan {
     let examples = util::zk2::examples();
+    let policy = std::fs::read_to_string(examples.join("acl/walkthrough.face.toml")).unwrap();
+    let policy = if south {
+        policy
+    } else {
+        policy.replace(
+            "attach       = \"south-region\"\nregion       = \"ground\"\n",
+            "attach       = \"client\"\n",
+        )
+    };
     let enrollment: Enrollment = toml::from_str(
         &std::fs::read_to_string(examples.join("acl/walkthrough.enrollment.toml")).unwrap(),
     )
@@ -94,11 +111,7 @@ fn face_plan(attach: FaceAttach) -> AclPlan {
         &contracts,
         &AclOptions {
             default_permission: AclPermission::Deny,
-            face: Some(AclFace {
-                attach,
-                far: "ground".into(),
-                region: (attach == FaceAttach::SouthRegion).then(|| "ground".to_owned()),
-            }),
+            face_policy: Some(zenkey_model::link::parse(&policy)),
             ..AclOptions::default()
         },
     )
@@ -120,7 +133,7 @@ struct Across {
 
 /// The vehicle router holding `plan`, navigation a client of it, and the
 /// ground on its far side as `attach` says; what the ground then sees.
-async fn across(plan: &AclPlan, attach: FaceAttach) -> Across {
+async fn across(plan: &AclPlan, south: bool) -> Across {
     let dict = scratch("near.txt");
     std::fs::write(
         &dict,
@@ -158,35 +171,32 @@ async fn across(plan: &AclPlan, attach: FaceAttach) -> Across {
         .unwrap();
 
     let far_dict = scratch("far.txt");
-    let (_far, ground) = match attach {
-        FaceAttach::SouthRegion => {
-            // The ground router names its region and is the `ground`
-            // principal to the vehicle router. A router presenting usrpwd
-            // credentials checks them on its own links too, so it holds a
-            // dictionary: the vehicle router's, and its client's.
-            std::fs::write(&far_dict, "router:router-pw\nops:ops-pw\n").unwrap();
-            let mut c = base("router");
-            c.insert_json5("region_name", "\"ground\"").unwrap();
-            c.insert_json5("listen/endpoints", &format!("[\"{}\"]", util::ANY_PORT))
-                .unwrap();
-            c.insert_json5("connect/endpoints", &format!("[\"{near_ep}\"]"))
-                .unwrap();
-            usrpwd(&mut c, "ground", Some(&far_dict));
-            let far = zenoh::open(c).await.expect("the ground router");
-            let far_ep = util::bound(&far).await;
-            let mut c = base("client");
-            c.insert_json5("connect/endpoints", &format!("[\"{far_ep}\"]"))
-                .unwrap();
-            usrpwd(&mut c, "ops", None);
-            (Some(far), zenoh::open(c).await.expect("a ground client"))
-        }
-        _ => {
-            let mut c = base("client");
-            c.insert_json5("connect/endpoints", &format!("[\"{near_ep}\"]"))
-                .unwrap();
-            usrpwd(&mut c, "ground", None);
-            (None, zenoh::open(c).await.expect("the ground session"))
-        }
+    let (_far, ground) = if south {
+        // The ground router names its region and is the `ground` principal
+        // to the vehicle router. A router presenting usrpwd credentials
+        // checks them on its own links too, so it holds a dictionary: the
+        // vehicle router's, and its client's.
+        std::fs::write(&far_dict, "router:router-pw\nops:ops-pw\n").unwrap();
+        let mut c = base("router");
+        c.insert_json5("region_name", "\"ground\"").unwrap();
+        c.insert_json5("listen/endpoints", &format!("[\"{}\"]", util::ANY_PORT))
+            .unwrap();
+        c.insert_json5("connect/endpoints", &format!("[\"{near_ep}\"]"))
+            .unwrap();
+        usrpwd(&mut c, "ground", Some(&far_dict));
+        let far = zenoh::open(c).await.expect("the ground router");
+        let far_ep = util::bound(&far).await;
+        let mut c = base("client");
+        c.insert_json5("connect/endpoints", &format!("[\"{far_ep}\"]"))
+            .unwrap();
+        usrpwd(&mut c, "ops", None);
+        (Some(far), zenoh::open(c).await.expect("a ground client"))
+    } else {
+        let mut c = base("client");
+        c.insert_json5("connect/endpoints", &format!("[\"{near_ep}\"]"))
+            .unwrap();
+        usrpwd(&mut c, "ground", None);
+        (None, zenoh::open(c).await.expect("the ground session"))
     };
 
     // The control, on the vehicle side: the near router holds the token.
@@ -226,14 +236,14 @@ const CROSSES: Across = Across {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_far_router_south_gets_its_data_and_no_presence() {
-    let plan = face_plan(FaceAttach::SouthRegion);
+    let plan = face_plan(true);
     assert!(plan.gateway.is_some());
-    assert_eq!(across(&plan, FaceAttach::SouthRegion).await, CROSSES);
+    assert_eq!(across(&plan, true).await, CROSSES);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_far_session_as_a_client_gets_its_data_and_no_presence() {
-    let plan = face_plan(FaceAttach::Client);
+    let plan = face_plan(false);
     assert!(plan.gateway.is_none());
     assert!(
         !plan
@@ -241,14 +251,14 @@ async fn a_far_session_as_a_client_gets_its_data_and_no_presence() {
             .iter()
             .any(|r| r.id.starts_with("face-declarations:"))
     );
-    assert_eq!(across(&plan, FaceAttach::Client).await, CROSSES);
+    assert_eq!(across(&plan, false).await, CROSSES);
 }
 
 /// The control for `face-declarations`: without it, the far router never
 /// learns of navigation's queryable, and its GET gets no reply.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn without_the_declarations_a_far_router_routes_no_query() {
-    let mut plan = face_plan(FaceAttach::SouthRegion);
+    let mut plan = face_plan(true);
     let id = "face-declarations:ground";
     assert!(plan.rules.iter().any(|r| r.id == id));
     for p in &mut plan.policies {
@@ -256,7 +266,7 @@ async fn without_the_declarations_a_far_router_routes_no_query() {
     }
     plan.rules.retain(|r| r.id != id);
     assert_eq!(
-        across(&plan, FaceAttach::SouthRegion).await,
+        across(&plan, true).await,
         Across {
             status: 0,
             tokens: 0,

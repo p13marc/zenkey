@@ -1078,6 +1078,35 @@ pub(crate) enum CheckCmd {
     /// decodes through the bundle's descriptor set (§7.2); a raw type
     /// declares no structure and cannot be checked (exit 2).
     Schema(CheckSchemaArgs),
+    /// Check a router's config against its constrained faces, exit-coded
+    ///
+    /// `link.v1` §2.15 (#769): for each face of the policy (`--face-policy`),
+    /// the router config's block as it guards that face, read from the FILE
+    /// through zenoh's own loader:
+    ///
+    ///   zk_not_denied              a pair of the nine messages and both
+    ///                              flows that no deny of the far principal's
+    ///                              policies denies on the namespace's
+    ///                              zk2/**/@zk/**; read subject by subject,
+    ///                              since any allow wins across subjects
+    ///   wildcard_downsampling      a downsampling rule on the face's
+    ///                              transports that is not one concrete key
+    ///   intersecting_downsampling  two of them that intersect
+    ///   window_under_outage        with --window: a listed owner of state
+    ///                              whose tombstone window is below the
+    ///                              face's max_outage_s (§2.11)
+    ///
+    /// and the block against the whole plan the same face policy, enrollment
+    /// and contracts compile to, as `acl gen --check` compares them: rules,
+    /// subjects, policies, the downsampling items, the south region. Opens
+    /// no session: what a router runs is not on the bus (core §11.3), so the
+    /// block judged is the file somebody says it runs.
+    ///
+    /// Exit 0 every face guarded as planned, 1 a finding or a difference, 2
+    /// no verdict: a file that does not load, a face policy its linter
+    /// refuses, or a plan that cannot be made.
+    #[command(verbatim_doc_comment)]
+    Face(CheckFaceArgs),
 }
 
 #[derive(Subcommand)]
@@ -1290,6 +1319,29 @@ pub(crate) enum AclCmd {
     ///   name     = "ops"                       # bindings and calls, no address
     ///   admin    = true                        # the routers' admin space
     ///   inspects = ["*/*"]                     # presence alone, no data
+    ///
+    /// With --face-policy, the router's constrained faces (link.v1, #769;
+    /// examples/zk2/link/ holds one):
+    ///
+    ///   system   = "lab"                       # the near router's system
+    ///   services = ["radio-a"]                 # the services it carries
+    ///   [face.radio]
+    ///   far          = "ground"                # the far principal: its policy gets the denies
+    ///   attach       = "client"                # or "south-region", with region = "…"
+    ///   select       = { link_protocols = ["unixsock-stream"] }
+    ///   class        = "constrained"
+    ///   expose       = "link"                  # or "none": no push crosses
+    ///   interval_s   = 1                       # one put per exposed stream key per second
+    ///   max_outage_s = 6                       # each listed owner's tombstone window floor
+    ///   batch_bytes  = 1000
+    ///   link_bps     = 1000000
+    ///
+    /// The plan (link.v1 §2.3) denies @zk, @adv and the admin space, and the
+    /// pushes of every resource whose contract does not mark it
+    /// link.exposure = "link", in the far principal's policy; downsamples
+    /// each crossing stream key of a listed service, egress, put; and lets
+    /// GETs and calls cross by grant. `zenctl check face` judges a router's
+    /// config against it.
     // Verbatim, so the table and the enrollment example keep their lines:
     // clap would otherwise fold them into one.
     #[command(verbatim_doc_comment)]
@@ -3047,25 +3099,26 @@ pub(crate) struct AclGenArgs {
     /// Inclusion by zenoh-keyexpr. Exit 0.
     #[arg(long, num_args = 3, value_names = ["PRINCIPAL", "KEY", "MESSAGE"])]
     pub(crate) explain: Option<Vec<String>>,
-    /// Guard a constrained face too (spec §8.5): the far principal's policy
-    /// carries the `@zk` and `@stream` denies, and loses its presence and
-    /// contract grants (bindings resolve statically there, R7).
-    #[arg(long, value_name = "constrained", requires_all = ["attach", "far"])]
-    pub(crate) face: Option<Face>,
-    /// With --face: how the far side attaches. `client`: one far-side or
-    /// gateway session, a client of this router. `south-region`: a far
-    /// router in a south region of this one (`gateway.south`; needs
-    /// --region). `router` is refused: a deny on a router-to-router link
-    /// hides the declarations but lets their key strings cross.
-    #[arg(long, value_enum, value_name = "ATTACHMENT", requires = "face")]
-    pub(crate) attach: Option<Attach>,
-    /// With --face: the far side's principal (its id, user or CN): the
-    /// gateway session, or the far router.
-    #[arg(long, value_name = "PRINCIPAL", requires = "face")]
+    /// Guard the router's constrained faces too: its face policy (TOML,
+    /// `link.v1` §2.1). Each face's denies (`@zk`, `@adv`, the admin space,
+    /// and every push its exposure does not let cross) go into its far
+    /// principal's policy, which loses its presence, history, admin-space
+    /// and contract grants; its crossing streams get one downsampling rule
+    /// per key; a south region gets `gateway.south` and the declarations of
+    /// every queryable it may query. Router to router is refused.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) face_policy: Option<PathBuf>,
+    /// Replaced by --face-policy (#769): refused by name, exit 2.
+    #[arg(long, hide = true, num_args = 0..=1, default_missing_value = "")]
+    pub(crate) face: Option<String>,
+    /// Replaced by --face-policy's `attach` (#769): refused by name.
+    #[arg(long, hide = true, num_args = 0..=1, default_missing_value = "")]
+    pub(crate) attach: Option<String>,
+    /// Replaced by --face-policy's `far` (#769): refused by name.
+    #[arg(long, hide = true, num_args = 0..=1, default_missing_value = "")]
     pub(crate) far: Option<String>,
-    /// With --attach south-region: the far router's `region_name`, which
-    /// this router's `gateway.south` lists.
-    #[arg(long, value_name = "NAME", requires = "face")]
+    /// Replaced by --face-policy's `region` (#769): refused by name.
+    #[arg(long, hide = true, num_args = 0..=1, default_missing_value = "")]
     pub(crate) region: Option<String>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
@@ -3078,22 +3131,35 @@ pub(crate) enum DefaultPermission {
     Allow,
 }
 
-/// The one face profile spec §8.5 describes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub(crate) enum Face {
-    /// A bandwidth-limited link: radio, cell, tactical, satellite.
-    Constrained,
-}
-
-/// `--attach`: how the far side of a constrained face attaches (§8.5, U23).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub(crate) enum Attach {
-    /// One far-side session, or a gateway session, as a client.
-    Client,
-    /// A far router in a south region of this router.
-    SouthRegion,
-    /// A far router linked router to router: refused, with why.
-    Router,
+/// The `check face` verb's flags (`link.v1` §2.15; #769, LB) — one struct
+/// the dispatcher hands over whole, destructured in the verb (#354).
+#[derive(clap::Args)]
+pub(crate) struct CheckFaceArgs {
+    /// The router's JSON5 config file, read through zenoh's own loader: its
+    /// `access_control`, `downsampling` and `gateway` blocks.
+    #[arg(value_name = "ROUTER-CONFIG")]
+    pub(crate) router: PathBuf,
+    /// The router's face policy (TOML, `link.v1` §2.1).
+    #[arg(long, value_name = "FILE")]
+    pub(crate) face_policy: PathBuf,
+    /// The enrollment `acl gen` reads: the listed services' interfaces, and
+    /// the plan the block is compared with.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) enrollment: PathBuf,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    /// The posture the plan is compiled under (spec §11.2), as `acl gen`'s.
+    #[arg(long, visible_alias = "posture", value_enum, value_name = "PERMISSION",
+          default_value_t = DefaultPermission::Deny)]
+    pub(crate) default_permission: DefaultPermission,
+    /// A listed owner's tombstone window as the deployment configures it,
+    /// ADDRESS=SECS, repeatable (`link.v1` §2.11). With one, every listed
+    /// owner of state is checked against each face's outage, a window not
+    /// given being the core's 60 s; with none, windows are not asked.
+    #[arg(long, value_name = "ADDRESS=SECS")]
+    pub(crate) window: Vec<String>,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `storage list` verb's flags — one struct the dispatcher hands over whole,

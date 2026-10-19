@@ -3152,8 +3152,14 @@ async fn check_expect_judges_samples_values_qos_and_presence() {
         )
         .await,
     );
+    // A ceiling nothing here reaches keeps the window open its whole second:
+    // without a rate bound, early success ends it at the first valid sample,
+    // which under load was the owner's every time before the intruder's
+    // (#781).
     let run = bus
-        .until(&expect(&["--valid-payload"]), |r| r.code == 1)
+        .until(&expect(&["--valid-payload", "--rate-max", "1000"]), |r| {
+            r.code == 1
+        })
         .await;
     exits(&run, 1);
     let doc = run.json();

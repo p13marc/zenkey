@@ -258,6 +258,7 @@ mod tests {
                 && name.ends_with(".toml")
                 && !name.ends_with(".bindings.toml")
                 && !name.ends_with(".enrollment.toml")
+                && !name.ends_with(".face.toml")
             {
                 out.push(p);
             }

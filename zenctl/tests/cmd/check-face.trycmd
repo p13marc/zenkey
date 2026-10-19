@@ -1,0 +1,106 @@
+`check face` judges a router's config file against the constrained faces
+its face policy names (`link.v1` §2.15, #769). What a router runs is not on
+the bus (core §11.3), so it reads a file, through zenoh's own loader, and
+opens no session. For each face it reads the block as it guards the far
+side: the denies of every policy whose subject can match the far
+principal's sessions, subject by subject, since any allow wins across
+subjects (§2.4), and the downsampling rules on the face's transports. Then
+it compares the whole block with the plan the same face policy, enrollment
+and contracts compile to, as `acl gen --check` does.
+
+The lab router of `examples/zk2/link/`, running the block `acl gen
+--face-policy` wrote: every face guarded as planned, exit 0. The windows
+were not asked, and the note says so.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --format table
+tests/cmd/fixtures/link/router.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
+PASS
+judged against the config file tests/cmd/fixtures/link/router.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+
+```
+
+The same block hand-edited the two ways a deployment must not: the `zk`
+deny taken out of ground's policy, and one wildcard rule in place of the
+two (scenarios §3, step 2). Both are §2.15's findings, and the comparison
+names the edits. Exit 1.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-drifted.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --format table
+? 1
+tests/cmd/fixtures/link/router-drifted.json5: face radio (far ground): 7 deny rule(s) across subject(s) ground; 1 downsampling rule(s) on its transports
+  ✗ zk_not_denied          face radio  @zk
+  ✗ wildcard_downsampling  face radio  zk2/lab/*/radio.v1/stream/air/dropped_total
+against the plan: 3 difference(s)
+  ✗ policy_missing        ground  planned rules [call-in:tool.console, call-out:tool.console, consume-in:tool.console, consume-out:tool.console, face:radio:@state, face:radio:@stream:radio.v1, face:radio:admin, face:radio:adv, face:radio:events:radio.v1, face:radio:state:radio.v1, face:radio:stream:radio.v1, face:radio:zk] subjects [ground]
+  ✗ policy_extra          ground  configured rules [call-in:tool.console, call-out:tool.console, consume-in:tool.console, consume-out:tool.console, face:radio:@state, face:radio:@stream:radio.v1, face:radio:admin, face:radio:adv, face:radio:events:radio.v1, face:radio:state:radio.v1, face:radio:stream:radio.v1] subjects [ground]
+  ✗ downsampling_differs  radio   planned link_protocols unixsock-stream egress put zk2/lab/radio-a/radio.v1/@stream/frames@1Hz zk2/lab/radio-a/radio.v1/stream/air/dropped_total@1Hz; configured link_protocols unixsock-stream egress put zk2/lab/*/radio.v1/stream/air/dropped_total@1Hz
+FAIL
+zk_not_denied [face radio] @zk: a pair of the nine messages and both flows is not denied on @zk: presence, descriptors or bundles cross the face (§2.6, §2.15)
+wildcard_downsampling [face radio] zk2/lab/*/radio.v1/stream/air/dropped_total: a downsampling rule that is not one concrete key: every key it covers shares one timer (§2.8, §2.15)
+judged against the config file tests/cmd/fixtures/link/router-drifted.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+
+```
+
+Given the windows the deployment configures (§2.11), every listed owner of
+state is checked against each face's outage, a window not given being the
+core's 60 s. A window of 2 s below the radio face's 6 s outage is a
+finding, though the block itself is clean.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --window lab/radio-a=2 --format ndjson
+? 1
+{"against":"tests/cmd/fixtures/link/router.json5","comparison":{"answer":"not_established","reason":"tests/cmd/fixtures/link/router.json5 carries the plan whole: 26 rule(s), 5 subject(s), 5 polic(y/ies), enabled, default deny, 1 downsampling item(s)"},"judgement":{"answer":"established"},"namespace":"","notes":[{"text":"window_under_outage [face radio] lab/radio-a: a listed owner of state's tombstone window is below the face's outage: a delete made during a longer outage is lost across the face (§2.11)"},{"cite":"core §11.3, link.v1 §2.14","text":"judged against the config file tests/cmd/fixtures/link/router.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here"},{"text":"the windows are the ones given: whether each owner runs with its window is its configuration, not on the bus (link.v1 §2.11, §5)"}],"report":"face-check"}
+{"denies":8,"face":"radio","far":"ground","row":"face","rules":2,"subjects":["ground"]}
+{"at":"lab/radio-a","code":"window_under_outage","face":"radio","row":"finding","severity":"error"}
+{"face":"radio","given":true,"min_s":6,"row":"window","service":"lab/radio-a","window_s":2}
+window_under_outage [face radio] lab/radio-a: a listed owner of state's tombstone window is below the face's outage: a delete made during a longer outage is lost across the face (§2.11)
+judged against the config file tests/cmd/fixtures/link/router.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+the windows are the ones given: whether each owner runs with its window is its configuration, not on the bus (link.v1 §2.11, §5)
+
+```
+
+A file that is not there, and a window that is not `ADDRESS=SECS`, are
+questions that could not be asked: exit 2, never a 1 claiming the router
+guards its faces wrongly.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/no-such-router.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml
+? 2
+Error: tests/cmd/fixtures/link/no-such-router.json5: zenoh refused the config: No such file or directory (os error 2)
+check face: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --window radio-a=2
+? 2
+Error: --window "radio-a=2": "radio-a" is not <system>/<service>: "radio-a" is not a zk2 key: an address is <system>/<service>
+check face: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A window for an address that owns no state behind a face is a question
+nobody asked, and passing over it would leave a misspelt owner on the
+core's 60 s with the check clean: exit 2, naming the listed owners.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --window lab/radio-a=600 --window lab/radio-b=2
+? 2
+Error: --window names lab/radio-b, which owns no state behind a face of this policy (link.v1 §2.11); the listed owners of state are: lab/radio-a
+check face: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A face policy its linter refuses has no plan, and no block is judged
+against it: exit 2.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router.json5 --face-policy tests/cmd/fixtures/link/radio-router.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml
+? 2
+Error: --face-policy: the face policy is refused (link.v1 §2.1): error router_attach [face radio] attach. Router to router is refused (§8.5, §11.3: on a router-to-router link, a deny hides a denied declaration from the far side, but its key string still crosses (spike S3: 11,330 B and 201 denied keys, against 506 B and none in a south region)): attach the far router in a south region (attach = "south-region", region = "<name>"), or the far session as a client (attach = "client")
+check face: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

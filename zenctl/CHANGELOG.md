@@ -6,6 +6,28 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — constrained faces from a face policy: `link.v1` (#769, LB)
+
+`acl gen` guarded one face with four flags and two denies, `@zk` and
+`@stream`, and said "downsampling is not modelled here". `link.v1` (text
+0.2) puts a face in a file the deployment versions, the **face policy**,
+and the engine compiles its plan (`zenkey_model::link`): every push the
+contracts do not expose denied, the exposed streams downsampled one rule
+per key, the attachment, the window floors and the liveness evidence.
+`check face` judges a router's config file against it. Both open no
+session.
+
+| Before | Now | Notes |
+|---|---|---|
+| `acl gen … --face constrained --attach client\|south-region --far <P> [--region <R>]` | `acl gen … --face-policy <FILE>` | The four flags are refused by name, exit 2, naming `--face-policy`. A policy states the far principal (`far`), the attachment (`attach`, `region`), the link protocols the face is (`select.link_protocols`), what crosses (`expose`), the rate (`interval_s`), the outage, the batch and the link rate (`link.v1` §2.1); `examples/zk2/link/radio.face.toml` and `examples/zk2/acl/walkthrough.face.toml` are two. A policy its linter refuses is exit 2 with every finding, `router_attach` (router to router) among them, with why |
+| the far principal's `face-presence:<far>` (`@zk`, all nine messages) and `face-stream:<far>` (`@stream`, all nine) | `face:<face>:<id>` for every deny of the face's plan, in the far principal's policy only: `zk`, `adv` (`zk2/**/@adv/**`) and `admin` (`@/**`, never namespaced), all nine messages; then the exposure denies (`put`, `delete`, `declare_subscriber`), wholesale per kind token (`stream`, `@stream`, `state`, `@state`, `events`) or per interface, carved around what crosses (`link.v1` §2.6, §2.7) | Grant kinds `face_presence` (the `zk` deny), `face_adv`, `face_admin` and `face_exposure`; `face_stream` is gone, its `@stream` deny now one of the exposure denies. A contract that uses no `link.v1` exposes nothing, so every push across the face is denied: the walkthrough's ground crosses as GETs and calls, by grant |
+| the far principal lost its presence and contract grants | it loses its presence, history and admin-space grants too | the face's `zk`, `adv` and `admin` denies would cut them anyway (deny is evaluated first within a policy); a far principal that reads with history draws a `history_across_face` warning |
+| `face-declarations:<far>` over the far side's own GET and call selectors | also over every queryable they reach, as its owner declares it: the owner's `<iface>/state/**` and `@state/**` (S2), an operation's template pattern, an archive's `@state` forms | core §8.5, 0.30 (zk2py's F-117, confirmed live): a declaration is checked by inclusion against the queryable's own key, so a grant over `…/state/peers/*` sent no `…/state/**` and the far router routed no state GET |
+| — | `downsampling: [...]` beside `access_control` in `--json5`, and `downsampling` rows (`--format ndjson`), zenoh's `DownsamplingItemConf`: one item per face, `link_protocols` the face's, egress, `put`, one rule per crossing stream key of a listed service at 1/`interval_s` Hz | `link.v1` §2.8. Never a wildcard rule, never two that intersect |
+| `face` in the plan's JSON: `{attach, far, region}` | `faces`: `link.v1`'s own plan per face (§2.3, `plan.json`'s shape), and a `face` row per face | each face's table section shows its far principal, its downsampling rules, its window floors and its liveness evidence; the plan's warnings (`templated_exposure`, `carve_out_overlap`, `interval_over_horizon`) ride the notes, the policy's (`batch_over_lease`) the `face_policy` warnings |
+| `acl gen --check --against` compared `access_control` and `gateway` | and the `downsampling` items, by id: `downsampling_missing`, `downsampling_extra`, `downsampling_differs` | a router config with downsampling the plan does not name now differs |
+| — | `check face <ROUTER-CONFIG> --face-policy <FILE> --enrollment <FILE> --contracts … [--default-permission …] [--window ADDRESS=SECS]…` | `link.v1` §2.15: per face, `zk_not_denied` read subject by subject over every subject that can match the far principal's sessions, `wildcard_downsampling` and `intersecting_downsampling` over the rules on its transports; `window_under_outage` per listed owner of state when windows are given (a window not given is 60 s; none given, not asked); and `acl gen --check`'s comparison with the plan. Report `face-check`: `face`, `finding`, `window` and `difference` rows. Exit 0 every face guarded as planned, 1 a finding or a difference, 2 no verdict |
+
 ## Unreleased (`main`, zk2) — `config` back on zk2: `config.v1` (#768, CC)
 
 FJ9 left v1's six `config` verbs dark "until the configuration profile

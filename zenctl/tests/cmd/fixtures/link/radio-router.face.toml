@@ -1,0 +1,15 @@
+# The lab router's face policy with its far side linked router to router:
+# refused by the linter (link.v1 §2.5, `router_attach`; acl-gen.trycmd).
+system   = "lab"
+services = ["radio-a"]
+
+[face.radio]
+far          = "ground"
+attach       = "router"
+select       = { link_protocols = ["unixsock-stream"] }
+class        = "constrained"
+expose       = "link"
+interval_s   = 1
+max_outage_s = 6
+batch_bytes  = 1000
+link_bps     = 1000000

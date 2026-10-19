@@ -3,6 +3,59 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.30 — 2026-10-18: what a south region's declaration grant covers (#769)
+
+Compiling `link.v1` into live routers (#769, LB: the reference generator,
+`zenctl acl gen --face-policy`, and the spec-only implementation, zk2py
+round 30) ran §8.5's south region under `deny` with grants narrower than
+the owners' queryables, which the measurement of 0.14 had not. zk2py filed
+F-117 against `link.v1` §2.5, which restates §8.5; the core's sentence had
+the same gap. `link.v1` text 0.2 answers it beside this amendment. No
+fixture case changed, and none is added.
+
+**Changed: the declaration grant, spelled out (§8.5).**
+- **The gap.** §8.5 required the far side's principal to be granted
+  `declare_queryable` on egress "for what its side may query". Read as the
+  far side's GET and call selectors, that grant does not send the owner's
+  state queryables: they are declared over the interface's `state/**` and
+  `@state/**` (S2, the table of §2.1), and zenoh checks a declaration by
+  inclusion against the queryable's own key expression (§11.3). A selector
+  over one resource does not include `state/**`.
+- **Measured.** zk2py, on zenoh 1.10.1: granted on its bindings' selectors
+  only, a far client's call was answered and its state GET was not;
+  granted on the owners' `state/**` and `@state/**` as well, both were;
+  with no grant, neither. The reference measured the same in `link.v1`'s
+  scenario §2.
+- **The rule.** The grant covers every queryable the far side may query,
+  as its owner declares it: a state GET's state queryables (S2), a call's
+  operation queryable on its concrete key or over its template (O1, so
+  `@op/set/*` for a call of `set/duty`), an archive's `@state` forms
+  (§4.4). The MUST is unchanged; what it covers is now stated.
+  `[Sc: link.v1 scenarios §2]`
+
+**Changed: the reference generator compiles face policies (§8.5).** The
+`@stream` bullet said the reference denied `@stream` wholesale "at this
+version"; it now compiles `link.v1`'s plan, the downsampling of an exposed
+`@stream` included (`zenctl acl gen --face-policy`, #769 LB).
+
+**Deliberately not changed.**
+- **A grant, not a widening of the far side's reads.** A declaration
+  carries a key expression and no value. What crosses in the replies is
+  still checked against Consume and Call (§11.1, §11.2), so naming an
+  owner's whole `state/**` in the declaration grant shows the far router
+  that the queryable exists, and gives its sessions nothing to read.
+- **No narrower owner queryables.** An owner could declare one queryable
+  per resource, so that a selector-wide grant would include it; S2's one
+  queryable over `state/**` stays, since the grant can name it and the
+  runtime's GET over a whole interface needs it.
+- **Clients unchanged.** A far side attached as a client sends every query
+  to its router and needs no declaration (§8.5): no grant is added there.
+- **`constrained.md` §6** keeps its words. Its state GET is answered with
+  the grant this amendment spells out; the scenario named no grant.
+- **Subscriptions.** The same inclusion admits a subscription or a GET
+  only when a grant includes its key expression (§11.3, F-116). §11.3
+  already says it; only `link.v1`'s scenarios had subscribed wider.
+
 ## 0.29 — 2026-10-18: what `link.v1` needed of the core (#769)
 
 `link.v1`'s first text (#769, LA) publishes the face policy that §8.5

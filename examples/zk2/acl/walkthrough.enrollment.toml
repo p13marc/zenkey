@@ -8,7 +8,7 @@
 #                  --contracts examples/zk2/walkthrough \
 #                  --contracts spec/profiles/health \
 #                  --contracts zenwatch/contracts/zenwatch.v1.toml --json5
-#   … --face constrained --attach south-region --far ground --region ground
+#   … --face-policy examples/zk2/acl/walkthrough.face.toml   (link.v1, #769)
 #
 # `health.v1`, which navigation implements, is a profile's standard contract
 # (spec/profiles/health/health.v1.toml, #721), so it comes by a second
