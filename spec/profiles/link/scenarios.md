@@ -533,9 +533,19 @@ beside its user name.
 6. G and X each receive what §1's G receives, and neither's puts reach L:
    `local`'s grants are `ground`'s here, and `ground`'s face denies hold
    over them.
-7. G and X each receive what §1's G receives, and neither's puts reach L:
-   under `allow` every rule is a deny, and a subject two policies list
-   holds both's.
+7. Neither's puts reach L: under `allow` every rule is a deny, and a
+   subject two policies list holds both's. G receives what §1's G
+   receives, through `ground`'s own subject. X matches the face's subject
+   alone, and what it receives depends on the complement the generator
+   wrote for `radio-a` (core §11.2, 0.31; 0.6, F-122):
+   - where the generator leaves a principal's own keys out of its
+     complement (the reference), `radio-a`'s policy denies nothing of
+     `radio-a`'s own traffic, and X receives exactly what §1's G receives;
+   - where it denies a principal its own keys on the messages and flows
+     its Own grant does not name, `put` toward it among them, X receives
+     nothing at all: §1's G's share is `radio-a`'s traffic alone, so no
+     sample, token or descriptor reaches X, and neither its GET nor its
+     call is answered (measured by the spec-only implementation).
 8. All five of each one's puts reach L: denying `@zk` in `radio-a`'s
    policy changes nothing of step 5's writes.
 9. 0.4 reported nothing for steps 1, 2, 4 and 8, `narrowed_too_far` at

@@ -4,6 +4,43 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.6 — 2026-10-19: what a subject in two policies receives (#769, LF)
+
+The spec-only implementation (zk2py, round 34) read 0.5 cold, passed
+every fixture (1414) and all eleven scenario sections, §11 over mTLS
+among them, and filed one finding, F-122, an ambiguity. Written against
+core 0.31, which answers it. No rule, code or fixture of this text
+changed.
+
+**Changed: scenarios §11, expected 7 (F-122; core §11.2).**
+- **The finding.** In step 7, under `allow`, the face's subject is listed
+  in `ground`'s policy and `radio-a`'s. The text expected X to receive
+  §1's G's share. zk2py's X received nothing at all: its generator
+  compiles `radio-a`'s complement over every message and flow `radio-a`
+  holds no grant for, its own stream's `put` toward it among them, and the
+  face's subject holds `radio-a`'s denies. The reference leaves a
+  principal's own keys out of its complement, so `radio-a`'s policy
+  denies none of `radio-a`'s traffic. Neither leaks: X gets less, or the
+  same, and no put reaches L.
+- **The rule.** Core 0.31 says a generator MAY leave the keys of the
+  services a principal runs out of its own complement, and one that
+  denies them too conforms. Expected 7 now gives X's share exactly under
+  each: §1's G's share under the reference's complement, and nothing at
+  all under the stricter one, since §1's G's share is `radio-a`'s traffic
+  alone. G's share does not depend on it, since G also matches `ground`'s
+  own subject.
+
+**Deliberately not changed.**
+- **The checks.** §2.15 reads which policies list a subject, never their
+  rules (0.4). The block of step 7 is reported (`face_subject_misplaced`,
+  `near_subject_on_face`, `zk_not_denied`, `narrowed_too_far`) whichever
+  complement wrote it.
+- **The fixtures.** No `lints.json` case carries a rule, and no
+  `plan.json` case a principal's complement.
+- **One complement for both implementations.** Choosing one would make
+  either generator non-conforming for a block that only a misplaced
+  subject can show, and that §2.15 already refuses.
+
 ## 0.5 — 2026-10-19: one kind of name per subject (#769, LE)
 
 The spec-only implementation (zk2py, round 33) read 0.4 cold, passed
