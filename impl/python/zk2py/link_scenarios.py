@@ -60,27 +60,65 @@ IFACE = "radio.v1"
 BOUND_TOKENS = ("stream", "@stream", "state", "@state", "events")
 
 
+#: ``policy()``'s "leave ``interval_s`` as the example writes it".
+_KEEP = object()
+
+
+class PolicyDrift(RuntimeError):
+    """A section's change to ``radio.face.toml`` could not be applied: the
+    example no longer has the line it rewrites."""
+
+
 def policy(services: list[str] | None = None, *, far: str | None = None, attach: str | None = None,
-           region: str | None = None, expose: str | None = None, interval_s: Any = "keep") -> str:
+           region: str | None = None, expose: str | None = None, interval_s: Any = _KEEP) -> str:
     """``radio.face.toml``, with a section's changes: each named key's line
     replaced, ``region`` added after ``attach``, ``interval_s`` removed with
-    ``None``."""
+    ``None``. Every requested change must find its line, and the result must
+    read back with each requested value, else :class:`PolicyDrift`: a
+    section never runs on the unmodified policy."""
     out = []
-    changes = {"far": far, "attach": attach, "expose": expose}
+    changes: dict[str, Any] = {"far": far, "attach": attach, "expose": expose}
+    requested = {k for k, v in changes.items() if v is not None}
+    requested |= {"services"} if services is not None else set()
+    requested |= {"region"} if region is not None else set()
+    requested |= {"interval_s"} if interval_s is not _KEEP else set()
+    applied: set[str] = set()
     for line in FACE.read_text().splitlines():
         key = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith("#") else None
         if key == "services" and services is not None:
             line = f"services = {json.dumps(services)}"
+            applied.add(key)
         elif key in changes and changes[key] is not None:
             line = f'{key:<12} = "{changes[key]}"'
-        elif key == "interval_s" and interval_s != "keep":
+            applied.add(key)
+        elif key == "interval_s" and interval_s is not _KEEP:
+            applied.add(key)
             if interval_s is None:
                 continue
             line = f"interval_s   = {interval_s}"
         out.append(line)
         if key == "attach" and region is not None:
             out.append(f'region       = "{region}"')
-    return "\n".join(out) + "\n"
+            applied.add("region")
+    missing = requested - applied
+    if missing:
+        raise PolicyDrift(f"{FACE}: no line for {sorted(missing)}, so the section's change cannot be applied")
+    text = "\n".join(out) + "\n"
+    doc = tomllib.loads(text)
+    faces = doc.get("face") or {}
+    if len(faces) != 1:
+        raise PolicyDrift(f"{FACE}: the scenarios expect one face, found {sorted(faces)}")
+    face = next(iter(faces.values()))
+    want = {**{k: v for k, v in changes.items() if v is not None},
+            **({"region": region} if region is not None else {})}
+    wrong = {k: face.get(k) for k, v in want.items() if face.get(k) != v}
+    if services is not None and doc.get("services") != services:
+        wrong["services"] = doc.get("services")
+    if interval_s is not _KEEP and face.get("interval_s") != interval_s:
+        wrong["interval_s"] = face.get("interval_s")
+    if wrong:
+        raise PolicyDrift(f"{FACE}: the rewritten policy reads {wrong}, not the section's values")
+    return text
 
 
 class Report:
@@ -111,39 +149,81 @@ def enrollment(contract: Any) -> tuple[list[Any], dict[str, Any]]:
     ``tools``; a tool's ``bindings`` name an interface and its providers,
     and with no ``resources`` take every stream, state and event resource of
     it; its ``calls`` name operations. Returns the principals and, per tool,
-    its (consume, call) uses."""
+    its (consume, call) uses. Anything it cannot resolve raises
+    :class:`EnrollmentError`, naming it: an enrollment read wrongly would
+    test a deployment that is not the example's."""
     from . import acl
+
+    def need(table: dict[str, Any], key: str, where: str) -> Any:
+        if key not in table:
+            raise EnrollmentError(f"{ENROLLMENT}: {where} has no {key!r}")
+        return table[key]
+
+    def contract_of(iface: str, where: str) -> Any:
+        if iface not in contracts:
+            raise EnrollmentError(f"{ENROLLMENT}: {where} names interface {iface!r}, whose contract is not given "
+                                  f"(given: {sorted(contracts)})")
+        return contracts[iface]
 
     doc = tomllib.loads(ENROLLMENT.read_text())
     contracts = {contract.interface: contract}
-    implements = {s["address"]: s["implements"] for s in doc.get("service", [])}
+    implements = {need(s, "address", "a [[service]]"): need(s, "implements", f"service {s.get('address')}")
+                  for s in doc.get("service", [])}
     tools: dict[str, tuple[list[Any], list[Any]]] = {}
     for tool in doc.get("tool", []):
+        tname = need(tool, "name", "a [[tool]]")
         consumes = []
-        for b in (tool.get("bindings") or {}).values():
-            c = contracts[b["interface"]]
-            resources = b.get("resources") or [f"{r['token']}/{r['template']}" for r in c.canonical["resources"]
-                                               if r["token"] in BOUND_TOKENS]
-            consumes.append(acl.Use(b["interface"], list(b["providers"]), resources))
+        for role, b in (tool.get("bindings") or {}).items():
+            where = f"tool {tname}'s binding {role}"
+            iface = need(b, "interface", where)
+            c = contract_of(iface, where)
+            declared = {f"{r['token']}/{r['template']}" for r in c.canonical["resources"]
+                        if r["token"] in BOUND_TOKENS}
+            resources = b.get("resources") or sorted(declared)
+            unknown = [r for r in resources if r not in declared]
+            if unknown:
+                raise EnrollmentError(f"{ENROLLMENT}: {where} binds {unknown}, which {iface} does not declare")
+            consumes.append(acl.Use(iface, list(need(b, "providers", where)), resources))
         calls = []
         for cl in tool.get("calls", []):
-            c = contracts[cl["interface"]]
+            where = f"tool {tname}'s calls"
+            iface = need(cl, "interface", where)
+            c = contract_of(iface, where)
             names = {r["template"] for r in c.canonical["resources"] if r["token"] == "@op"}
-            calls.append(acl.Use(cl["interface"], list(cl["providers"]),
-                                 [f"@op/{op}" for op in cl["operations"] if op in names]))
-        tools[tool["name"]] = (consumes, calls)
+            ops = list(need(cl, "operations", where))
+            unknown = [op for op in ops if op not in names]
+            if unknown:
+                raise EnrollmentError(f"{ENROLLMENT}: {where} name operations {unknown}, which {iface} does not "
+                                      f"declare (it declares {sorted(names)})")
+            calls.append(acl.Use(iface, list(need(cl, "providers", where)), [f"@op/{op}" for op in ops]))
+        tools[tname] = (consumes, calls)
     principals = []
     for pr in doc.get("principal", []):
+        user = need(pr, "user", "a [[principal]]")
         services = pr.get("services") or []
+        if len(services) > 1:
+            raise EnrollmentError(f"{ENROLLMENT}: principal {user} runs {services}; zk2py.acl takes one service "
+                                  "per principal")
         consumes, calls = [], []
         for name in pr.get("tools") or []:
+            if name not in tools:
+                raise EnrollmentError(f"{ENROLLMENT}: principal {user} runs tool {name!r}, which the enrollment "
+                                      f"does not define (it defines {sorted(tools)})")
             consumes += tools[name][0]
             calls += tools[name][1]
-        principals.append(acl.Principal(
-            pr["user"], pr["user"], service=services[0] if services else None,
-            implements=[contracts[i] for i in implements.get(services[0], [])] if services else [],
-            consumes=consumes, calls=calls))
+        impl: list[Any] = []
+        if services:
+            if services[0] not in implements:
+                raise EnrollmentError(f"{ENROLLMENT}: principal {user} runs service {services[0]!r}, which no "
+                                      "[[service]] describes")
+            impl = [contract_of(i, f"service {services[0]}") for i in implements[services[0]]]
+        principals.append(acl.Principal(user, user, service=services[0] if services else None, implements=impl,
+                                        consumes=consumes, calls=calls))
     return principals, tools
+
+
+class EnrollmentError(RuntimeError):
+    """``radio.enrollment.toml`` names something zk2py cannot resolve."""
 
 
 def derive(policy_text: str) -> dict[str, Any]:
@@ -430,7 +510,10 @@ def section1(report: Report) -> None:
         fl = {k: sum(1 for x in w.fls.of(f"{b}/{k}") if x.kind == "put")
               for k in ("stream/air/frames_total", "@stream/raw", "stream/air/dropped_total")}
         fl_changes = w.g_events(b, "change", w.fls)
-        report.check(sec, "measured (F-118): a session with local's credentials over the face, a principal whose "
+        # Not a conformance gate: it records what an open finding measures,
+        # and is expected to flip when a later text (link 0.3) answers F-118.
+        report.check(sec, "MEASUREMENT of open SPEC-FINDINGS F-118, not a conformance check (expected to flip when "
+                          "link 0.3 answers it): a session with local's credentials over the face, a principal whose "
                           "policy carries none of the plan's denies, sees the owner's tokens and receives every push: "
                           "the denies hold only for the far principal",
                      any("/@zk/instance/" in k for k in w.flt.rows) and fl["stream/air/frames_total"] >= 90

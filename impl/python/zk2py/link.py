@@ -575,21 +575,34 @@ def compile_face(face_plan: dict[str, Any], block: dict[str, Any], far_subject: 
     return out
 
 
-def declaration_grant(gets: list[tuple[str, list[str]]], calls: list[tuple[str, list[str], str]]) -> list[str]:
+#: core §4.4: "An archive is a service implementing archive.v1".
+ARCHIVE_IFACE = "archive.v1"
+
+
+def declaration_grant(gets: list[tuple[str, list[str]]], calls: list[tuple[str, list[str], str]],
+                      archives: list[str] = ()) -> list[str]:  # type: ignore[assignment]
     """§2.5 (0.2), core §8.5 (0.30): the far principal's ``declare_queryable``
     egress grant "over every queryable its side may query, as the owner
-    declares it". ``gets`` are (interface, providers) whose state the far
-    side GETs: "the owner's state queryables over its interface's state/**
-    and @state/** (core S2), with the providers as bound". ``calls`` are
-    (interface, providers, operation template): "the operation's queryable
-    over its template's pattern (core §5)". An archive's ``@state`` forms
-    (core §4.4) are not here: zk2py's deployments run none."""
+    declares it".
+    - ``gets`` are (interface, providers) whose state the far side GETs:
+      "the owner's state queryables over its interface's state/** and
+      @state/** (core S2), with the providers as bound";
+    - ``calls`` are (interface, providers, operation template): "the
+      operation's queryable over its template's pattern (core §5)";
+    - ``archives`` are the archives (addresses, as bound) the far side
+      reads last-known state from: "an archive's last-known GET: its
+      queryable over its @state forms (core §4.4)", which are under the
+      archive's own ``archive.v1/@state`` token, so its state queryable
+      there.
+    A ``gets`` entry for ``archive.v1`` is an archive read too, and is
+    covered by the same keys."""
     keys: list[str] = []
     for iface, providers in gets:
         keys += [f"zk2/{p}/{iface}/{t}/**" for p in providers for t in ("state", "@state")]
     for iface, providers, template in calls:
         pattern = "/".join(_pattern(s) for s in templates.parse_template(template).segments)
         keys += [f"zk2/{p}/{iface}/@op/{pattern}" for p in providers]
+    keys += [f"zk2/{a}/{ARCHIVE_IFACE}/@state/**" for a in archives]
     return sorted(set(keys), key=_bytes)
 
 
