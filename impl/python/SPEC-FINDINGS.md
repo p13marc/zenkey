@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Thirty-three rounds.**
+**Thirty-four rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -71,7 +71,9 @@ where that was not enough, or where the spec said two things.
   running its scenarios §9 and §10 (see "At link.v1 0.4"). `link.v1` 0.5
   resolved it.
 - F-122 was found against `link.v1` 0.5, running its scenario §11 (see
-  "At link.v1 0.5" at the end).
+  "At link.v1 0.5"). Core 0.31 and `link.v1` 0.6 resolved it.
+- F-123 was found against core 0.31's §11.2, reading its new bullet (see
+  "At core 0.31 and link.v1 0.6" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -81,8 +83,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.30, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4,
-config.v1 0.3 and link.v1 0.5:** 122 entries, one open.
+**Counts at core 0.31, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4,
+config.v1 0.3 and link.v1 0.6:** 123 entries, one open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -197,12 +199,14 @@ config.v1 0.3 and link.v1 0.5:** 122 entries, one open.
   the far principal's policy.
 - F-121: resolved by `link.v1` 0.5, as zk2py measured it and read it.
   0.5 also found the same hole in the far principal's subject.
-- F-122: open, against `link.v1` 0.5.
+- F-122: resolved by core 0.31 and `link.v1` 0.6. Both complements now
+  conform, and zk2py's, the stricter, is named with its exact outcome.
+- F-123: open, against core 0.31.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at core 0.30, config.v1 0.3, link.v1 0.5 | Location | In one line |
+| Id | Severity | Status at core 0.31, config.v1 0.3, link.v1 0.6 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -325,7 +329,8 @@ by the spec section that now states the rule.
 | F-119 | gap | resolved by link 0.3 | link.v1 0.2 §2.2, §2.3, §2.7, with core §9.8 | Two revisions of one interface, which may differ in `link.exposure` (an annotation change is a review), can run in one deployment; the plan's denies are per interface, and the text names no revision. |
 | F-120 | gap | resolved by link 0.4 | link.v1 0.3 §2.15, with §2.4 | The two subject checks pass three blocks §2.4 forbids, measured on a router: a subject bound to the far principal and a near one, a face subject that also names a near link protocol, and under `allow` the far principal's subject narrowed to its face. |
 | F-121 | gap | resolved by link 0.5 | link.v1 0.4 §2.15 `narrowed_too_far`, with §2.4 | `narrowed_too_far` credits a name to a subject that names it beside a name of the other kind, or as the other kind, which zenoh matches only for a session presenting both: measured, `local` narrowed off `tcp` matches no subject over TCP, its puts reach the near side, and the tool reports nothing. |
-| F-122 | ambiguity | open | link.v1 0.5 scenarios.md §11 expected 7, with core §11.2 | Under `allow`, X, which matches only a face subject listed by `ground`'s policy and `radio-a`'s, receives nothing on zk2py's router, where the text expects what §1's G receives: zk2py's `radio-a` policy denies what `radio-a` holds no grant for, and core §11.2 does not say whether a generator's complement does. |
+| F-122 | ambiguity | resolved by core 0.31, link 0.6 | link.v1 0.5 scenarios.md §11 expected 7, with core §11.2 | Under `allow`, X, which matches only a face subject listed by `ground`'s policy and `radio-a`'s, receives nothing on zk2py's router, where the text expects what §1's G receives: zk2py's `radio-a` policy denies what `radio-a` holds no grant for, and core §11.2 does not say whether a generator's complement does. |
+| F-123 | ambiguity | open | core 0.31 §11.2 "A principal's own keys" | The new MUST names keys, "the keys of the services it does not run that its grants do not name", not keys per message and flow: read per key, a key a Consume grant names would need no deny of a `put` on it. `security.md` §2 decides it per message and flow. |
 
 ---
 
@@ -5360,6 +5365,8 @@ X, as at most what §1's G receives. The counted check says so, and a
 `NOTE` records X's numbers. Either the expected line could say "at most",
 or core §11.2 could say what a complement covers.
 
+**Status at core 0.31 and link.v1 0.6: resolved by both.** Core §11.2: "A generator MUST deny, in each principal's policy, the keys of the services it does not run that its grants do not name." "It MAY leave the keys of the services the principal runs out of that principal's complement". "A generator that denies them too, per message and flow, is stricter, and conforms. The reference leaves them out." `link.v1` 0.6's expected 7 names both outcomes. For the reference: "X receives exactly what §1's G receives". For zk2py's complement: "where it denies a principal its own keys on the messages and flows its Own grant does not name, `put` toward it among them, X receives nothing at all". zk2py's generator takes the stricter branch. Its §11 step 7 now asserts that branch exactly: X with no sample, token, descriptor or reply, and G with §1's share. A probe on a key no contract declares shows that X's session is live, so a dead session would fail the check.
+
 **Where zk2py's reading of link.v1 0.5 needed a guess, beyond the
 findings.**
 - **The generator's refusal** (§2.4, no code): `compile_faces` refuses a
@@ -5374,3 +5381,113 @@ findings.**
     "beside its user name" says.
 - **A rule without `flows`** is read as both flows, measured, though no
   fixture carries one.
+
+## At core 0.31 and link.v1 0.6 (#609)
+
+Core 0.31 answers F-122 in §11.2, "A principal's own keys":
+- a generator MUST deny each principal the keys of the services it does
+  not run that its grants do not name;
+- it MAY leave the principal's own services' keys out of its complement;
+- one that denies them too conforms.
+
+`security.md` §2 names the exception. `link.v1` 0.6 changes only §11's
+expected 7, which now gives X's share exactly under each complement. No
+rule, code or fixture of either text changed.
+
+**`just py-conformance`: 1414 of 1414,** as in round 34, link 156.
+
+**`just py-link`: 79 of 79,** all eleven sections. §11 has one more check
+than round 34.
+
+**§11, step 7, pinned to zk2py's branch.** zk2py's generator (`zk2py.acl`)
+compiles a principal's complement per message and flow, over every key of
+the deployment it holds no grant for, its own services' keys included.
+That is core §11.2's stricter branch. `radio-a`'s policy denies `radio-a`:
+- egress `put` of its own stream;
+- ingress `query` of its own state and operation;
+- egress `reply`.
+
+The face's subject, which that policy also lists, holds those denies.
+Step 7 asserts the branch's outcome exactly:
+- G receives §1's share through `ground`'s own subject: 5 of
+  `air/dropped_total` and of `frames`, none of `air/frames_total` or
+  `raw`, all 10 `oper`, 5 `fault`, no `change`, no token or descriptor,
+  and its GET and call answered;
+- X receives nothing at all: every count 0, no token, no liveliness
+  token, no descriptor, and neither its GET nor its call answered;
+- neither's 5 puts reach L.
+
+A second check makes a dead X fail: G and X each put once on
+`zk2py-probe/<who>`, a key no contract declares, which stays open under
+`allow` (core §11.2) and no face deny covers. L receives each, 1 and 1.
+
+**Robustness** (review-bot on PR #790):
+- **`check_ids` now covers rules and policies.** Measured on zenoh
+  1.10.1:
+  - a rule with no id is refused at insert ("missing field `id`");
+  - a repeated rule id is refused at open ("Rule id must be unique");
+  - a repeated policy id is refused at open ("Policy id must be unique:
+    id 'x' is repeated");
+  - a policy with no id loads, and so do two.
+
+  zk2py raises `BlockError` for the first three, naming the rule or the
+  policy. A policy needs no id, and only the ids present are compared.
+- **`subject_denies` and `compare_block`** look rules up with `.get`, so
+  a policy naming an unknown rule cannot raise a `KeyError` even before
+  `check_ids` runs.
+- **`mint_certificates`** raises with openssl's stderr when openssl fails,
+  for example: `openssl req -x509 failed (1): req: Can't open "ca.key" for
+  writing, Permission denied`.
+- **Failed closes are logged once.** `close_each` closes everything,
+  continuing past a failure, and prints one line on stderr when any fail
+  ("2 of 3 of … failed to close: …, and 1 more"). `_close_all`,
+  `World.close` and every run's cleanup use it. No silent `except: pass`
+  is left in `link_scenarios`. The full run logged none.
+
+**The question: does core 0.31's new MUST decide, for every message and
+flow, what a generator must deny?** Not by itself; it does with
+`security.md` §2. That is F-123.
+
+### F-123 · ambiguity · core 0.31 §11.2 "A principal's own keys": keys, or keys per message and flow
+
+> core §11.2: "A generator MUST deny, in each principal's policy, the keys
+> of the services it does not run that its grants do not name."
+
+> core §11.2: "It MAY leave the keys of the services the principal runs
+> out of that principal's complement … Under `allow`, the principal then
+> also reads and receives its own keys on the messages and flows that its
+> Own grant's rows do not name." … "A generator that denies them too, per
+> message and flow, is stricter, and conforms."
+
+> core scenarios security.md §2: "Every unauthorized action is blocked,
+> with two exceptions"
+
+A grant names keys for some messages on some flows (§11.2's table): the
+console's Consume grant names `zk2/lab/*/radio.v1/stream/air/dropped_total`
+for ingress `declare_subscriber` and `query`, and egress `put`, `delete`
+and `reply`. The MUST's object is "the keys … that its grants do not
+name".
+- **Read per key**, a key any grant names for any message is outside the
+  MUST. The sentence alone then requires no deny of `ground`'s ingress
+  `put` on `lab/radio-a`'s `air/dropped_total`, which its grants name as a
+  key, though not for `put`.
+- **Read per message and flow**, it does require one. The MAY and the
+  stricter branch beside it are written per message and flow, and
+  `security.md` §2 reads "Every unauthorized action is blocked, with two
+  exceptions", neither of which is this write.
+
+`link.v1`'s scenarios assume the second reading: §7's expected 3 ("`ground`'s
+deny of other services' writes holds for both") and §9's control. The
+bullet's own words decide neither.
+**Resolved:** a guess, read with `security.md` §2. zk2py's generator
+denies per message and flow, as it did. Wording that would decide it:
+"deny, on each message and flow, the keys of the services it does not run
+that its grants do not name for that message and flow".
+
+**Where zk2py's reading of core 0.31 and link.v1 0.6 needed a guess,
+beyond the finding.**
+- **The liveness probe's key**, `zk2py-probe/<who>`, is outside the
+  deployment's keys and every face deny. Core §11.2's "Keys no contract
+  declares stay open under `allow`" makes it reachable for any session.
+- **Policy ids are optional**, measured. A repeated one is refused only
+  between policies that carry an id: two policies with none load.

@@ -268,7 +268,13 @@ def generate(principals: list[Principal], posture: str, *, egress_selectors: boo
     """The ``access_control`` block for ``posture`` (``deny`` or ``allow``).
     ``allow_rules_under_allow`` compiles the allow rules but sets
     ``default_permission: allow``: security.md §2's "Allow rules alone,
-    under allow, block nothing"."""
+    under allow, block nothing".
+
+    Under ``allow``, each principal's complement is taken per message and
+    flow over every key of the deployment (:func:`universe`) its grants do
+    not name for that message and flow, its own services' keys included:
+    core §11.2's stricter branch (0.31, "A generator that denies them too,
+    per message and flow, is stricter, and conforms")."""
     grants = compile_grants(principals, egress_selectors=egress_selectors, reply_selectors=reply_selectors,
                             presence_egress=presence_egress)
     out = Generated({}, grants={k: sorted(v) for k, v in grants.items()})

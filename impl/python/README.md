@@ -103,9 +103,10 @@ link          156 passed     0 failed
 total        1414 passed     0 failed
 ```
 
-The figures are against `core.md` 0.30, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.5. `link.v1` 0.5
-added ten `lints.json` cases and changed one. `link.v1` 0.4
+The figures are against `core.md` 0.31, `hostid.v1` 0.5, `freshness.v1`
+0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.6, which changed no
+fixture (nor did core 0.31). `link.v1` 0.5 added ten `lints.json` cases
+and changed one. `link.v1` 0.4
 added 18 `lints.json` cases, and 0.3 one `plan.json` case and eight
 `lints.json` cases. `link.v1` 0.2
 added the scenarios' radio as an example (`examples/zk2/link/radio.v1.toml`,
@@ -145,10 +146,13 @@ fixtures:
   its three blocks, and two more of the same kind.
 - `link.v1` 0.5 resolved F-121, found against its 0.4, as zk2py read it:
   one kind of name per subject.
-- F-122 is open: found against `link.v1` 0.5's scenario §11. Under
-  `allow`, a face subject that `radio-a`'s policy also lists holds
-  `radio-a`'s denies, and on zk2py's generator X receives nothing where
-  the text expects §1's share (`SPEC-FINDINGS.md`, "At link.v1 0.5").
+- Core 0.31 and `link.v1` 0.6 resolved F-122, found against `link.v1`
+  0.5's scenario §11. A generator MAY leave a principal's own keys out of
+  its complement, and zk2py's, which denies them per message and flow,
+  conforms. §11's expected 7 gives that branch's outcome exactly.
+- F-123 is open: found against core 0.31. §11.2's new MUST names keys, not
+  keys per message and flow, and only `security.md` §2 decides that
+  (`SPEC-FINDINGS.md`, "At core 0.31 and link.v1 0.6").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -845,7 +849,7 @@ python -m zk2py.live_interop --only config       # the live runner's config run
   range, and restores a hot group left part applied once: zk2py's device
   reports it as `{"refused": words, "partial": {…}}`.
 
-## link.v1 (profile text 0.5, core 0.30)
+## link.v1 (profile text 0.6, core 0.31)
 
 ```bash
 just py-link
@@ -888,7 +892,7 @@ just py-link
 - **The `link` conformance family:** 156 of 156, every case passing the
   first time it ran.
 - **`just py-link`** (`python -m zk2py.link_scenarios`) runs `scenarios.md`
-  §1 to §11 as 0.5 writes them, 78 of 78, every section, on zenoh-python
+  §1 to §11 as 0.6 writes them, 79 of 79, every section, on zenoh-python
   routers: N with usrpwd and the block zk2py compiles under `deny` (and
   `allow` in §7, §9, §10 and §11),
   listening on TCP (the near side) and on a `unixsock-stream` path (the
@@ -925,7 +929,10 @@ just py-link
     mTLS session. N also listens on TLS with `enable_mtls`, certificates
     minted by openssl for the run. Measured: a session presenting the CN
     matches a subject naming a user name and that CN, and one presenting
-    another CN, or none, does not.
+    another CN, or none, does not. Its step 7 asserts zk2py's branch of core
+    §11.2 exactly: the stricter complement, under which X receives nothing
+    at all while a probe on a key no contract declares shows its session
+    is live.
   - §5's face goes down as G's session closing, its merged members kept.
 - **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
   core S3).
