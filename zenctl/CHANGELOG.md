@@ -6,6 +6,24 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — what the subject checks let through: `link.v1` 0.4 (#769, LD)
+
+zk2py's round 32 found three blocks `check face` passed that `link.v1`
+§2.4 forbids, each measured on a router (F-120): a subject bound to the far
+principal and a near one, a face subject that also names a near link
+protocol, and under `allow` the far principal narrowed to its face. The
+reference found two more: a face subject in a near principal's policy, and
+one in no policy. `link.v1` 0.4 reports all five; `acl gen` already writes
+none of them, and is unchanged.
+
+| Before | Now | Notes |
+|---|---|---|
+| `near_subject_on_face` exempted a subject that named the far principal among others | it reports any subject on the face bound to another principal, whatever else it names; the far principal's subject names it alone, as its user names or its CNs | (a): `local`'s credentials over the face matched a subject bound to `ground` and `local` |
+| — | `face_subject_beyond_face`: a subject bound by no identity on the face that selects a link protocol outside it, or every one | (b): `radio-a` over TCP read `lab/radio-b`'s stream with `ground`'s grants |
+| — | `face_subject_misplaced`: a subject bound by no identity on the face not listed in exactly the far principal's policies; `check face` reads each policy's subject list | a face subject in a near principal's policy, in none, or in a policy of its own (scenarios §7, step 5, which the comparison alone named before) |
+| — | `narrowed_too_far`, under `allow`, with no face (`face -` in the table): a user name or CN whose session over a link protocol it is not kept off matches no subject | (c), and a near principal narrowed the same way: allowed everything there, writes included |
+| a finding's note always said `[face …]` | a finding with no face says none | `narrowed_too_far [face -] ground` would have read as a face named `-` |
+
 ## Unreleased (`main`, zk2) — a near credential on the face, and two revisions: `link.v1` 0.3 (#769, LC)
 
 zk2py's round 31 found that a near principal's subject, bound by its user

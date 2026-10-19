@@ -2189,14 +2189,31 @@ pub fn link_says(code: link::Code) -> &'static str {
              (§2.3)"
         }
         C::NearSubjectOnFace => {
-            "a subject bound to another principal than the face's far one, and not kept off \
-             the face's link protocols: zenoh ties no credential to a link, so that principal's \
-             credentials over the face match it, and get its grants there (§2.4, §2.15)"
+            "a subject bound to another principal than the face's far one, whatever else it \
+             names, and not kept off the face's link protocols: zenoh ties no credential to a \
+             link, so that principal's credentials over the face match it, and get its grants \
+             there (§2.4, §2.15)"
         }
         C::FaceSubjectMissing => {
             "under allow, no subject bound by no identity selects this link protocol of the \
              face: a session over it that matches no other subject is allowed everything \
              (§2.4, §2.15)"
+        }
+        C::FaceSubjectBeyondFace => {
+            "a subject bound by no identity that a session over the face matches, and that \
+             selects a link protocol outside the face's, or every one: sessions off the face \
+             match it too, and get what its policies grant beside their own (§2.4, §2.15)"
+        }
+        C::FaceSubjectMisplaced => {
+            "a subject bound by no identity that a session over the face matches, not listed \
+             in exactly the policies of the far principal's subjects on the face: every \
+             session over the face gets another policy's grants, misses a deny of the far \
+             principal's, or, listed in none, is allowed by default (§2.4, §2.15)"
+        }
+        C::NarrowedTooFar => {
+            "under allow, this principal's session over a link protocol it is not kept off \
+             matches no subject, so it is allowed everything there: a subject narrowed \
+             further than the faces it is kept off (§2.4, §2.15)"
         }
         _ => "the face policy's linter refuses it (§2.1)",
     }
@@ -3209,7 +3226,8 @@ fn matches_far(s: &crate::report::AclSubjectDoc, far: &str, link_protocols: &[St
     on_face
 }
 
-/// A router's subjects and posture, as `link.v1` §2.15 reads them.
+/// A router's subjects, posture and policies' subject lists, as `link.v1`
+/// §2.15 reads them (0.4: which policies list a face subject).
 fn block_subjects(observed: &AclConfigDoc) -> link::BlockSubjects {
     let list = |v: &Option<Vec<String>>| v.clone().unwrap_or_default();
     link::BlockSubjects {
@@ -3228,6 +3246,13 @@ fn block_subjects(observed: &AclConfigDoc) -> link::BlockSubjects {
                 link_protocols: s.link_protocols.clone().filter(|p| !p.is_empty()),
                 interfaces: list(&s.interfaces),
                 zids: list(&s.zids),
+            })
+            .collect(),
+        policies: observed
+            .policies
+            .iter()
+            .map(|p| link::BlockPolicy {
+                subjects: p.subjects.clone(),
             })
             .collect(),
     }
@@ -3251,11 +3276,17 @@ fn applies_to(d: &DownsamplingDoc, link_protocols: &[String]) -> bool {
 /// For each face of `policy`, the block read is, per subject that can match
 /// a session of the far principal on the face, the deny rules of that
 /// subject's policies: any allow wins across subjects (§2.4), so `@zk` must
-/// be denied in each. Every other subject is read too
-/// (`link::check_subjects`, 0.3): one bound to another principal must be
-/// kept off the face's link protocols, and under `allow` each of them needs
-/// a subject bound by no identity. The downsampling rules are those of
-/// every item that applies to the face's transports, in the block's order.
+/// be denied in each (§2.15 states this reduction since 0.4). Every other
+/// subject is read too, with which policies list it
+/// (`link::check_subjects`, 0.3, 0.4): one bound to another principal must
+/// be kept off the face's link protocols whatever else it names, a face
+/// subject must select the face's link protocols alone and ride exactly the
+/// far principal's policies, and under `allow` each of the face's link
+/// protocols needs one; and, once over every face, under `allow` each
+/// principal's session over a link protocol it is not kept off must match
+/// one of its subjects (`link::check_narrowing`). The downsampling rules are
+/// those of every item that applies to the face's transports, in the
+/// block's order.
 /// `windows` are
 /// the tombstone windows the deployment configures, by address (§2.11):
 /// `None` is not asked. `plan` is the plan the same policy compiled to.
@@ -3274,9 +3305,14 @@ pub fn check_face(
     let mut findings: Vec<link::Finding> = Vec::new();
     let mut faces = Vec::new();
     let all_subjects = block_subjects(observed);
+    // Under allow, every principal's session over a link protocol it is
+    // not kept off matches one of its subjects (§2.4, 0.4): read over every
+    // face at once, so no face's.
+    findings.extend(link::check_narrowing(policy, &all_subjects));
     for (name, face) in &policy.faces {
-        // No other principal's subject on the face, and under allow the
-        // face's own (§2.4, 0.3).
+        // No other principal's subject on the face, every face subject the
+        // face's alone and beside the far principal's, and under allow the
+        // face's own (§2.4, 0.3, 0.4).
         findings.extend(link::check_subjects(name, face, &all_subjects));
         let subjects: Vec<&crate::report::AclSubjectDoc> = observed
             .subjects

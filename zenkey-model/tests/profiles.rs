@@ -1386,10 +1386,15 @@ fn link_block(b: &Value) -> (String, link::Block) {
                 freq: r["freq"].as_f64().expect("freq"),
             })
             .collect(),
-        // `default_permission` and `subjects`, together or neither (0.3).
-        subjects: match (b.get("default_permission"), b.get("subjects")) {
-            (None, None) => None,
-            (Some(p), Some(subjects)) => Some(link::BlockSubjects {
+        // `default_permission`, `subjects` and `policies`, all three or none
+        // (0.3; `policies` since 0.4, F-120).
+        subjects: match (
+            b.get("default_permission"),
+            b.get("subjects"),
+            b.get("policies"),
+        ) {
+            (None, None, None) => None,
+            (Some(p), Some(subjects), Some(policies)) => Some(link::BlockSubjects {
                 posture: match p.as_str().expect("default_permission") {
                     "deny" => link::Posture::Deny,
                     "allow" => link::Posture::Allow,
@@ -1411,8 +1416,16 @@ fn link_block(b: &Value) -> (String, link::Block) {
                         }
                     })
                     .collect(),
+                policies: policies
+                    .as_array()
+                    .expect("policies")
+                    .iter()
+                    .map(|p| link::BlockPolicy {
+                        subjects: strings(&p["subjects"]),
+                    })
+                    .collect(),
             }),
-            _ => panic!("block: default_permission and subjects go together"),
+            _ => panic!("block: default_permission, subjects and policies go together"),
         },
     };
     (b["face"].as_str().expect("block.face").to_owned(), block)

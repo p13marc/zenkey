@@ -16,7 +16,8 @@
 //!                                      window floors, liveness evidence, warnings
 //! narrowed(policy, is_far)          ─▶ the link protocols a principal's subject keeps
 //! check_windows / check_block /
-//!   check_subjects                  ─▶ findings
+//!   check_subjects /
+//!   check_narrowing                 ─▶ findings
 //! ```
 //!
 //! There is no session here and no router: a generator writes the plan
@@ -349,12 +350,23 @@ pub enum Code {
     WildcardDownsampling,
     /// Two downsampling rules that intersect (§2.15).
     IntersectingDownsampling,
-    /// A subject bound to another principal than the face's far one that
-    /// can match a session on the face (§2.4, §2.15, 0.3).
+    /// A subject on the face bound to another principal than the face's
+    /// far one, whatever else it names (§2.4, §2.15, 0.3; widened in 0.4,
+    /// F-120).
     NearSubjectOnFace,
-    /// Under `allow`, a link protocol of the face that no subject bound by
-    /// no identity selects (§2.4, §2.15, 0.3).
+    /// Under `allow`, a link protocol of the face that no face subject
+    /// naming no interface and no zid selects (§2.4, §2.15, 0.3).
     FaceSubjectMissing,
+    /// A face subject that also selects sessions off the face (§2.4,
+    /// §2.15, 0.4, F-120).
+    FaceSubjectBeyondFace,
+    /// A face subject not listed in exactly the far principal's policies
+    /// (§2.4, §2.15, 0.4, F-120).
+    FaceSubjectMisplaced,
+    /// Under `allow`, a name the block binds whose session over a link
+    /// protocol it is not kept off matches no subject (§2.4, §2.15, 0.4,
+    /// F-120).
+    NarrowedTooFar,
 }
 
 impl Code {
@@ -383,6 +395,9 @@ impl Code {
             Self::IntersectingDownsampling => "intersecting_downsampling",
             Self::NearSubjectOnFace => "near_subject_on_face",
             Self::FaceSubjectMissing => "face_subject_missing",
+            Self::FaceSubjectBeyondFace => "face_subject_beyond_face",
+            Self::FaceSubjectMisplaced => "face_subject_misplaced",
+            Self::NarrowedTooFar => "narrowed_too_far",
         }
     }
 
@@ -1573,6 +1588,8 @@ pub struct BlockSubject {
     pub usernames: Vec<String>,
     pub cert_common_names: Vec<String>,
     /// `None` when the subject names no link protocol: it selects every one.
+    /// An empty list, which zenoh 1.10.1 refuses to load (§2.15, 0.4), is
+    /// read as `None`.
     pub link_protocols: Option<Vec<String>>,
     pub interfaces: Vec<String>,
     pub zids: Vec<String>,
@@ -1583,13 +1600,72 @@ impl BlockSubject {
     fn bound(&self) -> bool {
         !self.usernames.is_empty() || !self.cert_common_names.is_empty()
     }
+
+    /// The link protocols it names; `None` for every one, an empty list
+    /// included.
+    fn protocols(&self) -> Option<&[String]> {
+        self.link_protocols.as_deref().filter(|p| !p.is_empty())
+    }
+
+    /// Whether it selects the link protocol `p`.
+    fn selects(&self, p: &str) -> bool {
+        self.protocols().is_none_or(|l| l.iter().any(|x| x == p))
+    }
+
+    /// Whether it can match a session over `face` (§2.15): its link
+    /// protocols are absent or name one of the face's. Interfaces and zids
+    /// keep no session off a face: a zid is unauthenticated (core §11.3),
+    /// and a face's link may report an interface.
+    fn on_face(&self, face: &Face) -> bool {
+        self.protocols()
+            .is_none_or(|l| l.iter().any(|x| face.link_protocols.contains(x)))
+    }
+
+    /// Whether it is the far principal's (§2.15, 0.4): it names `far` alone,
+    /// as its user names or as its CNs. zenoh matches one value of each
+    /// property a subject names, so every session it matches presents
+    /// `far`.
+    fn far_alone(&self, far: &str) -> bool {
+        let only = |v: &[String]| !v.is_empty() && v.iter().all(|x| x == far);
+        only(&self.usernames) || only(&self.cert_common_names)
+    }
+
+    /// Whether it names the user name or CN `name`.
+    fn names(&self, name: &str) -> bool {
+        self.usernames
+            .iter()
+            .chain(&self.cert_common_names)
+            .any(|x| x == name)
+    }
 }
 
-/// A block's posture and every subject it defines, when they were read.
+/// One policy of a router's block, as read (§2.15, 0.4): the ids of the
+/// subjects it lists. Its rules are not read here: which policies list a
+/// subject is what the subject checks need.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockPolicy {
+    pub subjects: Vec<String>,
+}
+
+/// A block's posture, every subject it defines and every policy's subject
+/// list, when they were read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockSubjects {
     pub posture: Posture,
     pub subjects: Vec<BlockSubject>,
+    pub policies: Vec<BlockPolicy>,
+}
+
+impl BlockSubjects {
+    /// The indices of the policies that list the subject `id`.
+    fn listing(&self, id: &str) -> BTreeSet<usize> {
+        self.policies
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.subjects.iter().any(|s| s == id))
+            .map(|(i, _)| i)
+            .collect()
+    }
 }
 
 /// What a router runs for one face, as somebody read it (§2.15).
@@ -1597,13 +1673,15 @@ pub struct BlockSubjects {
 pub struct Block {
     /// The deployment's namespace, empty for none (core §1.6).
     pub namespace: String,
-    /// The denies of a policy whose subject can match the far principal's
-    /// sessions on the face.
+    /// The denies of every policy that lists one subject that can match
+    /// the far principal's sessions on the face (§2.15): a tool checks each
+    /// such subject's denies alone, since any allow wins across subjects.
     pub deny: Vec<BlockDeny>,
     /// In the block's order.
     pub downsampling: Vec<BlockRule>,
-    /// The block's posture and subjects, which [`check_subjects`] reads;
-    /// `None` when they were not read.
+    /// The block's posture, subjects and policies' subject lists, which
+    /// [`check_subjects`] and [`check_narrowing`] read; `None` when they
+    /// were not read.
     pub subjects: Option<BlockSubjects>,
 }
 
@@ -1671,33 +1749,50 @@ fn zk_denied(target: &str, deny: &[BlockDeny]) -> bool {
 
 /// Checks a router's subjects against the face `name` they must keep to
 /// its far principal (§2.4, §2.15):
-/// - `near_subject_on_face`, each subject bound by a user name or a CN,
-///   none of them the face's far principal, whose `link_protocols` are
-///   absent or name one of the face's: zenoh ties no credential to a link,
-///   so a session with its credentials over the face matches it;
+/// - `near_subject_on_face`, each subject on the face bound by a user name
+///   or a CN that is not the far principal's alone, whatever else it names
+///   (0.4): zenoh ties no credential to a link, and matches one value of
+///   each property, so a session over the face with another name the
+///   subject binds matches it;
+/// - `face_subject_beyond_face`, each face subject (on the face, bound by
+///   no user name and no CN) whose link protocols are absent or name one
+///   outside the face's: sessions off the face match it too (0.4);
+/// - `face_subject_misplaced`, each face subject not listed in exactly the
+///   policies that list a subject of the far principal's on the face, at
+///   least one: it would grant every session over the face another
+///   policy's rules, miss one of the far principal's denies, or, listed in
+///   none, get the default (0.4);
 /// - `face_subject_missing`, under `allow`, each link protocol of the face
-///   that no subject bound by no identity, no interface and no zid names in
-///   its `link_protocols`: a session over it that matches no other subject
+///   that no face subject naming no interface and no zid names in its
+///   `link_protocols`: a session over it that matches no other subject
 ///   gets the default, everything.
 #[must_use]
 pub fn check_subjects(name: &str, face: &Face, block: &BlockSubjects) -> Vec<Finding> {
     let mut out = Vec::new();
-    for s in &block.subjects {
-        let far = s
-            .usernames
-            .iter()
-            .chain(&s.cert_common_names)
-            .any(|x| *x == face.far);
-        let on_face = s
-            .link_protocols
-            .as_ref()
-            .is_none_or(|p| p.iter().any(|x| face.link_protocols.contains(x)));
-        if s.bound() && !far && on_face {
-            out.push(Finding::new(
-                Code::NearSubjectOnFace,
-                Some(name),
-                s.id.clone(),
-            ));
+    let on_face: Vec<&BlockSubject> = block.subjects.iter().filter(|s| s.on_face(face)).collect();
+    // The far principal's policies: those listing one of its subjects on
+    // the face.
+    let far_policies: BTreeSet<usize> = on_face
+        .iter()
+        .filter(|s| s.far_alone(&face.far))
+        .flat_map(|s| block.listing(&s.id))
+        .collect();
+    for s in &on_face {
+        let mut found = |code: Code| out.push(Finding::new(code, Some(name), s.id.clone()));
+        if s.bound() {
+            if !s.far_alone(&face.far) {
+                found(Code::NearSubjectOnFace);
+            }
+            continue;
+        }
+        if s.protocols()
+            .is_none_or(|l| l.iter().any(|x| !face.link_protocols.contains(x)))
+        {
+            found(Code::FaceSubjectBeyondFace);
+        }
+        let listed = block.listing(&s.id);
+        if listed.is_empty() || listed != far_policies {
+            found(Code::FaceSubjectMisplaced);
         }
     }
     if block.posture == Posture::Allow {
@@ -1706,7 +1801,7 @@ pub fn check_subjects(name: &str, face: &Face, block: &BlockSubjects) -> Vec<Fin
                 !s.bound()
                     && s.interfaces.is_empty()
                     && s.zids.is_empty()
-                    && s.link_protocols.as_ref().is_some_and(|l| l.contains(p))
+                    && s.protocols().is_some_and(|l| l.contains(p))
             });
             if !selected {
                 out.push(Finding::new(
@@ -1715,6 +1810,48 @@ pub fn check_subjects(name: &str, face: &Face, block: &BlockSubjects) -> Vec<Fin
                     p.clone(),
                 ));
             }
+        }
+    }
+    sort_findings(&mut out);
+    out
+}
+
+/// Checks a router's subjects against every face of `policy` at once
+/// (§2.4, §2.15, 0.4): under `allow`, `narrowed_too_far` (no face, `at` the
+/// name) for each user name or CN the block's subjects bind, and each
+/// face's far principal, with a link protocol of §2.1's list, outside every
+/// face whose far principal it is not, that no subject naming no interface
+/// and no zid selects among those naming that name or no user name and no
+/// CN. A session with that name over that link protocol matches no
+/// subject, and is allowed everything (core §11.3): a far principal with no
+/// subject at all among them. Under `deny`, such a session gets nothing,
+/// and there is nothing to report.
+#[must_use]
+pub fn check_narrowing(policy: &FacePolicy, block: &BlockSubjects) -> Vec<Finding> {
+    let mut out = Vec::new();
+    if block.posture != Posture::Allow {
+        return out;
+    }
+    let names: BTreeSet<&str> = block
+        .subjects
+        .iter()
+        .flat_map(|s| s.usernames.iter().chain(&s.cert_common_names))
+        .chain(policy.faces.values().map(|f| &f.far))
+        .map(String::as_str)
+        .collect();
+    for name in names {
+        let kept: Vec<String> = narrowed(policy, |f| policy.faces[f].far == name)
+            .unwrap_or_else(|| LINK_PROTOCOLS.iter().map(|p| (*p).to_owned()).collect());
+        let bare = kept.iter().any(|p| {
+            !block.subjects.iter().any(|s| {
+                s.interfaces.is_empty()
+                    && s.zids.is_empty()
+                    && (!s.bound() || s.names(name))
+                    && s.selects(p)
+            })
+        });
+        if bare {
+            out.push(Finding::new(Code::NarrowedTooFar, None, name));
         }
     }
     sort_findings(&mut out);
@@ -1780,8 +1917,11 @@ pub fn lint(input: &LintInput<'_>) -> Vec<Finding> {
     }
     if let Some((face, block)) = input.block {
         out.extend(check_block(face, block));
-        if let (Some(s), Some(f)) = (&block.subjects, policy.faces.get(face)) {
-            out.extend(check_subjects(face, f, s));
+        if let Some(s) = &block.subjects {
+            if let Some(f) = policy.faces.get(face) {
+                out.extend(check_subjects(face, f, s));
+            }
+            out.extend(check_narrowing(&policy, s));
         }
     }
     sort_findings(&mut out);
@@ -1924,6 +2064,29 @@ mod tests {
         assert_eq!(narrowed(&one, |_| true), None);
         let all = policy(vec![("x", face("x", LINK_PROTOCOLS))]);
         assert_eq!(narrowed(&all, |_| false), Some(Vec::new()));
+    }
+
+    /// An empty `link_protocols`, which zenoh 1.10.1 refuses to load, is
+    /// read as absent: the subject selects every link protocol (§2.15,
+    /// 0.4).
+    #[test]
+    fn an_empty_link_protocol_list_reads_as_absent() {
+        let radio = face("ground", &["unixsock-stream"]);
+        let block = |links: Option<Vec<String>>| BlockSubjects {
+            posture: Posture::Deny,
+            subjects: vec![BlockSubject {
+                id: "local".into(),
+                usernames: vec!["local".into()],
+                link_protocols: links,
+                ..BlockSubject::default()
+            }],
+            policies: vec![BlockPolicy {
+                subjects: vec!["local".into()],
+            }],
+        };
+        let found = |links| check_subjects("radio", &radio, &block(links));
+        assert_eq!(found(Some(Vec::new())), found(None));
+        assert_eq!(found(None).len(), 1);
     }
 
     #[test]

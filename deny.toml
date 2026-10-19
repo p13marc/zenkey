@@ -16,9 +16,19 @@ ignore = [
     "RUSTSEC-2025-0134", # rustls-pemfile unmaintained
     "RUSTSEC-2025-0141", # bincode 1.x unmaintained
     "RUSTSEC-2026-0041", # lz4_flex decompress leak — zenoh pins 0.10, fix is in a later minor
+    # unsafe-libyaml's repository was archived in 2024; it comes through
+    # serde_yaml 0.9, which zenoh-config 1.10.1 depends on, so replacing
+    # zenkey-fleet's own serde_yaml would not drop it (2026-10-19).
+    "RUSTSEC-2024-0449", # unsafe-libyaml unmaintained (via serde_yaml)
     # Transitive via iced 0.14's window stack (iced_winit -> winit ->
     # sctk-adwaita -> ab_glyph). Re-check on every iced bump (2026-08-29).
     "RUSTSEC-2026-0192", # ttf-parser unmaintained — author declared no further fixes
+    # iced_winit 0.14 -> mundy 0.2 -> zbus 5: these crates were merged into
+    # zbus 6 (zvariant as its `wire` module), which mundy 0.2 does not use.
+    # Re-check on every iced bump (2026-10-19).
+    "RUSTSEC-2026-0370", # zvariant unmaintained
+    "RUSTSEC-2026-0371", # zbus_names unmaintained
+    "RUSTSEC-2026-0372", # zvariant_derive unmaintained
 ]
 
 [licenses]

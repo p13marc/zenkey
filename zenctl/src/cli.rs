@@ -1092,13 +1092,23 @@ pub(crate) enum CheckCmd {
     ///   wildcard_downsampling      a downsampling rule on the face's
     ///                              transports that is not one concrete key
     ///   intersecting_downsampling  two of them that intersect
-    ///   near_subject_on_face       a subject bound to another principal
-    ///                              whose link protocols do not keep it off
-    ///                              the face's: zenoh ties no credential to
-    ///                              a link (§2.4, 0.3)
+    ///   near_subject_on_face       a subject bound to another principal,
+    ///                              whatever else it names, whose link
+    ///                              protocols do not keep it off the
+    ///                              face's: zenoh ties no credential to a
+    ///                              link (§2.4, 0.3, 0.4)
+    ///   face_subject_beyond_face   a subject bound by no identity on the
+    ///                              face that selects a link protocol
+    ///                              outside it, or every one (0.4)
+    ///   face_subject_misplaced     a subject bound by no identity on the
+    ///                              face not listed in exactly the far
+    ///                              principal's policies (0.4)
     ///   face_subject_missing       under allow, a link protocol of the
     ///                              face that no subject bound by no
     ///                              identity selects (§2.4, 0.3)
+    ///   narrowed_too_far           under allow, a principal whose session
+    ///                              over a link protocol it is not kept
+    ///                              off matches no subject (0.4)
     ///   window_under_outage        with --window: a listed owner of state
     ///                              whose tombstone window is below the
     ///                              face's max_outage_s (§2.11)
