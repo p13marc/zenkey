@@ -279,14 +279,22 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `router_attach`, refused. `check face <ROUTER-CONFIG> --face-policy …
   --enrollment … [--window ADDRESS=SECS]` is its judgement
   (`zenkey_fleet::check_face`, report `FaceCheck`): `link.v1` §2.15 per face,
-  read subject by subject, `near_subject_on_face` and under `allow`
-  `face_subject_missing` over every subject, the windows of §2.11 when
-  given, and `acl gen --check`'s comparison, which now covers the
-  downsampling items and a subject's link protocols. Its plans are pinned
-  (`tests/fixtures/acl/`, `ACL_BLESS=1`) and judged by a live router
+  the denies read subject by subject; over every subject and the subject
+  list of every policy (text 0.4, F-120, #769 LD), `near_subject_on_face`
+  (bound to another principal, whatever else it names),
+  `face_subject_beyond_face` and `face_subject_misplaced` (a subject bound
+  to nobody on the face must select its link protocols alone and ride
+  exactly the far principal's policies), and under `allow`
+  `face_subject_missing` and `narrowed_too_far` (no face: a name whose
+  session over a link protocol it is not kept off matches no subject); the
+  windows of §2.11 when given, and `acl gen --check`'s comparison, which
+  now covers the downsampling items and a subject's link protocols. Its
+  plans are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`; every face plan
+  passes its own `check face` in both postures) and judged by a live router
   (`tests/acl_live.rs`, `tests/acl_face.rs`, and `tests/link_face.rs`,
-  `link.v1`'s scenarios §1–§8 one test per section over a `unixsock-stream`
-  face, §7 in both postures).
+  `link.v1`'s scenarios §1–§10 one test per section over a `unixsock-stream`
+  face, §7 in both postures, §9 and §10 the hand-edited blocks 0.4
+  refuses, each with what it leaks).
   FJ8a's writes and captures: `gen <address>` and `serve <address> <iface>
   <operation>` are mock owners — real zk2 services through
   `zenkey::ServiceBuilder` (`zenkey_fleet::tape::{generate, mock}`), refused
@@ -519,7 +527,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   F-118 and F-119, #769 LC: every revision of an interface read together,
   failing closed, `exposure_disagrees`; `narrowed`, the link protocols a
   principal's subject keeps off the faces whose far principal it is not;
-  `check_subjects`, `near_subject_on_face` and `face_subject_missing`).
+  `check_subjects`, `near_subject_on_face` and `face_subject_missing`;
+  text 0.4, F-120, #769 LD: the block's policies' subject lists
+  (`BlockPolicy`), `near_subject_on_face` widened to any subject bound to
+  another principal, `face_subject_beyond_face`, `face_subject_misplaced`,
+  and `check_narrowing`'s `narrowed_too_far`, a block-wide finding with no
+  face).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
