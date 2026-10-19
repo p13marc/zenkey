@@ -1878,6 +1878,8 @@ pub fn check_narrowing(policy: &FacePolicy, block: &BlockSubjects) -> Vec<Findin
         );
     }
     for f in policy.faces.values() {
+        // Named in either list, by any subject, interfaces and zids
+        // included: it is then read by the kinds those lists give it.
         let bound = block.subjects.iter().any(|s| {
             s.usernames
                 .iter()

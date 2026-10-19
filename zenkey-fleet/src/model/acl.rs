@@ -1431,41 +1431,31 @@ pub fn plan_acl(
     for (i, p) in enrollment.principal.iter().enumerate() {
         let name = principal_name(i, p);
         match place(p, &holders, &mut seen_ids, &mut seen_identities) {
+            // On a router with a face, a subject names one kind of name
+            // (link.v1 §2.4, 0.5, F-121): one naming a user name and a CN
+            // matches only a session presenting both, which §2.15's checks
+            // cannot attribute to one principal, so the block would fail
+            // them. Such a principal is refused.
+            Ok(pl)
+                if policy.is_some()
+                    && !pl.subject.usernames.is_empty()
+                    && !pl.subject.cert_common_names.is_empty() =>
+            {
+                refusals.push(AclRefusal {
+                    principal: name,
+                    reason: "it is bound by a user name and a CN both, and on a router with a \
+                             constrained face a subject names one of them: bind it by `user` \
+                             or by `cn`"
+                        .to_owned(),
+                    cite: CITE_FACE_KIND.to_owned(),
+                });
+            }
             Ok(pl) => placed.push(pl),
             Err(r) => refusals.push(AclRefusal {
                 principal: name,
                 reason: r.reason,
                 cite: r.cite.to_owned(),
             }),
-        }
-    }
-
-    // On a router with a face, a subject names one kind of name (link.v1
-    // §2.4, 0.5, F-121): one naming a user name and a CN matches only a
-    // session presenting both, which §2.15's checks cannot attribute to one
-    // principal, so the block would fail them. Such a principal is refused.
-    if policy.is_some() {
-        let (one, both): (Vec<Placed>, Vec<Placed>) = placed.into_iter().partition(|pl| {
-            pl.subject.usernames.is_empty() || pl.subject.cert_common_names.is_empty()
-        });
-        placed = one;
-        for pl in both {
-            let i = enrollment
-                .principal
-                .iter()
-                .position(|p| {
-                    nonempty(&p.id).or(nonempty(&p.user)).or(nonempty(&p.cn))
-                        == Some(pl.subject.id.as_str())
-                })
-                .expect("a placed principal is enrolled");
-            refusals.push(AclRefusal {
-                principal: principal_name(i, &enrollment.principal[i]),
-                reason: "it is bound by a user name and a CN both, and on a router with a \
-                         constrained face a subject names one of them: bind it by `user` or by \
-                         `cn`"
-                    .to_owned(),
-                cite: CITE_FACE_KIND.to_owned(),
-            });
         }
     }
 
