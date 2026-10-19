@@ -494,8 +494,16 @@ pub struct AclSubject {
     pub cert_common_names: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub usernames: Vec<String>,
-    /// What it runs: service and archive addresses, `tool.<name>`. Not a
-    /// zenoh field: the JSON5 block carries it as a comment.
+    /// The link protocols it is selected by, empty for every one. A router
+    /// with constrained faces narrows each principal's subject off the faces
+    /// whose far principal it is not, and under `allow` each face has a
+    /// subject of its own, bound by no identity, selected by its link
+    /// protocols alone (`link.v1` §2.4, 0.3).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub link_protocols: Vec<String>,
+    /// What it runs: service and archive addresses, `tool.<name>`; empty
+    /// for a face's own subject. Not a zenoh field: the JSON5 block carries
+    /// it as a comment.
     pub runs: Vec<String>,
 }
 
@@ -1071,6 +1079,7 @@ history   = true
                 id: "tc-h1".into(),
                 cert_common_names: vec![],
                 usernames: vec!["tc-h1".into()],
+                link_protocols: vec![],
                 runs: vec!["h1/tc".into()],
             }],
             policies: vec![AclPolicy {
@@ -1130,7 +1139,7 @@ history   = true
                     "cite": "§11.3",
                 }],
             }),
-            "no face, no downsampling, no gateway: absent; empty CNs: absent"
+            "no face, no downsampling, no gateway: absent; empty CNs and link protocols: absent"
         );
 
         // A south-region face, its downsampling, and a shared rule without
@@ -1190,7 +1199,25 @@ history   = true
         plan.rules[0].holder = None;
         plan.warnings.clear();
         plan.refusals.clear();
+        // A principal narrowed off the face, and under allow the face's own
+        // subject, bound by no identity (link.v1 §2.4, 0.3).
+        plan.subjects[0].link_protocols = vec!["tcp".into(), "udp".into()];
+        plan.subjects.push(AclSubject {
+            id: "face:rf".into(),
+            cert_common_names: vec![],
+            usernames: vec![],
+            link_protocols: vec!["unixsock-stream".into()],
+            runs: vec![],
+        });
         let v = serde_json::to_value(&plan).unwrap();
+        assert_eq!(
+            v["subjects"],
+            json!([
+                {"id": "tc-h1", "usernames": ["tc-h1"], "link_protocols": ["tcp", "udp"], "runs": ["h1/tc"]},
+                {"id": "face:rf", "link_protocols": ["unixsock-stream"], "runs": []},
+            ]),
+            "zenoh's AclConfigSubjects, link_protocols kebab-case"
+        );
         assert_eq!(
             v["faces"],
             json!([{

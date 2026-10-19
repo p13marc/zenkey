@@ -409,18 +409,19 @@ access_control: {
       key_exprs: ["zk2/*/*/*/events/**"] },
   ],
   subjects: [
-    { id: "thruster-l", usernames: ["thruster-l"] },  // runs vehicle-01/thruster-l
-    { id: "thruster-r", usernames: ["thruster-r"] },  // runs vehicle-01/thruster-r
-    { id: "teleop", usernames: ["teleop"] },  // runs vehicle-01/teleop
-    { id: "autopilot", usernames: ["autopilot"] },  // runs vehicle-01/autopilot
-    { id: "safety", usernames: ["safety"] },  // runs vehicle-01/safety
-    { id: "navigation", usernames: ["navigation"] },  // runs vehicle-01/navigation
-    { id: "cam-front", usernames: ["cam-front"] },  // runs vehicle-01/cam-front
-    { id: "detector", usernames: ["detector"] },  // runs vehicle-01/detector
-    { id: "tracker", usernames: ["tracker"] },  // runs vehicle-01/tracker
-    { id: "zenwatch", usernames: ["zenwatch"] },  // runs vehicle-01/zenwatch, tool.zenwatch
-    { id: "executor", usernames: ["executor"] },  // runs vehicle-01/executor
-    { id: "archive", usernames: ["archive"] },  // runs vehicle-01/archive
+    // link.v1 §2.4 (0.3, F-118): zenoh ties no credential to a link, so a subject bound by a user name or a CN alone matches that principal's session over a face too; each principal's subject is selected by the link protocols outside the faces whose far principal it is not; under deny, a session matching no subject is granted nothing.
+    { id: "thruster-l", usernames: ["thruster-l"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/thruster-l
+    { id: "thruster-r", usernames: ["thruster-r"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/thruster-r
+    { id: "teleop", usernames: ["teleop"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/teleop
+    { id: "autopilot", usernames: ["autopilot"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/autopilot
+    { id: "safety", usernames: ["safety"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/safety
+    { id: "navigation", usernames: ["navigation"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/navigation
+    { id: "cam-front", usernames: ["cam-front"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/cam-front
+    { id: "detector", usernames: ["detector"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/detector
+    { id: "tracker", usernames: ["tracker"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/tracker
+    { id: "zenwatch", usernames: ["zenwatch"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/zenwatch, tool.zenwatch
+    { id: "executor", usernames: ["executor"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/executor
+    { id: "archive", usernames: ["archive"], link_protocols: ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"] },  // runs vehicle-01/archive
     { id: "ground", usernames: ["ground"] },  // runs ground/fleet-mgr, ground/archive, tool.ops
   ],
   policies: [

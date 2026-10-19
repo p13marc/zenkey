@@ -4,9 +4,12 @@ the bus (core §11.3), so it reads a file, through zenoh's own loader, and
 opens no session. For each face it reads the block as it guards the far
 side: the denies of every policy whose subject can match the far
 principal's sessions, subject by subject, since any allow wins across
-subjects (§2.4), and the downsampling rules on the face's transports. Then
-it compares the whole block with the plan the same face policy, enrollment
-and contracts compile to, as `acl gen --check` does.
+subjects (§2.4), and the downsampling rules on the face's transports. It
+reads every other subject too: zenoh ties no credential to a link, so a
+subject bound to another principal that is not kept off the face's link
+protocols matches that principal's credentials over the face (§2.4, 0.3).
+Then it compares the whole block with the plan the same face policy,
+enrollment and contracts compile to, as `acl gen --check` does.
 
 The lab router of `examples/zk2/link/`, running the block `acl gen
 --face-policy` wrote: every face guarded as planned, exit 0. The windows
@@ -21,9 +24,11 @@ tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of
 
 ```
 
-The same block hand-edited the two ways a deployment must not: the `zk`
-deny taken out of ground's policy, and one wildcard rule in place of the
-two (scenarios §3, step 2). Both are §2.15's findings, and the comparison
+The same block hand-edited the three ways a deployment must not: the `zk`
+deny taken out of ground's policy, `local`'s subject left as 0.2 wrote it,
+bound by its user name alone (F-118: its credentials over the face would
+carry its grants there), and one wildcard rule in place of the two
+(scenarios §3, step 2). All three are §2.15's findings, and the comparison
 names the edits. Exit 1.
 
 ```console
@@ -31,13 +36,16 @@ $ zenctl check face tests/cmd/fixtures/link/router-drifted.json5 --face-policy .
 ? 1
 tests/cmd/fixtures/link/router-drifted.json5: face radio (far ground): 7 deny rule(s) across subject(s) ground; 1 downsampling rule(s) on its transports
   ✗ zk_not_denied          face radio  @zk
+  ✗ near_subject_on_face   face radio  local
   ✗ wildcard_downsampling  face radio  zk2/lab/*/radio.v1/stream/air/dropped_total
-against the plan: 3 difference(s)
+against the plan: 4 difference(s)
+  ✗ subject_differs       local   planned cns [] usernames ["local"] link_protocols ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"]; configured cns [] usernames ["local"]
   ✗ policy_missing        ground  planned rules [call-in:tool.console, call-out:tool.console, consume-in:tool.console, consume-out:tool.console, face:radio:@state, face:radio:@stream:radio.v1, face:radio:admin, face:radio:adv, face:radio:events:radio.v1, face:radio:state:radio.v1, face:radio:stream:radio.v1, face:radio:zk] subjects [ground]
   ✗ policy_extra          ground  configured rules [call-in:tool.console, call-out:tool.console, consume-in:tool.console, consume-out:tool.console, face:radio:@state, face:radio:@stream:radio.v1, face:radio:admin, face:radio:adv, face:radio:events:radio.v1, face:radio:state:radio.v1, face:radio:stream:radio.v1] subjects [ground]
   ✗ downsampling_differs  radio   planned link_protocols unixsock-stream egress put zk2/lab/radio-a/radio.v1/@stream/frames@1Hz zk2/lab/radio-a/radio.v1/stream/air/dropped_total@1Hz; configured link_protocols unixsock-stream egress put zk2/lab/*/radio.v1/stream/air/dropped_total@1Hz
 FAIL
 zk_not_denied [face radio] @zk: a pair of the nine messages and both flows is not denied on @zk: presence, descriptors or bundles cross the face (§2.6, §2.15)
+near_subject_on_face [face radio] local: a subject bound to another principal than the face's far one, and not kept off the face's link protocols: zenoh ties no credential to a link, so that principal's credentials over the face match it, and get its grants there (§2.4, §2.15)
 wildcard_downsampling [face radio] zk2/lab/*/radio.v1/stream/air/dropped_total: a downsampling rule that is not one concrete key: every key it covers shares one timer (§2.8, §2.15)
 judged against the config file tests/cmd/fixtures/link/router-drifted.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)

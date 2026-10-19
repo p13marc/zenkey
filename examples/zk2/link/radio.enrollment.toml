@@ -8,7 +8,9 @@
 # `ground` across the face as a client, and `ground-router`, the far router
 # of a south region, which carries the ground's sessions. A face policy
 # names one of them its far principal; that principal's policy alone
-# carries the face's denies (link.v1 §2.4).
+# carries the face's denies, and every other principal's subject is kept
+# off the face's link protocols, since zenoh ties no credential to a link
+# (link.v1 §2.4, 0.3).
 
 [[principal]]
 user     = "radio-a"
