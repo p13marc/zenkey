@@ -1093,8 +1093,9 @@ pub(crate) enum CheckCmd {
     ///                              transports that is not one concrete key
     ///   intersecting_downsampling  two of them that intersect
     ///   near_subject_on_face       a subject bound to another principal,
-    ///                              whatever else it names, whose link
-    ///                              protocols do not keep it off the
+    ///                              whatever else it names, or naming a
+    ///                              user name and a CN both (0.5), whose
+    ///                              link protocols do not keep it off the
     ///                              face's: zenoh ties no credential to a
     ///                              link (§2.4, 0.3, 0.4)
     ///   face_subject_beyond_face   a subject bound by no identity on the
@@ -1106,9 +1107,11 @@ pub(crate) enum CheckCmd {
     ///   face_subject_missing       under allow, a link protocol of the
     ///                              face that no subject bound by no
     ///                              identity selects (§2.4, 0.3)
-    ///   narrowed_too_far           under allow, a principal whose session
-    ///                              over a link protocol it is not kept
-    ///                              off matches no subject (0.4)
+    ///   narrowed_too_far           under allow, a name whose session over
+    ///                              a link protocol it is not kept off
+    ///                              matches no subject (0.4); a user name
+    ///                              and a CN are each answered by subjects
+    ///                              naming that kind alone (0.5)
     ///   window_under_outage        with --window: a listed owner of state
     ///                              whose tombstone window is below the
     ///                              face's max_outage_s (§2.11)
@@ -1360,7 +1363,9 @@ pub(crate) enum AclCmd {
     /// GETs and calls cross by grant. Every other principal's subject is
     /// selected by the link protocols outside the face's (§2.4), and under
     /// allow the face has a subject of its own in the far principal's
-    /// policy. `zenctl check face` judges a router's config against it.
+    /// policy. A subject names a user or a cn, never both (§2.4, 0.5): a
+    /// principal enrolled with both is refused. `zenctl check face` judges
+    /// a router's config against it.
     // Verbatim, so the table and the enrollment example keep their lines:
     // clap would otherwise fold them into one.
     #[command(verbatim_doc_comment)]
