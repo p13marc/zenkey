@@ -1092,6 +1092,11 @@ pub(crate) enum CheckCmd {
     ///   wildcard_downsampling      a downsampling rule on the face's
     ///                              transports that is not one concrete key
     ///   intersecting_downsampling  two of them that intersect
+    ///   block_disabled             access control not enabled, `enabled`
+    ///                              false or absent, as zenoh reads it: no
+    ///                              rule is enforced, so everything crosses;
+    ///                              reported beside the rest, which read the
+    ///                              block as written (0.7)
     ///   near_subject_on_face       a subject bound to another principal,
     ///                              whatever else it names, or naming a
     ///                              user name and a CN both (0.5), whose
