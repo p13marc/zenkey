@@ -1,7 +1,9 @@
 //! `link.v1`'s scenarios, run against live routers
-//! (`spec/profiles/link/scenarios.md` §1–§8, text 0.3; #769, LB and LC):
-//! one test per section, named after it. §7 runs under both postures, and
-//! §8 gives the generator two revisions of `radio.v1`.
+//! (`spec/profiles/link/scenarios.md` §1–§10, text 0.4; #769, LB, LC and
+//! LD): one test per section, named after it. §7 runs under both postures,
+//! §8 gives the generator two revisions of `radio.v1`, and §9 and §10 run
+//! hand edits of the generator's block that §2.15's subject checks refuse
+//! (0.4, F-120), each with what it leaks.
 //!
 //! The generator is the reference's: `plan_acl` over the example of
 //! `examples/zk2/link/` (the `radio.v1` contract, its enrollment and the
@@ -39,7 +41,7 @@ use std::time::{Duration, Instant};
 
 use util::zk2::{T, eventually};
 use zenkey_fleet::report::{
-    AclConfigDoc, AclPermission, AclPlan, AclPolicy, DownsamplingDoc, Enrollment,
+    AclConfigDoc, AclPermission, AclPlan, AclPolicy, AclSubject, DownsamplingDoc, Enrollment,
 };
 use zenkey_fleet::{AclOptions, ContractSet, acl_plan_json5, check_face, plan_acl};
 use zenkey_model::freshness::{self, Last, Observation, Verdict};
@@ -1328,10 +1330,18 @@ async fn s7_a_near_principals_credentials_on_the_face() {
             "unixsock-stream"
         )]
     );
-    // The face subject's policy is the comparison's: §2.15 cannot tell
-    // which denies are the far principal's.
+    // The face subject in a policy of its own: misplaced, since 0.4 reads
+    // which policies list a subject (F-120); the comparison names the
+    // policy too.
     let c = check_against(&split, &allow, &text, None);
-    assert!(c.findings.is_empty(), "{:?}", c.findings);
+    assert_eq!(
+        c.findings,
+        [link::Finding::new(
+            link::Code::FaceSubjectMisplaced,
+            Some("radio"),
+            "face:radio"
+        )]
+    );
     assert!(!c.comparison.findings.is_empty());
 }
 
@@ -1442,4 +1452,315 @@ async fn s8_two_minors_that_disagree_on_a_streams_exposure() {
     // 2. Minor 1 alone lets both owners' cross (F-119).
     assert!(g2.iter().all(|n| (4..=6).contains(n)), "{g2:?}");
     assert!(d2.iter().all(|n| (4..=6).contains(n)), "{d2:?}");
+}
+
+/// `plan` with the subject `id` edited: a hand edit of the block N runs.
+fn with_subject(plan: &AclPlan, id: &str, edit: impl Fn(&mut AclSubject)) -> AclPlan {
+    let mut p = plan.clone();
+    edit(
+        p.subjects
+            .iter_mut()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("a subject {id}")),
+    );
+    p
+}
+
+/// `plan` with the subject `id` listed by the policies `to`, and by no
+/// other.
+fn listed_in(plan: &AclPlan, id: &str, to: &[&str]) -> AclPlan {
+    let mut p = plan.clone();
+    for pol in &mut p.policies {
+        pol.subjects.retain(|s| s != id);
+        if to.contains(&pol.id.as_str()) {
+            pol.subjects.push(id.to_owned());
+        }
+    }
+    p
+}
+
+/// The face's own subject, as the generator writes it under `allow`
+/// (§2.4).
+fn face_subject() -> AclSubject {
+    AclSubject {
+        id: "face:radio".into(),
+        cert_common_names: Vec::new(),
+        usernames: Vec::new(),
+        link_protocols: vec!["unixsock-stream".into()],
+        runs: Vec::new(),
+    }
+}
+
+/// How many of five puts a session with each of `users`' credentials over
+/// N's TCP endpoint, the near side, makes on `lab/radio-a`'s
+/// `air/dropped_total` reach L, the owner silent.
+async fn near_forged(plan: &AclPlan, users: &[&str]) -> Vec<usize> {
+    let sel = selectors();
+    let n = near(plan).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let l = client(&n.tcp, "local").await;
+    let lr = reader(&l, plan, Some(&sel)).await;
+    o.settle(&[&lr.seen], &[]).await;
+    let mut out = Vec::new();
+    for user in users {
+        let s = client(&n.tcp, user).await;
+        out.push(forged(&s, &lr.seen).await);
+    }
+    out
+}
+
+/// What a session with `radio-a`'s credentials over N's TCP endpoint,
+/// subscribed to `lab/radio-b`'s `air/dropped_total` alone, a read none of
+/// `radio-a`'s grants names (core §11.1), receives of 20 samples
+/// `lab/radio-b` publishes there; L receives all 20.
+async fn near_read(plan: &AclPlan) -> usize {
+    let key = "zk2/lab/radio-b/radio.v1/stream/air/dropped_total";
+    let only = [key.to_owned()];
+    let n = near(plan).await;
+    let b = client(&n.tcp, "radio-b").await;
+    let a = client(&n.tcp, "radio-a").await;
+    let ar = reader(&a, plan, Some(&only)).await;
+    let l = client(&n.tcp, "local").await;
+    let lr = reader(&l, plan, Some(&only)).await;
+    eventually("L hears radio-b", || async {
+        b.put(key, "probe").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        lr.seen.puts(key) > 0
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    ar.seen.clear();
+    lr.seen.clear();
+    for i in 0..20u64 {
+        b.put(key, i.to_string()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(lr.seen.puts(key), 20, "L receives every sample");
+    ar.seen.puts(key)
+}
+
+/// §9 Who a subject binds (§2.4, §2.15).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s9_who_a_subject_binds() {
+    let text = policy(&[]);
+    let deny = plan(&text);
+    let allow = plan_with(&text, &contracts(), AclPermission::Allow);
+    // 1. F-120 (a): local's subject bound to ground and local, in local's
+    //    policy. 2, control: the same, ground's subject narrowed to its
+    //    face (§2.4's MAY under deny).
+    let both = with_subject(&deny, "local", |s| {
+        s.usernames = vec!["ground".into(), "local".into()];
+        s.link_protocols.clear();
+    });
+    let both_apart = with_subject(&both, "ground", |s| {
+        s.link_protocols = vec!["unixsock-stream".into()];
+    });
+    // 3. F-120 (c): under allow, ground narrowed to its face. 4: under
+    //    allow, radio-b narrowed off tcp too.
+    let far_narrowed = with_subject(&allow, "ground", |s| {
+        s.link_protocols = vec!["unixsock-stream".into()];
+    });
+    let near_narrowed = with_subject(&allow, "radio-b", |s| {
+        s.link_protocols.retain(|p| p != "tcp");
+    });
+
+    let under_both = on_face(&both, &[("ground", true), ("local", true)]).await;
+    let under_apart = on_face(&both_apart, &[("ground", true), ("local", true)]).await;
+    let far_tcp = near_forged(&far_narrowed, &["ground"]).await;
+    let near_tcp = near_forged(&near_narrowed, &["radio-b"]).await;
+    let control = near_forged(&allow, &["ground", "radio-b"]).await;
+
+    // 1. X matches the subject bound to both, and gets local's grants
+    //    across the face. G keeps §1's share: zenoh splits a subject into
+    //    one combination per value, and equal combinations are one subject,
+    //    so ground's combination of it is ground's own subject, whose deny
+    //    is evaluated first. Neither's puts reach L.
+    assert_far(&under_both[0].0);
+    assert_unguarded(&under_both[1].0);
+    assert_eq!((under_both[0].1, under_both[1].1), (0, 0), "no forgery");
+    // 2. With ground's subject narrowed, the two combinations differ: G
+    //    matches both, any allow wins, and it gets local's share too.
+    assert_unguarded(&under_apart[0].0);
+    assert_unguarded(&under_apart[1].0);
+    assert_eq!((under_apart[0].1, under_apart[1].1), (0, 0), "no forgery");
+    // 3. ground over tcp matches no subject: allowed everything, its puts
+    //    on radio-a's key among it. 4: radio-b over tcp, the same. Under
+    //    the generator's block, neither's put reaches L.
+    assert_eq!(far_tcp, [5], "ground over tcp, narrowed to its face");
+    assert_eq!(near_tcp, [5], "radio-b over tcp, narrowed off it");
+    assert_eq!(control, [0, 0], "the generator's block");
+
+    // 5. An empty list is refused when the configuration loads, so no
+    //    router runs one (zenoh-config's NEVec).
+    let loads = |subject: &str| {
+        zenoh::Config::from_json5(&format!(
+            "{{ access_control: {{ enabled: true, default_permission: \"deny\", rules: [{{ id: \
+             \"r\", permission: \"allow\", flows: [\"ingress\"], messages: [\"put\"], \
+             key_exprs: [\"a\"] }}], subjects: [{subject}], policies: [{{ rules: [\"r\"], \
+             subjects: [\"s\"] }}] }} }}"
+        ))
+        .is_ok()
+    };
+    assert!(
+        loads("{ id: \"s\", usernames: [\"local\"] }"),
+        "the control loads"
+    );
+    assert!(!loads(
+        "{ id: \"s\", usernames: [\"local\"], link_protocols: [] }"
+    ));
+    assert!(!loads("{ id: \"s\", usernames: [] }"));
+
+    // 6. A tool checks each block (§2.15).
+    let found = |c: zenkey_fleet::report::FaceCheck| -> Vec<(link::Code, Option<String>, String)> {
+        c.findings
+            .into_iter()
+            .map(|f| (f.code, f.face, f.at))
+            .collect()
+    };
+    let radio = || Some("radio".to_owned());
+    for b in [&both, &both_apart] {
+        assert_eq!(
+            found(check(b, &text, None)),
+            [
+                (link::Code::ZkNotDenied, radio(), "@zk".to_owned()),
+                (link::Code::NearSubjectOnFace, radio(), "local".to_owned()),
+            ]
+        );
+    }
+    assert_eq!(
+        found(check_against(&far_narrowed, &allow, &text, None)),
+        [(link::Code::NarrowedTooFar, None, "ground".to_owned())]
+    );
+    assert_eq!(
+        found(check_against(&near_narrowed, &allow, &text, None)),
+        [(link::Code::NarrowedTooFar, None, "radio-b".to_owned())]
+    );
+}
+
+/// §10 The face's own subject (§2.4, §2.15).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_the_faces_own_subject() {
+    let text = policy(&[]);
+    let deny = plan(&text);
+    let allow = plan_with(&text, &contracts(), AclPermission::Allow);
+    // 1. F-120 (b): under allow, the face's subject names tcp too; and
+    //    under deny, a subject selected by both, in ground's policy.
+    let beyond = with_subject(&allow, "face:radio", |s| {
+        s.link_protocols.push("tcp".into());
+    });
+    let mut beyond_deny = deny.clone();
+    let mut wide = face_subject();
+    wide.link_protocols.push("tcp".into());
+    beyond_deny.subjects.push(wide);
+    let beyond_deny = listed_in(&beyond_deny, "face:radio", &["ground"]);
+    // 2. Under deny, a subject selected by the face's link protocol alone,
+    //    in local's policy. 3: under allow, the face's subject moved there.
+    let mut stray = deny.clone();
+    stray.subjects.push(face_subject());
+    let stray = listed_in(&stray, "face:radio", &["local"]);
+    let moved = listed_in(&allow, "face:radio", &["local"]);
+    // 4. Under allow, the face's subject in no policy.
+    let unlisted = listed_in(&allow, "face:radio", &[]);
+    // 5. Under deny, the face's subject in a policy of its own, holding the
+    //    plan's denies alone (§7's step 5, under deny).
+    let mut split = deny.clone();
+    split.subjects.push(face_subject());
+    let ground = deny.policies.iter().find(|p| p.id == "ground").unwrap();
+    split.policies.push(AclPolicy {
+        id: "face:radio".into(),
+        rules: ground
+            .rules
+            .iter()
+            .filter(|r| r.starts_with("face:radio:"))
+            .cloned()
+            .collect(),
+        subjects: vec!["face:radio".into()],
+    });
+
+    let read_beyond = near_read(&beyond).await;
+    let read_beyond_deny = near_read(&beyond_deny).await;
+    let read_control = near_read(&allow).await;
+    let read_control_deny = near_read(&deny).await;
+    let under_stray = on_face(&stray, &[("ground", true), ("local", true)]).await;
+    let under_moved = on_face(&moved, &[("ground", true), ("local", true)]).await;
+    let under_unlisted = on_face(&unlisted, &[("ground", true), ("local", true)]).await;
+    let under_split = on_face(&split, &[("ground", true), ("local", false)]).await;
+
+    // 1. radio-a over tcp matches the face's subject, and reads radio-b's
+    //    stream with ground's grants: every sample, under either posture,
+    //    where the generator's blocks let it read none.
+    assert_eq!(read_beyond, 20, "radio-a reads radio-b's stream, allow");
+    assert_eq!(read_beyond_deny, 20, "radio-a reads radio-b's stream, deny");
+    assert_eq!(
+        (read_control, read_control_deny),
+        (0, 0),
+        "the generator's blocks"
+    );
+    // 2, 3. Every session over the face matches the stray subject, ground's
+    //    among them, and gets local's grants there; any allow wins. Their
+    //    puts reach L under neither: local may not write radio-a's keys.
+    for (under, posture) in [(&under_stray, "deny"), (&under_moved, "allow")] {
+        assert_unguarded(&under[0].0);
+        assert_unguarded(&under[1].0);
+        assert_eq!((under[0].1, under[1].1), (0, 0), "no forgery, {posture}");
+    }
+    // 4. A subject that no policy lists gets the default: under allow,
+    //    everything, the puts on radio-a's key among it, for G as for X.
+    assert_unguarded(&under_unlisted[0].0);
+    assert_unguarded(&under_unlisted[1].0);
+    assert_eq!((under_unlisted[0].1, under_unlisted[1].1), (5, 5));
+    // 5. Under deny, a policy that only denies grants nothing: G keeps
+    //    §1's share, X gets nothing, and neither's puts reach L.
+    assert_far(&under_split[0].0);
+    assert_eq!(
+        under_split[1],
+        (
+            Far1 {
+                dropped: 0,
+                frames: 0,
+                frames_total: 0,
+                raw: 0,
+                oper: 0,
+                fault: 0,
+                change: 0,
+                get: false,
+                call: false,
+                tokens: 0,
+                descriptor: 0,
+            },
+            0
+        ),
+        "X over the face: nothing at all"
+    );
+    assert_eq!(under_split[0].1, 0, "no forgery");
+
+    // 6. A tool checks each block (§2.15).
+    let found = |c: zenkey_fleet::report::FaceCheck| -> Vec<(link::Code, String)> {
+        c.findings.into_iter().map(|f| (f.code, f.at)).collect()
+    };
+    let at = |code, at: &str| (code, at.to_owned());
+    let misplaced = at(link::Code::FaceSubjectMisplaced, "face:radio");
+    let zk = at(link::Code::ZkNotDenied, "@zk");
+    assert_eq!(
+        found(check_against(&beyond, &allow, &text, None)),
+        [at(link::Code::FaceSubjectBeyondFace, "face:radio")]
+    );
+    assert_eq!(
+        found(check(&beyond_deny, &text, None)),
+        [at(link::Code::FaceSubjectBeyondFace, "face:radio")]
+    );
+    assert_eq!(
+        found(check(&stray, &text, None)),
+        [zk.clone(), misplaced.clone()]
+    );
+    for b in [&moved, &unlisted] {
+        assert_eq!(
+            found(check_against(b, &allow, &text, None)),
+            [zk.clone(), misplaced.clone()]
+        );
+    }
+    // Reported though harmless: §2.15 reads which policies list a subject,
+    // not what their rules say.
+    assert_eq!(found(check(&split, &text, None)), [misplaced]);
 }

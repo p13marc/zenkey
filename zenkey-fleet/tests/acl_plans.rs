@@ -253,6 +253,60 @@ fn radio_under_allow() {
     pinned("radio.face.allow.json5", &radio_plan(AclPermission::Allow));
 }
 
+/// What `check face` finds in `plan`'s block, read back by zenoh's loader,
+/// against the face policy `policy` it was compiled from: §2.15's findings,
+/// and the comparison's.
+fn self_check(plan: &AclPlan, policy: &str) -> (Vec<link::Finding>, usize) {
+    let block = acl_plan_json5(plan);
+    let c = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
+    let acl = serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
+    let ds: Vec<zenkey_fleet::report::DownsamplingDoc> = c
+        .get_json("downsampling")
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+        .unwrap_or_default();
+    let gw: Option<serde_json::Value> = c
+        .get_json("gateway")
+        .ok()
+        .and_then(|g| serde_json::from_str(&g).ok());
+    let parsed = link::parse(policy);
+    let report = zenkey_fleet::check_face(
+        plan,
+        parsed.policy.as_ref().unwrap(),
+        &acl,
+        &ds,
+        gw.as_ref(),
+        None,
+        "self",
+    );
+    (report.findings, report.comparison.findings.len())
+}
+
+/// Every face plan the generator writes passes every check of `link.v1`
+/// §2.15 in both postures, the subject checks of 0.4 among them (F-120):
+/// the walkthrough's face in both attachments, and the radio's.
+#[test]
+fn every_face_block_passes_its_own_checks() {
+    for posture in [AclPermission::Deny, AclPermission::Allow] {
+        for south in [false, true] {
+            let policy = walkthrough_face(south);
+            let plan = plan("walkthrough", "walkthrough", posture, Some(&policy));
+            assert_eq!(
+                self_check(&plan, &policy),
+                (Vec::new(), 0),
+                "walkthrough, south {south}, {posture:?}"
+            );
+        }
+        let policy =
+            std::fs::read_to_string(root().join("examples/zk2/link/radio.face.toml")).unwrap();
+        assert_eq!(
+            self_check(&radio_plan(posture), &policy),
+            (Vec::new(), 0),
+            "radio, {posture:?}"
+        );
+    }
+}
+
 /// `config.v1`'s acts, each its own grant (config.v1 §2.21; #768, CC): the
 /// standard contract alone, as `--contracts spec/profiles/config` gives it.
 fn config_plan(default_permission: AclPermission) -> AclPlan {
