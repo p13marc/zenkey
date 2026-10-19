@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.29** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.30** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -27,9 +27,10 @@ stamp, in 0.27 a reader that stalls, a tool as a role with what it
 inspects, and the merge's unstamped samples and equal times, in 0.28
 what `config.v1` needed: the error codes defined, `forbidden` among
 them, `unavailable` from a handler for one member, and a rate across a
-restart, and in 0.29 what `link.v1` needed: its vocabulary published
+restart, in 0.29 what `link.v1` needed: its vocabulary published
 without `downsample_ms`, a crossing counter's epoch, and a batch's
-example made exact).
+example made exact, and in 0.30 what a south region's declaration
+grant covers, as compiling `link.v1` measured).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1970,13 +1971,21 @@ facts.
   downsamples them: an `@stream` resource whose contract exposes it, one
   rule per concrete key ([`link.v1`](profiles/link/v1.md) §2.7, §2.8,
   0.29). A named key's frames are queued, not dropped, and every request
-  waits behind them. The reference generator denies `@stream` wholesale at
-  this version.
+  waits behind them. The reference generator compiles a face policy into
+  these denies and the downsampling rules (`zenctl acl gen --face-policy`,
+  0.30).
 - **A far router in a south region needs declarations sent toward it**
   (0.14, measured). It learns of queryables only from the declarations the
   near router sends it, so the far side's principal MUST be granted
-  `declare_queryable` on egress for what its side may query. Without that
-  grant, its queries are never routed.
+  `declare_queryable` on egress over every queryable its side may query,
+  as the owner declares it (0.30, measured): a declaration is checked by
+  inclusion against the queryable's own key expression (§11.3), which the
+  far side's selectors need not include. For a state GET that is the
+  owner's state queryables over `state/**` and `@state/**` (S2); for a
+  call, the operation's queryable on its concrete key or over its template
+  (O1), `@op/set/*` for a call of `set/duty`; for an archive, its `@state`
+  forms (§4.4). Without that grant, its queries are never routed.
+  `[Sc: link.v1 scenarios §2]`
 - **Access control is per hop** (§11.3). The near router sees the far
   router as one principal, carrying the union of the grants the far side's
   sessions need.

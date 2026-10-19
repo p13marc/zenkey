@@ -4,6 +4,79 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.2 — 2026-10-18: what compiling it into live routers found (#769, LB)
+
+The reference generator (`zenctl acl gen --face-policy`, LB) and the
+spec-only implementation (zk2py, round 29) each compiled the profile into
+zenoh 1.10.1 routers and ran the six scenario sections. zk2py passed every
+fixture (119) and filed two findings, F-116 and F-117; the reference
+confirmed F-117 in its own §2. Written against core 0.30, which corrects
+§8.5 for F-117. No fixture case changed.
+
+**Changed: readers subscribe to what they are granted (F-116;
+scenarios.md Conventions, §5).**
+- **The finding.** G and L subscribed to `zk2/lab/*/**`, and §5's G
+  subscribed to and GOT `…/radio.v1/state/**`, under a `deny` block
+  compiled from per-binding grants. zenoh refuses a subscription or a GET
+  that no grant includes (core §11.3): zk2py measured a subscriber on
+  `a/**` with allows on `a/b` and `a/c` receiving nothing, while a GET of
+  `a/b` is answered. As written, the scenarios' readers received nothing.
+- **The fix.** Each reader subscribes to, and GETs, the selectors its
+  grants name, one per resource, and the Conventions say why. The
+  enrollment is the reference's (`examples/zk2/link/radio.enrollment.toml`):
+  one tool bound on `lab/*`, run by `ground`, `ground-router` and `local`.
+- **The text** implied nothing wider: no rule of v1.md lets a reader
+  subscribe beyond its grants, and §2.7's crossing is about an owner's
+  pushes. It is unchanged.
+- **No fixture:** a subscription's admission is a router's, which only a
+  scenario runs.
+
+**Changed: what the south region's declaration grant covers (F-117;
+§2.5, scenarios.md §2).**
+- **The finding.** §2.5, restating core §8.5, required the far principal
+  to be granted `declare_queryable` on egress "for what its side may
+  query". Granted on its bindings' selectors only, zk2py's G had its call
+  answered and its state GET not; granted on the owners' `state/**` and
+  `@state/**` as well, both; with no grant, neither. The reference
+  measured the same in its live §2.
+- **Why.** An owner's state queryables are declared over its interface's
+  `state/**` and `@state/**` (core S2), and zenoh checks a declaration by
+  inclusion against that key expression (core §11.3). A selector over one
+  resource, `…/state/peers/*`, does not include `…/state/**`, so the
+  declaration never reaches the far router, which then routes no GET.
+- **The rule.** The grant covers every queryable the far side may query,
+  **as its owner declares it**: the state queryables for a state GET, an
+  operation's queryable over its template's pattern for a call (core §5:
+  `@op/set/*` for a call of `set/duty`, the same inclusion), and an
+  archive's over its `@state` forms. It is still a grant, not a deny: a
+  declaration carries a key expression and no value, and what crosses in
+  the replies is still the Consume and Call grants'.
+- **Scenarios §2** say how the owner serves, and add the control F-117
+  measured: the grant over G's own selectors answers the call and not the
+  GET.
+- **No fixture:** the grant depends on the enrollment's bindings and calls
+  (core §11.1's input), which no fixture of this profile carries; the
+  plan's shape is unchanged. The reference pins it in its generator's
+  fixtures (`walkthrough.face-south-deny.json5`) and runs it in §2.
+
+**Changed: pointers.** §2.15 names `zenctl check face` beside `acl gen
+--check`; Appendix B names the walkthrough's face policy and the radio
+example (`examples/zk2/link/`).
+
+**Deliberately not changed.**
+- **The plan's shape** (§2.3) and every fixture: neither finding is the
+  plan's. A plan member listing the declarations a south region needs was
+  considered and left out: they follow from grants, not from the policy
+  and the contracts, and the plan would carry an enrollment's facts.
+- **The far principal's withheld grants.** The reference withholds the far
+  principal's presence, history and admin-space grants, which the plan's
+  `zk`, `adv` and `admin` denies would cut anyway (§2.4: deny is evaluated
+  first within a policy). That is a generator's tidiness, with the same
+  effect, and no rule here asks for it.
+- **The core's constrained scenarios** (`constrained.md` §6) keep their
+  words: a ground client's state GET "works" there with the declaration
+  grant core 0.30 now spells out.
+
 ## 0.1 — 2026-10-18: the first text, draft (#769, LA)
 
 `link.v1` is a profile of #613. Its record was zenoh-modem's sketch
