@@ -1818,13 +1818,14 @@ pub fn check_subjects(name: &str, face: &Face, block: &BlockSubjects) -> Vec<Fin
 
 /// Checks a router's subjects against every face of `policy` at once
 /// (§2.4, §2.15, 0.4): under `allow`, `narrowed_too_far` (no face, `at` the
-/// name) for each user name or CN the block's subjects bind with a link
-/// protocol of §2.1's list, outside every face whose far principal it is
-/// not, that no subject naming no interface and no zid selects among those
-/// naming that name or no user name and no CN. A session with that name
-/// over that link protocol matches no subject, and is allowed everything
-/// (core §11.3). Under `deny`, such a session gets nothing, and there is
-/// nothing to report.
+/// name) for each user name or CN the block's subjects bind, and each
+/// face's far principal, with a link protocol of §2.1's list, outside every
+/// face whose far principal it is not, that no subject naming no interface
+/// and no zid selects among those naming that name or no user name and no
+/// CN. A session with that name over that link protocol matches no
+/// subject, and is allowed everything (core §11.3): a far principal with no
+/// subject at all among them. Under `deny`, such a session gets nothing,
+/// and there is nothing to report.
 #[must_use]
 pub fn check_narrowing(policy: &FacePolicy, block: &BlockSubjects) -> Vec<Finding> {
     let mut out = Vec::new();
@@ -1835,6 +1836,7 @@ pub fn check_narrowing(policy: &FacePolicy, block: &BlockSubjects) -> Vec<Findin
         .subjects
         .iter()
         .flat_map(|s| s.usernames.iter().chain(&s.cert_common_names))
+        .chain(policy.faces.values().map(|f| &f.far))
         .map(String::as_str)
         .collect();
     for name in names {

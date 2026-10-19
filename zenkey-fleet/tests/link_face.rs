@@ -1557,13 +1557,22 @@ async fn s9_who_a_subject_binds() {
         s.link_protocols = vec!["unixsock-stream".into()];
     });
     // 3. F-120 (c): under allow, ground narrowed to its face. 4: under
-    //    allow, radio-b narrowed off tcp too.
+    //    allow, radio-b narrowed off tcp too. 5, control: the generator's
+    //    allow block.
     let far_narrowed = with_subject(&allow, "ground", |s| {
         s.link_protocols = vec!["unixsock-stream".into()];
     });
     let near_narrowed = with_subject(&allow, "radio-b", |s| {
         s.link_protocols.retain(|p| p != "tcp");
     });
+    // 7, checked only: under allow, ground with no subject at all, which a
+    //    generator never writes (§2.4); its session over tcp matches no
+    //    subject, as step 3's does.
+    let mut far_unbound = allow.clone();
+    far_unbound.subjects.retain(|s| s.id != "ground");
+    for p in &mut far_unbound.policies {
+        p.subjects.retain(|s| s != "ground");
+    }
 
     let under_both = on_face(&both, &[("ground", true), ("local", true)]).await;
     let under_apart = on_face(&both_apart, &[("ground", true), ("local", true)]).await;
@@ -1585,13 +1594,13 @@ async fn s9_who_a_subject_binds() {
     assert_unguarded(&under_apart[1].0);
     assert_eq!((under_apart[0].1, under_apart[1].1), (0, 0), "no forgery");
     // 3. ground over tcp matches no subject: allowed everything, its puts
-    //    on radio-a's key among it. 4: radio-b over tcp, the same. Under
+    //    on radio-a's key among it. 4: radio-b over tcp, the same. 5: under
     //    the generator's block, neither's put reaches L.
     assert_eq!(far_tcp, [5], "ground over tcp, narrowed to its face");
     assert_eq!(near_tcp, [5], "radio-b over tcp, narrowed off it");
     assert_eq!(control, [0, 0], "the generator's block");
 
-    // 5. An empty list is refused when the configuration loads, so no
+    // 6. An empty list is refused when the configuration loads, so no
     //    router runs one (zenoh-config's NEVec).
     let loads = |subject: &str| {
         zenoh::Config::from_json5(&format!(
@@ -1611,7 +1620,7 @@ async fn s9_who_a_subject_binds() {
     ));
     assert!(!loads("{ id: \"s\", usernames: [] }"));
 
-    // 6. A tool checks each block (§2.15).
+    // 7. A tool checks each block (§2.15).
     let found = |c: zenkey_fleet::report::FaceCheck| -> Vec<(link::Code, Option<String>, String)> {
         c.findings
             .into_iter()
@@ -1636,6 +1645,17 @@ async fn s9_who_a_subject_binds() {
         found(check_against(&near_narrowed, &allow, &text, None)),
         [(link::Code::NarrowedTooFar, None, "radio-b".to_owned())]
     );
+    assert_eq!(
+        found(check_against(&far_unbound, &allow, &text, None)),
+        [
+            (link::Code::NarrowedTooFar, None, "ground".to_owned()),
+            (
+                link::Code::FaceSubjectMisplaced,
+                radio(),
+                "face:radio".to_owned()
+            ),
+        ]
+    );
 }
 
 /// §10 The face's own subject (§2.4, §2.15).
@@ -1654,15 +1674,15 @@ async fn s10_the_faces_own_subject() {
     wide.link_protocols.push("tcp".into());
     beyond_deny.subjects.push(wide);
     let beyond_deny = listed_in(&beyond_deny, "face:radio", &["ground"]);
-    // 2. Under deny, a subject selected by the face's link protocol alone,
-    //    in local's policy. 3: under allow, the face's subject moved there.
+    // 3. Under deny, a subject selected by the face's link protocol alone,
+    //    in local's policy. 4: under allow, the face's subject moved there.
     let mut stray = deny.clone();
     stray.subjects.push(face_subject());
     let stray = listed_in(&stray, "face:radio", &["local"]);
     let moved = listed_in(&allow, "face:radio", &["local"]);
-    // 4. Under allow, the face's subject in no policy.
+    // 5. Under allow, the face's subject in no policy.
     let unlisted = listed_in(&allow, "face:radio", &[]);
-    // 5. Under deny, the face's subject in a policy of its own, holding the
+    // 6. Under deny, the face's subject in a policy of its own, holding the
     //    plan's denies alone (§7's step 5, under deny).
     let mut split = deny.clone();
     split.subjects.push(face_subject());
@@ -1689,7 +1709,7 @@ async fn s10_the_faces_own_subject() {
 
     // 1. radio-a over tcp matches the face's subject, and reads radio-b's
     //    stream with ground's grants: every sample, under either posture,
-    //    where the generator's blocks let it read none.
+    //    where the generator's blocks (2) let it read none.
     assert_eq!(read_beyond, 20, "radio-a reads radio-b's stream, allow");
     assert_eq!(read_beyond_deny, 20, "radio-a reads radio-b's stream, deny");
     assert_eq!(
@@ -1697,7 +1717,7 @@ async fn s10_the_faces_own_subject() {
         (0, 0),
         "the generator's blocks"
     );
-    // 2, 3. Every session over the face matches the stray subject, ground's
+    // 3, 4. Every session over the face matches the stray subject, ground's
     //    among them, and gets local's grants there; any allow wins. Their
     //    puts reach L under neither: local may not write radio-a's keys.
     for (under, posture) in [(&under_stray, "deny"), (&under_moved, "allow")] {
@@ -1705,12 +1725,12 @@ async fn s10_the_faces_own_subject() {
         assert_unguarded(&under[1].0);
         assert_eq!((under[0].1, under[1].1), (0, 0), "no forgery, {posture}");
     }
-    // 4. A subject that no policy lists gets the default: under allow,
+    // 5. A subject that no policy lists gets the default: under allow,
     //    everything, the puts on radio-a's key among it, for G as for X.
     assert_unguarded(&under_unlisted[0].0);
     assert_unguarded(&under_unlisted[1].0);
     assert_eq!((under_unlisted[0].1, under_unlisted[1].1), (5, 5));
-    // 5. Under deny, a policy that only denies grants nothing: G keeps
+    // 6. Under deny, a policy that only denies grants nothing: G keeps
     //    §1's share, X gets nothing, and neither's puts reach L.
     assert_far(&under_split[0].0);
     assert_eq!(
@@ -1735,7 +1755,7 @@ async fn s10_the_faces_own_subject() {
     );
     assert_eq!(under_split[0].1, 0, "no forgery");
 
-    // 6. A tool checks each block (§2.15).
+    // 7. A tool checks each block (§2.15).
     let found = |c: zenkey_fleet::report::FaceCheck| -> Vec<(link::Code, String)> {
         c.findings.into_iter().map(|f| (f.code, f.at)).collect()
     };

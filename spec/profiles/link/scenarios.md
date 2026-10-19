@@ -418,7 +418,11 @@ client of N on the near side, with the credentials named.
 7. Steps 1 and 2: `near_subject_on_face` at `local`, and `zk_not_denied`,
    since that subject can match `ground`'s session and its policy holds no
    `@zk` deny. Step 3: `narrowed_too_far` at `ground`, step 4 at
-   `radio-b`, each with no face.
+   `radio-b`, each with no face. The generator's `allow` block with
+   `ground`'s subject removed, which no generator writes (§2.4), whose
+   session over TCP matches no subject as step 3's does:
+   `narrowed_too_far` at `ground`, and `face_subject_misplaced` at the
+   face's subject, since the far principal has no policy.
 
 ## §10 The face's own subject (§2.4, §2.15)
 

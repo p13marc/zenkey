@@ -65,9 +65,10 @@ block that breaks §2.4 from what the block shows (F-120; §2.4, §2.15,
     not listed in exactly the far principal's policies, at least one. The
     two new blocks, and §7's step 5, which 0.3 left to the comparison.
   - `narrowed_too_far`, new, with no face, `at` the user name or CN: under
-    `allow`, a name the block binds and a link protocol outside the faces
-    it is kept off that no subject selects for it. (c), and a near
-    principal narrowed the same way.
+    `allow`, a name the block binds, or a face's `far`, and a link protocol
+    outside the faces it is kept off that no subject selects for it. (c),
+    a near principal narrowed the same way, and a far principal the block
+    gives no subject at all, which a generator refuses to write.
   - `face_subject_missing` is kept, reading the defined face subject that
     names no interface and no zid.
 - **The denies a face's block holds**, stated: for each subject that can
@@ -93,7 +94,9 @@ block that breaks §2.4 from what the block shows (F-120; §2.4, §2.15,
   selected by every link protocol outside the face, where `tcp` alone
   would be `narrowed_too_far`; the catch-all case puts its subject in a
   policy of its own, and gains `face_subject_beyond_face` and
-  `face_subject_misplaced`. Sixteen new cases.
+  `face_subject_misplaced`. Eighteen new cases, two of them the far
+  principal's subject in no policy and the far principal with no subject
+  at all (review of PR #786).
 - **Scenarios §9 and §10** run each block live, with what it leaks and
   what a tool reports; §7's expected 6 now reports step 5.
 - **The guesses round 32 listed, settled.**
