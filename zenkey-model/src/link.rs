@@ -649,15 +649,6 @@ pub fn parse(text: &str) -> Parsed {
     }
     shared_protocols(&table, &mut out);
     shared_far(&table, &mut out);
-    for (name, face) in &faces {
-        if !face.batch_within_lease() {
-            out.push(Finding::new(
-                Code::BatchOverLease,
-                Some(name),
-                "batch_bytes",
-            ));
-        }
-    }
     sort_findings(&mut out);
     let policy = if out.iter().any(Finding::is_error) {
         None
@@ -868,6 +859,18 @@ fn parse_face(name: &str, t: &toml::Table, out: &mut Vec<Finding>) -> Option<Fac
     let batch_bytes = int("batch_bytes", MAX_BATCH, true);
     let link_bps = int("link_bps", MAX_U32, true);
     let lease_ms = int("lease_ms", MAX_U32, false);
+    // `batch_over_lease` needs these three keys alone, so it is checked
+    // whatever else the face holds (§2.1: each key is checked alone).
+    let lease = if t.contains_key("lease_ms") {
+        lease_ms
+    } else {
+        Some(DEFAULT_LEASE_MS)
+    };
+    if let (Some(b), Some(bps), Some(l)) = (batch_bytes, link_bps, lease)
+        && !within_lease(b, bps, l)
+    {
+        out.push(Finding::new(Code::BatchOverLease, at, "batch_bytes"));
+    }
     if !ok {
         return None;
     }
@@ -892,7 +895,10 @@ fn parse_face(name: &str, t: &toml::Table, out: &mut Vec<Finding>) -> Option<Fac
     })
 }
 
-/// `shared_protocol` (§2.14), over every face whose protocol list is one.
+/// `shared_protocol` (§2.14), over every face whose protocol list is one
+/// and names only link protocols of §2.1's list: one naming another is
+/// `unknown_protocol`, a wrong value, and checks that need it are skipped
+/// (§2.1).
 fn shared_protocols(table: &toml::Table, out: &mut Vec<Finding>) {
     let Some(toml::Value::Table(faces)) = table.get("face") else {
         return;
@@ -900,8 +906,10 @@ fn shared_protocols(table: &toml::Table, out: &mut Vec<Finding>) {
     let lists: Vec<(&String, Vec<String>)> = faces
         .iter()
         .filter_map(|(name, v)| {
-            let l = v.get("select")?.get("link_protocols")?;
-            Some((name, protocol_list(l)?))
+            let l = protocol_list(v.get("select")?.get("link_protocols")?)?;
+            l.iter()
+                .all(|p| LINK_PROTOCOLS.contains(&p.as_str()))
+                .then_some((name, l))
         })
         .collect();
     for (i, (name, l)) in lists.iter().enumerate() {

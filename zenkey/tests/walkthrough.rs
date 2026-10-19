@@ -5,8 +5,9 @@ mod common;
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use common::{T, client, config, eventually, example, router};
+use common::{SETTLE, T, client, config, eventually, example, router};
 use serde_json::{Value, json};
 use zenkey::consumer::Delivery;
 use zenkey::model::authoring::Kind;
@@ -142,45 +143,56 @@ async fn w4_1_perception_pipeline() {
     );
 
     // The graph: detector ← cam-front, tracker ← {detectors}, from
-    // descriptors and tokens alone.
-    let tokens = presence::tokens(&tool, "zk2/vehicle-01/*/@zk/**", T)
-        .await
-        .unwrap();
-    let mut descriptors = Vec::new();
-    for k in &tokens {
-        if let ZkKey::Instance { addr, instance } = k {
-            descriptors.push(
-                presence::descriptor(&tool, addr, instance, T)
-                    .await
-                    .unwrap()
-                    .into_descriptor()
-                    .unwrap(),
-            );
-        }
-    }
+    // descriptors and tokens alone. A liveliness GET that runs to its
+    // timeout may be incomplete (spec §8.1), and under load one reading can
+    // miss a token or a descriptor, so the graph is read until it is whole;
+    // the last reading is the one that fails.
     let e = |c: &str, r: &str, p: &str| Edge {
         consumer: c.to_owned(),
         role: r.to_owned(),
         provider: p.to_owned(),
     };
-    let drawn: BTreeSet<Edge> = presence::edges(&descriptors, &tokens).into_iter().collect();
-    assert_eq!(
-        drawn,
-        BTreeSet::from([
-            e("vehicle-01/detector", "input", "vehicle-01/cam-front"),
-            e(
-                "vehicle-01/detector-replay",
-                "input",
-                "vehicle-01/replay-cam"
-            ),
-            e("vehicle-01/tracker", "sources", "vehicle-01/detector"),
-            e(
-                "vehicle-01/tracker",
-                "sources",
-                "vehicle-01/detector-replay"
-            ),
-        ])
-    );
+    let want = BTreeSet::from([
+        e("vehicle-01/detector", "input", "vehicle-01/cam-front"),
+        e(
+            "vehicle-01/detector-replay",
+            "input",
+            "vehicle-01/replay-cam",
+        ),
+        e("vehicle-01/tracker", "sources", "vehicle-01/detector"),
+        e(
+            "vehicle-01/tracker",
+            "sources",
+            "vehicle-01/detector-replay",
+        ),
+    ]);
+    let deadline = tokio::time::Instant::now() + SETTLE;
+    let mut drawn = graph(&tool).await;
+    while drawn != want && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drawn = graph(&tool).await;
+    }
+    assert_eq!(drawn, want);
+}
+
+/// The edges `tool` draws from `vehicle-01`'s tokens and descriptors, in
+/// one reading: an instance whose descriptor does not answer within `T`
+/// adds none.
+async fn graph(tool: &zenoh::Session) -> BTreeSet<Edge> {
+    let tokens = presence::tokens(tool, "zk2/vehicle-01/*/@zk/**", T)
+        .await
+        .unwrap();
+    let mut descriptors = Vec::new();
+    for k in &tokens {
+        if let ZkKey::Instance { addr, instance } = k
+            && let Ok(d) = presence::descriptor(tool, addr, instance, T)
+                .await
+                .and_then(presence::Found::into_descriptor)
+        {
+            descriptors.push(d);
+        }
+    }
+    presence::edges(&descriptors, &tokens).into_iter().collect()
 }
 
 /// The tcgui frontend (`examples/zk2/tcgui/frontend.bindings.toml`): a pure
