@@ -575,6 +575,24 @@ def compile_face(face_plan: dict[str, Any], block: dict[str, Any], far_subject: 
     return out
 
 
+def declaration_grant(gets: list[tuple[str, list[str]]], calls: list[tuple[str, list[str], str]]) -> list[str]:
+    """§2.5 (0.2), core §8.5 (0.30): the far principal's ``declare_queryable``
+    egress grant "over every queryable its side may query, as the owner
+    declares it". ``gets`` are (interface, providers) whose state the far
+    side GETs: "the owner's state queryables over its interface's state/**
+    and @state/** (core S2), with the providers as bound". ``calls`` are
+    (interface, providers, operation template): "the operation's queryable
+    over its template's pattern (core §5)". An archive's ``@state`` forms
+    (core §4.4) are not here: zk2py's deployments run none."""
+    keys: list[str] = []
+    for iface, providers in gets:
+        keys += [f"zk2/{p}/{iface}/{t}/**" for p in providers for t in ("state", "@state")]
+    for iface, providers, template in calls:
+        pattern = "/".join(_pattern(s) for s in templates.parse_template(template).segments)
+        keys += [f"zk2/{p}/{iface}/@op/{pattern}" for p in providers]
+    return sorted(set(keys), key=_bytes)
+
+
 def liveness_across(face_plan: dict[str, Any], address: str, subscriber: Any,
                     annotations: dict[str, dict[str, Any]]) -> tuple[str, str]:
     """§2.12 and §5, "Is this provider live across the face?": ``live``
