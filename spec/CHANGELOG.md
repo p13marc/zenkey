@@ -3,6 +3,41 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.32 — 2026-10-19: a principal's complement, per message and flow (#769)
+
+The spec-only implementation (zk2py, round 35) read 0.31 cold and filed
+F-123, an ambiguity in the bullet 0.31 added. No fixture case changed,
+and none is added.
+
+**Changed: the MUST of "A principal's own keys", per message and flow
+(§11.2).**
+- **The gap.** 0.31 required a generator to deny each principal "the keys
+  of the services it does not run that its grants do not name". A grant
+  names a key for some messages and flows only, the rows of the table of
+  §11.2. Read per key, a key that a principal's Consume grant names, such
+  as another service's stream, would need no deny of that principal's
+  ingress `put` on it, and the principal could write a key it may only
+  read. Only `security.md` §2 ("every unauthorized action is blocked")
+  decided it, and `link.v1`'s scenarios assumed the reading per message
+  and flow.
+- **The rule.** The deny is taken on each message and flow, over the keys
+  of the services the principal does not run that its grants do not name
+  for that message and flow. zk2py's wording.
+- **Both implementations already do this.**
+  - **The reference** denies ingress `put`, `delete`, `declare_queryable`,
+    `reply` and `liveliness_token` over every other service's keys,
+    whatever the principal may read (`deny-write`). It denies the reads
+    (`deny-read`) and the deliveries (`deny-receive`) over the surfaces of
+    other services that its read grants do not name.
+  - **zk2py** compiles every message and flow apart.
+
+**Deliberately not changed.**
+- **The MAY** of 0.31, a principal's own services' keys left out of its
+  complement, stands as it was.
+- **The grouping of messages.** A generator may write one deny for several
+  messages that share a key set, as the reference does. The rule is what
+  is denied, not how the rules are cut.
+
 ## 0.31 — 2026-10-19: whether a principal's own keys are in its complement (#769)
 
 The spec-only implementation (zk2py, round 34) read `link.v1` 0.5 and
