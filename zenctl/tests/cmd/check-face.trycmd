@@ -113,6 +113,27 @@ tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of
 
 ```
 
+The generator's block with its `enabled` line taken out. zenoh reads an
+absent `enabled` as false, and enforces none of the block: every session
+over the face gets everything, and writes an owner's keys (`link.v1`
+scenarios §12). Since 0.7 (F-124) that is §2.15's own `block_disabled`,
+read as zenoh reads it, and not only the comparison's `disabled`. It is
+reported beside the block's other findings, here none. Exit 1.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-disabled.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --format table
+? 1
+tests/cmd/fixtures/link/router-disabled.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
+  ✗ block_disabled  face radio  enabled
+against the plan: 1 difference(s)
+  ✗ disabled  access_control  planned enabled: true; configured enabled: false
+FAIL
+block_disabled [face radio] enabled: the block's access control is not enabled, `enabled` false or absent, which zenoh reads as false: the router enforces none of its rules, under either posture, so everything crosses the face; its other findings read the block as written (§2.15)
+judged against the config file tests/cmd/fixtures/link/router-disabled.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+
+```
+
 Given the windows the deployment configures (§2.11), every listed owner of
 state is checked against each face's outage, a window not given being the
 core's 60 s. A window of 2 s below the radio face's 6 s outage is a

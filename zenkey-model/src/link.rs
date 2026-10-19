@@ -6,7 +6,9 @@
 //! (§2.1), the plan a generator derives from both (§2.3–§2.12), every
 //! revision of an interface read together, how a generator keeps every
 //! other principal's subject off a face (§2.4), and the checks of a
-//! router's block (§2.15).
+//! router's block (§2.15), whether its access control is enabled among
+//! them (0.7, F-124). A far principal two faces name carries both plans'
+//! denies on each, which the linter warns of (§2.1, §2.4, 0.7, F-125).
 //!
 //! ```text
 //! exposure(kind, annotations)       ─▶ host │ link │ invalid │ ignored
@@ -328,6 +330,10 @@ pub enum Code {
     SharedProtocol,
     /// A batch over a third of the lease (§2.10).
     BatchOverLease,
+    /// Two or more faces naming one far principal, whose policy then
+    /// carries every one of their plans' denies on each of them (§2.1,
+    /// §2.4, 0.7, F-125).
+    FarOfTwoFaces,
     /// A listed service the deployment names no interfaces for (§2.3).
     ServiceUnknown,
     /// An interface whose contract is not given (§2.3).
@@ -350,6 +356,9 @@ pub enum Code {
     WildcardDownsampling,
     /// Two downsampling rules that intersect (§2.15).
     IntersectingDownsampling,
+    /// A block whose access control is not enabled: zenoh enforces none of
+    /// its rules (§2.15, 0.7, F-124).
+    BlockDisabled,
     /// A subject on the face bound to another principal than the face's
     /// far one, whatever else it names (§2.4, §2.15, 0.3; widened in 0.4,
     /// F-120).
@@ -383,6 +392,7 @@ impl Code {
             Self::UnknownProtocol => "unknown_protocol",
             Self::SharedProtocol => "shared_protocol",
             Self::BatchOverLease => "batch_over_lease",
+            Self::FarOfTwoFaces => "far_of_two_faces",
             Self::ServiceUnknown => "service_unknown",
             Self::ContractUnknown => "contract_unknown",
             Self::TemplatedExposure => "templated_exposure",
@@ -393,6 +403,7 @@ impl Code {
             Self::ZkNotDenied => "zk_not_denied",
             Self::WildcardDownsampling => "wildcard_downsampling",
             Self::IntersectingDownsampling => "intersecting_downsampling",
+            Self::BlockDisabled => "block_disabled",
             Self::NearSubjectOnFace => "near_subject_on_face",
             Self::FaceSubjectMissing => "face_subject_missing",
             Self::FaceSubjectBeyondFace => "face_subject_beyond_face",
@@ -406,6 +417,7 @@ impl Code {
     pub fn severity(self) -> Severity {
         match self {
             Self::BatchOverLease
+            | Self::FarOfTwoFaces
             | Self::TemplatedExposure
             | Self::CarveOutOverlap
             | Self::IntervalOverHorizon
@@ -636,6 +648,7 @@ pub fn parse(text: &str) -> Parsed {
         Some(_) => out.push(Finding::new(Code::BadValue, None, "face")),
     }
     shared_protocols(&table, &mut out);
+    shared_far(&table, &mut out);
     for (name, face) in &faces {
         if !face.batch_within_lease() {
             out.push(Finding::new(
@@ -902,6 +915,30 @@ fn shared_protocols(table: &toml::Table, out: &mut Vec<Finding>) {
                 Some(name),
                 "select.link_protocols",
             ));
+        }
+    }
+}
+
+/// `far_of_two_faces` (§2.1, §2.4, 0.7, F-125), over every face whose `far`
+/// is one, whatever else the policy holds: one warning per far principal
+/// two or more faces name, with no face, `at` its name. Its policy carries
+/// every one of their plans' denies, and no zenoh rule is limited to a link
+/// protocol, so each of its faces carries them all.
+fn shared_far(table: &toml::Table, out: &mut Vec<Finding>) {
+    let Some(toml::Value::Table(faces)) = table.get("face") else {
+        return;
+    };
+    let mut named: BTreeMap<&str, usize> = BTreeMap::new();
+    for v in faces.values() {
+        if let Some(toml::Value::String(far)) = v.get("far")
+            && !far.is_empty()
+        {
+            *named.entry(far.as_str()).or_default() += 1;
+        }
+    }
+    for (far, n) in named {
+        if n > 1 {
+            out.push(Finding::new(Code::FarOfTwoFaces, None, far));
         }
     }
 }
@@ -1701,6 +1738,11 @@ impl BlockSubjects {
 pub struct Block {
     /// The deployment's namespace, empty for none (core §1.6).
     pub namespace: String,
+    /// The block's `enabled`, as read: `Some(false)` when access control is
+    /// not enabled, which a tool reading a router's configuration also reads
+    /// for an `enabled` absent from it, as zenoh 1.10.1 does (§2.15, 0.7,
+    /// F-124); `None` when it was not read.
+    pub enabled: Option<bool>,
     /// The denies of every policy that lists one subject that can match
     /// the far principal's sessions on the face (§2.15): a tool checks each
     /// such subject's denies alone, since any allow wins across subjects.
@@ -1713,10 +1755,16 @@ pub struct Block {
     pub subjects: Option<BlockSubjects>,
 }
 
-/// Checks a router's block for the face `face` (§2.15).
+/// Checks a router's block for the face `face` (§2.15): `block_disabled`
+/// when its access control is not enabled (0.7, F-124), beside every other
+/// finding, which reads the block as written; `zk_not_denied`;
+/// `wildcard_downsampling` and `intersecting_downsampling`.
 #[must_use]
 pub fn check_block(face: &str, block: &Block) -> Vec<Finding> {
     let mut out = Vec::new();
+    if block.enabled == Some(false) {
+        out.push(Finding::new(Code::BlockDisabled, Some(face), "enabled"));
+    }
     let ns = block.namespace.trim_matches('/');
     let target = if ns.is_empty() {
         ZK_DENY.to_owned()

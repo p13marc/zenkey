@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a block not enabled, and two faces of one far principal: `link.v1` 0.7 (#769, LH)
+
+zk2py's round 36 found two gaps (F-124, F-125). A router config whose
+`access_control.enabled` is false, or absent (zenoh's default), enforces
+none of its rules, and `check face` said so only through its comparison
+with the plan. Two faces naming one far principal each carry both faces'
+denies, since no zenoh rule is limited to a link protocol, and nothing
+said so.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check face`: a block not enabled was the comparison's `disabled` alone | also `block_disabled [face …] enabled`, from `link.v1` §2.15's own checks, beside every other finding | read through zenoh's loader, so an absent `enabled` is false. Under either posture every session over the face then gets everything, and writes an owner's keys (`link.v1` scenarios §12) |
+| `acl gen --face-policy`: two faces with one `far` were planned silently | the same block, the union of both plans' denies in the far principal's policy, and a `face_policy` warning, `far_of_two_faces at <far>` (`link.v1` §2.1, §2.4) | it refuses nothing: the union fails closed. Over a face that exposes, beside one that exposes none, nothing is pushed across (scenarios §13). Name a far principal per face to keep each face's plan its own |
+
 ## Unreleased (`main`, zk2) — one kind of name per subject: `link.v1` 0.5 (#769, LE)
 
 zk2py's round 33 found that `narrowed_too_far` credited a name to a

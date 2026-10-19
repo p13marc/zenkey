@@ -6,7 +6,8 @@ a setup, steps, and expected observations. They are a generator's and a
 router's: the reference runs them as tests of the tool that compiles a
 face policy into a router's configuration (`zenctl acl gen`), against live
 routers, one test per section, named after it (#769, LB; §7 and §8 since
-0.3, LC; §9 and §10 since 0.4, LD; §11 since 0.5, LE).
+0.3, LC; §9 and §10 since 0.4, LD; §11 since 0.5, LE; §12 and §13 since
+0.7, LH).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -563,3 +564,98 @@ beside its user name.
      subject, not their rules;
    - step 8: `near_subject_on_face` and `face_subject_misplaced`, with no
      `zk_not_denied`.
+
+## §12 What a block omits (§2.15)
+
+zenoh fills in what a router's configuration leaves out of its access
+control: `enabled` false, `default_permission` `deny`, and a rule's
+`flows` both flows. A block whose access control is not enabled enforces
+none of its rules (0.7, F-124). Each step but the last is a hand edit of
+the text of the generator's `deny` block.
+
+**Setup.** As §7, with G, X and L as §7 says.
+
+**Steps.**
+1. The block with `enabled: false`. The owner's traffic; G and X as §7's
+   step 1.
+2. The block with its `enabled` line taken out. As step 1.
+3. The block with its `default_permission` line taken out. As step 1.
+4. The block with `flows` taken out of the console's Consume rule for the
+   samples it receives (`consume-out:tool.console`, `egress`, which
+   `ground`'s and `local`'s policies list), and out of every deny of the
+   face. The owner's traffic, and G as §7's step 1. Then, the owner
+   silent, G puts five times on
+   `zk2/lab/radio-a/radio.v1/stream/air/dropped_total` and five times on
+   `…/stream/air/frames_total`, and L counts what reaches it of each.
+   **Control:** the generator's block, G's puts on both.
+5. A tool checks the blocks of steps 1 to 4 (§2.15).
+
+**Expected.**
+1. Nothing is enforced. G and X each receive about 100 of
+   `air/frames_total` and of `raw`, all 10 puts of `oper`, all 5
+   occurrences of `fault` and of `change`, see the owner's two tokens,
+   receive its descriptor, and have their GET and call answered. The
+   face's downsampling, a block of its own, still applies: 4 to 6 of
+   `air/dropped_total` and of `frames`. All five of each one's puts reach
+   L.
+2. The same as step 1: zenoh's `enabled` is false by default.
+3. G receives what §1's G receives; X matches no subject and receives
+   nothing at all, sees no token and gets no reply; neither's puts reach
+   L: a block without `default_permission` is `deny`.
+4. G receives what §1's G receives, and nothing the face denies: both
+   edited rules hold on egress. All five of its puts on
+   `air/dropped_total` reach L, through the Consume rule, and none of its
+   puts on `air/frames_total`, which the face's deny of `stream` names:
+   both hold on ingress too. Under the generator's block, none of either
+   reaches L.
+5. Steps 1 and 2: `block_disabled` at `enabled`, alone, and the
+   reference's comparison with the plan reports `disabled`. Step 3: no
+   finding, and the comparison none: a tool reads the absent
+   `default_permission` as `deny`, as zenoh does. Step 4: no finding, since
+   a tool reads a rule with no `flows` as both flows; the comparison names
+   the Consume rule, whose flows the plan gives as `egress` alone.
+
+## §13 Two faces, one far principal (§2.4)
+
+Each face of a policy has a plan of its own, but every deny of each goes
+into the far principal's policy, and no zenoh rule is limited to a link
+protocol: a far principal of two faces carries both plans' denies on each
+(0.7, F-125).
+
+**Setup.** As §1, under `deny`, with a second face in the face policy:
+
+```toml
+[face.sat]
+far          = "ground"
+attach       = "client"
+select       = { link_protocols = ["tls"] }
+class        = "constrained"
+expose       = "none"
+max_outage_s = 6
+batch_bytes  = 1000
+link_bps     = 1000000
+```
+
+N does not listen on TLS: no session crosses `sat`.
+
+**Steps.**
+1. The generator compiles the block, and N starts with it. The owner's
+   traffic; G over the radio face as §1's steps 2 and 3, the traffic
+   started without waiting for G to hear the owner.
+2. **Control:** `sat`'s far principal is `ground-router`. As step 1, the
+   traffic started once G hears the owner.
+3. A tool checks both blocks (§2.15).
+
+**Expected.**
+1. The generator warns `far_of_two_faces` at `ground` and refuses
+   nothing. The radio face's plan is §1's, and `sat`'s denies every push
+   wholesale (§2.7); `ground`'s policy carries both plans' denies,
+   `face:radio:…` and `face:sat:…`. Over the radio face G receives no
+   sample of `air/dropped_total` or `frames`, no put of `oper` and no
+   occurrence of `fault`, where §1's G receives 4 to 6, 4 to 6, 10 and 5;
+   its GET and call are answered, by grant (§2.9); it sees no token and no
+   descriptor. Nothing leaks: the face fails closed.
+2. No warning. `ground-router`'s policy carries `sat`'s denies, and
+   `ground`'s the radio face's alone: G receives what §1's G receives.
+3. No finding for either block, and no difference from its plan: §2.15
+   reads no plan.

@@ -278,11 +278,18 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   owner declares it (`state/**`, an operation's pattern; core §8.5, 0.30).
   Several revisions of a listed interface go to the model, which lets a
   resource cross only where every one exposes it and warns
-  `exposure_disagrees` (F-119). Router to router is the policy's
-  `router_attach`, refused. `check face <ROUTER-CONFIG> --face-policy …
+  `exposure_disagrees` (F-119). Two faces naming one far principal each
+  carry both plans' denies, since no zenoh rule is limited to a link
+  protocol: written so, and warned (`far_of_two_faces`, a linter warning
+  with no face, never a refusal; text 0.7, F-125, #769 LH). Router to
+  router is the policy's `router_attach`, refused. `check face
+  <ROUTER-CONFIG> --face-policy …
   --enrollment … [--window ADDRESS=SECS]` is its judgement
   (`zenkey_fleet::check_face`, report `FaceCheck`): `link.v1` §2.15 per face,
-  the denies read subject by subject; over every subject and the subject
+  `block_disabled` for access control not enabled (`enabled` false or
+  absent, read as zenoh's loader reads it; beside every other finding, and
+  beside the comparison's `disabled`: text 0.7, F-124, #769 LH), the
+  denies read subject by subject; over every subject and the subject
   list of every policy (text 0.4, F-120, #769 LD), `near_subject_on_face`
   (bound to another principal, whatever else it names, or naming a user
   name and a CN both: text 0.5, F-121, #769 LE),
@@ -298,11 +305,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   plans are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`; every face plan
   passes its own `check face` in both postures) and judged by a live router
   (`tests/acl_live.rs`, `tests/acl_face.rs`, and `tests/link_face.rs`,
-  `link.v1`'s scenarios §1–§11 one test per section over a `unixsock-stream`
+  `link.v1`'s scenarios §1–§13 one test per section over a `unixsock-stream`
   face, §7 in both postures, §9 and §10 the hand-edited blocks 0.4
   refuses, §11 those 0.5 refuses, one session over mTLS presenting a CN
   beside its user name, with certificates minted per run by `rcgen`; each
-  with what it leaks).
+  with what it leaks; §12 the block's text without what zenoh defaults,
+  `enabled`, `default_permission` and a rule's `flows`, and §13 two faces
+  of one far principal, 0.7's).
   FJ8a's writes and captures: `gen <address>` and `serve <address> <iface>
   <operation>` are mock owners — real zk2 services through
   `zenkey::ServiceBuilder` (`zenkey_fleet::tape::{generate, mock}`), refused
@@ -542,7 +551,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   and `check_narrowing`'s `narrowed_too_far`, a block-wide finding with no
   face; text 0.5, F-121, #769 LE: one kind of name per subject, the far
   principal's subject naming it alone in one list and nothing in the
-  other, and `narrowed_too_far` reading user names and CNs apart).
+  other, and `narrowed_too_far` reading user names and CNs apart; text
+  0.7, F-124 and F-125, #769 LH: `Block::enabled` and `check_block`'s
+  `block_disabled`, and the linter's `far_of_two_faces`, a warning with no
+  face).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2

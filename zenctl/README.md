@@ -850,9 +850,13 @@ no credential to a link, so every other principal's subject is selected
 by the link protocols outside the face's, and under `allow` the face gets
 a subject of its own in the far principal's policy (`link.v1` §2.4, 0.3):
 a near principal's credentials over the face get nothing, or under
-`allow` what the far principal gets. Router to router is refused, because
-a deny there lets the denied key strings cross. `zenctl check face`
-judges a router's config file against the face policy.
+`allow` what the far principal gets. Two faces naming one far principal
+each carry both plans' denies, since no zenoh rule is limited to a link
+protocol: the plan warns `far_of_two_faces` (`link.v1` 0.7). Router to
+router is refused, because a deny there lets the denied key strings
+cross. `zenctl check face` judges a router's config file against the face
+policy, an access control left disabled among what it reports
+(`block_disabled`, read as zenoh reads an absent `enabled`: off).
 
 ```
 $ zenctl acl gen --enrollment examples/zk2/acl/tcgui.enrollment.toml \
