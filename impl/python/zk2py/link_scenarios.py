@@ -1,5 +1,5 @@
 """The ``link.v1`` scenarios (``spec/profiles/link/scenarios.md``, text
-0.5) on zenoh-python routers: ``just py-link`` (``python -m
+0.6, core 0.31) on zenoh-python routers: ``just py-link`` (``python -m
 zk2py.link_scenarios [--only 1 …]``), all eleven sections.
 
 - **The deployment** is the reference's example, ``examples/zk2/link/``,
@@ -317,7 +317,10 @@ def mint_certificates(workdir: str, cns: list[str]) -> dict[str, str]:
     import subprocess
 
     def run(*args: str) -> None:
-        subprocess.run(["openssl", *args], check=True, capture_output=True, cwd=workdir)
+        done = subprocess.run(["openssl", *args], capture_output=True, text=True, cwd=workdir)
+        if done.returncode != 0:
+            raise RuntimeError(f"openssl {' '.join(args[:2])} failed ({done.returncode}): "
+                               f"{(done.stderr or done.stdout).strip()}")
 
     run("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", "ca.key",
         "-out", "ca.pem", "-days", "2", "-subj", "/CN=zk2py-link-ca")
@@ -353,6 +356,21 @@ def open_tls(w: "World", user: str, cn: str) -> Any:
         "root_ca_certificate": w.certs["ca"], "enable_mtls": True,
         "connect_private_key": w.certs[f"client-{cn}.key"], "connect_certificate": w.certs[f"client-{cn}"]}))
     return zenoh.open(conf)
+
+
+def close_each(things: list[Any], what: str) -> None:
+    """Close each of ``things``, closing the rest when one fails, and log
+    the failures once, on stderr: a scenario's result does not turn on a
+    close, but a failure to close is not hidden either."""
+    failed = []
+    for x in things:
+        try:
+            x.close()
+        except Exception as e:  # noqa: BLE001 - closing the rest anyway
+            failed.append(f"{type(e).__name__}: {e}")
+    if failed:
+        print(f"note: {len(failed)} of {len(things)} of {what} failed to close: {failed[0]}"
+              + (f" (and {len(failed) - 1} more)" if len(failed) > 1 else ""), file=sys.stderr, flush=True)
 
 
 class Tokens:
@@ -540,19 +558,11 @@ class World:
             return [k for k in s.deliveries if k.startswith(prefix)]
 
     def close(self) -> None:
-        for o in self.owners.values():
-            try:
-                o.close()
-            except Exception:  # noqa: BLE001 - closing anyway
-                pass
+        close_each(list(self.owners.values()), "the owners")
         for s in (self.gs, self.ls) + ((self.fls,) if self.fls is not None else ()):
             s.close()
-        for x in (self.g, self.l, self.n) + ((self.far_router[0],) if self.far_router else ()) \
-                + ((self.fl,) if self.fl is not None else ()):
-            try:
-                x.close()
-            except Exception:  # noqa: BLE001
-                pass
+        close_each(list((self.g, self.l, self.n) + ((self.far_router[0],) if self.far_router else ())
+                        + ((self.fl,) if self.fl is not None else ())), "the sessions and routers")
 
 
 def base_of(name: str = "radio-a") -> str:
@@ -1000,10 +1010,33 @@ def _anonymous(endpoint: str, timeout_s: float = 10.0) -> tuple[str, Any]:
     return ("refused", box["e"]) if "e" in box else ("no answer", None)
 
 
-def _run7(posture: str, generator: str = "0.3", *, anonymous: bool = False, block_edit: Any = None) -> dict[str, Any]:
-    """One block of §7 (and of §9 and §10, ``block_edit`` changing it by
+#: A key no contract declares, outside every face deny: under ``allow`` it
+#: "stays open" (core §11.2), so a put on it shows a session is live.
+PROBE_KEY = "zk2py-probe"
+
+
+def _alive(w: World, sessions: dict[str, Any]) -> dict[str, int]:
+    """Under ``allow``: each session puts once on ``zk2py-probe/<who>``, a
+    key no contract declares, and L counts what reaches it. A session the
+    block denies everything of the deployment's keys still reaches L here,
+    so "nothing" is the block's, not a dead session's."""
+    import zenoh
+
+    got: list[str] = []
+    sub = w.l.declare_subscriber(f"{PROBE_KEY}/**", zenoh.handlers.Callback(lambda smp: got.append(str(smp.key_expr))))
+    time.sleep(0.5)
+    for who, sess in sessions.items():
+        sess.put(f"{PROBE_KEY}/{who}", b"alive")
+    time.sleep(1.0)
+    sub.undeclare()
+    return {who: got.count(f"{PROBE_KEY}/{who}") for who in sessions}
+
+
+def _run7(posture: str, generator: str = "0.3", *, anonymous: bool = False, block_edit: Any = None,
+          alive: bool = False) -> dict[str, Any]:
+    """One block of §7 (and of §9 to §11, ``block_edit`` changing it by
     hand): the owner's traffic, then G's and X's requests and puts, then a
-    tool's check of the block."""
+    tool's check of the block; with ``alive``, :func:`_alive` for G and X."""
     w = World(policy(), posture=posture, generator=generator, face_local=True, block_edit=block_edit)
     try:
         o = w.owner()
@@ -1025,14 +1058,12 @@ def _run7(posture: str, generator: str = "0.3", *, anonymous: bool = False, bloc
         puts = _puts(w, sessions)
         for who, n in puts.items():
             r.setdefault(who, {})["puts_to_L"] = n
+        if alive:
+            for who, n in _alive(w, {"G": w.g, "X": w.fl}).items():
+                r[who]["alive"] = n
         return r
     finally:
-        for c in w.closers:
-            try:
-                c.close()
-            except Exception:  # noqa: BLE001
-                pass
-        w.close()
+        _close_all(w)
 
 
 def _like_section1_g(d: dict[str, Any]) -> bool:
@@ -1042,13 +1073,6 @@ def _like_section1_g(d: dict[str, Any]) -> bool:
     return (4 <= d["stream/air/dropped_total"] <= 6 and 4 <= d["@stream/frames"] <= 6
             and d["stream/air/frames_total"] == 0 and d["@stream/raw"] == 0 and d["oper"] == 10
             and d["fault"] == 5 and d["change"] == 0)
-
-
-def _at_most_section1_g(d: dict[str, Any]) -> bool:
-    """Nothing beyond what §1's G receives: none of air/frames_total, raw or
-    change, no token, and no more of the rest."""
-    return (d["stream/air/dropped_total"] <= 6 and d["@stream/frames"] <= 6 and d["stream/air/frames_total"] == 0
-            and d["@stream/raw"] == 0 and d["oper"] <= 10 and d["fault"] <= 5 and d["change"] == 0 and not d["tokens"])
 
 
 def _answered(d: dict[str, Any]) -> bool:
@@ -1298,12 +1322,7 @@ def _near_puts(posture: str, edit: Any, who: list[str]) -> dict[str, Any]:
         time.sleep(0.3)
         return {"puts": _puts(w, sessions), "found": w.check_block()}
     finally:
-        for c in w.closers:
-            try:
-                c.close()
-            except Exception:  # noqa: BLE001
-                pass
-        w.close()
+        _close_all(w)
 
 
 def _load(block: dict[str, Any]) -> str:
@@ -1432,12 +1451,7 @@ def _read_radio_b(posture: str, edit: Any) -> dict[str, Any]:
             s.close()
         return {"got": got, "found": w.check_block()}
     finally:
-        for c in w.closers:
-            try:
-                c.close()
-            except Exception:  # noqa: BLE001
-                pass
-        w.close()
+        _close_all(w)
 
 
 def section10(report: Report) -> None:
@@ -1486,11 +1500,9 @@ def section10(report: Report) -> None:
 # -- §11: a subject naming both kinds ----------------------------------------------------
 
 def _close_all(w: World) -> None:
-    for c in w.closers:
-        try:
-            c.close()
-        except Exception:  # noqa: BLE001
-            pass
+    """Close a run's extra sessions, then the world, logging what failed to
+    close once (:func:`close_each`)."""
+    close_each(w.closers, "a run's sessions")
     w.close()
 
 
@@ -1555,7 +1567,7 @@ def section11(report: Report) -> None:
 
     s5 = _run7("deny", block_edit=mixed("radio-a", "deny"))
     s6 = _run7("deny", block_edit=mixed("local", "deny"))
-    s7 = _run7("allow", block_edit=mixed("radio-a", "allow"))
+    s7 = _run7("allow", block_edit=mixed("radio-a", "allow"), alive=True)
     s8 = _run7("deny", block_edit=_edits(mixed("radio-a", "deny"), with_zk))
     report.check(sec, "step 5 (deny, ground and radio-a's CN in radio-a's policy, the face's subject in ground's and "
                       "radio-a's): G and X each receive what §1's G receives, and all five of each one's puts reach L",
@@ -1564,14 +1576,20 @@ def section11(report: Report) -> None:
     report.check(sec, "step 6 (the same with local): G and X each receive what §1's G receives, and neither's puts "
                       "reach L", all(_like_section1_g(s6[w]) and s6[w]["puts_to_L"] == 0 for w in ("G", "X")),
                  f"G {_brief(s6['G'])}; X {_brief(s6['X'])}")
-    report.check(sec, "step 7 (step 5 under allow): G receives what §1's G receives, X at most that (SPEC-FINDINGS "
-                      "F-122: zk2py's radio-a policy denies what radio-a holds no grant for, and the face's subject "
-                      "holds those denies too), and neither's puts reach L",
-                 _like_section1_g(s7["G"]) and _at_most_section1_g(s7["X"])
+    # Core §11.2 (0.31): zk2py's generator takes the stricter complement. It
+    # denies radio-a, per message and flow, its own keys where its Own
+    # grant's rows do not name them (put toward it among them), so link.v1
+    # 0.6's second branch of expected 7 is the one it must show, exactly.
+    report.check(sec, "step 7 (step 5 under allow; zk2py's complement denies a principal its own keys per message and "
+                      "flow, core §11.2's stricter branch): G receives what §1's G receives through ground's own "
+                      "subject; X receives nothing at all, no sample, token or descriptor, and neither its GET nor "
+                      "its call is answered; neither's puts reach L",
+                 _like_section1_g(s7["G"]) and _answered(s7["G"]) and _nothing(s7["X"])
                  and s7["G"]["puts_to_L"] == 0 and s7["X"]["puts_to_L"] == 0,
                  f"G {_brief(s7['G'])}; X {_brief(s7['X'])}")
-    x7 = "what §1's G receives" if _like_section1_g(s7["X"]) else "less than §1's G: " + _brief(s7["X"])
-    report.note(sec, f"step 7, for open SPEC-FINDINGS F-122: X, matching the face's subject alone, receives {x7}")
+    report.check(sec, "step 7: X's session is live (its put on a key no contract declares reaches L, as G's does), so "
+                      "its nothing is the block's", s7["X"]["alive"] == 1 and s7["G"]["alive"] == 1,
+                 f"G {s7['G']['alive']}, X {s7['X']['alive']}")
     report.check(sec, "step 8 (step 5 with radio-a's policy listing the face's zk rule): all five of each one's puts "
                       "reach L", s8["G"]["puts_to_L"] == 5 and s8["X"]["puts_to_L"] == 5,
                  f"G {_brief(s8['G'])}; X {_brief(s8['X'])}")

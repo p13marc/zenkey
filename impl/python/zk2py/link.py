@@ -1,5 +1,5 @@
-"""``link.v1``, text 0.5 (``spec/profiles/link/v1.md``): what crosses a
-constrained face.
+"""``link.v1``, text 0.6 (``spec/profiles/link/v1.md``, written against
+core 0.31): what crosses a constrained face.
 
 From the text alone:
 - **the face policy** (§2.1): :func:`parse_policy` reads the TOML file and
@@ -23,7 +23,7 @@ From the text alone:
   block, and the near router's ``gateway`` for a south region (§2.5).
 
 Where the text left a choice, zk2py's is named in ``SPEC-FINDINGS.md``
-("At link.v1 0.1" to "At link.v1 0.5").
+("At link.v1 0.1" to "At link.v1 0.6").
 """
 
 from __future__ import annotations
@@ -621,10 +621,11 @@ def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dic
 
 class BlockError(ValueError):
     """A block no router runs: zenoh 1.10.1 refuses it when the
-    configuration loads (measured: a subject with no id, two subjects with
-    one id, a policy listing a subject or a rule the block does not define),
-    or a face the face policy does not have. A check says so rather than
-    reading it."""
+    configuration loads (measured: a subject or a rule with no id, two
+    subjects, two rules or two policies with one id, a policy listing a
+    subject or a rule the block does not define), or a face the face policy
+    does not have. A check says so rather than reading it. A policy with no
+    id loads (measured), so a policy needs none."""
 
 
 def rule_flows(rule: dict[str, Any]) -> list[str]:
@@ -637,9 +638,11 @@ def rule_flows(rule: dict[str, Any]) -> list[str]:
 
 def check_ids(subjects: list[dict[str, Any]], policies: list[dict[str, Any]],
               rules: list[dict[str, Any]] | None = None) -> None:
-    """Raise :class:`BlockError` for what zenoh refuses at load: a subject
-    with no id, an id two subjects share, and a policy listing a subject (or,
-    given ``rules``, a rule) the block does not define."""
+    """Raise :class:`BlockError` for what zenoh refuses at load (each
+    measured): a subject with no id, an id two subjects share; given
+    ``rules``, a rule with no id, an id two rules share, and a policy
+    listing a rule the block does not define; a policy listing a subject
+    the block does not define; and an id two policies share."""
     ids: set[str] = set()
     for i, s in enumerate(subjects):
         sid = s.get("id")
@@ -648,9 +651,23 @@ def check_ids(subjects: list[dict[str, Any]], policies: list[dict[str, Any]],
         if sid in ids:
             raise BlockError(f"subject id {sid!r} is repeated")
         ids.add(sid)
-    rule_ids = None if rules is None else {r.get("id") for r in rules}
+    rule_ids: set[str] | None = None
+    if rules is not None:
+        rule_ids = set()
+        for i, r in enumerate(rules):
+            rid = r.get("id")
+            if not isinstance(rid, str) or not rid:
+                raise BlockError(f"rule #{i} has no id")
+            if rid in rule_ids:
+                raise BlockError(f"rule id {rid!r} is repeated")
+            rule_ids.add(rid)
+    policy_ids: set[str] = set()
     for i, pol in enumerate(policies):
         name = pol.get("id", f"#{i}")
+        if "id" in pol:
+            if pol["id"] in policy_ids:
+                raise BlockError(f"policy id {pol['id']!r} is repeated")
+            policy_ids.add(pol["id"])
         for sid in pol.get("subjects") or []:
             if sid not in ids:
                 raise BlockError(f"policy {name} lists subject {sid!r}, which the block does not define")
@@ -834,10 +851,11 @@ def subject_denies(block: dict[str, Any], face: Face) -> dict[str, list[dict[str
             continue
         if not names and (_names(s, "interfaces") or _names(s, "zids")):
             continue
-        out[s["id"]] = [{"flows": rule_flows(rules[r]), "messages": list(rules[r].get("messages") or []),
-                         "key_exprs": list(rules[r].get("key_exprs") or [])}
-                        for p in block.get("policies", []) if s["id"] in (p.get("subjects") or [])
-                        for r in (p.get("rules") or []) if rules[r].get("permission") == "deny"]
+        held = [rules.get(r) for p in block.get("policies", []) if s["id"] in (p.get("subjects") or [])
+                for r in (p.get("rules") or [])]
+        out[s["id"]] = [{"flows": rule_flows(r), "messages": list(r.get("messages") or []),
+                         "key_exprs": list(r.get("key_exprs") or [])}
+                        for r in held if r is not None and r.get("permission") == "deny"]
     return out
 
 
@@ -1028,7 +1046,8 @@ def compare_block(policy: Policy, face_plans: list[dict[str, Any]], block: dict[
         fars = {s["id"] for s in block.get("subjects", []) if fp["far"] in names_of(s)}
         far_policies = [p for p in block.get("policies", []) if fars & set(p.get("subjects") or [])]
         for p in far_policies:
-            held = [rules[r] for r in (p.get("rules") or []) if rules[r].get("permission") == "deny"]
+            held = [r for r in (rules.get(x) for x in (p.get("rules") or []))
+                    if r is not None and r.get("permission") == "deny"]
             for d in fp["deny"]:
                 if not any(set(d["key_exprs"]) <= set(r.get("key_exprs") or [])
                            and set(d["messages"]) <= set(r.get("messages") or [])
