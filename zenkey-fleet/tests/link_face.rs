@@ -1,0 +1,1083 @@
+//! `link.v1`'s scenarios, run against live routers
+//! (`spec/profiles/link/scenarios.md` §1–§6, text 0.2; #769, LB): one test
+//! per section, named after it.
+//!
+//! The generator is the reference's: `plan_acl` over the example of
+//! `examples/zk2/link/` (the `radio.v1` contract, its enrollment and the
+//! lab router's face policy), rendered as `zenctl acl gen --face-policy
+//! --json5` writes it and pasted into N, a zenoh 1.10.1 router with
+//! timestamping on (a router's default) and usrpwd authentication. N listens
+//! on `tcp/127.0.0.1:0`, the near side, and on a `unixsock-stream` socket,
+//! the face, which is what the downsampling block selects (`link.v1` §2.14).
+//! Every session authenticates as a user of its own, under `deny`.
+//!
+//! **The readers subscribe to what they are granted** (0.2, F-116): under
+//! `deny`, zenoh admits a subscription or a GET only when a grant includes
+//! its key expression (core §11.3), so G and L subscribe to the console
+//! tool's Consume selectors, read off the plan, never to `zk2/lab/*/**`.
+//!
+//! **The owner** is a plain session, so what is judged is the router's
+//! block and not a runtime's discipline; it serves its state as core S2
+//! says, one queryable over `…/radio.v1/state/**`, which is what makes
+//! §2's declaration grant matter (core §8.5, 0.30; F-117). §5's owner is the
+//! runtime's own (`zenkey::ServiceBuilder`), because the tombstone window it
+//! keeps, `tombstone_window_s` (core S3), is the thing judged.
+//!
+//! What a test cannot judge, it does not claim: the batch against the lease
+//! (§2.10) is a linter's, and nothing here runs a 2,400 bit/s link.
+
+mod util;
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use util::zk2::{T, eventually};
+use zenkey_fleet::report::{AclConfigDoc, AclPermission, AclPlan, DownsamplingDoc, Enrollment};
+use zenkey_fleet::{AclOptions, ContractSet, acl_plan_json5, check_face, plan_acl};
+use zenkey_model::freshness::{self, Last, Observation, Verdict};
+use zenkey_model::link;
+use zenoh::Wait;
+use zenoh::query::{ConsolidationMode, QueryTarget};
+use zenoh::sample::SampleKind;
+
+/// Every user N knows, password `<user>-pw`.
+const USERS: [&str; 6] = [
+    "router",
+    "radio-a",
+    "radio-b",
+    "local",
+    "ground",
+    "ground-router",
+];
+
+/// How long a reader waits for what must not arrive, once it has seen what
+/// must.
+const SILENCE: Duration = Duration::from_millis(1500);
+
+fn dir() -> PathBuf {
+    util::zk2::examples().join("link")
+}
+
+fn contracts() -> ContractSet {
+    let (set, problems) = ContractSet::load_path(&dir().join("radio.v1.toml"));
+    assert!(problems.is_empty(), "{problems:?}");
+    set
+}
+
+fn enrollment() -> Enrollment {
+    toml::from_str(&std::fs::read_to_string(dir().join("radio.enrollment.toml")).unwrap()).unwrap()
+}
+
+/// The scenarios' face policy (`radio.face.toml`), each edit applied.
+fn policy(edits: &[(&str, &str)]) -> String {
+    let mut text = std::fs::read_to_string(dir().join("radio.face.toml")).unwrap();
+    for (from, to) in edits {
+        assert!(text.contains(from), "{from:?} in the face policy");
+        text = text.replace(from, to);
+    }
+    text
+}
+
+const SOUTH: [(&str, &str); 2] = [
+    (
+        "attach       = \"client\"\n",
+        "attach       = \"south-region\"\nregion       = \"ground\"\n",
+    ),
+    (
+        "far          = \"ground\"",
+        "far          = \"ground-router\"",
+    ),
+];
+const BOTH_LISTED: (&str, &str) = (
+    "services = [\"radio-a\"]",
+    "services = [\"radio-a\", \"radio-b\"]",
+);
+const CLOSED: (&str, &str) = (
+    "expose       = \"link\"\ninterval_s   = 1\n",
+    "expose       = \"none\"\n",
+);
+
+/// The generator: the block for `policy`, under `deny`.
+fn plan(policy: &str) -> AclPlan {
+    let plan = plan_acl(
+        &enrollment(),
+        &contracts(),
+        &AclOptions {
+            default_permission: AclPermission::Deny,
+            face_policy: Some(link::parse(policy)),
+            ..AclOptions::default()
+        },
+    )
+    .expect("the radio example plans");
+    assert!(plan.refusals.is_empty(), "{:#?}", plan.refusals);
+    plan
+}
+
+/// A tool checking the block N runs (§2.15): the fragment `block` wrote,
+/// read back by zenoh's loader, against the face policy and the plan the
+/// generator makes of it. A hand edit of `block` is what the comparison
+/// finds.
+fn check(
+    block: &AclPlan,
+    policy: &str,
+    windows: Option<&BTreeMap<String, u64>>,
+) -> zenkey_fleet::report::FaceCheck {
+    let planned = self::plan(policy);
+    let block = acl_plan_json5(block);
+    let c = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
+    let acl: AclConfigDoc = serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
+    let ds: Vec<DownsamplingDoc> = c
+        .get_json("downsampling")
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+        .unwrap_or_default();
+    let gw = c
+        .get_json("gateway")
+        .ok()
+        .and_then(|g| serde_json::from_str(&g).ok());
+    let parsed = link::parse(policy);
+    check_face(
+        &planned,
+        parsed.policy.as_ref().unwrap(),
+        &acl,
+        &ds,
+        gw.as_ref(),
+        windows,
+        "N.json5",
+    )
+}
+
+fn scratch(name: &str) -> PathBuf {
+    static NTH: AtomicU64 = AtomicU64::new(0);
+    std::env::temp_dir().join(format!(
+        "zk-lb-{}-{}-{name}",
+        std::process::id(),
+        NTH.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+/// N, running `plan`'s block: its near-side and face endpoints.
+struct Near {
+    _router: zenoh::Session,
+    tcp: String,
+    face: String,
+    files: Vec<PathBuf>,
+}
+
+impl Drop for Near {
+    fn drop(&mut self) {
+        for f in &self.files {
+            let _ = std::fs::remove_file(f);
+        }
+    }
+}
+
+async fn near(plan: &AclPlan) -> Near {
+    let dict = scratch("near.txt");
+    std::fs::write(
+        &dict,
+        USERS
+            .iter()
+            .map(|u| format!("{u}:{u}-pw\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    let sock = scratch("face.sock");
+    let face = format!("unixsock-stream/{}", sock.display());
+    let text = format!(
+        "{{\n  mode: \"router\",\n  scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
+         listen: {{ endpoints: [\"{}\", \"{face}\"] }},\n  \
+         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }} }},\n{}}}\n",
+        util::ANY_PORT,
+        dict.display().to_string(),
+        acl_plan_json5(plan)
+    );
+    let router = zenoh::open(
+        zenoh::Config::from_json5(&text)
+            .unwrap_or_else(|e| panic!("N's config does not parse: {e}\n{text}")),
+    )
+    .await
+    .expect("N runs the block");
+    let tcp = util::bound(&router).await;
+    Near {
+        _router: router,
+        tcp,
+        face,
+        files: vec![dict, sock],
+    }
+}
+
+fn base(mode: &str) -> zenoh::Config {
+    let mut c = zenoh::Config::default();
+    c.insert_json5("mode", &format!("{mode:?}")).unwrap();
+    c.insert_json5("scouting/multicast/enabled", "false")
+        .unwrap();
+    c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+    c
+}
+
+/// A client of the router at `ep`, as `user`.
+async fn client(ep: &str, user: &str) -> zenoh::Session {
+    let mut c = base("client");
+    c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
+        .unwrap();
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        &format!("{{ user: \"{user}\", password: \"{user}-pw\" }}"),
+    )
+    .unwrap();
+    zenoh::open(c)
+        .await
+        .unwrap_or_else(|e| panic!("{user} connects to {ep}: {e}"))
+}
+
+/// F (§2): a router naming its region `ground`, attached to N over the
+/// face as `ground-router`, with G a client of it.
+struct Far {
+    _router: zenoh::Session,
+    tcp: String,
+    dict: PathBuf,
+}
+
+impl Drop for Far {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.dict);
+    }
+}
+
+async fn far(n: &Near) -> Far {
+    // A router presenting usrpwd credentials checks them on its own links
+    // too, so it holds a dictionary: N's, and its client's.
+    let dict = scratch("far.txt");
+    std::fs::write(&dict, "router:router-pw\nground:ground-pw\n").unwrap();
+    let mut c = base("router");
+    c.insert_json5("region_name", "\"ground\"").unwrap();
+    c.insert_json5("listen/endpoints", &format!("[\"{}\"]", util::ANY_PORT))
+        .unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{}\"]", n.face))
+        .unwrap();
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        &format!(
+            "{{ user: \"ground-router\", password: \"ground-router-pw\", dictionary_file: {:?} }}",
+            dict.display().to_string()
+        ),
+    )
+    .unwrap();
+    let router = zenoh::open(c).await.expect("F attaches to N over the face");
+    let tcp = util::bound(&router).await;
+    Far {
+        _router: router,
+        tcp,
+        dict,
+    }
+}
+
+/// Every delivery a reader records: its arrival, key and kind.
+#[derive(Clone, Default)]
+struct Seen(Arc<Mutex<Vec<(Instant, String, SampleKind)>>>);
+
+impl Seen {
+    /// Puts whose key contains `needle`.
+    fn puts(&self, needle: &str) -> usize {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, k, kind)| *kind == SampleKind::Put && k.contains(needle))
+            .count()
+    }
+
+    fn last(&self, needle: &str) -> Option<Instant> {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, k, _)| k.contains(needle))
+            .map(|(t, _, _)| *t)
+            .max()
+    }
+
+    fn len(&self) -> usize {
+        self.0.lock().unwrap().len()
+    }
+
+    fn clear(&self) {
+        self.0.lock().unwrap().clear();
+    }
+}
+
+/// A reader's subscribers, on exactly the selectors its grants name (the
+/// console's Consume, F-116), or on `only` of them.
+struct Reader {
+    seen: Seen,
+    _subs: Vec<zenoh::pubsub::Subscriber<()>>,
+}
+
+async fn reader(s: &zenoh::Session, plan: &AclPlan, only: Option<&[String]>) -> Reader {
+    let seen = Seen::default();
+    let selectors: Vec<String> = match only {
+        Some(o) => o.to_vec(),
+        None => plan
+            .rules
+            .iter()
+            .find(|r| r.id == "consume-in:tool.console")
+            .expect("the console's Consume")
+            .key_exprs
+            .clone(),
+    };
+    let mut subs = Vec::new();
+    for sel in selectors {
+        let s2 = seen.clone();
+        subs.push(
+            s.declare_subscriber(sel)
+                .callback(move |sample| {
+                    s2.0.lock().unwrap().push((
+                        Instant::now(),
+                        sample.key_expr().to_string(),
+                        sample.kind(),
+                    ));
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    Reader { seen, _subs: subs }
+}
+
+/// A plain owner: its instance and interface tokens, its descriptor, its
+/// state queryable over `…/radio.v1/state/**` (core S2) answering
+/// `peers/x`, and `reset`.
+struct Owner {
+    s: zenoh::Session,
+    base: String,
+    _tokens: Vec<zenoh::liveliness::LivelinessToken>,
+    _qs: Vec<zenoh::query::Queryable<()>>,
+}
+
+async fn owner(ep: &str, name: &str) -> Owner {
+    let s = client(ep, name).await;
+    let base = format!("zk2/lab/{name}");
+    let instance = format!("{base}/@zk/instance/00000000000000a1");
+    let tokens = vec![
+        s.liveliness().declare_token(&instance).await.unwrap(),
+        s.liveliness()
+            .declare_token(format!(
+                "{base}/@zk/alive/radio.v1/00000000000000a1/0000000000000000"
+            ))
+            .await
+            .unwrap(),
+    ];
+    let reply = |key: String, value: &'static str| {
+        move |q: zenoh::query::Query| {
+            let _ = q.reply(&key, value).wait();
+        }
+    };
+    let qs = vec![
+        s.declare_queryable(&instance)
+            .complete(true)
+            .callback(reply(instance.clone(), "{}"))
+            .await
+            .unwrap(),
+        s.declare_queryable(format!("{base}/radio.v1/state/**"))
+            .callback(reply(format!("{base}/radio.v1/state/peers/x"), "px"))
+            .await
+            .unwrap(),
+        s.declare_queryable(format!("{base}/radio.v1/@op/reset"))
+            .complete(true)
+            .callback(reply(format!("{base}/radio.v1/@op/reset"), "reset"))
+            .await
+            .unwrap(),
+    ];
+    Owner {
+        s,
+        base,
+        _tokens: tokens,
+        _qs: qs,
+    }
+}
+
+impl Owner {
+    async fn put(&self, rel: &str, payload: impl Into<zenoh::bytes::ZBytes>) {
+        self.s
+            .put(format!("{}/radio.v1/{rel}", self.base), payload)
+            .await
+            .unwrap();
+    }
+
+    /// Puts `oper` until every reader has one, then clears them all: the
+    /// subscriptions stand, across N and F, before the traffic starts.
+    async fn settle(&self, ready: &[&Seen], clear: &[&Seen]) {
+        eventually("the readers' subscriptions stand", || async {
+            self.put("state/oper", "probe").await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            ready.iter().all(|s| s.puts("/state/oper") > 0)
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        for s in ready.iter().chain(clear) {
+            s.clear();
+        }
+    }
+}
+
+/// An event occurrence's key chunk: a ULID's shape (26 Crockford digits).
+fn ulid(n: u64) -> String {
+    format!("01J{n:023}")
+}
+
+/// The owner's traffic (Conventions): for 5 s, the two streams at 20 Hz,
+/// the two `@stream`s at 20 Hz with 1 KB payloads, `oper` 10 times, half a
+/// second apart, `peers/x` once, and `fault` and `change` 5 times each in
+/// the first half second.
+async fn traffic(o: &Owner) {
+    let kb = vec![0u8; 1024];
+    for i in 0..100u64 {
+        o.put("stream/air/dropped_total", i.to_string()).await;
+        o.put("stream/air/frames_total", i.to_string()).await;
+        o.put("@stream/frames", kb.clone()).await;
+        o.put("@stream/raw", kb.clone()).await;
+        if i % 10 == 0 {
+            o.put("state/oper", format!("v{i}")).await;
+        }
+        if i == 0 {
+            o.put("state/peers/x", "px").await;
+        }
+        if i < 10 {
+            let ev = if i % 2 == 0 { "fault" } else { "change" };
+            o.put(&format!("events/{ev}/{}", ulid(i)), "e").await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// The value replies to a GET, or a call (`BestMatching`, core O1).
+async fn values(s: &zenoh::Session, selector: &str, call: bool) -> usize {
+    let rx = s
+        .get(selector)
+        .target(if call {
+            QueryTarget::BestMatching
+        } else {
+            QueryTarget::All
+        })
+        .consolidation(ConsolidationMode::None)
+        .timeout(T)
+        .await
+        .expect("a get is sent");
+    let mut n = 0;
+    while let Ok(r) = rx.recv_async().await {
+        n += usize::from(r.result().is_ok());
+    }
+    n
+}
+
+/// A GET or a call, retried for a while: `true` once one is answered.
+async fn answered(s: &zenoh::Session, selector: &str, call: bool, within: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + within;
+    while tokio::time::Instant::now() < deadline {
+        if values(s, selector, call).await > 0 {
+            return true;
+        }
+    }
+    false
+}
+
+const PEERS_X: &str = "zk2/lab/radio-a/radio.v1/state/peers/x";
+const RESET: &str = "zk2/lab/radio-a/radio.v1/@op/reset";
+const INSTANCE: &str = "zk2/lab/radio-a/@zk/instance/00000000000000a1";
+
+/// What a far reader sees of §1's traffic, and of the requests.
+#[derive(Debug, PartialEq, Eq)]
+struct Far1 {
+    dropped: usize,
+    frames: usize,
+    frames_total: usize,
+    raw: usize,
+    oper: usize,
+    fault: usize,
+    change: usize,
+    get: bool,
+    call: bool,
+    tokens: usize,
+    descriptor: usize,
+}
+
+/// §1's steps 2 and 3 with `g` across the face and `l` near: the traffic,
+/// the GET and the call, the tokens and the descriptor.
+async fn one(o: &Owner, g: &zenoh::Session, plan: &AclPlan, l: Option<&zenoh::Session>) -> Far1 {
+    let gr = reader(g, plan, None).await;
+    let lr = match l {
+        Some(l) => Some(reader(l, plan, None).await),
+        None => None,
+    };
+    let mut ready = vec![&gr.seen];
+    ready.extend(lr.as_ref().map(|r| &r.seen));
+    o.settle(&ready, &[]).await;
+    traffic(o).await;
+    tokio::time::sleep(SILENCE).await;
+    let r = "radio-a/radio.v1/";
+    if let Some(lr) = &lr {
+        // L receives every sample, put and occurrence.
+        let l = &lr.seen;
+        for res in [
+            "stream/air/dropped_total",
+            "stream/air/frames_total",
+            "@stream/frames",
+            "@stream/raw",
+        ] {
+            let n = l.puts(&format!("{r}{res}"));
+            assert!(n >= 80, "L receives about 100 of {res}: {n}");
+        }
+        assert_eq!(l.puts(&format!("{r}state/oper")), 10);
+        assert_eq!(l.puts(&format!("{r}events/fault/")), 5);
+        assert_eq!(l.puts(&format!("{r}events/change/")), 5);
+    }
+    let s = &gr.seen;
+    let read = zenkey::presence::liveliness_read(g, "zk2/lab/*/@zk/**", T)
+        .await
+        .unwrap();
+    assert!(read.complete, "a refused read is complete (§8.1): {read:?}");
+    Far1 {
+        dropped: s.puts(&format!("{r}stream/air/dropped_total")),
+        frames: s.puts(&format!("{r}@stream/frames")),
+        frames_total: s.puts(&format!("{r}stream/air/frames_total")),
+        raw: s.puts(&format!("{r}@stream/raw")),
+        oper: s.puts(&format!("{r}state/oper")),
+        fault: s.puts(&format!("{r}events/fault/")),
+        change: s.puts(&format!("{r}events/change/")),
+        get: answered(g, PEERS_X, false, Duration::from_secs(5)).await,
+        call: answered(g, RESET, true, Duration::from_secs(5)).await,
+        tokens: read.keys.len(),
+        descriptor: values(g, INSTANCE, false).await,
+    }
+}
+
+/// §1's expected 2–4 for the far reader: one sample per second of each
+/// downsampled stream, the first at once; nothing of what stays home; the
+/// state and the exposed event whole; the requests answered; no token and
+/// no descriptor.
+fn assert_far(g: &Far1) {
+    assert!((4..=6).contains(&g.dropped), "dropped_total 4 to 6: {g:?}");
+    assert!((4..=6).contains(&g.frames), "frames 4 to 6: {g:?}");
+    assert_eq!(
+        (g.frames_total, g.raw, g.change),
+        (0, 0, 0),
+        "what stays home: {g:?}"
+    );
+    assert_eq!((g.oper, g.fault), (10, 5), "state and event whole: {g:?}");
+    assert!(g.get && g.call, "requests cross by grant: {g:?}");
+    assert_eq!((g.tokens, g.descriptor), (0, 0), "no @zk: {g:?}");
+}
+
+/// §1 A face compiled and enforced, the far side a client (§2.4–§2.9).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s1_a_face_compiled_and_enforced_the_far_side_a_client() {
+    let text = policy(&[]);
+    let plan = plan(&text);
+    // 1. The block holds the plan: the far principal's policy carries every
+    //    deny, and the downsampling block one rule per crossing stream of
+    //    lab/radio-a at 1 Hz.
+    let ground = plan.policies.iter().find(|p| p.id == "ground").unwrap();
+    for d in &plan.faces[0].deny {
+        assert!(
+            ground.rules.contains(&format!("face:radio:{}", d.id)),
+            "{}",
+            d.id
+        );
+    }
+    let keys: Vec<&str> = plan.downsampling[0]
+        .rules
+        .iter()
+        .map(|r| r.key_expr.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "zk2/lab/radio-a/radio.v1/@stream/frames",
+            "zk2/lab/radio-a/radio.v1/stream/air/dropped_total",
+        ]
+    );
+    assert!(plan.downsampling[0].rules.iter().all(|r| r.freq == 1.0));
+
+    let n = near(&plan).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let g = client(&n.face, "ground").await;
+    let l = client(&n.tcp, "local").await;
+    let far = one(&o, &g, &plan, Some(&l)).await;
+    assert_far(&far);
+    // 3. L's requests are answered too; 4. L sees the owner's tokens and
+    //    its descriptor.
+    assert!(answered(&l, PEERS_X, false, Duration::from_secs(5)).await);
+    assert!(answered(&l, RESET, true, Duration::from_secs(5)).await);
+    eventually(
+        "L sees the owner's instance and interface tokens",
+        || async {
+            zenkey::presence::liveliness_read(&l, "zk2/lab/*/@zk/**", T)
+                .await
+                .unwrap()
+                .keys
+                .len()
+                == 2
+        },
+    )
+    .await;
+    assert_eq!(values(&l, INSTANCE, false).await, 1);
+    // 5. A tool checks the block: no finding.
+    let c = check(&plan, &text, None);
+    assert!(c.findings.is_empty(), "{:?}", c.findings);
+    assert!(
+        c.comparison.findings.is_empty(),
+        "{:?}",
+        c.comparison.findings
+    );
+    assert_eq!(c.judgement.conclusive(), Some(false));
+}
+
+/// GET and call across a south region, under `plan`: whether each is
+/// answered.
+async fn south_requests(plan: &AclPlan) -> (bool, bool) {
+    let n = near(plan).await;
+    let _o = owner(&n.tcp, "radio-a").await;
+    let f = far(&n).await;
+    let g = client(&f.tcp, "ground").await;
+    let within = Duration::from_secs(4);
+    (
+        answered(&g, PEERS_X, false, within).await,
+        answered(&g, RESET, true, within).await,
+    )
+}
+
+/// §2 A far router in a south region (§2.4, §2.5, §2.9).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s2_a_far_router_in_a_south_region() {
+    let text = policy(&SOUTH);
+    let plan = plan(&text);
+    let gw = plan.gateway.as_ref().expect("the plan's gateway");
+    assert_eq!(gw.south[0].filters[0].modes, ["peer", "client"]);
+    assert_eq!(gw.south[1].filters[0].region_names, ["ground"]);
+    // The declaration grant covers the owner's state queryable as it
+    // declares it, and reset's (core §8.5, 0.30; F-117).
+    let decl = "face-declarations:ground-router";
+    let d = plan.rules.iter().find(|r| r.id == decl).expect(decl);
+    for k in [
+        "zk2/lab/*/radio.v1/state/**",
+        "zk2/lab/*/radio.v1/@op/reset",
+    ] {
+        assert!(d.key_exprs.iter().any(|x| x == k), "{k}: {:?}", d.key_exprs);
+    }
+
+    // The controls: no declaration grant (step 2); one over G's own GET and
+    // call selectors only, not the owner's `state/**` (step 3).
+    let mut none = plan.clone();
+    none.rules.retain(|r| r.id != decl);
+    for p in &mut none.policies {
+        p.rules.retain(|r| r != decl);
+    }
+    let mut selectors = plan.clone();
+    for r in &mut selectors.rules {
+        if r.id == decl {
+            r.key_exprs.retain(|k| !k.ends_with("/state/**"));
+        }
+    }
+
+    let full = async {
+        let n = near(&plan).await;
+        let o = owner(&n.tcp, "radio-a").await;
+        let f = far(&n).await;
+        let g = client(&f.tcp, "ground").await;
+        one(&o, &g, &plan, None).await
+    };
+    let far1 = full.await;
+    let without = south_requests(&none).await;
+    let narrow = south_requests(&selectors).await;
+    // 1. G receives what §1's G receives; its GET and call are answered.
+    assert_far(&far1);
+    // 2. Without the grant, neither is: F learns of no queryable.
+    assert_eq!(without, (false, false), "no declaration grant");
+    // 3. Over G's selectors only, the call is answered and the GET is not.
+    assert_eq!(
+        narrow,
+        (false, true),
+        "the GET's selector does not include state/**"
+    );
+    // 4. Router to router is refused, and no block is written.
+    let err = plan_acl(
+        &enrollment(),
+        &contracts(),
+        &AclOptions {
+            face_policy: Some(link::parse(&policy(&[(
+                "attach       = \"client\"",
+                "attach       = \"router\"",
+            )]))),
+            ..AclOptions::default()
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("router_attach"), "{err}");
+}
+
+/// Each owner's `air/dropped_total` at 20 Hz for 5 s, after the settle;
+/// what G receives from each.
+async fn two_owners(plan: &AclPlan) -> (usize, usize) {
+    let n = near(plan).await;
+    let a = owner(&n.tcp, "radio-a").await;
+    let b = owner(&n.tcp, "radio-b").await;
+    let g = client(&n.face, "ground").await;
+    let gr = reader(&g, plan, None).await;
+    eventually("G hears both owners' oper", || async {
+        a.put("state/oper", "probe").await;
+        b.put("state/oper", "probe").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gr.seen.puts("radio-a/radio.v1/state/oper") > 0
+            && gr.seen.puts("radio-b/radio.v1/state/oper") > 0
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    gr.seen.clear();
+    for i in 0..100u64 {
+        a.put("stream/air/dropped_total", i.to_string()).await;
+        b.put("stream/air/dropped_total", i.to_string()).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(SILENCE).await;
+    (
+        gr.seen.puts("radio-a/radio.v1/stream/air/dropped_total"),
+        gr.seen.puts("radio-b/radio.v1/stream/air/dropped_total"),
+    )
+}
+
+/// §3 One rule per key, and a service not listed (§2.8).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s3_one_rule_per_key_and_a_service_not_listed() {
+    let both_text = policy(&[BOTH_LISTED]);
+    let both = plan(&both_text);
+    let keys: Vec<&str> = both.downsampling[0]
+        .rules
+        .iter()
+        .map(|r| r.key_expr.as_str())
+        .collect();
+    assert!(keys.contains(&"zk2/lab/radio-a/radio.v1/stream/air/dropped_total"));
+    assert!(keys.contains(&"zk2/lab/radio-b/radio.v1/stream/air/dropped_total"));
+    // 2. The hand-written block: one wildcard rule for the two.
+    let mut hand = both.clone();
+    hand.downsampling[0].rules = vec![link::Rule {
+        key_expr: "zk2/lab/*/radio.v1/stream/air/dropped_total".into(),
+        freq: 1.0,
+    }];
+    let one_listed = plan(&policy(&[]));
+
+    let ((a1, b1), (a2, b2), (a3, b3)) = (
+        two_owners(&both).await,
+        two_owners(&hand).await,
+        two_owners(&one_listed).await,
+    );
+    // 1. A rule per key, a timer per rule.
+    assert!((4..=6).contains(&a1) && (4..=6).contains(&b1), "{a1} {b1}");
+    // 2. One timer for every key the rule covers.
+    assert!((4..=6).contains(&(a2 + b2)), "{a2} + {b2}");
+    let c = check(&hand, &both_text, None);
+    assert!(
+        c.findings
+            .iter()
+            .any(|f| f.code == link::Code::WildcardDownsampling),
+        "{:?}",
+        c.findings
+    );
+    assert_eq!(c.judgement.conclusive(), Some(true));
+    // 3. A service not listed is in no rule, and crosses at its owner's rate.
+    assert!((4..=6).contains(&a3), "radio-a {a3}");
+    assert!(b3 >= 80, "radio-b about 100: {b3}");
+}
+
+/// `fault` and `change` 5 times each within one second; what G and L
+/// receive of each.
+async fn events(plan: &AclPlan) -> ((usize, usize), (usize, usize)) {
+    let n = near(plan).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let g = client(&n.face, "ground").await;
+    let l = client(&n.tcp, "local").await;
+    let gr = reader(&g, plan, None).await;
+    let lr = reader(&l, plan, None).await;
+    // G's GET crosses whatever the face exposes: its session stands. The
+    // settle waits on L, which hears `oper` whatever the face says.
+    assert!(answered(&g, PEERS_X, false, Duration::from_secs(5)).await);
+    o.settle(&[&lr.seen], &[&gr.seen]).await;
+    for i in 0..10u64 {
+        let ev = if i % 2 == 0 { "fault" } else { "change" };
+        o.put(&format!("events/{ev}/{}", ulid(i)), "e").await;
+        tokio::time::sleep(Duration::from_millis(90)).await;
+    }
+    tokio::time::sleep(SILENCE).await;
+    let count = |s: &Seen| {
+        (
+            s.puts("radio-a/radio.v1/events/fault/"),
+            s.puts("radio-a/radio.v1/events/change/"),
+        )
+    };
+    (count(&gr.seen), count(&lr.seen))
+}
+
+/// §4 An event that must not cross (§2.7, §2.9).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s4_an_event_that_must_not_cross() {
+    let generated = plan(&policy(&[]));
+    // 2. The sketch's spelling of the events deny, draft 0's keys.
+    let mut sketch = generated.clone();
+    let id = "face:radio:events:radio.v1";
+    let rule = sketch
+        .rules
+        .iter_mut()
+        .find(|r| r.id == id)
+        .expect("the plan's events deny");
+    assert_eq!(rule.key_exprs, ["zk2/*/*/radio.v1/events/change/**"]);
+    rule.key_exprs = vec!["zk2/*/*/radio.v1/stream/change/**".into()];
+    // 3. A face that exposes none.
+    let closed = plan(&policy(&[CLOSED]));
+    assert_eq!(
+        closed.faces[0]
+            .deny
+            .iter()
+            .find(|d| d.id == "events")
+            .map(|d| d.key_exprs.clone()),
+        Some(vec!["zk2/*/*/*/events/**".to_owned()])
+    );
+
+    let ((g1, l1), (g2, _), (g3, _)) = (
+        events(&generated).await,
+        events(&sketch).await,
+        events(&closed).await,
+    );
+    // 1. Every fault on its own key, none dropped by the interval; no
+    //    change. L receives all ten.
+    assert_eq!(g1, (5, 0), "G");
+    assert_eq!(l1, (5, 5), "L");
+    // 2. The sketch's deny covers no event key.
+    assert_eq!(g2, (5, 5), "G under the sketch's spelling");
+    // 3. No occurrence at all.
+    assert_eq!(g3, (0, 0), "G across a face that exposes none");
+}
+
+/// A late joiner's merge (core §4.2): each member and its stamp.
+#[derive(Default)]
+struct Merged(BTreeMap<String, Option<zenoh::time::Timestamp>>);
+
+impl Merged {
+    fn apply(&mut self, key: &str, kind: SampleKind, stamp: Option<zenoh::time::Timestamp>) {
+        let newer = match (self.0.get(key).copied().flatten(), stamp) {
+            (Some(held), Some(t)) => t > held,
+            _ => true,
+        };
+        if !newer {
+            return;
+        }
+        match kind {
+            SampleKind::Put => {
+                self.0.insert(key.to_owned(), stamp);
+            }
+            SampleKind::Delete => {
+                self.0.remove(key);
+            }
+        }
+    }
+
+    /// Seeds as core §4.2 says: subscribed already, GET each granted
+    /// selector over the owner's state, merge by stamp.
+    async fn seed(&mut self, g: &zenoh::Session, selectors: &[String]) {
+        for sel in selectors {
+            let rx = g
+                .get(sel.as_str())
+                .target(QueryTarget::All)
+                .consolidation(ConsolidationMode::None)
+                .timeout(T)
+                .await
+                .unwrap();
+            while let Ok(r) = rx.recv_async().await {
+                if let Ok(s) = r.result() {
+                    self.apply(s.key_expr().as_ref(), s.kind(), s.timestamp().copied());
+                }
+            }
+        }
+    }
+}
+
+/// §5's steps 1 to 3 with the owner's window at `window_s`: what G's merge
+/// holds after seeding, and after seeding again past the outage.
+async fn outage(plan: &AclPlan, window_s: u64) -> (usize, usize) {
+    let n = near(plan).await;
+    let contract = contracts().iter().next().unwrap().contract().clone();
+    let iface: zenkey_model::grammar::IfaceId = "radio.v1".parse().unwrap();
+    let owner_session = client(&n.tcp, "radio-a").await;
+    let mut cfg = util::zk2::config("lab/radio-a");
+    cfg.tombstone_window_s = Some(window_s);
+    let mut b = zenkey::ServiceBuilder::new(&owner_session, cfg);
+    b.implement(zenkey::Implementation::new(contract.clone()))
+        .unwrap();
+    for r in &contract.resources {
+        b.expose(
+            &iface,
+            &format!("{}/{}", r.token.as_str(), r.template.as_str()),
+        )
+        .unwrap();
+    }
+    b.serve_state(&iface).unwrap();
+    let mut svc = b.start().await.expect("the owner starts under the block");
+    let oper = svc
+        .state_writer(&iface, "state/oper", &Default::default())
+        .await
+        .unwrap();
+    let peer: zenkey_model::template::Bindings = [("peer".to_owned(), vec!["x".to_owned()])].into();
+    let peers = svc
+        .state_writer(&iface, "state/peers/{peer}", &peer)
+        .await
+        .unwrap();
+    oper.put("on").await.unwrap();
+    peers.put("px").await.unwrap();
+
+    // G's granted selectors over lab/radio-a's state (F-116).
+    let selectors = vec![
+        "zk2/lab/radio-a/radio.v1/state/oper".to_owned(),
+        "zk2/lab/radio-a/radio.v1/state/peers/*".to_owned(),
+    ];
+    let mut merged = Merged::default();
+    let g = client(&n.face, "ground").await;
+    let gr = reader(&g, plan, Some(&selectors)).await;
+    merged.seed(&g, &selectors).await;
+    let before = merged.0.len();
+    // 2. The face goes down for 4 s; meanwhile the owner deletes both.
+    drop(gr);
+    g.close().await.unwrap();
+    oper.delete().await.unwrap();
+    peers.delete().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    // 3. The face comes back, and G seeds again.
+    let g = client(&n.face, "ground").await;
+    let _gr = reader(&g, plan, Some(&selectors)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    merged.seed(&g, &selectors).await;
+    (before, merged.0.len())
+}
+
+/// §5 A state window raised to the outage (§2.11).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s5_a_state_window_raised_to_the_outage() {
+    let text = policy(&[]);
+    let plan = plan(&text);
+    // The plan's floor is the face's outage, and the owner runs with it.
+    let floor = plan.faces[0].windows[0].clone();
+    assert_eq!((floor.service.as_str(), floor.min_s), ("lab/radio-a", 6));
+    // One after the other: two runtime owners of `lab/radio-a` in one
+    // process, each on a bus of its own, left a GET unanswered when run at
+    // once (observed; not this profile's).
+    let raised = outage(&plan, floor.min_s).await;
+    let control = outage(&plan, 2).await;
+    // 1–3. G held both, and its merge removes both by the owner's
+    //      `reply_del`s, within the window.
+    assert_eq!(raised, (2, 0), "a window of the outage keeps the deletes");
+    // 4. A window below the outage loses them: both stay standing.
+    assert_eq!(control, (2, 2), "a lost delete (core §4.2)");
+    // The linter, given the windows, reports the control's.
+    let low = BTreeMap::from([("lab/radio-a".to_owned(), 2)]);
+    let c = check(&plan, &text, Some(&low));
+    assert_eq!(
+        c.findings,
+        [link::Finding::new(
+            link::Code::WindowUnderOutage,
+            Some("radio"),
+            "lab/radio-a"
+        )]
+    );
+    let ok = BTreeMap::from([("lab/radio-a".to_owned(), floor.min_s)]);
+    assert!(check(&plan, &text, Some(&ok)).findings.is_empty());
+}
+
+/// A tool across the face judging a provider's liveness (`freshness.v1`
+/// §2.9, §5) over the plan's evidence: live while a member of it is fresh
+/// by G's receive clock; never down.
+fn liveness(plan: &AclPlan, seen: &Seen, since: Instant) -> &'static str {
+    let evidence = &plan.faces[0]
+        .liveness
+        .iter()
+        .find(|l| l.service == "lab/radio-a")
+        .unwrap()
+        .evidence;
+    let contract = contracts().iter().next().unwrap().contract().clone();
+    let fresh = evidence.iter().any(|name| {
+        let rel = name.strip_prefix("radio.v1/").unwrap();
+        let r = contract
+            .resources
+            .iter()
+            .find(|r| format!("{}/{}", r.token.as_str(), r.template.as_str()) == rel)
+            .unwrap();
+        let h = freshness::horizon(r.kind, &r.annotations);
+        let o = Observation::Subscribed {
+            last: seen
+                .last(&format!("radio-a/radio.v1/{rel}"))
+                .map(|t| Last::Put(t.elapsed())),
+            listened: since.elapsed(),
+            complete: true,
+        };
+        freshness::judge(&h, &o).verdict == Verdict::Fresh
+    });
+    if fresh { "live" } else { "unobservable" }
+}
+
+/// §6's steps on `plan`: the verdict at 5 s, and 6 s after the owner
+/// closes; and how many deliveries G had.
+async fn judged(plan: &AclPlan) -> (&'static str, &'static str, usize) {
+    let n = near(plan).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let g = client(&n.face, "ground").await;
+    let evidence = vec![
+        "zk2/lab/radio-a/radio.v1/state/oper".to_owned(),
+        "zk2/lab/radio-a/radio.v1/stream/air/dropped_total".to_owned(),
+    ];
+    let gr = reader(&g, plan, Some(&evidence)).await;
+    assert!(answered(&g, PEERS_X, false, Duration::from_secs(5)).await);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let since = Instant::now();
+    let mut at_5 = "";
+    for i in 0..120u64 {
+        o.put("stream/air/dropped_total", i.to_string()).await;
+        if i % 40 == 0 {
+            o.put("state/oper", "up").await;
+        }
+        if i == 100 {
+            at_5 = liveness(plan, &gr.seen, since);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // 2. The owner closes its service: nothing of it crosses any more.
+    //    Across the face that is all a close changes (its tokens never
+    //    crossed, §2.6), so the owner stops publishing and is left open.
+    let delivered = gr.seen.len();
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let after = liveness(plan, &gr.seen, since);
+    drop(o);
+    (at_5, after, delivered)
+}
+
+/// §6 Liveness across the face (§2.12).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s6_liveness_across_the_face() {
+    let open = plan(&policy(&[]));
+    assert_eq!(
+        open.faces[0].liveness[0].evidence,
+        ["radio.v1/state/oper", "radio.v1/stream/air/dropped_total"]
+    );
+    let closed = plan(&policy(&[CLOSED]));
+    assert!(closed.faces[0].liveness[0].evidence.is_empty());
+    let (live, after, _) = judged(&open).await;
+    let (from_start, _, nothing) = judged(&closed).await;
+    // 1. Both fresh at G: live.
+    assert_eq!(live, "live");
+    // 2. Both stale: unobservable, never down (core R7).
+    assert_eq!(after, "unobservable");
+    // 3. No evidence: unobservable from the start, whatever the owner
+    //    publishes, and nothing of it reaches G.
+    assert_eq!(from_start, "unobservable");
+    assert_eq!(nothing, 0, "G receives nothing of the owner");
+}
