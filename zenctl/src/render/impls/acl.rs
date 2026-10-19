@@ -546,13 +546,13 @@ impl Render for FaceCheck {
             .findings
             .iter()
             .map(|f| {
-                Note::caveat(format!(
-                    "{} [face {}] {}: {}",
-                    f.code,
-                    f.face.as_deref().unwrap_or("-"),
-                    f.at,
-                    zenkey_fleet::link_says(f.code)
-                ))
+                let says = zenkey_fleet::link_says(f.code);
+                // A finding of the whole block, as `narrowed_too_far` is,
+                // names no face (link.v1 §2.15, 0.4).
+                Note::caveat(match &f.face {
+                    Some(face) => format!("{} [face {face}] {}: {says}", f.code, f.at),
+                    None => format!("{} {}: {says}", f.code, f.at),
+                })
             })
             .collect();
         notes.push(

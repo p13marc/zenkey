@@ -7,8 +7,10 @@ principal's sessions, subject by subject, since any allow wins across
 subjects (§2.4), and the downsampling rules on the face's transports. It
 reads every other subject too: zenoh ties no credential to a link, so a
 subject bound to another principal that is not kept off the face's link
-protocols matches that principal's credentials over the face (§2.4, 0.3).
-Then it compares the whole block with the plan the same face policy,
+protocols matches that principal's credentials over the face (§2.4, 0.3),
+and a subject bound to nobody is the face's own only when it selects the
+face's link protocols alone and rides exactly the far principal's policies
+(0.4). Then it compares the whole block with the plan the same face policy,
 enrollment and contracts compile to, as `acl gen --check` does.
 
 The lab router of `examples/zk2/link/`, running the block `acl gen
@@ -45,9 +47,68 @@ against the plan: 4 difference(s)
   ✗ downsampling_differs  radio   planned link_protocols unixsock-stream egress put zk2/lab/radio-a/radio.v1/@stream/frames@1Hz zk2/lab/radio-a/radio.v1/stream/air/dropped_total@1Hz; configured link_protocols unixsock-stream egress put zk2/lab/*/radio.v1/stream/air/dropped_total@1Hz
 FAIL
 zk_not_denied [face radio] @zk: a pair of the nine messages and both flows is not denied on @zk: presence, descriptors or bundles cross the face (§2.6, §2.15)
-near_subject_on_face [face radio] local: a subject bound to another principal than the face's far one, and not kept off the face's link protocols: zenoh ties no credential to a link, so that principal's credentials over the face match it, and get its grants there (§2.4, §2.15)
+near_subject_on_face [face radio] local: a subject bound to another principal than the face's far one, whatever else it names, and not kept off the face's link protocols: zenoh ties no credential to a link, so that principal's credentials over the face match it, and get its grants there (§2.4, §2.15)
 wildcard_downsampling [face radio] zk2/lab/*/radio.v1/stream/air/dropped_total: a downsampling rule that is not one concrete key: every key it covers shares one timer (§2.8, §2.15)
 judged against the config file tests/cmd/fixtures/link/router-drifted.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+
+```
+
+Since `link.v1` 0.4 (F-120) the checks also read which policies list each
+subject. Two hand edits under `deny`: `local`'s subject bound to `ground`
+and `local` both, which `local`'s credentials over the face still match,
+though one of its names is the far principal's; and a subject selected by
+the face's link protocol and bound to nobody, listed in `local`'s policy,
+which hands every session over the face `local`'s grants there. Each is a
+finding, and each also leaves a subject that can match the far principal
+with no `@zk` deny. Exit 1.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-stray.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --format table
+? 1
+tests/cmd/fixtures/link/router-stray.json5: face radio (far ground): 8 deny rule(s) across subject(s) local, ground, face:radio; 2 downsampling rule(s) on its transports
+  ✗ zk_not_denied           face radio  @zk
+  ✗ face_subject_misplaced  face radio  face:radio
+  ✗ near_subject_on_face    face radio  local
+against the plan: 5 difference(s)
+  ✗ subject_differs             local       planned cns [] usernames ["local"] link_protocols ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"]; configured cns [] usernames ["ground", "local"]
+  ✗ subject_extra               face:radio  configured cns [] usernames [] link_protocols ["unixsock-stream"]
+  ✗ subject_unplanned_property  face:radio  configured link_protocols: ["unixsock-stream"]
+  ✗ policy_missing              local       planned rules [call-in:tool.console, call-out:tool.console, consume-in:tool.console, consume-out:tool.console, contracts-in, contracts-out, presence-in:tool.console, presence-out:tool.console] subjects [local]
+  ✗ policy_extra                local       configured rules [call-in:tool.console, call-out:tool.console, consume-in:tool.console, consume-out:tool.console, contracts-in, contracts-out, presence-in:tool.console, presence-out:tool.console] subjects [face:radio, local]
+FAIL
+zk_not_denied [face radio] @zk: a pair of the nine messages and both flows is not denied on @zk: presence, descriptors or bundles cross the face (§2.6, §2.15)
+face_subject_misplaced [face radio] face:radio: a subject bound by no identity that a session over the face matches, not listed in exactly the policies of the far principal's subjects on the face: every session over the face gets another policy's grants, misses a deny of the far principal's, or, listed in none, is allowed by default (§2.4, §2.15)
+near_subject_on_face [face radio] local: a subject bound to another principal than the face's far one, whatever else it names, and not kept off the face's link protocols: zenoh ties no credential to a link, so that principal's credentials over the face match it, and get its grants there (§2.4, §2.15)
+judged against the config file tests/cmd/fixtures/link/router-stray.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+
+```
+
+Three under `allow`, against the `allow` plan: the face's own subject also
+selected by `tcp`, so every session over TCP gets `ground`'s grants; and
+`ground` narrowed to its face and `radio-b` off `udp`, so each one's
+session over a link protocol it is not kept off matches no subject, and is
+allowed everything. `narrowed_too_far` reads every face at once, so it
+names no face. Exit 1.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-allow-narrowed.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --default-permission allow --format table
+? 1
+under default_permission allow, zenoh evaluates no allow rule, so each grant is compiled into denies of its complement, from the contracts given (regenerate on every revision). Deny works by inclusion: a put on a wildcard key is in none and reaches subscribers (R6 discards it), and a wildcard call is in none either, so an operation that allows fan-out executes on every provider for a principal never granted it, only its answers denied (O2 refuses the others). A session matching no subject has no policy and is allowed everything, so authentication must refuse it (§11.2, §11.3)
+tests/cmd/fixtures/link/router-allow-narrowed.json5: face radio (far ground): 20 deny rule(s) across subject(s) ground, face:radio; 2 downsampling rule(s) on its transports
+  ✗ narrowed_too_far          face -      ground
+  ✗ narrowed_too_far          face -      radio-b
+  ✗ face_subject_beyond_face  face radio  face:radio
+against the plan: 3 difference(s)
+  ✗ subject_differs             radio-b     planned cns [] usernames ["radio-b"] link_protocols ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"]; configured cns [] usernames ["radio-b"] link_protocols ["tcp", "tls", "quic", "serial", "unixpipe", "vsock", "ws"]
+  ✗ subject_differs             face:radio  planned cns [] usernames [] link_protocols ["unixsock-stream"]; configured cns [] usernames [] link_protocols ["unixsock-stream", "tcp"]
+  ✗ subject_unplanned_property  ground      configured link_protocols: ["unixsock-stream"]
+FAIL
+narrowed_too_far ground: under allow, this principal's session over a link protocol it is not kept off matches no subject, so it is allowed everything there: a subject narrowed further than the faces it is kept off (§2.4, §2.15)
+narrowed_too_far radio-b: under allow, this principal's session over a link protocol it is not kept off matches no subject, so it is allowed everything there: a subject narrowed further than the faces it is kept off (§2.4, §2.15)
+face_subject_beyond_face [face radio] face:radio: a subject bound by no identity that a session over the face matches, and that selects a link protocol outside the face's, or every one: sessions off the face match it too, and get what its policies grant beside their own (§2.4, §2.15)
+judged against the config file tests/cmd/fixtures/link/router-allow-narrowed.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
 
 ```
