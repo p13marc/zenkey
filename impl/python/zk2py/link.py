@@ -1,5 +1,5 @@
 """``link.v1``, text 0.6 (``spec/profiles/link/v1.md``, written against
-core 0.31): what crosses a constrained face.
+core 0.32): what crosses a constrained face.
 
 From the text alone:
 - **the face policy** (§2.1): :func:`parse_policy` reads the TOML file and
@@ -622,8 +622,9 @@ def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dic
 class BlockError(ValueError):
     """A block no router runs: zenoh 1.10.1 refuses it when the
     configuration loads (measured: a subject or a rule with no id, two
-    subjects, two rules or two policies with one id, a policy listing a
-    subject or a rule the block does not define), or a face the face policy
+    subjects, two rules or two policies with one id, a policy id that is
+    not a string, a policy listing a subject or a rule the block does not
+    define), or a face the face policy
     does not have. A check says so rather than reading it. A policy with no
     id loads (measured), so a policy needs none."""
 
@@ -663,11 +664,17 @@ def check_ids(subjects: list[dict[str, Any]], policies: list[dict[str, Any]],
             rule_ids.add(rid)
     policy_ids: set[str] = set()
     for i, pol in enumerate(policies):
-        name = pol.get("id", f"#{i}")
-        if "id" in pol:
-            if pol["id"] in policy_ids:
-                raise BlockError(f"policy id {pol['id']!r} is repeated")
-            policy_ids.add(pol["id"])
+        pid = pol.get("id")
+        # Measured: a policy id that is a list or a number is refused at
+        # insert ("invalid type … expected a string"); a null one loads, as
+        # an absent one does.
+        if pid is not None and not isinstance(pid, str):
+            raise BlockError(f"policy #{i} has an id that is not a string: {pid!r}")
+        name = pid if pid is not None else f"#{i}"
+        if pid is not None:
+            if pid in policy_ids:
+                raise BlockError(f"policy id {pid!r} is repeated")
+            policy_ids.add(pid)
         for sid in pol.get("subjects") or []:
             if sid not in ids:
                 raise BlockError(f"policy {name} lists subject {sid!r}, which the block does not define")

@@ -103,9 +103,9 @@ link          156 passed     0 failed
 total        1414 passed     0 failed
 ```
 
-The figures are against `core.md` 0.31, `hostid.v1` 0.5, `freshness.v1`
+The figures are against `core.md` 0.32, `hostid.v1` 0.5, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.6, which changed no
-fixture (nor did core 0.31). `link.v1` 0.5 added ten `lints.json` cases
+fixture (nor did core 0.31 or 0.32). `link.v1` 0.5 added ten `lints.json` cases
 and changed one. `link.v1` 0.4
 added 18 `lints.json` cases, and 0.3 one `plan.json` case and eight
 `lints.json` cases. `link.v1` 0.2
@@ -150,9 +150,13 @@ fixtures:
   0.5's scenario §11. A generator MAY leave a principal's own keys out of
   its complement, and zk2py's, which denies them per message and flow,
   conforms. §11's expected 7 gives that branch's outcome exactly.
-- F-123 is open: found against core 0.31. §11.2's new MUST names keys, not
-  keys per message and flow, and only `security.md` §2 decides that
-  (`SPEC-FINDINGS.md`, "At core 0.31 and link.v1 0.6").
+- Core 0.32 resolved F-123, found against its 0.31, in zk2py's wording:
+  a principal's complement is taken per message and flow.
+- F-124 and F-125 are open, from a last cold read of `link.v1` 0.6, each
+  measured (`SPEC-FINDINGS.md`, "At core 0.32"):
+  - a block whose access control is not enabled enforces nothing, and
+    passes every check;
+  - two faces with one far principal carry each other's denies.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -849,7 +853,7 @@ python -m zk2py.live_interop --only config       # the live runner's config run
   range, and restores a hot group left part applied once: zk2py's device
   reports it as `{"refused": words, "partial": {…}}`.
 
-## link.v1 (profile text 0.6, core 0.31)
+## link.v1 (profile text 0.6, core 0.32)
 
 ```bash
 just py-link

@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Thirty-four rounds.**
+**Thirty-five rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -73,7 +73,9 @@ where that was not enough, or where the spec said two things.
 - F-122 was found against `link.v1` 0.5, running its scenario §11 (see
   "At link.v1 0.5"). Core 0.31 and `link.v1` 0.6 resolved it.
 - F-123 was found against core 0.31's §11.2, reading its new bullet (see
-  "At core 0.31 and link.v1 0.6" at the end).
+  "At core 0.31 and link.v1 0.6"). Core 0.32 resolved it.
+- F-124 and F-125 were found against `link.v1` 0.6, in a last cold read of
+  §2.4, §2.15 and §5 (see "At core 0.32" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -83,8 +85,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.31, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4,
-config.v1 0.3 and link.v1 0.6:** 123 entries, one open.
+**Counts at core 0.32, hostid.v1 0.5, freshness.v1 0.3, health.v1 0.4,
+config.v1 0.3 and link.v1 0.6:** 125 entries, two open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -201,12 +203,13 @@ config.v1 0.3 and link.v1 0.6:** 123 entries, one open.
   0.5 also found the same hole in the far principal's subject.
 - F-122: resolved by core 0.31 and `link.v1` 0.6. Both complements now
   conform, and zk2py's, the stricter, is named with its exact outcome.
-- F-123: open, against core 0.31.
+- F-123: resolved by core 0.32, in zk2py's wording.
+- F-124 and F-125: open, against `link.v1` 0.6.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at core 0.31, config.v1 0.3, link.v1 0.6 | Location | In one line |
+| Id | Severity | Status at core 0.32, config.v1 0.3, link.v1 0.6 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -330,7 +333,9 @@ by the spec section that now states the rule.
 | F-120 | gap | resolved by link 0.4 | link.v1 0.3 §2.15, with §2.4 | The two subject checks pass three blocks §2.4 forbids, measured on a router: a subject bound to the far principal and a near one, a face subject that also names a near link protocol, and under `allow` the far principal's subject narrowed to its face. |
 | F-121 | gap | resolved by link 0.5 | link.v1 0.4 §2.15 `narrowed_too_far`, with §2.4 | `narrowed_too_far` credits a name to a subject that names it beside a name of the other kind, or as the other kind, which zenoh matches only for a session presenting both: measured, `local` narrowed off `tcp` matches no subject over TCP, its puts reach the near side, and the tool reports nothing. |
 | F-122 | ambiguity | resolved by core 0.31, link 0.6 | link.v1 0.5 scenarios.md §11 expected 7, with core §11.2 | Under `allow`, X, which matches only a face subject listed by `ground`'s policy and `radio-a`'s, receives nothing on zk2py's router, where the text expects what §1's G receives: zk2py's `radio-a` policy denies what `radio-a` holds no grant for, and core §11.2 does not say whether a generator's complement does. |
-| F-123 | ambiguity | open | core 0.31 §11.2 "A principal's own keys" | The new MUST names keys, "the keys of the services it does not run that its grants do not name", not keys per message and flow: read per key, a key a Consume grant names would need no deny of a `put` on it. `security.md` §2 decides it per message and flow. |
+| F-123 | ambiguity | resolved by core 0.32 | core 0.31 §11.2 "A principal's own keys" | The new MUST names keys, "the keys of the services it does not run that its grants do not name", not keys per message and flow: read per key, a key a Consume grant names would need no deny of a `put` on it. `security.md` §2 decides it per message and flow. |
+| F-124 | gap | open | link.v1 0.6 §2.15, §5 | A block read from a router's configuration whose access control is not enabled (`enabled` false, or absent, zenoh's default) enforces nothing, and passes every check: measured, G and X both get `local`'s share and their puts reach the near side, and the tool reports nothing. |
+| F-125 | gap | open | link.v1 0.6 §2.4, §2.1 | Two faces of one policy with one far principal: §2.4 puts both plans' denies into that principal's policy, which holds on both faces, so each face carries the other's denies; nothing lints, refuses or splits it. Measured: G over a face that exposes `link` receives none of its pushes beside a face that exposes none. |
 
 ---
 
@@ -5484,6 +5489,8 @@ denies per message and flow, as it did. Wording that would decide it:
 "deny, on each message and flow, the keys of the services it does not run
 that its grants do not name for that message and flow".
 
+**Status at core 0.32: resolved by 0.32, in zk2py's wording.** Core §11.2: "A generator MUST deny, in each principal's policy, on each message and flow, the keys of the services it does not run that its grants do not name for that message and flow. A Consume grant on another service's key names it for reading and receiving only, so the principal's writes to it are denied (the table above)." zk2py's generator already compiled every message and flow apart, and nothing in it changed.
+
 **Where zk2py's reading of core 0.31 and link.v1 0.6 needed a guess,
 beyond the finding.**
 - **The liveness probe's key**, `zk2py-probe/<who>`, is outside the
@@ -5491,3 +5498,145 @@ beyond the finding.**
   declares stay open under `allow`" makes it reachable for any session.
 - **Policy ids are optional**, measured. A repeated one is refused only
   between policies that carry an id: two policies with none load.
+
+## At core 0.32 (#609)
+
+Core 0.32 rewords one MUST of §11.2, "A principal's own keys", in zk2py's
+wording: "on each message and flow, … for that message and flow". That
+answers F-123. No rule, code or fixture changed, and `link.v1` stays at
+0.6.
+
+**`just py-conformance`: 1414 of 1414. `just py-link`: 79 of 79,** all
+eleven sections. §11 also prints the cold read's measurements as `NOTE`
+lines (below), which are not counted.
+
+**Robustness** (review-bot on PR #792):
+- **The liveness probe** (§11 step 7) no longer depends on fixed sleeps:
+  - L's subscriber on the probe key is undeclared in a `finally`;
+  - each session puts again every 0.1 s until L has one from every session,
+    or until a 5 s deadline. `PROBE_DEADLINE_S` states the assumption:
+    a declaration and a put each cross N on loopback well within it;
+  - the probe key carries a suffix unique to the run,
+    `zk2py-probe-<12 hex>/<who>`.
+- **`check_ids` checks a policy id's type** before comparing it.
+  Measured on zenoh 1.10.1:
+
+  | Policy id | At load |
+  |---|---|
+  | a list | refused at insert ("invalid type: sequence, expected a string") |
+  | a number | refused at insert |
+  | `null` | loads, as an absent id does |
+  | `""` | loads |
+
+  zk2py raises `BlockError` for an id that is neither a string nor null.
+
+**The last cold read of `link.v1` 0.6, §2.4, §2.15 and §5.** What a second
+implementation would still have to guess comes to two findings, F-124 and
+F-125, each measured.
+
+Two more readings are decided by measurement. The text does not state
+them, but zenoh's own defaults settle them:
+- a rule with no `flows` applies to both flows (round 34);
+- a block with no `default_permission` behaves as `deny`. Measured with
+  the generator's `deny` block without it: G got §1's share and X nothing.
+
+Neither is in `lints.json`'s shape, and a tool reading a live block needs
+both. That is the same gap as F-124, which zk2py files once, for the
+default that hides a whole block.
+
+Everything else read as decided.
+
+### F-124 · gap · link.v1 0.6 §2.15, §5: a block whose access control is not enabled
+
+> §2.15: "A tool checks a block read from a router's configuration against
+> the face it guards. It MUST report what the fixture reports"
+
+> §5: "a router's block is a file someone read, since the running block is
+> not on the bus (core §11.3)." … "**Unobservable:** whether the router
+> runs the block read (core §11.3)."
+
+> `lints.json`'s description: "block is a router's block for one face:
+> {face, namespace, deny: [{flows, messages, key_exprs}], downsampling:
+> [{key_expr, freq}]}"
+
+zenoh's `access_control` carries `enabled`. A block whose `enabled` is
+false enforces none of its rules. So does a block that omits it, since
+false is zenoh's default (measured).
+
+Measured with the generator's `deny` block for §7's deployment:
+- with `enabled: false`, and again with `enabled` absent, G and X each get
+  `local`'s share: 100 of `air/frames_total` and of `raw`, the 5 `change`
+  occurrences, both tokens and the descriptor;
+- each one's 5 puts on `lab/radio-a`'s key reach L;
+- zk2py's tool reports nothing, since every check reads the rules and the
+  subjects, which are all in place.
+
+§5's "Unobservable: whether the router runs the block read" is about a
+router that may not run the file. Here the file itself says it is off,
+which a tool can read. The text, `lints.json`'s shape and its codes say
+nothing of `enabled`. A second implementation must guess whether a
+disabled block is checked as written (zk2py's tool does, and passes it),
+reported, or "not asked".
+**Resolved:** open. zk2py's tool checks the rules as written, as the
+fixture's shape implies. A reading that would decide it: a finding for a
+block whose `enabled` is not true (none of its rules is enforced, and
+under either posture everything crosses). Or §2.15 could say a tool reads
+`enabled`, `default_permission` and a rule's `flows` as zenoh 1.10.1
+defaults them: false, `deny`, and both flows.
+
+### F-125 · gap · link.v1 0.6 §2.4, §2.1: two faces with one far principal
+
+> §2.4: "A generator MUST therefore put every deny of a face's plan into
+> the policy of each subject that can match the far principal's session
+> on the face: the far principal's, at least."
+
+> §2.4: "The far principal's subject is narrowed off the faces whose far
+> principal it is not, and no further."
+
+> §2.3: "A generator derives a plan for each face of a policy"
+
+Nothing keeps two faces of one policy from naming the same `far`.
+- §2.1's linter has no finding for it.
+- Appendix B's zenoh-modem has an RF face whose far principal is `ground`,
+  and an SBD terminal whose policy it does not show. On one router with
+  one ground principal, the two would be this case.
+- `plan.json` and `lints.json` give two faces distinct far principals.
+
+The plans are per face. But a zenoh rule cannot be limited to a link
+protocol, and the far principal's subject is narrowed off no face of its
+own. So both plans' denies sit in one policy, which holds wherever its
+subject matches, on either face and off them. Deny is evaluated first
+within a policy, so each face carries the union of the two plans' denies.
+That fails closed: no leak. But the face that exposes loses what its plan
+lets cross.
+
+Measured on N, under `deny`: the scenarios' policy with a second face,
+`sat`, to `ground` over `tls`, exposing none. zk2py's generator compiles
+both faces into `ground`'s policy, `face-radio-*` beside `face-sat-*`. G
+over the radio face then receives no sample of `air/dropped_total` or
+`frames`, no `oper` put and no `fault` occurrence, where §1's G receives
+5, 5, 10 and 5. Its GET and call are still answered (by grant, §2.9). The
+tool reports nothing: the block holds every deny of both plans, and §2.15
+reads no plan.
+
+A second implementation must guess among:
+- refusing the policy;
+- accepting the union;
+- splitting the far principal's subject per face: one subject per face's
+  link protocols, each in a policy with that face's denies, and under
+  `allow` one more off the faces.
+
+The text describes none of these. Splitting would pass §2.15's checks,
+but §2.4's "and no further" can be read against it.
+**Resolved:** open. zk2py's generator writes the union, as §2.4's MUST
+reads, and the scenarios never give two faces one far. A reading that
+would decide it:
+- a lint for two faces with one `far`, refused or warned;
+- or §2.4 saying the far principal's policy holds every face's denies, so
+  each such face carries all of them;
+- or §2.4 describing the split.
+
+**Where zk2py's reading of core 0.32 and link.v1 0.6 needed a guess,
+beyond the findings.**
+- **The probe's deadline**, 5 s, and its 0.1 s repeat: timings for
+  loopback. A probe later than the deadline counts as not arrived.
