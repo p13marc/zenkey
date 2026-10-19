@@ -1,5 +1,5 @@
 """The ``link.v1`` scenarios (``spec/profiles/link/scenarios.md``, text
-0.6, core 0.31) on zenoh-python routers: ``just py-link`` (``python -m
+0.6, core 0.32) on zenoh-python routers: ``just py-link`` (``python -m
 zk2py.link_scenarios [--only 1 …]``), all eleven sections.
 
 - **The deployment** is the reference's example, ``examples/zk2/link/``,
@@ -1013,23 +1013,50 @@ def _anonymous(endpoint: str, timeout_s: float = 10.0) -> tuple[str, Any]:
 #: A key no contract declares, outside every face deny: under ``allow`` it
 #: "stays open" (core §11.2), so a put on it shows a session is live.
 PROBE_KEY = "zk2py-probe"
+#: How long :func:`_alive` waits for every probe to reach L. It assumes a
+#: subscriber's declaration and a put each cross N, on loopback, well
+#: within it; a probe that arrives later counts as not arrived.
+PROBE_DEADLINE_S = 5.0
+#: How often :func:`_alive` puts each probe again while it waits.
+PROBE_EVERY_S = 0.1
 
 
 def _alive(w: World, sessions: dict[str, Any]) -> dict[str, int]:
-    """Under ``allow``: each session puts once on ``zk2py-probe/<who>``, a
-    key no contract declares, and L counts what reaches it. A session the
-    block denies everything of the deployment's keys still reaches L here,
-    so "nothing" is the block's, not a dead session's."""
+    """Under ``allow``: each session puts on ``zk2py-probe-<run>/<who>``, a
+    key no contract declares, with a suffix unique to this run, and L
+    subscribes to it. The puts repeat every :data:`PROBE_EVERY_S` until L
+    has one from every session or :data:`PROBE_DEADLINE_S` passes, so no
+    fixed sleep has to cover the subscriber's declaration. Returns 1 for a
+    session whose probe reached L, else 0. A session the block denies all
+    of the deployment's keys still reaches L here, so "nothing" is the
+    block's, not a dead session's."""
+    import uuid
+
     import zenoh
 
-    got: list[str] = []
-    sub = w.l.declare_subscriber(f"{PROBE_KEY}/**", zenoh.handlers.Callback(lambda smp: got.append(str(smp.key_expr))))
-    time.sleep(0.5)
-    for who, sess in sessions.items():
-        sess.put(f"{PROBE_KEY}/{who}", b"alive")
-    time.sleep(1.0)
-    sub.undeclare()
-    return {who: got.count(f"{PROBE_KEY}/{who}") for who in sessions}
+    root = f"{PROBE_KEY}-{uuid.uuid4().hex[:12]}"
+    arrived: set[str] = set()
+    lock = threading.Lock()
+
+    def seen(smp: Any) -> None:
+        with lock:
+            arrived.add(str(smp.key_expr).rsplit("/", 1)[-1])
+
+    sub = w.l.declare_subscriber(f"{root}/**", zenoh.handlers.Callback(seen))
+    try:
+        deadline = time.monotonic() + PROBE_DEADLINE_S
+        while time.monotonic() < deadline:
+            with lock:
+                waiting = [who for who in sessions if who not in arrived]
+            if not waiting:
+                break
+            for who in waiting:
+                sessions[who].put(f"{root}/{who}", b"alive")
+            time.sleep(PROBE_EVERY_S)
+    finally:
+        sub.undeclare()
+    with lock:
+        return {who: int(who in arrived) for who in sessions}
 
 
 def _run7(posture: str, generator: str = "0.3", *, anonymous: bool = False, block_edit: Any = None,
@@ -1616,6 +1643,56 @@ def section11(report: Report) -> None:
                                      f("face_subject_misplaced", "radio", "face:radio")]), str(s8["found"]))
     report.note(sec, f"step 3's and step 4's control blocks (the generator's allow block): tool "
                      f"{s3c['found'] or 'no finding'}; {s4c['found'] or 'no finding'}")
+    _cold_read(report, sec)
+
+
+def _cold_read(report: Report, sec: str) -> None:
+    """Measurements for open SPEC-FINDINGS F-124 and F-125 (round 36's cold
+    read of link.v1 0.6), as NOTE lines: a block whose access control is
+    not enabled, and two faces of one policy with one far principal."""
+    def enabled(value: Any) -> Any:
+        def edit(block: dict[str, Any]) -> dict[str, Any]:
+            if value is None:
+                block.pop("enabled", None)
+            else:
+                block["enabled"] = value
+            return block
+        return edit
+
+    for label, value in (("enabled: false", False), ("enabled absent", None)):
+        r = _run7("deny", block_edit=enabled(value))
+        report.note(sec, f"MEASUREMENT for open SPEC-FINDINGS F-124, the generator's deny block with {label}: "
+                         f"G {_brief(r['G'])}; X {_brief(r['X'])}; tool {r['found'] or 'no finding'}")
+    two = policy() + SAT_FACE
+    pol, _ = link.parse_policy(two)
+    sat = next(f for f in derive(two)["faces"] if f["name"] == "sat")
+    w = World(two, block_edit=lambda block: link.compile_faces(pol, [sat], block))
+    try:
+        o = w.owner()
+        traffic(o)
+        g = _receives(w, w.gs, w.gt)
+        g.update(_asks(w.g, o))
+        found = w.check_block()
+    finally:
+        _close_all(w)
+    report.note(sec, f"MEASUREMENT for open SPEC-FINDINGS F-125, two faces with one far principal, ground (radio "
+                     f"exposes link, sat over tls exposes none), under deny: G over the radio face {_brief(g)}; "
+                     f"tool {found or 'no finding'}")
+
+
+#: F-125's second face: the scenarios' policy with a face to the same far
+#: principal over another link protocol, exposing none.
+SAT_FACE = """
+[face.sat]
+far          = "ground"
+attach       = "client"
+select       = { link_protocols = ["tls"] }
+class        = "constrained"
+expose       = "none"
+max_outage_s = 600
+batch_bytes  = 270
+link_bps     = 2400
+"""
 
 
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
