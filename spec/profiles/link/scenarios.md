@@ -6,7 +6,7 @@ a setup, steps, and expected observations. They are a generator's and a
 router's: the reference runs them as tests of the tool that compiles a
 face policy into a router's configuration (`zenctl acl gen`), against live
 routers, one test per section, named after it (#769, LB; §7 and §8 since
-0.3, LC).
+0.3, LC; §9 and §10 since 0.4, LD).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -341,8 +341,9 @@ console's selectors under either posture.
    is undone.
 6. Steps 1 and 3: no finding. Step 2: `near_subject_on_face` for
    `ground-router`, `local`, `radio-a` and `radio-b`. Step 4:
-   `face_subject_missing` at `unixsock-stream`. Step 5: no §2.15 finding,
-   and the comparison with the plan names the policy (§2.15).
+   `face_subject_missing` at `unixsock-stream`. Step 5:
+   `face_subject_misplaced` at the face's subject (0.4; 0.3 left it to the
+   comparison with the plan, which names the policy too).
 
 ## §8 Two minors that disagree on a stream's exposure (§2.3, §2.7)
 
@@ -369,3 +370,99 @@ N reads keys, never descriptors.
 2. The plan has a rule for each owner's `air/frames_total`, and no deny of
    it: G receives 4 to 6 from each owner, `lab/radio-b`'s among them,
    though the minor it runs keeps it home (F-119).
+
+## §9 Who a subject binds (§2.4, §2.15)
+
+A subject that names the far principal and a near one binds the near one
+too, and a principal narrowed further than §2.4 narrows it matches no
+subject where it is narrowed off (0.4, F-120). Each step is a hand edit
+of the generator's block.
+
+**Setup.** As §7, with G, X and L as §7 says. A session "over TCP" is a
+client of N on the near side, with the credentials named.
+
+**Steps.**
+1. Under `deny`, `local`'s subject replaced by one bound to `ground` and
+   `local` (`usernames = ["ground", "local"]`, no link protocol), listed
+   in `local`'s policy. The owner's traffic; G and X as §7's step 1.
+2. **Control:** the same, `ground`'s subject narrowed to `unixsock-stream`
+   (§2.4's MAY under `deny`). As step 1.
+3. Under `allow`, `ground`'s subject narrowed to `unixsock-stream`. A
+   session over TCP with `ground`'s credentials puts five times on
+   `zk2/lab/radio-a/radio.v1/stream/air/dropped_total`, and L counts what
+   reaches it.
+4. Under `allow`, `radio-b`'s subject narrowed off `tcp` too. A session
+   over TCP with `radio-b`'s credentials, as step 3.
+5. **Control:** the generator's `allow` block. Steps 3 and 4's sessions,
+   as step 3.
+6. A configuration whose subject names an empty list, `link_protocols: []`
+   or `usernames: []`, is loaded as a router's configuration is, beside
+   the same subject without the list.
+7. A tool checks the blocks of steps 1 to 4 (§2.15).
+
+**Expected.**
+1. X matches the subject bound to both, and gets `local`'s grants across
+   the face: about 100 of `air/frames_total` and of `raw`, all 5
+   occurrences of `change`, the owner's two tokens, and its GET and call
+   answered; the face's downsampling still applies. G
+   receives what §1's G receives: zenoh splits a subject into one
+   combination per value, and equal combinations are one subject, so the
+   subject's `ground` combination is `ground`'s own subject, whose deny is
+   evaluated first. Neither's puts reach L.
+2. The two `ground` combinations differ, G matches both, and any allow
+   wins: G gets `local`'s share too, as X does. Neither's puts reach L.
+3. The session matches no subject, and all five puts reach L.
+4. The same: all five reach L.
+5. None of either session's puts reaches L.
+6. Each empty list is refused at load; the subject without it loads.
+7. Steps 1 and 2: `near_subject_on_face` at `local`, and `zk_not_denied`,
+   since that subject can match `ground`'s session and its policy holds no
+   `@zk` deny. Step 3: `narrowed_too_far` at `ground`, step 4 at
+   `radio-b`, each with no face.
+
+## §10 The face's own subject (§2.4, §2.15)
+
+A face subject that selects more than the face's link protocols, or rides
+another policy than the far principal's, or none, hands sessions what
+§2.4 forbids (0.4, F-120).
+
+**Setup.** As §9.
+
+**Steps.**
+1. Under `allow`, the face's subject selected by `tcp` beside
+   `unixsock-stream`; under `deny`, a subject bound to nothing and selected
+   by both, listed in `ground`'s policy. `lab/radio-b` publishes
+   `air/dropped_total` 20 times; a session over TCP with `radio-a`'s
+   credentials and L each subscribe to that key alone, a read none of
+   `radio-a`'s grants names.
+2. **Control:** the generator's `allow` and `deny` blocks. As step 1.
+3. Under `deny`, a subject selected by `unixsock-stream` alone and bound to
+   nothing, listed in `local`'s policy. The owner's traffic; G and X as
+   §7's step 1.
+4. Under `allow`, the face's subject moved from `ground`'s policy to
+   `local`'s. As step 3.
+5. Under `allow`, the face's subject in no policy. As step 3.
+6. Under `deny`, the face's subject in a policy of its own, holding the
+   plan's denies alone (§7's step 5, under `deny`). As step 3.
+7. A tool checks the blocks of steps 1 and 3 to 6 (§2.15).
+
+**Expected.**
+1. Under either posture, the `radio-a` session receives all 20 samples,
+   with `ground`'s grants through the subject. L receives all 20.
+2. The `radio-a` session receives none, under either posture.
+3. G and X each get `local`'s share there, as §9's X does: every session
+   over the face matches the subject, and any allow wins. Neither's puts
+   reach L.
+4. The same as step 3.
+5. G and X each get `local`'s share there, and all five of each one's puts
+   reach L: zenoh gives a subject no policy lists `default_permission`,
+   everything under `allow`.
+6. G receives what §1's G receives; X receives nothing, sees no token and
+   gets no reply; neither's puts reach L. A policy that only denies grants
+   nothing under `deny`.
+7. Step 1, in each posture: `face_subject_beyond_face` at the subject.
+   Steps 3 to 5: `face_subject_misplaced` at the face's subject, and
+   `zk_not_denied`, since it can match `ground`'s session and the policies
+   listing it hold no `@zk` deny. Step 6: `face_subject_misplaced` alone,
+   though the block grants nothing more: §2.15 reads which policies list a
+   subject, not their rules.

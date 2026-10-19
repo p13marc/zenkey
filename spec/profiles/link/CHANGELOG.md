@@ -4,6 +4,137 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-19: what the subject checks let through (#769, LD)
+
+The spec-only implementation (zk2py, round 32) read 0.3 cold, passed
+every fixture and all eight scenario sections, and filed one finding,
+F-120: §2.15's two subject checks passed three blocks that §2.4 forbids,
+each measured on a router. The reference confirms all three live, finds
+two more of the same kind, and answers them in the text, the model, the
+fixtures and two new scenario sections, run live. Written against core
+0.30, unchanged (below).
+
+**Changed: §2.15 reads which policies list a subject, and reports every
+block that breaks §2.4 from what the block shows (F-120; §2.4, §2.15,
+§5).**
+- **The finding**, three hand edits of 0.3's block for §7's deployment:
+  - (a) under `deny`, `local`'s subject bound to `ground` and `local`,
+    listed in `local`'s policy: `local`'s credentials over the face got
+    `local`'s grants there. `near_subject_on_face` exempted the subject,
+    since one of its names was the far principal's;
+  - (b) under `allow`, the face's own subject naming `tcp` beside
+    `unixsock-stream`: `radio-a`'s credentials over TCP read
+    `lab/radio-b`'s `air/dropped_total`. `face_subject_missing` was
+    satisfied, since the subject named the face's protocol;
+  - (c) under `allow`, `ground`'s subject narrowed to `unixsock-stream`:
+    `ground`'s credentials over TCP matched no subject, and their puts on
+    an owner's key reached the near side. Neither check looked at the far
+    principal's subject.
+- **What the reference measured** (scenarios §9, §10):
+  - (a): X received 100 of `air/frames_total` and of `raw`, all 5 `change`
+    occurrences and both tokens; G kept §1's share, as zk2py measured. The
+    reason: zenoh 1.10.1 splits a subject into one combination per value
+    of each property, and equal combinations, across subjects, are one
+    subject. The `ground` part of the combined subject is `ground`'s own
+    subject, whose face denies are evaluated first. With `ground`'s
+    subject narrowed to its face (§2.4's MAY), the two combinations
+    differ, and G gets `local`'s share too (§9, step 2). "Any allow wins
+    across subjects" holds across distinct combinations;
+  - (b): all 20 samples, against none under 0.3's block; under `deny`,
+    such a subject in `ground`'s policy does the same;
+  - (c): all 5 puts. A near principal narrowed off one more link protocol
+    does the same: `radio-b`'s credentials over TCP, 5 of 5;
+  - two more blocks 0.3 passes: a face subject in a near principal's
+    policy, under either posture, gives G and X `local`'s share over the
+    face; a face subject that no policy lists, under `allow`, gives them
+    everything, their writes to an owner's key included, since zenoh gives
+    such a subject `default_permission`.
+- **The rule.** §2.15's checks report every block that breaks §2.4, from
+  what the block shows: its posture, its subjects, which subjects each
+  policy lists, and the face policy. Terms: a subject *on the face*; *the
+  far principal's*, naming it alone as its user names or as its CNs; *a
+  face subject*, on the face and naming no user name and no CN, whatever
+  its id; *the far principal's policies*, those listing one of its
+  subjects on the face.
+  - `near_subject_on_face`, widened: a subject on the face bound to
+    another principal, whatever else it names, the far principal's name
+    among them. (a)
+  - `face_subject_beyond_face`, new, `at` the subject's id: a face subject
+    whose link protocols are absent or name one outside the face's. (b)
+  - `face_subject_misplaced`, new, `at` the subject's id: a face subject
+    not listed in exactly the far principal's policies, at least one. The
+    two new blocks, and §7's step 5, which 0.3 left to the comparison.
+  - `narrowed_too_far`, new, with no face, `at` the user name or CN: under
+    `allow`, a name the block binds and a link protocol outside the faces
+    it is kept off that no subject selects for it. (c), and a near
+    principal narrowed the same way.
+  - `face_subject_missing` is kept, reading the defined face subject that
+    names no interface and no zid.
+- **The denies a face's block holds**, stated: for each subject that can
+  match the far principal's session on the face, the deny rules of every
+  policy listing it, each subject's checked alone. The reference has read
+  them so since LB, and 0.3 never said it. That reading reports
+  `zk_not_denied` for (a) and for the two new blocks, whose stray subject's
+  policies hold no `@zk` deny, but only by that accident: a policy that
+  denied `@zk` would have passed, and a reading of the far principal's
+  policy alone passes them all.
+- **§2.4** says it in the generator's terms: one principal per subject;
+  narrowed no further than the faces it is kept off; the face's subject
+  selected by the face's link protocols alone and listed in exactly the
+  far principal's policies; and a face subject a block carries under
+  `deny` held to the same rules.
+- **zenoh facts**, in §2.15, each measured: the split into combinations;
+  a subject that no policy lists; an empty list refused when the
+  configuration loads.
+- **Fixtures.** `lints.json`'s block carries `policies`, `[{subjects}]`,
+  with `default_permission` and `subjects`: all three or none. 0.3's six
+  cases with subjects gain `policies`. Two of them change besides: in the
+  case of a face subject for one of two link protocols, `local` is now
+  selected by every link protocol outside the face, where `tcp` alone
+  would be `narrowed_too_far`; the catch-all case puts its subject in a
+  policy of its own, and gains `face_subject_beyond_face` and
+  `face_subject_misplaced`. Sixteen new cases.
+- **Scenarios §9 and §10** run each block live, with what it leaks and
+  what a tool reports; §7's expected 6 now reports step 5.
+- **The guesses round 32 listed, settled.**
+  - The face subject's id, and every other, is the generator's: an id
+    joins a subject to its policies and is where a finding points, and no
+    check depends on what it says.
+  - An empty list is refused by zenoh 1.10.1 when the configuration loads
+    (measured): a generator never writes one, no fixture carries one, and
+    a check reads one as absent.
+  - A face whose far principal has no subject, and a principal left with
+    no link protocol, are the generator's refusals, with no code here.
+  - The comparison with the plan has the generator's shape.
+
+**Deliberately not changed.**
+- **The core** (0.30). §11.3 already says a session that matches no
+  subject gets `default_permission`; that a subject no policy lists gets
+  it too, and that equal combinations merge, are zenoh facts this text
+  measures for the blocks it checks. No core grant shape writes a subject
+  bound to two principals or a subject in no policy (§11.1: one subject
+  per principal, each in its policy), so the core's rules do not turn on
+  either.
+- **Rules' permissions are not read.** The checks read which policies
+  list a subject, not what their rules say, so a face subject in a policy
+  of its own that only denies, under `deny`, is reported though it grants
+  nothing (§10, step 6). Reading permissions would make the check exact
+  for that case, at the cost of every rule in the fixture and a longer
+  rule for a second implementation to agree on. A face subject is the far
+  principal's, or a finding.
+- **A subject bound to no principal and off the face**, one selecting near
+  link protocols alone, is core §11's (§11.2, F-87), not this text's: no
+  session over the face matches it.
+- **The denies' reading leaves out** a subject bound to no principal that
+  names an interface or a zid, as the reference has since LB. The new
+  checks treat it as a face subject, and report it unless it rides
+  exactly the far principal's policies, where its denies are the far
+  principal's.
+- **The plan's shape** (§2.3): no plan member lists the block's subjects.
+- **The generator.** It passes every new check in both postures, the
+  walkthrough's face in both attachments and the radio's, unchanged: no
+  pinned block was blessed.
+
 ## 0.3 — 2026-10-19: a near credential on the face, and two revisions of one interface (#769, LC)
 
 The spec-only implementation (zk2py, round 31) read 0.2 cold, passed
