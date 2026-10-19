@@ -4,6 +4,132 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-19: one kind of name per subject (#769, LE)
+
+The spec-only implementation (zk2py, round 33) read 0.4 cold, passed
+every fixture (1404) and all ten scenario sections, and filed one
+finding, F-121: §2.15's `narrowed_too_far` credited a name to a subject
+that names it beside a name of the other kind, or as the other kind,
+which zenoh matches only for a session presenting both. The reference
+confirms both blocks live, finds the same hole in the far principal's
+subject, where it leaks, and answers them in the text, the model, the
+generator, the fixtures and a new scenario section, run live. Round 33's
+mutation test left five mutants alive; four are pinned now. Written
+against core 0.30, unchanged (below).
+
+**Changed: a subject naming both kinds binds no one alone (F-121; §2.4,
+§2.15, §5).**
+- **The finding**, two hand edits of the generator's `allow` block for
+  §7's deployment, with `local` narrowed off `tcp` too:
+  - (i) a subject naming `ground` as its user name and `local` as its CN,
+    in `ground`'s policy;
+  - (ii) a subject naming `local` as a CN, off the face, in `local`'s
+    policy.
+
+  In each, `local`'s session over TCP, presenting its user name alone,
+  matches no subject, and its 5 puts reach the near side. 0.4 reported
+  nothing.
+- **What the reference measured** (scenarios §11):
+  - (i) and (ii): 5 of 5 each, as zk2py measured. With neither subject,
+    the same 5, and 0.4's `narrowed_too_far` at `local`.
+  - Over mTLS, `local`'s subject naming `local` as its user name and as
+    its CN. A session presenting the CN `local` matched it (0 of 5 puts
+    reached the near side); one presenting the CN `other`, or over TCP
+    with no certificate, matched nothing (5 of 5). That is the subject the
+    generator wrote for a principal enrolled with a `user` and a `cn`
+    both, and 0.4 passed it.
+  - The same hole in the far principal's subject. 0.4 read a subject
+    naming `ground` as its user name and `radio-a` as its CN as
+    `ground`'s, so `radio-a`'s policy, which listed it, became one of the
+    far principal's policies, and a face subject in it and in `ground`'s
+    passed. Under `deny`, every session over the face then wrote
+    `radio-a`'s keys, 5 of 5 for G and for X, under `radio-a`'s Own grant,
+    which no face deny includes.
+  - What 0.4 said of it: only `zk_not_denied`, by the accident of
+    `radio-a`'s policy holding no `@zk` deny; and nothing at all once that
+    policy also lists the face's `zk` rule, while the writes still cross.
+  - With `local` in place of `radio-a`, or under `allow`, nothing more
+    crossed: `local`'s grants are `ground`'s here, and a subject two
+    policies list holds both's rules, deny first.
+- **The rule.**
+  - *The far principal's subject* names the far principal alone in one
+    list and nothing in the other. A subject naming both kinds is *bound
+    to another principal*: on the face it is `near_subject_on_face`, and
+    it gives the far principal no policy, so a face subject riding its
+    policy is `face_subject_misplaced`.
+  - `narrowed_too_far` reads names by kind: each user name a subject
+    names, each CN, and a face's `far` that no subject names, of a kind
+    the block cannot tell. A subject naming no interface and no zid
+    answers for a user name when it names it among its user names and no
+    CN, or names neither kind; for a CN, the same with the lists swapped.
+    One finding per name, whichever kinds fail.
+  - §2.4: one principal per subject holds within one list. Across the
+    two, one kind of name per subject: a generator writes each subject
+    with one list, and refuses a principal given with both on a router
+    with a face.
+  - The denies' reading is unchanged, and wider than the far principal's
+    subject on purpose: a subject naming the far principal beside a name
+    of the other kind can match its session, if the session presents
+    both. The reference's `matches_far` reads it so.
+- **zenoh facts**, in §2.15, each measured: a subject naming both kinds
+  matches only a session presenting one of each; a subject two policies
+  list holds both's rules, deny first.
+- **The generator** (the reference's `zenctl acl gen`), on a router with a
+  face:
+  - it refuses a principal enrolled with a `user` and a `cn` both, whose
+    subject would name both kinds: a generator's refusal, with no code
+    (§2.15);
+  - it places a face's far principal by its user name or CN alone. It also
+    matched the enrollment's `id`, which wrote a far principal's subject
+    that 0.4's checks already refused (`near_subject_on_face` at it).
+
+  Neither shape is in a pinned enrollment, so no pinned block changed, and
+  `every_face_block_passes_its_own_checks` passes in both postures
+  unchanged.
+- **Fixtures.** `lints.json`'s case 86 now expects `near_subject_on_face`
+  at `ground` and at `mixed`, beside `ops`: both name both kinds. Ten new
+  cases, 103 to 112:
+  - F-121's (i) and (ii);
+  - the far principal's name beside `radio-a` as a CN, in `radio-a`'s
+    policy, and case 86's `mixed` in `local`'s, each with a face subject
+    riding that policy;
+  - one name as both kinds, and a subject naming a user name and a CN
+    that answers for neither;
+  - round 33's surviving mutants: a face subject in the far principal's
+    policies and one more; the far principal's subject and the face's
+    both in no policy; `narrowed_too_far` answered by a subject bound to
+    no principal; and not answered by one naming an interface or a zid.
+- **Scenarios §11** runs each block live, with what it leaks and what a
+  tool reports, 0.4's reading among it. `zenctl check face`'s help and its
+  findings' text name the new reading.
+
+**Deliberately not changed.**
+- **The core** (0.30). Core §11.1 binds a principal "to a user name or a
+  certificate CN", and no core grant shape writes a subject naming both;
+  §11.3 already says a session matching no subject gets
+  `default_permission`. That zenoh matches a subject of both kinds only
+  for a session presenting both is a zenoh fact this text measures for
+  the blocks it checks.
+- **The generator without a face policy** still writes a principal
+  enrolled with a `user` and a `cn` as one subject naming both. That is
+  core §11's question, not this text's: under `deny` its session must
+  present both, and under `allow` one presenting either alone gets
+  `default_permission`, as any session matching no subject does (core
+  §11.3).
+- **A far whose kind the block cannot tell.** A face's `far` is a name,
+  and a block shows its kind only through the lists that name it. A name
+  some subject binds as a user name is not also checked as a CN: the
+  enrollment decides which it is.
+- **`at` stays the name.** One `narrowed_too_far` per name, whichever of
+  its kinds fail.
+- **The checks read a name's session as presenting that name alone.** A
+  session presenting a CN may present a user name too, which another
+  subject matches; a block cannot tell what else a session presents. 0.4
+  read interfaces and zids the same way.
+- **An empty list** stays read as absent, and no fixture carries one,
+  since zenoh refuses one at load (0.4). Round 33's fifth surviving
+  mutant, an empty list read as empty, stays unpinned.
+
 ## 0.4 — 2026-10-19: what the subject checks let through (#769, LD)
 
 The spec-only implementation (zk2py, round 32) read 0.3 cold, passed

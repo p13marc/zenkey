@@ -2297,13 +2297,25 @@
       },
       "expect": [
         {
+          "at": "ground",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "mixed",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
           "at": "ops",
           "code": "near_subject_on_face",
           "face": "radio",
           "severity": "error"
         }
       ],
-      "note": "the far principal's subject is one naming it alone, as its user names or as its CNs: a subject naming ground and ops as CNs matches ops; one naming ground as its user name and a CN of its own, or local as its user name and ground as its CN, matches only sessions presenting ground (§2.15, 0.4)",
+      "note": "the far principal's subject names it alone in one list and nothing in the other (0.5, F-121): a subject naming ground and ops as CNs matches ops; one naming ground as its user name and a CN of its own, or local as its user name and ground as its CN, matches only a session presenting one of each, which the block cannot attribute to one principal (§2.15)",
       "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
     },
     {
@@ -3817,6 +3829,1056 @@
         }
       ],
       "note": "under allow, no subject for ground, the face's far principal, as a generator never writes: its session off the face matches no subject, and is allowed everything; the face subject has no far principal's policy to ride (§2.4, §2.15)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "local"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio",
+              "ground-local"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          },
+          {
+            "cert_common_names": [
+              "local"
+            ],
+            "id": "ground-local",
+            "usernames": [
+              "ground"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "local",
+          "code": "narrowed_too_far",
+          "face": null,
+          "severity": "error"
+        },
+        {
+          "at": "ground-local",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "F-121 (i): under allow, local narrowed off tcp too, and a subject naming ground as its user name and local as its CN, in ground's policy: local's session over tcp, presenting its user name alone, matches neither, and is allowed everything; that subject answers for no name, and on the face it is no one principal's (§2.4, §2.15, 0.5; scenarios §11)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "local",
+              "local-cn"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          },
+          {
+            "cert_common_names": [
+              "local"
+            ],
+            "id": "local-cn",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "local",
+          "code": "narrowed_too_far",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "F-121 (ii): under allow, local narrowed off tcp too, and a subject naming local as a CN, off the face, in local's policy: a session presenting the user name local over tcp matches neither; a name a subject binds as a user name is answered among user names (§2.15, 0.5; scenarios §11)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "deny",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "radio-a",
+              "ground-radio-a",
+              "face:radio"
+            ]
+          },
+          {
+            "subjects": [
+              "local"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "radio-a",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "radio-a"
+            ]
+          },
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          },
+          {
+            "cert_common_names": [
+              "radio-a"
+            ],
+            "id": "ground-radio-a",
+            "usernames": [
+              "ground"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "face:radio",
+          "code": "face_subject_misplaced",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "ground-radio-a",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "under deny, a subject naming ground as its user name and radio-a as its CN, in radio-a's policy, and a face subject in ground's policy and radio-a's: 0.4 read radio-a's policy as one of the far principal's and passed the face subject, and every session over the face wrote radio-a's keys (measured); the far principal's policies are those of its subjects naming one kind (§2.4, §2.15, 0.5; scenarios §11)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "deny",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "local",
+              "local-ground",
+              "face:radio"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          },
+          {
+            "cert_common_names": [
+              "ground"
+            ],
+            "id": "local-ground",
+            "usernames": [
+              "local"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "face:radio",
+          "code": "face_subject_misplaced",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "local-ground",
+          "code": "near_subject_on_face",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "the same from the other side: a subject naming local as its user name and ground as its CN (case 86's mixed), in local's policy, made it one of the far principal's under 0.4, and a face subject in it passed (§2.4, §2.15, 0.5)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "deny",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "local",
+              "face:radio"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "face:radio",
+          "code": "face_subject_misplaced",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "under deny, a face subject in the far principal's policy and in local's: listed in more than exactly the far principal's policies, it gives every session over the face local's grants that ground's denies do not include (§2.4, §2.15, 0.4)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "local"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "face:radio",
+          "code": "face_subject_misplaced",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "under allow, the far principal's subject and the face's both in no policy: the face subject is listed in exactly the far principal's policies, which are none, and gets default_permission, everything; at least one (§2.4, §2.15, 0.4)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "radio-a"
+            ]
+          },
+          {
+            "subjects": [
+              "radio-b"
+            ]
+          },
+          {
+            "subjects": [
+              "local"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          },
+          {
+            "subjects": [
+              "near-tcp"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "radio-a",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "radio-a"
+            ]
+          },
+          {
+            "id": "radio-b",
+            "link_protocols": [
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "radio-b"
+            ]
+          },
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          },
+          {
+            "id": "near-tcp",
+            "link_protocols": [
+              "tcp"
+            ]
+          }
+        ]
+      },
+      "expect": [],
+      "note": "under allow, radio-b narrowed off tcp, and a subject bound to no principal selecting tcp alone, off the face, in a policy of its own: radio-b's session over tcp matches it, so no name is left matching no subject; whether that subject is sound is core §11.2's (F-87), not this text's (§2.15, 0.4)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "radio-a"
+            ]
+          },
+          {
+            "subjects": [
+              "radio-b",
+              "radio-b-zid"
+            ]
+          },
+          {
+            "subjects": [
+              "local"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          },
+          {
+            "subjects": [
+              "by-interface"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "radio-a",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "radio-a"
+            ]
+          },
+          {
+            "id": "radio-b",
+            "link_protocols": [
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "radio-b"
+            ]
+          },
+          {
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          },
+          {
+            "id": "radio-b-zid",
+            "link_protocols": [
+              "tcp"
+            ],
+            "usernames": [
+              "radio-b"
+            ],
+            "zids": [
+              "a1b2c3d4"
+            ]
+          },
+          {
+            "id": "by-interface",
+            "interfaces": [
+              "eth0"
+            ],
+            "link_protocols": [
+              "tcp"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "radio-b",
+          "code": "narrowed_too_far",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "the same with a subject naming radio-b and a zid, and one naming an interface alone, each selecting tcp alone: a session matches one only presenting that zid or arriving on that interface, so neither answers for radio-b over tcp (§2.15, 0.4)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "local"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "cert_common_names": [
+              "local"
+            ],
+            "id": "local",
+            "link_protocols": [
+              "tcp",
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "local",
+          "code": "narrowed_too_far",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "under allow, local's subject naming local as its user name and as its CN: a session presenting the user name alone, or the CN alone, matches it not (measured over mTLS), so no subject answers for local over any link protocol (§2.15, 0.5; scenarios §11)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "block": {
+        "default_permission": "allow",
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "",
+        "policies": [
+          {
+            "subjects": [
+              "local",
+              "local-ops"
+            ]
+          },
+          {
+            "subjects": [
+              "ops"
+            ]
+          },
+          {
+            "subjects": [
+              "ground",
+              "face:radio"
+            ]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "local",
+            "link_protocols": [
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ],
+            "usernames": [
+              "local"
+            ]
+          },
+          {
+            "cert_common_names": [
+              "ops"
+            ],
+            "id": "ops",
+            "link_protocols": [
+              "udp",
+              "tls",
+              "quic",
+              "serial",
+              "unixpipe",
+              "vsock",
+              "ws"
+            ]
+          },
+          {
+            "id": "ground",
+            "usernames": [
+              "ground"
+            ]
+          },
+          {
+            "id": "face:radio",
+            "link_protocols": [
+              "unixsock-stream"
+            ]
+          },
+          {
+            "cert_common_names": [
+              "ops"
+            ],
+            "id": "local-ops",
+            "link_protocols": [
+              "tcp"
+            ],
+            "usernames": [
+              "local"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "at": "local",
+          "code": "narrowed_too_far",
+          "face": null,
+          "severity": "error"
+        },
+        {
+          "at": "ops",
+          "code": "narrowed_too_far",
+          "face": null,
+          "severity": "error"
+        }
+      ],
+      "note": "under allow, local and ops, a CN, each narrowed off tcp, and a subject selected by tcp naming local as its user name and ops as its CN: it matches only a session presenting both, so it answers for neither name over tcp (§2.15, 0.5)",
       "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
     }
   ],
