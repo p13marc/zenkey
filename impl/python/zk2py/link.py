@@ -1,4 +1,4 @@
-"""``link.v1``, text 0.4 (``spec/profiles/link/v1.md``): what crosses a
+"""``link.v1``, text 0.5 (``spec/profiles/link/v1.md``): what crosses a
 constrained face.
 
 From the text alone:
@@ -23,13 +23,14 @@ From the text alone:
   block, and the near router's ``gateway`` for a south region (§2.5).
 
 Where the text left a choice, zk2py's is named in ``SPEC-FINDINGS.md``
-("At link.v1 0.1", "0.2", "0.3", "0.4").
+("At link.v1 0.1" to "At link.v1 0.5").
 """
 
 from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass, field
+from collections.abc import Sequence
 from typing import Any
 
 from . import freshness, templates
@@ -593,7 +594,7 @@ def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dic
     out = []
 
     def denied(m: str, fl: str) -> bool:
-        return any(m in d.get("messages", []) and fl in d.get("flows", [])
+        return any(m in d.get("messages", []) and fl in rule_flows(d)
                    and any((ke := _keyexpr(k)) is not None and ke.includes(target) for k in d.get("key_exprs", []))
                    for d in block.get("deny", []))
 
@@ -618,6 +619,47 @@ def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dic
     return out
 
 
+class BlockError(ValueError):
+    """A block no router runs: zenoh 1.10.1 refuses it when the
+    configuration loads (measured: a subject with no id, two subjects with
+    one id, a policy listing a subject or a rule the block does not define),
+    or a face the face policy does not have. A check says so rather than
+    reading it."""
+
+
+def rule_flows(rule: dict[str, Any]) -> list[str]:
+    """A rule's flows; one that names none applies to both (zenoh 1.10.1,
+    measured: an allow without ``flows`` admits a put on ingress and on
+    egress, and a deny without it refuses both)."""
+    flows = rule.get("flows")
+    return list(FLOWS) if flows is None else list(flows)
+
+
+def check_ids(subjects: list[dict[str, Any]], policies: list[dict[str, Any]],
+              rules: list[dict[str, Any]] | None = None) -> None:
+    """Raise :class:`BlockError` for what zenoh refuses at load: a subject
+    with no id, an id two subjects share, and a policy listing a subject (or,
+    given ``rules``, a rule) the block does not define."""
+    ids: set[str] = set()
+    for i, s in enumerate(subjects):
+        sid = s.get("id")
+        if not isinstance(sid, str) or not sid:
+            raise BlockError(f"subject #{i} has no id")
+        if sid in ids:
+            raise BlockError(f"subject id {sid!r} is repeated")
+        ids.add(sid)
+    rule_ids = None if rules is None else {r.get("id") for r in rules}
+    for i, pol in enumerate(policies):
+        name = pol.get("id", f"#{i}")
+        for sid in pol.get("subjects") or []:
+            if sid not in ids:
+                raise BlockError(f"policy {name} lists subject {sid!r}, which the block does not define")
+        if rule_ids is not None:
+            for rid in pol.get("rules") or []:
+                if rid not in rule_ids:
+                    raise BlockError(f"policy {name} lists rule {rid!r}, which the block does not define")
+
+
 def _names(subject: dict[str, Any], prop: str) -> list[str]:
     """A subject's list, "a check given one reads it as absent" when empty
     (0.4: "An empty list … is refused when the configuration loads")."""
@@ -636,11 +678,13 @@ def on_face(subject: dict[str, Any], face: Face) -> bool:
 
 
 def far_principals(subject: dict[str, Any], far: str) -> bool:
-    """§2.15 (0.4): "the far principal's when it names the far principal
-    alone, as its user names or as its CNs: one of the two lists is not
-    empty, and every name in it is the face's far"."""
-    return any(names and all(n == far for n in names)
-               for names in (_names(subject, "usernames"), _names(subject, "cert_common_names")))
+    """§2.15 (0.5): "the far principal's when it names the far principal
+    alone in one of its two lists and nothing in the other: its user names
+    are all the face's far and it names no CN, or its CNs are all the face's
+    far and it names no user name"."""
+    users, cns = _names(subject, "usernames"), _names(subject, "cert_common_names")
+    return bool(users and not cns and all(n == far for n in users)
+                or cns and not users and all(n == far for n in cns))
 
 
 def is_face_subject(subject: dict[str, Any], face: Face) -> bool:
@@ -650,11 +694,13 @@ def is_face_subject(subject: dict[str, Any], face: Face) -> bool:
 
 
 def _listing(subjects: list[dict[str, Any]], policies: list[dict[str, Any]]) -> dict[str, set[int]]:
-    """Each subject id -> the policies (by index) that list it."""
-    out: dict[str, set[int]] = {str(s.get("id")): set() for s in subjects}
+    """Each subject id -> the policies (by index) that list it; a block
+    zenoh would refuse raises :class:`BlockError`."""
+    check_ids(subjects, policies)
+    out: dict[str, set[int]] = {s["id"]: set() for s in subjects}
     for i, p in enumerate(policies):
         for sid in p.get("subjects") or []:
-            out.setdefault(str(sid), set()).add(i)
+            out[sid].add(i)
     return out
 
 
@@ -703,28 +749,67 @@ def check_subjects(face: Face, subjects: list[dict[str, Any]], policies: list[di
     return out
 
 
+#: The two kinds of name a subject names, by its list (§2.15, 0.5), and
+#: the kind of a face's far that no subject names.
+USER, CN, UNTOLD = "usernames", "cert_common_names", None
+
+
+def answers(subject: dict[str, Any], name: str, kind: str | None) -> bool:
+    """§2.15 (0.5), "Who answers": "A subject that names no interface and
+    no zid answers for a user name when it names that user name among its
+    user names and no CN, or names no user name and no CN; for a CN, the
+    same with the two lists swapped. A face's far that no subject names is
+    answered only by a subject that names no user name, CN, interface or
+    zid"."""
+    if _names(subject, "interfaces") or _names(subject, "zids"):
+        return False
+    users, cns = _names(subject, USER), _names(subject, CN)
+    if not users and not cns:
+        return True
+    if kind == USER:
+        return name in users and not cns
+    if kind == CN:
+        return name in cns and not users
+    return False
+
+
+def named_kinds(policy: Policy, subjects: list[dict[str, Any]]) -> list[tuple[str, str | None]]:
+    """§2.15 (0.5), "The names, by kind": each user name a subject names,
+    each CN, "a name in both lists is checked as each", and a face's far
+    that no subject names, of a kind the block cannot tell. In order of
+    first naming."""
+    out: list[tuple[str, str | None]] = []
+    for s in subjects:
+        for kind in (USER, CN):
+            for n in _names(s, kind):
+                if (n, kind) not in out:
+                    out.append((n, kind))
+    named = {n for n, _ in out}
+    for f in policy.faces:
+        if f.far not in named and (f.far, UNTOLD) not in out:
+            out.append((f.far, UNTOLD))
+    return out
+
+
 def narrowed_too_far(policy: Policy, subjects: list[dict[str, Any]], default_permission: str) -> list[dict[str, Any]]:
-    """§2.15 (0.4): "under allow, a name the block's subjects bind, or a
-    face's far, and a link protocol of §2.1's list outside every face whose
-    far principal it is not, that no subject naming no interface and no zid
-    selects, among those that name it or no user name and no CN". One
-    finding per name, with no face."""
+    """§2.15 (0.4; by kind, 0.5): "under allow, a name the block binds, read
+    by its kind, and a link protocol of §2.1's list outside every face whose
+    far principal it is not, that no subject answering for that name
+    selects" (:func:`answers`). "It reports a name once, whichever of its
+    kinds fails", with no face."""
     if default_permission != "allow":
         return []
-    names: list[str] = []
-    for n in [n for s in subjects for n in _user_names(s)] + [f.far for f in policy.faces]:
-        if n not in names:
-            names.append(n)
-    usable = [s for s in subjects if not _names(s, "interfaces") and not _names(s, "zids")]
-    out = []
-    for n in names:
-        off = {lp for f in policy.faces if f.far != n for lp in f.link_protocols}
+    out: list[dict[str, Any]] = []
+    for name, kind in named_kinds(policy, subjects):
+        if any(f["at"] == name for f in out):
+            continue
+        off = {lp for f in policy.faces if f.far != name for lp in f.link_protocols}
         for lp in LINK_PROTOCOL_ORDER:
             if lp in off:
                 continue
-            if not any((n in _user_names(s) or not _user_names(s))
-                       and (not _names(s, "link_protocols") or lp in _names(s, "link_protocols")) for s in usable):
-                out.append(finding("narrowed_too_far", None, n))
+            if not any(answers(s, name, kind) and (not _names(s, "link_protocols") or lp in _names(s, "link_protocols"))
+                       for s in subjects):
+                out.append(finding("narrowed_too_far", None, name))
                 break
     return out
 
@@ -738,7 +823,8 @@ def subject_denies(block: dict[str, Any], face: Face) -> dict[str, list[dict[str
     interface or zid — "the deny rules of every policy that lists it", by
     subject id. "With no such subject, the denies are none": an empty
     mapping."""
-    rules = {r["id"]: r for r in block.get("rules", [])}
+    check_ids(block.get("subjects", []), block.get("policies", []), block.get("rules", []))
+    rules = {r.get("id"): r for r in block.get("rules", [])}
     out: dict[str, list[dict[str, Any]]] = {}
     for s in block.get("subjects", []):
         if not on_face(s, face):
@@ -748,20 +834,26 @@ def subject_denies(block: dict[str, Any], face: Face) -> dict[str, list[dict[str
             continue
         if not names and (_names(s, "interfaces") or _names(s, "zids")):
             continue
-        out[s["id"]] = [{"flows": rules[r]["flows"], "messages": rules[r]["messages"],
-                         "key_exprs": rules[r]["key_exprs"]}
-                        for p in block.get("policies", []) if s["id"] in p.get("subjects", [])
-                        for r in p.get("rules", []) if r in rules and rules[r].get("permission") == "deny"]
+        out[s["id"]] = [{"flows": rule_flows(rules[r]), "messages": list(rules[r].get("messages") or []),
+                         "key_exprs": list(rules[r].get("key_exprs") or [])}
+                        for p in block.get("policies", []) if s["id"] in (p.get("subjects") or [])
+                        for r in (p.get("rules") or []) if rules[r].get("permission") == "deny"]
     return out
 
 
-def check_router_block(block: dict[str, Any], policy: Policy, face_name: str, downsampling: list[dict[str, Any]],
-                       namespace: str = "") -> list[dict[str, Any]]:
+def check_router_block(block: dict[str, Any], policy: Policy, face_name: str,
+                       downsampling: Sequence[dict[str, Any]] | None = None, namespace: str = "") -> list[dict[str, Any]]:
     """§2.15 over a router's whole ``access_control`` block: each subject's
     denies (:func:`subject_denies`) "checked alone", one ``zk_not_denied``
     when any of them, or none at all, misses a pair; and every other check
-    as :func:`check_block` reads lints.json's shape. Sorted."""
-    face = next(f for f in policy.faces if f.name == face_name)
+    as :func:`check_block` reads lints.json's shape. Sorted. A face the
+    policy does not have, or a block zenoh refuses at load, raises
+    :class:`BlockError`."""
+    face = next((f for f in policy.faces if f.name == face_name), None)
+    if face is None:
+        raise BlockError(f"the face policy has no face {face_name!r} (it has {[f.name for f in policy.faces]})")
+    check_ids(block.get("subjects", []), block.get("policies", []), block.get("rules", []))
+    downsampling = list(downsampling or [])
     view = {"face": face_name, "namespace": namespace, "downsampling": downsampling,
             "default_permission": block.get("default_permission", "deny"),
             "subjects": [{"id": s["id"], **{k: list(s[k]) for k in SUBJECT_PROPS if s.get(k)}}
@@ -875,6 +967,13 @@ def compile_faces(policy: Policy, face_plans: list[dict[str, Any]], block: dict[
     def bound_to(name: str) -> list[str]:
         return [s["id"] for s in out["subjects"] if name in names_of(s)]
 
+    for s in out["subjects"]:
+        # §2.4 (0.5): "On a router with a face, a generator writes each
+        # subject with one of the two lists … and refuses a principal it is
+        # given with both".
+        if face_plans and _names(s, "usernames") and _names(s, "cert_common_names"):
+            raise Refused(f"subject {s.get('id')}: a principal bound by a user name and a CN both, on a router "
+                          "with a face")
     for fp in face_plans:
         fars = bound_to(fp["far"])
         if not fars:
@@ -919,19 +1018,21 @@ def compare_block(policy: Policy, face_plans: list[dict[str, Any]], block: dict[
     alone."""
     out = []
     faces = {f.name: f for f in policy.faces}
-    rules = {r["id"]: r for r in block.get("rules", [])}
+    check_ids(block.get("subjects", []), block.get("policies", []), block.get("rules", []))
+    rules = {r.get("id"): r for r in block.get("rules", [])}
 
     def names_of(s: dict[str, Any]) -> list[str]:
         return _names(s, "usernames") + _names(s, "cert_common_names")
 
     for fp in face_plans:
         fars = {s["id"] for s in block.get("subjects", []) if fp["far"] in names_of(s)}
-        far_policies = [p for p in block.get("policies", []) if fars & set(p["subjects"])]
+        far_policies = [p for p in block.get("policies", []) if fars & set(p.get("subjects") or [])]
         for p in far_policies:
-            held = [rules[r] for r in p["rules"] if r in rules and rules[r].get("permission") == "deny"]
+            held = [rules[r] for r in (p.get("rules") or []) if rules[r].get("permission") == "deny"]
             for d in fp["deny"]:
-                if not any(set(d["key_exprs"]) <= set(r["key_exprs"]) and set(d["messages"]) <= set(r["messages"])
-                           and set(d["flows"]) <= set(r["flows"]) for r in held):
+                if not any(set(d["key_exprs"]) <= set(r.get("key_exprs") or [])
+                           and set(d["messages"]) <= set(r.get("messages") or [])
+                           and set(d["flows"]) <= set(rule_flows(r)) for r in held):
                     out.append(f"face {fp['name']}: policy {p['id']} lacks the plan's deny {d['id']}")
         if block.get("default_permission") == "allow":
             mine = set(faces[fp["name"]].link_protocols)

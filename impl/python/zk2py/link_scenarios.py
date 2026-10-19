@@ -1,6 +1,6 @@
 """The ``link.v1`` scenarios (``spec/profiles/link/scenarios.md``, text
-0.4) on zenoh-python routers: ``just py-link`` (``python -m
-zk2py.link_scenarios [--only 1 …]``), all ten sections.
+0.5) on zenoh-python routers: ``just py-link`` (``python -m
+zk2py.link_scenarios [--only 1 …]``), all eleven sections.
 
 - **The deployment** is the reference's example, ``examples/zk2/link/``,
   read as given: the ``radio.v1`` contract, the lab router's face policy
@@ -19,7 +19,7 @@ zk2py.link_scenarios [--only 1 …]``), all ten sections.
   ``gateway`` for a south region (:func:`zk2py.link.router_extras`).
 - **A near principal on the face** (§7): X, a client of N over the face
   with ``local``'s credentials.
-- **Hand edits** (§9, §10): each step changes the generator's block
+- **Hand edits** (§9 to §11): each step changes the generator's block
   (``World(block_edit=…)``); a tool's check is
   :func:`zk2py.link.check_router_block`, every subject that can match the
   far principal's session checked alone (0.4).
@@ -55,6 +55,7 @@ import tempfile
 import threading
 import time
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -292,11 +293,12 @@ def minor1(workdir: str) -> Any:
 GENERATORS = {"0.3": {}, "no-face": {"face_subject": None}, "own": {"face_subject": "own", "any_posture": True}}
 
 
-def check(block: dict[str, Any], policy_text: str, downsampling: list[dict[str, Any]] = ()) -> list[dict[str, Any]]:  # type: ignore[assignment]
+def check(block: dict[str, Any], policy_text: str,
+          downsampling: Sequence[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """A tool's §2.15 check of an ``access_control`` block for the radio
     face, with the downsampling items beside it."""
     pol, _ = link.parse_policy(policy_text)
-    return link.check_router_block(block, pol, "radio", [x for ds in downsampling for x in ds["rules"]])
+    return link.check_router_block(block, pol, "radio", [x for ds in downsampling or [] for x in ds.get("rules", [])])
 
 
 def generate_face(policy_text: str, face_plan: dict[str, Any], block: dict[str, Any], far: str,
@@ -305,6 +307,52 @@ def generate_face(policy_text: str, face_plan: dict[str, Any], block: dict[str, 
         return link.compile_face(face_plan, block, far)
     pol, _ = link.parse_policy(policy_text)
     return link.compile_faces(pol, [face_plan], block, **GENERATORS[generator])
+
+
+def mint_certificates(workdir: str, cns: list[str]) -> dict[str, str]:
+    """§11's setup: "its certificate and a client certificate per CN … are
+    signed by one CA minted for the run", by openssl, P-256 keys. Returns
+    the paths: ``ca``, ``server``, ``server.key``, ``client-<cn>`` and
+    ``client-<cn>.key``."""
+    import subprocess
+
+    def run(*args: str) -> None:
+        subprocess.run(["openssl", *args], check=True, capture_output=True, cwd=workdir)
+
+    run("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", "ca.key",
+        "-out", "ca.pem", "-days", "2", "-subj", "/CN=zk2py-link-ca")
+    out = {"ca": os.path.join(workdir, "ca.pem")}
+
+    def leaf(name: str, cn: str, ext: str) -> None:
+        with open(os.path.join(workdir, f"{name}.ext"), "w") as f:
+            f.write(ext)
+        run("req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", f"{name}.key",
+            "-out", f"{name}.csr", "-subj", f"/CN={cn}")
+        run("x509", "-req", "-in", f"{name}.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-CAcreateserial",
+            "-out", f"{name}.pem", "-days", "2", "-extfile", f"{name}.ext")
+        out[name], out[f"{name}.key"] = os.path.join(workdir, f"{name}.pem"), os.path.join(workdir, f"{name}.key")
+
+    leaf("server", "localhost", "subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n"
+                                "basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\n")
+    for cn in cns:
+        leaf(f"client-{cn}", cn, "extendedKeyUsage=clientAuth\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature\n")
+    return out
+
+
+def open_tls(w: "World", user: str, cn: str) -> Any:
+    """A client of N over TLS presenting ``cn``'s client certificate beside
+    ``user``'s user name and password (§11's step 4)."""
+    import zenoh
+
+    conf = zenoh.Config()
+    conf.insert_json5("mode", json.dumps("client"))
+    conf.insert_json5("connect/endpoints", json.dumps([w.tls_endpoint]))
+    conf.insert_json5("scouting/multicast/enabled", "false")
+    conf.insert_json5("transport/auth/usrpwd", json.dumps({"user": user, "password": f"{user}-pw"}))
+    conf.insert_json5("transport/link/tls", json.dumps({
+        "root_ca_certificate": w.certs["ca"], "enable_mtls": True,
+        "connect_private_key": w.certs[f"client-{cn}.key"], "connect_certificate": w.certs[f"client-{cn}"]}))
+    return zenoh.open(conf)
 
 
 class Tokens:
@@ -325,14 +373,16 @@ class World:
     ``face_local``: also X, a session with ``local``'s credentials over the
     face (§7). ``posture`` and ``generator`` (:data:`GENERATORS`, or
     ``"0.2"``) choose the block, and ``block_edit`` changes it by hand
-    (F-120's measurements); ``revisions`` are the contracts the plan is
-    derived from (§8), the example's alone by default."""
+    (§9 to §11); ``revisions`` are the contracts the plan is derived from
+    (§8), the example's alone by default. ``tls``: N also listens on
+    ``tls/127.0.0.1`` with mTLS, certificates minted for the run
+    (:func:`mint_certificates`, §11's step 4)."""
 
     def __init__(self, policy_text: str, *, far: str = "ground", attach: str = "client",
                  queryable_grant: str | None = "owner", deny_override: tuple[str, list[str]] | None = None,
                  downsampling_override: list[dict[str, Any]] | None = None, tombstone_s: float = 60.0,
                  face_local: bool = False, posture: str = "deny", generator: str = "0.3",
-                 revisions: list[Any] | None = None, block_edit: Any = None):
+                 revisions: list[Any] | None = None, block_edit: Any = None, tls: bool = False):
         import zenoh
 
         from . import acl, live
@@ -355,7 +405,7 @@ class World:
         if deny_override is not None:
             rid, keys = deny_override
             for r in block["rules"]:
-                if r["id"] == f"face-{self.plan['name']}-{rid}":
+                if r.get("id") == f"face-{self.plan['name']}-{rid}":
                     r["key_exprs"] = keys
         self.queryable_keys: list[str] = []
         if attach == "south-region" and queryable_grant:
@@ -374,8 +424,10 @@ class World:
             block["rules"].append({"id": "far-queryables", "messages": ["declare_queryable"], "flows": ["egress"],
                                    "permission": "allow", "key_exprs": keys})
             for pol in block["policies"]:
-                if far in pol["subjects"]:
+                if far in pol.get("subjects", []):
                     pol["rules"].append("far-queryables")
+        # A hand edit that leaves a block zenoh refuses at load says so here.
+        link.check_ids(block["subjects"], block["policies"], block["rules"])
         self.block = block
         extras = link.router_extras(self.plan)
         if downsampling_override is not None:
@@ -391,10 +443,20 @@ class World:
         self.near = f"tcp/127.0.0.1:{port}"
         conf = zenoh.Config()
         conf.insert_json5("mode", json.dumps("router"))
-        conf.insert_json5("listen/endpoints", json.dumps([self.near, f"unixsock-stream/{self.sock}"]))
+        listen = [self.near, f"unixsock-stream/{self.sock}"]
+        self.tls_endpoint: str | None = None
+        if tls:
+            self.certs = mint_certificates(self.workdir, ["local", "other"])
+            self.tls_endpoint = f"tls/127.0.0.1:{free_loopback_port()}"
+            listen.append(self.tls_endpoint)
+        conf.insert_json5("listen/endpoints", json.dumps(listen))
         conf.insert_json5("scouting/multicast/enabled", "false")
         conf.insert_json5("timestamping/enabled", "true")
         conf.insert_json5("transport/auth/usrpwd", json.dumps({"dictionary_file": users}))
+        if tls:
+            conf.insert_json5("transport/link/tls", json.dumps({
+                "root_ca_certificate": self.certs["ca"], "listen_private_key": self.certs["server.key"],
+                "listen_certificate": self.certs["server"], "enable_mtls": True}))
         conf.insert_json5("access_control", json.dumps(block))
         for k, v in extras.items():
             conf.insert_json5(k, json.dumps(v))
@@ -982,6 +1044,13 @@ def _like_section1_g(d: dict[str, Any]) -> bool:
             and d["fault"] == 5 and d["change"] == 0)
 
 
+def _at_most_section1_g(d: dict[str, Any]) -> bool:
+    """Nothing beyond what §1's G receives: none of air/frames_total, raw or
+    change, no token, and no more of the rest."""
+    return (d["stream/air/dropped_total"] <= 6 and d["@stream/frames"] <= 6 and d["stream/air/frames_total"] == 0
+            and d["@stream/raw"] == 0 and d["oper"] <= 10 and d["fault"] <= 5 and d["change"] == 0 and not d["tokens"])
+
+
 def _answered(d: dict[str, Any]) -> bool:
     return d["get"] == [b"peer x"] and d["call"] == [b"now"]
 
@@ -1020,7 +1089,7 @@ def _brief(d: dict[str, Any]) -> str:
 def section7(report: Report) -> None:
     sec = "§7 a near principal's credentials on the face"
     runs = {("deny", "0.3"): None, ("deny", "0.2"): None, ("allow", "0.3"): None, ("allow", "no-face"): None,
-            ("allow", "own"): None}
+            ("allow", "own"): None, ("allow", "0.2"): None}
     for posture, generator in runs:
         runs[(posture, generator)] = _run7(posture, generator, anonymous=(posture, generator) == ("allow", "0.3"))
     s1, s2, s3, s4, s5 = (runs[k] for k in (("deny", "0.3"), ("deny", "0.2"), ("allow", "0.3"),
@@ -1084,6 +1153,9 @@ def section7(report: Report) -> None:
                      + "; ".join(f"step {i}: {r['compare'] or 'none'}" for i, r in enumerate((s1, s2, s3, s4, s5), 1)))
     same = _block_under("deny", "no-face") == _block_under("deny", "0.3")
     report.note(sec, f"step 4's block under deny is step 1's: {same} (step 5's under deny is §10's step 6)")
+    b2 = runs[("allow", "0.2")]
+    report.note(sec, f"step 2's block under allow (0.2's, nothing narrowed, no face subject): G {_brief(b2['G'])}; "
+                     f"X {_brief(b2['X'])}; tool {b2['found']}")
 
 
 def _block_under(posture: str, generator: str) -> dict[str, Any]:
@@ -1411,8 +1483,125 @@ def section10(report: Report) -> None:
                  s6["found"] == [f("face_subject_misplaced", "radio", "face:radio")], str(s6["found"]))
 
 
+# -- §11: a subject naming both kinds ----------------------------------------------------
+
+def _close_all(w: World) -> None:
+    for c in w.closers:
+        try:
+            c.close()
+        except Exception:  # noqa: BLE001
+            pass
+    w.close()
+
+
+def _tls_puts(edit: Any) -> dict[str, Any]:
+    """§11 step 4: under allow, three sessions with local's credentials:
+    over TLS presenting the CN local, over TLS presenting the CN other, and
+    over TCP with no certificate; each puts five times on lab/radio-a's
+    air/dropped_total, and L counts what reaches it."""
+    from . import live
+
+    w = World(policy(), posture="allow", block_edit=edit, tls=True)
+    try:
+        sessions = {"tls-cn-local": open_tls(w, "local", "local"), "tls-cn-other": open_tls(w, "local", "other"),
+                    "tcp-no-cert": live.open_client(w.near, ("local", "local-pw"))}
+        w.closers += list(sessions.values())
+        time.sleep(0.3)
+        return {"puts": _puts(w, sessions), "found": w.check_block()}
+    finally:
+        _close_all(w)
+
+
+def section11(report: Report) -> None:
+    sec = "§11 a subject naming both kinds"
+    f = link.finding
+    off_tcp = _narrow("local", [p for p in NEAR_PROTOCOLS if p != "tcp"])
+    step1 = _edits(off_tcp, _subject("ground-local", usernames=["ground"], cert_common_names=["local"]),
+                   _listed("ground-local", by=["ground"]))
+    step2 = _edits(off_tcp, _subject("local-cn", cert_common_names=["local"], link_protocols=list(NEAR_PROTOCOLS)),
+                   _listed("local-cn", by=["local"]))
+    s1 = _near_puts("allow", step1, ["local"])
+    s2 = _near_puts("allow", step2, ["local"])
+    s3 = _near_puts("allow", off_tcp, ["local"])
+    s3c = _near_puts("allow", None, ["local"])
+    report.check(sec, "step 1 (F-121 (i)): local's session over TCP matches neither local's subject nor the one naming "
+                      "ground and local's CN: all five puts reach L", s1["puts"] == {"local": 5}, str(s1["puts"]))
+    report.check(sec, "step 2 (F-121 (ii)): the added subject names local as a CN, the session presents it as a user "
+                      "name: all five reach L", s2["puts"] == {"local": 5}, str(s2["puts"]))
+    report.check(sec, "step 3 (control): local narrowed off tcp and nothing else, all five reach L; under the "
+                      "generator's block, none does", s3["puts"] == {"local": 5} and s3c["puts"] == {"local": 0},
+                 f"{s3['puts']}; generator's {s3c['puts']}")
+    both = _subject("local", usernames=["local"], cert_common_names=["local"], link_protocols=list(NEAR_PROTOCOLS))
+    s4, s4c = _tls_puts(both), _tls_puts(None)
+    report.check(sec, "step 4 (local's subject naming local as its user name and as its CN): over TLS with the CN "
+                      "local, none of its puts reaches L; with the CN other, or over TCP with no certificate, all five "
+                      "do", s4["puts"] == {"tls-cn-local": 0, "tls-cn-other": 5, "tcp-no-cert": 5}, str(s4["puts"]))
+    report.check(sec, "step 4 (control, the generator's allow block): none of the three sessions' puts reaches L",
+                 s4c["puts"] == {"tls-cn-local": 0, "tls-cn-other": 0, "tcp-no-cert": 0}, str(s4c["puts"]))
+
+    def mixed(principal: str, posture: str) -> Any:
+        sid = f"ground-{principal}"
+        edits = [_subject(sid, usernames=["ground"], cert_common_names=[principal]), _listed(sid, by=[principal])]
+        if posture == "deny":
+            edits.append(_subject("face:radio", link_protocols=["unixsock-stream"]))
+        edits.append(_listed("face:radio", by=["ground", principal]))
+        return _edits(*edits)
+
+    def with_zk(block: dict[str, Any]) -> dict[str, Any]:
+        for pol in block["policies"]:
+            if pol["id"] == "radio-a-policy":
+                pol["rules"].append("face-radio-zk")
+        return block
+
+    s5 = _run7("deny", block_edit=mixed("radio-a", "deny"))
+    s6 = _run7("deny", block_edit=mixed("local", "deny"))
+    s7 = _run7("allow", block_edit=mixed("radio-a", "allow"))
+    s8 = _run7("deny", block_edit=_edits(mixed("radio-a", "deny"), with_zk))
+    report.check(sec, "step 5 (deny, ground and radio-a's CN in radio-a's policy, the face's subject in ground's and "
+                      "radio-a's): G and X each receive what §1's G receives, and all five of each one's puts reach L",
+                 all(_like_section1_g(s5[w]) and s5[w]["puts_to_L"] == 5 for w in ("G", "X")),
+                 f"G {_brief(s5['G'])}; X {_brief(s5['X'])}")
+    report.check(sec, "step 6 (the same with local): G and X each receive what §1's G receives, and neither's puts "
+                      "reach L", all(_like_section1_g(s6[w]) and s6[w]["puts_to_L"] == 0 for w in ("G", "X")),
+                 f"G {_brief(s6['G'])}; X {_brief(s6['X'])}")
+    report.check(sec, "step 7 (step 5 under allow): G receives what §1's G receives, X at most that (SPEC-FINDINGS "
+                      "F-122: zk2py's radio-a policy denies what radio-a holds no grant for, and the face's subject "
+                      "holds those denies too), and neither's puts reach L",
+                 _like_section1_g(s7["G"]) and _at_most_section1_g(s7["X"])
+                 and s7["G"]["puts_to_L"] == 0 and s7["X"]["puts_to_L"] == 0,
+                 f"G {_brief(s7['G'])}; X {_brief(s7['X'])}")
+    x7 = "what §1's G receives" if _like_section1_g(s7["X"]) else "less than §1's G: " + _brief(s7["X"])
+    report.note(sec, f"step 7, for open SPEC-FINDINGS F-122: X, matching the face's subject alone, receives {x7}")
+    report.check(sec, "step 8 (step 5 with radio-a's policy listing the face's zk rule): all five of each one's puts "
+                      "reach L", s8["G"]["puts_to_L"] == 5 and s8["X"]["puts_to_L"] == 5,
+                 f"G {_brief(s8['G'])}; X {_brief(s8['X'])}")
+    srt = link.sort_findings
+    report.check(sec, "step 9: step 1, narrowed_too_far at local, and near_subject_on_face at the added subject",
+                 s1["found"] == srt([f("narrowed_too_far", None, "local"),
+                                     f("near_subject_on_face", "radio", "ground-local")]), str(s1["found"]))
+    report.check(sec, "step 9: steps 2 to 4, narrowed_too_far at local",
+                 all(r["found"] == [f("narrowed_too_far", None, "local")] for r in (s2, s3, s4)),
+                 f"{s2['found']}; {s3['found']}; {s4['found']}")
+    for n, r, sid in ((5, s5, "ground-radio-a"), (6, s6, "ground-local")):
+        report.check(sec, f"step 9: step {n}, near_subject_on_face at the added subject, face_subject_misplaced at the "
+                          f"face's subject, and zk_not_denied",
+                     r["found"] == srt([f("near_subject_on_face", "radio", sid),
+                                        f("face_subject_misplaced", "radio", "face:radio"),
+                                        f("zk_not_denied", "radio", "@zk")]), str(r["found"]))
+    report.check(sec, "step 9: step 7, the same, and narrowed_too_far at radio-a",
+                 s7["found"] == srt([f("near_subject_on_face", "radio", "ground-radio-a"),
+                                     f("face_subject_misplaced", "radio", "face:radio"),
+                                     f("zk_not_denied", "radio", "@zk"), f("narrowed_too_far", None, "radio-a")]),
+                 str(s7["found"]))
+    report.check(sec, "step 9: step 8, near_subject_on_face and face_subject_misplaced, with no zk_not_denied",
+                 s8["found"] == srt([f("near_subject_on_face", "radio", "ground-radio-a"),
+                                     f("face_subject_misplaced", "radio", "face:radio")]), str(s8["found"]))
+    report.note(sec, f"step 3's and step 4's control blocks (the generator's allow block): tool "
+                     f"{s3c['found'] or 'no finding'}; {s4c['found'] or 'no finding'}")
+
+
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
-            "7": section7, "8": section8, "9": section9, "10": section10}
+            "7": section7, "8": section8, "9": section9, "10": section10, "11": section11}
 
 
 def main(argv: list[str] | None = None) -> int:
