@@ -100,8 +100,10 @@ The plan (link.v1 §2.3) denies @zk, @adv and the admin space, and the
 pushes of every resource whose contract does not mark it
 link.exposure = "link", in the far principal's policy; downsamples
 each crossing stream key of a listed service, egress, put; and lets
-GETs and calls cross by grant. `zenctl check face` judges a router's
-config against it.
+GETs and calls cross by grant. Every other principal's subject is
+selected by the link protocols outside the face's (§2.4), and under
+allow the face has a subject of its own in the far principal's
+policy. `zenctl check face` judges a router's config against it.
 
 Usage: zenctl acl gen [OPTIONS] --enrollment <FILE>
 

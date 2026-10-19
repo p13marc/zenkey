@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a near credential on the face, and two revisions: `link.v1` 0.3 (#769, LC)
+
+zk2py's round 31 found that a near principal's subject, bound by its user
+name alone, matched that principal's credentials over the face, which then
+carried its grants across (F-118), and that two minors of one interface
+disagreeing on a resource's exposure had no rule (F-119). `link.v1` 0.3
+answers both, and `acl gen --face-policy` writes it.
+
+| Before | Now | Notes |
+|---|---|---|
+| every subject bound by its user name or CN alone | each principal's subject also `link_protocols: [...]`, the closed list outside every face whose far principal it is not (`radio-a`, `local`, … on the radio's `unixsock-stream` face: `tcp`, `udp`, `tls`, `quic`, `serial`, `unixpipe`, `vsock`, `ws`); a principal left with none is refused (`link.v1` §2.4) | under `deny`, `local`'s credentials over the face match no subject and get nothing. The far principal's subject is narrowed off the other faces only. The JSON's subjects carry `link_protocols`; the table's "bound by" says `over …` |
+| — | under `--default-permission allow`, a subject `face:<face>` per face, selected by its link protocols alone, listed in the far principal's policy beside its own subject | under `allow` a session matching no subject is allowed everything, so a narrowed credential over the face would be; through the face's subject it gets what the far principal gets. A policy of its own holding the face's denies alone would undo the far principal's own denies (measured, `link.v1` scenarios §7) |
+| several revisions of a listed interface read silently, fail-closed | read the same way by the model (`link.v1` §2.3), and each resource they disagree on reported: `exposure_disagrees`, a plan warning on a face that exposes, in the notes | a resource crosses only where every revision given that declares it marks it `link`; a horizon counts only where every one gives one, the least of them |
+| `check face`: `zk_not_denied`, `wildcard_downsampling`, `intersecting_downsampling` | and `near_subject_on_face` (a subject bound to another principal, not kept off the face's link protocols) and, under `allow`, `face_subject_missing` (a face link protocol no identity-free subject selects), errors | `link.v1` §2.15. The comparison now compares a subject's `link_protocols` too (`subject_differs`) |
+
 ## Unreleased (`main`, zk2) — constrained faces from a face policy: `link.v1` (#769, LB)
 
 `acl gen` guarded one face with four flags and two denies, `@zk` and

@@ -1298,7 +1298,7 @@ face radio: far ground (client), 8 deny rule(s) in its policy
     assert_data_eq!(
         notes(&plan),
         str![[r#"
-face radio to ground (client): its policy carries the face's denies and no presence, history, admin-space or contract grant; requests cross by grant, never by exposure (link.v1 §2.4, §2.9)
+face radio to ground (client): its policy carries the face's denies and no presence, history, admin-space or contract grant; every other principal's subject is kept off the face's link protocols; requests cross by grant, never by exposure (link.v1 §2.4, §2.9)
 what a router runs is not on the bus: `zenctl check face <router.json5> --face-policy …` judges the file it is said to run (link.v1 §2.14, §2.15); each listed owner of state must run with a tombstone window of at least the face's outage (§2.11), which no tool can observe
 18 rule(s), 3 subject(s), 3 polic(y/ies), 1 face(s), 2 downsampling rule(s), compiled from 1 contract revision(s)
 write the fragment: `zenctl acl gen --enrollment … --contracts … --json5 > router-acl.json5`, merge it at the router config's top level, restart the router, and regenerate on every contract revision (spec §11.2)
