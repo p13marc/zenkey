@@ -51,6 +51,40 @@ fn windows(given: &[String]) -> Result<Option<BTreeMap<String, u64>>> {
     Ok(Some(out))
 }
 
+/// Every `--window` names a listed owner of state behind a face: one the
+/// plan has no floor for is a question nobody asked (`link.v1` §2.11, "not
+/// this profile's"), and passing over it would let a misspelt address
+/// leave its owner on the core's 60 s and the check clean.
+fn known_windows(
+    given: &BTreeMap<String, u64>,
+    plan: &zenkey_fleet::report::AclPlan,
+) -> Result<()> {
+    let floors: std::collections::BTreeSet<&str> = plan
+        .faces
+        .iter()
+        .flat_map(|f| &f.windows)
+        .map(|w| w.service.as_str())
+        .collect();
+    let unknown: Vec<&str> = given
+        .keys()
+        .map(String::as_str)
+        .filter(|a| !floors.contains(a))
+        .collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    Err(unaskable!(
+        "--window names {}, which owns no state behind a face of this policy (link.v1 §2.11); the \
+         listed owners of state are: {}",
+        unknown.join(", "),
+        if floors.is_empty() {
+            "none".to_owned()
+        } else {
+            floors.into_iter().collect::<Vec<_>>().join(", ")
+        }
+    ))
+}
+
 /// `check face`: exit 0 every face guarded as planned, 1 a finding or a
 /// difference from the plan, 2 no verdict.
 pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
@@ -78,10 +112,15 @@ pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
     };
     let plan = ASKING
         .ask(zenkey_fleet::plan_acl(&enrollment, &contracts, &opts).map_err(anyhow::Error::from));
-    let policy = parsed
-        .policy
-        .as_ref()
-        .expect("a face policy the planner accepted is a policy");
+    let policy = ASKING.ask(
+        parsed
+            .policy
+            .as_ref()
+            .ok_or_else(|| unaskable!("--face-policy: the planner kept no policy to judge")),
+    );
+    if let Some(given) = &windows {
+        ASKING.ask(known_windows(given, &plan));
+    }
     let observed = ASKING.ask(acl::load_against(&router));
     let report = zenkey_fleet::check_face(
         &plan,

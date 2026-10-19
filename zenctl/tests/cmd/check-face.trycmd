@@ -82,6 +82,18 @@ check face: the question could not be asked — exit 2, the reserved non-verdict
 
 ```
 
+A window for an address that owns no state behind a face is a question
+nobody asked, and passing over it would leave a misspelt owner on the
+core's 60 s with the check clean: exit 2, naming the listed owners.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router.json5 --face-policy ../examples/zk2/link/radio.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --window lab/radio-a=600 --window lab/radio-b=2
+? 2
+Error: --window names lab/radio-b, which owns no state behind a face of this policy (link.v1 §2.11); the listed owners of state are: lab/radio-a
+check face: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
 A face policy its linter refuses has no plan, and no block is judged
 against it: exit 2.
 

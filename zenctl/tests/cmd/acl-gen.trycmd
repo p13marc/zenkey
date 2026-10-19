@@ -583,3 +583,12 @@ $ zenctl acl gen --enrollment ../examples/zk2/acl/walkthrough.enrollment.toml --
 Error: --face, --attach, --far, --region were replaced by --face-policy <FILE> (link.v1 §2.1, #769): a face policy names each constrained face's far principal (`far`), its attachment (`attach`, `region`) and its link protocols (`select`), and adds what crosses (`expose`), its rate (`interval_s`), its outage, batch and link rate. examples/zk2/link/radio.face.toml is one; see `zenctl acl gen --help`
 
 ```
+
+Even with no value, an old flag is refused by name.
+
+```console
+$ zenctl acl gen --enrollment ../examples/zk2/acl/walkthrough.enrollment.toml --contracts ../examples/zk2/.history --contracts ../zenwatch/contracts/zenwatch.v1.toml --face
+? 2
+Error: --face was replaced by --face-policy <FILE> (link.v1 §2.1, #769): a face policy names each constrained face's far principal (`far`), its attachment (`attach`, `region`) and its link protocols (`select`), and adds what crosses (`expose`), its rate (`interval_s`), its outage, batch and link rate. examples/zk2/link/radio.face.toml is one; see `zenctl acl gen --help`
+
+```
