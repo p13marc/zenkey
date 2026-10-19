@@ -1621,22 +1621,50 @@ impl BlockSubject {
             .is_none_or(|l| l.iter().any(|x| face.link_protocols.contains(x)))
     }
 
-    /// Whether it is the far principal's (§2.15, 0.4): it names `far` alone,
-    /// as its user names or as its CNs. zenoh matches one value of each
-    /// property a subject names, so every session it matches presents
-    /// `far`.
+    /// Whether it is the far principal's (§2.15, 0.4, 0.5): it names `far`
+    /// alone in one of its two lists, and nothing in the other. zenoh
+    /// matches one value of each property a subject names, so a subject
+    /// naming user names and CNs matches only a session presenting one of
+    /// each (measured, 0.5, F-121), which the block cannot attribute to one
+    /// principal.
     fn far_alone(&self, far: &str) -> bool {
         let only = |v: &[String]| !v.is_empty() && v.iter().all(|x| x == far);
-        only(&self.usernames) || only(&self.cert_common_names)
+        match (self.usernames.is_empty(), self.cert_common_names.is_empty()) {
+            (false, true) => only(&self.usernames),
+            (true, false) => only(&self.cert_common_names),
+            _ => false,
+        }
     }
 
-    /// Whether it names the user name or CN `name`.
-    fn names(&self, name: &str) -> bool {
-        self.usernames
-            .iter()
-            .chain(&self.cert_common_names)
-            .any(|x| x == name)
+    /// Whether it answers for the name `name` of the kind `kind` (§2.15,
+    /// `narrowed_too_far`, 0.5): it names no interface and no zid, and
+    /// either names no user name and no CN, or names `name` in the list of
+    /// that kind and nothing in the other. A name no subject binds answers
+    /// only to a subject bound to no principal.
+    fn answers(&self, name: &str, kind: NameKind) -> bool {
+        if !self.interfaces.is_empty() || !self.zids.is_empty() {
+            return false;
+        }
+        if !self.bound() {
+            return true;
+        }
+        let has = |v: &[String]| v.iter().any(|x| x == name);
+        match kind {
+            NameKind::User => self.cert_common_names.is_empty() && has(&self.usernames),
+            NameKind::Cn => self.usernames.is_empty() && has(&self.cert_common_names),
+            NameKind::Unbound => false,
+        }
     }
+}
+
+/// The kind of a name `narrowed_too_far` reads (§2.15, 0.5): a user name
+/// or a CN, as the list naming it says, or a face's `far` that no subject
+/// names in either list, whose kind the block cannot tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum NameKind {
+    User,
+    Cn,
+    Unbound,
 }
 
 /// One policy of a router's block, as read (§2.15, 0.4): the ids of the
@@ -1750,10 +1778,13 @@ fn zk_denied(target: &str, deny: &[BlockDeny]) -> bool {
 /// Checks a router's subjects against the face `name` they must keep to
 /// its far principal (§2.4, §2.15):
 /// - `near_subject_on_face`, each subject on the face bound by a user name
-///   or a CN that is not the far principal's alone, whatever else it names
+///   or a CN that is not the far principal's, whatever else it names
 ///   (0.4): zenoh ties no credential to a link, and matches one value of
 ///   each property, so a session over the face with another name the
-///   subject binds matches it;
+///   subject binds matches it. The far principal's names it alone in one
+///   list and nothing in the other (0.5): a subject naming user names and
+///   CNs matches only a session presenting one of each, whose principal
+///   the block cannot tell, and its policies are not the far principal's;
 /// - `face_subject_beyond_face`, each face subject (on the face, bound by
 ///   no user name and no CN) whose link protocols are absent or name one
 ///   outside the face's: sessions off the face match it too (0.4);
@@ -1817,42 +1848,62 @@ pub fn check_subjects(name: &str, face: &Face, block: &BlockSubjects) -> Vec<Fin
 }
 
 /// Checks a router's subjects against every face of `policy` at once
-/// (§2.4, §2.15, 0.4): under `allow`, `narrowed_too_far` (no face, `at` the
-/// name) for each user name or CN the block's subjects bind, and each
-/// face's far principal, with a link protocol of §2.1's list, outside every
-/// face whose far principal it is not, that no subject naming no interface
-/// and no zid selects among those naming that name or no user name and no
-/// CN. A session with that name over that link protocol matches no
-/// subject, and is allowed everything (core §11.3): a far principal with no
-/// subject at all among them. Under `deny`, such a session gets nothing,
-/// and there is nothing to report.
+/// (§2.4, §2.15, 0.4, 0.5): under `allow`, `narrowed_too_far` (no face,
+/// `at` the name) for each name the block binds, read by kind: each user
+/// name a subject names, as a user name; each CN, as a CN; and each face's
+/// far principal that no subject names in either list, of a kind the block
+/// cannot tell. Such a name is reported with a link protocol of §2.1's
+/// list, outside every face whose far principal it is not, that no subject
+/// answering for it selects: one naming no interface and no zid, and either
+/// naming no user name and no CN, or naming the name in the list of its
+/// kind and nothing in the other (0.5, F-121). zenoh matches one value of
+/// each property a subject names, so a session with that name alone over
+/// that link protocol matches no subject, and is allowed everything (core
+/// §11.3): a far principal with no subject at all among them. One finding
+/// per name, whichever kinds fail. Under `deny`, such a session gets
+/// nothing, and there is nothing to report.
 #[must_use]
 pub fn check_narrowing(policy: &FacePolicy, block: &BlockSubjects) -> Vec<Finding> {
     let mut out = Vec::new();
     if block.posture != Posture::Allow {
         return out;
     }
-    let names: BTreeSet<&str> = block
-        .subjects
-        .iter()
-        .flat_map(|s| s.usernames.iter().chain(&s.cert_common_names))
-        .chain(policy.faces.values().map(|f| &f.far))
-        .map(String::as_str)
-        .collect();
-    for name in names {
+    let mut names: BTreeSet<(&str, NameKind)> = BTreeSet::new();
+    for s in &block.subjects {
+        names.extend(s.usernames.iter().map(|u| (u.as_str(), NameKind::User)));
+        names.extend(
+            s.cert_common_names
+                .iter()
+                .map(|c| (c.as_str(), NameKind::Cn)),
+        );
+    }
+    for f in policy.faces.values() {
+        let bound = block.subjects.iter().any(|s| {
+            s.usernames
+                .iter()
+                .chain(&s.cert_common_names)
+                .any(|x| *x == f.far)
+        });
+        if !bound {
+            names.insert((f.far.as_str(), NameKind::Unbound));
+        }
+    }
+    let mut bare_names: BTreeSet<&str> = BTreeSet::new();
+    for (name, kind) in names {
         let kept: Vec<String> = narrowed(policy, |f| policy.faces[f].far == name)
             .unwrap_or_else(|| LINK_PROTOCOLS.iter().map(|p| (*p).to_owned()).collect());
         let bare = kept.iter().any(|p| {
-            !block.subjects.iter().any(|s| {
-                s.interfaces.is_empty()
-                    && s.zids.is_empty()
-                    && (!s.bound() || s.names(name))
-                    && s.selects(p)
-            })
+            !block
+                .subjects
+                .iter()
+                .any(|s| s.answers(name, kind) && s.selects(p))
         });
         if bare {
-            out.push(Finding::new(Code::NarrowedTooFar, None, name));
+            bare_names.insert(name);
         }
+    }
+    for name in bare_names {
+        out.push(Finding::new(Code::NarrowedTooFar, None, name));
     }
     sort_findings(&mut out);
     out
