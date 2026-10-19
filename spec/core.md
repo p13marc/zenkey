@@ -2942,16 +2942,19 @@ The format is the generator's own. The reference reads an enrollment file
   contract declares stay open under `allow`.
   - **A principal's own keys** (0.31, F-122). A generator MUST deny, in
     each principal's policy, the keys of the services it does not run
-    that its grants do not name. The keys of the services it runs, which
-    P3 makes it their only writer, it MAY leave out of its own complement,
-    so that under `allow` it may also read and receive them on the
-    messages and flows its Own grant's rows do not name; under `deny` it
-    gets those rows alone. A generator that denies them too, per message
-    and flow, is stricter, and conforms. Beyond the principal's own
-    sessions, the two differ only for a subject that two principals'
-    policies list, which no grant shape of §11.1 writes, and which
-    `link.v1` reports on a face. The reference leaves them out.
-    `[Sc: link.v1 scenarios §11]`
+    that its grants do not name.
+  - It MAY leave the keys of the services the principal runs out of that
+    principal's complement: P3 makes the principal their only writer.
+    Under `allow`, the principal then also reads and receives its own
+    keys on the messages and flows that its Own grant's rows do not name.
+    Under `deny`, it gets those rows alone.
+  - A generator that denies them too, per message and flow, is stricter,
+    and conforms. The reference leaves them out.
+  - The two differ only for the principal's own sessions, and for a
+    subject that two principals' policies list. No grant shape of §11.1
+    writes such a subject, and `link.v1` reports one on a face. No fixture
+    pins either reading, since none carries a principal's complement;
+    `link.v1`'s scenario §11, step 7, shows both. `[Sc: link.v1 scenarios §11]`
 - **"Every principal" compiles into each principal's own policy** (0.15,
   F-87). In zenoh 1.10.1, a subject that matches every session (one with
   no attribute, or `link_protocols: ["tcp"]`) makes the per-user subjects

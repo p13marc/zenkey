@@ -24,10 +24,11 @@ changed.
   same, and no put reaches L.
 - **The rule.** Core 0.31 says a generator MAY leave the keys of the
   services a principal runs out of its own complement, and one that
-  denies them too conforms. Expected 7 now says X receives at most §1's
-  G's share: exactly that under the reference's complement, nothing of
-  `radio-a`'s traffic under the stricter one. G's share does not depend on
-  it, since G also matches `ground`'s own subject.
+  denies them too conforms. Expected 7 now gives X's share exactly under
+  each: §1's G's share under the reference's complement, and nothing at
+  all under the stricter one, since §1's G's share is `radio-a`'s traffic
+  alone. G's share does not depend on it, since G also matches `ground`'s
+  own subject.
 
 **Deliberately not changed.**
 - **The checks.** §2.15 reads which policies list a subject, never their
