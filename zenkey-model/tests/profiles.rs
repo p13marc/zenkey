@@ -1289,10 +1289,11 @@ fn link_exposure() {
 
 /// A plan as a router's block, which [`link::check_block`] must pass: every
 /// plan has the whole `@zk` deny and concrete rules that do not intersect
-/// (link.v1 §2.6, §2.8).
+/// (link.v1 §2.6, §2.8), and a generator writes it enabled (§2.15, 0.7).
 fn plan_as_block(p: &link::FacePlan) -> link::Block {
     link::Block {
         namespace: String::new(),
+        enabled: Some(true),
         deny: p
             .deny
             .iter()
@@ -1367,6 +1368,9 @@ fn link_block(b: &Value) -> (String, link::Block) {
     };
     let block = link::Block {
         namespace: b["namespace"].as_str().expect("namespace").to_owned(),
+        // Optional (0.7, F-124): `false` is the finding, and absent was not
+        // read.
+        enabled: b.get("enabled").map(|e| e.as_bool().expect("enabled")),
         deny: b["deny"]
             .as_array()
             .expect("deny")

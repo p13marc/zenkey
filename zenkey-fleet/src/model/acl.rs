@@ -3406,6 +3406,9 @@ pub fn check_face(
                 name,
                 &link::Block {
                     namespace: plan.namespace.clone(),
+                    // zenoh's loader reads an absent `enabled` as false, and
+                    // so does the document (§2.15, 0.7, F-124).
+                    enabled: Some(observed.enabled),
                     deny,
                     downsampling: ds.clone(),
                     subjects: None,
