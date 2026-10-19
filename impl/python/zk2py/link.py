@@ -1,4 +1,4 @@
-"""``link.v1``, text 0.6 (``spec/profiles/link/v1.md``, written against
+"""``link.v1``, text 0.7 (``spec/profiles/link/v1.md``, written against
 core 0.32): what crosses a constrained face.
 
 From the text alone:
@@ -23,7 +23,7 @@ From the text alone:
   block, and the near router's ``gateway`` for a south region (§2.5).
 
 Where the text left a choice, zk2py's is named in ``SPEC-FINDINGS.md``
-("At link.v1 0.1" to "At link.v1 0.6").
+("At link.v1 0.1" to "At link.v1 0.7").
 """
 
 from __future__ import annotations
@@ -157,6 +157,7 @@ def parse_policy(text: str) -> tuple[Policy | None, list[dict[str, Any]]]:
                 good_protocols[name] = protos
             if f is not None:
                 faces.append(f)
+    out += far_of_two_faces(doc.get("face"))
     # §2.14: "A policy MUST NOT give two faces a common link protocol."
     names = sorted(good_protocols)
     for i, a in enumerate(names):
@@ -168,6 +169,22 @@ def parse_policy(text: str) -> tuple[Policy | None, list[dict[str, Any]]]:
     if any(f["severity"] == "error" for f in out):
         return None, out
     return Policy(system, list(services), sorted(faces, key=lambda f: _bytes(f.name)), out), out
+
+
+def far_of_two_faces(faces: Any) -> list[dict[str, Any]]:
+    """§2.1 (0.7, F-125): "Two or more faces of the policy name the same
+    far … One finding per such name, with no face; at is the name". It
+    "reads every face whose far is a non-empty string, whatever else the
+    policy or the face holds", a face whose name is no plain chunk among
+    them."""
+    if type(faces) is not dict:
+        return []
+    count: dict[str, int] = {}
+    for body in faces.values():
+        far = body.get("far") if type(body) is dict else None
+        if type(far) is str and far:
+            count[far] = count.get(far, 0) + 1
+    return [finding("far_of_two_faces", None, far, "warning") for far, n in count.items() if n >= 2]
 
 
 def _face(name: str, body: dict[str, Any], out: list[dict[str, Any]]) -> tuple[Face | None, list[str] | None]:
@@ -592,6 +609,15 @@ def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dic
     face, ns = block["face"], block.get("namespace") or ""
     target = _keyexpr(f"{ns}/zk2/**/@zk/**" if ns else "zk2/**/@zk/**")
     out = []
+    # §2.15 (0.7, F-124): "block_disabled (error, at enabled): the block's
+    # access control is not enabled". In lints.json's shape an absent
+    # enabled "was not read"; a router's configuration is read by
+    # check_router_block, which gives an absent one as false.
+    if "enabled" in block:
+        if type(block["enabled"]) is not bool:
+            raise BlockError(f"enabled is {block['enabled']!r}, not a boolean (zenoh refuses it at load)")
+        if not block["enabled"]:
+            out.append(finding("block_disabled", face, "enabled"))
 
     def denied(m: str, fl: str) -> bool:
         return any(m in d.get("messages", []) and fl in rule_flows(d)
@@ -879,7 +905,11 @@ def check_router_block(block: dict[str, Any], policy: Policy, face_name: str,
         raise BlockError(f"the face policy has no face {face_name!r} (it has {[f.name for f in policy.faces]})")
     check_ids(block.get("subjects", []), block.get("policies", []), block.get("rules", []))
     downsampling = list(downsampling or [])
+    # §2.15 (0.7), "What a block omits": "enabled absent as false, a
+    # block's default_permission absent as deny, and a rule's flows absent
+    # as both flows" (rule_flows).
     view = {"face": face_name, "namespace": namespace, "downsampling": downsampling,
+            "enabled": block.get("enabled", False),
             "default_permission": block.get("default_permission", "deny"),
             "subjects": [{"id": s["id"], **{k: list(s[k]) for k in SUBJECT_PROPS if s.get(k)}}
                          for s in block.get("subjects", [])],

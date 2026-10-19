@@ -1,6 +1,6 @@
 """The ``link.v1`` scenarios (``spec/profiles/link/scenarios.md``, text
-0.6, core 0.32) on zenoh-python routers: ``just py-link`` (``python -m
-zk2py.link_scenarios [--only 1 …]``), all eleven sections.
+0.7, core 0.32) on zenoh-python routers: ``just py-link`` (``python -m
+zk2py.link_scenarios [--only 1 …]``), all thirteen sections.
 
 - **The deployment** is the reference's example, ``examples/zk2/link/``,
   read as given: the ``radio.v1`` contract, the lab router's face policy
@@ -373,6 +373,17 @@ def close_each(things: list[Any], what: str) -> None:
               + (f" (and {len(failed) - 1} more)" if len(failed) > 1 else ""), file=sys.stderr, flush=True)
 
 
+def noted(report: "Report", sec: str, what: str, run: Any) -> Any:
+    """Run a measurement whose result is only a NOTE: its failure is a NOTE
+    too, never a failed section (review-bot on PR #794). Returns the
+    result, or None."""
+    try:
+        return run()
+    except Exception as e:  # noqa: BLE001 - a measurement that cannot run is a note
+        report.note(sec, f"{what}: could not be measured ({type(e).__name__}: {e})")
+        return None
+
+
 class Tokens:
     def __init__(self, session: Any, selectors: list[str]):
         import zenoh
@@ -400,7 +411,8 @@ class World:
                  queryable_grant: str | None = "owner", deny_override: tuple[str, list[str]] | None = None,
                  downsampling_override: list[dict[str, Any]] | None = None, tombstone_s: float = 60.0,
                  face_local: bool = False, posture: str = "deny", generator: str = "0.3",
-                 revisions: list[Any] | None = None, block_edit: Any = None, tls: bool = False):
+                 revisions: list[Any] | None = None, block_edit: Any = None, tls: bool = False,
+                 faces: str = "first"):
         import zenoh
 
         from . import acl, live
@@ -417,7 +429,13 @@ class World:
         consumes, calls = tools["console"]
         self.selectors = [s for u in consumes for s in acl.use_selectors(u)]
         block = acl.generate(principals, posture).block
-        block = generate_face(policy_text, self.plan, block, far, generator)
+        if faces == "all":
+            # §13: the generator compiles every face of the policy, each
+            # face's denies into its far principal's policy (§2.4, 0.7).
+            pol, _ = link.parse_policy(policy_text)
+            block = link.compile_faces(pol, p["faces"], block, **GENERATORS[generator])
+        else:
+            block = generate_face(policy_text, self.plan, block, far, generator)
         if block_edit is not None:
             block = block_edit(block)
         if deny_override is not None:
@@ -478,24 +496,28 @@ class World:
         conf.insert_json5("access_control", json.dumps(block))
         for k, v in extras.items():
             conf.insert_json5(k, json.dumps(v))
-        self.n = zenoh.open(conf)
         self.closers: list[Any] = []
         self.far_router = None
         self.far, self.attach = far, attach
-        self.g = self._open_g()
-        self.l = live.open_client(self.near, ("local", "local-pw"))
-        self.gs = fr.Subscriber(self.g, self.selectors)
-        self.ls = fr.Subscriber(self.l, self.selectors)
-        presence = ["zk2/lab/*/@zk/**"]
-        self.gt, self.lt = Tokens(self.g, presence), Tokens(self.l, presence)
-        self.fl: Any = None
-        self.fls: Any = None
-        self.flt: Any = None
-        if face_local:
-            self.fl = live.open_client(f"unixsock-stream/{self.sock}", ("local", "local-pw"))
-            self.fls = fr.Subscriber(self.fl, self.selectors)
-            self.flt = Tokens(self.fl, presence)
+        self.g = self.l = self.gs = self.ls = self.fl = self.fls = self.flt = None
         self.owners: dict[str, Any] = {}
+        self.n = zenoh.open(conf)
+        try:
+            self.g = self._open_g()
+            self.l = live.open_client(self.near, ("local", "local-pw"))
+            self.gs = fr.Subscriber(self.g, self.selectors)
+            self.ls = fr.Subscriber(self.l, self.selectors)
+            presence = ["zk2/lab/*/@zk/**"]
+            self.gt, self.lt = Tokens(self.g, presence), Tokens(self.l, presence)
+            if face_local:
+                self.fl = live.open_client(f"unixsock-stream/{self.sock}", ("local", "local-pw"))
+                self.fls = fr.Subscriber(self.fl, self.selectors)
+                self.flt = Tokens(self.fl, presence)
+        except BaseException:
+            # A world that cannot start closes what it opened, N first among
+            # them, before the error goes on.
+            self.close()
+            raise
         time.sleep(0.5)
 
     def _open_g(self) -> Any:
@@ -558,11 +580,12 @@ class World:
             return [k for k in s.deliveries if k.startswith(prefix)]
 
     def close(self) -> None:
+        """Close whatever the world holds, a world whose start failed among
+        them: subscribers, owners, sessions, then the routers."""
+        close_each([x for x in (self.gs, self.ls, self.fls) if x is not None], "the subscribers")
         close_each(list(self.owners.values()), "the owners")
-        for s in (self.gs, self.ls) + ((self.fls,) if self.fls is not None else ()):
-            s.close()
-        close_each(list((self.g, self.l, self.n) + ((self.far_router[0],) if self.far_router else ())
-                        + ((self.fl,) if self.fl is not None else ())), "the sessions and routers")
+        close_each([x for x in (self.g, self.l, self.fl) if x is not None]
+                   + ([self.far_router[0]] if self.far_router else []) + [self.n], "the sessions and routers")
 
 
 def base_of(name: str = "radio-a") -> str:
@@ -1021,21 +1044,23 @@ PROBE_DEADLINE_S = 5.0
 PROBE_EVERY_S = 0.1
 
 
-def _alive(w: World, sessions: dict[str, Any]) -> dict[str, int]:
+def _alive(w: World, sessions: dict[str, Any]) -> dict[str, dict[str, int]]:
     """Under ``allow``: each session puts on ``zk2py-probe-<run>/<who>``, a
     key no contract declares, with a suffix unique to this run, and L
     subscribes to it. The puts repeat every :data:`PROBE_EVERY_S` until L
     has one from every session or :data:`PROBE_DEADLINE_S` passes, so no
     fixed sleep has to cover the subscriber's declaration. Returns 1 for a
-    session whose probe reached L, else 0. A session the block denies all
-    of the deployment's keys still reaches L here, so "nothing" is the
-    block's, not a dead session's."""
+    session whose probe reached L, else 0, as ``arrived``, beside
+    ``attempts``, the puts it took. A session the block denies all of the
+    deployment's keys still reaches L here, so "nothing" is the block's,
+    not a dead session's."""
     import uuid
 
     import zenoh
 
     root = f"{PROBE_KEY}-{uuid.uuid4().hex[:12]}"
     arrived: set[str] = set()
+    attempts = {who: 0 for who in sessions}
     lock = threading.Lock()
 
     def seen(smp: Any) -> None:
@@ -1052,11 +1077,12 @@ def _alive(w: World, sessions: dict[str, Any]) -> dict[str, int]:
                 break
             for who in waiting:
                 sessions[who].put(f"{root}/{who}", b"alive")
+                attempts[who] += 1
             time.sleep(PROBE_EVERY_S)
     finally:
         sub.undeclare()
     with lock:
-        return {who: int(who in arrived) for who in sessions}
+        return {who: {"arrived": int(who in arrived), "attempts": attempts[who]} for who in sessions}
 
 
 def _run7(posture: str, generator: str = "0.3", *, anonymous: bool = False, block_edit: Any = None,
@@ -1086,8 +1112,8 @@ def _run7(posture: str, generator: str = "0.3", *, anonymous: bool = False, bloc
         for who, n in puts.items():
             r.setdefault(who, {})["puts_to_L"] = n
         if alive:
-            for who, n in _alive(w, {"G": w.g, "X": w.fl}).items():
-                r[who]["alive"] = n
+            for who, probe in _alive(w, {"G": w.g, "X": w.fl}).items():
+                r[who]["alive"] = probe
         return r
     finally:
         _close_all(w)
@@ -1140,7 +1166,7 @@ def _brief(d: dict[str, Any]) -> str:
 def section7(report: Report) -> None:
     sec = "§7 a near principal's credentials on the face"
     runs = {("deny", "0.3"): None, ("deny", "0.2"): None, ("allow", "0.3"): None, ("allow", "no-face"): None,
-            ("allow", "own"): None, ("allow", "0.2"): None}
+            ("allow", "own"): None}
     for posture, generator in runs:
         runs[(posture, generator)] = _run7(posture, generator, anonymous=(posture, generator) == ("allow", "0.3"))
     s1, s2, s3, s4, s5 = (runs[k] for k in (("deny", "0.3"), ("deny", "0.2"), ("allow", "0.3"),
@@ -1204,9 +1230,10 @@ def section7(report: Report) -> None:
                      + "; ".join(f"step {i}: {r['compare'] or 'none'}" for i, r in enumerate((s1, s2, s3, s4, s5), 1)))
     same = _block_under("deny", "no-face") == _block_under("deny", "0.3")
     report.note(sec, f"step 4's block under deny is step 1's: {same} (step 5's under deny is §10's step 6)")
-    b2 = runs[("allow", "0.2")]
-    report.note(sec, f"step 2's block under allow (0.2's, nothing narrowed, no face subject): G {_brief(b2['G'])}; "
-                     f"X {_brief(b2['X'])}; tool {b2['found']}")
+    b2 = noted(report, sec, "step 2's block under allow", lambda: _run7("allow", "0.2"))
+    if b2 is not None:
+        report.note(sec, f"step 2's block under allow (0.2's, nothing narrowed, no face subject): G {_brief(b2['G'])}; "
+                         f"X {_brief(b2['X'])}; tool {b2['found']}")
 
 
 def _block_under(posture: str, generator: str) -> dict[str, Any]:
@@ -1427,32 +1454,6 @@ def section9(report: Report) -> None:
                  gone == link.sort_findings([f("narrowed_too_far", None, "ground"),
                                              f("face_subject_misplaced", "radio", "face:radio")]), str(gone))
     report.note(sec, f"step 5's block (the generator's allow block): tool {s5['found'] or 'no finding'}")
-    _f121(report, sec)
-
-
-def _f121(report: Report, sec: str) -> None:
-    """Measurements for SPEC-FINDINGS F-121 (open): a subject naming a user
-    name and a CN matches only a session presenting both, which
-    ``narrowed_too_far``'s "those that name it" does not ask."""
-    tag = "MEASUREMENT for open SPEC-FINDINGS F-121"
-    mixed = _subject("mixed", usernames=["ground"], cert_common_names=["local"])
-    narrowed = _narrow("local", [p for p in NEAR_PROTOCOLS if p != "tcp"])
-    with_mixed = _near_puts("allow", _edits(narrowed, mixed, _listed("mixed", by=["ground"])), ["local"])
-    without = _near_puts("allow", narrowed, ["local"])
-    report.note(sec, f"{tag} (i), allow, local narrowed off tcp: with a subject usernames=[ground], "
-                     f"cert_common_names=[local] in ground's policy, local's puts over TCP reaching L "
-                     f"{with_mixed['puts']['local']}/5, tool {with_mixed['found'] or 'no finding'}; without it, "
-                     f"{without['puts']['local']}/5, tool {without['found']}")
-    as_cn = _near_puts("allow", _edits(narrowed, _subject("local-cn", cert_common_names=["local"],
-                                                          link_protocols=list(NEAR_PROTOCOLS)),
-                                       _listed("local-cn", by=["local"])), ["local"])
-    report.note(sec, f"{tag} (ii), allow, local narrowed off tcp, with a subject cert_common_names=[local] off the "
-                     f"face in local's policy: local's puts over TCP (user name local, no certificate) reaching L "
-                     f"{as_cn['puts']['local']}/5, tool {as_cn['found'] or 'no finding'}")
-    q2 = _run7("deny", block_edit=_edits(mixed, _listed("mixed", by=["local"])))
-    report.note(sec, f"{tag}, what zenoh matches, deny, usernames=[ground], cert_common_names=[local] in local's "
-                     f"policy: G (user name ground, no certificate) "
-                     f"{_brief(q2['G'])}; X {_brief(q2['X'])}; tool {q2['found'] or 'no finding'}")
 
 
 def _read_radio_b(posture: str, edit: Any) -> dict[str, Any]:
@@ -1615,7 +1616,7 @@ def section11(report: Report) -> None:
                  and s7["G"]["puts_to_L"] == 0 and s7["X"]["puts_to_L"] == 0,
                  f"G {_brief(s7['G'])}; X {_brief(s7['X'])}")
     report.check(sec, "step 7: X's session is live (its put on a key no contract declares reaches L, as G's does), so "
-                      "its nothing is the block's", s7["X"]["alive"] == 1 and s7["G"]["alive"] == 1,
+                      "its nothing is the block's", s7["X"]["alive"]["arrived"] == 1 and s7["G"]["alive"]["arrived"] == 1,
                  f"G {s7['G']['alive']}, X {s7['X']['alive']}")
     report.check(sec, "step 8 (step 5 with radio-a's policy listing the face's zk rule): all five of each one's puts "
                       "reach L", s8["G"]["puts_to_L"] == 5 and s8["X"]["puts_to_L"] == 5,
@@ -1643,60 +1644,175 @@ def section11(report: Report) -> None:
                                      f("face_subject_misplaced", "radio", "face:radio")]), str(s8["found"]))
     report.note(sec, f"step 3's and step 4's control blocks (the generator's allow block): tool "
                      f"{s3c['found'] or 'no finding'}; {s4c['found'] or 'no finding'}")
-    _cold_read(report, sec)
 
 
-def _cold_read(report: Report, sec: str) -> None:
-    """Measurements for open SPEC-FINDINGS F-124 and F-125 (round 36's cold
-    read of link.v1 0.6), as NOTE lines: a block whose access control is
-    not enabled, and two faces of one policy with one far principal."""
-    def enabled(value: Any) -> Any:
-        def edit(block: dict[str, Any]) -> dict[str, Any]:
-            if value is None:
-                block.pop("enabled", None)
-            else:
-                block["enabled"] = value
-            return block
-        return edit
+#: §13's second face, as scenarios.md writes it, its far principal given.
+SAT_FACE = """
+[face.sat]
+far          = "{far}"
+attach       = "client"
+select       = {{ link_protocols = ["tls"] }}
+class        = "constrained"
+expose       = "none"
+max_outage_s = 6
+batch_bytes  = 1000
+link_bps     = 1000000
+"""
 
-    for label, value in (("enabled: false", False), ("enabled absent", None)):
-        r = _run7("deny", block_edit=enabled(value))
-        report.note(sec, f"MEASUREMENT for open SPEC-FINDINGS F-124, the generator's deny block with {label}: "
-                         f"G {_brief(r['G'])}; X {_brief(r['X'])}; tool {r['found'] or 'no finding'}")
-    two = policy() + SAT_FACE
-    pol, _ = link.parse_policy(two)
-    sat = next(f for f in derive(two)["faces"] if f["name"] == "sat")
-    w = World(two, block_edit=lambda block: link.compile_faces(pol, [sat], block))
+
+# -- §12: what a block omits --------------------------------------------------------------
+
+def _omit(key: str) -> Any:
+    def edit(block: dict[str, Any]) -> dict[str, Any]:
+        block.pop(key, None)
+        return block
+    return edit
+
+
+def _set(key: str, value: Any) -> Any:
+    def edit(block: dict[str, Any]) -> dict[str, Any]:
+        block[key] = value
+        return block
+    return edit
+
+
+def _consume_out(rule: dict[str, Any]) -> bool:
+    """The console's Consume rule for the samples it receives: an egress
+    allow of ``put`` over radio.v1's stream selectors (§12 step 4's
+    ``consume-out:tool.console``; zk2py writes one per principal)."""
+    return (rule.get("permission") == "allow" and link.rule_flows(rule) == ["egress"]
+            and "put" in rule.get("messages", [])
+            and any(k.startswith(f"zk2/lab/*/{IFACE}/stream/") for k in rule.get("key_exprs", [])))
+
+
+def _flows_out(block: dict[str, Any]) -> dict[str, Any]:
+    """§12 step 4: "flows taken out of the console's Consume rule for the
+    samples it receives …, which ground's and local's policies list, and
+    out of every deny of the face"."""
+    listed = {r for pol in block["policies"] if {"ground", "local"} & set(pol["subjects"]) for r in pol["rules"]}
+    for r in block["rules"]:
+        if (r["id"] in listed and _consume_out(r)) or r["id"].startswith("face-radio-"):
+            r.pop("flows", None)
+    return block
+
+
+def _g_puts(w: World) -> dict[str, int]:
+    """§12 step 4: "the owner silent, G puts five times on …/air/dropped_total
+    and five times on …/stream/air/frames_total, and L counts what reaches
+    it of each"."""
+    out = {}
+    for name in ("dropped_total", "frames_total"):
+        key = f"{base_of()}/stream/air/{name}"
+        for i in range(5):
+            w.g.put(key, f"put G {name} {i}".encode())
+            time.sleep(0.05)
+        time.sleep(1.0)
+        out[name] = sum(1 for x in w.ls.of(key) if x.payload.startswith(f"put G {name} ".encode()))
+    return out
+
+
+def _run12_flows(edit: Any) -> dict[str, Any]:
+    w = World(policy(), block_edit=edit)
     try:
         o = w.owner()
         traffic(o)
         g = _receives(w, w.gs, w.gt)
         g.update(_asks(w.g, o))
-        found = w.check_block()
+        return {"G": g, "puts": _g_puts(w), "found": w.check_block(), "block": w.block}
     finally:
         _close_all(w)
-    report.note(sec, f"MEASUREMENT for open SPEC-FINDINGS F-125, two faces with one far principal, ground (radio "
-                     f"exposes link, sat over tls exposes none), under deny: G over the radio face {_brief(g)}; "
-                     f"tool {found or 'no finding'}")
 
 
-#: F-125's second face: the scenarios' policy with a face to the same far
-#: principal over another link protocol, exposing none.
-SAT_FACE = """
-[face.sat]
-far          = "ground"
-attach       = "client"
-select       = { link_protocols = ["tls"] }
-class        = "constrained"
-expose       = "none"
-max_outage_s = 600
-batch_bytes  = 270
-link_bps     = 2400
-"""
+def _everything(d: dict[str, Any]) -> bool:
+    """§12 expected 1: "about 100 of air/frames_total and of raw, all 10
+    puts of oper, all 5 occurrences of fault and of change, see the owner's
+    two tokens, receive its descriptor, and have their GET and call
+    answered. The face's downsampling … still applies: 4 to 6 of
+    air/dropped_total and of frames"."""
+    return (90 <= d["stream/air/frames_total"] <= 110 and 90 <= d["@stream/raw"] <= 110 and d["oper"] == 10
+            and d["fault"] == 5 and d["change"] == 5 and {"instance", "alive"} <= set(d["tokens"])
+            and d["descriptor"] >= 1 and _answered(d)
+            and 4 <= d["stream/air/dropped_total"] <= 6 and 4 <= d["@stream/frames"] <= 6)
+
+
+def section12(report: Report) -> None:
+    sec = "§12 what a block omits"
+    f = link.finding
+    s1 = _run7("deny", block_edit=_set("enabled", False))
+    s2 = _run7("deny", block_edit=_omit("enabled"))
+    s3 = _run7("deny", block_edit=_omit("default_permission"))
+    for n, r, label in ((1, s1, "enabled: false"), (2, s2, "the enabled line taken out")):
+        report.check(sec, f"step {n} ({label}): nothing is enforced: G and X each receive about 100 of "
+                          f"air/frames_total and of raw, all of oper, fault and change, both tokens and the "
+                          f"descriptor, their GET and call answered, 4 to 6 of air/dropped_total and frames (the "
+                          f"downsampling still applies), and all five of each one's puts reach L",
+                     _everything(r["G"]) and _everything(r["X"]) and r["G"]["puts_to_L"] == 5
+                     and r["X"]["puts_to_L"] == 5, f"G {_brief(r['G'])}; X {_brief(r['X'])}")
+    report.check(sec, "step 3 (the default_permission line taken out): G receives what §1's G receives; X receives "
+                      "nothing at all, sees no token and gets no reply; neither's puts reach L",
+                 _like_section1_g(s3["G"]) and _nothing(s3["X"]) and s3["G"]["puts_to_L"] == 0
+                 and s3["X"]["puts_to_L"] == 0, f"G {_brief(s3['G'])}; X {_brief(s3['X'])}")
+    s4, s4c = _run12_flows(_flows_out), _run12_flows(None)
+    edited = [r["id"] for r in s4["block"]["rules"] if "flows" not in r]
+    report.check(sec, "step 4 (flows taken out of the Consume rule for received samples and of every face deny): G "
+                      "receives what §1's G receives and nothing the face denies; all five of its puts on "
+                      "air/dropped_total reach L and none on air/frames_total; under the generator's block none of "
+                      "either",
+                 _like_section1_g(s4["G"]) and s4["puts"] == {"dropped_total": 5, "frames_total": 0}
+                 and s4c["puts"] == {"dropped_total": 0, "frames_total": 0}
+                 and any(not rid.startswith("face-") for rid in edited) and any(rid.startswith("face-") for rid in edited),
+                 f"G {_brief(s4['G'])}; puts {s4['puts']}; generator's {s4c['puts']}; rules without flows {edited}")
+    report.check(sec, "step 5: steps 1 and 2, block_disabled at enabled, alone; steps 3 and 4, no finding (a tool "
+                      "reads an absent default_permission as deny, and a rule with no flows as both flows)",
+                 s1["found"] == s2["found"] == [f("block_disabled", "radio", "enabled")]
+                 and s3["found"] == [] and s4["found"] == [],
+                 f"{s1['found']}; {s2['found']}; {s3['found']}; {s4['found']}")
+    report.note(sec, "step 5, zk2py's comparison with the plan (its shape, link.compare_block): "
+                     + "; ".join(f"step {i}: {link.compare_block(link.parse_policy(policy())[0], [derive(policy())['faces'][0]], b) or 'none'}"
+                                 for i, b in ((1, s1["block"]), (2, s2["block"]), (3, s3["block"]), (4, s4["block"]))))
+
+
+# -- §13: two faces, one far principal ------------------------------------------------------
+
+def section13(report: Report) -> None:
+    sec = "§13 two faces, one far principal"
+    f = link.finding
+    out = {}
+    for far in ("ground", "ground-router"):
+        text = policy() + SAT_FACE.format(far=far)
+        warnings = link.parse_policy(text)[1]
+        w = World(text, faces="all")
+        try:
+            o = w.owner()
+            traffic(o)
+            g = _receives(w, w.gs, w.gt)
+            g.update(_asks(w.g, o))
+            policies = {p["id"]: [r for r in p["rules"] if r.startswith("face-")] for p in w.block["policies"]}
+            out[far] = {"G": g, "warnings": warnings, "found": w.check_block(), "policies": policies}
+        finally:
+            _close_all(w)
+    one, two = out["ground"], out["ground-router"]
+    report.check(sec, "step 1: the generator warns far_of_two_faces at ground, and refuses nothing",
+                 one["warnings"] == [f("far_of_two_faces", None, "ground", "warning")], str(one["warnings"]))
+    gp = one["policies"].get("ground-policy", [])
+    report.check(sec, "step 1: ground's policy carries both plans' denies, the radio face's and sat's",
+                 any(r.startswith("face-radio-") for r in gp) and any(r.startswith("face-sat-") for r in gp), str(gp))
+    report.check(sec, "step 1: over the radio face G receives no sample of air/dropped_total or frames, no put of oper "
+                      "and no occurrence of fault; its GET and call are answered; it sees no token and no descriptor",
+                 all(one["G"][k] == 0 for k in STREAMS + ("oper", "fault", "change")) and _answered(one["G"])
+                 and not one["G"]["tokens"] and one["G"]["descriptor"] == 0, _brief(one["G"]))
+    report.check(sec, "step 2 (control, sat's far principal ground-router): no warning; ground-router's policy "
+                      "carries sat's denies and ground's the radio face's alone; G receives what §1's G receives",
+                 two["warnings"] == [] and any(r.startswith("face-sat-") for r in two["policies"].get("ground-router-policy", []))
+                 and all(r.startswith("face-radio-") for r in two["policies"].get("ground-policy", []))
+                 and _like_section1_g(two["G"]), f"{two['warnings']}; {two['policies']}; G {_brief(two['G'])}")
+    report.check(sec, "step 3: a tool finds nothing in either block", one["found"] == [] and two["found"] == [],
+                 f"{one['found']}; {two['found']}")
 
 
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
-            "7": section7, "8": section8, "9": section9, "10": section10, "11": section11}
+            "7": section7, "8": section8, "9": section9, "10": section10, "11": section11, "12": section12,
+            "13": section13}
 
 
 def main(argv: list[str] | None = None) -> int:
