@@ -1,0 +1,806 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\npeer=r2\nport=eth0",
+        "key": "a659f813308ad1da"
+      },
+      "labels": {
+        "host": "h-3fa9c2d41b7e",
+        "peer": "r2",
+        "port": "eth0"
+      },
+      "note": "the test vector (RFC 11 §3.1, §2.2): host drops out, peer sorts before port",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\npeer=r2\nport=eth0",
+        "key": "a659f813308ad1da"
+      },
+      "labels": {
+        "host": "h-3fa9c2d41b7e",
+        "peer": "r2",
+        "port": "eth0"
+      },
+      "note": "the test vector, labels written in another order: the same key",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\npeer=r2\nport=eth0",
+        "key": "a659f813308ad1da"
+      },
+      "labels": {
+        "peer": "r2",
+        "port": "eth0"
+      },
+      "note": "the test vector without its host label: the same key",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down",
+        "key": "64e8f5ba5c6bdd1a"
+      },
+      "labels": {},
+      "note": "no discriminating label: the bare rule is hashed",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down",
+        "key": "64e8f5ba5c6bdd1a"
+      },
+      "labels": {
+        "host": "h-3fa9c2d41b7e"
+      },
+      "note": "a host label alone: the bare rule, as with none",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nport=eth0",
+        "key": "fa0fb906f001be33"
+      },
+      "labels": {
+        "host.boot_id": "bbbb",
+        "host.id": "h-3fa9c2d41b7e",
+        "port": "eth0"
+      },
+      "note": "host.* labels are host-scoped and drop out (ZenSight's host_scoped_labels_are_excluded_from_the_normative_input)",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nport=eth0",
+        "key": "fa0fb906f001be33"
+      },
+      "labels": {
+        "port": "eth0"
+      },
+      "note": "the same alarm without the host.* labels",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nport=eth0",
+        "key": "fa0fb906f001be33"
+      },
+      "labels": {
+        "host.": "x",
+        "port": "eth0"
+      },
+      "note": "a name that is the prefix host. alone is host-scoped",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nhostname=r1\nport=eth0",
+        "key": "150672ad53778cac"
+      },
+      "labels": {
+        "hostname": "r1",
+        "port": "eth0"
+      },
+      "note": "hostname is not host-scoped: it enters the input",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nhosts.x=r1\nport=eth0",
+        "key": "8ec20d539b569628"
+      },
+      "labels": {
+        "hosts.x": "r1",
+        "port": "eth0"
+      },
+      "note": "hosts.x is not host-scoped",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nHost=r1\nport=eth0",
+        "key": "c83b342cef0d9dd9"
+      },
+      "labels": {
+        "Host": "r1",
+        "port": "eth0"
+      },
+      "note": "Host is not host (the comparison is exact)",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nHOST.id=r1\nport=eth0",
+        "key": "2a365e72b600db2c"
+      },
+      "labels": {
+        "HOST.id": "r1",
+        "port": "eth0"
+      },
+      "note": "HOST.id is not host-scoped",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\n host=r1\nport=eth0",
+        "key": "014c760f163573b9"
+      },
+      "labels": {
+        " host": "r1",
+        "port": "eth0"
+      },
+      "note": "a name with a leading space is not host",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nport=eth0",
+        "key": "fa0fb906f001be33"
+      },
+      "labels": {
+        "host": "a\nb",
+        "port": "eth0"
+      },
+      "note": "a host label is removed before the framing is checked: its newline breaks nothing",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nport=eth0",
+        "key": "fa0fb906f001be33"
+      },
+      "labels": {
+        "host.=": "c",
+        "host.id": "a\nb",
+        "port": "eth0"
+      },
+      "note": "so is a host.* label, whatever its name or value holds",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "ssh-listening\nexpected=listen\nport=22",
+        "key": "ac0f2b156611121b"
+      },
+      "labels": {
+        "expected": "listen",
+        "port": "22"
+      },
+      "note": "two labels: expected sorts before port",
+      "op": "derive",
+      "rule": "ssh-listening"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "PortScanDetector\nsrc=10.0.0.5",
+        "key": "9113d9466bb14958"
+      },
+      "labels": {
+        "src": "10.0.0.5"
+      },
+      "note": "a CamelCase rule: rules are hashed as written, never slugged",
+      "op": "derive",
+      "rule": "PortScanDetector"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "PortScanDetector\nsrc=10.0.0.6",
+        "key": "9113dc466bb14e71"
+      },
+      "labels": {
+        "src": "10.0.0.6"
+      },
+      "note": "another label value is another alarm",
+      "op": "derive",
+      "rule": "PortScanDetector"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "x\nB=1\na=2",
+        "key": "7b8fe9c799afca7b"
+      },
+      "labels": {
+        "B": "1",
+        "a": "2"
+      },
+      "note": "byte order: B (0x42) sorts before a (0x61)",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "x\na.b=2\na_b=1",
+        "key": "da150a6a25160eff"
+      },
+      "labels": {
+        "a.b": "2",
+        "a_b": "1"
+      },
+      "note": "byte order: a.b (0x2e) sorts before a_b (0x5f)",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "x\na=2\nab=1",
+        "key": "ed55afdd2fff1fac"
+      },
+      "labels": {
+        "a": "2",
+        "ab": "1"
+      },
+      "note": "byte order: a prefix sorts first",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "x\nz=1\né=2",
+        "key": "e2367ae9046635c2"
+      },
+      "labels": {
+        "z": "1",
+        "é": "2"
+      },
+      "note": "byte order over UTF-8: z (0x7a) before é (0xc3 0xa9)",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "x\nport=",
+        "key": "86bbf51adc7472b7"
+      },
+      "labels": {
+        "port": ""
+      },
+      "note": "an empty value is framed",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "x\nexpr=a=1",
+        "key": "baaaffd7865b81d8"
+      },
+      "labels": {
+        "expr": "a=1"
+      },
+      "note": "a value may hold =: only a name may not",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "a=b",
+        "key": "e65093190491a193"
+      },
+      "labels": {},
+      "note": "a rule may hold =: only a newline breaks it",
+      "op": "derive",
+      "rule": "a=b"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "x\nsite=zürich",
+        "key": "17f7e15e1bf0e4c2"
+      },
+      "labels": {
+        "site": "zürich"
+      },
+      "note": "a value in UTF-8",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "x\nmsg=a\rb",
+        "key": "9bd51a25abbc1e9d"
+      },
+      "labels": {
+        "msg": "a\rb"
+      },
+      "note": "a carriage return is not a newline: framed",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "link_down\nport=22",
+        "key": "16991d91fb818ca6"
+      },
+      "labels": {
+        "port": "22"
+      },
+      "note": "a newline in the rule breaks the framing: sanitized to link_down (ZenSight's a_framing_violating_rule_still_keys_deterministically)",
+      "op": "derive",
+      "rule": "link\ndown"
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "link_down\nport=22",
+        "key": "16991d91fb818ca6"
+      },
+      "labels": {
+        "port": "22"
+      },
+      "note": "the framed alarm the sanitized one collides with: sanitizing is not injective",
+      "op": "derive",
+      "rule": "link_down"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "unnamed",
+        "key": "8cdb6af9c367e25f"
+      },
+      "labels": {},
+      "note": "an empty rule breaks the framing: sanitized to unnamed",
+      "op": "derive",
+      "rule": ""
+    },
+    {
+      "expect": {
+        "framed": true,
+        "input": "unnamed",
+        "key": "8cdb6af9c367e25f"
+      },
+      "labels": {},
+      "note": "the framed rule unnamed shares that key",
+      "op": "derive",
+      "rule": "unnamed"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "unnamed\nport=22",
+        "key": "7924a179988917bf"
+      },
+      "labels": {
+        "port": "22"
+      },
+      "note": "an empty rule with a label",
+      "op": "derive",
+      "rule": ""
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "_",
+        "key": "af64124c8602484e"
+      },
+      "labels": {},
+      "note": "a rule that is one newline: sanitized to _, which is not empty",
+      "op": "derive",
+      "rule": "\n"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "x\na_b=1",
+        "key": "8e637a45235331b5"
+      },
+      "labels": {
+        "a=b": "1"
+      },
+      "note": "an = in a name breaks the framing: sanitized to a_b",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "x\na_b=1",
+        "key": "8e637a45235331b5"
+      },
+      "labels": {
+        "a\nb": "1"
+      },
+      "note": "a newline in a name: sanitized to a_b",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "x\n_=1",
+        "key": "137ad157845afbaa"
+      },
+      "labels": {
+        "": "1"
+      },
+      "note": "an empty name breaks the framing: sanitized to _",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "x\nport=a_b",
+        "key": "8713d08bc3d921ff"
+      },
+      "labels": {
+        "port": "a\nb"
+      },
+      "note": "a newline in a value breaks the framing: sanitized to a_b",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "x\nport=_",
+        "key": "65d464a499df4038"
+      },
+      "labels": {
+        "port": "\n"
+      },
+      "note": "a value that is one newline: sanitized to _",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "x\na_b=1\na_b=2",
+        "key": "aad8b9ff5179db3a"
+      },
+      "labels": {
+        "a=b": "2",
+        "a_b": "1"
+      },
+      "note": "two names that sanitize to one: sorted by value next, byte order",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "x\na_b=1\na_b=1",
+        "key": "aad8b8ff5179d987"
+      },
+      "labels": {
+        "a=b": "1",
+        "a_b": "1"
+      },
+      "note": "two names that sanitize to one, with one value: the term twice",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "x\na_b=1\nport=eth0",
+        "key": "e7811feaccfede38"
+      },
+      "labels": {
+        "a\nb": "1",
+        "port": "eth0"
+      },
+      "note": "one bad name sanitizes; the framed labels beside it are unchanged",
+      "op": "derive",
+      "rule": "x"
+    },
+    {
+      "expect": {
+        "framed": false,
+        "input": "link_down\n_=d\na_b=c\nport=a_b",
+        "key": "88ff293dcd1150d2"
+      },
+      "labels": {
+        "": "d",
+        "a=b": "c",
+        "host": "e\nf",
+        "port": "a\nb"
+      },
+      "note": "everything at once: the host label drops out first, then each part is sanitized",
+      "op": "derive",
+      "rule": "link\ndown"
+    },
+    {
+      "expect": true,
+      "name": "host",
+      "note": "the label named host",
+      "op": "host_scoped"
+    },
+    {
+      "expect": true,
+      "name": "host.id",
+      "note": "host.* is host-scoped",
+      "op": "host_scoped"
+    },
+    {
+      "expect": true,
+      "name": "host.boot_id",
+      "note": "host.* is host-scoped",
+      "op": "host_scoped"
+    },
+    {
+      "expect": true,
+      "name": "host.",
+      "note": "the prefix alone starts with host.",
+      "op": "host_scoped"
+    },
+    {
+      "expect": true,
+      "name": "host.x.y",
+      "note": "any name under host.",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "hostname",
+      "note": "a name that starts with host but not host.",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "hosts",
+      "note": "not host",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "hosts.x",
+      "note": "not under host.",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "host_id",
+      "note": "an underscore is not the dot",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "Host",
+      "note": "no case folding",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "HOST.id",
+      "note": "no case folding",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": " host",
+      "note": "no trimming",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "host ",
+      "note": "no trimming",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "x.host",
+      "note": "host. must be the start",
+      "op": "host_scoped"
+    },
+    {
+      "expect": false,
+      "name": "",
+      "note": "the empty name is not host-scoped (it breaks the framing, §2.3)",
+      "op": "host_scoped"
+    },
+    {
+      "expect": "zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms/a659f813308ad1da",
+      "note": "the test vector's alarm (§2.2)",
+      "op": "ref",
+      "ref": {
+        "alert_key": "a659f813308ad1da",
+        "service": "netlink",
+        "system": "h-3fa9c2d41b7e"
+      }
+    },
+    {
+      "expect": "zk2/h-3fa9c2d41b7e/snmp.router01/alarms.v1/state/alarms/a659f813308ad1da",
+      "note": "a dotted service, carried whole (§2.12, D23)",
+      "op": "ref",
+      "ref": {
+        "alert_key": "a659f813308ad1da",
+        "service": "snmp.router01",
+        "system": "h-3fa9c2d41b7e"
+      }
+    },
+    {
+      "expect": "zk2/fleet/catalog/alarms.v1/state/alarms/x-_x46oo",
+      "note": "an alert key that is no plain chunk is slugged (core §1.4)",
+      "op": "ref",
+      "ref": {
+        "alert_key": "Foo",
+        "service": "catalog",
+        "system": "fleet"
+      }
+    },
+    {
+      "expect": "zk2/fleet/catalog/alarms.v1/state/alarms/x-_x",
+      "note": "the empty value's slug",
+      "op": "ref",
+      "ref": {
+        "alert_key": "",
+        "service": "catalog",
+        "system": "fleet"
+      }
+    },
+    {
+      "expect": null,
+      "note": "a system that is no name (core §1.2)",
+      "op": "ref",
+      "ref": {
+        "alert_key": "a659f813308ad1da",
+        "service": "netlink",
+        "system": "Lab"
+      }
+    },
+    {
+      "expect": null,
+      "note": "an empty service is no name",
+      "op": "ref",
+      "ref": {
+        "alert_key": "a659f813308ad1da",
+        "service": "",
+        "system": "h-3fa9c2d41b7e"
+      }
+    },
+    {
+      "expect": null,
+      "note": "a service that is two chunks",
+      "op": "ref",
+      "ref": {
+        "alert_key": "a659f813308ad1da",
+        "service": "net/link",
+        "system": "h-3fa9c2d41b7e"
+      }
+    },
+    {
+      "expect": {
+        "alert_key": "a659f813308ad1da",
+        "service": "netlink",
+        "system": "h-3fa9c2d41b7e"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms/a659f813308ad1da",
+      "note": "an alarm's key",
+      "op": "parse"
+    },
+    {
+      "expect": {
+        "alert_key": "a659f813308ad1da",
+        "service": "snmp.router01",
+        "system": "h-3fa9c2d41b7e"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/snmp.router01/alarms.v1/state/alarms/a659f813308ad1da",
+      "note": "a dotted service, whole",
+      "op": "parse"
+    },
+    {
+      "expect": {
+        "alert_key": "Foo",
+        "service": "catalog",
+        "system": "fleet"
+      },
+      "key": "zk2/fleet/catalog/alarms.v1/state/alarms/x-_x46oo",
+      "note": "a slugged alert key, unslugged",
+      "op": "parse"
+    },
+    {
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/a659f813308ad1da",
+      "note": "another major is another profile's (core §1.7)",
+      "op": "parse"
+    },
+    {
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms/a659f813308ad1da/x",
+      "note": "one chunk too many",
+      "op": "parse"
+    },
+    {
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms",
+      "note": "no alert key",
+      "op": "parse"
+    },
+    {
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v1/@state/alarms/a659f813308ad1da",
+      "note": "the explicit state token is not the contract's",
+      "op": "parse"
+    },
+    {
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/other/a659f813308ad1da",
+      "note": "another template",
+      "op": "parse"
+    },
+    {
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/netlink/health.v1/state/status",
+      "note": "another interface",
+      "op": "parse"
+    },
+    {
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms/x-abc",
+      "note": "a chunk no slug produces (core §1.4)",
+      "op": "parse"
+    },
+    {
+      "expect": null,
+      "key": "v1/h-3fa9c2d41b7e/state/netlink/alert/a659f813308ad1da",
+      "note": "a v1 key is not a zk2 key",
+      "op": "parse"
+    }
+  ],
+  "description": "alarms.v1 §2.2, §2.3, §2.12. Each case has an `op`. `derive`: a rule and its labels (a JSON object of strings, host-scoped labels included) -> `key`, the alert key a reader derives through the sanitizing step (§2.3), `input`, the string hashed (its UTF-8 bytes), and `framed`, whether the strict recipe (§2.2) accepts the rule and labels as they are; on framed input the two recipes give one key. `host_scoped`: a label name -> whether it is host-scoped (§2.2), compared exactly. `ref`: a reference's system, service and alert key -> the alarm's key (§2.12), the alert key slugged (core §1.4), or null when the system or the service is no name (core §1.2). `parse`: a key -> the reference it names, the alert key unslugged, or null when it is not a key of alarms.v1's one template."
+}

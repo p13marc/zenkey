@@ -552,7 +552,9 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// of draft 1 (r3.3 D19), until each profile ships its own (#613).
 /// `freshness.v1` publishes its own (`freshness::VOCABULARY`, core 0.21),
 /// and so does `link.v1` (`link::VOCABULARY`, core 0.29, which drops the
-/// interim `downsample_ms`).
+/// interim `downsample_ms`), and `alarms.v1` an empty one
+/// (`alarms::VOCABULARY`, core 0.34, which drops the interim
+/// `severity_default`).
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),
     ("timing", &["period_ms", "deadline_ms", "lifespan_ms"]),
@@ -560,7 +562,7 @@ const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::link::NAME, crate::link::VOCABULARY),
     ("arbitration", &["policy"]),
     ("desired", &["target_param", "target"]),
-    ("alarms", &["severity_default"]),
+    (crate::alarms::NAME, crate::alarms::VOCABULARY),
     (
         "media",
         &[

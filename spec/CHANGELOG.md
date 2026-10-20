@@ -3,6 +3,55 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.34 — 2026-10-20: what `alarms.v1` needed of the core (#800)
+
+`alarms.v1`'s first text (#800, AA) states the profile whose standard
+contract ZenSight's mapping wrote, moves the contract under
+`profiles/alarms/`, and decides what the interim `alarms` row of Appendix
+D was for. No fixture case changed; one is added.
+
+**Changed: `alarms.v1`'s vocabulary published, and empty (Appendix D,
+§10).**
+- **The gap.** Appendix D's interim tables gave `alarms` one key,
+  `severity_default`, from architecture D19's list, and nothing said what
+  it defaulted. Every alarm's document carries its `severity`: the
+  published revision 1.0 requires it (`alarms.v1` §2.4), so a default has
+  nothing to fill. No contract under `examples/zk2/` or `spec/` wrote the
+  key.
+- **The rule.** `alarms.v1` §4 publishes its vocabulary, with no key.
+  Appendix D's published table gains `alarms` with none, and the interim
+  row is gone. W105 reads an empty published table as it reads any other
+  (0.21), so a contract that writes `alarms.<key>` draws W105.
+  `[F: contracts/w105-alarms-vocabulary]`
+- **Why publish it empty, rather than drop the row.** A profile that
+  Appendix D does not list has no table, and none of its keys draws W105
+  (§10). Dropped, the row would turn today's warning on
+  `alarms.severity_default` into silence; published empty, it keeps
+  warning of a key that means nothing.
+- **§10** says a profile may publish an empty vocabulary, and names
+  `alarms.v1`'s standard contract beside `health.v1`'s and `config.v1`'s.
+
+**Changed: a pointer (§8.1).** The tokenless set names `alarms.v1` beside
+`health.v1`, as interfaces every service of a framework set implements
+(`alarms.v1` §2.13).
+
+**Deliberately not changed.**
+- **The key recipe is not an extension point.** It is fixed by the
+  profile (`alarms.v1` §2.2), byte for byte ZenSight's, and is not a
+  per-application parameter: a parameter would need a slot for it in the
+  descriptor or the contract, which §10's four points do not give, and
+  the one known implementer has one recipe.
+- **S4, and a restart.** An owner that restarts cannot GET its own alarms
+  back: no storage answers on its keys (S4), and its previous process,
+  which answered them, is gone. `alarms.v1` §2.9 takes the previous
+  instance's alarms from the two sources §4.3's catch-up already names,
+  the owner's own record and an archive on its own side, so no core rule
+  is needed.
+- **Silence.** `alarms.v1` §2.15 establishes "no alarm fires" only from a
+  complete GET that drew at least one member, or a complete, empty one
+  with a lossless window longer than the horizon (§2.7's readings, with
+  the profile's re-put): an empty reply set alone stays no verdict (O5).
+
 ## 0.33 — 2026-10-20: one kind of name per principal (#788)
 
 The reference generator found it while finishing `link.v1` (LE, F-121),

@@ -92,8 +92,9 @@ zk2/*/*/@zk/alive/config.v1/**                                     "which device
   occurrence-keyed and r3.3 made the `events` kind. A reliable stream would lose them to a
   reader that was not connected.
   - The reason and retention for each are on each resource in `modem.v3.toml`.
-  - `device_fault` is edge-triggered raised/cleared, which is `alarms.v1`'s shape: a later option,
-    not taken in a 1:1 mapping.
+  - `device_fault` is edge-triggered raised/cleared, which is `alarms.v1`'s shape
+    ([`spec/profiles/alarms/v1.md`](../../../spec/profiles/alarms/v1.md), Appendix B): a later
+    option, not taken in a 1:1 mapping.
   - The v1 ULIDs are already lowercase (`modem-mgmt/src/clock.rs:54-69`), so the keys are the
     same shape.
 - **The action event is renamed `action_event/{occurrence}`.** `action/{occurrence}` would have

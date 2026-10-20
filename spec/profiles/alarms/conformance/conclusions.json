@@ -1,0 +1,2453 @@
+{
+  "cases": [
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "yes",
+          "reason": "firing"
+        },
+        "stale_firing": {
+          "answer": "no",
+          "reason": "fresh"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a firing alarm a subscriber heard 10 s ago",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": false
+      },
+      "expect": {
+        "firing": {
+          "answer": "yes",
+          "reason": "firing"
+        },
+        "stale_firing": {
+          "answer": "no",
+          "reason": "fresh"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "its owner in the tokenless set: the descriptor lists alarms.v1, the token plays no part (§2.13)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "yes",
+          "reason": "firing"
+        },
+        "stale_firing": {
+          "answer": "no",
+          "reason": "fresh"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a GET reply stamped 10 s ago, the clock trusted",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "stale"
+        },
+        "stale_firing": {
+          "answer": "yes",
+          "reason": "stale"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "not confirmed within 900 s, its owner present: stale, never firing now nor resolved (§2.7)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1000,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "stale"
+        },
+        "stale_firing": {
+          "answer": "yes",
+          "reason": "stale"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a GET reply aged beyond the horizon",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 1000
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "yes",
+          "reason": "firing"
+        },
+        "stale_firing": {
+          "answer": "no",
+          "reason": "fresh"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "the most recent confirmation counts (freshness.v1 §2.7)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1000,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "near_horizon"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "near_horizon"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "within the delta of the horizon (freshness.v1 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 899.6
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "clock_untrusted"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "clock_untrusted"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a GET reader without a trusted clock",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "no_stamp"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "no_stamp"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a reply without a stamp breaks core S2",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": null
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "clock_disagrees"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "clock_disagrees"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a stamp ahead of the reader's clock beyond the delta",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": -1
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "yes",
+          "reason": "firing"
+        },
+        "stale_firing": {
+          "answer": "no",
+          "reason": "fresh"
+        }
+      },
+      "face": null,
+      "held_whole": true,
+      "latest": "firing",
+      "note": "the owner's alarms established, and this key among them",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "not_read"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "not_read"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": null,
+      "note": "nothing of the key read: silence is no verdict (core O5)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "not_held"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": true,
+      "latest": null,
+      "note": "the owner's alarms established, and this key not among them (§2.15)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "not_read"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "not_read"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": null,
+      "note": "no observation at all",
+      "observations": [],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "no_observation"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "no_observation"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a firing document held from before, and nothing observed in this reading",
+      "observations": [],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "resolved"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "resolved",
+      "note": "a resolved document",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "resolved"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "resolved",
+      "note": "a resolved document, whatever its age: resolved is the owner's last word",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 5000,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "deleted"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "deleted",
+      "note": "a delete reads as resolved (§2.6)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 5,
+            "kind": "delete"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "deleted"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "deleted",
+      "note": "a reply_del reads as resolved",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "delete"
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "undecodable"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "undecodable"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "undecodable",
+      "note": "the latest put does not read: never at a guessed state (§2.4)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "stale"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "undecodable"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "undecodable",
+      "note": "an unreadable put, not confirmed: stale for the first question, and not known to be firing for the last",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1000,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "not_asked",
+          "reason": "absent"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "absent"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "absent, an archive's document firing: last-known, never firing now (core S6)",
+      "observations": [
+        {
+          "via": "archive"
+        }
+      ],
+      "presence": "absent",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "not_asked",
+          "reason": "absent"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "absent"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "absent, though a subscriber still holds a fresh put: presence first",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "absent",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "its token not seen in a read possibly incomplete",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "incomplete",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": false
+      },
+      "expect": {
+        "firing": {
+          "answer": "not_asked",
+          "reason": "not_listed"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_listed"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "its descriptor does not list alarms.v1",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "its descriptor could not be read",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "not_asked",
+          "reason": "last_known"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "last_known"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "only an archive read, the owner present: last-known (core S5, S6)",
+      "observations": [
+        {
+          "via": "archive"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "yes",
+          "reason": "firing"
+        },
+        "stale_firing": {
+          "answer": "no",
+          "reason": "fresh"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "an archive and a subscription: the subscription answers",
+      "observations": [
+        {
+          "via": "archive"
+        },
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "the subscription lost deliveries and no GET answered since: a resolve may have been lost",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "deleted",
+      "note": "a loss after a delete: a re-raise may have been lost",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "yes",
+          "reason": "firing"
+        },
+        "stale_firing": {
+          "answer": "no",
+          "reason": "fresh"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a loss, then the reader's GET answered the key (core §4.2)",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a loss, and a GET that drew nothing for the key",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 1000,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "not_asked",
+          "reason": "previous_instance"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "previous_instance"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "the latest put stamped by an earlier instance of the owner: that instance's last word (§2.14)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": true,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "resolved"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "resolved",
+      "note": "an earlier instance's resolved document is still resolved",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 5,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": true,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "face_closed"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "face_closed"
+        }
+      },
+      "face": {
+        "reachable": false
+      },
+      "held_whole": false,
+      "latest": null,
+      "note": "across a face closed to the alarms: never 'nothing fires' (§2.11)",
+      "observations": [],
+      "presence": "across_face",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "yes",
+          "reason": "firing"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        }
+      },
+      "face": {
+        "reachable": true
+      },
+      "held_whole": false,
+      "latest": "firing",
+      "note": "across a face, a GET by grant, the clock by the deployment's word: firing; whether its owner is present does not cross",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "across_face",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "stale"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        }
+      },
+      "face": {
+        "reachable": true
+      },
+      "held_whole": false,
+      "latest": "firing",
+      "note": "across a face, stale: the link may be out, so no finding about the owner",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 1000
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "across_face",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "nothing_crossed"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        }
+      },
+      "face": {
+        "reachable": true
+      },
+      "held_whole": false,
+      "latest": null,
+      "note": "across a face, a GET that drew nothing",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "across_face",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "nothing_crossed"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        }
+      },
+      "face": {
+        "reachable": true
+      },
+      "held_whole": false,
+      "latest": "firing",
+      "note": "across a face, a subscription's silence: no push crosses at 1.0 (§2.11), so it is no staleness",
+      "observations": [
+        {
+          "complete": true,
+          "last": null,
+          "listened_s": 1200,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "trusted": false
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ],
+      "presence": "across_face",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "not_held"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        }
+      },
+      "face": {
+        "reachable": true
+      },
+      "held_whole": true,
+      "latest": null,
+      "note": "across a face, the owner's alarms established by a GET it answered, and this key not among them",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "across_face",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "yes",
+        "firing": 1,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "any_firing"
+      },
+      "note": "a critical alarm firing, at warning or above",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "critical",
+      "expect": {
+        "answer": "no",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "none_firing"
+      },
+      "note": "only a warning firing, at critical or above",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": "warning"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "critical",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 1
+        },
+        "reason": "owner_unobservable"
+      },
+      "note": "an owner whose alarms are not known whole: never no",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": "warning"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        },
+        {
+          "alarms": [],
+          "set": {
+            "verdict": "unobservable"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "yes",
+        "firing": 1,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 1
+        },
+        "reason": "any_firing"
+      },
+      "note": "a yes whatever else is unknown",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        },
+        {
+          "alarms": [],
+          "set": {
+            "verdict": "unobservable"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "info",
+      "expect": {
+        "answer": "yes",
+        "firing": 1,
+        "owners": {
+          "established": 0,
+          "not_asked": 0,
+          "unobservable": 1
+        },
+        "reason": "any_firing"
+      },
+      "note": "a firing alarm of an owner whose other alarms are not known is still firing",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": "info"
+            }
+          ],
+          "set": {
+            "verdict": "unobservable"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "critical",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "alarm_unobservable"
+      },
+      "note": "a critical alarm gone stale, its owner's alarms established",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "unobservable",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "critical",
+      "expect": {
+        "answer": "no",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "none_firing"
+      },
+      "note": "an unobservable alarm below the severity plays no part",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "unobservable",
+              "severity": "warning"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "critical",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "alarm_unobservable"
+      },
+      "note": "an unobservable alarm of no severity known may be at it",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "unobservable",
+              "severity": null
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "critical",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "alarm_unobservable"
+      },
+      "note": "a yes without a severity is counted as unknown",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": null
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 0,
+          "not_asked": 0,
+          "unobservable": 1
+        },
+        "reason": "owner_unobservable"
+      },
+      "note": "the owner's reason comes first",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "unobservable",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "unobservable"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "info",
+      "expect": {
+        "answer": "no",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "none_firing"
+      },
+      "note": "an established owner with nothing firing",
+      "owners": [
+        {
+          "alarms": [],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "no",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "none_firing"
+      },
+      "note": "a resolved alarm and an earlier instance's play no part",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "no",
+              "severity": "critical"
+            },
+            {
+              "answer": "not_asked",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "yes",
+        "firing": 2,
+        "owners": {
+          "established": 2,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "any_firing"
+      },
+      "note": "every alarm at or above the severity is counted",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": "warning"
+            },
+            {
+              "answer": "yes",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        },
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": "info"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "no",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 1,
+          "unobservable": 0
+        },
+        "reason": "none_firing"
+      },
+      "note": "an absent owner is counted apart, and does not stop a no",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "no",
+              "severity": "warning"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        },
+        {
+          "alarms": [],
+          "set": {
+            "verdict": "not_asked"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "not_asked",
+        "firing": 0,
+        "owners": {
+          "established": 0,
+          "not_asked": 1,
+          "unobservable": 0
+        },
+        "reason": "no_owner"
+      },
+      "note": "only an absent owner, whose alarms are last-known",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "not_asked",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "not_asked"
+          }
+        }
+      ],
+      "question": "any_firing"
+    },
+    {
+      "at_least": "info",
+      "expect": {
+        "answer": "not_asked",
+        "firing": 0,
+        "owners": {
+          "established": 0,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "no_owner"
+      },
+      "note": "no owner in scope",
+      "owners": [],
+      "question": "any_firing"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "answered",
+        "verdict": "established"
+      },
+      "face": null,
+      "note": "a complete GET the owner answered: its answer is its alarms (core S2)",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 2
+      },
+      "window": null
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": false
+      },
+      "expect": {
+        "reason": "answered",
+        "verdict": "established"
+      },
+      "face": null,
+      "note": "tokenless, found by its descriptor (§2.13)",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 1
+      },
+      "window": null
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "answered",
+        "verdict": "established"
+      },
+      "face": null,
+      "note": "answered, with a short lossless window",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 2
+      },
+      "window": {
+        "listened_s": 10,
+        "lossless": true,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "window",
+        "verdict": "established"
+      },
+      "face": null,
+      "note": "an empty complete GET, and a lossless window longer than 900 s",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": {
+        "listened_s": 901,
+        "lossless": true,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "window_short",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a window of exactly 900 s is not longer than the horizon",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": {
+        "listened_s": 900,
+        "lossless": true,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "no_member",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "an empty reply set alone is no verdict (core O5)",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": null
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "seed_incomplete",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a GET that ended at its timeout, or with an error reply",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": false
+      },
+      "window": {
+        "listened_s": 1200,
+        "lossless": true,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "no_seed",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a window without a GET: a hung owner is as silent",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": null,
+      "window": {
+        "listened_s": 1200,
+        "lossless": true,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "window_lost",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "answered, then a delivery lost",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 3
+      },
+      "window": {
+        "listened_s": 10,
+        "lossless": false,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "window_lost",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a long window that lost a delivery",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": {
+        "listened_s": 1200,
+        "lossless": false,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "owner_gap",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "answered, then the owner left or re-minted",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 3
+      },
+      "window": {
+        "listened_s": 10,
+        "lossless": true,
+        "present_throughout": false
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "owner_gap",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a long window, the owner not present throughout",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": {
+        "listened_s": 1200,
+        "lossless": true,
+        "present_throughout": false
+      }
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "absent",
+        "verdict": "not_asked"
+      },
+      "face": null,
+      "note": "absent",
+      "presence": "absent",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": null
+    },
+    {
+      "descriptor": {
+        "lists": false
+      },
+      "expect": {
+        "reason": "not_listed",
+        "verdict": "not_asked"
+      },
+      "face": null,
+      "note": "not listed",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": null
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "presence_incomplete",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "its token not seen, in a read possibly incomplete",
+      "presence": "incomplete",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 1
+      },
+      "window": null
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "no_descriptor",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "its descriptor not read",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 1
+      },
+      "window": null
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "face_closed",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "reachable": false
+      },
+      "note": "across a face closed to the alarms",
+      "presence": "across_face",
+      "question": "owner_set",
+      "seed": null,
+      "window": null
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "answered",
+        "verdict": "established"
+      },
+      "face": {
+        "reachable": true
+      },
+      "note": "across a face, a GET by grant that the owner answered",
+      "presence": "across_face",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 2
+      },
+      "window": null
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "across_face",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "reachable": true
+      },
+      "note": "across a face, an empty GET: no window is of a present owner",
+      "presence": "across_face",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": {
+        "listened_s": 1200,
+        "lossless": true,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "seed_incomplete",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "reachable": true
+      },
+      "note": "across a face, a GET that did not complete",
+      "presence": "across_face",
+      "question": "owner_set",
+      "seed": {
+        "complete": false
+      },
+      "window": null
+    },
+    {
+      "alert_key": "a659f813308ad1da",
+      "expect": {
+        "answer": "yes",
+        "reason": "strict"
+      },
+      "note": "the test vector's document, on its key",
+      "payload": {
+        "labels": {
+          "host": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "a659f813308ad1da",
+      "expect": {
+        "answer": "yes",
+        "reason": "strict"
+      },
+      "note": "without the host label: the same key",
+      "payload": {
+        "labels": {
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "a659f813308ad1da",
+      "expect": {
+        "answer": "yes",
+        "reason": "strict"
+      },
+      "note": "host-scoped labels added: the same key",
+      "payload": {
+        "labels": {
+          "host": "h-3fa9c2d41b7e",
+          "host.boot_id": "y",
+          "host.id": "x",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "a659f813308ad1da",
+      "expect": {
+        "answer": "yes",
+        "reason": "strict"
+      },
+      "note": "the state is not hashed",
+      "payload": {
+        "labels": {
+          "host": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "resolved",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "a659f813308ad1da",
+      "expect": {
+        "answer": "yes",
+        "reason": "strict"
+      },
+      "note": "nor the severity, the summary or the category",
+      "payload": {
+        "category": "anomaly",
+        "labels": {
+          "host": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "info",
+        "state": "firing",
+        "summary": "other",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "6eaf36dc0b603fa7",
+      "expect": {
+        "answer": "no",
+        "reason": "mismatch"
+      },
+      "note": "a key that hashed the host label: a phantom (§2.9)",
+      "payload": {
+        "labels": {
+          "host": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "f3ba0919e7b57915",
+      "expect": {
+        "answer": "no",
+        "reason": "mismatch"
+      },
+      "note": "another alarm's key",
+      "payload": {
+        "labels": {
+          "host": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "A659F813308AD1DA",
+      "expect": {
+        "answer": "no",
+        "reason": "mismatch"
+      },
+      "note": "upper-case hex is another value: the comparison is exact",
+      "payload": {
+        "labels": {
+          "host": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "16991d91fb818ca6",
+      "expect": {
+        "answer": "yes",
+        "reason": "sanitized"
+      },
+      "note": "an unframed rule, keyed through the sanitizing step (§2.3)",
+      "payload": {
+        "labels": {
+          "port": "22"
+        },
+        "rule": "link\ndown",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "12c94b268a8108d5",
+      "expect": {
+        "answer": "no",
+        "reason": "mismatch"
+      },
+      "note": "an unframed rule hashed as it is: not the recipe",
+      "payload": {
+        "labels": {
+          "port": "22"
+        },
+        "rule": "link\ndown",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "question": "rederives"
+    },
+    {
+      "alert_key": "a659f813308ad1da",
+      "expect": {
+        "answer": "not_asked",
+        "reason": "no_document"
+      },
+      "note": "a delete carries no document",
+      "payload": "delete",
+      "question": "rederives"
+    },
+    {
+      "alert_key": "a659f813308ad1da",
+      "expect": {
+        "answer": "unobservable",
+        "reason": "undecodable"
+      },
+      "note": "a payload that does not read",
+      "payload": {
+        "rule": "link_down",
+        "state": "acked"
+      },
+      "question": "rederives"
+    }
+  ],
+  "description": "alarms.v1 §2.14, §2.15, §5: what a tool may conclude, by `question`. `reading`: one reading of one alarm key -> §5's first question (`firing`, §2.14) and its last (`stale_firing`), each an answer (yes, no, unobservable, not_asked) and a reason. A reading is the owner's `presence` (present, absent, incomplete, across_face), its `descriptor` when present ({lists, token}, null when not read), the `face` when across one ({reachable}: whether the deployment lets this reader reach the alarms, §2.11), the key's `observations` as freshness.v1's judgements.json writes them (judged at 900 s; a GET among them is the reader's re-seed, made after any loss its subscription had), the `latest` sample by the owner's stamp (firing, resolved, deleted, undecodable, or null when none was read), `previous_instance` (that latest put stamped by an earlier instance of the owner) and `held_whole` (the owner's alarms established in this reading, §2.15). `owner_set`: an owner's presence, its descriptor and face as above, its `seed` (the S4 GET: {complete: true, members}, {complete: false} for one that ended at its timeout or with an error reply, or null when none was made) and its `window` ({listened_s, lossless, present_throughout}, or null) -> whether its alarms are known whole (established, unobservable, not_asked) and a reason. `any_firing`: a severity `at_least` and the owners in scope, each with its set's verdict and its alarms (the first question's answer, and the latest document's severity, null when none reads) -> §5's second question: an answer, a reason, the count of alarms firing at or above the severity, and the owners counted by verdict. `rederives`: the alert key a key carries and its payload (a decoded document, or \"delete\") -> §5's third question."
+}

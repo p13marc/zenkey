@@ -1,0 +1,833 @@
+{
+  "cases": [
+    {
+      "expect": [
+        "raised"
+      ],
+      "note": "a raise (§2.5)",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "resolved",
+        "retired"
+      ],
+      "note": "a raise, then a resolve: a put, then a delete (§2.5)",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600000
+          }
+        },
+        "delete"
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "resolved"
+      ],
+      "note": "a bare delete of a firing alarm reads as resolved (§2.6)",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        "delete"
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "escalated"
+      ],
+      "note": "an escalation: another severity, a new timestamp",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "critical",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950060000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "escalated",
+        "escalated"
+      ],
+      "note": "a severity lowered is an escalation too: either way (§2.5)",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "critical",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950060000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950120000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "escalated"
+      ],
+      "note": "another severity under the same timestamp still reads escalated; the owner broke §2.5",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "critical",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "refreshed"
+      ],
+      "note": "a refresh: the summary changed, the timestamp kept, observed_at_ms set",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "observed_at_ms": 1760950300000,
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0 for 5 min",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "refreshed"
+      ],
+      "note": "a host-scoped label added: the same key, a refresh",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "host.id": "h-3fa9c2d41b7e",
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "observed_at_ms": 1760950030000,
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "refreshed"
+      ],
+      "note": "a category set: a refresh",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "category": "expectation",
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "observed_at_ms": 1760950030000,
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "confirmed"
+      ],
+      "note": "the document put again unchanged: a confirmation (§2.7)",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "refreshed",
+        "confirmed"
+      ],
+      "note": "a refresh confirmed unchanged, observed_at_ms included",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "observed_at_ms": 1760950300000,
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0 for 5 min",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "observed_at_ms": 1760950300000,
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0 for 5 min",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "confirmed"
+      ],
+      "note": "a member this text does not name plays no part",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "later": {
+              "added": "by a later minor"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "raised"
+      ],
+      "note": "a new timestamp at one severity: a raise the reader did not see resolved",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950001000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "resolved",
+        "raised"
+      ],
+      "note": "a re-raise before the delete was heard",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950660000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "resolved",
+        "retired",
+        "raised"
+      ],
+      "note": "a re-raise after the delete (§2.5)",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600000
+          }
+        },
+        "delete",
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950660000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised"
+      ],
+      "note": "a late reader's first put is a raise, even of a refreshed document",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "observed_at_ms": 1760950300000,
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0 for 5 min",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "resolved",
+        "retired"
+      ],
+      "note": "a late reader's first put is resolved: the state is the document's",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600000
+          }
+        },
+        "delete"
+      ]
+    },
+    {
+      "expect": [
+        "retired"
+      ],
+      "note": "a delete of a key held by nothing",
+      "samples": [
+        "delete"
+      ]
+    },
+    {
+      "expect": [
+        "resolved",
+        "confirmed"
+      ],
+      "note": "a resolved document put again unchanged",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "resolved",
+        "refreshed"
+      ],
+      "note": "a resolved document changed under its timestamp",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 back up",
+            "timestamp": 1760950600000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "resolved",
+        "resolved"
+      ],
+      "note": "a resolved document with a new timestamp: another resolve",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600000
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "resolved",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950600001
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "unreadable"
+      ],
+      "note": "a put that does not read: unreadable",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "rule": "link_down",
+            "state": "acked"
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "unreadable",
+        "retired"
+      ],
+      "note": "after an unreadable put nothing is held, so a delete retires",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "rule": "link_down",
+            "state": "acked"
+          }
+        },
+        "delete"
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "unreadable",
+        "raised"
+      ],
+      "note": "after an unreadable put, a firing document is a raise",
+      "samples": [
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "rule": "link_down",
+            "state": "acked"
+          }
+        },
+        {
+          "put": {
+            "labels": {
+              "peer": "r2",
+              "port": "eth0"
+            },
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link to r2 down on eth0",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    }
+  ],
+  "description": "alarms.v1 §2.6: one key's samples, in the owner's stamp order (core §4.2), each {\"put\": its payload, decoded as JSON} or \"delete\" (a delete or a reply_del) -> the transition each one makes against the document held before it: raised, escalated, refreshed, confirmed, resolved, retired, or unreadable (a payload documents.json reads as unreadable, after which nothing is held). The reader starts holding nothing. Two documents are equal when every member §2.4 names is equal."
+}
