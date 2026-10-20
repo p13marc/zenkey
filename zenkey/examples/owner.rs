@@ -13,6 +13,11 @@
 //!     <address> <contract.toml>...
 //! ```
 //!
+//! `owner --help` (or `-h`) prints the interface a live runner drives —
+//! its options, what it prints, each command word and its answers, the
+//! `alarms.v1` surface whole — and exits 0 (#800, F-133). This doc is the
+//! long form of the same.
+//!
 //! The address is `<system>/<service>`, or `@hostid.v1/<service>` for a
 //! system minted from the machine id (`spec/profiles/hostid/v1.md` §2.3,
 //! #719). The system is minted before the session opens (§2.7), and a host
@@ -320,6 +325,89 @@ fn parse_level(s: &str) -> Option<Option<Level>> {
         _ => None,
     }
 }
+
+/// What `owner --help` prints (#800, AC; zk2py's F-133): the usage, what
+/// standard output carries, every command word, and the `alarms.v1`
+/// surface whole, as the agreed interface a live runner drives. The answer
+/// formats are the module doc's, unchanged.
+pub const HELP: &str = "\
+owner: a zk2 owner to interoperate with (#609, #610). It brings up one service
+implementing the given contracts, and runs until its standard input closes.
+
+usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
+    [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
+    [--tokenless <iface>]... [--clock-reference <key>] [--clock-offset-ms <ms>]
+    [--cardinality <iface>:<resource>=<n>]...
+    [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
+    [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
+    [--alarms-rules <rule>[,<rule>...]]
+    <system>/<service>|@hostid.v1/<service> <contract.toml>...
+
+Standard output, first:
+  listening tcp/127.0.0.1:<port>       a router on an ephemeral port (with --connect:
+                                       connected <endpoint>, a client of that router)
+  ready zk2/<system>/<service>/@zk/instance/<instance>
+then one line per line of standard input. A command refused, by the runtime or
+here, is answered `refused <line>: <why>`; an unknown command word is answered
+`refused <line>: unknown command`, and a malformed command of a known word with
+that word's usage.
+
+Command words:
+  status, check, retire, fault, confirm   health.v1 (--health)
+  clock-offset <ms>                       the clock's simulated offset
+  put, delete, fill                       one write on a member (core §2.7)
+  config ...                              config.v1 (--config)
+  alarm ...                               alarms.v1 (--alarms), below
+
+alarms.v1 (spec/profiles/alarms/v1.md)
+  Implemented by the runtime with --alarms, implied by any --alarms-* option,
+  or when a contract file given is the standard alarms.v1 (fingerprint
+  95579151...). With --alarms, an alarms.v1 contract file of another revision
+  is implemented on that revision instead, its freshness.ttl_s setting the
+  confirmation period: a runner's copy of the standard contract with a short
+  horizon is accepted (each firing alarm re-put every 427.5 s at the
+  standard 900 s, every 1.9 s at 4 s).
+
+  --alarms                        implement alarms.v1
+  --alarms-record <file>          the owner's persistent record, read at start and
+                                  rewritten whole after every put and every delete:
+                                  {\"profile\": \"alarms.v1\", \"alarms\": {\"<alert key>\": <document>, ...}},
+                                  each document as it was put, a resolved one
+                                  included until its delete. Write documents into it
+                                  only while no owner runs on it.
+  --alarms-archive <sys>/<svc>    an archive on the owner's side, read explicitly at
+                                  start (within 2 s) when the record holds nothing
+  --alarms-rules <rule>,...       the rules evaluated: a firing document of another
+                                  rule found at start is resolved (default: every rule)
+  --cardinality alarms.v1:state/alarms/{alert_key}=<n>
+                                  the bound, lowered before the adoption
+
+  alarm raise <json>              the condition holds; <json>, the rest of the line as
+                                  written: {\"rule\": <string>,
+                                  \"severity\": \"info\"|\"warning\"|\"critical\",
+                                  \"summary\": <string>, \"labels\"?: {<name>: <value>, ...},
+                                  \"category\"?: <string>}
+  alarm resolve <alert_key>       the resolved put, then the delete
+  alarm confirm <alert_key>|all on|off
+                                  off: the owner stops evaluating it and lets it go
+                                  stale; any act on an alarm turns it back on
+  alarm list                      the alarms held
+  alarm adoption                  what the start took over
+
+  Answers, one line each (<document> is the alarm's JSON on one line, as put):
+    alarm raised|escalated|refreshed|unchanged <alert_key> <document>
+    alarm resolved <alert_key> <document>, or alarm none <alert_key>
+    alarm confirm <alert_key>|all on|off
+    alarm held <json>             the documents held, by alert key
+    alarm adoption source=<record|archive|nothing> adopted=<keys>
+      retired=<key>:<resolved|undecodable|phantom>,... resolved=<keys> over_bound=<keys>
+                                  each list comma-separated, - when empty
+    refused <line>: <why>         a raise past the bound names the bound and whose it is
+
+  A restart is the process's: kill it (no close), or close standard input (a
+  clean close, which resolves and deletes nothing), then start it again with
+  the same --alarms-record.
+";
 
 fn level_name(l: Option<Level>) -> String {
     l.map_or_else(|| "UNSPECIFIED".to_owned(), |l| l.to_string())
@@ -1351,6 +1439,10 @@ async fn main() {
         )
         .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print!("{HELP}");
+        return;
+    }
     let opts = match Options::parse(&args) {
         Ok(o) => o,
         Err(usage) => {
