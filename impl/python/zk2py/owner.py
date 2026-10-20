@@ -834,6 +834,13 @@ class Owner:
         with self._writes:
             self.closed_writers.add(key)
 
+    def reopen_writer(self, key: str) -> None:
+        """The member's writer is back (``alarms.v1`` §2.7, 0.2: "An
+        evaluation that finds the condition again confirms it again"): its
+        re-puts resume, the next one at once if its interval ran out."""
+        with self._writes:
+            self.closed_writers.discard(key)
+
     # -- freshness.v1 §2.4 and core §4.3 -----------------------------------
 
     def _now_ns(self) -> int:

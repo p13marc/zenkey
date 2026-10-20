@@ -590,7 +590,8 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                          al.CONFIRMED, al.RESOLVED, al.RETIRED], f"{[x.kind for x in b]}, {bus.reads(kb)}")
         f1 = g.answers()[ka][0] if ka in g.readings else None
         report.check(sec, "4. G's reply holds A stamped by the new instance, whose meta.zid is the stamp's id",
-                     _zid_eq(g.stamps.get(ka), g.meta_zid) and not g.readings[ka].previous_instance,
+                     _zid_eq(g.stamps.get(ka), g.meta_zid) and not g.readings[ka].previous_instance
+                     and not g.foreign,
                      f"stamp {g.stamps.get(ka)}, meta.zid {g.meta_zid}")
         report.check(sec, "4. G judges A yes, firing, never previous_instance",
                      f1 is not None and _pair(f1) == "yes, firing", f1 and _pair(f1))
@@ -653,6 +654,19 @@ def section6(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "2. G judges the same: neither firing now nor resolved (§2.7)",
                      g1 is not None and _pair(g1) == "unobservable, stale" and _pair(g4) == "yes, stale",
                      f"{g1 and _pair(g1)}; {g4 and _pair(g4)}")
+        # Beyond scenarios.md: §2.7 (0.2), "An evaluation that finds the
+        # condition again confirms it again", the same observation as at the
+        # raise, which §2.5 makes no act.
+        mark = time.monotonic_ns()
+        o.raise_(A, "warning")
+        _wait(lambda: len(bus.deliveries(k, mark)) >= 2, ttl / 2 + 3.0)
+        again = bus.deliveries(k, mark)
+        gaps = [(b.arrival_ns - a.arrival_ns) / fr.NS for a, b in zip(again, again[1:])]
+        report.check(sec, "extra (§2.7, 0.2): the condition found again, its confirmations resume, unchanged",
+                     len(again) >= 2 and all(_doc(x) == _doc(last) for x in again)
+                     and (again[0].arrival_ns - mark) / fr.NS <= 1.0 and max(gaps) <= ttl / 2 + JITTER_S,
+                     f"{len(again)} puts, first {(again[0].arrival_ns - mark) / fr.NS if again else None} s, "
+                     f"gaps {[round(x, 2) for x in gaps]}")
     finally:
         bus.close()
 

@@ -925,6 +925,10 @@ class AlarmsOwner:
             self._put(key, {**base, "timestamp": self._new_ts(key)})
             return ESCALATED
         if (held.summary, held.category, held.labels) == (summary, category, dict(labels or {})):
+            # §2.5 (0.2): no act; §2.7 (0.2): "An evaluation that finds the
+            # condition again confirms it again", so confirmations stopped
+            # by stop_evaluating resume.
+            self.owner.reopen_writer(key)
             return "none"
         observed = max(self.now_ms(), held.timestamp)
         self._put(key, {**base, "timestamp": held.timestamp, "observed_at_ms": observed})
@@ -1091,6 +1095,11 @@ class OwnerReading:
     readings: dict[str, Reading] = field(default_factory=dict)
     documents: dict[str, Alarm | None] = field(default_factory=dict)
     stamps: dict[str, str | None] = field(default_factory=dict)
+    #: §2.14 step 5 (0.2): GET replies whose stamp's id is not ``meta.zid``,
+    #: by value: core §4.2's foreign stamp, "a finding a tool reports
+    #: apart". After §2.9's re-put, no reply of the present instance carries
+    #: an earlier one's stamp.
+    foreign: list[str] = field(default_factory=list)
 
     def answers(self, horizon: fr.Horizon = HORIZON) -> dict[str, tuple[Answer, Answer]]:
         return {k: (judge(r, Q_FIRING, horizon), judge(r, Q_STALE, horizon)) for k, r in self.readings.items()}
@@ -1138,6 +1147,8 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
         seed = Seed(complete=not st.errors, members=sum(1 for r in replies.values() if not r.deleted))
     verdict = owner_set(presence, descriptor, None, seed, window, ttl_s=horizon.ttl_s or TTL_S)
     out = OwnerReading(address, presence, descriptor, meta_zid, seed, window, verdict)
+    if meta_zid is not None:
+        out.foreign = sorted(k for k, r in replies.items() if _zid(r.stamp_id) != _zid(meta_zid))
     known = set(keys_known) | set(replies)
     if subscriber is not None:
         with subscriber.lock:
