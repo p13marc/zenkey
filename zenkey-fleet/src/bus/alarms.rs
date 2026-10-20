@@ -240,7 +240,10 @@ impl AlarmRefresh {
 /// nothing was asked of anyone — every owner would read absent (§2.14 step
 /// 1), and the GET would heal a loss nobody answered (§2.15). A router's
 /// restart cuts a client off so until it reconnects; the refresh then makes
-/// no read, and says why.
+/// no read, and says why. A peer alone on its bus reads nothing so too, its
+/// own process's owners included: it cannot tell alone from cut off, and a
+/// reader shares no session with an owner it judges (zenctl and zenwatch
+/// open their own).
 pub async fn cut_off(session: &Session) -> Option<String> {
     let info = session.info();
     if info.routers_zid().await.next().is_some() || info.peers_zid().await.next().is_some() {

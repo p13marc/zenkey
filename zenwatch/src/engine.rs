@@ -954,8 +954,12 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                     .map(|n| Notice::Rule(Box::new(n)))
                     .collect()
             }
-            refreshed = async { alarm_refresh.as_mut().expect("guarded").await },
-                if alarm_refresh.is_some() =>
+            refreshed = async {
+                match alarm_refresh.as_mut() {
+                    Some(r) => r.await,
+                    None => std::future::pending().await,
+                }
+            }, if alarm_refresh.is_some() =>
             {
                 alarm_refresh = None;
                 let at = zenkey_fleet::rfc3339_now();
