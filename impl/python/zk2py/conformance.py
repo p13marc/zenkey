@@ -812,7 +812,7 @@ def _alarms_conclusions(path: Path) -> list[Result]:
             r = alarms.Reading(presence=c["presence"], descriptor=c.get("descriptor"), face=c.get("face"),
                                observations=[_freshness_observation(o) for o in c["observations"]],
                                latest=c["latest"], previous_instance=bool(c["previous_instance"]),
-                               held_whole=bool(c["held_whole"]))
+                               held_whole=bool(c["held_whole"]), left_out=bool(c["left_out"]))
             got: Any = {"firing": alarms.judge(r, alarms.Q_FIRING).pair(),
                         "stale_firing": alarms.judge(r, alarms.Q_STALE).pair()}
         elif q == "owner_set":
@@ -822,7 +822,7 @@ def _alarms_conclusions(path: Path) -> list[Result]:
             owners = [alarms.OwnerRead(o["set"]["verdict"],
                                        tuple(alarms.AlarmRead(a["answer"], a["severity"]) for a in o["alarms"]))
                       for o in c["owners"]]
-            got = alarms.any_firing(c["at_least"], owners)
+            got = alarms.any_firing(c["at_least"], owners, scope_whole=bool(c["scope_whole"]))
         elif q == "rederives":
             payload = alarms.DELETE if c["payload"] == "delete" else c["payload"]
             got = alarms.rederives(c["alert_key"], payload).pair()
@@ -991,20 +991,125 @@ def _window_cases() -> list[tuple[str, Any, Any]]:
 
 
 def _scope_cases() -> list[tuple[str, Any, Any]]:
-    """F-137: a scope read that is not whole may miss an owner, so "is
-    anything firing?" over it is never no."""
+    """alarms.v1 0.5 §2.15 "Whole" and "An archive's read plays no part in
+    it" (F-137): a scope found by a complete presence read and an archive's
+    read cut short is whole; one whose presence read was not whole is not."""
     from . import alarms
 
     quiet = alarms.OwnerRead(alarms.ESTABLISHED)
-    label = "alarms.v1 0.3 §2.15 (F-137)"
+    label = "alarms.v1 0.5 §2.15 (F-137)"
+    presence_whole = alarms.ScopeRead(["lab/a"], whole=True)
+    archive_short = alarms.ScopeRead(["lab/svc"], whole=True, archive_short=True, skipped=1)
+    both = presence_whole.union(archive_short)
+    not_whole = alarms.ScopeRead(["lab/a"], whole=False).union(archive_short)
     return [
-        (f"{label}: one established owner with nothing firing, the scope read whole",
-         alarms.any_firing("warning", [quiet] + alarms.ScopeRead(["lab/a"]).owner_reads())["reason"],
-         "none_firing"),
-        (f"{label}: the same, the scope read incomplete (an archive key that did not read back)",
-         alarms.any_firing("warning", [quiet] + alarms.ScopeRead(["lab/a"], False, 1).owner_reads())["reason"],
-         "owner_unobservable"),
+        (f"{label}: a complete presence read and an archive's read cut short: whole, the archive said short",
+         [both.whole, both.archive_short,
+          alarms.any_firing("warning", [quiet, alarms.OwnerRead(alarms.NOT_ASKED)], both.whole)["reason"]],
+         [True, True, "none_firing"]),
+        (f"{label}: a presence read possibly incomplete: not whole, scope_incomplete",
+         [not_whole.whole, alarms.any_firing("warning", [quiet], not_whole.whole)["reason"]],
+         [False, "scope_incomplete"]),
     ]
+
+
+def _reporter_transitions(root: Path) -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.4 §2.16 over transitions.json: each case's samples read
+    by a present, listed owner's fresh subscription, judged (§2.14), and
+    reported. What must be reported is read from the fixture's transition
+    names by §2.16's own sentences: the first raise of a firing alarm, an
+    escalation, a resolve of an alarm reported firing, an unreadable put
+    after a report; never a refresh, a confirmation, a raise of an alarm
+    already reported firing at its severity, nor a retire."""
+    from . import alarms, freshness as fr
+
+    out = []
+    path = root.parent / "profiles" / "alarms" / "conformance" / "transitions.json"
+    for i, c in enumerate(_load_json(path)["cases"]):
+        rep, track = alarms.ChangeReporter(), alarms.Transitions()
+        got, want = [], []
+        reported: tuple[str, str | None] | None = None  # (side, severity) last reported
+        for smp in c["samples"]:
+            t = track.step(alarms.DELETE if smp == "delete" else smp["put"])
+            doc = track.held
+            if smp == "delete":
+                latest = "deleted"
+            elif doc is None:
+                latest = "undecodable"
+            else:
+                latest = doc.state
+            r = alarms.Reading("present", {"lists": True, "token": True}, None,
+                               [fr.Subscription(1000 * fr.NS, True, fr.Delivery(
+                                   "delete" if smp == "delete" else "put", 1 * fr.NS))], latest)
+            a = alarms.judge(r)
+            sev = None if doc is None else doc.severity
+            got.append([x.answer for x in rep.update({"k": (a, sev, t)})])
+            # §2.16, from the transition's name
+            # refreshed and confirmed name a resolved document put again too
+            # (§2.6's table), so their side is the document's
+            side = {"raised": alarms.YES, "escalated": alarms.YES, "resolved": alarms.NO,
+                    "retired": alarms.NO}.get(t, "neither")
+            if t in ("refreshed", "confirmed") and doc is not None:
+                side = alarms.YES if doc.firing else alarms.NO
+            now = (side, sev if side == alarms.YES else None)
+            if reported is None:
+                must = side == alarms.YES  # first reading: a firing alarm SHOULD be reported
+            else:
+                must = now != reported
+            reported = now
+            want.append([a.answer] if must else [])
+        out.append((f"alarms.v1 0.4 §2.16 over transitions.json #{i}: {c['note']}", got, want))
+    return out
+
+
+def _reporter_conclusions(root: Path) -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.4 §2.16 over conclusions.json's readings: an alarm last
+    reported firing at critical, then the case's reading. The report is the
+    case's first answer and reason, "the answer after the change", or none
+    when the answer is yes at critical. A loss (incomplete) is reported once
+    for the scope instead."""
+    from . import alarms
+
+    out = []
+    path = root.parent / "profiles" / "alarms" / "conformance" / "conclusions.json"
+    for i, c in enumerate(_load_json(path)["cases"]):
+        if c["question"] != "reading":
+            continue
+        rep = alarms.ChangeReporter()
+        rep.update({"k": (alarms.Answer(alarms.YES, "firing"), "critical", "raised")})
+        e = c["expect"]["firing"]
+        got = [(x.key, x.answer, x.reason) for x in rep.update({"k": (alarms.Answer(e["answer"], e["reason"]),
+                                                                       "critical", None)})]
+        if e["reason"] == "incomplete":
+            want = [(None, alarms.UNOBSERVABLE, "incomplete")]
+        elif e["answer"] == alarms.YES:
+            want = []
+        else:
+            want = [("k", e["answer"], e["reason"])]
+        out.append((f"alarms.v1 0.4 §2.16 over conclusions.json #{i}: {c['note']}", got, want))
+    return out
+
+
+def _reporter_loss() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.4 §2.16, "A loss is the reader's": reported once for the
+    scope, no key's answer the loss made unobservable reported, each key
+    reported again against its last report once healed (F-139)."""
+    from . import alarms
+
+    yes, inc = alarms.Answer(alarms.YES, "firing"), alarms.Answer(alarms.UNOBSERVABLE, "incomplete")
+    no = alarms.Answer(alarms.NO, "not_held")
+    rep = alarms.ChangeReporter()
+    steps = [
+        {"a": (yes, "warning", "raised"), "b": (yes, "critical", "raised")},
+        {"a": (inc, "warning", "loss"), "b": (inc, "critical", "loss")},
+        {"a": (inc, "warning", "loss"), "b": (inc, "critical", "loss")},
+        {"a": (yes, "warning", "healed"), "b": (no, None, "healed")},
+    ]
+    got = [[(x.key, x.answer, x.reason) for x in rep.update(st)] for st in steps]
+    want = [[("a", "yes", "firing"), ("b", "yes", "firing")], [(None, "unobservable", "incomplete")], [],
+            [("b", "no", "not_held")]]
+    return [("alarms.v1 0.4 §2.16: a loss reported once, the keys kept, each reported again once healed (F-139)",
+             got, want)]
 
 
 def family_readings(root: Path) -> list[Result]:
@@ -1013,7 +1118,9 @@ def family_readings(root: Path) -> list[Result]:
     from . import alarms
 
     out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
-    return out + [_check(note, got, want) for note, got, want in _window_cases() + _scope_cases()]
+    computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
+        + _reporter_loss()
+    return out + [_check(note, got, want) for note, got, want in computed]
 
 
 BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_population, "rate.json": _budget_rate,

@@ -497,13 +497,20 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
         k = key(A)
         # Beyond scenarios.md, for 0.3's §2.14 step 5: a second reader R,
         # whose subscription hears A firing and closes before the resolve.
-        r_sub = None if reraise else fr.Subscriber(bus.s_session, f"zk2/{ADDRESS}/{al.PROFILE}/state/alarms/*")
+        # R is an AlarmsReader; its subscription closes before the resolve,
+        # and it notes the loss that took A's resolve and delete.
+        r3 = None if reraise else al.AlarmsReader(bus.s_session, f"zk2/{ADDRESS}/{al.PROFILE}/state/alarms/*",
+                                                  (ADDRESS,), trust=bus.trust)
+        if r3 is not None:
+            bus.extra.append(r3)
+        r_sub = None if r3 is None else r3.subscriber
         o.raise_(A, "warning")
         _wait(lambda: bus.s.of(k), 3.0)
         fired = _doc(bus.s.of(k)[-1])
-        if r_sub is not None:
+        if r3 is not None and r_sub is not None:
             _wait(lambda: r_sub.of(k), 3.0)
             r_sub.close()
+            r3.note_loss()
             o.raise_(B, "warning")
         mark = time.monotonic_ns()
         o.resolve(A)
@@ -534,15 +541,16 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
                 g = bus.read(bus.g_session)
                 report.check(sec, "3. 65 s after the delete, G's GET draws nothing for the key (core S3)",
                              g.seed is not None and g.seed.complete and k not in g.readings, f"{sorted(g.readings)}")
-                # R holds A firing; the GET that establishes the owner's
-                # alarms (it answers B) does not answer A, and nothing of A
-                # reached R after it was asked: A holds none (0.3).
-                assert r_sub is not None
-                rr = al.read_owner(bus.g_session, ADDRESS, subscriber=r_sub, trust=bus.trust)
+                # R holds A firing and lost the resolve and delete; its GET,
+                # asked after the loss, establishes the owner's alarms (it
+                # answers B) and leaves A out, nothing of A arriving since:
+                # step 4 healed, A holds none (0.5, F-136).
+                assert r3 is not None and r_sub is not None
+                rr = r3.read(ADDRESS)
                 held = [x.kind for x in r_sub.of(k)]
                 f1, f4 = rr.answers().get(k, (None, None))
-                report.check(sec, "extra (§2.14 step 5, 0.3): a reader that held A firing and missed its delete "
-                                  "reads no, not_held",
+                report.check(sec, "extra (§2.14 steps 4 and 5, 0.5): a reader that held A firing and lost its resolve "
+                                  "and delete reads no, not_held",
                              held == ["put"] and rr.verdict.reason == "answered" and f1 is not None
                              and _pair(f1) == "no, not_held" and _pair(f4) == "not_asked, not_firing",
                              f"held {held}, owner {rr.verdict.expect()}, {f1 and _pair(f1)}; {f4 and _pair(f4)}")
@@ -627,6 +635,9 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         mark = time.monotonic_ns()
         o.restart()
         new_instance = o.instance
+        # 0.5: "G GETs the moment S sees the new instance token. Then the
+        # owner evaluates its rules once": the GET first, B still firing.
+        _wait(lambda: "st" in at_token, 5.0)
         o.resolve(B)  # its first evaluation finds B's condition clear
         time.sleep(1.0)
         tok = [t for t, k in bus.token_puts() if k.endswith(new_instance)]
@@ -660,6 +671,8 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         for name, k in (("R", kr), ("P", kp)):
             if seen and not (k in rep_at and rep_at[k].deleted):
                 problems.append(f"no reply_del for {name}'s key")
+            elif seen and not _zid_eq(rep_at[k].stamp_id, g.meta_zid):
+                problems.append(f"{name}'s reply_del not stamped by the new instance: {rep_at[k].stamp_id}")
         report.check(sec, "3. before the new instance token appears (a SHOULD): a GET made the moment S sees it "
                           "answers A firing (t0 kept) and B under the new instance's stamps, and a reply_del "
                           "for each of R's and P's keys",
@@ -852,7 +865,7 @@ def section8(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             report.check(sec, f"3 ({name}). T judges A not asked, absent; the archived document is last-known",
                          _pair(f3) == "not_asked, absent", _pair(f3))
             owners = [t.read(a, keys_known=(ka,) if a == ADDRESS else ()).owner_read() for a in scope.owners]
-            ans = al.any_firing("warning", owners + scope.owner_reads())
+            ans = al.any_firing("warning", owners, scope.whole)
             report.check(sec, f"3 ({name}). anything firing at or above warning over zk2/lab/*: the owner counted "
                               "not asked, and not yes",
                          ADDRESS in scope.owners and ans["answer"] != al.YES and ans["owners"][al.NOT_ASKED] >= 1,
@@ -860,19 +873,18 @@ def section8(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
 
         found = al.owners_by_presence(bus.t_session, "lab")
         # The live reader: the owners it found (step 1), and presence now.
-        step3("a live reader", live_t, al.ScopeRead(sorted(set(live_t.token_events) | set(found.owners)),
-                                                     found.complete))
+        step3("a live reader", live_t, found.union(al.ScopeRead(sorted(live_t.token_events))))
         # A one-shot tool: presence now, and the archive's keys (0.3).
         once_session = live.open_client(bus.endpoint)
         bus.extra.append(once_session)
         once = al.AlarmsReader(once_session, f"zk2/lab/*/{al.PROFILE}/state/alarms/*", trust=bus.trust)
         bus.extra.append(once)
         by_archive = al.owners_from_archive(once_session, "lab/archive", "lab")
-        report.check(sec, "3 (a one-shot tool). it knows of the owner by the archive's keys, a complete read "
-                          "(§2.15, 0.3)", by_archive.owners == [ADDRESS] and by_archive.complete, f"{by_archive}")
-        step3("a one-shot tool", once, al.ScopeRead(sorted(set(found.owners) | set(by_archive.owners)),
-                                                   found.complete and by_archive.complete,
-                                                   by_archive.skipped))
+        report.check(sec, "3 (a one-shot tool). it knows of the owner by the archive's keys, the read not short "
+                          "(§2.15, 0.3)", by_archive.owners == [ADDRESS] and not by_archive.archive_short,
+                     f"{by_archive}")
+        # 0.5: the archive's read plays no part in whether the scope is whole.
+        step3("a one-shot tool", once, found.union(by_archive))
     finally:
         bus.close()
 
@@ -933,26 +945,41 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                             trust=bus.trust)
         bus.extra.append(t)
 
-        unseen: list[al.OwnerRead] = []
+        whole = [True]
+        reporter = al.ChangeReporter()
 
         def scope(get: bool = True) -> tuple[list[al.OwnerReading], list[str]]:
-            # The owners in scope by presence (§2.13); a read possibly
-            # incomplete may miss one, counted unobservable (F-137).
-            pres = live.list_presence(bus.t_session, "zk2/lab/*/@zk/**")
-            addresses = sorted({f"{p['system']}/{p['service']}" for p in pres.instances})
+            # The owners in scope by presence (§2.13), and whether that read
+            # is whole (§2.15, 0.5).
+            sr = t.scope_read("lab")
+            whole[0] = sr.whole
+            pres = live.list_presence(bus.t_session, "zk2/lab/*/@zk/alive/**")
             alive = sorted({f"{p['system']}/{p['service']}" for p in pres.alive if p["iface"] == al.PROFILE})
-            unseen[:] = al.ScopeRead(addresses, pres.complete).owner_reads()
-            return [t.read(a, horizon=h, get=get) for a in addresses], alive
+            return [t.read(a, horizon=h, get=get) for a in sr.owners], alive
+
+        def report_changes(reads: list[al.OwnerReading]) -> list[tuple[str | None, str, str, str | None]]:
+            # §2.16 (0.4): each key's first answer, after its change
+            feed = {}
+            for r in reads:
+                for k, (f1, _) in r.answers(h).items():
+                    d = r.documents.get(k)
+                    feed[k] = (f1, None if d is None else d.severity, None)
+            return [(x.key, x.answer, x.reason, x.severity) for x in reporter.update(feed)]
 
         reads, alive = scope()
         by = {r.address: r for r in reads}
+        ka = key(A, "lab/a")
+        kb = key(B, "lab/b")
+        got = report_changes(reads)
+        report.check(sec, "extra (§2.16, 0.4): at the first reading, the alarm firing is reported, with its answer",
+                     got == [(ka, al.YES, "firing", "warning")], f"{got}")
         report.check(sec, "1. T finds lab/b by its descriptor, though it holds no alive/alarms.v1 token (§2.13)",
                      "lab/b" in by and by["lab/b"].descriptor == {"lists": True, "token": False} and "lab/b" not in alive,
                      f"{by.get('lab/b') and by['lab/b'].descriptor}, alive {alive}")
-        w = al.any_firing("warning", [r.owner_read(h) for r in reads] + unseen)
+        w = al.any_firing("warning", [r.owner_read(h) for r in reads], whole[0])
         report.check(sec, "1. at warning: yes, any_firing, 1", (w["answer"], w["reason"], w["firing"]) ==
                      (al.YES, "any_firing", 1), f"{w}")
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads] + unseen)
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads], whole[0])
         report.check(sec, "1. at critical: unobservable, owner_unobservable",
                      (c["answer"], c["reason"]) == (al.UNOBSERVABLE, "owner_unobservable"), f"{c}")
         report.check(sec, "1. lab/a established (answered), lab/b not (window_short)",
@@ -967,18 +994,23 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             time.sleep(0.2)
         reads, _ = scope()
         by = {r.address: r for r in reads}
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads] + unseen)
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads], whole[0])
         report.check(sec, f"2. a window over {h.ttl_s} s, lossless, both present: at critical no, none_firing",
                      (c["answer"], c["reason"]) == (al.NO, "none_firing"), f"{c}, window {by['lab/b'].window}")
         report.check(sec, "2. lab/b established by its window",
                      by.get("lab/b") is not None and by["lab/b"].verdict.reason == "window",
                      f"{by.get('lab/b') and by['lab/b'].verdict.expect()}")
+        got = report_changes(reads)
+        report.check(sec, "extra (§2.16): A's confirmations since are no change to report", got == [], f"{got}")
         ob.raise_(B, "critical")
         time.sleep(0.5)
         reads, _ = scope()
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads] + unseen)
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads], whole[0])
         report.check(sec, "3. lab/b raises B at critical: yes, any_firing, 1",
                      (c["answer"], c["reason"], c["firing"]) == (al.YES, "any_firing", 1), f"{c}")
+        got = report_changes(reads)
+        report.check(sec, "extra (§2.16): B's raise is reported as the answer after it, at its severity",
+                     got == [(kb, al.YES, "firing", "critical")], f"{got}")
         # Beyond scenarios.md (0.3): a gap in lab/b's presence breaks the
         # window until a complete GET after it; so does a loss.
         ob.resolve(B)
@@ -995,6 +1027,9 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      rb.verdict.expect() == {"reason": "window_short", "verdict": "unobservable"}
                      and rb.window is not None and rb.window.present_throughout,
                      f"{rb.verdict.expect()}, window {rb.window}")
+        got = report_changes([rb])
+        report.check(sec, "extra (§2.16): B's resolve and delete are reported as the answer after them, no",
+                     len(got) == 1 and got[0][:2] == (kb, al.NO), f"{got}")
         t.note_loss()
         ra = t.read("lab/a", horizon=h, get=False)
         ka = key(A, "lab/a")
@@ -1004,12 +1039,17 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      ra.verdict.expect() == {"reason": "window_lost", "verdict": "unobservable"}
                      and fa is not None and _pair(fa) == "unobservable, incomplete",
                      f"{ra.verdict.expect()}, A {fa and _pair(fa)}")
+        got = report_changes([ra])
+        report.check(sec, "extra (§2.16): the loss is reported once for the scope, and no key for it (the MAY)",
+                     got == [(None, al.UNOBSERVABLE, "incomplete", None)], f"{got}")
         ra = t.read("lab/a", horizon=h)
         fa = ra.answers(h).get(ka, (None, None))[0]
         report.check(sec, "extra (0.3): a complete GET after the loss heals it: lab/a answered, A yes, firing",
                      ra.verdict.expect() == {"reason": "answered", "verdict": "established"}
                      and fa is not None and _pair(fa) == "yes, firing",
                      f"{ra.verdict.expect()}, A {fa and _pair(fa)}, window {ra.window}")
+        got = report_changes([ra])
+        report.check(sec, "extra (§2.16): healed, A still firing at warning: nothing to report", got == [], f"{got}")
     finally:
         bus.close()
 

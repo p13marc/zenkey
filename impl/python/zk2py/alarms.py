@@ -530,7 +530,11 @@ class Reading:
       of the owner (its stamp's id not the present descriptor's
       ``meta.zid``; SPEC-FINDINGS F-129);
     - ``held_whole``: the owner's alarms established in this reading
-      (§2.15)."""
+      (§2.15);
+    - ``left_out`` (0.5): the GET that established them "left the key out:
+      it answered the key with neither a value nor a `reply_del`, and
+      nothing of the key arrived after that GET was asked" (§2.14 step 5),
+      which heals step 4 and makes the held sample none."""
 
     presence: str
     descriptor: dict[str, Any] | None = None
@@ -539,6 +543,7 @@ class Reading:
     latest: str | None = None
     previous_instance: bool = False
     held_whole: bool = False
+    left_out: bool = False
 
 
 def judge(r: Reading, question: str = Q_FIRING, horizon: fr.Horizon = HORIZON) -> Answer:
@@ -572,19 +577,24 @@ def judge(r: Reading, question: str = Q_FIRING, horizon: fr.Horizon = HORIZON) -
     # 3. An archive alone (freshness.v1 §2.8).
     if obs and all(isinstance(o, fr.Archive) for o in obs):
         return Answer(NOT_ASKED, "last_known", "only an archive's answer was read (core S6)")
-    # 4. A loss, with no GET that answered the key since (core §4.2): a
-    # value or a reply_del for it, zk2py's reading (SPEC-FINDINGS F-128).
+    # 4. A loss, "and since then no GET has answered this key, with a value
+    # or a reply_del, nor has the GET that established its owner's alarms
+    # (§2.15) left it out (step 5)" (0.5, F-136).
+    left_out = r.left_out and r.held_whole
     lost = any(isinstance(o, fr.Subscription) and not o.complete for o in obs)
     reseeded = any(isinstance(o, fr.Get) and o.reply is not None for o in obs)
-    if lost and not reseeded:
+    if lost and not reseeded and not left_out:
         return Answer(UNOBSERVABLE, "incomplete", "a delivery was lost, and no GET answered the key since")
-    # 5. The latest sample.
+    # 5. The latest sample. "A sample the reader holds, a delete included,
+    # is none … when the GET that established its owner's alarms, either
+    # way (answered or window), left the key out" (0.3, 0.5).
+    latest = None if left_out else r.latest
     not_firing = Answer(NOT_ASKED, "not_firing", "the latest is not a firing alarm")
-    if r.latest == "deleted":
+    if latest == "deleted":
         return not_firing if stale_q else Answer(NO, "deleted", "a delete or a reply_del")
-    if r.latest == RESOLVED:
+    if latest == RESOLVED:
         return not_firing if stale_q else Answer(NO, "resolved", "a resolved document, whatever its age")
-    if r.latest is None:
+    if latest is None:
         if r.held_whole:
             return not_firing if stale_q else Answer(NO, "not_held", "the owner's established alarms hold no such key")
         if across:
@@ -704,12 +714,13 @@ class OwnerRead:
     alarms: tuple[AlarmRead, ...] = ()
 
 
-def any_firing(at_least: str, owners: Iterable[OwnerRead]) -> dict[str, Any]:
-    """§2.15 "Anything firing at or above a severity *S*", its five steps in
-    order, with the count of alarms reading yes at *S* or above, and the
-    owners counted by verdict. Which owners are in scope is the caller's: an
-    absent one is counted only if the caller knows of it (SPEC-FINDINGS
-    F-131)."""
+def any_firing(at_least: str, owners: Iterable[OwnerRead], scope_whole: bool = True) -> dict[str, Any]:
+    """§2.15 "Anything firing at or above a severity *S*", its six steps in
+    order (0.5), with the count of alarms reading yes at *S* or above, and
+    the owners counted by verdict. Which owners are in scope is the
+    caller's, and ``scope_whole`` whether the reads that found them are
+    whole (§2.15 "Whole", 0.5): the latest presence read complete, and no
+    token move lost since; an archive's read plays no part in it."""
     owners = list(owners)
     counts = {ESTABLISHED: 0, NOT_ASKED: 0, UNOBSERVABLE: 0}
     for o in owners:
@@ -723,6 +734,9 @@ def any_firing(at_least: str, owners: Iterable[OwnerRead]) -> dict[str, Any]:
         return out(YES, "any_firing")
     if any(o.verdict == UNOBSERVABLE for o in owners):
         return out(UNOBSERVABLE, "owner_unobservable")
+    if not scope_whole:
+        # "an owner they missed is in no other step, and may fire"
+        return out(UNOBSERVABLE, "scope_incomplete")
     for o in owners:
         if o.verdict != ESTABLISHED:
             continue
@@ -734,6 +748,77 @@ def any_firing(at_least: str, owners: Iterable[OwnerRead]) -> dict[str, Any]:
     if counts[ESTABLISHED] == 0:
         return out(NOT_ASKED, "no_owner")
     return out(NO, "none_firing")
+
+
+# -- §2.16 reporting changes (0.4) -------------------------------------------------------
+
+@dataclass(frozen=True)
+class Report:
+    """One report of a tool that reports each alarm's changes (§2.16): the
+    key (None for the scope's loss), §2.14's answer after the change and its
+    reason, the document's severity while yes, and the change that moved it
+    (§2.6's transition, or the reader's own), which is never reported
+    alone."""
+
+    key: str | None
+    answer: str
+    reason: str
+    severity: str | None = None
+    change: str | None = None
+
+
+def _side(answer: str) -> str:
+    """§2.16: "the answer moving between yes, no and neither"."""
+    return answer if answer in (YES, NO) else "neither"
+
+
+class ChangeReporter:
+    """§2.16 (0.4), "Reporting changes", over one reader's readings. Each
+    :meth:`update` takes every key's first-question answer now, the latest
+    document's severity, and the change that led there, and returns what
+    to report:
+    - **the answer after the change**, never the change's name alone;
+    - **a change** is the answer moving between yes, no and neither, or,
+      while yes, the severity moving, either way. A refresh, a
+      confirmation, and a raise of an alarm already reported firing at its
+      severity are none;
+    - **a loss** (§2.14 step 4's ``incomplete``) is reported once for the
+      scope, the MAY taken: no key the loss made unobservable is reported,
+      each keeps its last report, and each is reported again, as a change
+      against that last report, once a GET answers it or the establishing
+      GET leaves it out (SPEC-FINDINGS F-139);
+    - **an alarm firing at the first reading** is reported (the SHOULD),
+      and so is a key first read later that is firing. A key first read at
+      no or neither is recorded, not reported: nothing was reported before
+      it, so nothing moved."""
+
+    def __init__(self) -> None:
+        self.last: dict[str, tuple[str, str | None]] = {}
+        self.loss_reported = False
+
+    def update(self, readings: dict[str, tuple[Answer, str | None, str | None]]) -> list[Report]:
+        out: list[Report] = []
+        lossy = [k for k, (a, _, _) in readings.items() if a.reason == "incomplete"]
+        if lossy and not self.loss_reported:
+            out.append(Report(None, UNOBSERVABLE, "incomplete", None, "loss"))
+            self.loss_reported = True
+        if not lossy:
+            self.loss_reported = False
+        for key in sorted(readings):
+            a, severity, change = readings[key]
+            if a.reason == "incomplete":
+                continue  # the loss is reported once; the key keeps its last report
+            side = _side(a.answer)
+            now = (side, severity if side == YES else None)
+            before = self.last.get(key)
+            self.last[key] = now
+            if before is None:
+                if side == YES:
+                    out.append(Report(key, a.answer, a.reason, severity, change or "first reading"))
+                continue
+            if now != before:
+                out.append(Report(key, a.answer, a.reason, now[1], change))
+        return out
 
 
 # -- §5 the third question -----------------------------------------------------------
@@ -1205,6 +1290,16 @@ class AlarmsReader:
                           seed=seeds[-1] if seeds else None, trust=self.trust, get=False, horizon=horizon,
                           keys_known=keys_known, timeout=self.timeout, lost_at=losses[-1] if losses else None)
 
+    def scope_read(self, systems: str = "*", services: str = "*") -> ScopeRead:
+        """§2.15 "Whole" (0.5): a presence read of the scope now, whole when
+        it ran to its final reply and no loss was seen since it began."""
+        began = time.monotonic_ns()
+        sr = owners_by_presence(self.session, systems, services)
+        for a in sr.owners:
+            self.add_owner(a)
+        lost_since = any(t >= began for t in self.losses())
+        return ScopeRead(sr.owners, sr.whole and not lost_since)
+
     def close(self) -> None:
         self.stall.close()
         self.subscriber.close()
@@ -1230,19 +1325,22 @@ def archive_form(archive: str, selector: str) -> str:
 @dataclass
 class ScopeRead:
     """The owners a tool found for a scope (§2.15, "the owners in scope"),
-    and whether the read that found them was whole: it ran to its final
-    reply with no error reply, and every key it answered read back
-    (``skipped`` counts those that did not). An incomplete scope may miss
-    an owner, so :meth:`owner_reads` adds one unobservable owner for it,
-    and "is anything firing?" over it is never **no** (SPEC-FINDINGS
-    F-137)."""
+    and whether the reads that found them are **whole** (0.5): "the
+    reader's latest presence read of them ran to its final reply … and, for
+    a reader that follows instance tokens since, it lost none of their
+    moves". "An archive's read plays no part in it": an archive's GET short
+    of its final reply, or a key that does not read back (``skipped``), can
+    leave out only an absent owner, not asked, so it only sets
+    ``archive_short``, which a tool says."""
 
     owners: list[str]
-    complete: bool = True
+    whole: bool = True
+    archive_short: bool = False
     skipped: int = 0
 
-    def owner_reads(self) -> list[OwnerRead]:
-        return [] if self.complete else [OwnerRead(UNOBSERVABLE)]
+    def union(self, other: "ScopeRead") -> "ScopeRead":
+        return ScopeRead(sorted(set(self.owners) | set(other.owners)), self.whole and other.whole,
+                         self.archive_short or other.archive_short, self.skipped + other.skipped)
 
 
 def owners_by_presence(tool: Any, systems: str = "*", services: str = "*") -> ScopeRead:
@@ -1251,7 +1349,7 @@ def owners_by_presence(tool: Any, systems: str = "*", services: str = "*") -> Sc
     from . import live
 
     pres = live.list_presence(tool, f"zk2/{systems}/{services}/@zk/**")
-    return ScopeRead(sorted({f"{p['system']}/{p['service']}" for p in pres.instances}), pres.complete)
+    return ScopeRead(sorted({f"{p['system']}/{p['service']}" for p in pres.instances}), whole=pres.complete)
 
 
 def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: str = "*",
@@ -1262,8 +1360,8 @@ def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: s
     back (every chunk unslugged) into the alarm key it archives, and that
     key's address. A tool whose readings end with its process knows of an
     absent owner this way (scenarios.md §8, 0.3). A GET that did not run to
-    its final reply, or a key that does not read back, leaves the scope
-    incomplete."""
+    its final reply, or a key that does not read back, sets
+    ``archive_short``, and leaves the scope whole (0.5)."""
     from . import live
 
     pattern = archive_form(archive, f"zk2/{systems}/{services}/{PROFILE}/{TOKEN}/{PREFIX}/*")
@@ -1279,7 +1377,7 @@ def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: s
             skipped += 1
             continue
         out.add(f"{ref['system']}/{ref['service']}")
-    return ScopeRead(sorted(out), not st.errors and skipped == 0, skipped)
+    return ScopeRead(sorted(out), whole=True, archive_short=bool(st.errors) or skipped > 0, skipped=skipped)
 
 
 def _zid(text: Any) -> int | None:
@@ -1397,13 +1495,12 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             if lost_at is None or seed.asked_ns >= lost_at:
                 obs.append(g.observation(trust))
         latest, prev, doc, sid = None, False, None, None
-        if seed is not None and seed.complete and verdict.verdict == ESTABLISHED and key not in replies \
-                and subscriber is not None \
-                and not any(x.arrival_ns >= seed.asked_ns for x in subscriber.of(key)):
-            # §2.14 step 5 (0.3): "the owner answers every live key (core
-            # S2), so the key's delete went past the tombstone window
-            # unheard": the held sample is none.
-            cands = []
+        # §2.14 step 5 (0.3, 0.5): the establishing GET "left the key out: it
+        # answered the key with neither a value nor a reply_del, and nothing
+        # of the key arrived after that GET was asked". The judge reads it
+        # (Reading.left_out), healing step 4 and making the sample none.
+        left_out = seed is not None and seed.complete and verdict.verdict == ESTABLISHED and key not in replies \
+            and (subscriber is None or not any(x.arrival_ns >= seed.asked_ns for x in subscriber.of(key)))
         if cands:
             _, _, kind, payload, sid = max(cands, key=lambda c: (c[0], c[1]))
             if kind == "delete":
@@ -1413,6 +1510,6 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
                 latest = "undecodable" if doc is None else doc.state
                 prev = meta_zid is not None and _zid(sid) != _zid(meta_zid)
         out.readings[key] = Reading(presence, descriptor, None, obs, latest, prev,
-                                    verdict.verdict == ESTABLISHED)
+                                    verdict.verdict == ESTABLISHED, left_out)
         out.documents[key], out.stamps[key] = doc, sid
     return out
