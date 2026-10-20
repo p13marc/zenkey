@@ -53,17 +53,19 @@ PUBLISHED_VOCABULARY = {
     # profiles/link/v1.md §4 (core 0.29): link.downsample_ms left with the
     # interim row, "a face's rate is its face policy's interval_s".
     "link": {"exposure"},
+    # profiles/alarms/v1.md §4 (core 0.34): published, and empty. The interim
+    # alarms.severity_default is dropped, so every alarms.<key> draws W105.
+    "alarms": set(),
 }
 
 #: Appendix D, interim annotation vocabularies (W105 outside them, until each
-#: profile publishes its own). freshness's and link's rows moved to the
-#: published table.
+#: profile publishes its own). freshness's, link's and alarms's rows moved to
+#: the published table.
 INTERIM_VOCABULARY = {
     "timing": {"period_ms", "deadline_ms", "lifespan_ms"},
     "telemetry": {"unit", "kind", "buckets", "semantic"},
     "arbitration": {"policy"},
     "desired": {"target_param", "target"},
-    "alarms": {"severity_default"},
     "media": {"tiers", "tier_param", "frame_clock", "control", "receiver_report"},
     "views": {"document"},
     "redundancy": {"election"},
