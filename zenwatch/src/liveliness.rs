@@ -478,6 +478,7 @@ impl ForeignRule {
             assume,
             passthrough: false,
             reason: "a liveliness token carries no payload",
+            alert: None,
         }
     }
 
@@ -521,6 +522,7 @@ impl ForeignRule {
             assume,
             passthrough: false,
             reason: "nothing was observed",
+            alert: None,
         }
     }
 
@@ -546,6 +548,7 @@ impl ForeignRule {
             assume: false,
             passthrough: true,
             reason: "a baseline is a count, not a payload",
+            alert: None,
         }
     }
 }

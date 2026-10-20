@@ -1,26 +1,31 @@
-//! The run loop: three observers, one router, N sinks — on two sessions
+//! The run loop: four observers, one router, N sinks — on two sessions
 //! (#614, FL2).
 //!
-//! The fleet's zk2 `watchdog` Straw judges the seven engine conditions
+//! The fleet's zk2 `watchdog` Straw judges the eight engine conditions
 //! every tick — its wire selectors on the session in no namespace, its
-//! contracts, presence and doctor through the one in the namespace — and
-//! yields a [`Transition`] per genuine change. The fleet's live presence
-//! projection ([`zenkey_fleet::PresenceFeed`], its own monitor on the
-//! namespaced session) carries `instance-gone` and `liveliness-gone` on the
-//! deployment's zk2 tokens ([`crate::presence`]); the daemon's own token
-//! ledger ([`crate::liveliness`], its own monitor on the raw session)
-//! carries `liveliness-gone` on anything else. A monitor each, because a
-//! `Dropped(n)` is one receiver's lag: a flood on one plane must not make
-//! another's tokens unobservable. All three feed one [`Notice`] stream,
+//! contracts, presence, doctor and `alert-firing`'s alarms through the one
+//! in the namespace — and yields a [`Transition`] per genuine change. The
+//! fleet's live presence projection ([`zenkey_fleet::PresenceFeed`], its
+//! own monitor on the namespaced session) carries `instance-gone` and
+//! `liveliness-gone` on the deployment's zk2 tokens ([`crate::presence`]);
+//! the daemon's own token ledger ([`crate::liveliness`], its own monitor on
+//! the raw session) carries `liveliness-gone` on anything else. A monitor
+//! each, because a `Dropped(n)` is one receiver's lag: a flood on one plane
+//! must not make another's tokens unobservable. The fleet's live `alarms.v1`
+//! readers ([`zenkey_fleet::AlarmFeed`], one per distinct `alerts`
+//! selector, on the namespaced session, #800 AD) carry `alerts`
+//! ([`crate::alarms`]): their deliveries drain here, their re-reads run
+//! beside the drain each tick, and their sweep runs on the tick. All four
+//! feed one [`Notice`] stream,
 //! [`route`] turns a notice into one [`Outgoing`] per matching rule, and
 //! every named sink gets it concurrently — a slow sink widens nothing, a
 //! failed sink is counted and logged, never fatal.
 //!
 //! **Three states, preserved.** `ok` / `firing` / `unobservable` ride from
-//! the engine's `CondState` into the sink payload unchanged. A presence or
-//! token rule whose observer lost events, or whose read ran to its timeout,
-//! says `unobservable` once, on its `observer` identity — never `ok`
-//! (RFC 13 §3 O6).
+//! the engine's `CondState` into the sink payload unchanged. A presence,
+//! token or alarm rule whose observer lost events, or whose read ran to its
+//! timeout, says `unobservable` once, on its `observer` identity — never
+//! `ok` (RFC 13 §3 O6).
 //!
 //! **Transitions, not states.** A token re-declared is not a notification;
 //! an address that was already down going down is not one either. What
@@ -65,6 +70,7 @@ use zenkey_fleet::{
     WatchdogSpec, WatchdogSummary,
 };
 
+use crate::alarms::{AlarmRules, AlertFacts, Remembered};
 use crate::config::{DisciplineConfig, DoctorConfig};
 use crate::discipline::{Counters as DisciplineCounters, Discipline, NoticeMeta, state as ledger};
 use crate::doctor::{self, DoctorNotice};
@@ -83,10 +89,11 @@ use crate::sinks::{NoticeKind, Notification, Outgoing, Sink};
 pub enum Notice {
     /// The engine judged a condition into a different state.
     Engine(Transition),
-    /// A presence or token rule said something about one identity, its
-    /// observer, or its first look (#614, FL2). Already the rule's: the
-    /// projection and the ledger fold per rule. Boxed: it carries the
-    /// presence move that decided it.
+    /// A presence, token or alarm rule said something about one identity,
+    /// its observer, or its first look (#614, FL2; #800, AD). Already the
+    /// rule's: the projection, the ledger and the alarm readers fold per
+    /// rule. Boxed: it carries the presence move or the alarm's change that
+    /// decided it.
     Rule(Box<RuleNotice>),
     /// One thing a scheduled doctor run said (#390): the baseline, a
     /// finding new or fixed since the last run, or the run itself failing
@@ -94,14 +101,15 @@ pub enum Notice {
     Doctor(Box<DoctorNotice>),
 }
 
-/// One presence or token rule's notice: the identity, its state, and the
-/// facts its rendering and the discipline need.
+/// One presence, token or alarm rule's notice: the identity, its state, and
+/// the facts its rendering and the discipline need.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuleNotice {
     /// The rule's name.
     pub rule: String,
     /// The identity under the rule: an address, an address and what a
-    /// token names, a token's wire key, `observer`, `baseline`.
+    /// token names, a token's wire key, an alarm's key, `observer`,
+    /// `baseline`.
     pub what: String,
     /// The notice's own kind: what a passthrough carries as is; a
     /// remembered identity's is the discipline's verdict.
@@ -109,7 +117,8 @@ pub struct RuleNotice {
     pub state: CondState,
     /// What the rule last said of the identity; `None` on first sight.
     pub prior: Option<CondState>,
-    /// The severity, when it is not the rule's (an `info` baseline).
+    /// The severity, when it is not the rule's (an `info` baseline, an
+    /// alarm's document).
     pub severity: Option<String>,
     pub evidence: String,
     /// Lines the message carries after the evidence (a baseline's list).
@@ -128,6 +137,9 @@ pub struct RuleNotice {
     pub passthrough: bool,
     /// Why no payload is rendered.
     pub reason: &'static str,
+    /// An alarm's change and its document (`alerts`, #800 AD): the
+    /// notification's `alert`, the payload rendered through the contract.
+    pub alert: Option<Box<AlertFacts>>,
 }
 
 /// What the discipline needs to know about a notice that its rendering
@@ -153,10 +165,10 @@ pub fn meta_of(notice: &Notice) -> NoticeMeta {
 /// holds no state.
 ///
 /// The notification's `id` is the notice **identity** (#389): the rule's id
-/// and what the notice is about — an address, a token's key, `observer`, an
-/// engine condition's sorted labels, a doctor finding's check and subject —
-/// stable across ticks, runs and restarts, which is what dedup and the
-/// state file key on.
+/// and what the notice is about — an address, a token's key, an alarm's
+/// key, `observer`, an engine condition's sorted labels, a doctor finding's
+/// check and subject — stable across ticks, runs and restarts, which is
+/// what dedup and the state file key on.
 pub fn route(notice: &Notice, rules: &[Rule], render: &RenderConfig) -> Vec<Outgoing> {
     let mut out = Vec::new();
     for r in rules {
@@ -211,8 +223,25 @@ pub fn route(notice: &Notice, rules: &[Rule], render: &RenderConfig) -> Vec<Outg
                     extra.push(format!("address: {a}"));
                 }
                 extra.extend(n.lines.iter().cloned());
-                let payload = Payload::None {
-                    reason: n.reason.into(),
+                // An alert's document is rendered through the contract that
+                // declares it (alarms.v1's, strict, §2.4), its discriminating
+                // labels over the rule's (#800, AD).
+                let mut labels = r.labels.clone();
+                let payload = match &n.alert {
+                    Some(a) => {
+                        labels.extend(a.labels());
+                        match &a.document {
+                            Some(d) => Payload::Typed(
+                                serde_json::to_value(d).unwrap_or(serde_json::Value::Null),
+                            ),
+                            None => Payload::None {
+                                reason: n.reason.into(),
+                            },
+                        }
+                    }
+                    None => Payload::None {
+                        reason: n.reason.into(),
+                    },
                 };
                 let rendered = crate::render::render(
                     &Draft {
@@ -222,14 +251,15 @@ pub fn route(notice: &Notice, rules: &[Rule], render: &RenderConfig) -> Vec<Outg
                         severity: &severity,
                         evidence: &n.evidence,
                         extra: &extra,
-                        labels: &r.labels,
+                        labels: &labels,
                         key: n.key.as_deref(),
-                        timestamp: None,
+                        timestamp: n.alert.as_ref().and_then(|a| a.timestamp()),
                         payload: &payload,
                     },
                     render,
                 );
-                out.push(outgoing(
+                let rendering = rendered.source;
+                let mut o = outgoing(
                     r,
                     format!("{}:{}", r.id, n.what),
                     n.kind,
@@ -240,7 +270,11 @@ pub fn route(notice: &Notice, rules: &[Rule], render: &RenderConfig) -> Vec<Outg
                     n.at.clone(),
                     n.evidence.clone(),
                     n.presence.clone(),
-                ));
+                );
+                o.notification.labels = labels;
+                o.notification.rendering = rendering;
+                o.notification.alert = n.alert.as_ref().map(|a| a.transition.clone());
+                out.push(o);
             }
             _ => {}
         }
@@ -281,6 +315,7 @@ fn outgoing(
             repeat: 0,
             group: None,
             presence,
+            alert: None,
         },
         sinks: r.sinks.clone(),
     }
@@ -298,6 +333,9 @@ pub struct RunSummary {
     pub dropped: u64,
     /// Address records the presence projection forgot at its bound.
     pub evicted: u64,
+    /// Deliveries the `alerts` rules' readers lost, and their stalls (each
+    /// one their observer gone unobservable until a GET heals it, #800 AD).
+    pub alarms_lost: u64,
     pub watchdog: Option<WatchdogSummary>,
     /// What the discipline did (#389).
     pub discipline: DisciplineCounters,
@@ -578,6 +616,37 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         token_feed = Some(feed);
         token_monitor = Some(monitor);
     }
+    // Alarms, live (#800, AD): one reader per distinct `alerts` selector,
+    // on the namespaced session, subscribed and seeded before `ready`; its
+    // first look told as `crate::alarms` decides, reconciled against what
+    // the ledger remembers announced.
+    let mut alarm_rules = AlarmRules::new(e.rules);
+    if !alarm_rules.is_empty() {
+        let initial = alarm_rules
+            .open(&e.bus.session, e.timeout, e.clocks_synced)
+            .await;
+        let mut remembered: BTreeMap<String, Vec<Remembered>> = BTreeMap::new();
+        for entry in discipline.announced() {
+            remembered
+                .entry(entry.rule.clone())
+                .or_default()
+                .push(Remembered {
+                    id: entry.id.clone(),
+                    state: entry.state,
+                    severity: entry.severity.clone(),
+                });
+        }
+        let sight = alarm_rules.sight();
+        tracing::info!(rules = ?alarm_rules.names().collect::<Vec<_>>(), ?sight,
+            "alarms: the first look");
+        let at = zenkey_fleet::rfc3339_now();
+        for n in alarm_rules.baseline(&initial, &remembered, &at) {
+            observe(&mut discipline, &mut summary, Notice::Rule(Box::new(n)));
+        }
+    }
+    type AlarmRefreshRun =
+        Pin<Box<dyn Future<Output = Vec<(usize, zenkey_fleet::AlarmRefreshed)>> + Send>>;
+    let mut alarm_refresh: Option<AlarmRefreshRun> = None;
     let dropped_now = |p: &Option<Monitor>, t: &Option<Monitor>| {
         p.as_ref().map_or(0, |m| m.core().dropped()) + t.as_ref().map_or(0, |m| m.core().dropped())
     };
@@ -642,6 +711,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                 sinks: &by_sink,
                 presence,
                 tokens,
+                alarms: alarm_rules.sight(),
                 doctor: doctor_every.as_deref().map(|every| DoctorCheck {
                     status: publish::DoctorStatus::Pending,
                     every,
@@ -744,6 +814,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                     sinks: &by_sink,
                     presence,
                     tokens,
+                    alarms: alarm_rules.sight(),
                     doctor: doctor_schedule.as_ref().zip(doctor_every.as_deref()).map(
                         |(s, every)| DoctorCheck {
                             status: s.status(),
@@ -818,6 +889,17 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                 Vec::new()
             }
             _ = disc_tick.tick() => {
+                // The alarm readers' sweep first (#800, AD) — what moved with
+                // no sample, stale or an owner gone — so it flushes in this
+                // tick; then their re-read starts beside the drain, one at a
+                // time.
+                let at = zenkey_fleet::rfc3339_now();
+                for n in alarm_rules.sweep(&at) {
+                    observe(&mut discipline, &mut summary, Notice::Rule(Box::new(n)));
+                }
+                if alarm_refresh.is_none() && alarm_rules.listening() {
+                    alarm_refresh = Some(Box::pin(crate::alarms::refresh(alarm_rules.plans())));
+                }
                 discipline_tick!(false);
                 Vec::new()
             }
@@ -861,6 +943,28 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                     }
                 }
             }
+            // An alarm reader's delivery folds into its book as it arrives
+            // (cancel-safe: `AlarmFeed::next`), and becomes this rule's
+            // notices (#800, AD).
+            got = alarm_rules.next(), if alarm_rules.listening() => {
+                let at = zenkey_fleet::rfc3339_now();
+                alarm_rules
+                    .delivered(got, &at)
+                    .into_iter()
+                    .map(|n| Notice::Rule(Box::new(n)))
+                    .collect()
+            }
+            refreshed = async { alarm_refresh.as_mut().expect("guarded").await },
+                if alarm_refresh.is_some() =>
+            {
+                alarm_refresh = None;
+                let at = zenkey_fleet::rfc3339_now();
+                alarm_rules
+                    .folded(refreshed, &at)
+                    .into_iter()
+                    .map(|n| Notice::Rule(Box::new(n)))
+                    .collect()
+            }
             Some(_) = tasks.join_next(), if !tasks.is_empty() => Vec::new(),
         };
         for n in notices {
@@ -888,6 +992,9 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         .map_or(0, |f| f.presence().forgotten());
     drop(presence_feed);
     drop(token_feed);
+    summary.alarms_lost = alarm_rules.lost();
+    drop(alarm_refresh);
+    drop(alarm_rules);
     for monitor in [presence_monitor, token_monitor].into_iter().flatten() {
         monitor.shutdown().await?;
     }
@@ -1025,7 +1132,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
     )
     .await?;
     eprintln!(
-        "zenwatch: stopped — {} notice(s), {} notification(s): {} delivered, {} failed{}{}{}",
+        "zenwatch: stopped — {} notice(s), {} notification(s): {} delivered, {} failed{}{}{}{}",
         summary.notices,
         summary.outgoing,
         summary.delivered,
@@ -1034,6 +1141,14 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             format!(
                 ", {} liveliness event(s) dropped by the observers (O6)",
                 summary.dropped
+            )
+        } else {
+            String::new()
+        },
+        if summary.alarms_lost > 0 {
+            format!(
+                ", {} alarm delivery(ies) lost or stall(s) by the alarm readers (O6)",
+                summary.alarms_lost
             )
         } else {
             String::new()
@@ -1182,6 +1297,7 @@ mod tests {
             assume: false,
             passthrough: false,
             reason: "a presence token carries no payload",
+            alert: None,
         };
         let notice = Notice::Rule(Box::new(n.clone()));
         let out = route(&notice, &rules, &RenderConfig::default());
@@ -1211,5 +1327,108 @@ mod tests {
         assert_eq!(out[0].notification.severity, "info");
         assert_eq!(out[0].notification.kind, NoticeKind::Baseline);
         assert_eq!(out[0].notification.id, "tc-gone:baseline");
+    }
+
+    /// An alert notice (#800, AD) routes to its rule alone, under
+    /// `<rule_id>:<alarm key>`, at its document's severity, its document's
+    /// discriminating labels over the rule's, the document rendered through
+    /// the contract (`schema`) with the owner's stamp, and the fleet's
+    /// transition carried whole.
+    #[test]
+    fn an_alert_notice_carries_its_document_and_transition() {
+        use zenkey_fleet::report::{AlarmAnswer, AlarmAnswerToken, AlarmChange, AlarmVia, Stamp};
+        let rules = vec![
+            rule(
+                "fleet",
+                "alerts zk2/*/*/alarms.v1/state/alarms/*",
+                &[("team", "infra")],
+            ),
+            rule("other", "alerts zk2/far/**", &[]),
+        ];
+        let key = "zk2/h1/netlink/alarms.v1/state/alarms/a659f813308ad1da";
+        let document = zenkey_model::alarms::Alarm {
+            timestamp: 1_760_950_000_000,
+            observed_at_ms: None,
+            rule: "link_down".into(),
+            severity: zenkey_model::alarms::Severity::Critical,
+            state: zenkey_model::alarms::State::Firing,
+            summary: "link to r2 down on eth0".into(),
+            category: None,
+            labels: BTreeMap::from([
+                ("peer".into(), "r2".into()),
+                ("host".into(), "h-3fa9c2d41b7e".into()),
+            ]),
+        };
+        let transition = zenkey_fleet::AlarmTransition {
+            key: key.into(),
+            alarm: zenkey_model::alarms::AlarmRef::from_key(key).unwrap(),
+            change: AlarmChange::Raised,
+            firing: AlarmAnswer {
+                answer: AlarmAnswerToken::Yes,
+                reason: "firing".into(),
+                says: "its owner says it fires".into(),
+            },
+            severity: Some(zenkey_model::alarms::Severity::Critical),
+            document: Some(document.clone()),
+            stamp: Some(Stamp {
+                time: "2026-10-20T00:00:00.000000000Z".into(),
+                clock: "a1".into(),
+            }),
+            via: Some(AlarmVia::Subscription),
+            lost: None,
+        };
+        let n = RuleNotice {
+            rule: "fleet".into(),
+            what: key.into(),
+            kind: NoticeKind::Alert,
+            state: CondState::Firing,
+            prior: None,
+            severity: Some("critical".into()),
+            evidence: "alarm a659f813308ad1da of h1/netlink raised at critical".into(),
+            lines: vec![],
+            key: Some(key.into()),
+            address: Some("h1/netlink".into()),
+            at: "t".into(),
+            presence: None,
+            assume: false,
+            passthrough: false,
+            reason: "a delete carries no document",
+            alert: Some(Box::new(AlertFacts {
+                transition: transition.clone(),
+                document: Some(document),
+            })),
+        };
+        let out = route(&Notice::Rule(Box::new(n)), &rules, &RenderConfig::default());
+        assert_eq!(out.len(), 1, "its rule alone");
+        let o = &out[0].notification;
+        assert_eq!(o.id, format!("fleet:{key}"));
+        assert_eq!(
+            (o.rule_kind.as_str(), o.kind),
+            ("alerts", NoticeKind::Alert)
+        );
+        assert_eq!(o.severity, "critical");
+        assert_eq!(o.title, "critical fleet firing");
+        assert_eq!(
+            o.labels,
+            BTreeMap::from([
+                ("peer".to_string(), "r2".to_string()),
+                ("team".to_string(), "infra".to_string()),
+            ])
+        );
+        assert_eq!(o.rendering, RenderSource::Schema);
+        assert_eq!(o.alert.as_ref(), Some(&transition));
+        assert!(o.message.contains(&format!("key: {key}")), "{}", o.message);
+        assert!(
+            o.message
+                .contains("timestamp: 2026-10-20T00:00:00.000000000Z"),
+            "{}",
+            o.message
+        );
+        assert!(
+            o.message.contains("payload: {") && o.message.contains("\"rule\":\"link_down\""),
+            "{}",
+            o.message
+        );
+        assert!(o.presence.is_none());
     }
 }

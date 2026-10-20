@@ -564,6 +564,7 @@ impl Discipline {
                 repeat: 0,
                 group: None,
                 presence: None,
+                alert: None,
             },
             sinks: facts.map(|f| f.sinks.clone()).unwrap_or_default(),
         });
@@ -784,6 +785,7 @@ impl Discipline {
                 repeat: 0,
                 group: Some(ns.iter().map(|n| n.id.clone()).collect()),
                 presence: None,
+                alert: None,
             },
             sinks,
         }
@@ -820,6 +822,7 @@ pub fn base_kind(head: &str) -> NoticeKind {
     match head {
         "instance-gone" => NoticeKind::Presence,
         "liveliness-gone" => NoticeKind::Liveliness,
+        "alerts" => NoticeKind::Alert,
         _ => NoticeKind::Transition,
     }
 }
@@ -877,6 +880,7 @@ mod tests {
                 repeat: 0,
                 group: None,
                 presence: None,
+                alert: None,
             },
             sinks: vec!["ops".into()],
         }

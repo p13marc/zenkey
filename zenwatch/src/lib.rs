@@ -38,6 +38,7 @@
 //! shapes ([`sinks::Outgoing`]); [`config`] owns the file and its
 //! refusals; [`exit`] cites the contract.
 
+pub mod alarms;
 pub mod bus;
 pub mod cli;
 pub mod config;

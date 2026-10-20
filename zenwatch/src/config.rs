@@ -53,10 +53,15 @@ pub struct Config {
     /// (`freshness.v1` §2.6): the doctor — scheduled, or a `doctor` rule's —
     /// then ages a `health.v1` status reply's stamp against this clock.
     /// It listens to no status, so without it the `health-*` checks of
-    /// every service implementing `health.v1` are unobservable. Default off.
+    /// every service implementing `health.v1` are unobservable. The alarm
+    /// rules (`alerts`, `alert-firing`; #800, AD) age an owner's GET reply
+    /// on it too: without it, an alarm read only by its owner's GET is not
+    /// yet established until a live put of its owner's clock measures that
+    /// clock (at most 450 s, alarms.v1 §2.7). Default off.
     #[serde(default)]
     pub clocks_synced: bool,
-    /// The watchdog's evaluation cadence for the engine rules, seconds.
+    /// The watchdog's evaluation cadence for the engine rules, seconds, and
+    /// the `alerts` rules' re-read (presence, the owners' GET) and sweep.
     #[serde(default = "default_tick")]
     pub tick_s: f64,
     pub rules: Vec<RuleConfig>,
@@ -1154,10 +1159,11 @@ mod tests {
 
     /// What the zk2 port took away is refused by name (#614, FL2), each by
     /// its path and with where its question went: v1's `origin-down` (no
-    /// silent alias), the dark `alerts`, inhibition switched on (a block
-    /// without `enabled` was on in v1), grouping by v1's origin, v1's
-    /// registry dirs and the doctor's sample. Inhibition off, or no block,
-    /// still runs.
+    /// silent alias), `alerts` over v1's alert plane (what to write instead,
+    /// #800 AD), inhibition switched on (a block without `enabled` was on in
+    /// v1), grouping by v1's origin, v1's registry dirs and the doctor's
+    /// sample. Inhibition off, or no block, still runs, and so does `alerts`
+    /// over alarms.v1.
     #[test]
     fn what_zk2_took_away_is_refused_by_name() {
         let cfg = parse(
@@ -1183,7 +1189,12 @@ mod tests {
                 .clone()
         };
         assert!(message("rules[0].rule").contains("instance-gone"));
-        assert!(message("rules[1].rule").contains("#613"));
+        let alerts = message("rules[1].rule");
+        assert!(
+            alerts.contains("v1's alert plane")
+                && alerts.contains("zk2/*/*/alarms.v1/state/alarms/*"),
+            "{alerts}"
+        );
         let inhibit = message("discipline.inhibit");
         assert!(
             inhibit.contains("removed") && inhibit.contains("catalog"),
@@ -1209,6 +1220,15 @@ mod tests {
             .unwrap();
             assert!(check(&cfg).is_empty(), "{off}: {:?}", check(&cfg));
         }
+        let lit = parse(
+            r#"{ rules: [
+                   { name: "fleet-alerts", rule: "alerts zk2/*/*/alarms.v1/state/alarms/*", sinks: ["hook"] },
+                   { name: "critical", rule: "alert-firing zk2/** critical", sinks: ["hook"] },
+                 ],
+                 sinks: { hook: { kind: "webhook", url: "https://example.org/h" } } }"#,
+        )
+        .unwrap();
+        assert!(check(&lit).is_empty(), "{:?}", check(&lit));
         let on = parse(
             r#"{ discipline: { inhibit: { enabled: true } },
                  rules: [{ name: "d", rule: "dropped", sinks: ["hook"] }],

@@ -1,24 +1,35 @@
-//! The rule vocabulary: the engine's closed seven, plus the two this daemon
-//! owns.
+//! The rule vocabulary: the engine's closed eight, plus the three this
+//! daemon owns.
 //!
-//! `instance-gone <SYSTEM/SERVICE>` and `liveliness-gone <SEL>` are **not**
-//! judged by the engine's watchdog here, and the reason is structural: a
-//! [`Condition`] is one state per rule (a `RuleState`), while these notify
-//! per *address* or per *token* — `*/tc` is every `tc` there is, each one
-//! up or gone on its own (#614, FL2). The engine judges its seven every
-//! tick; the daemon reads the other two from the fleet's live presence
-//! projection ([`crate::presence`]) or its own token ledger
-//! ([`crate::liveliness`]). `instance-gone` means one thing in both tools
+//! `instance-gone <SYSTEM/SERVICE>`, `liveliness-gone <SEL>` and `alerts
+//! <SEL>` are **not** judged by the engine's watchdog here, and the reason
+//! is structural: a [`Condition`] is one state per rule (a `RuleState`),
+//! while these notify per *address*, per *token* or per *alarm* — `*/tc`
+//! is every `tc` there is, each one up or gone on its own (#614, FL2), and
+//! `alerts zk2/*/*/alarms.v1/state/alarms/*` is every alarm there is, each
+//! one firing or resolved on its own (#800, AD). The engine judges its
+//! eight every tick; the daemon reads the other three from the fleet's
+//! live presence projection ([`crate::presence`]), its own token ledger
+//! ([`crate::liveliness`]) or the fleet's live `alarms.v1` reader
+//! ([`crate::alarms`]). `instance-gone` means one thing in both tools
 //! (#747): the per-address reading is the fleet's
 //! ([`zenkey_fleet::AddressWatch`]), which `zenctl watchdog` folds into its
-//! rule's one state and this daemon notifies from address by address. [`parse_rule`] is the one parser over the
-//! union, and its error spells the whole vocabulary, because closed means
-//! closed: no expressions, no templating.
+//! rule's one state and this daemon notifies from address by address.
+//! `alert-firing <SEL> [info|warning|critical]` is the engine's, as in
+//! `zenctl watchdog`: §5's second question of `alarms.v1` over the
+//! selector, one state for the rule. [`parse_rule`] is the one parser over
+//! the union, and its error spells the whole vocabulary, because closed
+//! means closed: no expressions, no templating.
 //!
-//! **Refused, never ignored.** `alerts <SEL>` read v1's alert plane and is
-//! dark until zk2's alarm profile exists (#613); `origin-down` and
-//! `alert-firing` are v1 spellings. Each is refused with where its question
-//! went, never parsed into a rule that would silently never fire.
+//! **Selectors.** The engine's window rules and `liveliness-gone` take wire
+//! selectors, watched in no namespace; `alerts` and `alert-firing` take a
+//! base-relative one (`zk2/…`), read through the session in the
+//! deployment's namespace, as every reader of a profile reads it.
+//!
+//! **Refused, never ignored.** `origin-down` is a v1 spelling, and v1's
+//! alert plane (`v1/<origin>/state/<producer>/alert/<alert_key>`) is no
+//! selector of `alerts` or `alert-firing`: each is refused with where its
+//! question went, never parsed into a rule that would silently never fire.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -28,27 +39,27 @@ use zenkey_fleet::{Condition, ResolvedTarget as Target};
 /// The whole grammar, for the parse error and the docs.
 pub const VOCABULARY: &str = "rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | \
      silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | \
-     doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | dropped | \
-     liveliness-gone <SEL>";
+     doctor <CHECK-ID> | alert-firing <SEL> [info|warning|critical] | dropped | \
+     instance-gone <SYSTEM/SERVICE> | liveliness-gone <SEL> | alerts <SEL>";
 
-/// Why `alerts` is refused (#613): named once, for the parser and the docs.
-pub const ALERTS_DARK: &str = "alerts read v1's alert plane, and zk2's alarm \
-     profile (alarms.v1) does not exist yet: the rule is dark until it does \
-     (#613). Refused rather than ignored — a rule that can never fire is a \
-     rule that pages nobody";
+/// Why v1's alert plane is no selector of `alerts` or `alert-firing`
+/// (#800, AD): named once, for the parser and the docs.
+pub const V1_ALERT_PLANE: &str = "v1's alert plane (`v1/<origin>/state/<producer>/alert/\
+     <alert_key>`) is gone: zk2's alarms are alarms.v1's, one key per alarm at \
+     zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>, read in the deployment's \
+     namespace. Write `zk2/*/*/alarms.v1/state/alarms/*`, or narrower \
+     (`zk2/<system>/*/alarms.v1/state/alarms/*`)";
 
-/// Why `alert-firing` is refused here (#800): the engine judges it on
-/// `alarms.v1` (zenctl's watchdog and `record --on`), and zenwatch's alarm
-/// rules come with `alerts` in #800's AD.
-pub const ALERT_FIRING_DARK: &str = "alert-firing reads alarms.v1 in zenctl's watchdog \
-     since #800's AC; zenwatch's alarm rules, `alerts` and `alert-firing`, come together \
-     in its AD (#613). Refused rather than ignored — a rule that can never fire is a rule \
-     that pages nobody";
+/// What every alarm selector refusal adds: where the selector is read.
+const ALARM_SELECTOR: &str = "an alarm selector is base-relative, read through the \
+     session in the deployment's namespace (bus.namespace, --namespace), so it starts at \
+     zk2/ — unlike a window rule's wire selector, which is watched in no namespace and \
+     carries it";
 
 /// What one rule watches.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuleKind {
-    /// One of the engine's seven, judged by the watchdog every tick. Never
+    /// One of the engine's eight, judged by the watchdog every tick. Never
     /// [`Condition::InstanceGone`]: [`parse_rule`] reads that spelling as
     /// [`RuleKind::InstanceGone`].
     Engine(Condition),
@@ -62,6 +73,12 @@ pub enum RuleKind {
     /// switch. On the deployment's own zk2 presence tokens it rides the
     /// projection; on anything else, the daemon's own token ledger.
     LivelinessGone { selector: String },
+    /// The alarms `selector` reaches (`alarms.v1`, #800 AD): base-relative,
+    /// read in the deployment's namespace by the fleet's live reader. One
+    /// state per alarm key, §5's first question: firing while it reads yes,
+    /// ok on no (resolved, deleted, not held by its owner's alarms known
+    /// whole), unobservable otherwise — never ok ([`crate::alarms`]).
+    Alerts { selector: String },
     /// The scheduled doctor (#390): not a spelling of the vocabulary at all
     /// — [`parse_rule`] never produces it — but the `doctor` block as the
     /// discipline and the router see it, so a doctor finding has a rule to
@@ -86,6 +103,7 @@ impl RuleKind {
             },
             RuleKind::InstanceGone { .. } => "instance-gone",
             RuleKind::LivelinessGone { .. } => "liveliness-gone",
+            RuleKind::Alerts { .. } => "alerts",
             RuleKind::ScheduledDoctor => "doctor",
         }
     }
@@ -94,6 +112,14 @@ impl RuleKind {
     pub fn watched_selector(&self) -> Option<&str> {
         match self {
             RuleKind::LivelinessGone { selector } => Some(selector),
+            _ => None,
+        }
+    }
+
+    /// The base-relative selector of an `alerts` rule.
+    pub fn alarm_selector(&self) -> Option<&str> {
+        match self {
+            RuleKind::Alerts { selector } => Some(selector),
             _ => None,
         }
     }
@@ -106,6 +132,7 @@ impl fmt::Display for RuleKind {
             RuleKind::Engine(c) => write!(f, "{c}"),
             RuleKind::InstanceGone { target } => write!(f, "instance-gone {}", target.address),
             RuleKind::LivelinessGone { selector } => write!(f, "liveliness-gone {selector}"),
+            RuleKind::Alerts { selector } => write!(f, "alerts {selector}"),
             RuleKind::ScheduledDoctor => f.write_str("doctor (scheduled)"),
         }
     }
@@ -119,7 +146,8 @@ pub struct RuleError(String);
 /// Parse one rule: whitespace-separated, kind first. The daemon's kinds and
 /// the refused spellings are tried first; anything else goes to
 /// [`Condition::parse`], whose error is re-spelled with the *full*
-/// vocabulary so the user never sees seven where there are nine.
+/// vocabulary so the user never sees the engine's nine where there are
+/// eleven.
 pub fn parse_rule(text: &str) -> Result<RuleKind, RuleError> {
     let tokens: Vec<&str> = text.split_whitespace().collect();
     let closed = |head: String| {
@@ -128,10 +156,21 @@ pub fn parse_rule(text: &str) -> Result<RuleKind, RuleError> {
         ))
     };
     match tokens.as_slice() {
-        ["alerts", ..] => Err(RuleError(format!("{text:?}: {ALERTS_DARK}"))),
-        // The engine reads `alert-firing` on alarms.v1 since #800's AC;
-        // zenwatch's alarm rules come together with `alerts` (#800, AD).
-        ["alert-firing", ..] => Err(RuleError(format!("{text:?}: {ALERT_FIRING_DARK}"))),
+        // v1's alert plane, under either alarm rule: where it went (#800,
+        // AD), before the engine's own refusal of a selector that is not
+        // base-relative.
+        ["alerts" | "alert-firing", sel, ..] if is_v1_alert_plane(sel) => {
+            Err(RuleError(format!("{text:?}: {V1_ALERT_PLANE}")))
+        }
+        ["alerts", sel] => {
+            alarm_selector(sel, "alerts").map(|selector| RuleKind::Alerts { selector })
+        }
+        ["alert-firing", sel, ..] => {
+            alarm_selector(sel, "alert-firing")?;
+            Condition::parse(text)
+                .map(RuleKind::Engine)
+                .map_err(|e| closed(engine_head(&e)))
+        }
         ["liveliness-gone", sel] => Ok(RuleKind::LivelinessGone {
             selector: selector(sel, "liveliness-gone")?,
         }),
@@ -143,22 +182,47 @@ pub fn parse_rule(text: &str) -> Result<RuleKind, RuleError> {
                     zenkey_fleet::one_line(&e)
                 ))
             }),
-        ["liveliness-gone" | "instance-gone", ..] => {
+        ["liveliness-gone" | "instance-gone" | "alerts", ..] => {
             Err(closed(format!("{text:?} takes exactly one argument")))
         }
-        _ => Condition::parse(text).map(RuleKind::Engine).map_err(|e| {
-            // The engine's own message, then the union it does not know. Its
-            // refusals of v1's spellings (`origin-down`, `alert-firing`)
-            // already say where the question went, and pass through whole.
-            let engine = e.to_string();
-            let head = engine
-                .split(" — the vocabulary is closed")
-                .next()
-                .unwrap_or(&engine)
-                .to_string();
-            closed(head)
-        }),
+        // The engine's own message, then the union it does not know. Its
+        // refusal of v1's `origin-down` already says where the question
+        // went, and passes through whole.
+        _ => Condition::parse(text)
+            .map(RuleKind::Engine)
+            .map_err(|e| closed(engine_head(&e))),
     }
+}
+
+/// The engine's refusal, without its own spelling of the vocabulary.
+fn engine_head(e: &zenkey_fleet::Error) -> String {
+    let engine = e.to_string();
+    engine
+        .split(" — the vocabulary is closed")
+        .next()
+        .unwrap_or(&engine)
+        .to_string()
+}
+
+/// A selector of v1's alert plane: `v1/…` at the bus root, or under a
+/// namespace (`<ns>/v1/…`). A zk2 selector whose system is named `v1`
+/// (`zk2/v1/…`) is not one.
+fn is_v1_alert_plane(sel: &str) -> bool {
+    let c: Vec<&str> = sel.split('/').collect();
+    c.first() == Some(&"v1") || (c.first() != Some(&"zk2") && c.get(1) == Some(&"v1"))
+}
+
+/// An alarm selector, refused the way the fleet's reader refuses one
+/// (`zenkey_fleet::AlarmScope`): a key expression, base-relative, reaching
+/// an `alarms.v1` key — with where it is read, which is not where a window
+/// rule's selector is.
+fn alarm_selector(sel: &str, head: &str) -> Result<String, RuleError> {
+    zenkey_fleet::AlarmScope::parse(sel)
+        .map(|_| sel.to_string())
+        .map_err(|why| {
+            let why = crate::exit::without_source_locations(&why);
+            RuleError(format!("{head} {why} — {ALARM_SELECTOR}"))
+        })
 }
 
 /// A wire selector, refused the way zenctl refuses one at the same seam.
@@ -269,11 +333,11 @@ impl Rule {
 mod tests {
     use super::*;
 
-    /// All nine spellings parse and round-trip; the two daemon kinds are the
-    /// daemon's, the seven are the engine's, and `instance-gone` is never
-    /// the engine's condition.
+    /// All eleven spellings parse and round-trip; the three daemon kinds
+    /// are the daemon's, the eight are the engine's, and `instance-gone` is
+    /// never the engine's condition.
     #[test]
-    fn the_nine_kinds_parse_and_round_trip() {
+    fn the_eleven_kinds_parse_and_round_trip() {
         let rules = [
             ("rate-above prod/zk2/*/*/*/stream/** 5", "rate-above"),
             (
@@ -293,6 +357,18 @@ mod tests {
                 "liveliness-gone prod/zk2/*/tc/@zk/instance/*",
                 "liveliness-gone",
             ),
+            ("alerts zk2/*/*/alarms.v1/state/alarms/*", "alerts"),
+            ("alerts zk2/lab/**", "alerts"),
+            (
+                "alerts zk2/h1/netlink/alarms.v1/state/alarms/a659f813308ad1da",
+                "alerts",
+            ),
+            (
+                "alert-firing zk2/*/*/alarms.v1/state/alarms/* warning",
+                "alert-firing",
+            ),
+            ("alert-firing zk2/lab/** critical", "alert-firing"),
+            ("alert-firing zk2/v1/** info", "alert-firing"),
         ];
         for (text, head) in rules {
             let kind = parse_rule(text).expect(text);
@@ -300,10 +376,24 @@ mod tests {
             assert_eq!(kind.head(), head);
             assert_eq!(
                 matches!(kind, RuleKind::Engine(_)),
-                !matches!(head, "instance-gone" | "liveliness-gone"),
+                !matches!(head, "instance-gone" | "liveliness-gone" | "alerts"),
                 "{text}"
             );
         }
+        // zenwatch accepts every spelling zenctl's watchdog does: the floor
+        // defaults to warning, as there.
+        assert_eq!(
+            parse_rule("alert-firing zk2/**").unwrap().to_string(),
+            "alert-firing zk2/** warning"
+        );
+        let RuleKind::Alerts { selector } = parse_rule("alerts zk2/lab/**").unwrap() else {
+            panic!("alerts is the daemon's");
+        };
+        assert_eq!(selector, "zk2/lab/**");
+        assert_eq!(
+            parse_rule("alerts zk2/lab/**").unwrap().alarm_selector(),
+            Some("zk2/lab/**")
+        );
         let RuleKind::InstanceGone { target } = parse_rule("instance-gone */tc").unwrap() else {
             panic!("instance-gone is the daemon's");
         };
@@ -317,32 +407,56 @@ mod tests {
         assert_eq!(rule_id(DOCTOR_RULE), "doctor");
     }
 
-    /// Refused, never ignored: `alerts` is dark and names #613; v1's
-    /// `origin-down` names `instance-gone`, with no silent alias; v1's
-    /// `alert-firing` names #613 too.
+    /// Refused, never ignored: v1's alert plane, under either alarm rule,
+    /// says what to write instead (#800, AD); a selector with the
+    /// namespace on it says where an alarm selector is read; one that
+    /// reaches no alarm says so; v1's `origin-down` names `instance-gone`,
+    /// with no silent alias.
     #[test]
-    fn the_dark_and_v1_spellings_are_refused_with_where_they_went() {
-        let e = parse_rule("alerts v1/*/state/*/alert/*")
+    fn the_v1_spellings_are_refused_with_where_they_went() {
+        for v1 in [
+            "alerts v1/*/state/*/alert/*",
+            "alerts site/v1/*/state/*/alert/*",
+            "alert-firing v1/*/state/*/alert/* warning",
+            "alert-firing v1/**",
+        ] {
+            let e = parse_rule(v1).unwrap_err().to_string();
+            assert!(
+                e.contains("v1's alert plane")
+                    && e.contains("zk2/*/*/alarms.v1/state/alarms/*")
+                    && !e.contains("#613"),
+                "{v1}: {e}"
+            );
+        }
+        let e = parse_rule("alerts site/zk2/*/*/alarms.v1/state/alarms/*")
             .unwrap_err()
             .to_string();
-        assert!(e.contains("#613") && e.contains("alarms.v1"), "{e}");
-        let e = parse_rule("alerts").unwrap_err().to_string();
-        assert!(e.contains("#613"), "every arity: {e}");
+        assert!(
+            e.contains("not base-relative") && e.contains("bus.namespace"),
+            "{e}"
+        );
+        for no_alarm in [
+            "alerts zk2/h1/tc/tc.netif.v1/**",
+            "alert-firing zk2/lab/svc/health.v1/** warning",
+        ] {
+            let e = parse_rule(no_alarm).unwrap_err().to_string();
+            assert!(e.contains("reaches no alarms.v1 key"), "{no_alarm}: {e}");
+        }
+        let e = parse_rule("alert-firing zk2/** severe")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("not a severity"), "{e}");
         let e = parse_rule("origin-down h-aaaaaaaaaaaa")
             .unwrap_err()
             .to_string();
         assert!(e.contains("instance-gone"), "{e}");
-        let e = parse_rule("alert-firing v1/*/state/*/alert/* warning")
-            .unwrap_err()
-            .to_string();
-        assert!(e.contains("#613"), "{e}");
     }
 
     /// Outside the vocabulary — an expression, a daemon kind with the wrong
     /// arity, an address that is not one, a selector that is not a key
-    /// expression — the error names all nine kinds.
+    /// expression — the error names all eleven kinds.
     #[test]
-    fn a_rule_outside_the_vocabulary_names_all_nine() {
+    fn a_rule_outside_the_vocabulary_names_all_eleven() {
         for bad in [
             "if rate > 5 then page",
             "liveliness-gone",
@@ -350,15 +464,24 @@ mod tests {
             "instance-gone host-a",
             "instance-gone Host A",
             "dropped now",
+            "alerts",
+            "alerts zk2/** zk2/lab/**",
+            "alert-firing",
+            "alert-firing zk2/** warning now",
         ] {
             let e = parse_rule(bad).unwrap_err().to_string();
             assert!(
                 e.contains("liveliness-gone <SEL>")
                     && e.contains("instance-gone <SYSTEM/SERVICE>")
+                    && e.contains("alerts <SEL>")
+                    && e.contains("alert-firing <SEL> [info|warning|critical]")
                     && e.contains("rate-above <SEL>"),
                 "{bad}: {e}"
             );
         }
+        let e = parse_rule("alerts zk2//x").unwrap_err().to_string();
+        assert!(e.contains("not a key expression"), "{e}");
+        assert!(!e.contains(" at /"), "no source locations: {e}");
         // A selector zenoh refuses, and one zenoh accepts but the convention
         // does not (`$*`, RFC 03 §2) — refused at parse, with the reason and
         // without a build-machine path in it.
