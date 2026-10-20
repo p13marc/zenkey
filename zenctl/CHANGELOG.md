@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a principal bound by a user name and a CN both is refused everywhere (#788)
+
+zenoh matches one value of each property a subject names, so a subject
+naming a user name and a CN matches only a session presenting both (measured
+over mTLS in `link.v1`'s scenarios §11). Under `allow`, a session presenting
+one of them matched no subject and was allowed everything: a principal
+enrolled with both was weaker than one enrolled with either. Core 0.33 §11.1
+makes the generator refuse it.
+
+| Before | Now | Notes |
+|---|---|---|
+| `acl gen` without `--face-policy` planned a principal enrolled with a `user` and a `cn` as one subject naming both; with a face it was a refused row (exit 1) | the enrollment is refused before any plan, with or without `--face-policy`: `Error: --enrollment: principal "…" is bound by a user name and a CN both`, exit 2, every such principal named | the input is refused, not the row: a plan printed around that principal would leave it unrestricted under `allow`. Bind each principal by `user` or by `cn`. A principal bound by a zid, or running a service the file does not declare, is still a refused row (exit 1) |
+
 ## Unreleased (`main`, zk2) — a block not enabled, and two faces of one far principal: `link.v1` 0.7 (#769, LH)
 
 zk2py's round 36 found two gaps (F-124, F-125). A router config whose

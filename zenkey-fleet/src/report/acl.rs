@@ -61,7 +61,7 @@ use super::judgement::Judgement;
 ///
 /// [[principal]]
 /// user     = "thruster-l"                    # a usrpwd user name …
-/// # cn     = "thruster-l.vehicle-01"         # … or the mTLS certificate CN (both: zenoh ANDs them)
+/// # cn     = "thruster-l.vehicle-01"         # … or the mTLS certificate CN, never both (§11.1)
 /// services = ["vehicle-01/thruster-l"]
 ///
 /// [[service]]

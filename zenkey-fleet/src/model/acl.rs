@@ -349,9 +349,10 @@ const CITE_FACE_NEAR: &str = "link.v1 §2.4 (0.3, F-118): zenoh ties no credenti
      a subject bound by a user name or a CN alone matches that principal's session over a face \
      too; each principal's subject is selected by the link protocols outside the faces whose \
      far principal it is not";
-const CITE_FACE_KIND: &str = "link.v1 §2.4 (0.5, F-121): zenoh matches one value of each \
-     property a subject names, so a subject naming a user name and a CN matches only a session \
-     presenting both, and no check of a router's block can tell whose sessions those are";
+const CITE_ONE_KIND: &str = "§11.1 (0.33, #788): a principal is bound to a user name or a \
+     certificate CN; zenoh matches one value of each property a subject names, so a subject \
+     naming both matches only a session presenting both, and on a router with a constrained \
+     face no check of its block can tell whose sessions those are (link.v1 §2.4, 0.5, F-121)";
 
 const CITE_IDENTITY: &str = "§11.3: `zids` subjects are unauthenticated; principals are bound by \
      certificate CN or username";
@@ -1315,6 +1316,29 @@ pub fn plan_acl(
             format!("namespace {ns:?} is not a concrete key expression (§1.6)"),
         ));
     }
+    // One kind of name per principal (§11.1, 0.33, #788): zenoh matches one
+    // value of each property a subject names, so a subject naming a user
+    // name and a CN matches only a session presenting both. The input is
+    // refused, not the row: under `allow`, a plan printed around that
+    // principal would leave a session presenting one of its names
+    // unrestricted.
+    let both: Vec<String> = enrollment
+        .principal
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| nonempty(&p.user).is_some() && nonempty(&p.cn).is_some())
+        .map(|(i, p)| format!("{:?}", principal_name(i, p)))
+        .collect();
+    if !both.is_empty() {
+        return Err(Error::unaskable(
+            "--enrollment",
+            format!(
+                "principal {} is bound by a user name and a CN both: bind each principal by \
+                 `user` or by `cn` ({CITE_ONE_KIND})",
+                both.join(", ")
+            ),
+        ));
+    }
     let policy = opts.face_policy.as_ref().map(face_policy).transpose()?;
     let mut contracts = Contracts {
         set: contracts,
@@ -1431,25 +1455,6 @@ pub fn plan_acl(
     for (i, p) in enrollment.principal.iter().enumerate() {
         let name = principal_name(i, p);
         match place(p, &holders, &mut seen_ids, &mut seen_identities) {
-            // On a router with a face, a subject names one kind of name
-            // (link.v1 §2.4, 0.5, F-121): one naming a user name and a CN
-            // matches only a session presenting both, which §2.15's checks
-            // cannot attribute to one principal, so the block would fail
-            // them. Such a principal is refused.
-            Ok(pl)
-                if policy.is_some()
-                    && !pl.subject.usernames.is_empty()
-                    && !pl.subject.cert_common_names.is_empty() =>
-            {
-                refusals.push(AclRefusal {
-                    principal: name,
-                    reason: "it is bound by a user name and a CN both, and on a router with a \
-                             constrained face a subject names one of them: bind it by `user` \
-                             or by `cn`"
-                        .to_owned(),
-                    cite: CITE_FACE_KIND.to_owned(),
-                });
-            }
             Ok(pl) => placed.push(pl),
             Err(r) => refusals.push(AclRefusal {
                 principal: name,
@@ -5147,14 +5152,13 @@ type = { raw = "text/plain" }
         }
     }
 
-    /// On a router with a face, a principal bound by a user name and a CN
-    /// both is refused (link.v1 §2.4, 0.5, F-121): its subject would match
-    /// only a session presenting both, which §2.15's checks cannot
-    /// attribute, so the block would fail them. The far principal refused
-    /// so leaves its face unplaceable; without a face policy the principal
-    /// is planned as before.
+    /// A principal bound by a user name and a CN both is refused, with or
+    /// without a face (§11.1, 0.33, #788): its subject would match only a
+    /// session presenting both, so under `allow` a session presenting one
+    /// of them would be unrestricted. The input is refused, never the row,
+    /// so no plan is printed around it, under either posture.
     #[test]
-    fn a_principal_bound_by_both_kinds_is_refused_on_a_router_with_a_face() {
+    fn a_principal_bound_by_both_kinds_is_refused_everywhere() {
         let (base, set, policy) = radio();
         let with_cn = |user: &str, cn: &str| {
             let mut e = base.clone();
@@ -5167,41 +5171,44 @@ type = { raw = "text/plain" }
             e
         };
         for posture in [AclPermission::Deny, AclPermission::Allow] {
-            let plan = plan_acl(
-                &with_cn("local", "local.example"),
-                &set,
-                &face_opts(posture, link::parse(&policy)),
-            )
-            .unwrap();
-            assert_eq!(plan.refusals.len(), 1, "{:?}", plan.refusals);
-            assert_eq!(plan.refusals[0].principal, "local");
-            assert_eq!(plan.refusals[0].cite, CITE_FACE_KIND);
-            assert!(!plan.subjects.iter().any(|s| s.id == "local"));
-            let err = plan_acl(
-                &with_cn("ground", "ground.example"),
-                &set,
-                &face_opts(posture, link::parse(&policy)),
-            )
+            for (who, cn) in [("local", "local.example"), ("ground", "ground.example")] {
+                for opts in [
+                    face_opts(posture, link::parse(&policy)),
+                    AclOptions {
+                        default_permission: posture,
+                        ..AclOptions::default()
+                    },
+                ] {
+                    let err = plan_acl(&with_cn(who, cn), &set, &opts).unwrap_err();
+                    assert!(matches!(err, Error::Unaskable { .. }), "{err}");
+                    let err = err.to_string();
+                    assert!(
+                        err.contains(&format!(
+                            "principal {who:?} is bound by a user name and a CN both"
+                        )) && err.contains("§11.1 (0.33, #788)"),
+                        "{err}"
+                    );
+                }
+            }
+        }
+        // Every such principal is named at once, in enrollment order.
+        let mut both = with_cn("local", "local.example");
+        both.principal
+            .iter_mut()
+            .find(|p| p.user.as_deref() == Some("ground"))
+            .unwrap()
+            .cn = Some("ground.example".to_owned());
+        let err = plan_acl(&both, &set, &AclOptions::default())
             .unwrap_err()
             .to_string();
-            assert!(
-                err.contains("far principal \"ground\" cannot be placed")
-                    && err.contains("a user name and a CN both"),
-                "{err}"
-            );
-        }
-        let plain = plan_acl(
-            &with_cn("local", "local.example"),
-            &set,
-            &AclOptions::default(),
-        )
-        .unwrap();
-        assert!(plain.refusals.is_empty(), "{:?}", plain.refusals);
-        let local = plain.subjects.iter().find(|s| s.id == "local").unwrap();
-        assert_eq!(
-            (&local.usernames[..], &local.cert_common_names[..]),
-            (&["local".to_owned()][..], &["local.example".to_owned()][..])
+        assert!(
+            err.contains("principal \"local\", \"ground\" is bound"),
+            "{err}"
         );
+        // A blank one of the two is no name: the principal is planned.
+        let blank = with_cn("local", "  ");
+        let plan = plan_acl(&blank, &set, &AclOptions::default()).unwrap();
+        assert!(plan.refusals.is_empty(), "{:?}", plan.refusals);
     }
 
     /// A face names its far principal by user name or CN (link.v1 §2.1),

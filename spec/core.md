@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.32** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.33** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -31,8 +31,9 @@ restart, in 0.29 what `link.v1` needed: its vocabulary published
 without `downsample_ms`, a crossing counter's epoch, and a batch's
 example made exact, in 0.30 what a south region's declaration grant
 covers, as compiling `link.v1` measured, in 0.31 whether a principal's
-own keys are in its complement, and in 0.32 that its complement is taken
-per message and flow).
+own keys are in its complement, in 0.32 that its complement is taken
+per message and flow, and in 0.33 that a principal is bound by one kind
+of name).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -2821,8 +2822,13 @@ every profile follows, and the process.
 Ownership (§6) reduces access control to a few grant shapes.
 
 **The input** (0.15, F-82). A generator compiles a deployment:
-- its principals, each bound to a user name or a certificate CN, never a zid
-  (§11.3);
+- its principals, each bound to a user name or a certificate CN, never both
+  and never a zid (§11.3). A generator MUST refuse an input that binds one
+  principal by both (0.33, #788): zenoh matches one value of each property
+  a subject names, so a subject naming both matches only a session
+  presenting both, and under `default_permission: allow` a session
+  presenting one of them would be allowed everything.
+  `[Sc: link.v1 scenarios §11]`;
 - the services each principal runs, with the contracts they implement;
 - each holder's bindings: role, interface, providers, resources,
   parameters (R2), and whether it reads with history;

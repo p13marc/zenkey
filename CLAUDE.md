@@ -266,9 +266,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   its presence, history, admin-space and contract grants; every other
   principal's subject narrowed to the link protocols outside the faces
   whose far principal it is not (`AclSubject::link_protocols`; one left
-  with none refused; on a router with a face, a principal enrolled with a
-  `user` and a `cn` both is refused, and a face's far principal is placed
-  by its user name or CN, never by its id: link.v1 0.5, F-121, #769 LE),
+  with none refused; a face's far principal is placed by its user name or
+  CN, never by its id: link.v1 0.5, F-121, #769 LE; and, face or no face,
+  an enrollment binding a principal by a `user` and a `cn` both is refused
+  whole, exit 2: core 0.33 §11.1, #788),
   since zenoh ties no credential to a link, and under
   `allow` a subject `face:<face>` per face, selected by its link protocols
   alone and listed in the far principal's policy (link.v1 0.3, F-118, #769
@@ -671,7 +672,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.32 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.33 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

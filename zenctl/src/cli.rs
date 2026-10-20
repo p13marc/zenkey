@@ -1312,13 +1312,15 @@ pub(crate) enum AclCmd {
     /// allow rule, so each grant compiles into denies of its complement,
     /// enumerated from the contracts. Every rule names its grant and the fact
     /// it exists for. A principal the plan cannot place is refused, never
-    /// dropped: exit 1.
+    /// dropped: exit 1. A principal enrolled with both a user and a cn is
+    /// refused with no plan, since zenoh would match only a session
+    /// presenting both: exit 2 (§11.1, 0.33).
     ///
     /// The enrollment file (examples/zk2/acl/ holds two):
     ///
     ///   namespace = "fleet-a"                  # optional; default --namespace
     ///   [[principal]]
-    ///   user     = "thruster-l"                # a usrpwd user, or cn = "…"; never a zid
+    ///   user     = "thruster-l"                # a usrpwd user or cn = "…", never both; never a zid
     ///   services = ["vehicle-01/thruster-l"]   # and archives = […], tools = […]
     ///   [[service]]
     ///   address    = "vehicle-01/thruster-l"
@@ -1368,9 +1370,7 @@ pub(crate) enum AclCmd {
     /// GETs and calls cross by grant. Every other principal's subject is
     /// selected by the link protocols outside the face's (§2.4), and under
     /// allow the face has a subject of its own in the far principal's
-    /// policy. A subject names a user or a cn, never both (§2.4, 0.5): a
-    /// principal enrolled with both is refused. `zenctl check face` judges
-    /// a router's config against it.
+    /// policy. `zenctl check face` judges a router's config against it.
     // Verbatim, so the table and the enrollment example keep their lines:
     // clap would otherwise fold them into one.
     #[command(verbatim_doc_comment)]

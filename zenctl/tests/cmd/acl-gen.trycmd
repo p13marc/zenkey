@@ -492,6 +492,19 @@ REFUSED ghost: it runs service "h9/tc", which the enrollment does not declare (�
 
 ```
 
+A principal bound by a user name and a CN both is refused before any plan
+(§11.1, 0.33, #788): zenoh matches one value of each property a subject
+names, so its subject would match only a session presenting both, and under
+`allow` a session presenting one of them would be unrestricted. The input is
+refused, not the row. Exit 2, and no plan is printed.
+
+```console
+$ zenctl acl gen --enrollment tests/cmd/fixtures/acl/enrollment-both.toml --contracts ../examples/zk2/.history
+? 2
+Error: --enrollment: principal "tc-h1" is bound by a user name and a CN both: bind each principal by `user` or by `cn` (§11.1 (0.33, #788): a principal is bound to a user name or a certificate CN; zenoh matches one value of each property a subject names, so a subject naming both matches only a session presenting both, and on a router with a constrained face no check of its block can tell whose sessions those are (link.v1 §2.4, 0.5, F-121))
+
+```
+
 A constrained face comes from the router's face policy (`link.v1`, #769):
 a TOML file naming each face's far principal, its attachment and link
 protocols, what crosses it and at what rate. Each face's plan (§2.3) goes
