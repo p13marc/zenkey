@@ -16,6 +16,7 @@
 
 pub mod acl;
 pub mod admin;
+pub mod alarms;
 pub mod bench;
 pub mod cache;
 pub mod call;

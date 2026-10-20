@@ -530,12 +530,19 @@ pub fn alarms_report() -> AlarmsReport {
         service: service.into(),
         alert_key: key.into(),
     };
+    let absent = || {
+        answer(
+            AlarmAnswerToken::NotAsked,
+            "absent",
+            "its owner is absent: presence's word, and its alarms are last-known",
+        )
+    };
     let row = |system: &str, service: &str, key: &str| AlarmRow {
         key: format!("zk2/{system}/{service}/alarms.v1/state/alarms/{key}"),
         alarm: r(system, service, key),
-        firing: answer(AlarmAnswerToken::NotAsked, "absent", "s"),
-        stale: answer(AlarmAnswerToken::NotAsked, "absent", "s"),
-        rederives: answer(AlarmAnswerToken::NotAsked, "no_document", "s"),
+        firing: absent(),
+        stale: absent(),
+        rederives: absent(),
         severity: None,
         latest: None,
         problems: vec![],
@@ -661,11 +668,6 @@ pub fn alarms_report() -> AlarmsReport {
         )
     };
     let gone = AlarmRow {
-        firing: answer(
-            AlarmAnswerToken::NotAsked,
-            "absent",
-            "its owner is absent: presence's word, and its alarms are last-known",
-        ),
         last_known: Some(LastKnownAlarm {
             archive: "lab/archive".into(),
             document: Some(a),

@@ -193,7 +193,7 @@ One contract for the whole tool, written once in
 | **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; an act (`pub`, `replay`, `gen`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `compat`, `doctor`, `health`, `watchdog`) land **any** failure
+Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `watchdog`) land **any** failure
 before the question was put on 2, so a dead bus never reads as a pass or as a
 finding.
 
@@ -224,6 +224,10 @@ zenctl check conform host-a/tc tc.netif.v1 --namespace prod --skip budget-window
 zenctl health --namespace prod --clocks-synced
 zenctl health host-a/tc --namespace prod               # one service, its clock measured over a 31 s window
 
+# Is anything firing? alarms.v1, exit 1 on an alarm at or above the floor, 2 when an owner cannot be read whole.
+zenctl alarms --namespace prod --clocks-synced --at-least critical
+zenctl alarms 'zk2/lab/**' --namespace prod --clocks-synced --for 905   # an owner with nothing firing, known whole by a window
+
 # One expectation over a zk2 resource, for CI or a cron job.
 zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 60 --at-least 1
 zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 30 \
@@ -237,7 +241,8 @@ zenctl check schema tc.netif.v1 'bandwidth/{ns}/{iface}' --from @sample.json --c
 # Conditions, as ndjson transitions (ok / firing / unobservable); --count bounds a run.
 zenctl watchdog --namespace prod --rule 'silent-for prod/zk2/host-a/tc/tc.netif.v1/stream/** 120' \
                 --rule 'invalid-payload prod/zk2/**' --rule 'qos-mismatch prod/zk2/**' \
-                --rule 'instance-gone host-a/tc' --rule dropped --count 12
+                --rule 'instance-gone host-a/tc' --rule 'alert-firing zk2/** critical' \
+                --rule dropped --count 12
 zenctl doctor --transitions --every 60                 # check-id changes, not states
 
 # Where does resolution stop for a key? Each sample's rung, named.
@@ -271,7 +276,7 @@ reach further than one concrete thing:
 | `gen`, `serve` | an address whose instance token is already present: a mock owner beside it would be a second writer of its keys (P3) and a split-brain on every exclusive resource (spec §6) | `--i-know` |
 | `gen`, `serve` | a contract's required role left unbound (R1: the runtime would not start the service) | `--bind ROLE=SYSTEM/SERVICE` |
 | `record`, `snapshot` | an `-o` file that already exists | `--overwrite` |
-| `record --on`, `watchdog` | a rule that judges v1 rather than zk2 (`origin-down` is `instance-gone` now; `alert-firing` waits for the alert profile, #613) | not overridable |
+| `record --on`, `watchdog` | a rule that judges v1 rather than zk2 (`origin-down` is `instance-gone` now; `alert-firing` reads `alarms.v1` under a base-relative `zk2/…` selector, so v1's selector is refused) | not overridable |
 | `call`, `bench call` | a JSON Schema request its type refuses: every violation named, nothing sent (spec §7.3, #671) | not overridable — send what the type declares |
 | `bench call` | an operation not declared `idempotent` | `--i-know` |
 | `bench call` | a fan-out to an operation that does not declare `fanout = "allowed"` (O2) | not overridable |
@@ -384,7 +389,12 @@ exit 1 on a cause, 0 when it answers, 2 when a rung cannot be observed) ·
 unhealthy at its level, stale — never a level, never down — unobservable or
 not asked, with whether its status agrees with its checks, whether its clock
 is ahead, and the roll-up; exit 1 on a finding, 2 when one cannot be read) ·
-`zenctl watchdog --rule …` (conditions, as transitions).
+`zenctl alarms [SELECTOR]` (the `alarms.v1` alarms a selector reaches: each
+firing, resolved, stale or not asked, with whether its key re-derives and
+whether it is past its horizon; each owner known whole or not; and "is
+anything firing at or above `--at-least`?" — exit 1 on yes, 0 on no, 2 when
+an owner or an alarm cannot be read) · `zenctl watchdog --rule …`
+(conditions, as transitions).
 
 **Router configuration — generated, then checked.**
 `zenctl storage list` (the storages the routers' admin space reports) ·
@@ -416,7 +426,8 @@ show|refresh|clear` (the name cache behind completion) · `zenctl completions
 > over zk2 keys; FJ9 removed what was left of v1 — `why`, `check
 > cutover|retired|conform`, `config`, `blob`, `export` and `--registry` — and
 > FK1 (#702–#705) brought `why` and `check conform` back in zk2's terms, and
-> CC (#768) `config`, as `config.v1`'s.
+> CC (#768) `config`, as `config.v1`'s. #800's AC brought v1's
+> `alert-firing` rule back on `alarms.v1`, and added `alarms`.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -685,7 +696,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks twenty-three questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks twenty-five questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -717,6 +728,8 @@ none.
 | `config-overdue` | does an owner's view, by its own clock, stand more than 60 s past its pending change's deadline? (error) | config.v1 §2.11 |
 | `config-unpersisted` | does an owner run a value a restart would not keep? (`--clocks-synced`; info) | config.v1 §5 |
 | `config-desired` | does an owner report its desired document refused or failed? (`--clocks-synced`; warning) | config.v1 §2.18 |
+| `alarm-key` | does an owner hold an alarm on a key that does not re-derive from its document (error), or only through the sanitizing step (warning)? | alarms.v1 §2.2 |
+| `alarm-stale` | does a present owner hold a firing alarm unconfirmed beyond its 900 s horizon? Neither firing now nor resolved (`--clocks-synced`; warning) | alarms.v1 §2.7 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -762,6 +775,11 @@ The two that compare two readings, or an owner's stamp with its own
 deadline, need no clock of ours; the two that read a document's value as
 current take `--clocks-synced`, like the `health-*` checks, and are
 unjudged without it. A stale document answers nothing, never a no.
+
+The `alarm-*` checks (#800) read every owner's
+`alarms.v1/state/alarms/*` with the second presence read. `alarm-key` needs
+no clock: a key is its document's or not. `alarm-stale` ages a reply's
+stamp, so it takes `--clocks-synced`, and is unjudged without it.
 
 A `doctor health-*` rule of `watchdog` or `record --on`
 runs the same doctor, so it takes the same word: `watchdog --clocks-synced`,
@@ -814,6 +832,52 @@ service unobservable, none asked (an absent service is not asked), or a run
 that could not start. `check conform` asks the first two questions of a
 service implementing `health.v1` as its `health` and `health-aggregation`
 cases.
+
+## `alarms` — is anything firing?
+
+`alarms` (#800) reads `alarms.v1` (`spec/profiles/alarms/v1.md`) as its
+§2.14 and §2.15 reader does, over the alarms a selector reaches: a key
+expression, base-relative (`zk2/…`), read in the namespace — one alarm, one
+owner's (`zk2/lab/svc/**`), a system's, or every one (the default). An owner
+implements `alarms.v1` when its descriptor lists it, token or not. One GET of
+the owners' alarms (S4), merged by the owner's stamp with a subscription
+when `--for` listens; then every archive's last-known documents, shown and
+never current. Per alarm, §5's questions; over the scope, the one the run
+exits by:
+
+| question | yes | no | unestablished |
+|---|---|---|---|
+| is this alarm firing? | a fresh firing document of the present instance (the finding) | resolved, a delete, a key its owner's alarms, known whole, do not hold | `not_asked` (its owner absent, not listing alarms.v1, an archive alone, an earlier instance's put); `unobservable` (stale, a loss with no GET since, nothing read, undecodable, a reply's age with no trusted clock) |
+| is anything firing at or above `--at-least`? | an alarm firing at or above it, whatever else is known (the finding, exit 1) | every owner asked known whole, none of its alarms that may be at or above it unobservable (exit 0) | an owner or an alarm unobservable; no owner asked (exit 2) |
+| does its key re-derive from its document? | `strict`; `sanitized` names §2.3's SHOULD broken | `mismatch`: a phantom (the doctor's `alarm-key`) | a delete; undecodable |
+| is it past its horizon, its owner present? | stale: about the owner (the doctor's `alarm-stale`) | fresh | its owner absent, not firing, across a face |
+
+An owner is **known whole** by a complete GET it answered, or by a complete,
+empty one and a lossless window longer than 900 s, the owner present
+throughout: `--for 905` listens that long, then a lease and the timeout more
+while the owners are watched (core §2.7). The **owners in scope** are those
+presence finds, and those an archive's keys name — absent, so not asked, and
+never "nothing fires". A reply's stamp is aged against a trusted clock:
+`--clocks-synced` is the deployment's word, or the window measures one on a
+live put.
+
+```
+$ zenctl alarms --namespace acme --clocks-synced -c tcp/127.0.0.1:7447
+alarms under zk2/*/*/alarms.v1/state/alarms/* in namespace "acme" — anything at or above warning: yes (any_firing), 1 firing; owners 1 established, 0 unobservable, 1 not asked
+✓  lab/a    established (answered) — its owner answered a complete GET; 1 alarm(s); known by presence
+—  lab/svc  not asked (absent) — its owner is absent: presence's word, and its alarms are last-known; 0 alarm(s); known by an archive's keys
+✗  lab/a a659f813308ad1da    firing: yes (firing, warning) — its owner says it fires, and confirmed it within 900 s
+…
+—  lab/svc a659f813308ad1da  firing: not asked (absent) — its owner is absent: presence's word, and its alarms are last-known
+    last-known at lab/archive (confirmed by alignment): firing link_down "link to r2 down on eth0" — last-known, never current
+```
+
+The same question is the watchdog's `alert-firing <SEL> [info|warning|critical]`
+rule (and `record --on`'s), read by a subscription seeded by S4's GET and
+re-read each tick: firing on yes, ok on no, unobservable otherwise — never
+ok. `check conform` asks an owner's keys and documents as `alarm-key` and
+`alarm-document`; `get state` reads one alarm's raw value, and
+`--last-known` an archive's.
 
 ## `acl gen` — access control from the contracts
 

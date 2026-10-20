@@ -120,6 +120,10 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ?  config-unpersisted (config.v1 §5)     unobservable — 1 subject(s) unjudged
     ? unjudged lab/rf0: no fresh view: the status carries no class, no writable and no startup value — the view this reader's clock is not trusted to the HLC delta against the stamping clock (unobservable) — the doctor measures no clock: pass --clocks-synced on the deployment's word that this host's clock and the owners' agree (freshness.v1 §2.6)
 —  config-desired (config.v1 §2.18)      not asked
+✗  alarm-key (alarms.v1 §2.2)            finding — 1 subject(s)
+    ✗ error: zk2/lab/liar/alarms.v1/state/alarms/0000000000000001 — the key is not its document's: the document derives a659f813308ad1da — a phantom of another derivation, of a renamed rule, or an owner that hashed a host-scoped label (alarms.v1 §2.2, §2.9)
+?  alarm-stale (alarms.v1 §2.7)          unobservable — 1 subject(s) unjudged
+    ? unjudged zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da: this reader's clock is not trusted to the HLC delta against the stamping clock (clock_untrusted); a reply is aged only on the operator's word that the clocks agree (--clocks-synced, freshness.v1 §2.6)
 
 "#]]
     );
@@ -171,7 +175,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
         "{said}"
     );
     assert!(
-        said.contains("7 finding(s): 4 error(s), 2 warning(s), 1 info"),
+        said.contains("8 finding(s): 5 error(s), 2 warning(s), 1 info"),
         "{said}"
     );
     // The config.v1 checks' scope (#768, CC): what they read, and the cure
@@ -421,6 +425,71 @@ health in namespace "acme" — worst FAILED: 1 healthy, 1 unhealthy, 1 stale, 1 
     );
 }
 
+/// `zenctl alarms` (#800, AC): one row per owner and per alarm key, every
+/// answer of §5's questions spelled apart in every medium — a mark and a
+/// word in the table, the profile's own tokens in `owner` and `alarm` rows
+/// — an archive's document last-known and never current, and the scope's
+/// answer leading the envelope as the run's judgement.
+#[test]
+fn an_alarms_reading_spells_every_answer_apart_in_every_medium() {
+    let report = fx::alarms_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+alarms under zk2/lab/*/alarms.v1/state/alarms/* in namespace "acme" — anything at or above warning: yes (any_firing), 2 firing; owners 2 established, 1 unobservable, 1 not asked
+✓  lab/a     established (answered) — its owner answered a complete GET; 2 alarm(s); known by presence
+✓  lab/hung  established (answered) — its owner answered a complete GET; 1 alarm(s); known by presence
+?  lab/liar  unobservable (seed_incomplete) — the GET of its alarms ended at its timeout, or with an error; 1 alarm(s); known by presence
+—  lab/svc   not asked (absent) — its owner is absent: presence's word, and its alarms are last-known; 0 alarm(s); known by an archive's keys
+·  lab/a 19e64a7aaf8fc7b6     firing: no (resolved, info) — its owner put it resolved
+    latest resolved fan_failed "fan 2 back" — the last put heard, stamped 2026-10-20T08:00:00.000000000Z by a1
+    past its horizon: not asked (not_firing) — it is not firing
+    key re-derives: yes (strict) — the key is the document's, by the strict recipe
+✗  lab/a a659f813308ad1da     firing: yes (firing, warning) — its owner says it fires, and confirmed it within 900 s
+    latest firing link_down "link to r2 down on eth0" — its owner's reply, stamped 2026-10-20T08:00:00.000000000Z by a1
+    past its horizon: no (fresh) — its owner confirmed it within 900 s
+    key re-derives: yes (strict) — the key is the document's, by the strict recipe
+?  lab/hung 719d159937e54eb8  firing: unobservable (stale, critical) — its owner has not confirmed it within 900 s
+    latest firing disk_full "/var is 97% full" — its owner's reply, stamped 2026-10-20T08:00:00.000000000Z by c3
+    past its horizon: yes (stale) — its owner has not confirmed it within 900 s
+    key re-derives: yes (strict) — the key is the document's, by the strict recipe
+✗  lab/liar 0000000000000001  firing: yes (firing, warning) — its owner says it fires, and confirmed it within 900 s
+    latest firing link_down "link to r2 down on eth0" — the last put heard, stamped 2026-10-20T08:00:00.000000000Z by b2
+    past its horizon: no (fresh) — its owner confirmed it within 900 s
+    key re-derives: no (mismatch) — the key is not the one its document derives
+—  lab/svc a659f813308ad1da   firing: not asked (absent) — its owner is absent: presence's word, and its alarms are last-known
+    past its horizon: not asked (absent) — its owner is absent: presence's word, and its alarms are last-known
+    key re-derives: not asked (absent) — its owner is absent: presence's word, and its alarms are last-known
+    last-known at lab/archive (confirmed by alignment): firing link_down "link to r2 down on eth0" — last-known, never current
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "alarms");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert_eq!(envelope["any_firing"]["answer"], "yes");
+    assert!(envelope.get("alarms").is_none(), "alarms are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.owners.len() + report.alarms.len());
+    let firing: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r["row"] == "alarm")
+        .map(|r| r["firing"]["answer"].as_str().expect("an answer"))
+        .collect();
+    assert_eq!(
+        firing,
+        ["no", "not_asked", "unobservable", "yes"].into(),
+        "four answers, four spellings"
+    );
+    let said = notes(&report);
+    assert!(said.contains("never by interface token"), "{said}");
+    assert!(said.contains("neither firing now nor resolved"), "{said}");
+}
+
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -445,6 +514,7 @@ fn no_family_emits_trailing_whitespace() {
         table(&fx::why_report_silent()),
         table(&fx::conform_report()),
         table(&fx::health_report()),
+        table(&fx::alarms_report()),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -1826,6 +1896,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "acl-plan",
         "admin-graph",
         "admin-routers",
+        "alarms",
         "bench",
         "cache",
         "cache-action",

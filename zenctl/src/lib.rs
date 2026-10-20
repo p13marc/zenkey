@@ -157,6 +157,7 @@ pub async fn run() -> Result<()> {
         Command::Why(a) => cmd::why::run(a).await,
         Command::Doctor(a) => cmd::doctor::run(a).await,
         Command::Health(a) => cmd::health::run(a).await,
+        Command::Alarms(a) => cmd::alarms::run(a).await,
         Command::Watchdog(a) => cmd::watchdog::run(a).await,
 
         // ── Meta ─────────────────────────────────────────────────────────

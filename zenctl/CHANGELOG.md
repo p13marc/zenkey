@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `alarms.v1` in the tools: `alarms`, `alert-firing`, two doctor checks (#800, AC)
+
+`alarms.v1` (`spec/profiles/alarms/v1.md`) gives zk2 the alert plane v1's
+`alert-firing` read, so the rule comes back on it, and §5's questions become
+surfaces: a verdict verb at the root beside `health`, two doctor checks
+about an owner, and two `check conform` cases.
+
+| Before | Now | Notes |
+|---|---|---|
+| `watchdog --rule 'alert-firing …'`, `record --on 'alert-firing …'`: refused, exit 2, "the rule is dark (#613)" | `alert-firing <SEL> [info\|warning\|critical]`, floor `warning` by default, as v1 spelled it: firing while an alarm fires at or above the floor under the selector, ok only when every owner in scope is known whole and none does, unobservable otherwise — never ok | `<SEL>` is base-relative (`zk2/…`), read in `--namespace`, and must reach an alarm key: v1's `v1/*/state/*/alert/*` is refused. The rule's transition spells the floor (`alert-firing zk2/** warning`). Read by a subscription seeded by S4's GET, re-read each tick; a loss holds it unobservable until a GET heals it. `--clocks-synced` ages a reply's stamp |
+| — | `zenctl alarms [SELECTOR] [--at-least SEV] [--for SECS] [--clocks-synced]`: every alarm the selector reaches with "is it firing?", "is it past its horizon?", "does its key re-derive?", each owner known whole or not, and "is anything firing at or above `--at-least`?" | exit 1 an alarm firing at or above the floor, 0 none with every owner asked known whole, 2 no verdict. An owner whose GET drew nothing is known whole only by `--for` longer than 900 s; an absent owner an archive names is in scope, not asked, its alarms last-known |
+| `doctor`: twenty-three checks | twenty-five: `alarm-key` (error: a key that does not re-derive from its document; warning: one that does only through the sanitizing step) and `alarm-stale` (warning: a present owner's firing alarm unconfirmed beyond 900 s) | `alarm-stale` only with `--clocks-synced`, else unobservable; the scope gains no half: what the checks read is in their verdicts |
+| `check conform`: nineteen cases | twenty-one: `alarm-key` and `alarm-document` (§2.4's owner MUSTs), read when the descriptor lists `alarms.v1` | an empty GET is no verdict |
+
 ## Unreleased (`main`, zk2) — a universal claim reads the window whole (#801)
 
 `check expect --valid-payload` and `--qos declared` ended the window at the

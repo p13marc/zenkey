@@ -832,7 +832,7 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Twenty-three checks, each a question whose finding is the yes: split-brain
+    /// Twenty-five checks, each a question whose finding is the yes: split-brain
     /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
     /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
     /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
@@ -851,7 +851,11 @@ pub(crate) enum Command {
     /// change's deadline by more than 60 s), config-unpersisted (info: a
     /// value a restart would not keep) and config-desired (a desired
     /// document refused or failed), the last two read only with
-    /// --clocks-synced. The deployment is read through a
+    /// --clocks-synced; and alarms.v1's alarm-key (a key that does not
+    /// re-derive from its document; a warning when it does only through the
+    /// sanitizing step) and alarm-stale (a present owner's firing alarm
+    /// unconfirmed beyond 900 s, read only with --clocks-synced). The
+    /// deployment is read through a
     /// session in its namespace; the routers' admin space and the presence
     /// domain through one in no namespace. A check whose input could not be
     /// had is unobservable, with the reason — never clean — and so is every
@@ -882,6 +886,33 @@ pub(crate) enum Command {
     /// (unhealthy, stale, a break, a clock ahead), 2 no verdict: a service
     /// unobservable, none asked, or a run that could not start.
     Health(HealthArgs),
+    /// Read the alarms.v1 alarms a selector reaches: is anything firing?
+    ///
+    /// alarms.v1's reader (spec/profiles/alarms/v1.md §2.14, §2.15),
+    /// through a session in the deployment's namespace: presence and each
+    /// descriptor — an owner implements alarms.v1 when its descriptor lists
+    /// it, token or not (§2.13) — then S4's GET of the alarms the selector
+    /// reaches, merged by the owner's stamp with what a subscription heard
+    /// when --for listens; and every archive's last-known documents, which
+    /// are shown, never current, and name owners a complete presence read
+    /// no longer finds (absent, not asked). Per alarm, §5's questions: is it
+    /// firing (a fresh firing document of the present instance; resolved, a
+    /// delete, or a key its owner's alarms, known whole, do not hold, is
+    /// no; stale, a loss with no GET since, an earlier instance's put, are
+    /// never yes or no); is it past its horizon, its owner present; does its
+    /// key re-derive from its document. Per owner, whether its alarms are
+    /// known whole: a complete GET it answered, or a complete empty one and
+    /// a lossless window longer than 900 s, the owner present throughout.
+    /// Over the scope, "is anything firing at or above --at-least?": yes on
+    /// any alarm firing at or above it, whatever else is known; no only
+    /// when every owner asked is known whole and none of its alarms that may
+    /// be at or above it is unobservable. A reply's age needs a trusted
+    /// clock: --clocks-synced is the deployment's word, or the window
+    /// measures one on a live put. Exit 1 an alarm firing at or above the
+    /// floor (the finding), 0 none, every owner asked known whole, 2 no
+    /// verdict: an owner or an alarm unobservable, no owner asked, or a run
+    /// that could not start.
+    Alarms(AlarmsArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
     /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
@@ -2148,10 +2179,11 @@ pub(crate) struct RecordArgs {
     /// before it. Repeatable; the watchdog's vocabulary — `rate-above <SEL>
     /// <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
     /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `instance-gone
-    /// <SYSTEM/SERVICE>`, `doctor <CHECK-ID>`, `dropped` — the rules that
-    /// read the deployment reading it in the namespace, `instance-gone` per
-    /// address on the live presence projection, as the watchdog's and
-    /// zenwatch's (#747). The file carries a
+    /// <SYSTEM/SERVICE>`, `doctor <CHECK-ID>`, `alert-firing <SEL>
+    /// [info|warning|critical]`, `dropped` — the rules that read the
+    /// deployment reading it in the namespace, `instance-gone` per address
+    /// on the live presence projection, as the watchdog's and zenwatch's
+    /// (#747), `alert-firing` alarms.v1 as the watchdog's. The file carries a
     /// state preamble (the owners' own answer, spec §4.2 S4), the pre-roll,
     /// the trigger record where it fired, then `--post` seconds more.
     #[arg(long, value_name = "RULE", requires = "pre")]
@@ -2476,11 +2508,17 @@ pub(crate) struct WatchdogArgs {
     /// wildcard only an address seen held can go, and an exact address is
     /// watched from the start; the rule fires while any address is gone,
     /// zenwatch's rule notifying per address from the same reading; v1's
-    /// origin-down), `doctor <CHECK-ID>`, `dropped`. Selectors are wire
-    /// keys (this session is in no namespace); the rules that read the
-    /// deployment read it through a second session in its namespace
+    /// origin-down), `doctor <CHECK-ID>`, `alert-firing <SEL>
+    /// [info|warning|critical]` (alarms.v1 §2.15: an alarm firing at or
+    /// above the floor, default warning, under a base-relative selector
+    /// `zk2/…` that reaches alarm keys; ok only when every owner in scope is
+    /// known whole and none fires, unobservable otherwise, never ok),
+    /// `dropped`. Selectors are wire keys (this session is in no namespace),
+    /// but alert-firing's, which is read in the namespace; the rules that
+    /// read the deployment read it through a second session in its namespace
     /// (`--namespace`): the lens and the doctor once per tick, beside the
-    /// drain, presence as it moves.
+    /// drain, presence as it moves, the alarms by a subscription seeded by
+    /// S4's GET and re-read each tick.
     #[arg(long = "rule", value_name = "RULE", required = true)]
     pub(crate) rules: Vec<String>,
     /// Seconds between evaluations — the one period flag (#307).
@@ -2933,6 +2971,89 @@ pub(crate) struct HealthArgs {
     pub(crate) across_face: Option<FaceStatus>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl alarms`'s flags (#800, AC) — one struct the dispatcher hands
+/// over whole, destructured in the verb (#354).
+#[derive(clap::Args)]
+pub(crate) struct AlarmsArgs {
+    /// The alarms asked of: a key expression, base-relative (`zk2/…`), that
+    /// reaches alarms.v1 keys — one alarm
+    /// (`zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da`), one owner's
+    /// (`zk2/lab/svc/**`), a system's (`zk2/lab/**`). Omitted, every alarm
+    /// in the namespace.
+    #[arg(
+        value_name = "SELECTOR",
+        default_value = "zk2/*/*/alarms.v1/state/alarms/*"
+    )]
+    pub(crate) selector: String,
+    /// The floor of "is anything firing at or above it?" (alarms.v1 §2.15):
+    /// info, warning or critical, in that order.
+    #[arg(long, value_enum, value_name = "SEVERITY", default_value = "warning")]
+    pub(crate) at_least: SeverityArg,
+    /// This host's clock and the owners' agree within the HLC delta (500
+    /// ms), as the deployment keeps them: a reply's stamp is then aged
+    /// against this clock (freshness.v1 §2.6). Without it, only a clock the
+    /// window measured on a live put of it is trusted.
+    #[arg(long)]
+    pub(crate) clocks_synced: bool,
+    /// The reading's window, seconds: a subscription to the alarms and to
+    /// the owners' instance tokens, declared before the GET, then --lease
+    /// and --timeout more while the owners are watched (spec §2.7, 0.25).
+    /// An owner whose GET drew nothing is known whole only by a lossless
+    /// window longer than 900 s, the owner present throughout (§2.15).
+    /// Omitted, no subscription: the GET alone.
+    #[arg(long = "for", value_name = "SECS")]
+    pub(crate) for_secs: Option<f64>,
+    /// The deployment's link lease, seconds: a window's owner is watched for
+    /// this, and --timeout, past the window's end (spec §2.7, 0.25).
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
+    pub(crate) lease: f64,
+    /// The routers' wait_before_close, seconds: a window is lossless only if
+    /// this reader never stalled longer than it, nor than --lease less one
+    /// keep-alive (spec §2.7, 0.27).
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
+    pub(crate) wait_before_close: f64,
+    /// The one owner the selector names sits across a constrained face
+    /// (spec §8.5), where presence and descriptors do not cross: the
+    /// deployment's word that it implements alarms.v1. `granted` when the
+    /// face grants this reader a GET of them (link.v1 §2.9), `denied` when it
+    /// does not — then every question is unobservable, never "nothing fires"
+    /// (alarms.v1 §2.11).
+    #[arg(long, value_enum, value_name = "GRANT")]
+    pub(crate) across_face: Option<FaceGrant>,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// An alarm's severity (alarms.v1 §2.4), as a flag spells it.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum SeverityArg {
+    Info,
+    Warning,
+    Critical,
+}
+
+impl SeverityArg {
+    pub(crate) fn severity(self) -> zenkey_model::alarms::Severity {
+        match self {
+            SeverityArg::Info => zenkey_model::alarms::Severity::Info,
+            SeverityArg::Warning => zenkey_model::alarms::Severity::Warning,
+            SeverityArg::Critical => zenkey_model::alarms::Severity::Critical,
+        }
+    }
+}
+
+/// `alarms --across-face`: whether the face grants this reader a GET of the
+/// alarms.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum FaceGrant {
+    /// The face grants this reader a GET of the alarms (link.v1 §2.9).
+    Granted,
+    /// It does not: every question is unobservable across it.
+    Denied,
 }
 
 /// `health --across-face`: whether the face lets a status cross.
