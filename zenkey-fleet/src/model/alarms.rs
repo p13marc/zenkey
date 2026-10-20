@@ -556,11 +556,19 @@ impl AlarmBook {
     /// owner it finds in scope, by instance token and descriptor, never by
     /// interface token (§2.13). An owner known before that a complete read
     /// does not find is absent from now. An instance set that moved since
-    /// the book last saw it is a gap in that owner's presence.
+    /// the book last saw it is a gap in that owner's presence. `at` is the
+    /// instant the read was asked: a loss folded after it, as a drain beside
+    /// a refresh folds one, leaves the read not whole (§2.15 "Whole", text
+    /// 0.6), since the token a loss took may have appeared after the read
+    /// was answered. As a GET heals a loss only when asked after it
+    /// (`Break::heal`), a loss at the read's very instant counts against
+    /// it. The book keeps its latest loss, never cleared, so no loss between
+    /// the ask and the fold is forgotten.
     pub fn presence_read(&mut self, o: &Observed, at: Instant) -> Vec<AlarmTransition> {
         let first = self.presence.is_none();
+        let lost_since = self.loss.as_ref().is_some_and(|l| l.at >= at);
         self.presence = Some(Basis {
-            complete: o.complete,
+            complete: o.complete && !lost_since,
         });
         let mut held: BTreeMap<Addr, BTreeMap<InstanceId, Option<InstanceSeen>>> = BTreeMap::new();
         for k in &o.tokens {
@@ -1964,6 +1972,18 @@ mod tests {
             wall(),
         );
         assert_eq!(b.scope_read(), ScopeRead::NotWhole);
+        // That loss is at t0. A read asked before it and folded after it —
+        // a drain beside a refresh folds the loss first — is dated by its
+        // ask, and heals nothing of it (text 0.6); nor does one asked at its
+        // very instant, as a GET asked then would not; one asked after it
+        // does.
+        let asked = t0 - Duration::from_millis(1);
+        b.presence_read(&presence(true, Some(ZID)), asked);
+        assert_eq!(b.scope_read(), ScopeRead::NotWhole);
+        b.presence_read(&presence(true, Some(ZID)), t0);
+        assert_eq!(b.scope_read(), ScopeRead::NotWhole, "a tie is not after");
+        b.presence_read(&presence(true, Some(ZID)), t0 + Duration::from_millis(1));
+        assert_eq!(b.scope_read(), ScopeRead::Whole);
         let empty = book(true);
         assert_eq!(
             empty.any_firing(Severity::Info, t0, wall()).reason,

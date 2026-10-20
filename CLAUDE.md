@@ -83,8 +83,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (text 0.5, F-136), and a receive path that could not be watched is a
   loss at the refresh's start; the owners in scope with how each was known
   (F-131), and `scope_read` (the latest presence read complete and nothing
-  lost since; an archive plays no part, F-137); and the
-  `AlarmTransition`s a notifier routes. `judge::alarms` and
+  lost since it was asked, text 0.6; an archive plays no part, F-137); and
+  the `AlarmTransition`s a notifier routes. `judge::alarms` and
   `report::alarms` complete it. Every verdict is `zenkey_model::alarms`'s,
   never re-derived. The watchdog's `alert-firing` holds one feed per
   selector (`RuleAlarms`, `SweepOutcome::alarms`), and the doctor's
@@ -614,8 +614,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   holds nothing, and a loss before that GET is healed for it, F-136),
   `owner_set`, `any_firing` (over a `ScopeRead`: reads that found the scope
   not whole are `scope_incomplete`, never no nor not asked, F-137),
-  `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.5 (#800
-  AE), with core 0.34 publishing its vocabulary empty, and the contract moved under
+  `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.6 (#800
+  AE, AF), with core 0.34 publishing its vocabulary empty, and the contract moved under
   `spec/profiles/alarms/` with its fingerprint unchanged).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
