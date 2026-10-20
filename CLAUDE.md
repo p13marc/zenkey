@@ -643,6 +643,22 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   at `Owner::next_due`, and converges desired state; a restart is a new
   service from `Startup` (`new_epoch` is refused while it runs), and the
   owner example's `--config` drives it from stdin.
+  `alarms` (#800, AB) is `alarms.v1`'s owner on the embedded standard
+  bundle: `ServiceBuilder::alarms(Startup)` → `Alarms` (also
+  `Service::alarms()`). `raise(Condition)` makes §2.5's act from what is
+  held — raised, escalated, refreshed, or unchanged with nothing put —
+  keyed by `zenkey_model::alarms::derive`; `resolve` puts the resolved
+  document, then deletes at once; each firing alarm's `StateWriter`
+  confirms it every 427.5 s from the contract's ttl until
+  `set_confirming(key, false)`; a raise past the bound is the budget's
+  `Error::Budget`, nothing evicted. A restart adopts inside `alarms()`,
+  before anything is alive: from the application's `Record` (`FileRecord`,
+  a JSON file), else an explicit archive read, never an S4 GET of its own
+  keys, retiring, resolving and re-putting in §2.9's order. `new_epoch`
+  re-puts every alarm first, a clean close touches none, `alarms_with`
+  takes another revision (a test's short-ttl copy), and the owner
+  example's `--alarms` drives it from stdin (`alarm raise|resolve|confirm|
+  list|adoption`).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
