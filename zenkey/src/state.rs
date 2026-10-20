@@ -573,6 +573,35 @@ impl StateWriter {
         Ok(ts)
     }
 
+    /// Re-puts the member's current value now, unchanged, under a fresh
+    /// stamp: a confirmation out of turn (`alarms.v1` §2.9's re-mint). It
+    /// takes the value under the member's lock, so it never puts an older
+    /// value over a newer one. `None`, nothing put, when the writer keeps no
+    /// value: after a delete, or on a resource with no horizon above 0.
+    pub(crate) async fn reput(&self) -> Result<Option<Timestamp>> {
+        let mut held = self.member.held.lock().await;
+        let Some((bytes, attachment)) = held.value.clone() else {
+            return Ok(None);
+        };
+        let ts = self.minter.mint()?;
+        self.store.put(
+            &self.key,
+            bytes.clone(),
+            self.writer.encoding().clone(),
+            attachment.clone(),
+            ts,
+        );
+        held.at = tokio::time::Instant::now();
+        let sent = self
+            .writer
+            .put_stamped(bytes.into(), attachment.map(Into::into), ts)
+            .await;
+        drop(held);
+        self.member.wake.notify_one();
+        sent?;
+        Ok(Some(ts))
+    }
+
     /// Puts a value of a JSON Schema type, encoded as the contract says.
     pub async fn put_value<T: Serialize>(&self, value: &T) -> Result<Timestamp> {
         let bytes = self.writer.encode(value)?;

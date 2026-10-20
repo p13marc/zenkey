@@ -34,7 +34,7 @@
 //! | §2.8 no firing alarm resolved or deleted to make room | nothing is evicted |
 //! | §2.8 SHOULD report the refusal (`health.v1`) | the application's: the refusal names the resource, the bound and whose it is |
 //! | §2.9 adoption, before the first put, from the record, else an archive on its own side, never an S4 GET | [`ServiceBuilder::alarms`], from [`Startup::record`], else [`Startup::archive`] read explicitly ([`crate::archive::last_known_all`]) |
-//! | §2.9 its order: resolved, then undecodable or not re-deriving, deleted; a rule no longer evaluated, resolved; else adopted; deletes and resolves before adoptions, and past the bound none of the rest resolved or deleted (0.2) | [`Adoption`]: retirements, then resolves, then adoptions in key order; the rest past the bound in [`Adoption::over_bound`] |
+//! | §2.9 its order: resolved, then undecodable or not re-deriving, deleted; a rule no longer evaluated, resolved; else adopted; deletes and resolves before adoptions, and past the bound none of the rest resolved or deleted (0.2) | [`Adoption`]: retirements, then resolves, then adoptions in key order; the rest past the bound in [`Adoption::over_bound`], a step that fails in [`Adoption::failed`], both kept in the record |
 //! | §2.9 SHOULD keep in the record the resolved document until its delete (0.2) | [`Record::save`] after every put and every delete, the resolved document's before its delete |
 //! | §2.9 each alarm kept put again from the new instance before a GET is answered with it, and before the instance token | adoption puts each one, unchanged, in [`ServiceBuilder::alarms`], before `start()` declares anything alive; [`crate::Service::new_epoch`] re-puts every alarm before its new descriptor and tokens |
 //! | §2.9 no source: nothing adopted | [`Source::Nothing`]; the instance is new, as every service's is (core §1.5) |
@@ -55,7 +55,16 @@
 //! neither resolved, which would say their condition cleared, nor deleted,
 //! which §2.5 forbids of a firing alarm: a reader that held one reads it as
 //! the previous instance's last word (§2.14), stale within 900 s. Each is
-//! named in [`Adoption::over_bound`].
+//! named in [`Adoption::over_bound`], and kept in the record for a later
+//! start.
+//!
+//! **A step that fails** on the bus, a delete or a put of the adoption,
+//! fails for its document only: [`ServiceBuilder::alarms`] still returns,
+//! the document is named in [`Adoption::failed`] and kept in the record as
+//! far as its step went (its resolved document once that is put), it is
+//! not held, and every other document takes its step. The record is saved
+//! once the adoption ends, so the next start redoes nothing done, and
+//! settles what is left. An act on such a key supersedes what was found.
 //!
 //! **The contract is the published bundle**, revision 1.0
 //! ([`FINGERPRINT`]), embedded byte for byte from
@@ -280,18 +289,20 @@ impl FileRecord {
     }
 
     /// The record's file as `held` makes it.
-    #[must_use]
-    pub fn render(held: &[Kept]) -> serde_json::Value {
-        let alarms: serde_json::Map<String, serde_json::Value> = held
-            .iter()
-            .map(|k| {
-                let doc = serde_json::from_slice(&k.payload).unwrap_or_else(|_| {
-                    serde_json::Value::String(String::from_utf8_lossy(&k.payload).into_owned())
-                });
-                (k.alert_key.clone(), doc)
-            })
-            .collect();
-        serde_json::json!({"profile": model::PROFILE, "alarms": alarms})
+    ///
+    /// # Errors
+    ///
+    /// A payload that is not JSON, named by its key: the file is not
+    /// written, so a document never turns undecodable there, to be deleted
+    /// at the next start.
+    pub fn render(held: &[Kept]) -> std::result::Result<serde_json::Value, String> {
+        let mut alarms = serde_json::Map::new();
+        for k in held {
+            let doc = serde_json::from_slice(&k.payload)
+                .map_err(|e| format!("the document of {} is not JSON: {e}", k.alert_key))?;
+            alarms.insert(k.alert_key.clone(), doc);
+        }
+        Ok(serde_json::json!({"profile": model::PROFILE, "alarms": alarms}))
     }
 
     /// What a record's file holds, by key: each document re-encoded as
@@ -299,7 +310,8 @@ impl FileRecord {
     ///
     /// # Errors
     ///
-    /// The file is not JSON, or its `alarms` is not an object.
+    /// The file is not JSON, its `alarms` is not an object, or a document
+    /// does not encode again.
     pub fn parse(text: &str) -> std::result::Result<Vec<Kept>, String> {
         let v: serde_json::Value =
             serde_json::from_str(text).map_err(|e| format!("not JSON: {e}"))?;
@@ -307,13 +319,16 @@ impl FileRecord {
             .get("alarms")
             .and_then(serde_json::Value::as_object)
             .ok_or("no \"alarms\" object")?;
-        Ok(alarms
+        alarms
             .iter()
-            .map(|(k, doc)| Kept {
-                alert_key: k.clone(),
-                payload: serde_json::to_vec(doc).unwrap_or_default(),
+            .map(|(k, doc)| {
+                Ok(Kept {
+                    alert_key: k.clone(),
+                    payload: serde_json::to_vec(doc)
+                        .map_err(|e| format!("the document of {k}: {e}"))?,
+                })
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -332,7 +347,8 @@ impl Record for FileRecord {
 
     fn save<'a>(&'a self, held: &'a [Kept]) -> BoxFuture<'a, std::result::Result<(), String>> {
         Box::pin(async move {
-            let text = serde_json::to_vec_pretty(&Self::render(held)).map_err(|e| e.to_string())?;
+            let text =
+                serde_json::to_vec_pretty(&Self::render(held)?).map_err(|e| e.to_string())?;
             let mut tmp = self.path.clone().into_os_string();
             tmp.push(".tmp");
             let tmp = PathBuf::from(tmp);
@@ -365,6 +381,10 @@ pub struct Startup {
     /// The bound its descriptor lowers the contract's 256 to (core §3.3),
     /// set before adoption.
     pub cardinality: Option<u64>,
+    /// A test's injected failures: the bus operations, counted from 1, that
+    /// fail as zenoh would.
+    #[cfg(test)]
+    pub(crate) fail_ops: std::collections::BTreeSet<usize>,
 }
 
 impl std::fmt::Debug for Startup {
@@ -475,8 +495,13 @@ pub struct Adoption {
     /// Step 4: adopted, `timestamp` kept, put again.
     pub adopted: Vec<String>,
     /// Firing and evaluated, past the bound: neither adopted, resolved nor
-    /// deleted (the module doc).
+    /// deleted (the module doc), and kept in the record for a later start.
     pub over_bound: Vec<String>,
+    /// The documents whose step failed on the bus, and why. Each is kept in
+    /// the record as far as its step went, for the next start (its resolved
+    /// document once that is put), and none is held; every other document
+    /// took its step.
+    pub failed: Vec<(String, String)>,
 }
 
 /// A service's `alarms.v1` (§2.5–§2.9), from [`ServiceBuilder::alarms`],
@@ -504,6 +529,10 @@ struct Inner {
     record: Option<Arc<dyn Record>>,
     held: tokio::sync::Mutex<Held>,
     adoption: Mutex<Adoption>,
+    /// A test's injected failures: the operations counted so far, and those
+    /// that fail.
+    #[cfg(test)]
+    faults: Mutex<(usize, std::collections::BTreeSet<usize>)>,
 }
 
 #[derive(Default)]
@@ -512,6 +541,10 @@ struct Held {
     /// The last transition's `timestamp` of keys no longer held, at most
     /// [`PAST`] of them.
     past: BTreeMap<String, u64>,
+    /// Documents a restart found and could not settle, or adopt within the
+    /// bound: not held, kept in the record for a later start, until an act
+    /// on their key supersedes them.
+    unsettled: BTreeMap<String, Vec<u8>>,
 }
 
 impl Held {
@@ -528,12 +561,14 @@ impl Held {
         }
     }
 
+    /// What the record holds: the alarms held, and the documents unsettled.
     fn kept(&self) -> Vec<Kept> {
-        self.alarms
-            .iter()
-            .map(|(k, e)| Kept {
+        let mut all: BTreeMap<&String, &Vec<u8>> = self.unsettled.iter().collect();
+        all.extend(self.alarms.iter().map(|(k, e)| (k, &e.payload)));
+        all.into_iter()
+            .map(|(k, p)| Kept {
                 alert_key: k.clone(),
-                payload: e.payload.clone(),
+                payload: p.clone(),
             })
             .collect()
     }
@@ -543,7 +578,7 @@ impl Held {
 struct Entry {
     doc: Alarm,
     payload: Vec<u8>,
-    writer: StateWriter,
+    writer: Arc<StateWriter>,
 }
 
 /// A stamp's time in milliseconds since the Unix epoch, below 2^53 (§2.4).
@@ -587,6 +622,15 @@ impl Alarms {
                 "alarms.v1 {ALARMS:?} is a JSON state in every revision of the major (§3)"
             )));
         }
+        if zenkey_model::freshness::horizon_of(&resource)
+            .refresh_bound()
+            .is_none_or(|b| b.is_zero())
+        {
+            return Err(Error::Contract(format!(
+                "alarms.v1 {ALARMS:?} declares no freshness.ttl_s above 0, so no alarm of it \
+                 would be confirmed (§2.7)"
+            )));
+        }
         let iface = imp.iface().clone();
         b.implement(imp)?;
         b.expose(&iface, ALARMS)?;
@@ -609,6 +653,8 @@ impl Alarms {
                 record: startup.record.clone(),
                 held: tokio::sync::Mutex::new(Held::default()),
                 adoption: Mutex::new(Adoption::default()),
+                #[cfg(test)]
+                faults: Mutex::new((0, startup.fail_ops.clone())),
             }),
         };
         a.adopt(&startup).await?;
@@ -667,7 +713,10 @@ impl Alarms {
     ///
     /// Each is an evaluation, so the alarm's confirmation is turned back on
     /// (§2.7). A raise past the bound is refused, [`Error::Budget`],
-    /// nothing put and nothing evicted (§2.8).
+    /// nothing put and nothing evicted (§2.8). On an alarm held resolved,
+    /// its delete having failed ([`Alarms::resolve`]), it is a re-raise: a
+    /// new `timestamp`, confirmed again, and no delete owed any more, since
+    /// the key holds a firing alarm again.
     pub async fn raise(&self, c: Condition) -> Result<Done> {
         let key = c.alert_key();
         let mut st = self.inner.held.lock().await;
@@ -703,7 +752,7 @@ impl Alarms {
         let fresh = if st.alarms.contains_key(&key) {
             None
         } else {
-            Some(self.writer(&key).await?)
+            Some(Arc::new(self.writer(&key).await?))
         };
         let payload = match &fresh {
             Some(w) => w.writer().encode(&doc)?,
@@ -713,6 +762,7 @@ impl Alarms {
             Some(writer) => {
                 writer.put(payload.clone()).await?;
                 st.past.remove(&key);
+                st.unsettled.remove(&key);
                 st.alarms.insert(
                     key.clone(),
                     Entry {
@@ -728,6 +778,7 @@ impl Alarms {
                 e.writer.set_refresh(true);
                 e.doc = doc.clone();
                 e.payload = payload;
+                st.unsettled.remove(&key);
             }
         }
         self.save(&st).await;
@@ -742,8 +793,8 @@ impl Alarms {
     /// owner will evaluate it no more while it runs (§2.5): its resolved
     /// document is put, with a new `timestamp`, then its key is deleted at
     /// once (core S3). `None` when no alarm is held there. A delete that
-    /// fails leaves the alarm held resolved, unconfirmed, until a resolve
-    /// deletes it.
+    /// fails leaves the alarm held resolved, unconfirmed and saved so in the
+    /// record, until a resolve deletes it, or a raise re-raises it.
     pub async fn resolve(&self, alert_key: &str) -> Result<Option<Done>> {
         let mut st = self.inner.held.lock().await;
         let now = self.now_ms();
@@ -758,6 +809,7 @@ impl Alarms {
                 ..e.doc.clone()
             };
             let payload = e.writer.writer().encode(&doc)?;
+            self.fault()?;
             e.writer.put(payload.clone()).await?;
             // §2.7: a resolved alarm is never confirmed.
             e.writer.set_refresh(false);
@@ -766,6 +818,7 @@ impl Alarms {
             self.save(&st).await;
         }
         let e = st.alarms.get(alert_key).expect("held");
+        self.fault()?;
         e.writer.delete().await?;
         let e = st.alarms.remove(alert_key).expect("held");
         st.forget(alert_key, e.doc.timestamp);
@@ -781,7 +834,9 @@ impl Alarms {
     /// (§2.7): an owner that has stopped evaluating its condition, its
     /// evaluator stuck or its source gone, lets it go stale rather than
     /// confirm what it no longer sees. Turned back on, it is re-put at once
-    /// if its interval has run out. `false` when no alarm is held there.
+    /// if its interval has run out. `false`, nothing changed, when no firing
+    /// alarm is held there: none at all, or one held resolved, which is
+    /// never confirmed.
     pub async fn set_confirming(&self, alert_key: &str, on: bool) -> bool {
         let st = self.inner.held.lock().await;
         match st.alarms.get(alert_key) {
@@ -789,8 +844,7 @@ impl Alarms {
                 e.writer.set_refresh(on);
                 true
             }
-            Some(_) => !on,
-            None => false,
+            _ => false,
         }
     }
 
@@ -824,10 +878,39 @@ impl Alarms {
 
     /// §2.9, a re-mint: every alarm held put again, unchanged, under a
     /// fresh stamp, before the new instance's descriptor and tokens.
+    ///
+    /// The writers are taken under the lock, and each re-puts its own
+    /// current value under its member's lock ([`StateWriter`]), so a raise
+    /// or a resolve meanwhile is neither blocked nor overwritten: a resolved
+    /// alarm deleted since is not put again. A failure stops the loop and is
+    /// returned, and [`crate::Service::new_epoch`] then mints nothing: the
+    /// alarms already re-put carry a fresh stamp of the same session, a
+    /// confirmation out of turn, and a retry puts every one again.
     pub(crate) async fn reput_all(&self) -> Result<()> {
-        let st = self.inner.held.lock().await;
-        for e in st.alarms.values() {
-            e.writer.put(e.payload.clone()).await?;
+        let writers: Vec<Arc<StateWriter>> = {
+            let st = self.inner.held.lock().await;
+            st.alarms.values().map(|e| Arc::clone(&e.writer)).collect()
+        };
+        for w in writers {
+            w.reput().await?;
+        }
+        Ok(())
+    }
+
+    /// A test's injected failure of the next bus operation; nothing outside
+    /// tests.
+    #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
+    fn fault(&self) -> Result<()> {
+        #[cfg(test)]
+        {
+            let mut f = self.inner.faults.lock().expect("not poisoned");
+            f.0 += 1;
+            if f.1.contains(&f.0) {
+                return Err(Error::Zenoh(format!(
+                    "injected failure of operation {}",
+                    f.0
+                )));
+            }
         }
         Ok(())
     }
@@ -932,7 +1015,9 @@ impl Alarms {
     }
 
     /// §2.9: each document found, by its order of rules, before any other
-    /// put of this instance.
+    /// put of this instance. A step that fails on the bus fails for its
+    /// document only: it is named in [`Adoption::failed`], kept in the record
+    /// as far as its step went, and every other document takes its step.
     async fn adopt(&self, startup: &Startup) -> Result<()> {
         let (source, found) = self.load(startup).await;
         let mut seen = std::collections::BTreeSet::new();
@@ -944,18 +1029,18 @@ impl Alarms {
                 continue;
             }
             match model::decode(&k.payload) {
-                Err(_) => retire.push((k.alert_key, Retired::Undecodable, None)),
+                Err(_) => retire.push((k, Retired::Undecodable, None)),
                 Ok(d) if d.state == State::Resolved => {
                     let t = d.timestamp;
-                    retire.push((k.alert_key, Retired::Resolved, Some(t)));
+                    retire.push((k, Retired::Resolved, Some(t)));
                 }
                 Ok(d) if d.alert_key() != k.alert_key => {
-                    retire.push((k.alert_key, Retired::Phantom, None));
+                    retire.push((k, Retired::Phantom, None));
                 }
                 Ok(d) if !startup.evaluates.as_ref().is_none_or(|f| f(&d)) => {
-                    resolve.push((k.alert_key, d));
+                    resolve.push((k, d));
                 }
-                Ok(d) => adopt.push((k.alert_key, d, k.payload)),
+                Ok(d) => adopt.push((k, d)),
             }
         }
         let mut report = Adoption {
@@ -965,52 +1050,81 @@ impl Alarms {
         let mut st = self.inner.held.lock().await;
         // Steps 1 and 2: deleted, which reads as resolved to whoever held
         // one firing (§2.6).
-        for (key, why, t) in retire {
-            self.writer(&key).await?.delete().await?;
-            if let Some(t) = t {
-                st.forget(&key, t);
+        for (k, why, t) in retire {
+            let done = async {
+                let w = self.writer(&k.alert_key).await?;
+                self.fault()?;
+                w.delete().await
+            };
+            match done.await {
+                Ok(_) => {
+                    if let Some(t) = t {
+                        st.forget(&k.alert_key, t);
+                    }
+                    report.retired.push((k.alert_key, why));
+                }
+                Err(e) => unsettled(&mut st, &mut report, k, &e),
             }
-            report.retired.push((key, why));
         }
         // Step 3: resolved, as §2.5 says: put resolved, then deleted.
-        for (key, doc) in resolve {
-            let w = self.writer(&key).await?;
+        for (k, doc) in resolve {
             let resolved = Alarm {
                 timestamp: new_after(self.now_ms(), Some(&doc.timestamp)),
                 observed_at_ms: None,
                 state: State::Resolved,
                 ..doc
             };
-            w.put(w.writer().encode(&resolved)?).await?;
-            w.set_refresh(false);
-            w.delete().await?;
-            st.forget(&key, resolved.timestamp);
-            report.resolved.push(key);
+            let mut kept = k.clone();
+            let done = async {
+                let w = self.writer(&k.alert_key).await?;
+                let payload = w.writer().encode(&resolved)?;
+                self.fault()?;
+                w.put(payload.clone()).await?;
+                // The resolved document is the record's from here on.
+                kept.payload = payload;
+                w.set_refresh(false);
+                self.fault()?;
+                w.delete().await
+            };
+            match done.await {
+                Ok(_) => {
+                    st.forget(&k.alert_key, resolved.timestamp);
+                    report.resolved.push(k.alert_key);
+                }
+                Err(e) => unsettled(&mut st, &mut report, kept, &e),
+            }
         }
         // Step 4: adopted, its timestamp kept, put again unchanged.
-        for (key, doc, payload) in adopt {
-            let writer = self.writer(&key).await?;
-            match writer.put(payload.clone()).await {
-                Ok(_) => {
+        for (k, doc) in adopt {
+            let put = async {
+                let writer = self.writer(&k.alert_key).await?;
+                self.fault()?;
+                writer.put(k.payload.clone()).await?;
+                Ok::<_, Error>(writer)
+            };
+            match put.await {
+                Ok(writer) => {
                     st.alarms.insert(
-                        key.clone(),
+                        k.alert_key.clone(),
                         Entry {
                             doc,
-                            payload,
-                            writer,
+                            payload: k.payload,
+                            writer: Arc::new(writer),
                         },
                     );
-                    report.adopted.push(key);
+                    report.adopted.push(k.alert_key);
                 }
                 Err(Error::Budget(r)) => {
                     tracing::warn!(
-                        alert_key = %key,
+                        alert_key = %k.alert_key,
                         "alarms.v1: a firing alarm of the previous instance is past the bound, \
-                         so it is neither adopted, resolved nor deleted (§2.8, §2.9): {r}"
+                         so it is neither adopted, resolved nor deleted, and stays in the record \
+                         (§2.8, §2.9): {r}"
                     );
-                    report.over_bound.push(key);
+                    report.over_bound.push(k.alert_key.clone());
+                    st.unsettled.insert(k.alert_key, k.payload);
                 }
-                Err(e) => return Err(e),
+                Err(e) => unsettled(&mut st, &mut report, k, &e),
             }
         }
         if source != Source::Nothing {
@@ -1019,6 +1133,7 @@ impl Alarms {
                 adopted = report.adopted.len(),
                 retired = report.retired.len(),
                 resolved = report.resolved.len(),
+                failed = report.failed.len(),
                 "alarms.v1: the previous instance's alarms, taken over (§2.9)"
             );
             self.save(&st).await;
@@ -1027,6 +1142,18 @@ impl Alarms {
         *self.inner.adoption.lock().expect("not poisoned") = report;
         Ok(())
     }
+}
+
+/// A document whose step failed on the bus: kept for the record, as far as
+/// its step went, and reported (§2.9).
+fn unsettled(st: &mut Held, report: &mut Adoption, k: Kept, e: &Error) {
+    tracing::warn!(
+        alert_key = %k.alert_key,
+        "alarms.v1: a document of the previous instance could not take its step, so it stays \
+         in the record for the next start (§2.9): {e}"
+    );
+    report.failed.push((k.alert_key.clone(), e.to_string()));
+    st.unsettled.insert(k.alert_key, k.payload);
 }
 
 /// A new `timestamp` (§2.5): the clock's `now`, or the previous plus 1
@@ -1048,7 +1175,8 @@ fn warn_problems(key: &str, doc: &Alarm) {
 #[cfg(test)]
 mod tests {
     use super::{
-        BUNDLE, Condition, FINGERPRINT, FileRecord, Kept, Severity, implementation, new_after,
+        BUNDLE, Condition, FINGERPRINT, FileRecord, Kept, Severity, State, implementation, model,
+        new_after,
     };
 
     /// The embedded bundle is the published revision, and its resource
@@ -1092,7 +1220,7 @@ mod tests {
             alert_key: "a659f813308ad1da".into(),
             payload: br#"{"rule":"link_down","severity":"warning","state":"firing","summary":"s","timestamp":1}"#.to_vec(),
         }];
-        let text = FileRecord::render(&held).to_string();
+        let text = FileRecord::render(&held).unwrap().to_string();
         let back = FileRecord::parse(&text).unwrap();
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].alert_key, held[0].alert_key);
@@ -1100,6 +1228,14 @@ mod tests {
         let b: serde_json::Value = serde_json::from_slice(&held[0].payload).unwrap();
         assert_eq!(a, b);
         assert!(FileRecord::parse("{}").is_err());
+        let corrupt = [Kept {
+            alert_key: "k".into(),
+            payload: b"not json".to_vec(),
+        }];
+        assert!(
+            FileRecord::render(&corrupt).is_err(),
+            "a corrupt document is never written as another"
+        );
     }
 
     /// An application shares the handle across tasks, and spawns its calls.
@@ -1116,5 +1252,213 @@ mod tests {
                 let _ = a.held().await;
             });
         };
+    }
+
+    /// A [`super::Record`] in memory, whose saves a test reads.
+    #[derive(Default)]
+    struct Memory {
+        found: std::sync::Mutex<Option<Vec<Kept>>>,
+        saves: std::sync::Mutex<Vec<Vec<Kept>>>,
+    }
+
+    impl Memory {
+        fn with(found: Vec<Kept>) -> std::sync::Arc<Self> {
+            std::sync::Arc::new(Self {
+                found: std::sync::Mutex::new(Some(found)),
+                saves: std::sync::Mutex::default(),
+            })
+        }
+
+        /// The last save, by key, each document as JSON.
+        fn last(&self) -> std::collections::BTreeMap<String, serde_json::Value> {
+            self.saves
+                .lock()
+                .unwrap()
+                .last()
+                .expect("a save")
+                .iter()
+                .map(|k| {
+                    (
+                        k.alert_key.clone(),
+                        serde_json::from_slice(&k.payload).unwrap(),
+                    )
+                })
+                .collect()
+        }
+    }
+
+    impl super::Record for Memory {
+        fn load(
+            &self,
+        ) -> crate::call::BoxFuture<'_, std::result::Result<Option<Vec<Kept>>, String>> {
+            let found = self.found.lock().unwrap().clone();
+            Box::pin(async move { Ok(found) })
+        }
+
+        fn save<'a>(
+            &'a self,
+            held: &'a [Kept],
+        ) -> crate::call::BoxFuture<'a, std::result::Result<(), String>> {
+            self.saves.lock().unwrap().push(held.to_vec());
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    /// A session of its own: puts reach no one, and succeed.
+    async fn alone() -> zenoh::Session {
+        let mut c = zenoh::Config::default();
+        c.insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        c.insert_json5("listen/endpoints", "[]").unwrap();
+        zenoh::open(c).await.unwrap()
+    }
+
+    fn kept(alert_key: &str, doc: &serde_json::Value) -> Kept {
+        Kept {
+            alert_key: alert_key.to_owned(),
+            payload: serde_json::to_vec(doc).unwrap(),
+        }
+    }
+
+    fn firing(rule: &str, labels: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"timestamp": 1_760_950_000_000_u64, "rule": rule, "severity": "warning",
+            "state": "firing", "summary": "s", "labels": labels})
+    }
+
+    async fn builder(
+        s: &zenoh::Session,
+        startup: super::Startup,
+    ) -> (crate::ServiceBuilder, super::Alarms) {
+        let mut b =
+            crate::ServiceBuilder::new(s, crate::ServiceConfig::new("lab/svc".parse().unwrap()));
+        let a = b.alarms(startup).await.unwrap();
+        (b, a)
+    }
+
+    /// §2.9: a step that fails on the bus fails for its document only. It is
+    /// reported, kept in the record as far as its step went, and not held;
+    /// every other document takes its step; and the next start settles what
+    /// is left, redoing nothing done.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_failed_adoption_step_loses_nothing() {
+        let s = alone().await;
+        let a_doc = firing(
+            "link_down",
+            serde_json::json!({"peer": "r2", "port": "eth0"}),
+        );
+        let b_doc = firing("disk_full", serde_json::json!({"mount": "/var"}));
+        let x_doc = firing("fan_gone", serde_json::json!({}));
+        let mut r_doc = firing("fan_failed", serde_json::json!({}));
+        r_doc["state"] = "resolved".into();
+        let key = |d: &serde_json::Value| model::Alarm::from_json(d).unwrap().alert_key();
+        let (a, b, x, r) = (key(&a_doc), key(&b_doc), key(&x_doc), key(&r_doc));
+        let p = "0000000000000001".to_owned();
+        let record = Memory::with(vec![
+            kept(&r, &r_doc),
+            kept(&p, &a_doc),
+            kept(&x, &x_doc),
+            kept(&a, &a_doc),
+            kept(&b, &b_doc),
+        ]);
+        // Operations: 1 R's delete, 2 P's delete, 3 X's resolved put, 4 X's
+        // delete, 5 A's put, 6 B's put. 2, 4 and 6 fail.
+        let mut startup = super::Startup::default()
+            .with_record(record.clone())
+            .evaluating(["link_down", "disk_full"]);
+        startup.fail_ops = [2, 4, 6].into();
+        let (_b1, alarms) = builder(&s, startup).await;
+        let report = alarms.adoption();
+        assert_eq!(report.retired, [(r.clone(), super::Retired::Resolved)]);
+        assert!(report.resolved.is_empty());
+        assert_eq!(report.adopted, std::slice::from_ref(&a));
+        let failed: Vec<&str> = report.failed.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(failed, [p.as_str(), x.as_str(), b.as_str()]);
+        assert!(
+            report.failed[0]
+                .1
+                .contains("injected failure of operation 2")
+        );
+        assert_eq!(alarms.held().await.keys().collect::<Vec<_>>(), [&a]);
+        let saved = record.last();
+        assert_eq!(saved.len(), 4, "A held, P, X and B kept: {saved:?}");
+        assert_eq!(saved[&a], a_doc);
+        assert_eq!(saved[&b], b_doc, "as found");
+        assert_eq!(saved[&p], a_doc, "as found");
+        assert_eq!(saved[&x]["state"], "resolved", "as far as its step went");
+        assert!(!saved.contains_key(&r), "R's delete went out");
+
+        // B raised by this instance supersedes what was found.
+        alarms
+            .raise(
+                super::Condition::new("disk_full", Severity::Critical, "full")
+                    .label("mount", "/var"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(record.last()[&b]["severity"], "critical");
+
+        // The next start, on what was saved, with nothing failing.
+        let next = Memory::with(record.saves.lock().unwrap().last().unwrap().clone());
+        let startup = super::Startup::default()
+            .with_record(next.clone())
+            .evaluating(["link_down", "disk_full"]);
+        let (_b2, again) = builder(&s, startup).await;
+        let report = again.adoption();
+        let mut retired = report.retired.clone();
+        retired.sort_by(|l, r| l.0.cmp(&r.0));
+        let mut want = vec![
+            (p.clone(), super::Retired::Phantom),
+            (x.clone(), super::Retired::Resolved),
+        ];
+        want.sort_by(|l, r| l.0.cmp(&r.0));
+        assert_eq!(
+            retired, want,
+            "X resolved already: deleted, not resolved again"
+        );
+        let mut adopted = report.adopted.clone();
+        adopted.sort();
+        let mut want = vec![a.clone(), b.clone()];
+        want.sort();
+        assert_eq!(adopted, want);
+        assert!(report.failed.is_empty() && report.resolved.is_empty());
+        assert_eq!(next.last().len(), 2);
+    }
+
+    /// §2.5: a resolve whose delete fails leaves the alarm held resolved,
+    /// unconfirmed and recorded so; a raise then re-raises it, confirmed
+    /// again, with no delete owed; and a resolve then deletes it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_failed_delete_leaves_the_alarm_resolved_until_a_raise_or_a_resolve() {
+        let s = alone().await;
+        let record = std::sync::Arc::new(Memory::default());
+        // No source: adoption makes no operation. 1 the resolved put, 2 its
+        // delete, which fails.
+        let mut startup = super::Startup::default().with_record(record.clone());
+        startup.fail_ops = [2].into();
+        let (_b, alarms) = builder(&s, startup).await;
+        let a = || {
+            super::Condition::new("link_down", Severity::Warning, "down")
+                .label("peer", "r2")
+                .label("port", "eth0")
+        };
+        let raised = alarms.raise(a()).await.unwrap();
+        let key = raised.alert_key.clone();
+        assert!(alarms.resolve(&key).await.is_err());
+        let held = alarms.get(&key).await.expect("still held");
+        assert_eq!(held.state, State::Resolved);
+        assert_eq!(alarms.is_confirming(&key).await, Some(false));
+        assert!(!alarms.set_confirming(&key, true).await, "never confirmed");
+        assert_eq!(record.last()[&key]["state"], "resolved");
+
+        let again = alarms.raise(a()).await.unwrap();
+        assert_eq!(again.act, super::Act::Raised);
+        assert!(again.document.timestamp > held.timestamp);
+        assert_eq!(alarms.is_confirming(&key).await, Some(true));
+        assert_eq!(record.last()[&key]["state"], "firing");
+
+        let done = alarms.resolve(&key).await.unwrap().expect("held");
+        assert_eq!(done.act, super::Act::Resolved);
+        assert!(alarms.held().await.is_empty());
+        assert!(record.last().is_empty());
     }
 }
