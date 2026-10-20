@@ -561,7 +561,7 @@ impl AlarmBook {
     /// a refresh folds one, leaves the read not whole (§2.15 "Whole", text
     /// 0.6), since the token a loss took may have appeared after the read
     /// was answered. As a GET heals a loss only when asked after it
-    /// ([`Break::heal`]), a loss at the read's very instant counts against
+    /// (`Break::heal`), a loss at the read's very instant counts against
     /// it. The book keeps its latest loss, never cleared, so no loss between
     /// the ask and the fold is forgotten.
     pub fn presence_read(&mut self, o: &Observed, at: Instant) -> Vec<AlarmTransition> {
