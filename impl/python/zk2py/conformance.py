@@ -1058,10 +1058,11 @@ def _reporter_transitions(root: Path) -> list[tuple[str, Any, Any]]:
                 side = alarms.YES if doc.firing else alarms.NO
             now = (side, sev if side == alarms.YES else None)
             if reported is None:
-                must = side == alarms.YES  # first reading: a firing alarm SHOULD be reported
+                must = side == alarms.YES  # a key's first answer: yes is reported, no and neither not
             else:
                 must = now != reported
-            reported = now
+            if must:
+                reported = now  # against the last report (0.6)
             want.append([a.answer] if must else [])
         out.append((f"alarms.v1 0.4 §2.16 over transitions.json #{i}: {c['note']}", got, want))
     return out
@@ -1134,6 +1135,48 @@ def _reporter_loss() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _presence_dating_cases() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.6 §2.15 "Whole": a presence read asked at 10 s; a loss at
+    or after its ask counts against it, a loss before it does not."""
+    from . import alarms
+
+    label = "alarms.v1 0.6 §2.15, a presence read dated by its ask"
+    return [(f"{label}: {note}", alarms.presence_read_whole(complete, 10, losses), want) for note, complete, losses,
+            want in [("a loss at 9 s, before the ask: whole", True, [9], True),
+                     ("a loss at 10 s, the ask's instant: not whole", True, [10], False),
+                     ("a loss at 12 s, its replies perhaps already in: not whole", True, [12], False),
+                     ("no loss, but the read possibly incomplete: not whole", False, [], False)]]
+
+
+def _reporter_first_answers() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.6 §2.16, "A key's first answer … moves from no report":
+    yes is reported; no is not; neither of the key's own MAY be (zk2py does
+    not); neither of the reader's own sight is not. A key with no report
+    keeps none until it reads yes, so a later neither of the reader's sight
+    is no change either."""
+    from . import alarms
+
+    yes, no = alarms.Answer(alarms.YES, "firing"), alarms.Answer(alarms.NO, "resolved")
+    stale, untrusted = alarms.Answer(alarms.UNOBSERVABLE, "stale"), alarms.Answer(alarms.UNOBSERVABLE,
+                                                                                  "clock_untrusted")
+
+    def run(*answers: Any) -> list[list[tuple[Any, ...]]]:
+        rep = alarms.ChangeReporter()
+        return [[(x.answer, x.reason) for x in rep.update({"k": (a, "warning", None)})] for a in answers]
+
+    label = "alarms.v1 0.6 §2.16, a key's first answer"
+    return [
+        (f"{label}: no, not reported; then a clock not yet trusted (the reader's sight), still nothing",
+         run(no, untrusted), [[], []]),
+        (f"{label}: stale (the key's own), not reported (the MAY's other branch); then yes, reported",
+         run(stale, yes), [[], [("yes", "firing")]]),
+        (f"{label}: the reader's sight first, then yes: reported once it is yes",
+         run(untrusted, yes), [[], [("yes", "firing")]]),
+        (f"{label}: yes, reported; then the reader's sight: a move from the last report, reported",
+         run(yes, untrusted), [[("yes", "firing")], [("unobservable", "clock_untrusted")]]),
+    ]
+
+
 def _left_out_cases() -> list[tuple[str, Any, Any]]:
     """alarms.v1 0.5 §2.14 step 5, "left the key out", as zk2py's reader
     decides it (alarms.is_left_out) from what its GET answered."""
@@ -1164,7 +1207,7 @@ def family_readings(root: Path) -> list[Result]:
 
     out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
-        + _reporter_loss() + _left_out_cases()
+        + _reporter_loss() + _reporter_first_answers() + _presence_dating_cases() + _left_out_cases()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
