@@ -614,8 +614,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   holds nothing, and a loss before that GET is healed for it, F-136),
   `owner_set`, `any_firing` (over a `ScopeRead`: reads that found the scope
   not whole are `scope_incomplete`, never no nor not asked, F-137),
-  `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.6 (#800
-  AE, AF), with core 0.34 publishing its vocabulary empty, and the contract moved under
+  `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.7 (#800
+  AE–AG), with core 0.34 publishing its vocabulary empty, and the contract moved under
   `spec/profiles/alarms/` with its fingerprint unchanged).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI

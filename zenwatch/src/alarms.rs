@@ -28,8 +28,9 @@
 //! reason is this reader's own sight ([`NOT_YET`]: a loss no GET has healed
 //! yet, §2.14 step 4; a clock not yet trusted, `freshness.v1` §2.6; a
 //! subscription not yet listened 900 s; presence or a descriptor not read
-//! whole) leaves the key at its last word, and time or the next read
-//! settles it. A loss is the reader's, not the keys': the rule's
+//! whole; nothing read yet, here or across a face — alarms.v1 §2.16's
+//! closed list, text 0.7) leaves the key at its last word, and time or the
+//! next read settles it. A loss is the reader's, not the keys': the rule's
 //! **observer** (`<rule_id>:observer`) says it once — unobservable on a
 //! loss (deliveries refused, the feed's stall), on a presence read or a GET
 //! that ran to its timeout, on a reader that stopped — and
@@ -89,15 +90,17 @@ const ABSENT: &str = "absent";
 
 /// The reasons that say only what this reader has not established yet, a
 /// loss included: a key's answer with one of them leaves the key at its
-/// last word (see the module doc). Every other answer — yes, no, and an
-/// unobservable or not asked that says something of the alarm or its
-/// owner (`stale`, `absent`, `previous_instance`, `undecodable`, …) — is
-/// the key's.
-pub const NOT_YET: [&str; 8] = [
+/// last word (see the module doc). alarms.v1 §2.16 closes the list (text
+/// 0.7, F-140): every other answer — yes, no, and an unobservable or not
+/// asked that says something of the alarm, its owner or the deployment
+/// (`stale`, `absent`, `previous_instance`, `undecodable`, `face_closed`,
+/// `no_stamp`, `clock_disagrees`, `not_a_horizon`, …) — is the key's.
+pub const NOT_YET: [&str; 9] = [
     "incomplete",
     "presence_incomplete",
     "no_descriptor",
     "not_read",
+    "nothing_crossed",
     "clock_untrusted",
     "listened_too_short",
     "near_horizon",
@@ -1549,6 +1552,10 @@ mod tests {
             (No, "not_held"),
             (Unobservable, "stale"),
             (Unobservable, "undecodable"),
+            (Unobservable, "face_closed"),
+            (Unobservable, "no_stamp"),
+            (Unobservable, "clock_disagrees"),
+            (Unobservable, "not_a_horizon"),
             (NotAsked, "absent"),
             (NotAsked, "previous_instance"),
             (NotAsked, "not_listed"),
