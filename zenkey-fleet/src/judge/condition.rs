@@ -824,7 +824,7 @@ pub fn judge_alert_firing(
             Eval {
                 state: CondState::Firing,
                 evidence: format!(
-                    "{} alarm(s) firing at or above {at_least} under {selector}{first}                      ({counts}; alarms.v1 §2.15)",
+                    "{} alarm(s) firing at or above {at_least} under {selector}{first} ({counts}; alarms.v1 §2.15)",
                     a.firing
                 ),
             }
@@ -832,13 +832,13 @@ pub fn judge_alert_firing(
         Answer::No => Eval {
             state: CondState::Ok,
             evidence: format!(
-                "no alarm firing at or above {at_least} under {selector}: every owner asked                  is known whole ({counts}; alarms.v1 §2.15)"
+                "no alarm firing at or above {at_least} under {selector}: every owner asked is known whole ({counts}; alarms.v1 §2.15)"
             ),
         },
         Answer::Unobservable => Eval {
             state: CondState::Unobservable,
             evidence: format!(
-                "whether an alarm fires at or above {at_least} under {selector} is unobservable:                  {} ({}; {counts}) — never ok",
+                "whether an alarm fires at or above {at_least} under {selector} is unobservable: {} ({}; {counts}) — never ok",
                 a.reason.says(),
                 a.reason.as_str()
             ),
