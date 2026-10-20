@@ -219,9 +219,10 @@ impl Render for AlarmsReport {
                     notes.push(
                         Note::coverage(
                             "the presence read ran to its timeout, so it is possibly \
-                             incomplete: an owner unseen is unobservable, never absent",
+                             incomplete: an owner unseen is unobservable, never absent, and \
+                             one it missed may fire, so nothing here reads \"nothing fires\"",
                         )
-                        .cite("spec §8.1"),
+                        .cite("spec §8.1, alarms.v1 §2.15"),
                     );
                 }
             }

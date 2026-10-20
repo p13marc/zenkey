@@ -488,6 +488,17 @@ alarms under zk2/lab/*/alarms.v1/state/alarms/* in namespace "acme" — anything
     let said = notes(&report);
     assert!(said.contains("never by interface token"), "{said}");
     assert!(said.contains("neither firing now nor resolved"), "{said}");
+
+    // A presence read that ran to its timeout (alarms.v1 text 0.5, F-137):
+    // the note says an owner it missed may fire, and the scope's answer,
+    // the fleet's, is no "nothing fires".
+    let mut partial = fx::alarms_report();
+    partial.presence.as_mut().expect("presence read").complete = false;
+    partial.any_firing.answer = zenkey_fleet::report::AlarmAnswerToken::Unobservable;
+    partial.any_firing.reason = "scope_incomplete".into();
+    let said = notes(&partial);
+    assert!(said.contains("one it missed may fire"), "{said}");
+    assert!(said.contains("(scope_incomplete)"), "{said}");
 }
 
 /// Every family renders a table that is byte-stable at a fixed width, with no
