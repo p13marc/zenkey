@@ -19,7 +19,7 @@
 //! AlarmRef::key / from_key  ─▶ zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>  §2.12
 //! firing(reading)           ─▶ §5 "is this alarm firing?": yes │ no │ unobservable │ not_asked, + reason
 //! owner_set(p, seed, win)   ─▶ established │ unobservable │ not_asked: an owner's alarms known whole  §2.15
-//! any_firing(s, owners)     ─▶ §5 "is anything firing at or above s?"
+//! any_firing(s, owners, sc) ─▶ §5 "is anything firing at or above s?", the scope's reads whole or not
 //! rederives(key, payload)   ─▶ §5 "does this key re-derive from its document?"
 //! stale_firing(reading)     ─▶ §5 "is a firing alarm past its horizon, its owner present?"
 //! ```
@@ -832,6 +832,23 @@ pub struct Reading<'a> {
     /// Whether the owner's alarms are established in this reading
     /// ([`owner_set`], §2.15): a key they do not hold then reads not firing.
     pub held_whole: bool,
+    /// Whether the reader's latest complete GET of the owner's alarms, its
+    /// seed (§2.15), left this key out: it answered the key with neither a
+    /// value nor a `reply_del`, and nothing of the key arrived after that GET
+    /// was asked. With [`Reading::held_whole`], that GET is the one that
+    /// established the owner's alarms, and two things follow (§2.14):
+    /// - the sample the reader holds is none (step 5, text 0.3): the owner
+    ///   answers every live key (core S2), so the key's delete went past the
+    ///   tombstone window unheard;
+    /// - a loss before that GET is healed for the key (step 4, text 0.5,
+    ///   F-136): an owner's alarms are established only over a window that
+    ///   lost nothing, which after a loss runs from the first complete GET
+    ///   that followed it, so the GET was asked after the loss, and the
+    ///   window has heard everything of the key since.
+    ///
+    /// Without `held_whole` it plays no part: an empty reply set is no
+    /// verdict (core O5).
+    pub left_out: bool,
 }
 
 /// A question of §5, answered in the three states: a pole of each
@@ -937,6 +954,10 @@ pub enum Reason {
     NoneFiring,
     /// Anything firing, unobservable: an owner's alarms are.
     OwnerUnobservable,
+    /// Anything firing, unobservable: the reads that found the owners in
+    /// scope were not whole, so an owner they missed may fire (text 0.5,
+    /// F-137).
+    ScopeIncomplete,
     /// Anything firing, unobservable: an alarm at or above the severity,
     /// or of a severity not known, is.
     AlarmUnobservable,
@@ -990,6 +1011,7 @@ impl Reason {
             Self::AnyFiring => "any_firing",
             Self::NoneFiring => "none_firing",
             Self::OwnerUnobservable => "owner_unobservable",
+            Self::ScopeIncomplete => "scope_incomplete",
             Self::AlarmUnobservable => "alarm_unobservable",
             Self::NoOwner => "no_owner",
             Self::Strict => "strict",
@@ -1042,6 +1064,10 @@ impl Reason {
             Self::AnyFiring => "an alarm at or above the severity fires",
             Self::NoneFiring => "no alarm at or above the severity fires",
             Self::OwnerUnobservable => "an owner's alarms are not known whole",
+            Self::ScopeIncomplete => {
+                "the reads that found the owners in scope were not whole, so an owner they \
+                 missed may fire"
+            }
             Self::AlarmUnobservable => {
                 "an alarm that may be at or above the severity is unobservable"
             }
@@ -1092,9 +1118,17 @@ fn premises(p: Presence) -> Option<Judged> {
     }
 }
 
-/// A subscription lost deliveries, and no GET answered since (§2.14).
-fn lost(observations: &[Observation]) -> bool {
-    let lossy = observations.iter().any(|o| {
+/// Whether the GET that established the owner's alarms left the key out
+/// ([`Reading::left_out`]): §2.14 steps 4 and 5.
+fn left_out(r: &Reading<'_>) -> bool {
+    r.held_whole && r.left_out
+}
+
+/// A subscription lost deliveries, and since then no GET answered the key
+/// nor did the GET that established its owner's alarms leave it out
+/// (§2.14 step 4, text 0.5, F-136).
+fn lost(r: &Reading<'_>) -> bool {
+    let lossy = r.observations.iter().any(|o| {
         matches!(
             o,
             Observation::Subscribed {
@@ -1103,10 +1137,11 @@ fn lost(observations: &[Observation]) -> bool {
             }
         )
     });
-    let answered = observations
+    let answered = r
+        .observations
         .iter()
         .any(|o| matches!(o, Observation::Got { reply: Some(_), .. }));
-    lossy && !answered
+    lossy && !answered && !left_out(r)
 }
 
 /// What the reading of a key established before its freshness was asked,
@@ -1127,10 +1162,13 @@ fn read(r: &Reading<'_>, not_firing: impl Fn(Reason) -> Judged) -> Read {
     if f.verdict == freshness::Verdict::NotAsked && f.reason == freshness::Reason::LastKnown {
         return Read::Done(Judged::new(NotAsked, Reason::LastKnown));
     }
-    if lost(r.observations) {
+    if lost(r) {
         return Read::Done(Judged::new(Unobservable, Reason::Incomplete));
     }
-    match r.latest {
+    // The sample a key left out by the establishing GET holds is none
+    // (step 5, text 0.3).
+    let latest = if left_out(r) { None } else { r.latest };
+    match latest {
         None if r.held_whole => Read::Done(not_firing(Reason::NotHeld)),
         None => Read::Done(Judged::new(
             Unobservable,
@@ -1338,13 +1376,28 @@ pub struct AnyFiring {
     pub not_asked: usize,
 }
 
+/// Whether the reads that found a scope's owners were whole (§2.15, text
+/// 0.5, F-137): what a reader knows of the owners its selector selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScopeRead {
+    /// Its latest presence read ran to its final reply, and, when it
+    /// follows instance tokens since, it lost none of their moves; or,
+    /// across a constrained face, the deployment's word names the owner
+    /// (§2.11).
+    Whole,
+    /// Its latest presence read possibly incomplete or refused, none made,
+    /// or a loss since: an owner it missed is counted nowhere, and may fire.
+    NotWhole,
+}
+
 /// §5's second question, "is anything firing at or above `at_least` under
-/// this selector?", over the owners in scope (§2.15): yes on any alarm
-/// firing at or above it, whatever else is known; no only when every owner
-/// asked is established and none of its alarms that may be at or above it
-/// is unobservable. Yes is the finding.
+/// this selector?", over the owners in scope (§2.15), by its order: yes on
+/// any alarm firing at or above it, whatever else is known; then an owner
+/// unobservable; then the scope's reads not whole (text 0.5, F-137); then
+/// an established owner's alarm that may be at or above it unobservable;
+/// then no owner established, not asked; else no. Yes is the finding.
 #[must_use]
-pub fn any_firing(at_least: Severity, owners: &[OwnerAlarms<'_>]) -> AnyFiring {
+pub fn any_firing(at_least: Severity, owners: &[OwnerAlarms<'_>], scope: ScopeRead) -> AnyFiring {
     let mut out = AnyFiring {
         answer: Answer::No,
         reason: Reason::NoneFiring,
@@ -1377,6 +1430,8 @@ pub fn any_firing(at_least: Severity, owners: &[OwnerAlarms<'_>]) -> AnyFiring {
         (Answer::Yes, Reason::AnyFiring)
     } else if out.unobservable > 0 {
         (Answer::Unobservable, Reason::OwnerUnobservable)
+    } else if scope == ScopeRead::NotWhole {
+        (Answer::Unobservable, Reason::ScopeIncomplete)
     } else if alarm_doubt {
         (Answer::Unobservable, Reason::AlarmUnobservable)
     } else if out.established == 0 {
@@ -1661,6 +1716,7 @@ mod tests {
             latest: Some(latest),
             previous_instance: false,
             held_whole: false,
+            left_out: false,
         };
         assert_eq!(firing(&r(&fresh, Latest::Firing)).answer, Answer::Yes);
         assert_eq!(firing(&r(&stale, Latest::Firing)).reason, Reason::Stale);
@@ -1692,22 +1748,84 @@ mod tests {
             Judged::new(Answer::Yes, Reason::Firing),
             Some(Severity::Warning),
         )];
-        let a = any_firing(
-            Severity::Critical,
-            &[OwnerAlarms {
-                set: est,
-                alarms: &warn,
-            }],
-        );
+        let one = [OwnerAlarms {
+            set: est,
+            alarms: &warn,
+        }];
+        let a = any_firing(Severity::Critical, &one, ScopeRead::Whole);
         assert_eq!((a.answer, a.firing), (Answer::No, 0));
-        let a = any_firing(
-            Severity::Warning,
-            &[OwnerAlarms {
-                set: est,
-                alarms: &warn,
-            }],
-        );
+        let a = any_firing(Severity::Warning, &one, ScopeRead::Whole);
         assert_eq!((a.answer, a.firing), (Answer::Yes, 1));
-        assert_eq!(any_firing(Severity::Info, &[]).answer, Answer::NotAsked);
+        assert_eq!(
+            any_firing(Severity::Info, &[], ScopeRead::Whole).answer,
+            Answer::NotAsked
+        );
+        // A scope whose reads were not whole is never no, nor not asked
+        // (text 0.5, F-137): an owner they missed may fire.
+        let a = any_firing(Severity::Critical, &one, ScopeRead::NotWhole);
+        assert_eq!(
+            (a.answer, a.reason),
+            (Answer::Unobservable, Reason::ScopeIncomplete)
+        );
+        assert_eq!(
+            any_firing(Severity::Info, &[], ScopeRead::NotWhole).reason,
+            Reason::ScopeIncomplete
+        );
+        assert_eq!(
+            any_firing(Severity::Warning, &one, ScopeRead::NotWhole).answer,
+            Answer::Yes,
+            "a yes whatever else is unknown"
+        );
+    }
+
+    /// §2.14 steps 4 and 5 (text 0.3, 0.5, F-136): the GET that established
+    /// the owner's alarms leaves a key out, so the sample held is none, and
+    /// a loss before it is healed for the key; without the establishing,
+    /// neither.
+    #[test]
+    fn a_key_the_establishing_get_left_out_is_not_held() {
+        let lossy = [
+            Observation::Subscribed {
+                last: Some(freshness::Last::Put(Duration::from_secs(600))),
+                listened: Duration::from_secs(2000),
+                complete: false,
+            },
+            Observation::Got {
+                reply: None,
+                clock: freshness::ClockTrust::Trusted {
+                    delta: freshness::DEFAULT_DELTA,
+                },
+            },
+        ];
+        let r = Reading {
+            presence: Presence::Present(Listing::Listed { token: true }),
+            observations: &lossy,
+            latest: Some(Latest::Firing),
+            previous_instance: false,
+            held_whole: true,
+            left_out: true,
+        };
+        let pair = |j: Judged| (j.answer, j.reason);
+        assert_eq!(pair(firing(&r)), (Answer::No, Reason::NotHeld));
+        assert_eq!(
+            pair(stale_firing(&r)),
+            (Answer::NotAsked, Reason::NotFiring)
+        );
+        let not_established = Reading {
+            held_whole: false,
+            ..r
+        };
+        assert_eq!(
+            pair(firing(&not_established)),
+            (Answer::Unobservable, Reason::Incomplete)
+        );
+        let answered_or_newer = Reading {
+            left_out: false,
+            ..r
+        };
+        assert_eq!(
+            pair(firing(&answered_or_newer)),
+            (Answer::Unobservable, Reason::Incomplete)
+        );
     }
 }

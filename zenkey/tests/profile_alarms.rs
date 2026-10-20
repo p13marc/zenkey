@@ -322,6 +322,7 @@ fn judge_g(a: &StateAnswer, alert_key: &str, presence: Presence, zid: &str) -> (
         latest: Some(latest_of(c)),
         previous_instance: c.clock().is_some_and(|id| id != zid),
         held_whole: false,
+        left_out: false,
     };
     (am::firing(&r), am::stale_firing(&r))
 }
@@ -353,6 +354,7 @@ fn judge_s(
         latest: Some(latest),
         previous_instance: !last.delete && last.stamp_id() != zid,
         held_whole: false,
+        left_out: false,
     };
     (am::firing(&r), am::stale_firing(&r))
 }

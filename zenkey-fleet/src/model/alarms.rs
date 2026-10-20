@@ -1125,7 +1125,7 @@ impl AlarmBook {
             .iter()
             .map(|(set, alarms)| OwnerAlarms { set: *set, alarms })
             .collect();
-        let mut out = am::any_firing(at_least, &owners);
+        let mut out = am::any_firing(at_least, &owners, am::ScopeRead::Whole);
         if self.refused > 0 && out.answer == Answer::No {
             out.answer = Answer::Unobservable;
             out.reason = Reason::AlarmUnobservable;
@@ -1163,6 +1163,7 @@ impl KeyReading {
             latest: self.latest,
             previous_instance: self.previous_instance,
             held_whole: self.held_whole,
+            left_out: false,
         }
     }
 

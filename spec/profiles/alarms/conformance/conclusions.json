@@ -18,6 +18,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a firing alarm a subscriber heard 10 s ago",
       "observations": [
         {
@@ -52,6 +53,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "its owner in the tokenless set: the descriptor lists alarms.v1, the token plays no part (§2.13)",
       "observations": [
         {
@@ -86,6 +88,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a GET reply stamped 10 s ago, the clock trusted",
       "observations": [
         {
@@ -122,6 +125,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "not confirmed within 900 s, its owner present: stale, never firing now nor resolved (§2.7)",
       "observations": [
         {
@@ -156,6 +160,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a GET reply aged beyond the horizon",
       "observations": [
         {
@@ -192,6 +197,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "the most recent confirmation counts (freshness.v1 §2.7)",
       "observations": [
         {
@@ -237,6 +243,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "within the delta of the horizon (freshness.v1 §2.6)",
       "observations": [
         {
@@ -273,6 +280,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a GET reader without a trusted clock",
       "observations": [
         {
@@ -308,6 +316,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a reply without a stamp breaks core S2",
       "observations": [
         {
@@ -344,6 +353,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a stamp ahead of the reader's clock beyond the delta",
       "observations": [
         {
@@ -380,6 +390,7 @@
       "face": null,
       "held_whole": true,
       "latest": "firing",
+      "left_out": false,
       "note": "the owner's alarms established, and this key among them",
       "observations": [
         {
@@ -414,6 +425,7 @@
       "face": null,
       "held_whole": false,
       "latest": null,
+      "left_out": false,
       "note": "nothing of the key read: silence is no verdict (core O5)",
       "observations": [
         {
@@ -447,6 +459,7 @@
       "face": null,
       "held_whole": true,
       "latest": null,
+      "left_out": true,
       "note": "the owner's alarms established, and this key not among them (§2.15)",
       "observations": [
         {
@@ -480,6 +493,7 @@
       "face": null,
       "held_whole": false,
       "latest": null,
+      "left_out": false,
       "note": "no observation at all",
       "observations": [],
       "presence": "present",
@@ -504,6 +518,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a firing document held from before, and nothing observed in this reading",
       "observations": [],
       "presence": "present",
@@ -528,6 +543,7 @@
       "face": null,
       "held_whole": false,
       "latest": "resolved",
+      "left_out": false,
       "note": "a resolved document",
       "observations": [
         {
@@ -562,6 +578,7 @@
       "face": null,
       "held_whole": false,
       "latest": "resolved",
+      "left_out": false,
       "note": "a resolved document, whatever its age: resolved is the owner's last word",
       "observations": [
         {
@@ -596,6 +613,7 @@
       "face": null,
       "held_whole": false,
       "latest": "deleted",
+      "left_out": false,
       "note": "a delete reads as resolved (§2.6)",
       "observations": [
         {
@@ -630,6 +648,7 @@
       "face": null,
       "held_whole": false,
       "latest": "deleted",
+      "left_out": false,
       "note": "a reply_del reads as resolved",
       "observations": [
         {
@@ -665,6 +684,7 @@
       "face": null,
       "held_whole": false,
       "latest": "undecodable",
+      "left_out": false,
       "note": "the latest put does not read: never at a guessed state (§2.4)",
       "observations": [
         {
@@ -699,6 +719,7 @@
       "face": null,
       "held_whole": false,
       "latest": "undecodable",
+      "left_out": false,
       "note": "an unreadable put, not confirmed: stale for the first question, and not known to be firing for the last",
       "observations": [
         {
@@ -730,6 +751,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "absent, an archive's document firing: last-known, never firing now (core S6)",
       "observations": [
         {
@@ -755,6 +777,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "absent, though a subscriber still holds a fresh put: presence first",
       "observations": [
         {
@@ -786,6 +809,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "its token not seen in a read possibly incomplete",
       "observations": [
         {
@@ -819,6 +843,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "its descriptor does not list alarms.v1",
       "observations": [
         {
@@ -850,6 +875,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "its descriptor could not be read",
       "observations": [
         {
@@ -884,6 +910,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "only an archive read, the owner present: last-known (core S5, S6)",
       "observations": [
         {
@@ -912,6 +939,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "an archive and a subscription: the subscription answers",
       "observations": [
         {
@@ -949,6 +977,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "the subscription lost deliveries and no GET answered since: a resolve may have been lost",
       "observations": [
         {
@@ -983,6 +1012,7 @@
       "face": null,
       "held_whole": false,
       "latest": "deleted",
+      "left_out": false,
       "note": "a loss after a delete: a re-raise may have been lost",
       "observations": [
         {
@@ -1017,6 +1047,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a loss, then the reader's GET answered the key (core §4.2)",
       "observations": [
         {
@@ -1062,6 +1093,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a loss, and a GET that drew nothing for the key",
       "observations": [
         {
@@ -1104,6 +1136,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "the latest put stamped by an earlier instance of the owner: that instance's last word (§2.14)",
       "observations": [
         {
@@ -1138,6 +1171,7 @@
       "face": null,
       "held_whole": false,
       "latest": "resolved",
+      "left_out": false,
       "note": "an earlier instance's resolved document is still resolved",
       "observations": [
         {
@@ -1171,6 +1205,7 @@
       },
       "held_whole": false,
       "latest": null,
+      "left_out": false,
       "note": "across a face closed to the alarms: never 'nothing fires' (§2.11)",
       "observations": [],
       "presence": "across_face",
@@ -1194,6 +1229,7 @@
       },
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "across a face, a GET by grant, the clock by the deployment's word: firing; whether its owner is present does not cross",
       "observations": [
         {
@@ -1229,6 +1265,7 @@
       },
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "across a face, stale: the link may be out, so no finding about the owner",
       "observations": [
         {
@@ -1264,6 +1301,7 @@
       },
       "held_whole": false,
       "latest": null,
+      "left_out": false,
       "note": "across a face, a GET that drew nothing",
       "observations": [
         {
@@ -1296,6 +1334,7 @@
       },
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "across a face, a subscription's silence: no push crosses at 1.0 (§2.11), so it is no staleness",
       "observations": [
         {
@@ -1336,6 +1375,7 @@
       },
       "held_whole": true,
       "latest": null,
+      "left_out": true,
       "note": "across a face, the owner's alarms established by a GET it answered, and this key not among them",
       "observations": [
         {
@@ -1377,7 +1417,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "critical",
@@ -1405,7 +1446,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "critical",
@@ -1439,7 +1481,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "warning",
@@ -1473,7 +1516,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "info",
@@ -1501,7 +1545,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "critical",
@@ -1529,7 +1574,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "critical",
@@ -1557,7 +1603,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "critical",
@@ -1585,7 +1632,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "critical",
@@ -1613,7 +1661,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "warning",
@@ -1641,7 +1690,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "info",
@@ -1664,7 +1714,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "warning",
@@ -1696,7 +1747,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "warning",
@@ -1739,7 +1791,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "warning",
@@ -1773,7 +1826,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "warning",
@@ -1801,7 +1855,8 @@
           }
         }
       ],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "at_least": "info",
@@ -1817,7 +1872,8 @@
       },
       "note": "no owner in scope",
       "owners": [],
-      "question": "any_firing"
+      "question": "any_firing",
+      "scope_whole": true
     },
     {
       "descriptor": {
@@ -2466,6 +2522,7 @@
       "face": null,
       "held_whole": false,
       "latest": "firing",
+      "left_out": false,
       "note": "a loss, a fresh put, and a complete GET that drew nothing for the key: a GET heals the loss only of a key it answered (0.2, F-128)",
       "observations": [
         {
@@ -2609,6 +2666,410 @@
       "question": "owner_set",
       "seed": null,
       "window": null
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "not_held"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": true,
+      "latest": "firing",
+      "left_out": true,
+      "note": "a loss took the key's resolve and delete; the GET that established its owner's alarms, asked after the loss, left the key out, and nothing of it arrived since: not held, the loss healed for it (0.5, F-136)",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 600,
+            "kind": "put"
+          },
+          "listened_s": 2000,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "left_out": true,
+      "note": "a loss, and a GET after it that left the key out but did not establish its owner's alarms (an empty reply set, no window): the loss stands, an empty reply set being no verdict (core O5)",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 600,
+            "kind": "put"
+          },
+          "listened_s": 2000,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "left_out": true,
+      "note": "the GET that left the key out was asked before the loss: it establishes nothing after it, its window having lost a delivery (§2.15), so the loss stands (0.5)",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 600,
+            "kind": "put"
+          },
+          "listened_s": 2000,
+          "via": "subscription"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "not_held"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": true,
+      "latest": "firing",
+      "left_out": true,
+      "note": "no loss: the GET that established its owner's alarms left out a key held firing from before, and nothing of it arrived since: its delete went past the tombstone window unheard (0.3)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 600,
+            "kind": "put"
+          },
+          "listened_s": 2000,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "no",
+          "reason": "not_held"
+        },
+        "stale_firing": {
+          "answer": "not_asked",
+          "reason": "not_firing"
+        }
+      },
+      "face": null,
+      "held_whole": true,
+      "latest": "firing",
+      "left_out": true,
+      "note": "a GET reader without a subscription: its latest GET established the owner's alarms and left out a key an earlier GET answered firing (0.3)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        }
+      },
+      "face": null,
+      "held_whole": true,
+      "latest": "firing",
+      "left_out": false,
+      "note": "a loss, then a put of the key heard after the establishing GET was asked: not left out, and a delivery after a loss heals nothing until a GET answers the key (0.3, 0.5)",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 5,
+            "kind": "put"
+          },
+          "listened_s": 2000,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "scope_incomplete"
+      },
+      "note": "the reads that found the scope not whole (a presence read possibly incomplete), every owner found established and quiet: never no, since an owner they missed may fire (0.5, F-137)",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "no",
+              "severity": "warning"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing",
+      "scope_whole": false
+    },
+    {
+      "at_least": "info",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 0,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "scope_incomplete"
+      },
+      "note": "a scope not whole, and no owner found: unobservable, never not asked",
+      "owners": [],
+      "question": "any_firing",
+      "scope_whole": false
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 0,
+          "not_asked": 1,
+          "unobservable": 0
+        },
+        "reason": "scope_incomplete"
+      },
+      "note": "a scope not whole, and only an absent owner: unobservable, never not asked",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "not_asked",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "not_asked"
+          }
+        }
+      ],
+      "question": "any_firing",
+      "scope_whole": false
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "yes",
+        "firing": 1,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "any_firing"
+      },
+      "note": "a scope not whole, and an alarm firing: yes, whatever else is unknown",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "yes",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing",
+      "scope_whole": false
+    },
+    {
+      "at_least": "warning",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 1
+        },
+        "reason": "owner_unobservable"
+      },
+      "note": "a scope not whole, and an owner unobservable: the owner's reason first",
+      "owners": [
+        {
+          "alarms": [],
+          "set": {
+            "verdict": "established"
+          }
+        },
+        {
+          "alarms": [],
+          "set": {
+            "verdict": "unobservable"
+          }
+        }
+      ],
+      "question": "any_firing",
+      "scope_whole": false
+    },
+    {
+      "at_least": "critical",
+      "expect": {
+        "answer": "unobservable",
+        "firing": 0,
+        "owners": {
+          "established": 1,
+          "not_asked": 0,
+          "unobservable": 0
+        },
+        "reason": "scope_incomplete"
+      },
+      "note": "a scope not whole comes before an established owner's alarm unobservable",
+      "owners": [
+        {
+          "alarms": [
+            {
+              "answer": "unobservable",
+              "severity": "critical"
+            }
+          ],
+          "set": {
+            "verdict": "established"
+          }
+        }
+      ],
+      "question": "any_firing",
+      "scope_whole": false
     }
   ],
   "description": "alarms.v1 §2.14, §2.15, §5: what a tool may conclude, by `question`. `reading`: one reading of one alarm key -> §5's first question (`firing`, §2.14) and its last (`stale_firing`), each an answer (yes, no, unobservable, not_asked) and a reason. A reading is the owner's `presence` (present, absent, incomplete, across_face), its `descriptor` when present ({lists, token}, null when not read), the `face` when across one ({reachable}: whether the deployment lets this reader reach the alarms, §2.11), the key's `observations` as freshness.v1's judgements.json writes them (judged at 900 s; a GET among them is the reader's re-seed, made after any loss its subscription had), the `latest` sample by the owner's stamp (firing, resolved, deleted, undecodable, or null when none was read), `previous_instance` (that latest put stamped by an earlier instance of the owner) and `held_whole` (the owner's alarms established in this reading, §2.15). `owner_set`: an owner's presence, its descriptor and face as above, its `seed` (the S4 GET: {complete: true, members}, {complete: false} for one that ended at its timeout or with an error reply, or null when none was made) and its `window` ({listened_s, lossless, present_throughout}, or null) -> whether its alarms are known whole (established, unobservable, not_asked) and a reason. `any_firing`: a severity `at_least` and the owners in scope, each with its set's verdict and its alarms (the first question's answer, and the latest document's severity, null when none reads) -> §5's second question: an answer, a reason, the count of alarms firing at or above the severity, and the owners counted by verdict. `rederives`: the alert key a key carries and its payload (a decoded document, or \"delete\") -> §5's third question: yes (`strict`, `sanitized`), no (`mismatch`), not asked for a delete (`no_document`), unobservable for a payload that does not read (`undecodable`)."
