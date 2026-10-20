@@ -114,9 +114,13 @@ jobs:
       # Benches are a gate, not decoration: the baseline in
       # docs/bench-baseline.md is only worth reading if the code behind it
       # still compiles. `--all-targets` above already compiles and links
-      # them (harness = false benches included) on every run. This is the
-      # release-profile build, a second full tree in the same workspace, so
-      # it runs on pushes and manual dispatch only, not per PR.
+      # them (harness = false benches included) on every run. The
+      # release-profile build is a second full tree in the same workspace,
+      # so a PR only checks the benches with release settings (no codegen,
+      # but cfg(debug_assertions) and release-only lints apply), and pushes
+      # and manual dispatch do the full build.
+      - if: github.event_name == 'pull_request'
+        run: cargo check --workspace --benches --release --locked
       - if: github.event_name != 'pull_request'
         run: cargo bench --workspace --no-run --locked
 
