@@ -424,10 +424,12 @@ impl Alarm {
                     .map_err(|()| Invalid::Schema(format!("/{m}: not an integer"))),
             }
         };
-        let timestamp = integer("timestamp")?.expect("required");
+        // Present by the loop above; refused, never a panic, if it is not.
+        let missing = |m: &str| Invalid::Schema(format!("/{m}: missing"));
+        let timestamp = integer("timestamp")?.ok_or_else(|| missing("timestamp"))?;
         let observed_at_ms = integer("observed_at_ms")?;
-        let rule = string("rule")?.expect("required");
-        let summary = string("summary")?.expect("required");
+        let rule = string("rule")?.ok_or_else(|| missing("rule"))?;
+        let summary = string("summary")?.ok_or_else(|| missing("summary"))?;
         let category = string("category")?;
         let severity = match o.get("severity") {
             Some(Value::String(s)) => Severity::parse(s),
