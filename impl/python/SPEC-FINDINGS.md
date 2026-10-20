@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty-one rounds.**
+**Forty-two rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -91,8 +91,10 @@ where that was not enough, or where the spec said two things.
   came from review of PR #809. `alarms.v1` 0.5 resolved all three, F-137
   partly against zk2py's reading.
 - F-138 and F-139 were found against `alarms.v1` 0.4 and 0.5, read cold
-  and run live against the owner example at 0.3 (see "At alarms.v1 0.5" at
-  the end).
+  and run live against the owner example at 0.3 (see "At alarms.v1 0.5").
+  `alarms.v1` 0.6 resolved both, as zk2py read them.
+- F-140 was found against `alarms.v1` 0.6, read cold and run live (see
+  "At alarms.v1 0.6" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -6759,6 +6761,19 @@ only when that GET established the owner's alarms (`held_whole`).
 `any_firing` … `scope_whole`: whether the reads that found the scope are
 whole (§2.15)."
 
+**Status at alarms.v1 0.6: resolved by 0.6, as zk2py read it.** The
+description now states both inputs.
+- `left_out`: "the reader's latest GET of the owner answered the key with
+  neither a value nor a `reply_del`, and nothing of the key arrived after
+  it was asked; it is §2.14 step 5's key left out, healing step 4's loss
+  for it, only with `held_whole`; without it, it changes no answer".
+- `scope_whole`: "whether the reads that found the owners in scope are
+  whole, §2.15: the latest presence read complete and nothing lost since;
+  an archive's read plays no part".
+
+Read from the description alone, every one of the 107 cases follows, the
+two with `left_out` and no `held_whole` among them. zk2py's gate stands.
+
 ### F-139 · ambiguity · alarms.v1 0.4 §2.16: "reports each key again" after a loss
 
 > §2.16: "**A loss is the reader's.** … A tool MAY report it once for its
@@ -6814,6 +6829,14 @@ moved or not".
 `just py-conformance`: 1853 of 1853 (`readings` 103). `just py-alarms`: 80
 of 80 on each owner.
 
+**Status at alarms.v1 0.6: resolved by 0.6, as zk2py read it.** §2.16:
+"Each key then keeps its last report through the loss … the key's answer
+is a change to report only if it moved from that last report … an alarm
+firing before the loss and after it, at one severity, is not reported
+again." That is reading 2, `ChangeReporter`'s. 0.6 also made zk2py see
+that its baseline must be the last *report*, not the last answer read:
+see "At alarms.v1 0.6".
+
 **Where zk2py's reading of alarms.v1 0.4 and 0.5 needed a guess, beyond
 the findings.**
 - **A key first read after the first reading** at **no** or **neither** (a
@@ -6826,3 +6849,93 @@ the findings.**
   stated"). zenoh answers its reads at once, complete and empty. zk2py's
   reader does not guard against it: such a reader would read every owner
   absent and heal a loss. The text defers it to the core.
+
+## At alarms.v1 0.6 (#609)
+
+0.6 answers F-138 and F-139 (each entry above carries its status), and
+states two of round 41's guesses. The core stays at 0.34, and no fixture
+case changed: only `conclusions.json`'s description did, and zk2py
+passed it unchanged.
+
+**zk2py against 0.6's two new rules.**
+- **§2.15 "Whole": a presence read is dated by the instant it was
+  asked,** and "a loss heard at or after that instant counts against it,
+  wherever its replies arrive". zk2py already counted a loss from the
+  read's start. But `scope_read` decided wholeness when the read returned,
+  so a loss heard during the GETs that followed it, before the second
+  question was asked, was missed. Now:
+  - `ScopeRead` carries the read's ask;
+  - `AlarmsReader.scope_whole` decides at the instant the question is
+    asked, through a pure `presence_read_whole`;
+  - `readings` has four cases, among them a loss at the ask's very instant.
+- **§2.16, "A key's first answer … moves from no report":** yes is
+  reported, no is not, a neither of the key's own MAY be, and a neither of
+  the reader's own sight is not.
+  - zk2py reported no first neither, one of the two readings the MAY
+    allows.
+  - But its `ChangeReporter` compared each answer with the key's last
+    *recorded* answer, not its last *report*. So a key first read `no`
+    (recorded, not reported) and then `unobservable, clock_untrusted` was
+    reported. That is a neither of the reader's sight, for a key with no
+    report: "no answer to report".
+  - It now compares with the last report. A key with no report keeps none
+    until it reads yes, and a key gone from the whole scope is reported
+    only if its last report was yes or no.
+  - `readings` has four first-answer cases. One of them is that sequence,
+    which round 41's reporter fails.
+  - F-139's answer, "each key then keeps its last report through the
+    loss", is the same baseline.
+
+**`just py-conformance`: 1861 of 1861.** The `alarms` family stays at 316,
+and `readings` is 111: round 41's 103, with four first-answer and four
+presence-dating cases.
+
+**`just py-alarms`: 80 of 80** against zk2py's owner and 80 of 80 against
+`owner-ac`, both exiting 0. These are round 41's checks: the reporter's
+live checks in §10 read the same under the new baseline, and §10 asks for
+wholeness at the question. §2, §4, §6 and §10 ran on the 4 s copy, with
+§10's step 2 at 900 s left out as before.
+
+### F-140 · gap · alarms.v1 0.6 §2.16 "A key's first answer": five of §2.14's reasons are on neither list
+
+> §2.16 (0.6): "Neither, for a cause of the key's own (stale, undecodable,
+> not asked), MAY be reported. Neither that only the reader's own sight
+> makes so (a loss no GET has healed, a clock not yet trusted, a reading
+> too near the horizon to tell, a window not yet listened, nothing read
+> yet, presence or a descriptor not read whole) is no answer to report"
+
+> §2.14 step 6: "unobservable: **unobservable**, with `freshness.v1`'s
+> reason"
+
+The two lists cover the reasons as follows:
+- **The key's own:** `stale` and `undecodable`, and not asked (`absent`,
+  `not_listed`, `last_known`, `previous_instance`).
+- **The reader's own sight:** `incomplete`, `clock_untrusted`,
+  `near_horizon`, `listened_too_short`, nothing read (`not_read`,
+  `no_observation`, `silent`), and `presence_incomplete` and
+  `no_descriptor`.
+- **On neither list,** each a first answer the first question can give:
+  - `face_closed` (§2.14 step 1). The deployment closes the face, so it
+    is not the key's own, and no read settles it.
+  - `nothing_crossed` (step 5 or 6). The link may be out, which is the
+    reader's sight, or the alarms may never cross.
+  - `no_stamp` (freshness.v1 §2.6). The owner's reply breaks S2, which
+    looks like the key's own.
+  - `clock_disagrees` (freshness.v1 §2.6). The stamp is ahead of the
+    reader's clock beyond the delta, and either clock may be the one
+    ahead.
+  - `not_a_horizon` (freshness.v1 §2.1), with a revision whose
+    `freshness.ttl_s` is no horizon. That is the contract's, not the key's
+    or the reader's.
+
+A tool that takes the MAY, reporting a first neither of the key's own,
+must classify these five, and two tools can classify them apart.
+
+**zk2py:** unaffected. Its reporter takes the other branch of the MAY and
+reports no first neither, so it never needs the classification.
+
+**Wording:** name these five in one list or the other, or close the lists:
+"any other neither is the reader's own sight".
+
+**Where zk2py's reading of alarms.v1 0.6 needed a guess, beyond the
+findings:** none.
