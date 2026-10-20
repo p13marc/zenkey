@@ -306,7 +306,7 @@ def validate(value: Any, schema: Any, root: dict[str, Any]) -> bool:
 
 
 @lru_cache(maxsize=1)
-def schema() -> dict[str, Any]:
+def load_schema() -> dict[str, Any]:
     """The 1.0 schema (§3), read from ``spec/`` as published."""
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
@@ -315,7 +315,7 @@ def in_schema(value: Any) -> bool:
     """§2.4: whether ``value`` satisfies the 1.0 schema's `alarms.v1.Alarm`.
     "Members the schema does not name" are ignored, since the type admits
     them (§3)."""
-    root = schema()
+    root = load_schema()
     return validate(value, {"$ref": f"#/$defs/{TYPE_NAME}"}, root)
 
 
