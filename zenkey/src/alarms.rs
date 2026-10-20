@@ -34,10 +34,12 @@
 //! | §2.8 no firing alarm resolved or deleted to make room | nothing is evicted |
 //! | §2.8 SHOULD report the refusal (`health.v1`) | the application's: the refusal names the resource, the bound and whose it is |
 //! | §2.9 adoption, before the first put, from the record, else an archive on its own side, never an S4 GET | [`ServiceBuilder::alarms`], from [`Startup::record`], else [`Startup::archive`] read explicitly ([`crate::archive::last_known_all`]) |
-//! | §2.9 its order: resolved, then undecodable or not re-deriving, deleted; a rule no longer evaluated, resolved; else adopted | [`Adoption`]: retirements, then resolves, then adoptions, so that a key retired takes none of the bound's room |
+//! | §2.9 its order: resolved, then undecodable or not re-deriving, deleted; a rule no longer evaluated, resolved; else adopted; deletes and resolves before adoptions, and past the bound none of the rest resolved or deleted (0.2) | [`Adoption`]: retirements, then resolves, then adoptions in key order; the rest past the bound in [`Adoption::over_bound`] |
+//! | §2.9 SHOULD keep in the record the resolved document until its delete (0.2) | [`Record::save`] after every put and every delete, the resolved document's before its delete |
 //! | §2.9 each alarm kept put again from the new instance before a GET is answered with it, and before the instance token | adoption puts each one, unchanged, in [`ServiceBuilder::alarms`], before `start()` declares anything alive; [`crate::Service::new_epoch`] re-puts every alarm before its new descriptor and tokens |
 //! | §2.9 no source: nothing adopted | [`Source::Nothing`]; the instance is new, as every service's is (core §1.5) |
 //! | §2.9 SHOULD NOT resolve or delete at a clean close | [`crate::Service::close`] touches no alarm |
+//! | §2.10 each device service puts its own | one [`ServiceBuilder::alarms`] per service, a device service's included |
 //! | §2.13 SHOULD be tokenless near the presence budget | the deployment's tokenless set (`ServiceConfig::tokenless`) |
 //!
 //! **The record is the application's** ([`Record`]): the runtime loads it
