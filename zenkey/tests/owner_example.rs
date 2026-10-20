@@ -898,6 +898,14 @@ async fn the_owner_example_implements_alarms() {
             .await
             .starts_with("alarm unchanged a659f813308ad1da ")
     );
+    // The JSON is the rest of the line as written: two spaces stay two.
+    let spaced = critical.replace("\"down\"", "\"down  twice\"");
+    let r = o.ask(&format!("alarm  raise   {spaced}")).await;
+    assert!(r.starts_with("alarm refreshed a659f813308ad1da "), "{r}");
+    let doc: am::Alarm = serde_json::from_str(r.splitn(4, ' ').nth(3).unwrap()).unwrap();
+    assert_eq!(doc.summary, "down  twice");
+    let got = am::decode(&state(&tool, key).await[0]).unwrap();
+    assert_eq!(got.summary, "down  twice", "as put");
     let b = r#"{"rule": "disk_full", "severity": "warning", "summary": "full", "labels": {"mount": "/var"}}"#;
     let raised_b = o.ask(&format!("alarm raise {b}")).await;
     let b_key = raised_b.split(' ').nth(2).unwrap().to_owned();
@@ -913,10 +921,9 @@ async fn the_owner_example_implements_alarms() {
         o.ask("alarm confirm a659f813308ad1da off").await,
         "alarm confirm a659f813308ad1da off"
     );
-    assert!(
-        o.ask("alarm confirm 0000000000000000 off")
-            .await
-            .starts_with("refused")
+    assert_eq!(
+        o.ask("alarm confirm 0000000000000000 off").await,
+        "refused alarm confirm 0000000000000000 off: no alarm is held on 0000000000000000"
     );
     assert_eq!(o.ask("alarm confirm all on").await, "alarm confirm all on");
     let held = o.ask("alarm list").await;

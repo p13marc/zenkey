@@ -1095,6 +1095,17 @@ async fn config_command(
     Ok(device_line(device, cfg.schema()))
 }
 
+/// The raw remainder of `line` after its first `n` words: a JSON argument
+/// keeps its own spacing.
+fn after_words(line: &str, n: usize) -> &str {
+    let mut rest = line.trim_start();
+    for _ in 0..n {
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        rest = rest[end..].trim_start();
+    }
+    rest
+}
+
 /// A document on one line.
 fn one_line(doc: &alarms::Alarm) -> String {
     serde_json::to_string(doc).unwrap_or_default()
@@ -1138,7 +1149,13 @@ async fn alarm_command(words: &[&str], rest: &str, a: &Alarms) -> Result<String,
             if *key == "all" {
                 a.set_confirming_all(on_).await;
             } else if !a.set_confirming(key, on_).await {
-                return Err(format!("no firing alarm is held on {key}"));
+                return Err(match a.get(key).await {
+                    Some(_) => format!(
+                        "the alarm on {key} is held resolved, its delete due, and a resolved \
+                         alarm is never confirmed (alarms.v1 §2.7)"
+                    ),
+                    None => format!("no alarm is held on {key}"),
+                });
             }
             Ok(format!("alarm confirm {key} {on}"))
         }
@@ -1187,7 +1204,7 @@ async fn command(
         let Some(a) = &up.alarms else {
             return refuse("alarms.v1 is not implemented here (--alarms)");
         };
-        return match alarm_command(&words, &rest(2), a).await {
+        return match alarm_command(&words, after_words(line, 2), a).await {
             Ok(answer) => answer,
             Err(why) => refuse(&why),
         };
