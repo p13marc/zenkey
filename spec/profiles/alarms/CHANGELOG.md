@@ -4,6 +4,83 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.6 — 2026-10-20: the cold reader's round 41 (#800, AF; #609)
+
+The spec-only implementation read 0.4 and 0.5 cold and ran them live
+(zk2py round 41): 1844 of 1844 fixture checks, and `scenarios.md` §1 to
+§10, 80 of 80, against its own owner and against the Rust owner example,
+§10's 905 s window left out as before. It resolved F-135 to F-137, filed
+two findings, F-138 and F-139, and named three guesses. Each finding is
+answered, and two of the guesses are stated; the reference's notifier
+already behaved as each answer says, and its reader is brought to one.
+Written against core 0.34, unchanged.
+
+No model change. `conclusions.json`'s description changes and its 107
+cases do not; `keys.json` (75), `documents.json` (62) and
+`transitions.json` (27) are unchanged.
+
+**Answered: the two findings.**
+- **F-138, `left_out` and `scope_whole` undescribed**
+  (`conformance/conclusions.json`, core Appendix E). 0.5 added both
+  inputs and left the file's description 0.3's. And the fixture's
+  `left_out` is wider than §2.14 step 5's term: two cases set it for an
+  owner whose alarms are not established (`held_whole: false`) and expect
+  `incomplete`, which an implementation reading it as "the establishing
+  GET left the key out" would answer `not_held`.
+  - The description now states both. `left_out`: the reader's latest GET
+    of the owner answered the key with neither a value nor a `reply_del`,
+    and nothing of the key arrived after it was asked; step 5's key left
+    out, healing step 4's loss for it, only with `held_whole`, and
+    without it no answer moves (core O5). `scope_whole`: whether the reads
+    that found the owners in scope are whole (§2.15).
+  - The cases stand as written. zk2py's reading stands: it gated
+    `left_out` on `held_whole` from the cases' notes.
+- **F-139, "reports each key again" after a loss** (§2.16). 0.4's
+  bullet could be read as re-reporting every key once the loss heals, one
+  more page per firing alarm, or as resuming each key against its last
+  report; 0.4's CHANGELOG said the latter ("each key keeps its last
+  report"), the text did not.
+  - The bullet now says it: each key keeps its last report through the
+    loss, and, as the healing GET answers it or, establishing its owner's
+    alarms, leaves it out, its answer is a change to report only if it
+    moved from that report. An alarm firing before the loss and after it,
+    at one severity, is not reported again. A tool that took the other
+    branch of the MAY, each key reported unobservable, reports each key
+    the healing GET moves from neither, as any change.
+  - The reference notifier did so (zenwatch's `alerts`: a key's word is
+    kept through a loss, and a notice is made only when the healing GET
+    moves it). zk2py's reading stands.
+
+**Answered: the round's guesses.**
+- **"Lost none of their moves since"** (§2.15, "Whole"). zk2py counted a
+  loss from the instant the presence read began. §2.15 now dates a
+  presence read as a GET is dated, by the instant it was asked: a loss
+  heard after that counts against it, wherever its replies arrive, since
+  the token a loss took may have appeared after the read was answered.
+  zk2py's reading stands.
+  - **The reference did not.** Its book folds a presence read when the
+    refresh ends, and a notifier drains its subscription beside the
+    refresh, so a loss folded while the refresh ran came first, and the
+    read, folded after, read whole. One-shot tools, which drain nothing
+    while they read, were not affected. The book now dates the read by its
+    ask (`AlarmBook::presence_read`'s `at`) and leaves it not whole when a
+    loss it holds is later.
+- **A key's first answer** (§2.16). zk2py recorded a key first read at no
+  or neither after the first reading, and reported neither. The text now
+  says a key's first answer, at the first reading or after it, moves from
+  no report: yes is reported (the SHOULD above); no is not, since there is
+  no report for it to clear; neither MAY be when its cause is the key's
+  own (stale, undecodable, not asked), and is not when only the reader's
+  own sight makes it so, as a raise the reader cannot yet judge is not
+  (0.4): time or the next read settles it. zk2py's reading is one of the
+  two the MAY allows. The reference notifier reports a first neither of
+  the key's own and holds one of its own sight until it settles.
+
+**Deliberately not stated.**
+- **A read through a session cut off from every router and peer**, which
+  zk2py does not guard against, stays 0.4's: core §2.7's and §8.1's for
+  every reader, not this text's.
+
 ## 0.5 — 2026-10-20: the cold reader's round 40 (#800, AE; #609)
 
 The spec-only implementation read 0.3 and ran it live (zk2py round 40):
