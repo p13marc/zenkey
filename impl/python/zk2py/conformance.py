@@ -728,6 +728,105 @@ def _link_lints(path: Path) -> list[Result]:
     return out
 
 
+def _alarms_keys(path: Path) -> list[Result]:
+    """alarms.v1 §2.2, §2.3, §2.12: `derive`, `host_scoped`, `ref` and
+    `parse`, each by its `op`. A `derive` case also checks that framed input
+    gives one key by both recipes."""
+    from . import alarms
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        name = f"keys #{i} {c['op']}: {c['note']}"
+        if c["op"] == "derive":
+            got = alarms.derive(c["rule"], c["labels"])
+            out.append(_check(name, got.expect(), c["expect"]))
+            strict = alarms.strict_key(c["rule"], c["labels"])
+            want_strict = got.key if c["expect"]["framed"] else None
+            out.append(_check(f"{name} (strict recipe)", strict, want_strict))
+        elif c["op"] == "host_scoped":
+            out.append(_check(name, alarms.is_host_scoped(c["name"]), c["expect"]))
+        elif c["op"] == "ref":
+            r = c["ref"]
+            out.append(_check(name, alarms.key_of(r["system"], r["service"], r["alert_key"]), c["expect"]))
+        elif c["op"] == "parse":
+            got_ref = alarms.parse_key(c["key"])
+            out.append(_check(name, got_ref, c["expect"]))
+            if got_ref is not None:
+                # §2.12: the reference builds back to the key it was read from.
+                back = alarms.key_of(got_ref["system"], got_ref["service"], got_ref["alert_key"])
+                out.append(_check(f"{name} (builds back)", back, c["key"]))
+        else:
+            out.append((name, False, f"an unknown op {c['op']!r}"))
+    return out
+
+
+def _alarms_documents(path: Path) -> list[Result]:
+    """alarms.v1 §2.4, §2.3: a decoded payload -> readable, the owner's
+    errors and its warnings, in the order checked."""
+    from . import alarms
+
+    return [_check(f"documents #{i}: {c['note']}", alarms.check(c["document"]), c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _alarms_transitions(path: Path) -> list[Result]:
+    """alarms.v1 §2.6: one key's samples in the owner's stamp order -> the
+    transition each makes against the document held before it."""
+    from . import alarms
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        samples = [alarms.DELETE if s == "delete" else s["put"] for s in c["samples"]]
+        out.append(_check(f"transitions #{i}: {c['note']}", alarms.transitions(samples), c["expect"]))
+    return out
+
+
+def _alarms_seed(s: Any):
+    from . import alarms
+
+    return None if s is None else alarms.Seed(bool(s["complete"]), int(s.get("members", 0)))
+
+
+def _alarms_window(w: Any):
+    from . import alarms
+
+    return None if w is None else alarms.Window(w["listened_s"], bool(w["lossless"]), bool(w["present_throughout"]))
+
+
+def _alarms_conclusions(path: Path) -> list[Result]:
+    """alarms.v1 §2.14, §2.15, §5, by `question`: `reading` (the first and
+    last questions of §5 over one reading), `owner_set`, `any_firing` and
+    `rederives`. An unknown question fails."""
+    from . import alarms
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        q, name = c["question"], f"conclusions #{i} {c['question']}: {c['note']}"
+        if q == "reading":
+            r = alarms.Reading(presence=c["presence"], descriptor=c.get("descriptor"), face=c.get("face"),
+                               observations=[_freshness_observation(o) for o in c["observations"]],
+                               latest=c["latest"], previous_instance=bool(c["previous_instance"]),
+                               held_whole=bool(c["held_whole"]))
+            got: Any = {"firing": alarms.judge(r, alarms.Q_FIRING).pair(),
+                        "stale_firing": alarms.judge(r, alarms.Q_STALE).pair()}
+        elif q == "owner_set":
+            got = alarms.owner_set(c["presence"], c.get("descriptor"), c.get("face"), _alarms_seed(c["seed"]),
+                                   _alarms_window(c["window"])).expect()
+        elif q == "any_firing":
+            owners = [alarms.OwnerRead(o["set"]["verdict"],
+                                       tuple(alarms.AlarmRead(a["answer"], a["severity"]) for a in o["alarms"]))
+                      for o in c["owners"]]
+            got = alarms.any_firing(c["at_least"], owners)
+        elif q == "rederives":
+            payload = alarms.DELETE if c["payload"] == "delete" else c["payload"]
+            got = alarms.rederives(c["alert_key"], payload).pair()
+        else:
+            out.append((name, False, f"an unknown question {q!r}"))
+            continue
+        out.append(_check(name, got, c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -741,6 +840,8 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
                "redaction.json": _config_redaction},
     "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints},
+    "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
+               "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
 }
 
 
