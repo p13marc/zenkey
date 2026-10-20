@@ -1,0 +1,1006 @@
+{
+  "cases": [
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "a firing document"
+    },
+    {
+      "document": {
+        "category": "expectation",
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "observed_at_ms": 1760950030000,
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "a refreshed document, with a category"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "resolved",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950100000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "a resolved document"
+    },
+    {
+      "document": {
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "no labels"
+    },
+    {
+      "document": {
+        "labels": {},
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "empty labels"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "observed_at_ms": 1760950000000,
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "observed_at_ms equal to timestamp"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 0
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "timestamp 0, the epoch"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 9007199254740991
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "timestamp 2^53-1, the largest"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000.0
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "an integral number is an integer (JSON Schema 2020-12)"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "an empty summary breaks no rule"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "later": {
+          "added": "by a later minor"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "a member the schema does not name is ignored"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "a\nb",
+          "peer": "r2"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "a host-scoped label is removed before the framing is checked"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.boot_id": "b",
+          "if_index": "3"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "dotted and underscored names in the form"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "observed_at_ms": 1760949999999,
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "observed_before_timestamp"
+        ],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "observed_at_ms before timestamp"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "observed_at_ms": 1760950030000,
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "resolved",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "observed_on_resolved"
+        ],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "a resolved document carries observed_at_ms"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "observed_at_ms": 1,
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "resolved",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "observed_before_timestamp",
+          "observed_on_resolved"
+        ],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "both rules of observed_at_ms broken"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link\ndown",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "unframed"
+        ]
+      },
+      "note": "a newline in the rule (§2.3)"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "unframed"
+        ]
+      },
+      "note": "an empty rule (§2.3)"
+    },
+    {
+      "document": {
+        "labels": {
+          "port": "a\nb"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "unframed"
+        ]
+      },
+      "note": "a newline in a value (§2.3)"
+    },
+    {
+      "document": {
+        "labels": {
+          "a=b": "1"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "unframed",
+          "label_name_form"
+        ]
+      },
+      "note": "an = in a name: unframed, and outside the form"
+    },
+    {
+      "document": {
+        "labels": {
+          "": "1"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "unframed",
+          "label_name_form"
+        ]
+      },
+      "note": "an empty name"
+    },
+    {
+      "document": {
+        "labels": {
+          "Peer": "r2"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "label_name_form"
+        ]
+      },
+      "note": "a capital in a name"
+    },
+    {
+      "document": {
+        "labels": {
+          "if-index": "3"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "label_name_form"
+        ]
+      },
+      "note": "a hyphen in a name"
+    },
+    {
+      "document": {
+        "labels": {
+          "a..b": "3"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "label_name_form"
+        ]
+      },
+      "note": "an empty segment"
+    },
+    {
+      "document": {
+        "labels": {
+          "_x": "3"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "label_name_form"
+        ]
+      },
+      "note": "a segment that starts with an underscore"
+    },
+    {
+      "document": {
+        "labels": {
+          "9lives": "3"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "label_name_form"
+        ]
+      },
+      "note": "a segment that starts with a digit"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.": "x"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": [
+          "label_name_form"
+        ]
+      },
+      "note": "host. alone is host-scoped, and outside the form"
+    },
+    {
+      "document": {
+        "labels": {
+          "Peer": "x"
+        },
+        "observed_at_ms": 1,
+        "rule": "",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "observed_before_timestamp"
+        ],
+        "readable": true,
+        "warnings": [
+          "unframed",
+          "label_name_form"
+        ]
+      },
+      "note": "errors first, then warnings"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "timestamp is required"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "rule is required"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "severity is required"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "state is required"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "summary is required"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "major",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a severity the enum does not list: never guessed (§2.4)"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "Critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "no case folding"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "acked",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a state the enum does not list"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": "1760950000000"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a timestamp as a string"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1.5
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a fraction is no integer"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "observed_at_ms": null,
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "observed_at_ms null: absent is written by leaving it out"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": 7,
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a rule that is no string"
+    },
+    {
+      "document": {
+        "category": 1,
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a category that is no string"
+    },
+    {
+      "document": {
+        "labels": {
+          "port": 22
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a label value that is no string"
+    },
+    {
+      "document": {
+        "labels": [
+          "port",
+          "eth0"
+        ],
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "labels that are no object"
+    },
+    {
+      "document": [
+        "link_down"
+      ],
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "an array is no document"
+    },
+    {
+      "document": "link_down",
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a string is no document"
+    },
+    {
+      "document": null,
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "null is no document"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": -1
+      },
+      "expect": {
+        "errors": [
+          "time_range"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a time before the epoch (§2.4)"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 9007199254740992
+      },
+      "expect": {
+        "errors": [
+          "time_range"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a time beyond 2^53-1"
+    },
+    {
+      "document": {
+        "labels": {
+          "host.id": "h-3fa9c2d41b7e",
+          "peer": "r2",
+          "port": "eth0"
+        },
+        "observed_at_ms": -5,
+        "rule": "link_down",
+        "severity": "critical",
+        "state": "firing",
+        "summary": "link to r2 down on eth0",
+        "timestamp": 1760950000000
+      },
+      "expect": {
+        "errors": [
+          "time_range"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "observed_at_ms out of range"
+    }
+  ],
+  "description": "alarms.v1 §2.4, §2.3: a payload, decoded as JSON -> whether a reader reads it as a document (`readable`), the owner's errors (MUSTs broken) and its warnings (SHOULDs broken), as tokens in the order checked. Unreadable: `schema`, outside the 1.0 schema's `alarms.v1.Alarm` (its required members, types and enums; an integral number is an integer, and a member the schema does not name is ignored), and then `time_range`, a time outside 0 to 2^53-1, and nothing else is reported. Errors: `observed_before_timestamp`, then `observed_on_resolved`. Warnings: `unframed` (the rule or a discriminating label breaks the framing, §2.3), then `label_name_form` once per label name outside the form, in byte order of the names."
+}

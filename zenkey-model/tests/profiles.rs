@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use zenkey_model::alarms;
 use zenkey_model::authoring::Kind;
 use zenkey_model::bundle::Bundle;
 use zenkey_model::config::{
@@ -50,6 +51,10 @@ const KNOWN: &[(&str, &str)] = &[
     ("link", "exposure.json"),
     ("link", "plan.json"),
     ("link", "lints.json"),
+    ("alarms", "keys.json"),
+    ("alarms", "documents.json"),
+    ("alarms", "transitions.json"),
+    ("alarms", "conclusions.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -1457,6 +1462,344 @@ fn link_lints() {
             block: block.as_ref().map(|(f, b)| (f.as_str(), b)),
         });
         expect(case, findings_json(&found), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+// --- alarms.v1 (#800, AA) -------------------------------------------------------
+
+/// `alarms.v1`'s standard contract as a bundle: every document of
+/// `documents.json` is checked against its own type too (core §7.3).
+fn alarms_bundle() -> Bundle {
+    let l = zenkey_model::contract::load_path(&profiles().join("alarms/alarms.v1.toml"));
+    Bundle::build(&l.contract.unwrap_or_else(|| panic!("{}", l.report)))
+}
+
+fn labels(v: &Value) -> Vec<(&str, &str)> {
+    v.as_object()
+        .expect("labels")
+        .iter()
+        .map(|(n, v)| (n.as_str(), v.as_str().expect("a string value")))
+        .collect()
+}
+
+/// `alarms/conformance/keys.json`: a rule and its labels → the alert key a
+/// reader derives, its input and whether it is framed; a label name →
+/// whether it is host-scoped; a reference → its key, and back (alarms.v1
+/// §2.2, §2.3, §2.12).
+#[test]
+fn alarms_keys() {
+    let path = profiles().join("alarms/conformance/keys.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}: {}", case["op"], case["note"]);
+        let got = match case["op"].as_str().expect("op") {
+            "derive" => {
+                let rule = case["rule"].as_str().expect("rule");
+                let labels = labels(&case["labels"]);
+                let d = alarms::derive(rule, labels.iter().copied());
+                let strict = alarms::alert_key(rule, labels.iter().copied());
+                // On framed input the strict recipe and the reader's agree.
+                assert_eq!(strict.is_ok(), d.framed, "{what}");
+                if let Ok(k) = &strict {
+                    assert_eq!(*k, d.key, "{what}");
+                }
+                assert!(
+                    d.key.len() == 16
+                        && d.key
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                    "{what}: {}",
+                    d.key
+                );
+                assert_eq!(chunk_slug(&d.key), d.key, "{what}: its own slug");
+                json!({"key": d.key, "input": d.input, "framed": d.framed})
+            }
+            "host_scoped" => json!(alarms::is_host_scoped(case["name"].as_str().expect("name"))),
+            "ref" => {
+                let r: alarms::AlarmRef = serde_json::from_value(case["ref"].clone()).expect("ref");
+                match r.key() {
+                    Ok(k) => {
+                        assert_eq!(
+                            alarms::AlarmRef::from_key(k.as_str()).as_ref(),
+                            Some(&r),
+                            "{what}: back"
+                        );
+                        json!(k.as_str())
+                    }
+                    Err(_) => Value::Null,
+                }
+            }
+            "parse" => json!(alarms::AlarmRef::from_key(
+                case["key"].as_str().expect("key")
+            )),
+            other => panic!("op {other:?}"),
+        };
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `alarms/conformance/documents.json`: a payload → whether it reads, and
+/// the owner's errors and warnings (alarms.v1 §2.4, §2.3). The model's
+/// reading of the schema agrees with the schema's own validation.
+#[test]
+fn alarms_documents() {
+    let path = profiles().join("alarms/conformance/documents.json");
+    let b = alarms_bundle();
+    let ty = zenkey_model::decode::type_of(&b, "state", alarms::ALARMS, "type").expect("its type");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let v = &case["document"];
+        let read = alarms::Alarm::from_json(v);
+        let schema_ok = zenkey_model::validate::validate(&b, ty, v).is_ok();
+        assert_eq!(
+            schema_ok,
+            !matches!(read, Err(alarms::Invalid::Schema(_))),
+            "{what}: the model reads the schema as validate does: {read:?}"
+        );
+        let got = match &read {
+            Err(e) => json!({"readable": false, "errors": [e.as_str()], "warnings": []}),
+            Ok(a) => {
+                let p = a.check();
+                let of = |g| {
+                    p.iter()
+                        .filter(|x| x.gravity() == g)
+                        .map(alarms::Problem::as_str)
+                        .collect::<Vec<_>>()
+                };
+                // A readable document serializes back into its type.
+                let back = serde_json::to_value(a).expect("serializes");
+                assert!(
+                    zenkey_model::validate::validate(&b, ty, &back).is_ok(),
+                    "{what}: {back}"
+                );
+                json!({
+                    "readable": true,
+                    "errors": of(alarms::Gravity::Error),
+                    "warnings": of(alarms::Gravity::Warning),
+                })
+            }
+        };
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `alarms/conformance/transitions.json`: one key's samples in the owner's
+/// stamp order → the transition each makes (alarms.v1 §2.6).
+#[test]
+fn alarms_transitions() {
+    let path = profiles().join("alarms/conformance/transitions.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let mut track = alarms::Track::default();
+        let got: Vec<Value> = case["samples"]
+            .as_array()
+            .expect("samples")
+            .iter()
+            .map(|s| {
+                let t = if s == "delete" {
+                    track.apply(alarms::Sample::Delete)
+                } else {
+                    match alarms::Alarm::from_json(&s["put"]) {
+                        Ok(a) => track.apply(alarms::Sample::Put(&a)),
+                        Err(_) => track.apply(alarms::Sample::Unreadable),
+                    }
+                };
+                json!(t.as_str())
+            })
+            .collect();
+        expect(case, json!(got), &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A case's presence, descriptor and face, as `alarms/conformance/` writes
+/// them.
+fn alarms_presence(case: &Value) -> alarms::Presence {
+    match case["presence"].as_str().expect("presence") {
+        "present" => alarms::Presence::Present(match &case["descriptor"] {
+            Value::Null => alarms::Listing::Unread,
+            d if d["lists"] == json!(false) => alarms::Listing::NotListed,
+            d => alarms::Listing::Listed {
+                token: d["token"].as_bool().expect("descriptor.token"),
+            },
+        }),
+        "absent" => alarms::Presence::Absent,
+        "incomplete" => alarms::Presence::Incomplete,
+        "across_face" => alarms::Presence::AcrossFace {
+            reachable: case["face"]["reachable"].as_bool().expect("face.reachable"),
+        },
+        other => panic!("presence {other:?}"),
+    }
+}
+
+fn alarms_judged(j: alarms::Judged) -> Value {
+    json!({"answer": j.answer.as_str(), "reason": j.reason.as_str()})
+}
+
+fn alarms_answer(v: &Value) -> alarms::Answer {
+    match v.as_str().expect("answer") {
+        "yes" => alarms::Answer::Yes,
+        "no" => alarms::Answer::No,
+        "unobservable" => alarms::Answer::Unobservable,
+        "not_asked" => alarms::Answer::NotAsked,
+        other => panic!("answer {other:?}"),
+    }
+}
+
+/// One alarm of a scope, as `any_firing` reads it: an answer and a
+/// severity.
+type AlarmRead = (alarms::Judged, Option<alarms::Severity>);
+
+fn alarms_severity(v: &Value) -> Option<alarms::Severity> {
+    v.as_str()
+        .map(|s| alarms::Severity::parse(s).unwrap_or_else(|| panic!("severity {s:?}")))
+}
+
+/// `alarms/conformance/conclusions.json`: §5's questions, from one reading,
+/// an owner's GET and window, a scope, or a key and its payload (alarms.v1
+/// §2.14, §2.15, §5).
+#[test]
+fn alarms_conclusions() {
+    let path = profiles().join("alarms/conformance/conclusions.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}: {}", case["question"], case["note"]);
+        let got = match case["question"].as_str().expect("question") {
+            "reading" => {
+                let observations: Vec<Observation> = case["observations"]
+                    .as_array()
+                    .expect("observations")
+                    .iter()
+                    .map(observation)
+                    .collect();
+                let latest = match &case["latest"] {
+                    Value::Null => None,
+                    l => Some(match l.as_str().expect("latest") {
+                        "firing" => alarms::Latest::Firing,
+                        "resolved" => alarms::Latest::Resolved,
+                        "deleted" => alarms::Latest::Deleted,
+                        "undecodable" => alarms::Latest::Undecodable,
+                        other => panic!("latest {other:?}"),
+                    }),
+                };
+                let r = alarms::Reading {
+                    presence: alarms_presence(case),
+                    observations: &observations,
+                    latest,
+                    previous_instance: case["previous_instance"]
+                        .as_bool()
+                        .expect("previous_instance"),
+                    held_whole: case["held_whole"].as_bool().expect("held_whole"),
+                };
+                json!({
+                    "firing": alarms_judged(alarms::firing(&r)),
+                    "stale_firing": alarms_judged(alarms::stale_firing(&r)),
+                })
+            }
+            "owner_set" => {
+                let seed = match &case["seed"] {
+                    Value::Null => None,
+                    s if s["complete"] == json!(true) => Some(alarms::Seed::Complete {
+                        members: usize::try_from(s["members"].as_u64().expect("members"))
+                            .expect("fits"),
+                    }),
+                    _ => Some(alarms::Seed::Incomplete),
+                };
+                let window = match &case["window"] {
+                    Value::Null => None,
+                    w => Some(alarms::Window {
+                        listened: secs(&w["listened_s"]),
+                        lossless: w["lossless"].as_bool().expect("lossless"),
+                        present_throughout: w["present_throughout"]
+                            .as_bool()
+                            .expect("present_throughout"),
+                    }),
+                };
+                let s = alarms::owner_set(alarms_presence(case), seed, window);
+                json!({"verdict": s.verdict.as_str(), "reason": s.reason.as_str()})
+            }
+            "any_firing" => {
+                let at_least = alarms_severity(&case["at_least"]).expect("at_least");
+                let owners: Vec<(alarms::SetJudged, Vec<AlarmRead>)> = case["owners"]
+                    .as_array()
+                    .expect("owners")
+                    .iter()
+                    .map(|o| {
+                        let verdict = match o["set"]["verdict"].as_str().expect("verdict") {
+                            "established" => alarms::SetVerdict::Established,
+                            "unobservable" => alarms::SetVerdict::Unobservable,
+                            "not_asked" => alarms::SetVerdict::NotAsked,
+                            other => panic!("verdict {other:?}"),
+                        };
+                        // The set's reason plays no part in the answer.
+                        let set = alarms::SetJudged {
+                            verdict,
+                            reason: alarms::Reason::Answered,
+                        };
+                        let alarms_read = o["alarms"]
+                            .as_array()
+                            .expect("alarms")
+                            .iter()
+                            .map(|a| {
+                                (
+                                    alarms::Judged {
+                                        answer: alarms_answer(&a["answer"]),
+                                        // Nor does an alarm's.
+                                        reason: alarms::Reason::Firing,
+                                    },
+                                    alarms_severity(&a["severity"]),
+                                )
+                            })
+                            .collect();
+                        (set, alarms_read)
+                    })
+                    .collect();
+                let scope: Vec<alarms::OwnerAlarms<'_>> = owners
+                    .iter()
+                    .map(|(set, a)| alarms::OwnerAlarms {
+                        set: *set,
+                        alarms: a,
+                    })
+                    .collect();
+                let a = alarms::any_firing(at_least, &scope);
+                json!({
+                    "answer": a.answer.as_str(),
+                    "reason": a.reason.as_str(),
+                    "firing": a.firing,
+                    "owners": {
+                        "established": a.established,
+                        "unobservable": a.unobservable,
+                        "not_asked": a.not_asked,
+                    },
+                })
+            }
+            "rederives" => {
+                let key = case["alert_key"].as_str().expect("alert_key");
+                let read = (case["payload"] != "delete")
+                    .then(|| alarms::Alarm::from_json(&case["payload"]));
+                let payload = match &read {
+                    None => alarms::Payload::Deleted,
+                    Some(Ok(a)) => alarms::Payload::Alarm(a),
+                    Some(Err(_)) => alarms::Payload::Unreadable,
+                };
+                alarms_judged(alarms::rederives(key, payload))
+            }
+            other => panic!("question {other:?}"),
+        };
+        expect(case, got, &what);
     }
     if bless() {
         write_json(&path, &doc);
