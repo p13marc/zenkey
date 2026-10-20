@@ -9,8 +9,8 @@ file, never an entry here ([`../README.md`](../README.md)).
 The spec-only implementation read 0.3 and ran it live (zk2py round 40):
 1757 of 1757 fixture checks, and `scenarios.md` §1 to §10, 74 of 74,
 against its own owner and against the Rust owner example. It filed three
-findings, F-135 to F-137, and named four guesses. Each finding is
-answered in the text, and the reference — `zenkey_model::alarms`'s
+findings, F-135 to F-137, and named four guesses; 0.4 changed none of
+the text they cite. Each finding is answered in the text, and the reference — `zenkey_model::alarms`'s
 judges, the fleet's reader, zenctl's `alarms` and the runtime's §5 test —
 is brought to it. Written against core 0.34, unchanged.
 
