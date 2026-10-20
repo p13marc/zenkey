@@ -551,8 +551,15 @@ mod tests {
         let r = judge(&o, Severity::Warning);
         assert_eq!(r.any_firing.answer, AlarmAnswerToken::Unobservable);
         assert_eq!(r.any_firing.reason, "scope_incomplete");
-        assert!(r.any_firing.says.contains("timeout"), "{}", r.any_firing.says);
-        assert_eq!(r.any_firing.established, 1, "the owner found is still known whole");
+        assert!(
+            r.any_firing.says.contains("timeout"),
+            "{}",
+            r.any_firing.says
+        );
+        assert_eq!(
+            r.any_firing.established, 1,
+            "the owner found is still known whole"
+        );
         assert_eq!(judgement_exit_code(&r.judgement()), 2);
     }
 }

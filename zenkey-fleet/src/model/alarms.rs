@@ -1696,7 +1696,11 @@ mod tests {
     const B: &str = "zk2/lab/svc/alarms.v1/state/alarms/0000000000000001";
 
     /// A GET of the scope's alarms, asked at `asked_at`, answering `replies`.
-    fn get(b: &mut AlarmBook, asked_at: Instant, replies: Vec<AlarmSample>) -> Vec<AlarmTransition> {
+    fn get(
+        b: &mut AlarmBook,
+        asked_at: Instant,
+        replies: Vec<AlarmSample>,
+    ) -> Vec<AlarmTransition> {
         b.seed(
             SeedRead {
                 asked_at,
@@ -1740,7 +1744,10 @@ mod tests {
             wall(),
         );
         let j = b.reading(A, loss, wall()).unwrap().firing();
-        assert_eq!((j.answer, j.reason), (Answer::Unobservable, Reason::Incomplete));
+        assert_eq!(
+            (j.answer, j.reason),
+            (Answer::Unobservable, Reason::Incomplete)
+        );
         (b, t0, loss)
     }
 
@@ -1764,12 +1771,14 @@ mod tests {
         let j = r.firing();
         assert_eq!((j.answer, j.reason), (Answer::No, Reason::NotHeld));
         assert_eq!(r.stale().reason, Reason::NotFiring);
-        assert!(b.seen(A).is_none(), "the sample held is none (§2.14 step 5)");
         assert!(
-            moved
-                .iter()
-                .any(|t| t.key == A && t.change == AlarmChange::Judged
-                    && t.firing.reason == "not_held"),
+            b.seen(A).is_none(),
+            "the sample held is none (§2.14 step 5)"
+        );
+        assert!(
+            moved.iter().any(|t| t.key == A
+                && t.change == AlarmChange::Judged
+                && t.firing.reason == "not_held"),
             "{moved:?}"
         );
         assert_eq!(
@@ -1785,7 +1794,12 @@ mod tests {
         // A put of A after that GET is a raise, read as any other.
         let again = heal + Duration::from_secs(2);
         let t = b
-            .sample(put(again, 0, doc("warning", "firing", 9), AlarmVia::Subscription))
+            .sample(put(
+                again,
+                0,
+                doc("warning", "firing", 9),
+                AlarmVia::Subscription,
+            ))
             .unwrap();
         assert_eq!(t.change, AlarmChange::Raised);
     }
@@ -1804,7 +1818,10 @@ mod tests {
         let soon = reseed + Duration::from_secs(60);
         assert_eq!(b.owner_set(&owner, soon).reason, Reason::WindowShort);
         let j = b.reading(A, soon, wall()).unwrap().firing();
-        assert_eq!((j.answer, j.reason), (Answer::Unobservable, Reason::Incomplete));
+        assert_eq!(
+            (j.answer, j.reason),
+            (Answer::Unobservable, Reason::Incomplete)
+        );
         assert_eq!(
             b.any_firing(Severity::Warning, soon, wall()).reason,
             Reason::OwnerUnobservable
@@ -1833,7 +1850,12 @@ mod tests {
         b.subscribed(t0);
         b.presence_read(&presence(true, Some(ZID)), t0);
         get(&mut b, t0, vec![]);
-        b.sample(put(t0, 1, doc("warning", "firing", 1), AlarmVia::Subscription));
+        b.sample(put(
+            t0,
+            1,
+            doc("warning", "firing", 1),
+            AlarmVia::Subscription,
+        ));
         let asked = t0 + Duration::from_secs(10);
         let loss = asked + Duration::from_millis(5);
         b.seeding();

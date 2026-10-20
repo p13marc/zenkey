@@ -779,7 +779,10 @@ async fn s5_a_restart_mid_incident() {
     // it deleted before its token.
     at_new_token(&s.log, before.len()).await;
     let at_token = get(&g).await;
-    assert!(at_token.complete, "the GET at the token ran to its final reply");
+    assert!(
+        at_token.complete,
+        "the GET at the token ran to its final reply"
+    );
     for (k, doc) in [(A_KEY, &a_doc), (b_key.as_str(), &b_doc)] {
         let c = reply(&at_token, k).unwrap_or_else(|| panic!("{k} answered at the token"));
         let Current::Value { sample, .. } = c else {
@@ -1077,7 +1080,9 @@ async fn a_re_mint_puts_every_alarm_again() {
     presence_of(&rs, None).await;
     seen_by(&os).await;
     let raised = a.raise(alarm_a(Severity::Warning)).await.unwrap().document;
-    let first = deliveries(&s.log, A_KEY, 1).await[0].stamp.expect("stamped");
+    let first = deliveries(&s.log, A_KEY, 1).await[0]
+        .stamp
+        .expect("stamped");
     let g = reader(&rs);
     let n = snapshot(&s.log).len();
     svc.new_epoch().await.unwrap();

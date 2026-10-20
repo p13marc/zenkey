@@ -817,7 +817,9 @@ pub struct Reading<'a> {
     /// at [`TTL`]. A GET among them is the reader's seed, made after any
     /// loss its subscription had (core §4.2): one that answered this key,
     /// with a value or a `reply_del`, heals the loss for it; one that drew
-    /// nothing for it does not (text 0.2, F-128).
+    /// nothing for it does not (text 0.2, F-128), unless it established the
+    /// owner's alarms and left the key out ([`Reading::left_out`], text
+    /// 0.5).
     pub observations: &'a [Observation],
     /// The latest sample read, or `None` when none was.
     pub latest: Option<Latest>,
