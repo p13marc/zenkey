@@ -831,8 +831,14 @@ class ChangeReporter:
             out.append(Report(None, UNOBSERVABLE, "incomplete", None, "loss"))
             self.loss_reported = True
         for key in gone:
-            last = self.reported.pop(key, None)
+            # §2.16: a key with no report has nothing to clear, and is
+            # forgotten: a reappearance is a first answer, which "moves from
+            # no report". A key with a report keeps it, so a reappearance is
+            # compared with it: one last reported yes or no is reported
+            # gone (neither) and keeps that report, so a later no clears it.
+            last = self.reported.get(key)
             if last is not None and last[0] != "neither":
+                self.reported[key] = ("neither", None)
                 out.append(Report(key, UNOBSERVABLE, "not_read", None, "gone"))
         for key in sorted(readings):
             a, severity, change = readings[key]
@@ -1340,11 +1346,10 @@ class AlarmsReader:
         """§2.15 "Whole" (0.5, 0.6): a presence read of the scope now, dated
         by the instant it was asked. Whether it is whole is
         :meth:`scope_whole`'s, at the instant the second question is asked."""
-        asked = time.monotonic_ns()
         sr = owners_by_presence(self.session, systems, services)
         for a in sr.owners:
             self.add_owner(a)
-        return ScopeRead(sr.owners, sr.whole, asked_ns=asked)
+        return sr
 
     def scope_whole(self, sr: ScopeRead) -> bool:
         """§2.15 "Whole": the presence read ran to its final reply, and "a
@@ -1403,8 +1408,9 @@ class ScopeRead:
 def presence_read_whole(complete: bool, asked_ns: int | None, losses: Iterable[int]) -> bool:
     """§2.15 "Whole" (0.6): a presence read that ran to its final reply,
     "dated as a GET is, by the instant it was asked: a loss heard at or
-    after that instant counts against it, wherever its replies arrive"."""
-    return complete and (asked_ns is None or not any(t >= asked_ns for t in losses))
+    after that instant counts against it, wherever its replies arrive". A
+    read with no ask on record cannot be dated, so it is not whole."""
+    return complete and asked_ns is not None and not any(t >= asked_ns for t in losses)
 
 
 def owners_by_presence(tool: Any, systems: str = "*", services: str = "*") -> ScopeRead:
@@ -1412,8 +1418,10 @@ def owners_by_presence(tool: Any, systems: str = "*", services: str = "*") -> Sc
     whether ``alarms.v1`` is theirs is each descriptor's (§2.14 step 2)."""
     from . import live
 
+    asked = time.monotonic_ns()
     pres = live.list_presence(tool, f"zk2/{systems}/{services}/@zk/**")
-    return ScopeRead(sorted({f"{p['system']}/{p['service']}" for p in pres.instances}), whole=pres.complete)
+    return ScopeRead(sorted({f"{p['system']}/{p['service']}" for p in pres.instances}), whole=pres.complete,
+                     asked_ns=asked)
 
 
 def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: str = "*",

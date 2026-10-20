@@ -949,7 +949,13 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                             trust=bus.trust)
         bus.extra.append(t)
 
-        scope_now: list[al.ScopeRead] = [al.ScopeRead([])]
+        scope_now: list[al.ScopeRead | None] = [None]
+
+        def scope_whole() -> bool:
+            # the presence read scope() made, asked at the question (0.6)
+            sr = scope_now[0]
+            assert sr is not None, "no presence read of the scope: scope() was not called"
+            return t.scope_whole(sr)
         reporter = al.ChangeReporter()
 
         def scope(get: bool = True) -> tuple[list[al.OwnerReading], list[str]]:
@@ -982,10 +988,10 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "1. T finds lab/b by its descriptor, though it holds no alive/alarms.v1 token (§2.13)",
                      "lab/b" in by and by["lab/b"].descriptor == {"lists": True, "token": False} and "lab/b" not in alive,
                      f"{by.get('lab/b') and by['lab/b'].descriptor}, alive {alive}")
-        w = al.any_firing("warning", [r.owner_read(h) for r in reads], t.scope_whole(scope_now[0]))
+        w = al.any_firing("warning", [r.owner_read(h) for r in reads], scope_whole())
         report.check(sec, "1. at warning: yes, any_firing, 1", (w["answer"], w["reason"], w["firing"]) ==
                      (al.YES, "any_firing", 1), f"{w}")
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads], t.scope_whole(scope_now[0]))
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads], scope_whole())
         report.check(sec, "1. at critical: unobservable, owner_unobservable",
                      (c["answer"], c["reason"]) == (al.UNOBSERVABLE, "owner_unobservable"), f"{c}")
         report.check(sec, "1. lab/a established (answered), lab/b not (window_short)",
@@ -1000,7 +1006,7 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             time.sleep(0.2)
         reads, _ = scope()
         by = {r.address: r for r in reads}
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads], t.scope_whole(scope_now[0]))
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads], scope_whole())
         report.check(sec, f"2. a window over {h.ttl_s} s, lossless, both present: at critical no, none_firing",
                      (c["answer"], c["reason"]) == (al.NO, "none_firing"), f"{c}, window {by['lab/b'].window}")
         report.check(sec, "2. lab/b established by its window",
@@ -1011,7 +1017,7 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         ob.raise_(B, "critical")
         time.sleep(0.5)
         reads, _ = scope()
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads], t.scope_whole(scope_now[0]))
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads], scope_whole())
         report.check(sec, "3. lab/b raises B at critical: yes, any_firing, 1",
                      (c["answer"], c["reason"], c["firing"]) == (al.YES, "any_firing", 1), f"{c}")
         got = report_changes(reads)

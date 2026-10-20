@@ -1135,6 +1135,42 @@ def _reporter_loss() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _reporter_gone() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.6 §2.16 and a key gone from the whole scope's readings:
+    a key with no report (a first neither of the key's own, not reported)
+    is forgotten, so a reappearance is a first answer; a key with a report
+    keeps it, so a reappearance is compared with it (review of PR #814)."""
+    from . import alarms
+
+    yes, no = alarms.Answer(alarms.YES, "firing"), alarms.Answer(alarms.NO, "resolved")
+    stale = alarms.Answer(alarms.UNOBSERVABLE, "stale")
+    other = {"o": (yes, "info", None)}
+
+    def run(*steps: Any) -> list[list[tuple[Any, ...]]]:
+        rep = alarms.ChangeReporter()
+        out = []
+        for st in steps:
+            feed = dict(other)
+            if st is not None:
+                feed["k"] = (st, "warning", None)
+            out.append([(x.key, x.answer, x.reason) for x in rep.update(feed) if x.key != "o"])
+        return out
+
+    label = "alarms.v1 0.6 §2.16, a key gone from the scope"
+    gone = ("k", "unobservable", "not_read")
+    return [
+        (f"{label}: last reported yes, gone, back at no: gone reported, and the no clears it",
+         run(yes, None, no), [[("k", "yes", "firing")], [gone], [("k", "no", "resolved")]]),
+        (f"{label}: last reported neither (stale after yes), gone, back at no: the no clears it",
+         run(yes, stale, None, no), [[("k", "yes", "firing")], [("k", "unobservable", "stale")], [],
+                                     [("k", "no", "resolved")]]),
+        (f"{label}: a first neither of the key's own, not reported, gone, back stale: nothing; then yes",
+         run(stale, None, stale, yes), [[], [], [], [("k", "yes", "firing")]]),
+        (f"{label}: no report, gone, back at no: a first answer, not reported",
+         run(no, None, no), [[], [], []]),
+    ]
+
+
 def _presence_dating_cases() -> list[tuple[str, Any, Any]]:
     """alarms.v1 0.6 §2.15 "Whole": a presence read asked at 10 s; a loss at
     or after its ask counts against it, a loss before it does not."""
@@ -1145,7 +1181,9 @@ def _presence_dating_cases() -> list[tuple[str, Any, Any]]:
             want in [("a loss at 9 s, before the ask: whole", True, [9], True),
                      ("a loss at 10 s, the ask's instant: not whole", True, [10], False),
                      ("a loss at 12 s, its replies perhaps already in: not whole", True, [12], False),
-                     ("no loss, but the read possibly incomplete: not whole", False, [], False)]]
+                     ("no loss, but the read possibly incomplete: not whole", False, [], False)]] + [
+        (f"{label}: a read with no ask on record cannot be dated: not whole",
+         alarms.presence_read_whole(True, None, []), False)]
 
 
 def _reporter_first_answers() -> list[tuple[str, Any, Any]]:
@@ -1207,7 +1245,8 @@ def family_readings(root: Path) -> list[Result]:
 
     out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
-        + _reporter_loss() + _reporter_first_answers() + _presence_dating_cases() + _left_out_cases()
+        + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
+        + _left_out_cases()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 

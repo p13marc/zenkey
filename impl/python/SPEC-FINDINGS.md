@@ -6937,5 +6937,24 @@ reports no first neither, so it never needs the classification.
 **Wording:** name these five in one list or the other, or close the lists:
 "any other neither is the reader's own sight".
 
+**After review of PR #814** (zk2py's code; no finding changed):
+- **A key gone from the whole scope.**
+  - A key with no report is forgotten, and a reappearance is a first
+    answer. That is §2.16's "moves from no report", and it holds for a
+    first neither of the key's own that zk2py chose not to report too.
+  - A key with a report now keeps it. Before, one last reported yes or no
+    was reported gone (`unobservable`, `not_read`) and then forgotten, so
+    a reappearance at **no** read as a first answer and was not reported.
+    That left the gone report standing, though a report then existed for
+    the no to clear. A key last reported neither had the same fault.
+  - `readings` has four cases. The old reporter fails the two where a key
+    had a report.
+- **A presence read with no ask** is not whole. `owners_by_presence` dates
+  every read it makes, `scope_read` takes that ask, and §10 asserts its
+  scope read was made before it uses it.
+
+`just py-conformance`: 1866 of 1866 (`readings` 116). `just py-alarms`: 80
+of 80 on each owner.
+
 **Where zk2py's reading of alarms.v1 0.6 needed a guess, beyond the
 findings:** none.
