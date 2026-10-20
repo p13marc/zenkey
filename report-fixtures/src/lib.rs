@@ -271,6 +271,34 @@ pub fn doctor_report() -> DoctorReport {
                 "unused",
             ),
             CheckReport::not_asked(CheckId::ConfigDesired),
+            // alarms.v1 (#800, AC): a phantom key, an error; the stale
+            // question unobservable without --clocks-synced.
+            CheckReport::of(
+                CheckId::AlarmKey,
+                vec![finding(
+                    CheckId::AlarmKey,
+                    DoctorSeverity::Error,
+                    "zk2/lab/liar/alarms.v1/state/alarms/0000000000000001",
+                    "the key is not its document's: the document derives a659f813308ad1da — a \
+                     phantom of another derivation, of a renamed rule, or an owner that hashed a \
+                     host-scoped label (alarms.v1 §2.2, §2.9)",
+                )],
+                vec![],
+                "unused",
+            ),
+            CheckReport::of(
+                CheckId::AlarmStale,
+                vec![],
+                vec![Unjudged {
+                    subject: "zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da".into(),
+                    reason: "this reader's clock is not trusted to the HLC delta against the \
+                             stamping clock (clock_untrusted); a reply is aged only on the \
+                             operator's word that the clocks agree (--clocks-synced, \
+                             freshness.v1 §2.6)"
+                        .into(),
+                }],
+                "unused",
+            ),
         ],
         unobservable: None,
     }
@@ -456,6 +484,274 @@ pub fn health_report() -> HealthReport {
             unobservable: 1,
             not_asked: 1,
         },
+        unobservable: None,
+    }
+}
+
+/// `zenctl alarms` (#800, AC): §5's answers in every token — a firing
+/// alarm, a phantom key, an unconfirmed one past its horizon, a resolved
+/// one, and an absent owner's alarm shown last-known — over owners each
+/// counted by its verdict, the scope's answer the finding.
+pub fn alarms_report() -> AlarmsReport {
+    use zenkey_model::alarms::{Alarm, AlarmRef, Severity, State};
+    let answer = |answer, reason: &str, says: &str| AlarmAnswer {
+        answer,
+        reason: reason.into(),
+        says: says.into(),
+    };
+    let doc = |rule: &str, severity, state, summary: &str, labels: &[(&str, &str)]| Alarm {
+        timestamp: 1_760_950_000_000,
+        observed_at_ms: None,
+        rule: rule.into(),
+        severity,
+        state,
+        summary: summary.into(),
+        category: None,
+        labels: labels
+            .iter()
+            .map(|(n, v)| ((*n).to_owned(), (*v).to_owned()))
+            .collect(),
+    };
+    let a = doc(
+        "link_down",
+        Severity::Warning,
+        State::Firing,
+        "link to r2 down on eth0",
+        &[("peer", "r2"), ("port", "eth0")],
+    );
+    let stamp = |clock: &str| {
+        Some(Stamp {
+            time: "2026-10-20T08:00:00.000000000Z".into(),
+            clock: clock.into(),
+        })
+    };
+    let r = |system: &str, service: &str, key: &str| AlarmRef {
+        system: system.into(),
+        service: service.into(),
+        alert_key: key.into(),
+    };
+    let row = |system: &str, service: &str, key: &str| AlarmRow {
+        key: format!("zk2/{system}/{service}/alarms.v1/state/alarms/{key}"),
+        alarm: r(system, service, key),
+        firing: answer(AlarmAnswerToken::NotAsked, "absent", "s"),
+        stale: answer(AlarmAnswerToken::NotAsked, "absent", "s"),
+        rederives: answer(AlarmAnswerToken::NotAsked, "no_document", "s"),
+        severity: None,
+        latest: None,
+        problems: vec![],
+        foreign_stamp: false,
+        last_known: None,
+    };
+    let seen = |latest, document: Option<Alarm>, clock: &str, via| {
+        Some(AlarmSeen {
+            latest,
+            document,
+            invalid: None,
+            stamp: stamp(clock),
+            via,
+        })
+    };
+    let firing = AlarmRow {
+        firing: answer(
+            AlarmAnswerToken::Yes,
+            "firing",
+            "its owner says it fires, and confirmed it within 900 s",
+        ),
+        stale: answer(
+            AlarmAnswerToken::No,
+            "fresh",
+            "its owner confirmed it within 900 s",
+        ),
+        rederives: answer(
+            AlarmAnswerToken::Yes,
+            "strict",
+            "the key is the document's, by the strict recipe",
+        ),
+        severity: Some(Severity::Warning),
+        latest: seen(AlarmLatest::Firing, Some(a.clone()), "a1", AlarmVia::Get),
+        ..row("lab", "a", "a659f813308ad1da")
+    };
+    let phantom = AlarmRow {
+        firing: answer(
+            AlarmAnswerToken::Yes,
+            "firing",
+            "its owner says it fires, and confirmed it within 900 s",
+        ),
+        stale: answer(
+            AlarmAnswerToken::No,
+            "fresh",
+            "its owner confirmed it within 900 s",
+        ),
+        rederives: answer(
+            AlarmAnswerToken::No,
+            "mismatch",
+            "the key is not the one its document derives",
+        ),
+        severity: Some(Severity::Warning),
+        latest: seen(
+            AlarmLatest::Firing,
+            Some(a.clone()),
+            "b2",
+            AlarmVia::Subscription,
+        ),
+        ..row("lab", "liar", "0000000000000001")
+    };
+    let disk = doc(
+        "disk_full",
+        Severity::Critical,
+        State::Firing,
+        "/var is 97% full",
+        &[("mount", "/var")],
+    );
+    let hung = AlarmRow {
+        firing: answer(
+            AlarmAnswerToken::Unobservable,
+            "stale",
+            "its owner has not confirmed it within 900 s",
+        ),
+        stale: answer(
+            AlarmAnswerToken::Yes,
+            "stale",
+            "its owner has not confirmed it within 900 s",
+        ),
+        rederives: answer(
+            AlarmAnswerToken::Yes,
+            "strict",
+            "the key is the document's, by the strict recipe",
+        ),
+        severity: Some(Severity::Critical),
+        latest: seen(AlarmLatest::Firing, Some(disk), "c3", AlarmVia::Get),
+        ..row(
+            "lab",
+            "hung",
+            &zenkey_model::alarms::derive("disk_full", [("mount", "/var")]).key,
+        )
+    };
+    let mut fan = doc(
+        "fan_failed",
+        Severity::Info,
+        State::Resolved,
+        "fan 2 back",
+        &[("fan", "2")],
+    );
+    fan.category = Some("sensor_health".into());
+    let resolved = AlarmRow {
+        firing: answer(
+            AlarmAnswerToken::No,
+            "resolved",
+            "its owner put it resolved",
+        ),
+        stale: answer(AlarmAnswerToken::NotAsked, "not_firing", "it is not firing"),
+        rederives: answer(
+            AlarmAnswerToken::Yes,
+            "strict",
+            "the key is the document's, by the strict recipe",
+        ),
+        severity: Some(Severity::Info),
+        latest: seen(
+            AlarmLatest::Resolved,
+            Some(fan),
+            "a1",
+            AlarmVia::Subscription,
+        ),
+        ..row(
+            "lab",
+            "a",
+            &zenkey_model::alarms::derive("fan_failed", [("fan", "2")]).key,
+        )
+    };
+    let gone = AlarmRow {
+        firing: answer(
+            AlarmAnswerToken::NotAsked,
+            "absent",
+            "its owner is absent: presence's word, and its alarms are last-known",
+        ),
+        last_known: Some(LastKnownAlarm {
+            archive: "lab/archive".into(),
+            document: Some(a),
+            deleted: false,
+            stamp: stamp("d4"),
+            confirmed: true,
+        }),
+        ..row("lab", "svc", "a659f813308ad1da")
+    };
+    let owner = |address: &str, known_by: Vec<KnownBy>, verdict, reason: &str, says: &str, n| {
+        AlarmOwnerRow {
+            address: address.into(),
+            known_by,
+            verdict,
+            reason: reason.into(),
+            says: says.into(),
+            alarms: n,
+            window_s: None,
+        }
+    };
+    AlarmsReport {
+        namespace: "acme".into(),
+        selector: "zk2/lab/*/alarms.v1/state/alarms/*".into(),
+        presence: Some(AlarmsPresence {
+            selector: "zk2/lab/*/@zk/**".into(),
+            complete: true,
+            services: 3,
+            listing: 3,
+        }),
+        face: None,
+        window_s: None,
+        clock: ClockGround::DeploymentWord,
+        asked: vec![
+            "zk2/lab/*/@zk/**".into(),
+            "zk2/lab/*/alarms.v1/state/alarms/*".into(),
+        ],
+        any_firing: AlarmScopeAnswer {
+            at_least: Severity::Warning,
+            answer: AlarmAnswerToken::Yes,
+            reason: "any_firing".into(),
+            says: "an alarm at or above the severity fires".into(),
+            firing: 2,
+            established: 2,
+            unobservable: 1,
+            not_asked: 1,
+        },
+        owners: vec![
+            owner(
+                "lab/a",
+                vec![KnownBy::Presence],
+                AlarmSetVerdict::Established,
+                "answered",
+                "its owner answered a complete GET",
+                2,
+            ),
+            owner(
+                "lab/hung",
+                vec![KnownBy::Presence],
+                AlarmSetVerdict::Established,
+                "answered",
+                "its owner answered a complete GET",
+                1,
+            ),
+            owner(
+                "lab/liar",
+                vec![KnownBy::Presence],
+                AlarmSetVerdict::Unobservable,
+                "seed_incomplete",
+                "the GET of its alarms ended at its timeout, or with an error",
+                1,
+            ),
+            owner(
+                "lab/svc",
+                vec![KnownBy::Archive],
+                AlarmSetVerdict::NotAsked,
+                "absent",
+                "its owner is absent: presence's word, and its alarms are last-known",
+                0,
+            ),
+        ],
+        alarms: {
+            let mut v = vec![resolved, firing, hung, phantom, gone];
+            v.sort_by(|a, b| a.key.cmp(&b.key));
+            v
+        },
+        lost: 0,
         unobservable: None,
     }
 }

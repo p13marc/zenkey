@@ -110,6 +110,9 @@ const CONFIG_CHECKS: [CheckId; 4] = [
     CheckId::ConfigDesired,
 ];
 
+/// The checks that read `alarms.v1` (#800, AC).
+const ALARM_CHECKS: [CheckId; 2] = [CheckId::AlarmKey, CheckId::AlarmStale];
+
 /// What a doctor run asks.
 #[derive(Debug, Clone)]
 pub struct DoctorSpec {
@@ -164,6 +167,12 @@ impl DoctorSpec {
     /// `config.v1/state/**` (#768, CC).
     fn asks_config(&self) -> bool {
         CONFIG_CHECKS.into_iter().any(|c| self.asks(c))
+    }
+
+    /// Whether the run asks an `alarms.v1` check, which reads every
+    /// owner's `alarms.v1/state/alarms/*` (#800, AC).
+    fn asks_alarms(&self) -> bool {
+        ALARM_CHECKS.into_iter().any(|c| self.asks(c))
     }
 
     /// Whether the run asks `check`.
@@ -243,6 +252,10 @@ pub struct DoctorObservation {
     /// with the first when `config-projection` is asked. Empty when no
     /// `config-*` check was asked.
     pub config: Vec<Result<ConfigGet, String>>,
+    /// `alarms.v1`'s reading (#800, AC): one S4 GET of every owner's
+    /// `alarms.v1/state/alarms/*`, with the second presence read. `None`
+    /// when no `alarm-*` check was asked.
+    pub alarms: Option<Result<crate::model::alarms::SeedRead, String>>,
 }
 
 /// The routers' admin space, as two reads found it.
@@ -375,6 +388,7 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
             }),
         health: p.health,
         config: p.config,
+        alarms: p.alarms,
     }
 }
 
@@ -388,6 +402,7 @@ struct PresencePhase {
     stamps: BTreeMap<(Addr, IfaceId), Result<StateStamps, String>>,
     health: Vec<Result<HealthGet, String>>,
     config: Vec<Result<ConfigGet, String>>,
+    alarms: Option<Result<crate::model::alarms::SeedRead, String>>,
 }
 
 async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> PresencePhase {
@@ -519,8 +534,15 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             None
         }
     };
-    let (contracts, archives, stamps, second, second_config) =
-        tokio::join!(contracts, archives, stamps, second, second_config);
+    let alarms = async {
+        if spec.asks_alarms() {
+            Some(crate::bus::alarms::get(s, crate::model::alarms::ALL, t).await)
+        } else {
+            None
+        }
+    };
+    let (contracts, archives, stamps, second, second_config, alarms) =
+        tokio::join!(contracts, archives, stamps, second, second_config, alarms);
     readings.extend(second);
     config_readings.extend(second_config);
     PresencePhase {
@@ -531,6 +553,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         stamps,
         health: readings,
         config: config_readings,
+        alarms,
     }
 }
 
@@ -801,6 +824,8 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::ConfigOverdue => config_overdue(p),
                 CheckId::ConfigUnpersisted => config_unpersisted(p, spec),
                 CheckId::ConfigDesired => config_desired(p, spec),
+                CheckId::AlarmKey => alarm_key(p, spec),
+                CheckId::AlarmStale => alarm_stale(p, spec),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -2252,6 +2277,195 @@ fn health_unjudged(s: &HealthSubject, what: &str) -> Unjudged {
 }
 
 /// The clean reason's tail: the services not asked.
+// ─── alarms.v1 (#800, AC) ───────────────────────────────────────────────────
+
+/// Every owner's alarms as the run's GET read them, beside the second
+/// presence read: a reader's book with no subscription (§2.14 with its GET
+/// alone), the reply's stamp aged on the operator's word only.
+fn alarm_book(
+    p: &Presence<'_>,
+    spec: &DoctorSpec,
+) -> std::result::Result<(crate::model::alarms::AlarmBook, bool), String> {
+    use crate::model::alarms::{AlarmBook, AlarmScope, BookSpec};
+    let read = match &p.obs.alarms {
+        None => return Err("no GET of the owners' alarms.v1/state/alarms/* was made".into()),
+        Some(Err(e)) => {
+            return Err(format!(
+                "the GET of the owners' alarms could not be made: {e}"
+            ));
+        }
+        Some(Ok(r)) => r,
+    };
+    let mut bs = BookSpec::new(spec.timeout);
+    bs.clocks_synced = spec.clocks_synced;
+    let mut book = AlarmBook::new(AlarmScope::all(), bs);
+    let (now, wall) = (std::time::Instant::now(), std::time::SystemTime::now());
+    book.presence_read(p.after, now);
+    book.seed(read.clone(), now, wall);
+    Ok((book, read.complete))
+}
+
+/// The alarms' GET ended at its timeout or with an error reply: a reply it
+/// did not bring back is unjudged (core §2.7).
+fn get_incomplete(what: &str) -> Unjudged {
+    unjudged(
+        crate::model::alarms::ALL,
+        format!("the GET ended at its timeout or with an error reply, so {what}"),
+    )
+}
+
+/// How many present owners' descriptors list `alarms.v1`, said beside a
+/// clean verdict.
+fn alarm_listing(book: &crate::model::alarms::AlarmBook) -> usize {
+    book.owners()
+        .filter(|a| {
+            matches!(
+                book.presence_of(a),
+                zenkey_model::alarms::Presence::Present(
+                    zenkey_model::alarms::Listing::Listed { .. }
+                )
+            )
+        })
+        .count()
+}
+
+/// `alarm-key` (`alarms.v1` §2.2, §2.3, §5): an alarm key that does not
+/// re-derive from its document — a phantom of another derivation, of a
+/// renamed rule, or an owner that hashed a host-scoped label — is an error;
+/// one that re-derives only through the sanitizing step is a warning, the
+/// SHOULD of §2.3 broken. A put that does not read re-derives nothing:
+/// unjudged. A finding stands on an incomplete GET; clean needs a complete
+/// one.
+fn alarm_key(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    const C: CheckId = CheckId::AlarmKey;
+    let (book, complete) = match alarm_book(p, spec) {
+        Ok(b) => b,
+        Err(why) => return CheckReport::unobservable(C, why),
+    };
+    let (now, wall) = (std::time::Instant::now(), std::time::SystemTime::now());
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let mut strict = 0usize;
+    for key in book.keys() {
+        let Some(r) = book.reading(key, now, wall) else {
+            continue;
+        };
+        let j = r.rederives();
+        let derived = book
+            .seen(key)
+            .and_then(|s| s.document)
+            .map(|d| d.alert_key())
+            .unwrap_or_default();
+        match (j.answer, j.reason) {
+            (zenkey_model::alarms::Answer::No, _) => findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                key,
+                format!(
+                    "the key is not its document's: the document derives {derived} — a phantom \
+                     of another derivation, of a renamed rule, or an owner that hashed a \
+                     host-scoped label (alarms.v1 §2.2, §2.9)"
+                ),
+            )),
+            (zenkey_model::alarms::Answer::Yes, zenkey_model::alarms::Reason::Sanitized) => {
+                findings.push(finding(
+                    C,
+                    DoctorSeverity::Warning,
+                    key,
+                    "the key is its document's only through the sanitizing step: the owner puts \
+                     input that is not framed, which alarms.v1 §2.3 says it SHOULD NOT",
+                ))
+            }
+            (zenkey_model::alarms::Answer::Yes, _) => strict += 1,
+            (zenkey_model::alarms::Answer::Unobservable, _) => undecided.push(unjudged(
+                key,
+                format!("{} ({})", j.reason.says(), j.reason.as_str()),
+            )),
+            (zenkey_model::alarms::Answer::NotAsked, _) => {}
+        }
+    }
+    if !complete && findings.is_empty() {
+        undecided.push(get_incomplete(
+            "an alarm the GET did not bring back may not re-derive",
+        ));
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{strict} alarm key(s), each its document's by the strict recipe (alarms.v1 §2.2); \
+             {} present service(s) list alarms.v1",
+            alarm_listing(&book)
+        ),
+    )
+}
+
+/// `alarm-stale` (`alarms.v1` §2.7, §2.14, §5): a firing alarm of a present,
+/// listed owner, its latest put the present instance's, not confirmed
+/// within 900 s — about the owner, which broke §2.7's confirmation or whose
+/// clock is ahead, which the alarm alone does not tell apart. A warning, as
+/// `health-stale` is. A reply is aged only on the operator's word
+/// (`--clocks-synced`): the doctor listens to no alarm long enough to
+/// measure a clock.
+fn alarm_stale(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    const C: CheckId = CheckId::AlarmStale;
+    let (book, complete) = match alarm_book(p, spec) {
+        Ok(b) => b,
+        Err(why) => return CheckReport::unobservable(C, why),
+    };
+    let (now, wall) = (std::time::Instant::now(), std::time::SystemTime::now());
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let mut fresh = 0usize;
+    for key in book.keys() {
+        let Some(r) = book.reading(key, now, wall) else {
+            continue;
+        };
+        let j = r.stale();
+        match j.answer {
+            zenkey_model::alarms::Answer::Yes => findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                key,
+                "its owner holds its instance token and lists alarms.v1, and the alarm fires \
+                 unconfirmed beyond its 900 s horizon: stale, never firing now and never \
+                 resolved; the cause (its owner hung, its writer closed, its clock ahead) is \
+                 unobservable from the alarm alone (alarms.v1 §2.7, §5)",
+            )),
+            zenkey_model::alarms::Answer::No => fresh += 1,
+            zenkey_model::alarms::Answer::Unobservable => {
+                let hint = if j.reason.as_str() == "clock_untrusted" {
+                    "; a reply is aged only on the operator's word that the clocks agree \
+                     (--clocks-synced, freshness.v1 §2.6)"
+                } else {
+                    ""
+                };
+                undecided.push(unjudged(
+                    key,
+                    format!("{} ({}){hint}", j.reason.says(), j.reason.as_str()),
+                ));
+            }
+            zenkey_model::alarms::Answer::NotAsked => {}
+        }
+    }
+    if !complete && findings.is_empty() {
+        undecided.push(get_incomplete(
+            "an alarm the GET did not bring back may be stale",
+        ));
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{fresh} firing alarm(s), each confirmed within its 900 s horizon; {} present \
+             service(s) list alarms.v1",
+            alarm_listing(&book)
+        ),
+    )
+}
+
 fn unlisted_note(n: usize) -> String {
     if n == 0 {
         String::new()
@@ -4899,5 +5113,130 @@ mod tests {
                 .verdict
                 .is_unobservable()
         );
+    }
+
+    // ─── alarms.v1 (#800, AC) ──────────────────────────────────────────────
+
+    /// `lab/al` lists alarms.v1, its descriptor's `meta.zid` the stamps'
+    /// clock, and its GET answers `replies`: each `(key, document, age)`.
+    fn alarms_obs(replies: &[(&str, serde_json::Value, u64)]) -> DoctorObservation {
+        use crate::model::alarms::{AlarmSample, SeedRead};
+        use crate::report::AlarmVia;
+        use zenoh::time::{NTP64, Timestamp, TimestampId};
+        let d: Descriptor = serde_json::from_value(json!({
+            "format": "zk2-descriptor/0.1", "service": "lab/al", "instance": A,
+            "interfaces": [{"iface": "alarms.v1",
+                "contract": format!("sha256:{}", zenkey::alarms::FINGERPRINT),
+                "minor": 0, "token": false}],
+            "meta": {"zid": "a1"},
+        }))
+        .unwrap();
+        let o = observed(
+            &[inst("lab/al", A)],
+            vec![(("lab/al", A), DescriptorRead::Served(Box::new(d)))],
+        );
+        let mut o = obs(o, &[], &[]);
+        let now = std::time::SystemTime::now();
+        let at = std::time::Instant::now();
+        o.alarms = Some(Ok(SeedRead {
+            asked_at: at,
+            complete: true,
+            discarded: 0,
+            replies: replies
+                .iter()
+                .map(|(key, doc, age)| AlarmSample {
+                    key: format!("zk2/lab/al/alarms.v1/state/alarms/{key}"),
+                    delete: false,
+                    payload: serde_json::to_vec(doc).unwrap(),
+                    stamp: Some(Timestamp::new(
+                        NTP64::from(
+                            (now - Duration::from_secs(*age))
+                                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                                .unwrap(),
+                        ),
+                        "a1".parse::<TimestampId>().unwrap(),
+                    )),
+                    at,
+                    wall: now,
+                    via: AlarmVia::Get,
+                })
+                .collect(),
+        }));
+        o
+    }
+
+    fn alarm(rule: &str, labels: serde_json::Value) -> serde_json::Value {
+        json!({"timestamp": 1, "rule": rule, "severity": "warning", "state": "firing",
+               "summary": "s", "labels": labels})
+    }
+
+    /// `alarm-key` (§2.2, §2.3, §5): a key that is not its document's is an
+    /// error, one that is only through the sanitizing step a warning, a
+    /// strict one clean — scenarios.md §9's three keys.
+    #[test]
+    fn alarm_key_finds_a_phantom_and_warns_of_a_sanitized_key() {
+        let a = alarm("link_down", json!({"peer": "r2", "port": "eth0"}));
+        let unframed = alarm("link\ndown", json!({"port": "22"}));
+        let sanitized = zenkey_model::alarms::derive("link\ndown", [("port", "22")]).key;
+        assert_eq!(sanitized, "16991d91fb818ca6", "scenarios.md §9's key");
+        let o = alarms_obs(&[
+            ("0000000000000001", a.clone(), 10),
+            (&sanitized, unframed, 10),
+            ("a659f813308ad1da", a, 10),
+        ]);
+        let r = check(&o, CheckId::AlarmKey);
+        assert_eq!(r.verdict, Judgement::Established, "{r:#?}");
+        let by: Vec<(&str, DoctorSeverity)> = r
+            .findings
+            .iter()
+            .map(|f| (f.subject.rsplit('/').next().unwrap(), f.severity))
+            .collect();
+        assert_eq!(
+            by,
+            [
+                ("0000000000000001", DoctorSeverity::Error),
+                ("16991d91fb818ca6", DoctorSeverity::Warning),
+            ]
+        );
+        assert!(
+            r.findings[0].evidence.contains("a659f813308ad1da"),
+            "{r:#?}"
+        );
+        let clean = alarms_obs(&[(
+            "a659f813308ad1da",
+            alarm("link_down", json!({"peer": "r2", "port": "eth0"})),
+            10,
+        )]);
+        let r = check(&clean, CheckId::AlarmKey);
+        assert!(
+            matches!(&r.verdict, Judgement::NotEstablished { reason } if reason.contains("1 alarm key")),
+            "{r:#?}"
+        );
+    }
+
+    /// `alarm-stale` (§2.7, §5): a firing alarm of a present, listed owner
+    /// unconfirmed beyond 900 s is the finding; a fresh one clean; without
+    /// the operator's word on the clocks, unobservable, never clean.
+    #[test]
+    fn alarm_stale_finds_an_unconfirmed_firing_alarm_on_the_operators_word() {
+        let a = alarm("link_down", json!({"peer": "r2", "port": "eth0"}));
+        let b = alarm("disk_full", json!({"mount": "/var"}));
+        let b_key = zenkey_model::alarms::derive("disk_full", [("mount", "/var")]).key;
+        let o = alarms_obs(&[("a659f813308ad1da", a, 10), (&b_key, b, 1000)]);
+        let r = health_check(&o, &synced(), CheckId::AlarmStale);
+        let f = found(&r);
+        assert!(f.subject.ends_with(&b_key), "{r:#?}");
+        assert_eq!(f.severity, DoctorSeverity::Warning);
+        let r = health_check(&o, &spec(), CheckId::AlarmStale);
+        assert!(r.verdict.is_unobservable(), "{r:#?}");
+        assert!(
+            r.unjudged
+                .iter()
+                .any(|u| u.reason.contains("--clocks-synced")),
+            "{r:#?}"
+        );
+        let mut none = alarms_obs(&[]);
+        none.alarms = None;
+        assert!(check(&none, CheckId::AlarmStale).verdict.is_unobservable());
     }
 }

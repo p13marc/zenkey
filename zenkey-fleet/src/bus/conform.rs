@@ -297,6 +297,10 @@ pub struct ConformObservation {
     /// window, when a descriptor of it lists `config.v1` (§2.1); `None`
     /// otherwise.
     pub config: Option<ConfigConform>,
+    /// The service's alarms (#800, AC), one S4 GET of its
+    /// `alarms.v1/state/alarms/*`, when a descriptor of it lists
+    /// `alarms.v1` (§2.13); `None` otherwise.
+    pub alarms: Option<std::result::Result<crate::model::alarms::SeedRead, String>>,
 }
 
 impl ConformObservation {
@@ -428,6 +432,27 @@ pub async fn observe(
         }
         Some(config_suite(session, &bus.namespace, &address, o, spec).await)
     };
+    let alarms = async {
+        let Ok(o) = &presence else {
+            return None;
+        };
+        let book = {
+            let mut b = crate::model::alarms::AlarmBook::new(
+                crate::model::alarms::AlarmScope::of(&address),
+                crate::model::alarms::BookSpec::new(t),
+            );
+            b.presence_read(o, std::time::Instant::now());
+            b
+        };
+        if !matches!(
+            book.presence_of(&address),
+            zenkey_model::alarms::Presence::Present(zenkey_model::alarms::Listing::Listed { .. })
+        ) {
+            return None;
+        }
+        let scope = crate::model::alarms::AlarmScope::of(&address);
+        Some(crate::bus::alarms::get(session, scope.alarms_selector(), t).await)
+    };
     let suite = suite(
         bus,
         offline,
@@ -438,9 +463,10 @@ pub async fn observe(
         presence.clone(),
         admin,
     );
-    let (mut obs, health, config) = tokio::join!(suite, health, config);
+    let (mut obs, health, config, alarms) = tokio::join!(suite, health, config, alarms);
     obs.health = health;
     obs.config = config;
+    obs.alarms = alarms;
     obs
 }
 
@@ -477,6 +503,7 @@ async fn suite(
         read_at: None,
         health: None,
         config: None,
+        alarms: None,
     };
     let Ok(fp) = obs.claimed() else {
         return obs;

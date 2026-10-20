@@ -1035,6 +1035,15 @@ pub(crate) enum CheckCmd {
     ///   config-dry-run   a dry run of a hot group's running values answers
     ///                    applied, the revision and the changes as they
     ///                    were (§2.9)
+    ///   alarm-key        when its descriptor lists alarms.v1, every alarm
+    ///                    key it holds re-derives from its document: a key
+    ///                    that is not its document's is the finding, one
+    ///                    only through the sanitizing step a pass naming
+    ///                    §2.3's SHOULD (alarms.v1 §2.2, §2.3)
+    ///   alarm-document   every alarm document it puts is an owner's: strict
+    ///                    JSON of the schema, its times in range,
+    ///                    observed_at_ms not before timestamp nor on a
+    ///                    resolved document (alarms.v1 §2.4)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
