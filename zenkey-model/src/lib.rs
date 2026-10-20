@@ -72,10 +72,17 @@
 //!   liveness evidence), and the checks of a router's block
 //!   (`spec/profiles/link/v1.md`, #769). The router's configuration is the
 //!   generator's.
+//! - [`alarms`]: `alarms.v1`'s key recipe, byte for byte ZenSight's, with
+//!   its sanitizing step; the document and its checks; one key's samples
+//!   read into transitions; a reference to an alarm; and §5's questions,
+//!   on top of [`freshness`] (`spec/profiles/alarms/v1.md`, #800). The
+//!   owner's puts, its confirmations and its adoption at a restart are the
+//!   runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
 
+pub mod alarms;
 pub mod authoring;
 pub mod budget;
 pub mod bundle;
