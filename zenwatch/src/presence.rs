@@ -1102,6 +1102,7 @@ mod tests {
             let sweep = zenkey_fleet::SweepOutcome {
                 doctor: None,
                 presence: Some(p),
+                ..zenkey_fleet::SweepOutcome::default()
             };
             for t in self.set.evaluate(tokio::time::Instant::now(), "t", sweep) {
                 self.watchdog.insert(t.rule, t.to);

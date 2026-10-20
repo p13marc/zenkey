@@ -16,6 +16,7 @@
 
 mod acl;
 pub mod acts;
+mod alarms;
 mod bench;
 mod closing;
 mod config;

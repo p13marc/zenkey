@@ -4,6 +4,131 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-20: the cold reader's round 39, and what the tools settled (#800, AC; #609)
+
+Two readings of 0.2 met here. The spec-only implementation ran it (zk2py
+round 39): 1734 of 1734 fixture checks, `scenarios.md` §1 to §10 against
+its own owner and against the Rust owner example as a black box, 65 of 65
+each. It filed two findings, F-133 and F-134, and named two guesses. The
+reference tools (#800's AC) read the profile across a deployment:
+`zenkey_fleet`'s alarms reader (`bus::alarms`, `model::alarms`), `zenctl
+alarms`, the watchdog's `alert-firing`, the doctor's `alarm-key` and
+`alarm-stale`, and `check conform`'s `alarm-key` and `alarm-document`; they
+run `scenarios.md` §8 to §10. Building them found four more places where
+0.2 left a reader to infer. Written against core 0.34, unchanged.
+
+No model change, and no case that existed before changes: the new cases
+were written by hand and pass as written. The evidence is now
+`documents.json`, 62 cases; `keys.json` 75, `transitions.json` 27 and
+`conclusions.json` 95 are unchanged.
+
+**Answered: the two findings.**
+- **F-133, the owner example's interface** (not the spec). `owner --help`
+  printed one usage line, and a runner found the command word `alarm` by
+  trying words. It now prints the interface a live runner drives, and
+  exits 0: the options, what standard output carries, each command word,
+  and the `alarms.v1` surface whole — `--alarms` and its options, each
+  `alarm` command, the condition's JSON (`{"rule", "severity", "summary",
+  "labels"?, "category"?}`, the rest of the line as written), every answer
+  line, the record file's format (`{"profile": "alarms.v1", "alarms":
+  {<alert key>: <document>}}`), and that an `alarms.v1` contract file of
+  another revision, a copy of the standard one with a short horizon, is
+  implemented on that revision. No answer's format changed.
+  `scenarios.md`'s conventions now name `owner --help` as the agreed
+  interface, and `zenkey/tests/owner_example.rs` pins what it names.
+- **F-134, "nothing after its value"** (§2.4). RFC 8259 writes a JSON text
+  as `ws value ws`, and 0.2 read literally refused a trailing newline. The
+  reference reads what `serde_json` reads, which is RFC 8259's: its strict
+  parser (`zenkey_model::strict::parse_json`) skips `ws` before the value
+  and ends with `serde_json`'s check that only `ws` remains — space,
+  horizontal tab, line feed and carriage return — measured on the four
+  cases below. zk2py's reading stands.
+  - §2.4 now says "nothing after its value but whitespace", and that
+    whitespace is RFC 8259's `ws`, before the value and after it; any other
+    character after it, a form feed or a no-break space included, is text
+    after the value.
+  - `documents.json`: four cases given as their `text`. A trailing newline
+    reads, and so does every `ws` character on both sides; a form feed
+    after the value, and a no-break space, are `json`.
+
+**Answered: the round's other guesses.**
+- **Where a window starts** (§2.15). 0.2's window "runs from its
+  declaration", where core §2.7, which §2.15 cites for lossless and
+  presence, counts a window's span from its declaration plus the reply
+  timeout. zk2py counted from the declaration. §2.15 now counts as core
+  §2.7 does, from the declaration plus the reply timeout (or from the
+  re-seed after a loss), to the window's end, the owner watched one lease
+  and the reply timeout past it; a reader judging at an instant ends its
+  window that long before it. The reference's one-shot reader listens the
+  window asked (`zenctl alarms --for`), then watches its owners a lease and
+  the timeout more, so §10's 905 s counts 904 s over 900. zk2py's reading
+  changes, by the reply timeout, which only the margin feels.
+- **§10 is slow too** (scenarios conventions). Its step 2 listens 905 s. The
+  conventions now name it beside §2 and §6, and the reference's default run
+  takes §10's steps 1 and 3, step 2 in the slow tier.
+
+**Stated: what the tools settled.** Each is the reference's reading, the
+reasons below.
+- **A gap in the owner's presence breaks the window** (§2.15). Core §2.7
+  makes a window over which an owner left, joined or re-minted
+  incomplete, and 0.2 said only how a window recovers from a loss. A
+  reader that listens for hours would then never know an owner whole by
+  its window after one restart. A gap now breaks the window as a loss
+  does, and the window runs again from the first complete GET after it:
+  the new instance puts every alarm it keeps again before it answers a GET
+  (§2.9), so that GET is of the instance the window then listens to.
+  Until one, the owner was not present throughout (`owner_gap`).
+- **A key its owner's answer leaves out holds nothing** (§2.14 step 5). A
+  reader that holds a sample of a key, and whose complete GET the owner
+  answered without the key — the GET that established the owner's alarms
+  — with nothing of the key since that GET was asked, reads the key as
+  holding none: the owner answers every live key (core S2), so its delete
+  went past the tombstone window unheard. With the owner's alarms
+  established, that is **no**, `not_held`. Without it, a reader started
+  before a resolve it did not hear would hold an alarm firing until it went
+  stale.
+- **A reader's stall is a loss** (§2.15). "Lost no delivery" is core
+  §2.7's (0.27): the reader's own queue lost nothing, and its receive path
+  never stalled past the bound. The reference watches its path as `check
+  conform` does (`bus::stall`), and reads a stall, or a transport of its
+  session closing, as a loss at the instant it sees it, healed as one by a
+  GET after it. A path it could not watch is a loss at every re-read.
+- **How a one-shot tool knows of an owner** (§2.15, `scenarios.md` §8).
+  0.2's §8 had T know of the absent owner "from its step 1". A tool whose
+  readings end with its process — `zenctl alarms`, a new process each run
+  — knows of it by the archive's keys instead, which §2.15 names. A live
+  reader (the watchdog's `alert-firing`, a notifier) keeps every owner it
+  found, and the reference's §8 runs both.
+- **Where §5's questions surface.** "Is this alarm firing?" and "is
+  anything firing?" are `zenctl alarms` (a judgement, exit-coded by the
+  second at `--at-least`) and the watchdog's `alert-firing <SEL>
+  [info|warning|critical]`, firing on yes, ok on no, unobservable
+  otherwise, never ok; "does this key re-derive?" is the doctor's
+  `alarm-key`, a mismatch an error and a sanitized key a warning, and
+  `check conform`'s `alarm-key`; "is this firing alarm past its horizon?"
+  is the doctor's `alarm-stale`, a warning, aged only on the operator's word
+  that the clocks agree. `check conform`'s `alarm-document` reads §2.4's
+  owner MUSTs.
+
+**Deliberately not stated.**
+- **A delivery after a loss does not heal it** (§2.14 step 4). A put of a
+  key heard after a loss is newer than anything lost before it, by one
+  owner's order on one key. The reference keeps 0.2's step 4 as written:
+  only a GET that answers the key heals it, so a key raised after a loss
+  reads unobservable until the next re-seed, which a live reader makes at
+  its next re-read. The narrower rule would need a reader to show its
+  deliveries kept the owner's order across the loss, which nothing on the
+  path promises.
+- **The horizon a reader judges at.** §2.7 says the contract's, and
+  §2.14 and §2.15 say 900 s: the standard contract's, so the two agree.
+  The reference's reader judges at 900 s whatever revision an owner
+  implements, as `zenkey_model::alarms` fixes it; a later minor that moves
+  `freshness.ttl_s` is a review (core §9.8), and would say which.
+- **No surface for transitions.** `zenkey_fleet`'s reader hands a notifier
+  each key's change, §2.6's transition or the reader's own (`lost`,
+  `judged`), with the first question's answer after it. zenwatch's
+  `alerts` is #800's AD; nothing here names its notifications.
+
 ## 0.2 — 2026-10-20: the cold reader's findings, and what the runtime settled (#800, AB; #609)
 
 Two readings of 0.1 met here. The spec-only implementation read it cold

@@ -64,10 +64,13 @@
 //! gave `health.v1` its domain (`health`: each service's verdict, §5's other
 //! questions and the roll-up, in the profile's own tokens, #721). CC gave
 //! `config.v1` its domain (`config`: a reading of the view and the status
-//! with §5's answers, and one act with its reply union, #768).
+//! with §5's answers, and one act with its reply union, #768). AC gave
+//! `alarms.v1` its domain (`alarms`: each key's §5 answers, each owner's
+//! verdict and the scope's, and a reader's transitions, #800).
 
 mod acl;
 mod admin;
+mod alarms;
 mod asked;
 mod bench;
 mod condition;
@@ -100,6 +103,7 @@ mod why;
 
 pub use acl::*;
 pub use admin::*;
+pub use alarms::*;
 pub use asked::*;
 pub use bench::*;
 pub use condition::*;

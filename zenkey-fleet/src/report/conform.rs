@@ -133,11 +133,24 @@ pub enum CaseId {
     /// runtime`, the revision, the pending change and the last change as
     /// they are (`config.v1` §2.9).
     ConfigDryRun,
+    /// Every alarm key the service holds re-derives from its document by
+    /// the strict recipe (`alarms.v1` §2.2, §2.3; #800): a key that is not
+    /// its document's is the violation, and one that is only through the
+    /// sanitizing step passes with the SHOULD of §2.3 named. Not asked of a
+    /// service whose descriptor does not list `alarms.v1`.
+    AlarmKey,
+    /// Every alarm document the service puts is an owner's document
+    /// (`alarms.v1` §2.4): strict JSON of the schema, its times in range,
+    /// `observed_at_ms` not before `timestamp` and never on a resolved
+    /// document. A put that does not read, or breaks one of those MUSTs, is
+    /// the violation; the SHOULDs (framed input, label names) are named in
+    /// a pass.
+    AlarmDocument,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 19] = [
+    pub const ALL: [CaseId; 21] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -157,6 +170,8 @@ impl CaseId {
         CaseId::ConfigView,
         CaseId::ConfigRefusal,
         CaseId::ConfigDryRun,
+        CaseId::AlarmKey,
+        CaseId::AlarmDocument,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -181,6 +196,8 @@ impl CaseId {
             CaseId::ConfigView => "config-view",
             CaseId::ConfigRefusal => "config-refusal",
             CaseId::ConfigDryRun => "config-dry-run",
+            CaseId::AlarmKey => "alarm-key",
+            CaseId::AlarmDocument => "alarm-document",
         }
     }
 
@@ -212,6 +229,8 @@ impl CaseId {
             CaseId::ConfigView => "config.v1 §2.2",
             CaseId::ConfigRefusal => "config.v1 §2.5",
             CaseId::ConfigDryRun => "config.v1 §2.9",
+            CaseId::AlarmKey => "alarms.v1 §2.2",
+            CaseId::AlarmDocument => "alarms.v1 §2.4",
         }
     }
 }
@@ -409,6 +428,8 @@ mod tests {
                 "config-view",
                 "config-refusal",
                 "config-dry-run",
+                "alarm-key",
+                "alarm-document",
             ]
         );
         for c in CaseId::ALL {

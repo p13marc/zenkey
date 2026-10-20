@@ -113,11 +113,21 @@ pub enum CheckId {
     /// converge, by a fresh view or status: §5's "no" to "has it converged
     /// to its desired document?" (`config.v1` §2.18, §5).
     ConfigDesired,
+    /// An alarm key that does not re-derive from its document: §5's *no*
+    /// to "does this key re-derive from its document?" (`alarms.v1` §2.2,
+    /// §2.3; #800). A key re-deriving only through the sanitizing step is a
+    /// warning: the owner broke §2.3's SHOULD to put framed input.
+    AlarmKey,
+    /// A firing alarm past its 900 s horizon, its owner present: §5's
+    /// *yes* to "is this firing alarm past its horizon, its owner present?"
+    /// (`alarms.v1` §2.7, §2.14; #800), about the owner, which broke §2.7's
+    /// confirmation or whose clock is ahead.
+    AlarmStale,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 23] = [
+    pub const ALL: [CheckId; 25] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -141,6 +151,8 @@ impl CheckId {
         CheckId::ConfigOverdue,
         CheckId::ConfigUnpersisted,
         CheckId::ConfigDesired,
+        CheckId::AlarmKey,
+        CheckId::AlarmStale,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -169,6 +181,8 @@ impl CheckId {
             CheckId::ConfigOverdue => "config-overdue",
             CheckId::ConfigUnpersisted => "config-unpersisted",
             CheckId::ConfigDesired => "config-desired",
+            CheckId::AlarmKey => "alarm-key",
+            CheckId::AlarmStale => "alarm-stale",
         }
     }
 
@@ -204,6 +218,8 @@ impl CheckId {
             CheckId::ConfigOverdue => "config.v1 §2.11",
             CheckId::ConfigUnpersisted => "config.v1 §5",
             CheckId::ConfigDesired => "config.v1 §2.18",
+            CheckId::AlarmKey => "alarms.v1 §2.2",
+            CheckId::AlarmStale => "alarms.v1 §2.7",
         }
     }
 
@@ -284,6 +300,14 @@ impl CheckId {
             CheckId::ConfigDesired => {
                 "was an owner's last desired document refused, or did converging it fail, by a \
                  fresh view or status?"
+            }
+            CheckId::AlarmKey => {
+                "does an owner hold an alarm on a key that does not re-derive from its document, \
+                 or only through the sanitizing step?"
+            }
+            CheckId::AlarmStale => {
+                "does a present owner hold a firing alarm it has not confirmed within its 900 s \
+                 horizon?"
             }
         }
     }
@@ -975,6 +999,8 @@ mod check_id_tests {
                 "config-overdue",
                 "config-unpersisted",
                 "config-desired",
+                "alarm-key",
+                "alarm-stale",
             ]
         );
     }

@@ -120,6 +120,26 @@ where
     }
 }
 
+/// [`eventually`] for a value: polls `f` until it returns `Some`, within
+/// [`SETTLE`], and returns what that poll found. A bus read is never made
+/// twice: a second read can miss what the first saw (a liveliness read
+/// under load comes back without a token the poll before it found), so
+/// the value is the one the poll found.
+pub async fn eventually_some<T, F, Fut>(what: &str, mut f: F) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Option<T>>,
+{
+    let deadline = tokio::time::Instant::now() + SETTLE;
+    loop {
+        if let Some(v) = f().await {
+            return v;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "never: {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// A link between two routers that a test can cut, stall and heal: a TCP
 /// proxy on an ephemeral port.
 /// - **Cutting** closes every forwarded connection and refuses new ones

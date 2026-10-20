@@ -91,6 +91,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         ));
         report.cases.extend(health_cases(obs));
         report.cases.extend(config_cases(obs));
+        report.cases.extend(alarm_cases(obs));
         report.unobservable = Some(why);
         report
     };
@@ -149,6 +150,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         ));
         report.cases.extend(health_cases(obs));
         report.cases.extend(config_cases(obs));
+        report.cases.extend(alarm_cases(obs));
         return report;
     };
     let owners: BTreeSet<String> = match &obs.presence {
@@ -234,6 +236,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
     }
     report.cases.extend(health_cases(obs));
     report.cases.extend(config_cases(obs));
+    report.cases.extend(alarm_cases(obs));
     let mut seen = BTreeSet::new();
     report.asked.retain(|s| seen.insert(s.clone()));
     report
@@ -964,6 +967,206 @@ fn health_cases(obs: &ConformObservation) -> [ConformCase; 2] {
         ),
     };
     [health, aggregation]
+}
+
+/// The `alarms.v1` cases (#800, AC): `alarm-key` (§2.2, §2.3) and
+/// `alarm-document` (§2.4), from one S4 GET of the service's alarms, read
+/// when its descriptor lists `alarms.v1` (§2.13); its subject the resource.
+/// A violation from any GET is one; a pass needs a GET that ran to its
+/// final reply and answered at least one alarm — an empty one is no verdict
+/// (core O5).
+fn alarm_cases(obs: &ConformObservation) -> [ConformCase; 2] {
+    use crate::model::alarms::{AlarmBook, AlarmScope, BookSpec};
+    use zenkey_model::alarms::{Answer, Gravity, Presence, Reason};
+    const S: &str = "state/alarms/{alert_key}";
+    let both = |f: fn(CaseId, &str, String) -> ConformCase, why: String| {
+        [
+            f(CaseId::AlarmKey, S, why.clone()),
+            f(CaseId::AlarmDocument, S, why),
+        ]
+    };
+    let unseen: fn(CaseId, &str, String) -> ConformCase =
+        |c, s, w| ConformCase::unobservable(c, s, w);
+    let not: fn(CaseId, &str, String) -> ConformCase = |c, s, w| ConformCase::not_asked(c, s, w);
+    let o = match &obs.presence {
+        Err(e) => return both(unseen, format!("the presence read could not be made: {e}")),
+        Ok(o) => o,
+    };
+    let mut book = AlarmBook::new(
+        AlarmScope::of(&obs.address),
+        BookSpec::new(obs.spec.timeout),
+    );
+    let (now, wall) = (std::time::Instant::now(), std::time::SystemTime::now());
+    book.presence_read(o, now);
+    let read = match &obs.alarms {
+        Some(Ok(r)) => r,
+        Some(Err(e)) => {
+            return both(
+                unseen,
+                format!("the GET of its alarms could not be made: {e}"),
+            );
+        }
+        None => {
+            return match book.presence_of(&obs.address) {
+                Presence::Absent => both(
+                    not,
+                    format!(
+                        "no instance token of {} visible to this reader: absent (alarms.v1 \
+                         §2.14)",
+                        obs.address
+                    ),
+                ),
+                Presence::Present(zenkey_model::alarms::Listing::NotListed) => both(
+                    not,
+                    "its descriptor does not list alarms.v1, so its alarms are not asked \
+                     (alarms.v1 §2.13)"
+                        .to_owned(),
+                ),
+                _ => both(
+                    unseen,
+                    "its presence or its descriptor could not be read: whether it implements \
+                     alarms.v1 cannot be told, and its interface token says nothing (alarms.v1 \
+                     §2.13)"
+                        .to_owned(),
+                ),
+            };
+        }
+    };
+    book.seed(read.clone(), now, wall);
+    let keys: Vec<&str> = book.keys().collect();
+    let first = |v: &[String]| {
+        let shown: Vec<&str> = v.iter().take(3).map(String::as_str).collect();
+        if v.len() > 3 {
+            format!("{} and {} more", shown.join("; "), v.len() - 3)
+        } else {
+            shown.join("; ")
+        }
+    };
+    let empty = |c: CaseId| {
+        ConformCase::unobservable(
+            c,
+            S,
+            if read.complete {
+                "its GET drew no alarm: an empty reply set is no verdict (core O5)".to_owned()
+            } else {
+                "its GET ended at its timeout or with an error reply, and drew no alarm".to_owned()
+            },
+        )
+    };
+    // alarm-key
+    let mut mismatched = Vec::new();
+    let mut sanitized = Vec::new();
+    let mut strict = 0usize;
+    // alarm-document
+    let mut broken = Vec::new();
+    let mut warned = Vec::new();
+    let mut documents = 0usize;
+    for k in &keys {
+        let Some(r) = book.reading(k, now, wall) else {
+            continue;
+        };
+        let alert = k.rsplit('/').next().unwrap_or(k);
+        let j = r.rederives();
+        match (j.answer, j.reason) {
+            (Answer::No, _) => {
+                let derived = book
+                    .seen(k)
+                    .and_then(|s| s.document)
+                    .map(|d| d.alert_key())
+                    .unwrap_or_default();
+                mismatched.push(format!("{alert} (its document derives {derived})"));
+            }
+            (Answer::Yes, Reason::Sanitized) => sanitized.push(alert.to_owned()),
+            (Answer::Yes, _) => strict += 1,
+            _ => {}
+        }
+        match book.seen(k) {
+            Some(seen) if seen.invalid.is_some() => {
+                broken.push(format!("{alert}: {}", seen.invalid.unwrap_or_default()))
+            }
+            Some(seen) if seen.document.is_some() => {
+                documents += 1;
+                let doc = seen.document.expect("guarded");
+                for p in doc.check() {
+                    match p.gravity() {
+                        Gravity::Error => broken.push(format!("{alert}: {p}")),
+                        Gravity::Warning => warned.push(format!("{alert}: {p}")),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let key = if !mismatched.is_empty() {
+        ConformCase::failed(
+            CaseId::AlarmKey,
+            S,
+            format!(
+                "{} key(s) not their document's: {} — a phantom of another derivation, of a \
+                 renamed rule, or a host-scoped label hashed (alarms.v1 §2.2, §2.9)",
+                mismatched.len(),
+                first(&mismatched)
+            ),
+        )
+    } else if !read.complete {
+        ConformCase::unobservable(
+            CaseId::AlarmKey,
+            S,
+            "its GET ended at its timeout or with an error reply: an alarm it did not bring back \
+             may not re-derive",
+        )
+    } else if strict + sanitized.len() == 0 {
+        empty(CaseId::AlarmKey)
+    } else {
+        ConformCase::passed(
+            CaseId::AlarmKey,
+            S,
+            if sanitized.is_empty() {
+                format!("{strict} key(s), each its document's by the strict recipe (§2.2)")
+            } else {
+                format!(
+                    "{strict} key(s) by the strict recipe, and {} only through the sanitizing \
+                     step, which breaks §2.3's SHOULD to put framed input: {}",
+                    sanitized.len(),
+                    first(&sanitized)
+                )
+            },
+        )
+    };
+    let document = if !broken.is_empty() {
+        ConformCase::failed(
+            CaseId::AlarmDocument,
+            S,
+            format!(
+                "{} document(s) not an owner's: {} (alarms.v1 §2.4)",
+                broken.len(),
+                first(&broken)
+            ),
+        )
+    } else if !read.complete {
+        ConformCase::unobservable(
+            CaseId::AlarmDocument,
+            S,
+            "its GET ended at its timeout or with an error reply: a document it did not bring \
+             back may break §2.4",
+        )
+    } else if documents == 0 {
+        empty(CaseId::AlarmDocument)
+    } else {
+        ConformCase::passed(
+            CaseId::AlarmDocument,
+            S,
+            if warned.is_empty() {
+                format!("{documents} document(s), each strict JSON of the schema (§2.4)")
+            } else {
+                format!(
+                    "{documents} document(s), each strict JSON of the schema; SHOULDs broken: {}",
+                    first(&warned)
+                )
+            },
+        )
+    };
+    [key, document]
 }
 
 /// The `config.v1` cases (#768, CC), in [`CaseId::ALL`] order.
@@ -2718,6 +2921,7 @@ mod tests {
             read_at: Some(read_at()),
             health: None,
             config: None,
+            alarms: None,
         };
         o.heard.insert(
             "stream/bandwidth/{dev}".into(),
@@ -4060,6 +4264,88 @@ mod tests {
             case(&r, CaseId::ConfigProjection, "service")
                 .verdict
                 .is_unobservable()
+        );
+    }
+
+    /// `alarm-key` and `alarm-document` (#800, AC): read only when the
+    /// descriptor lists alarms.v1; a phantom key and a document breaking
+    /// §2.4 are violations; a sanitized key passes with the SHOULD named;
+    /// an empty GET is no verdict.
+    #[test]
+    fn the_alarm_cases_judge_each_key_and_document() {
+        use crate::model::alarms::{AlarmSample, SeedRead};
+        use crate::report::AlarmVia;
+        let r = judge(&conforming());
+        assert_eq!(
+            case(&r, CaseId::AlarmKey, "state/alarms/{alert_key}").verdict,
+            Judgement::NotAsked,
+            "not listed: not asked"
+        );
+        let mut o = conforming();
+        let mut p = presence(Some(OWNER));
+        if let Some(ds) = &mut p.descriptors {
+            for read in ds.values_mut() {
+                if let DescriptorRead::Served(d) = read {
+                    let mut v = serde_json::to_value(&**d).unwrap();
+                    v["interfaces"].as_array_mut().unwrap().push(json!({
+                        "iface": "alarms.v1",
+                        "contract": format!("sha256:{}", zenkey::alarms::FINGERPRINT),
+                        "minor": 0, "token": false}));
+                    **d = serde_json::from_value(v).unwrap();
+                }
+            }
+        }
+        o.presence = Ok(p);
+        let reply = |key: &str, doc: serde_json::Value| AlarmSample {
+            key: format!("zk2/lab/m/alarms.v1/state/alarms/{key}"),
+            delete: false,
+            payload: serde_json::to_vec(&doc).unwrap(),
+            stamp: None,
+            at: std::time::Instant::now(),
+            wall: std::time::SystemTime::now(),
+            via: AlarmVia::Get,
+        };
+        let a = json!({"timestamp": 5, "rule": "link_down", "severity": "warning",
+            "state": "firing", "summary": "s", "labels": {"peer": "r2", "port": "eth0"}});
+        let mut bad = a.clone();
+        bad["observed_at_ms"] = json!(1);
+        let read = |replies| {
+            Some(Ok(SeedRead {
+                asked_at: std::time::Instant::now(),
+                complete: true,
+                replies,
+                discarded: 0,
+            }))
+        };
+        o.alarms = read(vec![
+            reply("0000000000000001", a.clone()),
+            reply("a659f813308ad1da", bad),
+        ]);
+        let r = judge(&o);
+        let k = failed(&r, CaseId::AlarmKey, "state/alarms/{alert_key}");
+        assert!(k.contains("0000000000000001"), "{k}");
+        let d = failed(&r, CaseId::AlarmDocument, "state/alarms/{alert_key}");
+        assert!(d.contains("observed_at_ms is before timestamp"), "{d}");
+        let unframed = json!({"timestamp": 5, "rule": "link\ndown", "severity": "warning",
+            "state": "firing", "summary": "s", "labels": {"port": "22"}});
+        o.alarms = read(vec![
+            reply("16991d91fb818ca6", unframed),
+            reply("a659f813308ad1da", a),
+        ]);
+        let r = judge(&o);
+        let c = case(&r, CaseId::AlarmKey, "state/alarms/{alert_key}");
+        assert!(
+            matches!(&c.verdict, Judgement::NotEstablished { reason }
+                if reason.contains("16991d91fb818ca6") && reason.contains("SHOULD")),
+            "{c:#?}"
+        );
+        o.alarms = read(vec![]);
+        let r = judge(&o);
+        assert!(
+            case(&r, CaseId::AlarmDocument, "state/alarms/{alert_key}")
+                .verdict
+                .is_unobservable(),
+            "an empty GET is no verdict"
         );
     }
 }

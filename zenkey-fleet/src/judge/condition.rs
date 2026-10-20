@@ -22,8 +22,12 @@
 //! `origin-down`, renamed for what it asks in zk2 — reads the live presence
 //! projection per address ([`AddressWatch`], #747), the reading zenwatch's
 //! rule of the same name makes, and folds it into the rule's one state;
-//! `doctor` runs FJ6's doctor. The rules that read v1's alert plane are
-//! dark until zk2's alerts profile exists (#613).
+//! `doctor` runs FJ6's doctor; `alert-firing` — v1's spelling, back on
+//! `alarms.v1` (#800, AC) — reads the alarms its selector reaches through a
+//! live reader in the namespace ([`AlarmFeed`]: subscribed, seeded by S4's
+//! GET, re-read beside the drain each tick) and is §5's second question at
+//! its floor: firing on *yes*, ok on *no*, and unobservable on every other
+//! answer, never ok.
 //!
 //! The semantic core is three tiny rules — [`judge_shortfall`],
 //! [`judge_excess`], [`judge_silence`] — shared with [`crate::judge::expect`], so
@@ -44,10 +48,12 @@ use std::time::{Duration, SystemTime};
 
 use crate::{Error, Result};
 
+use crate::bus::alarms::{AlarmFeed, AlarmRefresh, AlarmSpec, Refreshed};
 use crate::bus::contracts::BundleStore;
 use crate::bus::monitor::SampleView;
 use crate::bus::presence::{PresenceFeed, Scope};
 use crate::judge::doctor::DoctorBus;
+use crate::model::alarms::{AlarmBook, AlarmScope};
 use crate::model::catalog::{Catalog, ContractSet};
 use crate::model::lens::{Lens, observed_qos, qos_mismatch};
 use crate::model::presence_live::{LivePresence, PresenceBasis};
@@ -108,6 +114,21 @@ pub enum Condition {
     /// lost), else ok. A read access control refused is complete and empty,
     /// like absence, so the evidence says what this reader could see (0.8).
     InstanceGone { address: String },
+    /// An alarm firing at or above `at_least` under `selector`: §5's second
+    /// question of `alarms.v1` (§2.15; #800, AC), v1's `alert-firing` on
+    /// zk2's profile. The selector is base-relative (`zk2/…`) and reaches
+    /// alarm keys, read in the deployment's namespace by a live reader:
+    /// subscribed, seeded by S4's GET and re-read each tick. *Yes* is
+    /// firing, whatever else is known; *no* is ok, only when every owner in
+    /// scope is established and none of its alarms that may be at or above
+    /// the floor is unobservable; unobservable and not asked (no owner
+    /// established, its owners absent or not listing `alarms.v1`) are
+    /// unobservable — never ok. A loss makes the rule unobservable until a
+    /// GET heals it.
+    AlertFiring {
+        selector: String,
+        at_least: zenkey_model::alarms::Severity,
+    },
     /// The observer itself dropped samples this window (O6) — self-knowledge,
     /// so never unobservable.
     Dropped,
@@ -116,7 +137,8 @@ pub enum Condition {
 /// The rule grammar, spelled once for the parse error and the docs.
 const VOCABULARY: &str = "rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | \
      silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | \
-     doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | dropped";
+     doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | \
+     alert-firing <SEL> [info|warning|critical] | dropped";
 
 impl Condition {
     /// Parse one rule: whitespace-separated, kind first (Zenoh key
@@ -195,12 +217,21 @@ impl Condition {
                      visible to this reader (spec §8.1)",
                 ));
             }
-            ["alert-firing", ..] => {
-                return Err(Error::unaskable(
-                    format!("{rule:?}"),
-                    "alert-firing read v1's alert plane; zk2's alerts are a profile \
-                     still to come (#613), so the rule is dark",
-                ));
+            ["alert-firing", sel] | ["alert-firing", sel, _] => {
+                AlarmScope::parse(sel).map_err(|why| Error::unaskable("alert-firing", why))?;
+                let at_least = match tokens.get(2) {
+                    None => zenkey_model::alarms::Severity::Warning,
+                    Some(s) => zenkey_model::alarms::Severity::parse(s).ok_or_else(|| {
+                        Error::unaskable(
+                            format!("alert-firing {s:?}"),
+                            "is not a severity: info, warning or critical (alarms.v1 §2.4)",
+                        )
+                    })?,
+                };
+                Condition::AlertFiring {
+                    selector: sel.to_string(),
+                    at_least,
+                }
             }
             _ => {
                 return Err(Error::unaskable(
@@ -234,6 +265,9 @@ impl Condition {
         match self {
             Condition::DoctorCheck { check } => judge_doctor_check(*check, ev.doctor),
             Condition::InstanceGone { .. } => judge_instance_gone(ev.addresses, ev.presence),
+            Condition::AlertFiring { selector, at_least } => {
+                judge_alert_firing(selector, *at_least, ev.alarms)
+            }
             _ => self.judge_window_total(ev.window, ev.examples),
         }
     }
@@ -399,7 +433,9 @@ impl Condition {
                     w.dropped, w.window_s
                 ),
             },
-            Condition::DoctorCheck { .. } | Condition::InstanceGone { .. } => return None,
+            Condition::DoctorCheck { .. }
+            | Condition::InstanceGone { .. }
+            | Condition::AlertFiring { .. } => return None,
         })
     }
 
@@ -483,6 +519,9 @@ impl std::fmt::Display for Condition {
             Condition::QosMismatch { selector } => write!(f, "qos-mismatch {selector}"),
             Condition::DoctorCheck { check } => write!(f, "doctor {check}"),
             Condition::InstanceGone { address } => write!(f, "instance-gone {address}"),
+            Condition::AlertFiring { selector, at_least } => {
+                write!(f, "alert-firing {selector} {at_least}")
+            }
             Condition::Dropped => write!(f, "dropped"),
         }
     }
@@ -594,6 +633,9 @@ pub struct TickEvidence<'e> {
     /// This rule's own per-address reading of it, for an `instance-gone`
     /// rule: what it has seen held and gone.
     pub addresses: Option<&'e AddressWatch>,
+    /// The alarms an `alert-firing` rule's selector reaches (#800, AC): the
+    /// reader's book, or why there is none; `None` when not read this tick.
+    pub alarms: Option<std::result::Result<&'e AlarmBook, &'e str>>,
 }
 
 /// Judge one doctor check against this tick's run — total, and total in the
@@ -727,6 +769,208 @@ pub fn judge_instance_gone(watch: Option<&AddressWatch>, presence: Option<&LiveP
             ),
         },
     }
+}
+
+/// Judge one `alert-firing` rule — total — from its selector's reader
+/// (#800, AC): §5's second question of `alarms.v1` at `at_least`, over the
+/// owners in scope (§2.15), by `zenkey_model::alarms::any_firing`. **Firing**
+/// on yes, with the count and the first named; **ok** on no; every other
+/// answer **unobservable**, with its reason and each owner counted by its
+/// verdict — not asked is never ok, nor is a reader that is not reading.
+pub fn judge_alert_firing(
+    selector: &str,
+    at_least: zenkey_model::alarms::Severity,
+    read: Option<std::result::Result<&AlarmBook, &str>>,
+) -> Eval {
+    use zenkey_model::alarms::Answer;
+    let book = match read {
+        None => {
+            return Eval {
+                state: CondState::Unobservable,
+                evidence: format!("the alarms under {selector} were not read this tick"),
+            };
+        }
+        Some(Err(why)) => {
+            return Eval {
+                state: CondState::Unobservable,
+                evidence: format!("the alarms under {selector} could not be read: {why}"),
+            };
+        }
+        Some(Ok(b)) => b,
+    };
+    let (now, wall) = (std::time::Instant::now(), SystemTime::now());
+    let a = book.any_firing(at_least, now, wall);
+    let counts = format!(
+        "owners in scope: {} established, {} unobservable, {} not asked{}",
+        a.established,
+        a.unobservable,
+        a.not_asked,
+        if book.lost() > 0 {
+            format!("; {} delivery(ies) lost or stalls so far", book.lost())
+        } else {
+            String::new()
+        }
+    );
+    match a.answer {
+        Answer::Yes => {
+            let first = book
+                .keys()
+                .filter_map(|k| Some((k, book.reading(k, now, wall)?)))
+                .find(|(_, r)| {
+                    r.firing().answer == Answer::Yes && r.severity.is_some_and(|s| s >= at_least)
+                })
+                .map(|(k, r)| format!("; first: {k} at {}", r.severity.map_or("?", |s| s.as_str())))
+                .unwrap_or_default();
+            Eval {
+                state: CondState::Firing,
+                evidence: format!(
+                    "{} alarm(s) firing at or above {at_least} under {selector}{first} ({counts}; alarms.v1 §2.15)",
+                    a.firing
+                ),
+            }
+        }
+        Answer::No => Eval {
+            state: CondState::Ok,
+            evidence: format!(
+                "no alarm firing at or above {at_least} under {selector}: every owner asked is known whole ({counts}; alarms.v1 §2.15)"
+            ),
+        },
+        Answer::Unobservable => Eval {
+            state: CondState::Unobservable,
+            evidence: format!(
+                "whether an alarm fires at or above {at_least} under {selector} is unobservable: {} ({}; {counts}) — never ok",
+                a.reason.says(),
+                a.reason.as_str()
+            ),
+        },
+        Answer::NotAsked => Eval {
+            state: CondState::Unobservable,
+            evidence: format!(
+                "no owner under {selector} was asked: {} ({}; {counts}) — absent, not listing \
+                 alarms.v1, or not seen; not asked is never ok",
+                a.reason.says(),
+                a.reason.as_str()
+            ),
+        },
+    }
+}
+
+/// The `alert-firing` rules' readers (#800, AC): one live [`AlarmFeed`] per
+/// distinct selector, opened in the deployment's namespace before the first
+/// window — subscribed, then seeded by S4's GET (core §4.2) — drained
+/// beside the monitor, and re-read (presence, the GET) in each tick's
+/// sweep, beside the drain, never inside it.
+pub(crate) struct RuleAlarms {
+    feeds: Vec<(String, std::result::Result<AlarmFeed, String>)>,
+}
+
+impl RuleAlarms {
+    /// No reader: no rule reads alarms.
+    pub(crate) fn none() -> RuleAlarms {
+        RuleAlarms { feeds: Vec::new() }
+    }
+
+    /// One reader per selector `rules` read, on `session`; with none, each
+    /// is unobservable, saying why.
+    pub(crate) async fn open(
+        session: Option<&zenoh::Session>,
+        rules: &RuleSet,
+        timeout: Duration,
+        clocks_synced: bool,
+    ) -> RuleAlarms {
+        let mut feeds = Vec::new();
+        for selector in rules.alarm_selectors() {
+            let feed = match (session, AlarmScope::parse(&selector)) {
+                (None, _) => {
+                    Err("no session in the deployment's namespace was given to read alarms".into())
+                }
+                (_, Err(why)) => Err(why),
+                (Some(s), Ok(scope)) => {
+                    let mut spec = AlarmSpec::new(timeout);
+                    spec.clocks_synced = clocks_synced;
+                    spec.archives = false;
+                    AlarmFeed::open(s, scope, spec, true)
+                        .await
+                        .map(|(f, _)| f)
+                        .map_err(|e| crate::one_line(&e))
+                }
+            };
+            feeds.push((selector, feed));
+        }
+        RuleAlarms { feeds }
+    }
+
+    /// Some reader listens: the drain owes it its deliveries.
+    pub(crate) fn listening(&self) -> bool {
+        self.feeds.iter().any(|(_, f)| f.is_ok())
+    }
+
+    /// The next delivery of any reader, folded into its book. A reader
+    /// whose subscriptions closed reads unobservable from then on.
+    pub(crate) async fn next(&mut self) {
+        let mut ok: Vec<(usize, &mut AlarmFeed)> = self
+            .feeds
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, (_, f))| f.as_mut().ok().map(|f| (i, f)))
+            .collect();
+        if ok.is_empty() {
+            return std::future::pending().await;
+        }
+        let (closed, index) = {
+            let nexts = ok
+                .iter_mut()
+                .map(|(i, f)| {
+                    let i = *i;
+                    Box::pin(async move { (i, f.next().await.is_none()) })
+                })
+                .collect::<Vec<_>>();
+            let ((i, closed), _, _) = futures_util::future::select_all(nexts).await;
+            (closed, i)
+        };
+        if closed {
+            self.feeds[index].1 = Err("its subscriptions closed".into());
+        }
+    }
+
+    /// Each reader's refresh, owned, to run beside the drain.
+    pub(crate) fn plans(&self) -> Vec<(usize, AlarmRefresh)> {
+        self.feeds
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (_, f))| f.as_ref().ok().map(|f| (i, f.refresh_plan())))
+            .collect()
+    }
+
+    /// What the refreshes read, folded into their books.
+    pub(crate) fn fold(&mut self, done: Vec<(usize, Refreshed)>) {
+        for (i, r) in done {
+            if let Some((_, Ok(f))) = self.feeds.get_mut(i) {
+                f.fold(r);
+            }
+        }
+    }
+
+    /// The books, as a tick hands them to the rules.
+    pub(crate) fn reads(&self) -> Vec<AlarmRead<'_>> {
+        self.feeds
+            .iter()
+            .map(|(selector, f)| AlarmRead {
+                selector,
+                book: f.as_ref().map(AlarmFeed::book).map_err(String::as_str),
+            })
+            .collect()
+    }
+}
+
+/// Every refresh in `plans`, together.
+pub(crate) async fn refresh_alarms(plans: Vec<(usize, AlarmRefresh)>) -> Vec<(usize, Refreshed)> {
+    futures_util::future::join_all(
+        plans
+            .into_iter()
+            .map(|(i, p)| async move { (i, p.run().await) }),
+    )
+    .await
 }
 
 /// The `instance-gone` rules' presence (#747): the live projection over the
@@ -977,13 +1221,24 @@ struct RuleRuntime {
 }
 
 /// What a tick judges beside its drain, as the rules see it: the doctor
-/// run, and the live presence projection the `instance-gone` rules read,
-/// each `None` when no rule wanted it or none could run — which is
-/// *unobservable* for the rules that would have needed it (#352).
+/// run, the live presence projection the `instance-gone` rules read, and
+/// the alarms the `alert-firing` rules read, each `None` (or empty) when no
+/// rule wanted it or none could run — which is *unobservable* for the rules
+/// that would have needed it (#352).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SweepOutcome<'e> {
     pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
     pub presence: Option<&'e LivePresence>,
+    /// One reader per `alert-firing` selector (#800, AC).
+    pub alarms: &'e [AlarmRead<'e>],
+}
+
+/// The alarms one `alert-firing` selector reaches, as a tick hands them to
+/// the rules: the reader's book, or why there is none.
+#[derive(Debug, Clone, Copy)]
+pub struct AlarmRead<'e> {
+    pub selector: &'e str,
+    pub book: std::result::Result<&'e AlarmBook, &'e str>,
 }
 
 /// A set of rules judged tick by tick over **one** event stream — the
@@ -1128,6 +1383,28 @@ impl RuleSet {
     /// ([`observe_presence`](Self::observe_presence)).
     pub fn wants_presence(&self) -> bool {
         self.rules.iter().any(|r| r.addresses.is_some())
+    }
+
+    /// Some rule reads `alarms.v1` (`alert-firing`, #800 AC), so the driver
+    /// owes one live reader per distinct selector ([`RuleSet::alarm_selectors`]),
+    /// opened before the first window and re-read beside the drain.
+    pub fn wants_alarms(&self) -> bool {
+        self.rules
+            .iter()
+            .any(|r| matches!(r.rule, Condition::AlertFiring { .. }))
+    }
+
+    /// The distinct selectors the `alert-firing` rules read, in rule order.
+    pub fn alarm_selectors(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for r in &self.rules {
+            if let Condition::AlertFiring { selector, .. } = &r.rule
+                && !out.contains(selector)
+            {
+                out.push(selector.clone());
+            }
+        }
+        out
     }
 
     /// The narrowest presence scope covering every `instance-gone` pattern:
@@ -1301,12 +1578,21 @@ impl RuleSet {
                 qos_judged: rt.counters.qos_judged,
                 synthetic: rt.counters.synthetic,
             };
+            let alarms = match &rt.rule {
+                Condition::AlertFiring { selector, .. } => sweep
+                    .alarms
+                    .iter()
+                    .find(|a| a.selector == selector)
+                    .map(|a| a.book),
+                _ => None,
+            };
             let eval = rt.rule.judge(&TickEvidence {
                 window: &window,
                 examples: &rt.counters.examples,
                 doctor: sweep.doctor,
                 presence: sweep.presence,
                 addresses: rt.addresses.as_ref(),
+                alarms,
             });
             if let Some(transition) = rt.state.observe(eval, at) {
                 out.push(transition);
@@ -1443,6 +1729,14 @@ pub fn watchdog<'a>(
         // beside the drain.
         let mut presence = RulePresence::open(&bus.session, &mut rules, spec.timeout).await?;
 
+        // The `alert-firing` rules' readers too (#800, AC): subscribed and
+        // seeded before the first window, drained beside it.
+        let mut alarms = if rules.wants_alarms() {
+            RuleAlarms::open(Some(&bus.session), &rules, spec.timeout, spec.clocks_synced).await
+        } else {
+            RuleAlarms::none()
+        };
+
         // Declared before the window opens — not-asked must never read as "no".
         let monitor = crate::Monitor::start(&bus.raw, crate::MonitorSpec::default()).await?;
         let mut events = monitor.events();
@@ -1455,6 +1749,7 @@ pub fn watchdog<'a>(
             // (#338): a sweep that outlives the tick period widens this
             // window — `window_s` is measured, never assumed — so drops land
             // in the tick that incurred them.
+            let plans = alarms.plans();
             let sweep = async {
                 let doctor = if wants_doctor {
                     Some(tick_doctor(Some(bus), store, &doctor_spec).await)
@@ -1468,7 +1763,7 @@ pub fn watchdog<'a>(
                 } else {
                     None
                 };
-                (doctor, lens)
+                (doctor, lens, refresh_alarms(plans).await)
             };
             let mut sweep = std::pin::pin!(sweep);
             let mut swept = None;
@@ -1477,8 +1772,12 @@ pub fn watchdog<'a>(
             tokio::pin!(tick_over);
             while !closed {
                 let running = presence.as_ref().is_some_and(|p| p.running);
+                let listening = alarms.listening();
                 let item = tokio::select! {
                     item = events.recv() => item,
+                    // An alarm reader's delivery folds into its book as it
+                    // arrives (#800, AC).
+                    () = alarms.next(), if listening => continue,
                     // Presence moves fold as they arrive, so each rule's
                     // per-address reading sees every one in order.
                     moved = async { presence.as_mut().expect("guarded").feed.next().await },
@@ -1496,10 +1795,11 @@ pub fn watchdog<'a>(
                     }
                     // The tick cannot close before its own sweep has landed,
                     // and the drain keeps running until it does.
-                    (doctor, lens) = &mut sweep, if swept.is_none() => {
+                    (doctor, lens, refreshed) = &mut sweep, if swept.is_none() => {
                         if let Some(c) = lens {
                             catalog = Some(c);
                         }
+                        alarms.fold(refreshed);
                         swept = Some(doctor);
                         continue;
                     }
@@ -1520,15 +1820,17 @@ pub fn watchdog<'a>(
             let doctor_outcome = match swept {
                 Some(outcome) => outcome,
                 None => {
-                    let (doctor, lens) = sweep.await;
+                    let (doctor, lens, refreshed) = sweep.await;
                     if let Some(c) = lens {
                         catalog = Some(c);
                     }
+                    alarms.fold(refreshed);
                     doctor
                 }
             };
             let now = tokio::time::Instant::now();
             let at = crate::tape::record::rfc3339_now();
+            let reads = alarms.reads();
             let transitions = rules.evaluate(
                 now,
                 &at,
@@ -1537,6 +1839,7 @@ pub fn watchdog<'a>(
                         .as_ref()
                         .map(|o| o.as_ref().map_err(String::as_str)),
                     presence: presence.as_ref().and_then(RulePresence::presence),
+                    alarms: &reads,
                 },
             );
             for transition in transitions {
@@ -1616,6 +1919,8 @@ mod tests {
             "doctor split-brain",
             "instance-gone host-a/tc",
             "instance-gone */tc",
+            "alert-firing zk2/lab/*/alarms.v1/state/alarms/* warning",
+            "alert-firing zk2/** critical",
             "dropped",
         ];
         for rule in rules {
@@ -1624,8 +1929,16 @@ mod tests {
         }
         let err = Condition::parse("origin-down h-aaaaaaaaaaaa").unwrap_err();
         assert!(err.to_string().contains("instance-gone"), "{err}");
+        // v1's spelling, on alarms.v1 (#800, AC): the floor defaults to
+        // warning, and a v1 selector is no alarm's.
+        assert_eq!(
+            Condition::parse("alert-firing zk2/**").unwrap().to_string(),
+            "alert-firing zk2/** warning"
+        );
         let err = Condition::parse("alert-firing v1/*/state/*/alert/*").unwrap_err();
-        assert!(err.to_string().contains("#613"), "{err}");
+        assert!(err.to_string().contains("base-relative"), "{err}");
+        let err = Condition::parse("alert-firing zk2/** severe").unwrap_err();
+        assert!(err.to_string().contains("not a severity"), "{err}");
         let err = Condition::parse("instance-gone Host A").unwrap_err();
         assert!(err.to_string().contains("not a rule"), "{err}");
         let err = Condition::parse("instance-gone host-a").unwrap_err();
@@ -1981,6 +2294,7 @@ mod tests {
         let sweep = SweepOutcome {
             doctor: None,
             presence: Some(&p),
+            ..SweepOutcome::default()
         };
         let t = rules.evaluate(now, "t0", sweep);
         assert_eq!(to(&t, "instance-gone host-a/tc"), Some(CondState::Firing));
@@ -1989,6 +2303,7 @@ mod tests {
         let sweep = SweepOutcome {
             doctor: None,
             presence: Some(&p),
+            ..SweepOutcome::default()
         };
         let t = rules.evaluate(now, "t1", sweep);
         assert_eq!(to(&t, "instance-gone host-a/*"), Some(CondState::Firing));
@@ -2148,5 +2463,93 @@ mod tests {
             RuleSet::new(&[Condition::parse("doctor population-over-bound").expect("rule")])
                 .expect("compiles");
         assert!(rules.doctor_spec(t, false).deep);
+    }
+
+    /// `alert-firing` (#800, AC) is §5's second question at its floor: yes
+    /// firing, no ok, everything else unobservable — an unread selector, a
+    /// reader that could not open, an owner absent (not asked) — and a rule
+    /// with no reading this tick is never ok.
+    #[test]
+    fn alert_firing_is_the_scopes_question_and_never_ok_when_unasked() {
+        use crate::model::alarms::{AlarmSample, BookSpec, SeedRead};
+        use crate::report::AlarmVia;
+        use zenkey_model::alarms::Severity;
+        use zenoh::time::{NTP64, Timestamp, TimestampId};
+        let sel = "zk2/lab/*/alarms.v1/state/alarms/*";
+        assert_eq!(
+            judge_alert_firing(sel, Severity::Warning, None).state,
+            CondState::Unobservable
+        );
+        assert_eq!(
+            judge_alert_firing(sel, Severity::Warning, Some(Err("no session"))).state,
+            CondState::Unobservable
+        );
+        let t0 = std::time::Instant::now();
+        let mut spec = BookSpec::new(Duration::from_secs(1));
+        spec.clocks_synced = true;
+        let mut book = AlarmBook::new(AlarmScope::parse(sel).unwrap(), spec);
+        let keys = vec!["zk2/lab/svc/@zk/instance/000000000000000a".to_owned()];
+        let mut o = crate::model::catalog::Observed::from_keys("zk2/lab/*/@zk/**", &keys, true);
+        let d: zenkey_model::descriptor::Descriptor = serde_json::from_value(serde_json::json!({
+            "format": "zk2-descriptor/0.1", "service": "lab/svc",
+            "instance": "000000000000000a",
+            "interfaces": [{"iface": "alarms.v1",
+                "contract": format!("sha256:{}", zenkey::alarms::FINGERPRINT),
+                "minor": 0, "token": true}],
+            "meta": {},
+        }))
+        .unwrap();
+        o.descriptors = Some(
+            [(
+                (
+                    "lab/svc".parse().unwrap(),
+                    "000000000000000a".parse().unwrap(),
+                ),
+                crate::model::catalog::DescriptorRead::Served(Box::new(d)),
+            )]
+            .into(),
+        );
+        book.presence_read(&o, t0);
+        let now = SystemTime::now();
+        let stamp = Timestamp::new(
+            NTP64::from(now.duration_since(SystemTime::UNIX_EPOCH).unwrap()),
+            "a1".parse::<TimestampId>().unwrap(),
+        );
+        let doc = serde_json::json!({"timestamp": 1, "rule": "link_down", "severity": "warning",
+            "state": "firing", "summary": "s", "labels": {"peer": "r2", "port": "eth0"}});
+        book.seed(
+            SeedRead {
+                asked_at: t0,
+                complete: true,
+                replies: vec![AlarmSample {
+                    key: "zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da".into(),
+                    delete: false,
+                    payload: serde_json::to_vec(&doc).unwrap(),
+                    stamp: Some(stamp),
+                    at: t0,
+                    wall: now,
+                    via: AlarmVia::Get,
+                }],
+                discarded: 0,
+            },
+            t0,
+            now,
+        );
+        let e = judge_alert_firing(sel, Severity::Warning, Some(Ok(&book)));
+        assert_eq!(e.state, CondState::Firing, "{e:?}");
+        assert!(e.evidence.contains("a659f813308ad1da"), "{e:?}");
+        let e = judge_alert_firing(sel, Severity::Critical, Some(Ok(&book)));
+        assert_eq!(e.state, CondState::Ok, "a warning is below critical: {e:?}");
+        book.presence_read(
+            &crate::model::catalog::Observed::from_keys("zk2/lab/*/@zk/**", &[], true),
+            t0,
+        );
+        let e = judge_alert_firing(sel, Severity::Warning, Some(Ok(&book)));
+        assert_eq!(
+            e.state,
+            CondState::Unobservable,
+            "absent is not asked: {e:?}"
+        );
+        assert!(e.evidence.contains("never ok"), "{e:?}");
     }
 }

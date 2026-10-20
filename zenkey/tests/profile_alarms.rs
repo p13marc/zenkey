@@ -25,7 +25,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use common::{T, addr, client, config, eventually, router};
+use common::{T, addr, client, config, eventually, eventually_some, router};
 use zenkey::alarms::{
     self, Act, Alarms, Condition, FileRecord, Retired, Severity, Source, Startup,
 };
@@ -197,6 +197,21 @@ async fn deliveries(log: &Log, alert_key: &str, n: usize) -> Vec<Rec> {
     of(&snapshot(log), alert_key)
 }
 
+/// S received `after[put]` before the new instance token `after[token]`,
+/// within [`JITTER`]. The owner puts first (§2.9), but S hears the two on
+/// two subscriptions, a data one and a liveliness one, and a token's
+/// declaration and a put ride the transport on different lanes: under
+/// load the token can overtake a put it followed by a few milliseconds.
+/// What S can bound is the inversion, never the owner's own order.
+#[track_caller]
+fn before_token(after: &[Rec], put: usize, token: usize, what: &str) {
+    assert!(
+        put < token || after[put].at <= after[token].at + JITTER,
+        "{what} before the new instance token, within {JITTER:?}: the put came {:?} after it",
+        after[put].at.saturating_duration_since(after[token].at)
+    );
+}
+
 /// A tool's consumer of `lab/svc`'s `alarms.v1`, on the standard contract.
 fn reader(s: &zenoh::Session) -> Consumer {
     Consumer::for_tool(
@@ -251,11 +266,9 @@ async fn presence_of(tool: &zenoh::Session, want: Option<&InstanceId>) -> (Prese
                 _ => None,
             })
     };
-    eventually("the owner's instance token", || async {
-        instance().await.is_some()
-    })
-    .await;
-    let instance = instance().await.unwrap();
+    // The instance the poll found, never a second read: under load a
+    // second liveliness read can come back without the token.
+    let instance = eventually_some("the owner's instance token", instance).await;
     let d = presence::descriptor(tool, &addr(SVC), &instance, T)
         .await
         .unwrap()
@@ -788,15 +801,9 @@ async fn s5_a_restart_mid_incident() {
             .iter()
             .position(|r| r.alert_key() == Some(k.as_str()))
             .unwrap_or_else(|| panic!("{k} delivered"));
-        assert!(
-            at < token_at,
-            "{k} before the new instance token (a SHOULD)"
-        );
+        before_token(&after, at, token_at, &format!("{k} (a SHOULD)"));
     }
-    assert!(
-        a_put < token_at,
-        "A before the new instance token (a SHOULD)"
-    );
+    before_token(&after, a_put, token_at, "A (a SHOULD)");
     let all = snapshot(&s.log);
     assert_eq!(
         reads(&of(&all, A_KEY)),
@@ -1057,7 +1064,7 @@ async fn a_re_mint_puts_every_alarm_again() {
         .iter()
         .position(|r| r.alert_key() == Some(A_KEY))
         .expect("A put again");
-    assert!(put < token, "before the new instance token");
+    before_token(&after, put, token, "A");
     assert_eq!(
         reads(&of(&snapshot(&s.log), A_KEY)),
         [Transition::Raised, Transition::Confirmed]

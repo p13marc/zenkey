@@ -275,8 +275,12 @@ lands at the bus root, where no consumer of the deployment listens.
   `compat`, `zk2 contract check-history`). A move from v1 to zk2 is each
   adopter's own (#614).
 - **Profile-backed checks** stay dark until their profiles exist (#613).
-  These are kinds, alerts, configuration, blobs and export, and
-  `field-stuck`, which judges against a declared freshness (`freshness.v1`).
+  These are kinds, blobs and export, and `field-stuck`, which judges against
+  a declared freshness (`freshness.v1`). Configuration came back with
+  `config.v1` (#768), and alerts with `alarms.v1` (#800): `zenctl alarms`,
+  the watchdog's `alert-firing`, the doctor's `alarm-key` and `alarm-stale`,
+  and `check conform`'s `alarm-key` and `alarm-document` ask its §5
+  questions, and zenwatch's `alerts` is #800's AD.
   The population budget was among them until core 0.24 (#735) made it core
   (spec §2.7): `check conform`'s `budget`, `budget-window` and `rate` cases and the doctor's
   `population-over-bound` ask it.

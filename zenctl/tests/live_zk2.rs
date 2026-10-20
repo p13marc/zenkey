@@ -6098,3 +6098,570 @@ async fn the_doctor_and_check_conform_judge_a_config_owner() {
     exits(&run, 0);
     bus.keep(rf.svc);
 }
+
+// ─── alarms.v1: scenarios.md §8–§10, the tool's sections (#800, AC) ────────
+//
+// Common setup, the text's: R1 a router with timestamping on, owners and the
+// tool T its clients. Owners are the runtime's (`zenkey::alarms`), but for
+// §9's liar, whose documents only a raw writer puts. T is `zenctl alarms`,
+// and in §8 the watchdog's `alert-firing` rule too; T takes the
+// deployment's word for its clock (`--clocks-synced`: every session runs on
+// this host, the conventions).
+
+/// The alarm A of the scenarios' conventions: rule `link_down`, labels
+/// `{peer: r2, port: eth0}`, at `severity`.
+fn alarm_a(severity: zenkey::alarms::Severity) -> zenkey::alarms::Condition {
+    zenkey::alarms::Condition::new("link_down", severity, "link to r2 down on eth0")
+        .label("peer", "r2")
+        .label("port", "eth0")
+}
+
+/// A's alert key (alarms.v1 §2.2).
+const A_KEY: &str = "a659f813308ad1da";
+
+/// An owner of `alarms.v1` at `address` through the runtime, started, on
+/// `session`; its alarms in the tokenless set when `tokenless`.
+async fn alarms_owner(
+    session: &zenoh::Session,
+    address: &str,
+    tokenless: bool,
+) -> (Service, zenkey::alarms::Alarms) {
+    let mut cfg = ServiceConfig::new(address.parse().expect("an address"));
+    if tokenless {
+        cfg = cfg.tokenless(zenkey::alarms::iface());
+    }
+    let mut b = ServiceBuilder::new(session, cfg);
+    let a = b
+        .alarms(zenkey::alarms::Startup::default())
+        .await
+        .expect("alarms.v1");
+    (b.start().await.expect("start"), a)
+}
+
+/// `alarms`'s run, its document's row of the alarm `alert_key` of
+/// `address`, when it parses.
+fn alarm_of(run: &Run, address: &str, alert_key: &str) -> Option<Value> {
+    let doc: Value = serde_json::from_str(&run.stdout).ok()?;
+    let (system, service) = address.split_once('/')?;
+    rows_of(&doc, "alarm")
+        .into_iter()
+        .find(|r| {
+            r["alarm"]["system"] == system
+                && r["alarm"]["service"] == service
+                && r["alarm"]["alert_key"] == alert_key
+        })
+        .cloned()
+}
+
+/// `alarms`'s owner row of `address`.
+fn alarm_owner<'a>(doc: &'a Value, address: &str) -> &'a Value {
+    rows_of(doc, "owner")
+        .into_iter()
+        .find(|r| r["address"] == address)
+        .unwrap_or_else(|| panic!("{address} has an owner row: {doc}"))
+}
+
+/// The alarms' wire selector T reads, every owner of `lab`.
+const LAB: &str = "zk2/lab/*/alarms.v1/state/alarms/*";
+
+/// alarms.v1 `scenarios.md` §8 (§2.7, §2.9, §2.14, §2.15): an absent
+/// owner, last-known, for a tool. T reads `lab/svc` holding A firing: yes,
+/// `firing`, and the watchdog's `alert-firing` fires. The owner closes
+/// cleanly: S receives no resolved put and no delete of A (§2.9). Then a
+/// complete presence read holds no token of it and its GET draws no reply:
+/// T judges A not asked, `absent`, showing the archive's document firing as
+/// last-known with its stamp, never as firing now; "is anything firing at
+/// or above warning?" over `lab` counts the owner not asked and is not yes.
+/// T knows of the owner from the archive's keys, and the watchdog from its
+/// own earlier reading: both keep it in scope though no token of it is
+/// found (§2.15, F-131), and the rule goes unobservable, never ok.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_s8_an_absent_owner_last_known_for_a_tool() {
+    use zenkey::alarms::Severity;
+    let bus = Bus::bare(None).await;
+    let key = format!("zk2/lab/svc/alarms.v1/state/alarms/{A_KEY}");
+    let archiving = client(&bus.endpoint, None).await;
+    let archive = Archive::start(
+        &archiving,
+        ArchiveConfig {
+            service: ServiceConfig::new("lab/archive".parse().expect("an address")),
+            records: vec![Recorded {
+                owner: "lab/svc".parse().expect("an address"),
+                selector: "zk2/lab/svc/alarms.v1/state/**".to_owned(),
+                implementation: zenkey::alarms::implementation(),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .expect("an archive");
+    let owning = client(&bus.endpoint, None).await;
+    let (svc, alarms) = alarms_owner(&owning, "lab/svc", false).await;
+    wait_for(&bus, &["lab/svc", "lab/archive"]).await;
+    alarms
+        .raise(alarm_a(Severity::Warning))
+        .await
+        .expect("A raised");
+    let deadline = Instant::now() + SETTLE;
+    while archive.confirmed(&key).is_none() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(archive.confirmed(&key).is_some(), "the archive records A");
+
+    // Step 1: T reads the owner and judges A.
+    let args = [
+        "alarms",
+        LAB,
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code == 1).await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["report"], "alarms");
+    assert_eq!(doc["any_firing"]["answer"], "yes", "{run}");
+    let a = alarm_of(&run, "lab/svc", A_KEY).expect("A's row");
+    assert_eq!(a["firing"]["answer"], "yes", "{run}");
+    assert_eq!(a["firing"]["reason"], "firing");
+    assert_eq!(a["rederives"]["reason"], "strict");
+    assert_eq!(a["latest"]["document"]["state"], "firing");
+
+    // The watchdog's alert-firing holds the same reader live across steps
+    // 2 and 3: it knows the owner from its own earlier reading.
+    let watchdog = bus.spawn(&[
+        "watchdog",
+        "--rule",
+        "alert-firing zk2/lab/** warning",
+        "--every",
+        "1",
+        "--count",
+        "18",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+    ]);
+    // Its reader opens and its first ticks judge the owner holding A.
+    tokio::time::sleep(Duration::from_secs(8)).await;
+
+    // Step 2: the owner closes cleanly; S hears no resolve and no delete.
+    let listening = client(&bus.endpoint, None).await;
+    let heard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let h = Arc::clone(&heard);
+    let s = listening
+        .declare_subscriber("zk2/lab/svc/alarms.v1/**")
+        .callback(move |x: zenoh::sample::Sample| {
+            let what = match x.kind() {
+                zenoh::sample::SampleKind::Delete => "delete".to_owned(),
+                zenoh::sample::SampleKind::Put => {
+                    String::from_utf8_lossy(&x.payload().to_bytes()).into_owned()
+                }
+            };
+            h.lock().unwrap().push(what);
+        })
+        .await
+        .expect("S");
+    drop(alarms);
+    svc.close().await.expect("the owner closes");
+    owning.close().await.expect("its session ends");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let seen = heard.lock().unwrap().clone();
+    assert!(
+        seen.iter()
+            .all(|x| x != "delete" && !x.contains("\"resolved\"")),
+        "a clean close resolves and deletes nothing (§2.9): {seen:?}"
+    );
+    drop(s);
+
+    // Step 3: a complete presence read, the owner's GET, the archive's form.
+    let run = bus
+        .until(&args, |r| {
+            alarm_of(r, "lab/svc", A_KEY).is_some_and(|a| a["firing"]["reason"] == "absent")
+        })
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["presence"]["complete"], true, "{run}");
+    let a = alarm_of(&run, "lab/svc", A_KEY).expect("A's row");
+    assert_eq!(a["firing"]["answer"], "not_asked", "{run}");
+    assert!(a.get("latest").is_none(), "never shown as current: {run}");
+    let lk = &a["last_known"];
+    assert_eq!(lk["archive"], "lab/archive", "{run}");
+    assert_eq!(lk["document"]["state"], "firing");
+    assert!(lk["stamp"]["clock"].is_string(), "its stamp: {run}");
+    let owner = alarm_owner(&doc, "lab/svc");
+    assert_eq!(owner["verdict"], "not_asked", "{run}");
+    assert_eq!(owner["reason"], "absent");
+    assert_eq!(owner["known_by"], json!(["archive"]), "{run}");
+    assert_ne!(doc["any_firing"]["answer"], "yes", "{run}");
+    assert_eq!(
+        doc["any_firing"]["not_asked"], 2,
+        "the archive, and the absent owner: {run}"
+    );
+    let table = bus
+        .zenctl(&[
+            "alarms",
+            LAB,
+            "--clocks-synced",
+            "--timeout",
+            "1",
+            "--format",
+            "table",
+        ])
+        .await;
+    assert!(
+        table.stdout.contains("last-known, never current"),
+        "{table}"
+    );
+
+    // The watchdog: firing while the owner held A, then never ok.
+    let run = watchdog.await.expect("the watchdog");
+    let lines = ndjson_lines(&run);
+    let to: Vec<&str> = lines
+        .iter()
+        .filter(|l| l["row"] == "transition")
+        .filter_map(|l| l["to"].as_str())
+        .collect();
+    assert_eq!(to.first(), Some(&"firing"), "{run}");
+    assert_eq!(to.last(), Some(&"unobservable"), "{run}");
+    assert!(!to.contains(&"ok"), "an absent owner is never ok: {run}");
+    drop(archive);
+}
+
+/// alarms.v1 `scenarios.md` §9 (§2.2, §2.3, §5): a key that does not
+/// re-derive. `lab/liar` puts, through raw state writers on keys of its
+/// choosing, A's document on `…/0000000000000001`, a document with rule
+/// `link\ndown` and labels `{port: 22}` on its sanitized key
+/// `…/16991d91fb818ca6`, and A's document on its own key. T asks of each
+/// whether it re-derives: no, `mismatch`; yes, `sanitized`; yes, `strict`.
+/// The doctor reports the first as an error and the second as a warning.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_s9_a_key_that_does_not_rederive_for_a_tool() {
+    let mut bus = Bus::bare(None).await;
+    let id = zenkey::alarms::iface();
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("lab/liar".parse().expect("an address")),
+    );
+    b.implement(zenkey::alarms::implementation())
+        .expect("implement");
+    let a = json!({"timestamp": 1_760_950_000_000_u64, "rule": "link_down",
+        "severity": "warning", "state": "firing", "summary": "link to r2 down on eth0",
+        "labels": {"peer": "r2", "port": "eth0"}});
+    let unframed = json!({"timestamp": 1_760_950_000_000_u64, "rule": "link\ndown",
+        "severity": "warning", "state": "firing", "summary": "s", "labels": {"port": "22"}});
+    let sanitized = zenkey::model::alarms::derive("link\ndown", [("port", "22")]).key;
+    assert_eq!(sanitized, "16991d91fb818ca6", "the text's sanitized key");
+    let mut writers = Vec::new();
+    for (k, doc) in [
+        ("0000000000000001", &a),
+        (sanitized.as_str(), &unframed),
+        (A_KEY, &a),
+    ] {
+        let w = b
+            .declare_state_writer(
+                &id,
+                zenkey::alarms::ALARMS,
+                &[("alert_key".to_owned(), vec![k.to_owned()])].into(),
+            )
+            .await
+            .expect("a writer");
+        w.put(serde_json::to_vec(doc).expect("json"))
+            .await
+            .expect("a put");
+        writers.push(w);
+    }
+    bus.services.push(b.start().await.expect("start"));
+    bus.keep(writers);
+    wait_for(&bus, &["lab/liar"]).await;
+
+    let args = [
+        "alarms",
+        "zk2/lab/liar/**",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            [("0000000000000001"), (sanitized.as_str()), (A_KEY)]
+                .iter()
+                .all(|k| alarm_of(r, "lab/liar", k).is_some())
+        })
+        .await;
+    let row = |k: &str| alarm_of(&run, "lab/liar", k).unwrap_or_else(|| panic!("{k}: {run}"));
+    for (k, answer, reason) in [
+        ("0000000000000001", "no", "mismatch"),
+        (sanitized.as_str(), "yes", "sanitized"),
+        (A_KEY, "yes", "strict"),
+    ] {
+        let r = row(k);
+        assert_eq!(
+            (
+                r["rederives"]["answer"].as_str(),
+                r["rederives"]["reason"].as_str()
+            ),
+            (Some(answer), Some(reason)),
+            "{k}: {run}"
+        );
+    }
+    assert_eq!(
+        row(&sanitized)["problems"],
+        json!(["unframed"]),
+        "§2.3's SHOULD, named: {run}"
+    );
+
+    // The doctor: the mismatch an error, the sanitized key a warning.
+    let run = bus
+        .zenctl(&doctor_args(&["--check", "alarm-key", "--format", "json"]))
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    let findings = check_row(&doc, "alarm-key")["findings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let by: Vec<(String, String)> = findings
+        .iter()
+        .map(|f| {
+            (
+                f["subject"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned(),
+                f["severity"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        by,
+        [
+            ("0000000000000001".to_owned(), "error".to_owned()),
+            (sanitized.clone(), "warning".to_owned()),
+        ],
+        "{run}"
+    );
+}
+
+/// The owners' tokens under `lab/b`, read once: what T would find by token.
+async fn alive_alarms_tokens(bus: &Bus, address: &str) -> Vec<String> {
+    let read = zenkey::presence::liveliness_read(
+        &bus.owners,
+        &format!("zk2/{address}/@zk/alive/alarms.v1/**"),
+        Duration::from_secs(1),
+    )
+    .await
+    .expect("a liveliness read");
+    read.keys
+}
+
+/// alarms.v1 `scenarios.md` §10's two owners: `lab/a` holding A firing at
+/// warning, and `lab/b`, holding nothing, with `alarms.v1` in its tokenless
+/// set (core §8.1).
+async fn s10_owners(bus: &mut Bus) -> zenkey::alarms::Alarms {
+    use zenkey::alarms::Severity;
+    let (a, alarms_a) = alarms_owner(&bus.owners, "lab/a", false).await;
+    alarms_a
+        .raise(alarm_a(Severity::Warning))
+        .await
+        .expect("A raised");
+    let (b, alarms_b) = alarms_owner(&bus.owners, "lab/b", true).await;
+    bus.services.extend([a, b]);
+    bus.keep(alarms_a);
+    wait_for(bus, &["lab/a", "lab/b"]).await;
+    assert!(
+        alive_alarms_tokens(bus, "lab/b").await.is_empty(),
+        "lab/b holds no alive/alarms.v1/… token"
+    );
+    alarms_b
+}
+
+/// §10's step 1 at `at_least`: T subscribes, then GETs, and asks at once.
+async fn s10_step1(bus: &Bus, at_least: &str) -> Run {
+    bus.zenctl(&[
+        "alarms",
+        LAB,
+        "--for",
+        "1",
+        "--at-least",
+        at_least,
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ])
+    .await
+}
+
+/// alarms.v1 `scenarios.md` §10 (§2.15, §5), steps 1 and 3: anything
+/// firing, for a tool. At warning: yes, `any_firing`, 1. At critical:
+/// unobservable, `owner_unobservable` — `lab/a` is established
+/// (`answered`), `lab/b` is not (`window_short`): its GET drew nothing,
+/// which alone is no verdict, and its window is not yet longer than 900 s.
+/// T finds `lab/b` by its descriptor though it holds no `alive/alarms.v1/…`
+/// token (§2.13). Then `lab/b` raises B at critical: yes, `any_firing`, 1.
+/// Step 2, 905 s of listening, is the slow tier's
+/// ([`alarms_s10_anything_firing_for_a_tool_at_900_s`]).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_s10_anything_firing_for_a_tool() {
+    use zenkey::alarms::Severity;
+    let mut bus = Bus::bare(None).await;
+    let alarms_b = s10_owners(&mut bus).await;
+
+    // Step 1, at warning and at critical.
+    let run = s10_step1(&bus, "warning").await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["any_firing"]["answer"], "yes", "{run}");
+    assert_eq!(doc["any_firing"]["reason"], "any_firing");
+    assert_eq!(doc["any_firing"]["firing"], 1);
+    let run = s10_step1(&bus, "critical").await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(
+        (
+            doc["any_firing"]["answer"].as_str(),
+            doc["any_firing"]["reason"].as_str()
+        ),
+        (Some("unobservable"), Some("owner_unobservable")),
+        "{run}"
+    );
+    let a = alarm_owner(&doc, "lab/a");
+    assert_eq!(
+        (a["verdict"].as_str(), a["reason"].as_str()),
+        (Some("established"), Some("answered")),
+        "{run}"
+    );
+    let b = alarm_owner(&doc, "lab/b");
+    assert_eq!(
+        (b["verdict"].as_str(), b["reason"].as_str()),
+        (Some("unobservable"), Some("window_short")),
+        "{run}"
+    );
+    assert_eq!(
+        b["known_by"],
+        json!(["presence"]),
+        "by its descriptor: {run}"
+    );
+
+    // Step 3: lab/b raises B at critical.
+    alarms_b
+        .raise(
+            zenkey::alarms::Condition::new("disk_full", Severity::Critical, "/var is 97% full")
+                .label("mount", "/var"),
+        )
+        .await
+        .expect("B raised");
+    let args = [
+        "alarms",
+        LAB,
+        "--at-least",
+        "critical",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code == 1).await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["any_firing"]["reason"], "any_firing", "{run}");
+    assert_eq!(doc["any_firing"]["firing"], 1, "{run}");
+    bus.keep(alarms_b);
+}
+
+/// alarms.v1 `scenarios.md` §10 at the standard contract, whole: step 1,
+/// then step 2 — T listens 905 s, losing no delivery, both owners present
+/// throughout, and asks again at critical: no, `none_firing`, `lab/b`
+/// established by its window (`window`) — then step 3. The window counts
+/// from the subscription's declaration plus the reply timeout, and the
+/// owners are watched a lease and the timeout past it (core §2.7), so the
+/// run takes about 917 s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "slow tier: §10's step 2 listens 905 s at the contract's 900 s horizon"]
+async fn alarms_s10_anything_firing_for_a_tool_at_900_s() {
+    use zenkey::alarms::Severity;
+    let mut bus = Bus::bare(None).await;
+    let alarms_b = s10_owners(&mut bus).await;
+    let run = s10_step1(&bus, "critical").await;
+    exits(&run, 2);
+    assert_eq!(
+        alarm_owner(&run.json(), "lab/b")["reason"],
+        "window_short",
+        "{run}"
+    );
+
+    // Step 2: 905 s of listening.
+    let run = bus
+        .spawn_within(
+            &[
+                "alarms",
+                LAB,
+                "--for",
+                "905",
+                "--at-least",
+                "critical",
+                "--clocks-synced",
+                "--timeout",
+                "1",
+                "--format",
+                "json",
+            ],
+            Duration::from_secs(1000),
+        )
+        .await
+        .expect("the runner");
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(
+        (
+            doc["any_firing"]["answer"].as_str(),
+            doc["any_firing"]["reason"].as_str()
+        ),
+        (Some("no"), Some("none_firing")),
+        "{run}"
+    );
+    let b = alarm_owner(&doc, "lab/b");
+    assert_eq!(
+        (b["verdict"].as_str(), b["reason"].as_str()),
+        (Some("established"), Some("window")),
+        "{run}"
+    );
+
+    // Step 3.
+    alarms_b
+        .raise(
+            zenkey::alarms::Condition::new("disk_full", Severity::Critical, "/var is 97% full")
+                .label("mount", "/var"),
+        )
+        .await
+        .expect("B raised");
+    let run = bus
+        .until(
+            &[
+                "alarms",
+                LAB,
+                "--at-least",
+                "critical",
+                "--clocks-synced",
+                "--timeout",
+                "1",
+                "--format",
+                "json",
+            ],
+            |r| r.code == 1,
+        )
+        .await;
+    exits(&run, 1);
+    bus.keep(alarms_b);
+}

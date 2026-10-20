@@ -997,3 +997,34 @@ async fn the_owner_example_implements_alarms() {
     );
     o.stop().await;
 }
+
+/// `owner --help` (#800, AC; zk2py's F-133) documents the interface a live
+/// runner drives: the command word `alarm` and each of its commands, the
+/// condition's JSON, every answer line, the record file's format, and that
+/// a short-horizon copy of the standard contract is accepted.
+#[test]
+fn the_help_documents_the_alarms_surface() {
+    for piece in [
+        "alarm raise <json>",
+        "alarm resolve <alert_key>",
+        "alarm confirm <alert_key>|all on|off",
+        "alarm list",
+        "alarm adoption",
+        "\"rule\": <string>",
+        "\"severity\": \"info\"|\"warning\"|\"critical\"",
+        "\"labels\"?",
+        "\"category\"?",
+        "alarm raised|escalated|refreshed|unchanged <alert_key> <document>",
+        "alarm resolved <alert_key> <document>, or alarm none <alert_key>",
+        "alarm held <json>",
+        "alarm adoption source=<record|archive|nothing>",
+        "refused <line>: <why>",
+        "{\"profile\": \"alarms.v1\", \"alarms\": {\"<alert key>\": <document>, ...}}",
+        "short\n  horizon is accepted",
+        "--alarms-record <file>",
+        "--alarms-archive",
+        "--alarms-rules",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}

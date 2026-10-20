@@ -6,7 +6,9 @@ a setup, steps, and expected observations. §1 to §7 are the runtime's, and
 the reference runs them as tests of `zenkey`
 (`zenkey/tests/profile_alarms.rs`, one test per section, named after it;
 #800, AB). §8 to §10 are a tool's, and the reference tool runs them as
-tests of zenctl (#800, AC).
+tests of zenctl (`zenctl/tests/live_zk2.rs`, `alarms_s8_…` to
+`alarms_s10_…`, T being `zenctl alarms` and, in §8, the watchdog's
+`alert-firing`; #800, AC).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.5) are v1.md's rules; core
@@ -30,11 +32,20 @@ tests of zenctl (#800, AC).
   (`freshness.v1` §2.6, ground 1): every session of a scenario runs on one
   host. §6 measures nothing else.
 - **The horizon** is the contract's, 900 s, so the owner confirms each
-  firing alarm at least every 450 s. §2 waits 455 s and §6 about 910 s, and
-  a runner MAY keep them in a slow tier. The reference keeps them there,
-  and its default run checks what §2's and §6's owner puts on a copy of
-  the standard contract with `freshness.ttl_s = 4`, made in memory and
-  never published (0.2).
+  firing alarm at least every 450 s. §2 waits 455 s, §6 about 910 s and
+  §10's step 2 listens 905 s, and a runner MAY keep them in a slow tier.
+  The reference keeps them there, and its default run checks what §2's
+  and §6's owner puts on a copy of the standard contract with
+  `freshness.ttl_s = 4`, made in memory and never published (0.2), and
+  §10's steps 1 and 3 (0.3).
+- **The owner example** (0.3, F-133). The reference's owner,
+  `zenkey/examples/owner.rs` run with `--alarms`, is the one a black-box
+  runner drives, and `owner --help` is its agreed interface: its options,
+  what it prints, the command word `alarm` and each command, the
+  condition's JSON, every answer line, the record file's format, and that
+  a copy of the standard contract with a short horizon is accepted as a
+  contract file. §9's liar is no owner the text allows, so a runner writes
+  it itself.
 - **Jitter.** A gap between deliveries is measured at S. The reference
   allows 200 ms on loopback.
 
@@ -181,7 +192,8 @@ holds two more documents, written by a test before the restart:
    to "is anything firing at or above `warning`?" over `zk2/lab/*` counts
    the owner as not asked, and is not **yes** (§2.15). T knows of the
    owner from its step 1, so the owner is in scope though no token of it
-   is found (§2.15, "the owners in scope", 0.2).
+   is found (§2.15, "the owners in scope", 0.2). A tool whose readings end
+   with its process knows of it from the archive's keys instead (0.3).
 
 ## §9 A key that does not re-derive, for a tool (§2.2, §2.3, §5)
 
@@ -208,7 +220,10 @@ holds nothing, and has `alarms.v1` in its tokenless set (core §8.1).
    same selector, and asks at once: is anything firing at or above
    `warning`? At or above `critical`?
 2. T listens 905 s, losing no delivery, both owners present throughout,
-   and asks again at `critical`.
+   and asks again at `critical`. Its window counts as core §2.7 counts
+   one, from the subscription's declaration plus the reply timeout, and
+   its owners are watched a lease and the reply timeout past it (§2.15,
+   0.3).
 3. `lab/b` raises B at `critical`, and T asks at `critical`.
 
 **Expected.**

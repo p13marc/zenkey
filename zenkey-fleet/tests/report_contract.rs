@@ -222,6 +222,47 @@ fn doctor_severities_findings_and_verdicts_are_the_stable_vocabulary() {
     );
 }
 
+/// `alarms.v1` (#800, AC): §5's answers in the fixtures' tokens, every
+/// answer spelled apart, the scope's answer the finding, and an absent
+/// owner's alarm carried last-known and never as current.
+#[test]
+fn an_alarms_report_keeps_every_answer_apart() {
+    let r = fx::alarms_report();
+    let v = serde_json::to_value(&r).unwrap();
+    assert_eq!(v["any_firing"]["answer"], "yes");
+    assert_eq!(v["any_firing"]["at_least"], "warning");
+    let answers: std::collections::BTreeSet<&str> = v["alarms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["firing"]["answer"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        answers,
+        ["no", "not_asked", "unobservable", "yes"].into(),
+        "four answers, four spellings"
+    );
+    let gone = v["alarms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["last_known"].is_object())
+        .expect("an archived alarm");
+    assert!(gone.get("latest").is_none(), "never shown as current");
+    assert_eq!(gone["alarm"]["service"], "svc");
+    let verdicts: std::collections::BTreeSet<&str> = v["owners"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["verdict"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        verdicts,
+        ["established", "not_asked", "unobservable"].into()
+    );
+    assert_eq!(judgement_exit_code(&r.judgement()), 1);
+}
+
 /// Every enum in this surface, its wire spelling, behind an exhaustive
 /// `match`.
 ///
@@ -279,6 +320,65 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         ExpectVerdict::Impaired,
     ] {
         assert_eq!(wire(&v, ""), expect(&v));
+    }
+    // alarms.v1 (#800, AC): the fixtures' tokens, snake_case.
+    fn known(v: &KnownBy) -> &'static str {
+        match v {
+            KnownBy::Presence => "presence",
+            KnownBy::Earlier => "earlier",
+            KnownBy::Archive => "archive",
+            KnownBy::Word => "word",
+        }
+    }
+    fn change(v: &AlarmChange) -> &'static str {
+        match v {
+            AlarmChange::Raised => "raised",
+            AlarmChange::Escalated => "escalated",
+            AlarmChange::Refreshed => "refreshed",
+            AlarmChange::Confirmed => "confirmed",
+            AlarmChange::Resolved => "resolved",
+            AlarmChange::Retired => "retired",
+            AlarmChange::Unreadable => "unreadable",
+            AlarmChange::Lost => "lost",
+            AlarmChange::Judged => "judged",
+        }
+    }
+    fn latest(v: &AlarmLatest) -> &'static str {
+        match v {
+            AlarmLatest::Firing => "firing",
+            AlarmLatest::Resolved => "resolved",
+            AlarmLatest::Deleted => "deleted",
+            AlarmLatest::Undecodable => "undecodable",
+        }
+    }
+    for v in [
+        KnownBy::Presence,
+        KnownBy::Earlier,
+        KnownBy::Archive,
+        KnownBy::Word,
+    ] {
+        assert_eq!(wire(&v, ""), known(&v));
+    }
+    for v in [
+        AlarmChange::Raised,
+        AlarmChange::Escalated,
+        AlarmChange::Refreshed,
+        AlarmChange::Confirmed,
+        AlarmChange::Resolved,
+        AlarmChange::Retired,
+        AlarmChange::Unreadable,
+        AlarmChange::Lost,
+        AlarmChange::Judged,
+    ] {
+        assert_eq!(wire(&v, ""), change(&v));
+    }
+    for v in [
+        AlarmLatest::Firing,
+        AlarmLatest::Resolved,
+        AlarmLatest::Deleted,
+        AlarmLatest::Undecodable,
+    ] {
+        assert_eq!(wire(&v, ""), latest(&v));
     }
 }
 
