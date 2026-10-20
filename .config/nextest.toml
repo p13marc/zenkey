@@ -26,7 +26,9 @@ fail-fast = false
 # §8 across a constrained face, takes 200 s.
 slow-timeout = { period = "60s", terminate-after = 10 }
 # One test per CPU, nextest's default, left as it is. On vm-dev (6 CPUs, as
-# vm-runner-01) the suite took 5 min at 6 and 3.5 min at 12, but at 12
-# link_face's s10 saw 7 downsampled samples where 4 to 6 fit: its owner's
-# 5 s of traffic stretched under the load. Most tests sleep, so the CPUs
-# are not the limit; the timing windows are.
+# vm-runner-01) the suite took 5 min at 6 and 3.5 min at 12. The first run
+# at 12 failed link_face's s10, 7 downsampled samples where 4 to 6 fit,
+# because its owner's traffic was paced by sleeps the load stretched; paced
+# by deadline, the next run at 12 passed. One run is not enough to raise
+# this on a runner shared with another lane: most tests sleep, so the CPUs
+# are not the limit, the timing windows are.
