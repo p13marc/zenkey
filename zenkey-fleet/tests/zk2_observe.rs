@@ -559,7 +559,14 @@ async fn expect_judges_samples_values_and_presence() {
     let (late, ()) = tokio::join!(run_expect(&bed.tool, aim(), &spec), valid_then_invalid);
     let late = late.expect("a window");
     assert_eq!(late.verdict, ExpectVerdict::NotMet, "{late:?}");
+    // Not met for the late payloads, not for a shortfall a slow start
+    // could also give.
+    assert!(
+        late.violations.iter().any(|v| v.contains("invalid")),
+        "{late:?}"
+    );
     assert!(!late.ended_early, "{late:?}");
+    // Exact: a window not ended early is the one asked for.
     assert_eq!(late.window_s, 3.0, "{late:?}");
 
     let nobody = ResolvedTarget::parse("host-z/tc").expect("target");
