@@ -2276,7 +2276,6 @@ fn health_unjudged(s: &HealthSubject, what: &str) -> Unjudged {
     )
 }
 
-/// The clean reason's tail: the services not asked.
 // ─── alarms.v1 (#800, AC) ───────────────────────────────────────────────────
 
 /// Every owner's alarms as the run's GET read them, beside the second
@@ -2466,6 +2465,7 @@ fn alarm_stale(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
     )
 }
 
+/// The clean reason's tail: the services not asked.
 fn unlisted_note(n: usize) -> String {
     if n == 0 {
         String::new()

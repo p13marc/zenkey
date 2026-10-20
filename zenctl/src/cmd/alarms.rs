@@ -49,10 +49,7 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
              service in the selector (zk2/<system>/<service>/…)"
         )));
     }
-    let window = match for_secs {
-        Some(s) => Some(ASKING.ask(super::positive_secs("--for", s))),
-        None => None,
-    };
+    let window = for_secs.map(|s| ASKING.ask(super::positive_secs("--for", s)));
     let mut spec = AlarmSpec::new(dep.timeout());
     spec.window = window;
     spec.clocks_synced = clocks_synced;

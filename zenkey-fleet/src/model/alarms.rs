@@ -1094,7 +1094,7 @@ impl AlarmBook {
     /// its latest document's severity. A key refused at [`MAX_KEYS`] could
     /// be firing, so the answer is then never *no*.
     pub fn any_firing(&self, at_least: Severity, now: Instant, wall: SystemTime) -> AnyFiring {
-        let rows: Vec<(SetJudged, Vec<(Judged, Option<Severity>)>)> = self
+        let rows: Vec<(SetJudged, Vec<FirstAnswer>)> = self
             .owners
             .keys()
             .map(|a| {
@@ -1118,6 +1118,10 @@ impl AlarmBook {
         out
     }
 }
+
+/// One alarm's first answer and its latest document's severity, as
+/// `any_firing` takes them.
+type FirstAnswer = (Judged, Option<Severity>);
 
 /// One key's reading at an instant (§2.14), owned: what
 /// `zenkey_model::alarms`'s judges take.

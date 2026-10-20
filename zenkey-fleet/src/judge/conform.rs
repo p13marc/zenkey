@@ -4291,7 +4291,7 @@ mod tests {
                         "iface": "alarms.v1",
                         "contract": format!("sha256:{}", zenkey::alarms::FINGERPRINT),
                         "minor": 0, "token": false}));
-                    *d = Box::new(serde_json::from_value(v).unwrap());
+                    **d = serde_json::from_value(v).unwrap();
                 }
             }
         }

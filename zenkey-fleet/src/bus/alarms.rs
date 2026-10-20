@@ -178,8 +178,12 @@ pub struct Refreshed {
     /// The presence read, and when it was taken. `None` across a face.
     pub presence: Option<(Instant, Result<Observed, String>)>,
     pub seed: Result<SeedRead, String>,
-    pub archived: Option<Result<(Vec<String>, Vec<ArchivedAlarm>), String>>,
+    pub archived: Option<Result<ArchivesRead, String>>,
 }
+
+/// What the archives answered: the archives asked, and every last-known
+/// document they hold of the scope.
+pub type ArchivesRead = (Vec<String>, Vec<ArchivedAlarm>);
 
 impl AlarmRefresh {
     /// Presence, then the GET, then the archives.
@@ -256,7 +260,7 @@ async fn archived(
     session: &Session,
     scope: &AlarmScope,
     timeout: Duration,
-) -> Result<(Vec<String>, Vec<ArchivedAlarm>), String> {
+) -> Result<ArchivesRead, String> {
     let all = crate::bus::presence::observe(session, &Scope::all(), timeout)
         .await
         .map_err(|e| crate::one_line(&e))?;
