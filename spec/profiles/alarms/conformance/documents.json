@@ -1000,7 +1000,102 @@
         "warnings": []
       },
       "note": "observed_at_ms out of range"
+    },
+    {
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "a document as strict JSON text reads (0.2, F-126)",
+      "text": "{\"timestamp\": 1760950000000, \"rule\": \"link_down\", \"severity\": \"warning\", \"state\": \"firing\", \"summary\": \"link to r2 down on eth0\", \"labels\": {\"peer\": \"r2\", \"port\": \"eth0\"}}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a duplicate member, severity twice: not strict JSON, so two readers cannot read two severities (0.2, F-126)",
+      "text": "{\"timestamp\": 1760950000000, \"rule\": \"link_down\", \"severity\": \"warning\", \"severity\": \"critical\", \"state\": \"firing\", \"summary\": \"s\"}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a duplicate label name: two readers would derive two keys (0.2, F-126)",
+      "text": "{\"timestamp\": 1760950000000, \"rule\": \"link_down\", \"severity\": \"warning\", \"state\": \"firing\", \"summary\": \"s\", \"labels\": {\"peer\": \"r2\", \"peer\": \"r3\"}}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a duplicate member the schema does not name: refused at any depth (0.2, F-126)",
+      "text": "{\"timestamp\": 1760950000000, \"rule\": \"link_down\", \"severity\": \"warning\", \"state\": \"firing\", \"summary\": \"s\", \"later\": 1, \"later\": 2}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "NaN is no JSON number (0.2, F-126)",
+      "text": "{\"timestamp\": NaN, \"rule\": \"link_down\", \"severity\": \"warning\", \"state\": \"firing\", \"summary\": \"s\"}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "Infinity is no JSON number (0.2, F-126)",
+      "text": "{\"timestamp\": Infinity, \"rule\": \"link_down\", \"severity\": \"warning\", \"state\": \"firing\", \"summary\": \"s\"}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "a lone surrogate escape has no UTF-8 form, so the recipe has no input bytes (0.2, F-126)",
+      "text": "{\"timestamp\": 1760950000000, \"rule\": \"link\\ud800down\", \"severity\": \"warning\", \"state\": \"firing\", \"summary\": \"s\"}"
+    },
+    {
+      "expect": {
+        "errors": [],
+        "readable": true,
+        "warnings": []
+      },
+      "note": "a surrogate pair escape is one character, and reads (0.2, F-126)",
+      "text": "{\"timestamp\": 1760950000000, \"rule\": \"link_down\", \"severity\": \"warning\", \"state\": \"firing\", \"summary\": \"down \\ud83d\\ude00\"}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false,
+        "warnings": []
+      },
+      "note": "text after the document (0.2, F-126)",
+      "text": "{\"timestamp\": 1760950000000, \"rule\": \"link_down\", \"severity\": \"warning\", \"state\": \"firing\", \"summary\": \"link to r2 down on eth0\", \"labels\": {\"peer\": \"r2\", \"port\": \"eth0\"}} {}"
     }
   ],
-  "description": "alarms.v1 §2.4, §2.3: a payload, decoded as JSON -> whether a reader reads it as a document (`readable`), the owner's errors (MUSTs broken) and its warnings (SHOULDs broken), as tokens in the order checked. Unreadable: `schema`, outside the 1.0 schema's `alarms.v1.Alarm` (its required members, types and enums; an integral number is an integer, and a member the schema does not name is ignored), and then `time_range`, a time outside 0 to 2^53-1, and nothing else is reported. Errors: `observed_before_timestamp`, then `observed_on_resolved`. Warnings: `unframed` (the rule or a discriminating label breaks the framing, §2.3), then `label_name_form` once per label name outside the form, in byte order of the names."
+  "description": "alarms.v1 §2.4, §2.3: a payload, decoded as JSON (`document`), or as its text (`text`, 0.2) -> whether a reader reads it as a document (`readable`), the owner's errors (MUSTs broken) and its warnings (SHOULDs broken), as tokens in the order checked. Unreadable: `json`, text that is not strict JSON (RFC 8259 in UTF-8, no duplicate member at any depth, every number finite, every string with a UTF-8 form, nothing after the value; 0.2), then `schema`, outside the 1.0 schema's `alarms.v1.Alarm` (its required members, types and enums; an integral number is an integer, and a member the schema does not name is ignored), and then `time_range`, a time outside 0 to 2^53-1, and nothing else is reported. Errors: `observed_before_timestamp`, then `observed_on_resolved`. Warnings: `unframed` (the rule or a discriminating label breaks the framing, §2.3), then `label_name_form` once per label name outside the form, in byte order of the names."
 }
