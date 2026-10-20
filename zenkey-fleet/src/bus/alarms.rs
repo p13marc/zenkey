@@ -147,7 +147,9 @@ pub struct ReadLog {
     /// The GET: whether it ran to its final reply, or why it could not be
     /// made.
     pub seed: Option<Result<bool, String>>,
-    /// The archives asked, or why they could not be.
+    /// The archives asked, or why they could not all be read: the leg's
+    /// own presence read, or each archive that failed (what the others
+    /// answered is kept).
     pub archives: Option<Result<Vec<String>, String>>,
     /// Replies and deliveries on a non-concrete key, discarded (R6).
     pub discarded: u64,
@@ -181,9 +183,15 @@ pub struct Refreshed {
     pub archived: Option<Result<ArchivesRead, String>>,
 }
 
-/// What the archives answered: the archives asked, and every last-known
-/// document they hold of the scope.
-pub type ArchivesRead = (Vec<String>, Vec<ArchivedAlarm>);
+/// What the archives answered: each archive asked, every last-known
+/// document they hold of the scope, and each archive that could not be
+/// read, with why. One archive failing keeps what the others answered.
+#[derive(Debug, Clone, Default)]
+pub struct ArchivesRead {
+    pub asked: Vec<String>,
+    pub found: Vec<ArchivedAlarm>,
+    pub failed: Vec<String>,
+}
 
 impl AlarmRefresh {
     /// Presence, then the GET, then the archives.
@@ -265,22 +273,21 @@ async fn archived(
         .await
         .map_err(|e| crate::one_line(&e))?;
     let archive = IfaceId::from_str(ARCHIVE).expect("archive.v1 is an interface id");
-    let mut asked = Vec::new();
-    let mut out = Vec::new();
+    let mut out = ArchivesRead::default();
     for a in Catalog::new(&all).providers_of(&archive) {
-        asked.push(a.to_string());
-        let got = zenkey::archive::last_known_all(session, &a, scope.alarms_selector(), timeout)
-            .await
-            .map_err(|e| format!("archive {a}: {e}"))?;
-        out.extend(got.into_iter().map(|lk| ArchivedAlarm {
-            archive: a.clone(),
-            key: lk.origin,
-            value: lk.value,
-            stamp: lk.timestamp,
-            confirmed: lk.confirmed,
-        }));
+        out.asked.push(a.to_string());
+        match zenkey::archive::last_known_all(session, &a, scope.alarms_selector(), timeout).await {
+            Ok(got) => out.found.extend(got.into_iter().map(|lk| ArchivedAlarm {
+                archive: a.clone(),
+                key: lk.origin,
+                value: lk.value,
+                stamp: lk.timestamp,
+                confirmed: lk.confirmed,
+            })),
+            Err(e) => out.failed.push(format!("archive {a}: {e}")),
+        }
     }
-    Ok((asked, out))
+    Ok(out)
 }
 
 /// One reader of a scope's alarms, live: see the module doc.
@@ -479,9 +486,15 @@ impl AlarmFeed {
         }
         match r.archived {
             None => {}
-            Some(Ok((asked, found))) => {
-                self.book.archived(found);
-                self.log.archives = Some(Ok(asked));
+            Some(Ok(read)) => {
+                self.book.archived(read.found);
+                // An archive not read could know an absent owner (F-131):
+                // the run is no verdict over it, never "nothing fires".
+                self.log.archives = Some(if read.failed.is_empty() {
+                    Ok(read.asked)
+                } else {
+                    Err(read.failed.join("; "))
+                });
             }
             Some(Err(e)) => self.log.archives = Some(Err(e)),
         }
@@ -506,6 +519,7 @@ impl AlarmFeed {
             }
             Err(e) => self.log.seed = Some(Err(e)),
         }
+        out.extend(self.take_refused(now, wall));
         out.extend(self.check_stall(now, wall));
         out.extend(self.book.sweep(now, wall));
         out
@@ -518,18 +532,7 @@ impl AlarmFeed {
         self.restart_watch().await;
         let d = self.rx.as_mut()?.recv().await?;
         let (now, wall) = (Instant::now(), SystemTime::now());
-        let mut out = Vec::new();
-        let refused = self.refused.swap(0, Ordering::Relaxed);
-        if refused > 0 {
-            out.extend(self.book.lose(
-                AlarmLoss {
-                    dropped: refused,
-                    stalled: false,
-                },
-                now,
-                wall,
-            ));
-        }
+        let mut out = self.take_refused(now, wall);
         match d {
             Delivery::Sample(s) => out.extend(self.book.sample(s)),
             Delivery::Instance { key, held, at } => {
@@ -545,9 +548,28 @@ impl AlarmFeed {
     /// Every key's verdict at this instant: what moved with no sample.
     pub fn sweep(&mut self) -> Vec<AlarmTransition> {
         let (now, wall) = (Instant::now(), SystemTime::now());
-        let mut out = self.check_stall(now, wall);
+        let mut out = self.take_refused(now, wall);
+        out.extend(self.check_stall(now, wall));
         out.extend(self.book.sweep(now, wall));
         out
+    }
+
+    /// The deliveries the queue refused since last asked, as one loss:
+    /// taken wherever the book is judged, so a refusal after the last
+    /// delivery is still lost, never missed.
+    fn take_refused(&mut self, now: Instant, wall: SystemTime) -> Vec<AlarmTransition> {
+        let refused = self.refused.swap(0, Ordering::Relaxed);
+        if refused == 0 {
+            return Vec::new();
+        }
+        self.book.lose(
+            AlarmLoss {
+                dropped: refused,
+                stalled: false,
+            },
+            now,
+            wall,
+        )
     }
 
     /// A watch restarted after it saw a stall, so that the next one is seen

@@ -285,8 +285,10 @@ pub struct AlarmsReport {
     /// it.
     #[serde(default, skip_serializing_if = "super::asked::u64_is_zero")]
     pub lost: u64,
-    /// Set when nothing in scope could be read — a presence read or a GET
-    /// that could not be made — with why. The run is then no verdict.
+    /// Set when something in scope could not be read — a presence read or a
+    /// GET that could not be made, or an archive whose last-known could know
+    /// an absent owner — with why. The run is then no verdict unless an
+    /// alarm fires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unobservable: Option<String>,
 }

@@ -206,6 +206,14 @@ pub fn judge(obs: &AlarmObservation, at_least: Severity) -> AlarmsReport {
     {
         unobservable = Some(format!("the GET of the alarms could not be made: {e}"));
     }
+    if let Some(Err(e)) = &obs.log.archives
+        && unobservable.is_none()
+    {
+        unobservable = Some(format!(
+            "the archives' last-known could not all be read, and one not read could know an \
+             absent owner (alarms.v1 §2.15, F-131): {e}"
+        ));
+    }
     let mut alarms: Vec<AlarmRow> = book.keys().filter_map(|k| row(book, k, at, wall)).collect();
     for k in book.archived_keys() {
         if alarms.iter().all(|r| r.key != k)
@@ -461,6 +469,26 @@ mod tests {
         assert!(lk.document.is_some() && lk.confirmed);
         assert!(row.latest.is_none(), "never shown as current");
         assert_eq!(r.owners[0].known_by, [crate::report::KnownBy::Archive]);
+    }
+
+    #[test]
+    fn an_archive_not_read_is_no_verdict_over_nothing_firing() {
+        let mut o = obs(true);
+        o.log.archives = Some(Err("archive lab/archive: timed out".into()));
+        let mut r = judge(&o, Severity::Warning);
+        let why = r.unobservable.clone().expect("an archive not read is said");
+        assert!(why.contains("lab/archive: timed out"), "{why}");
+        assert_eq!(
+            judgement_exit_code(&r.judgement()),
+            1,
+            "a firing alarm is still the finding"
+        );
+        r.any_firing.answer = AlarmAnswerToken::No;
+        assert_eq!(
+            judgement_exit_code(&r.judgement()),
+            2,
+            "never \"nothing fires\""
+        );
     }
 
     #[test]
