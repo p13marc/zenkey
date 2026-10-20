@@ -55,8 +55,10 @@
 //!   (the reads a silence is explained from, #702), `conform` (a
 //!   service's suite, #703), `stall` (what a window's reader sees of its
 //!   own receive path: its transports and a ticker, core §2.7 0.27),
-//!   `health` (a `health.v1` reading, #721) and `config` (a `config.v1`
-//!   reading, and one act through the runtime's client, #768). The
+//!   `health` (a `health.v1` reading, #721), `config` (a `config.v1`
+//!   reading, and one act through the runtime's client, #768) and `alarms`
+//!   (an `alarms.v1` reader: subscribed, seeded by S4's GET, its own
+//!   receive path watched, live or one-shot, #800). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -92,7 +94,10 @@
 //!   tree starts from, merged with what was observed, #614 FL4), `identity`
 //!   (each key's resolution, kept and bounded), `config` (a `config.v1`
 //!   reading's freshness and projection, a change typed, pre-checked and
-//!   redacted before it is sent, #768), `timeline`, `snapshot` and
+//!   redacted before it is sent, #768), `alarms` (one reader's book of a
+//!   scope's alarms: each key merged by stamp and read as §2.6 says, each
+//!   owner's seed and window, the owners in scope, and the transitions a
+//!   notifier routes, #800), `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
 //!   schema reaches fall to, `stats`, `tree` and `diff`, plus the two
@@ -105,7 +110,8 @@
 //!   `doctor_delta`, `expect`, `probe`, `condition`, `field`, `why` (a
 //!   silence explained rung by rung, #702), `conform` (a service against
 //!   the revision it claims, #703), `health` (`health.v1`'s verdicts,
-//!   #721) and `config` (`config.v1`'s §5 answers, #768), and
+//!   #721), `config` (`config.v1`'s §5 answers, #768) and `alarms`
+//!   (`alarms.v1`'s §5 answers, #800), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -165,8 +171,8 @@ pub mod tape;
 // below actually **return** are lifted to the root.
 
 pub use judge::condition::{
-    CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome, WatchdogSpec,
-    WindowExamples, watchdog,
+    AlarmRead, CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome,
+    WatchdogSpec, WindowExamples, watchdog,
 };
 pub use judge::expect::{ExpectAim, ExpectSpec, run_expect};
 pub use judge::field::{
@@ -247,6 +253,20 @@ pub use bus::health::{
 };
 pub use judge::config::judge as judge_config;
 pub use judge::health::judge as judge_health;
+// `alarms.v1` (#800, AC): a scope's alarms read as the profile's reader
+// reads them — the live reader a watchdog rule and a notifier hold, the
+// one-shot reading, the session-free book both fold into and its
+// transitions, and the judge.
+pub use bus::alarms::{
+    AlarmFeed, AlarmObservation, AlarmRefresh, AlarmSpec, PresenceSeen as AlarmPresenceSeen,
+    ReadLog as AlarmReadLog, Refreshed as AlarmRefreshed, get as get_alarms,
+    observe as observe_alarms, run_alarms,
+};
+pub use judge::alarms::judge as judge_alarms;
+pub use model::alarms::{
+    AlarmBook, AlarmSample, AlarmScope, ArchivedAlarm, BookSpec as AlarmBookSpec, KeyReading,
+    SeedEnd as AlarmSeedEnd, SeedRead as AlarmSeedRead,
+};
 pub use model::config::{Assignment, Given, TypedValues};
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
@@ -323,7 +343,8 @@ pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
 pub use judge::condition::{
-    SilenceEvidence, TickEvidence, judge_doctor_check, judge_instance_gone, presence_observer,
+    SilenceEvidence, TickEvidence, judge_alert_firing, judge_doctor_check, judge_instance_gone,
+    presence_observer,
 };
 // The remaining items a frontend actually calls. Every one of these was
 // reachable only by module path (#350) — which said nothing about whether it
@@ -353,12 +374,13 @@ pub use model::timeline::{
 };
 pub use model::tree::KeyTreeSnapshot;
 pub use report::{
-    BenchReport, ConformReport, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport,
-    EntityKind, ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HealthReport,
-    HelloView, Judgement, LatencyReport, LatencySummary, MeshLink, RecordReport, ReplayReport,
-    RouterInfo, SampleRow, SeedCoverage, SeedLeg, ServeSummary, ServedCall, Snapshot, SnapshotDiff,
-    SnapshotReport, SnapshotRow, StorageInfo, TimelineReport, TopologyEdge, TopologyNode,
-    TopologyReport, WhyReport, ZrecHeader, ZsnapHeader, judgement_exit_code,
+    AlarmTransition, AlarmsReport, BenchReport, ConformReport, DeclaredEntities, DeclaredEntity,
+    DoctorDelta, DoctorReport, EntityKind, ExpectReport, FieldReport, GenPlan, GenPlanEntry,
+    GenReport, HealthReport, HelloView, Judgement, LatencyReport, LatencySummary, MeshLink,
+    RecordReport, ReplayReport, RouterInfo, SampleRow, SeedCoverage, SeedLeg, ServeSummary,
+    ServedCall, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, TimelineReport,
+    TopologyEdge, TopologyNode, TopologyReport, WhyReport, ZrecHeader, ZsnapHeader,
+    judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
@@ -476,5 +498,23 @@ const _: () = {
                 face: None,
             },
         ));
+        // An alarms reading holds its subscriptions, its queue and its
+        // receive path's watch across awaits (#800, AC).
+        is_send(&crate::run_alarms(
+            session,
+            "",
+            crate::AlarmScope::all(),
+            crate::AlarmSpec::new(std::time::Duration::ZERO),
+            zenkey_model::alarms::Severity::Warning,
+        ));
+    }
+
+    /// A live alarms reader's futures (#800, AC): the watchdog and a
+    /// notifier hold one across a drain.
+    #[allow(dead_code)]
+    fn alarm_feed_futures_are_send(feed: &mut crate::AlarmFeed) {
+        fn is_send<T: Send>(_: &T) {}
+        is_send(&feed.next());
+        is_send(&feed.refresh_plan().run());
     }
 };

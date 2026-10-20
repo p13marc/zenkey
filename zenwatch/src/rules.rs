@@ -37,6 +37,14 @@ pub const ALERTS_DARK: &str = "alerts read v1's alert plane, and zk2's alarm \
      (#613). Refused rather than ignored — a rule that can never fire is a \
      rule that pages nobody";
 
+/// Why `alert-firing` is refused here (#800): the engine judges it on
+/// `alarms.v1` (zenctl's watchdog and `record --on`), and zenwatch's alarm
+/// rules come with `alerts` in #800's AD.
+pub const ALERT_FIRING_DARK: &str = "alert-firing reads alarms.v1 in zenctl's watchdog \
+     since #800's AC; zenwatch's alarm rules, `alerts` and `alert-firing`, come together \
+     in its AD (#613). Refused rather than ignored — a rule that can never fire is a rule \
+     that pages nobody";
+
 /// What one rule watches.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuleKind {
@@ -73,6 +81,7 @@ impl RuleKind {
                 Condition::QosMismatch { .. } => "qos-mismatch",
                 Condition::DoctorCheck { .. } => "doctor",
                 Condition::InstanceGone { .. } => "instance-gone",
+                Condition::AlertFiring { .. } => "alert-firing",
                 Condition::Dropped => "dropped",
             },
             RuleKind::InstanceGone { .. } => "instance-gone",
@@ -120,6 +129,9 @@ pub fn parse_rule(text: &str) -> Result<RuleKind, RuleError> {
     };
     match tokens.as_slice() {
         ["alerts", ..] => Err(RuleError(format!("{text:?}: {ALERTS_DARK}"))),
+        // The engine reads `alert-firing` on alarms.v1 since #800's AC;
+        // zenwatch's alarm rules come together with `alerts` (#800, AD).
+        ["alert-firing", ..] => Err(RuleError(format!("{text:?}: {ALERT_FIRING_DARK}"))),
         ["liveliness-gone", sel] => Ok(RuleKind::LivelinessGone {
             selector: selector(sel, "liveliness-gone")?,
         }),

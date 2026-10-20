@@ -43,7 +43,8 @@
 //! namespace ([`TriggerSpec::deployment`]), refreshed beside the drain like
 //! every other sweep, and `instance-gone` reads the live presence
 //! projection through that session per address, as the watchdog's does
-//! (#747). The preamble is the owners' own
+//! (#747); `alert-firing` reads `alarms.v1` through live readers in that
+//! session, as the watchdog's does (#800, AC). The preamble is the owners' own
 //! answer (S4: target `All`, consolidation `Latest`, R6's discard) on the
 //! plain-`state` projection of the watched selectors
 //! ([`state_projection`]), never a storage's.
@@ -58,7 +59,9 @@ use zenoh::query::{ConsolidationMode, QueryTarget};
 use zenoh::sample::SampleKind;
 
 use crate::bus::monitor::{FleetEvent, SampleView, StreamItem};
-use crate::judge::condition::{Condition, RulePresence, RuleSet, SweepOutcome};
+use crate::judge::condition::{
+    Condition, RuleAlarms, RulePresence, RuleSet, SweepOutcome, refresh_alarms,
+};
 use crate::model::catalog::{Catalog, ContractSet};
 use crate::model::lens::Lens;
 use crate::model::retain::RetentionBudget;
@@ -327,6 +330,20 @@ where
         Some(bus) => RulePresence::open(&bus.session, &mut rules, spec.timeout).await?,
         None => None,
     };
+    // The `alert-firing` rules' readers (#800, AC), as the watchdog's:
+    // subscribed and seeded before the first window, through the
+    // deployment's session; with none, they read unobservable.
+    let mut alarms = if rules.wants_alarms() {
+        RuleAlarms::open(
+            deployment.map(|b| &b.session),
+            &rules,
+            spec.timeout,
+            spec.clocks_synced,
+        )
+        .await
+    } else {
+        RuleAlarms::none()
+    };
 
     // The ring is budgeted to the pre-roll **before** anything is watched:
     // `set_budget` applies from the next push, and the first push must
@@ -353,6 +370,7 @@ where
         // The sweep asks what the rules need, beside the drain: the doctor
         // and a fresh lens. Presence is a feed of its own, folded as it
         // moves.
+        let plans = alarms.plans();
         let sweep = async {
             let doctor = if wants_doctor {
                 Some(crate::judge::condition::tick_doctor(deployment, &bundles, &doctor_spec).await)
@@ -365,7 +383,7 @@ where
                     .ok(),
                 _ => None,
             };
-            (doctor, lens)
+            (doctor, lens, refresh_alarms(plans).await)
         };
         let mut sweep = std::pin::pin!(sweep);
         let mut swept = None;
@@ -382,8 +400,11 @@ where
         let mut gave_up = false;
         while !closed {
             let running = presence.as_ref().is_some_and(|p| p.running);
+            let listening = alarms.listening();
             let item = tokio::select! {
                 item = events.recv() => item,
+                // An alarm reader's delivery folds as it arrives (#800, AC).
+                () = alarms.next(), if listening => continue,
                 // Presence moves fold as they arrive (#747).
                 moved = async { presence.as_mut().expect("guarded").feed.next().await },
                     if running =>
@@ -398,10 +419,11 @@ where
                     }
                     continue;
                 }
-                (doctor, lens) = &mut sweep, if swept.is_none() => {
+                (doctor, lens, refreshed) = &mut sweep, if swept.is_none() => {
                     if let Some(c) = lens {
                         catalog = Some(c);
                     }
+                    alarms.fold(refreshed);
                     swept = Some(doctor);
                     continue;
                 }
@@ -433,15 +455,17 @@ where
         let doctor_outcome = match swept {
             Some(outcome) => outcome,
             None => {
-                let (doctor, lens) = sweep.await;
+                let (doctor, lens, refreshed) = sweep.await;
                 if let Some(c) = lens {
                     catalog = Some(c);
                 }
+                alarms.fold(refreshed);
                 doctor
             }
         };
         let now = tokio::time::Instant::now();
         let at = crate::tape::record::rfc3339_now();
+        let reads = alarms.reads();
         let transitions = rules.evaluate(
             now,
             &at,
@@ -450,6 +474,7 @@ where
                     .as_ref()
                     .map(|o| o.as_ref().map_err(String::as_str)),
                 presence: presence.as_ref().and_then(RulePresence::presence),
+                alarms: &reads,
             },
         );
         for t in transitions {
@@ -772,8 +797,9 @@ mod tests {
 
     /// Every zk2 rule arms a capture now (FJ8b): the three FJ8a refused —
     /// `invalid-payload`, `qos-mismatch` and v1's `origin-down` as zk2's
-    /// `instance-gone` — parse and compile into one rule set; v1's
-    /// `alert-firing` is dark (#613) and refused at the parse.
+    /// `instance-gone` — parse and compile into one rule set, and so does
+    /// v1's `alert-firing`, back on `alarms.v1` (#800, AC). A selector that
+    /// reaches no alarm is refused at the parse.
     #[test]
     fn every_zk2_condition_arms_a_capture() {
         let rules: Vec<Condition> = [
@@ -784,6 +810,8 @@ mod tests {
             "invalid-payload zk2/**",
             "qos-mismatch zk2/**",
             "instance-gone host-a/tc",
+            "alert-firing zk2/lab/** critical",
+            "alert-firing zk2/*/*/alarms.v1/state/alarms/*",
         ]
         .iter()
         .map(|s| Condition::parse(s).expect(s))
@@ -791,8 +819,21 @@ mod tests {
         let set = RuleSet::new(&rules).expect("they compile");
         assert!(set.wants_lens());
         assert!(set.wants_presence());
+        assert!(set.wants_alarms());
+        assert_eq!(
+            set.alarm_selectors(),
+            ["zk2/lab/**", "zk2/*/*/alarms.v1/state/alarms/*"]
+        );
         assert_eq!(set.presence_scope().selector(), "zk2/host-a/tc/@zk/**");
-        let e = Condition::parse("alert-firing zk2/**").unwrap_err();
-        assert!(e.is_unaskable() && e.to_string().contains("#613"), "{e}");
+        assert!(
+            !set.watched().iter().any(|w| w.contains("alarms")),
+            "an alarm reader is no raw selector: {:?}",
+            set.watched()
+        );
+        let e = Condition::parse("alert-firing zk2/lab/svc/health.v1/**").unwrap_err();
+        assert!(
+            e.is_unaskable() && e.to_string().contains("no alarms.v1 key"),
+            "{e}"
+        );
     }
 }
