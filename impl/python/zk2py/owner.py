@@ -415,6 +415,8 @@ class Owner:
         self._writes = threading.RLock()
         self._stop = threading.Event()
         self._refresher: threading.Thread | None = None
+        #: guards the refresher's start against close() (review of PR #807)
+        self._refresher_lock = threading.Lock()
         self.initial = dict(initial or {})
         self.hlc = hlc
         self.cardinality = {k: dict(v) for k, v in (cardinality or {}).items()}
@@ -634,9 +636,12 @@ class Owner:
             self._ensure_refresher()
 
     def _ensure_refresher(self) -> None:
-        if self._refresher is None and not self._stop.is_set():
-            self._refresher = threading.Thread(target=self._refresh_loop, daemon=True)
-            self._refresher.start()
+        """Start the re-put thread once, never after :meth:`close` set
+        ``_stop``: both read and write ``_refresher`` under one lock."""
+        with self._refresher_lock:
+            if self._refresher is None and not self._stop.is_set():
+                self._refresher = threading.Thread(target=self._refresh_loop, daemon=True)
+                self._refresher.start()
 
     def _descriptor(self, plan: dict[str, list[tuple[dict[str, Any], str]]]) -> bytes:
         """§3.3: the record, with `profiles` the union of the `uses`, every
@@ -716,7 +721,14 @@ class Owner:
         """A publisher for a member of a templated state resource, declared
         at its first put (``checks/disk`` of ``checks/{check}``), with the
         resource's QoS and Encoding. The key is concrete, its parameter
-        chunks slugged by the caller (§1.4)."""
+        chunks slugged by the caller (§1.4). It runs under ``_writes``
+        (reentrant: :meth:`set_state` and :meth:`delete_state` hold it), so
+        the refresher never sees a member's horizon before its first put is
+        recorded."""
+        with self._writes:
+            self._declare_member(key)
+
+    def _declare_member(self, key: str) -> None:
         if key in self._publishers:
             return
         assert self.session is not None
@@ -875,12 +887,18 @@ class Owner:
         while the clock guard holds, are not re-put (§2.10). When the guard
         releases, the members whose interval ran out are re-put at the next
         tick."""
+        def horizons() -> list[tuple[str, freshness.Horizon]]:
+            # A member's horizon is registered under _writes, with its first
+            # put (_member_publisher): the snapshot is taken under it too.
+            with self._writes:
+                return list(self.horizons.items())
+
         def tick() -> float:
-            refresh = min((h.refresh_ns for h in list(self.horizons.values()) if h.refresh_ns), default=10**9)
+            refresh = min((h.refresh_ns for _, h in horizons() if h.refresh_ns), default=10**9)
             return min(max(refresh / 10 / 1e9, 0.01), 0.1)
 
         while not self._stop.wait(tick()):
-            for key, h in list(self.horizons.items()):
+            for key, h in horizons():
                 due = h.refresh_ns - min(h.refresh_ns // 5, 200_000_000)
                 with self._writes:
                     held = self._held.get(key)
@@ -1093,10 +1111,13 @@ class Owner:
             call.refuse("app", "this owner decodes no protobuf schema")
 
     def close(self) -> None:
-        # freshness.v1 §2.4: "The re-puts stop when the owner stops".
-        self._stop.set()
-        if self._refresher is not None and self._refresher is not threading.current_thread():
-            self._refresher.join(timeout=2.0)
+        # freshness.v1 §2.4: "The re-puts stop when the owner stops". _stop
+        # is set under the refresher's lock, so no refresher starts after it.
+        with self._refresher_lock:
+            self._stop.set()
+            refresher = self._refresher
+        if refresher is not None and refresher is not threading.current_thread():
+            refresher.join(timeout=2.0)
         with self._writes:
             pass
         for e in reversed(self._entities):

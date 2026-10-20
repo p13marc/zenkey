@@ -346,7 +346,7 @@ py-link:
 # The Python implementation's alarms.v1 scenarios (spec/profiles/alarms/
 # scenarios.md §1–§10) on in-process zenoh-python routers, against zk2py's
 # owner, or the Rust owner example with `--owner <path>` (or ZK2PY_OWNER),
-# which this recipe never builds. §2, §6 and §10 run on a 4 s copy of the
+# which this recipe never builds. §2, §4, §6 and §10 run on a 4 s copy of the
 # contract unless `--full`; `--only N`, `--ttl S` and `--quick` pass through.
 py-alarms *ARGS:
     #!/usr/bin/env bash

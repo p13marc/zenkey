@@ -383,13 +383,24 @@ class NotStrict(ValueError):
     """§2.4 "Strict JSON first" (0.2): bytes that are not strict JSON."""
 
 
+#: RFC 8259 §2's ``ws``: space, horizontal tab, line feed, carriage return.
+#: zk2py's reading of §2.4's "nothing after its value" (SPEC-FINDINGS F-134,
+#: open at 0.2): whitespace of these four bytes may stand before and after
+#: the value, as RFC 8259's ``JSON-text = ws value ws`` has it; any other
+#: byte after the value (another space character, a second value, a NUL)
+#: is text after it, and refused. A byte-order mark before it is refused.
+JSON_WS = b" \t\n\r"
+
+
 def strict_json(payload: bytes) -> Any:
     """§2.4 (0.2, F-126): "UTF-8, JSON (RFC 8259) with nothing after its
     value, no duplicate member at any depth, every number finite, and every
     string with a UTF-8 form, so no lone surrogate escape". Raises
     :class:`NotStrict`."""
+    # The whitespace is stripped here, explicitly, so the reading does not
+    # rest on the JSON library's own (F-134).
     try:
-        value = jcs.loads(payload)
+        value = jcs.loads(payload.strip(JSON_WS))
     except jcs.JsonError as e:
         raise NotStrict(str(e)) from e
     if not _utf8(value):

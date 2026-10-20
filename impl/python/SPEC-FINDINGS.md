@@ -6159,7 +6159,9 @@ them, and settles five places the reference's owner met. The core stays at
   zk2py).
 - **§2.15:** across a face, a window's presence is not asked (F-130).
 
-**`just py-conformance`: 1734 of 1734.**
+**`just py-conformance`: 1745 of 1745** (after review of PR #807: 1734
+from the fixtures, and 11 of zk2py's own readings of F-134 in a family
+of their own, `readings`).
 - At the start of the round, the `alarms` family stopped at
   `documents.json`'s first `text` case, which round 38's runner did not
   read (exit 2).
@@ -6188,7 +6190,7 @@ contract with `freshness.ttl_s = 4`, and `--full` runs them at 900 s:
 | 1 | Raise; the duplicate; one key whatever the label order | 9 of 9 | 9 of 9 |
 | 2 | Escalate, refresh, confirm | 9 of 9 at ttl 4, and 9 of 9 at 900 s (re-put after 449.9 s) | 9 of 9 at ttl 4, and 9 of 9 at 900 s (re-put after 427.5 s) |
 | 3 | Resolve, delete within 1 s, `reply_del`, nothing 65 s later | 6 of 6 | 6 of 6 |
-| 4 | Re-raise | 2 of 2 | 2 of 2 |
+| 4 | Re-raise, and its confirmations (ttl 4 s) | 3 of 3 | 3 of 3 |
 | 5 | A restart mid-incident, from the owner's record, and its adoption | 11 of 11 | 11 of 11 |
 | 6 | A hung owner goes stale, and an extra check of 0.2's §2.7 resumption | 6 of 6 at ttl 4 | 6 of 6 at ttl 4 |
 | 7 | At the bound of 2 | 5 of 5 | 5 of 5 |
@@ -6196,7 +6198,16 @@ contract with `freshness.ttl_s = 4`, and `--full` runs them at 900 s:
 | 9 | A key that does not re-derive (T against a zk2py liar) | 3 of 3 | 3 of 3 (the same liar) |
 | 10 | Anything firing, a tokenless owner | 7 of 7 at ttl 4 | 7 of 7 at ttl 4 |
 
-Each column totals 65 of 65 on the default run. §2 also ran at 900 s,
+Each column totals 66 of 66 on the default run, and exits 0.
+- §4's third check, added after review of PR #807, goes beyond
+  `scenarios.md`. A resolve closes the alarm's writer, since a resolved
+  alarm is never confirmed. The re-raise's put reopens it: `Owner.set_state`
+  clears the writer's closed mark, whatever the act. The check shows two
+  confirmations after the re-raise, unchanged, 1.8 s and 1.9 s apart at
+  ttl 4.
+- So §4 runs on the short-ttl copy too, unless `--full`.
+- The runner exits 2 for any check or section not run, unless `--only` or
+  `--quick` asked for that subset. §2 also ran at 900 s,
 alone, on each owner: 9 of 9, about 7.6 minutes each.
 
 **Not run:**
@@ -6296,8 +6307,17 @@ other.
 Neither owner puts any whitespace (measured above), so the two
 implementations do not differ on each other's puts.
 
-**zk2py:** RFC 8259's reading. Whitespace around the value reads, and
-anything else after it is `json`.
+**zk2py:** RFC 8259's reading. Its four whitespace bytes (space, tab,
+LF, CR) around the value read, and anything else after it is `json`: a
+no-break space, U+2028, a vertical tab, a form feed, a NUL, text, or a
+second value. A byte-order mark before it is `json` too.
+- `alarms.strict_json` strips exactly those four bytes itself
+  (`alarms.JSON_WS`), so the reading does not rest on the JSON library's.
+- `just py-conformance`'s `readings` family states it as 11 cases, each
+  naming F-134. A later text's fixture would overturn them visibly.
+
+That was made explicit after review of PR #807. Before, the same reading
+rested on `jcs.loads`, measured to behave identically.
 
 **Wording:** "nothing after its value but whitespace (RFC 8259's `ws`)",
 or "and no whitespace before or after it". Either way, a fixture case

@@ -11,8 +11,9 @@ adapter:
 Either way:
 - **The bus** is the text's: R1, a router with timestamping on; the owner,
   S, G and T its clients, each with a session of its own. Timeouts are 1 s.
-- **The contract** is the standard one, 900 s, for §1, §3 to §5 and §7 to
-  §9. §2, §6 and §10 wait out the horizon, so by default they run on a copy
+- **The contract** is the standard one, 900 s, for §1, §3, §5 and §7 to
+  §9. §2, §6 and §10 wait out the horizon, and §4's extra check waits for
+  the re-raise's confirmations, so by default they run on a copy
   of the standard contract with ``freshness.ttl_s = --ttl`` (4 s), made in
   memory and never published, as the reference's default run does
   (scenarios.md's conventions, 0.2). Their waits scale with it: §2's 455 s
@@ -29,8 +30,8 @@ Either way:
   a zk2py owner putting raw documents, since the text gives no owner a way
   to put a document on another key.
 
-Exit 0 when every check passes, 1 when any fails, 2 when a section cannot
-run.
+Exit 0 when every check passes, 1 when any fails, 2 when a check or a
+section did not run, unless ``--only`` or ``--quick`` asked for that subset.
 """
 
 from __future__ import annotations
@@ -222,7 +223,10 @@ class RustAlarms:
         got = self._cmd(f"alarm raise {json.dumps(cond, separators=(',', ':'))}")
         if got.startswith("refused"):
             return got
-        act = got.split()[1]
+        words = got.split()
+        if len(words) < 2 or words[0] != "alarm":
+            raise RuntimeError(f"alarm raise: cannot read the answer {got!r}")
+        act = words[1]
         return "none" if act == "unchanged" else act
 
     def resolve(self, alarm: tuple[str, dict[str, str]]) -> bool:
@@ -472,10 +476,13 @@ def section2(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
 # -- §3 Resolve, then delete, and §4 Re-raise -----------------------------------------
 
 def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = False) -> None:
-    sec = "§4" if reraise else "§3"
+    # §4 runs on the short-ttl copy unless --full, so that its re-raise's
+    # confirmations can be waited for (review of PR #807).
+    ttl = ctx["ttl"] if reraise else al.TTL_S
+    sec = f"§4 (ttl {ttl} s)" if reraise else "§3"
     bus = Bus(mode)
     try:
-        o = bus.owner(contract=al.load())
+        o = bus.owner(contract=al.load(None if ttl == al.TTL_S else ttl))
         k = key(A)
         o.raise_(A, "warning")
         _wait(lambda: bus.s.of(k), 3.0)
@@ -519,6 +526,20 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
                          rr is not None and rr.firing and rd is not None and rr.timestamp > rd.timestamp,
                          f"{rr}, resolve {rd and rd.timestamp}")
             report.check(sec, "S reads raised", bus.reads(k)[-1:] == [al.RAISED], f"{bus.reads(k)}")
+            # Beyond scenarios.md: the resolve closed the alarm's writer
+            # (§2.7, a resolved alarm is never confirmed), and the re-raise
+            # reopens it, so the re-raised alarm is confirmed (§2.7).
+            if ttl == al.TTL_S:
+                report.cannot(sec, "extra: the re-raise's confirmations at 900 s: run §4 without --full")
+            else:
+                _wait(lambda: len(bus.deliveries(k, mark)) >= 3, 2 * ttl + 2.0)
+                again = bus.deliveries(k, mark)
+                gaps = [(b.arrival_ns - a.arrival_ns) / fr.NS for a, b in zip(again, again[1:])]
+                n = len(again) - 1
+                report.check(sec, "extra (§2.7): the re-raised alarm is confirmed, unchanged, within ttl/2",
+                             n >= 2 and all(_doc(x) == rr for x in again[1:]) and max(gaps) <= ttl / 2 + JITTER_S
+                             and bus.reads(k)[-n:] == [al.CONFIRMED] * n,
+                             f"{n} confirmations, gaps {[round(x, 2) for x in gaps]}, reads {bus.reads(k)[-n - 1:]}")
     finally:
         bus.close()
 
@@ -883,8 +904,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--only", action="append", choices=sorted(SECTIONS, key=int), help="run only these sections")
     ap.add_argument("--owner", type=Path, default=os.environ.get("ZK2PY_OWNER") or None,
                     help="run against the Rust owner example at this path (--alarms)")
-    ap.add_argument("--ttl", type=int, default=4, help="the short-ttl copy's horizon for §2, §6 and §10")
-    ap.add_argument("--full", action="store_true", help="run §2, §6 and §10 at the contract's 900 s")
+    ap.add_argument("--ttl", type=int, default=4, help="the short-ttl copy's horizon for §2, §4, §6 and §10")
+    ap.add_argument("--full", action="store_true", help="run §2, §4, §6 and §10 at the contract's 900 s")
     ap.add_argument("--quick", action="store_true", help="skip §3 step 3's 65 s wait")
     args = ap.parse_args(argv)
     mode: Any = "zk2py"
@@ -906,7 +927,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAIL [{sec}] {name}: {detail}")
     for sec, why in report.not_run:
         print(f"NOT RUN [{sec}] {why}")
-    return 1 if failed else 2 if report.not_run and not passed else 0
+    # A NOT RUN is a partial run, which a gate must not read as green,
+    # unless the caller asked for a subset (--only, --quick).
+    subset = bool(args.only) or args.quick
+    return 1 if failed else 2 if report.not_run and not subset else 0
 
 
 if __name__ == "__main__":

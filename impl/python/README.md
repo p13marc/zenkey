@@ -77,6 +77,7 @@ case name. It exits with:
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
+| readings | | `alarms` | not a fixture family: zk2py's own readings where a finding is open, each case naming it. Today, F-134's 11 cases: RFC 8259's whitespace around a payload's value reads, anything else after it is `json`. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
@@ -96,13 +97,14 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
+readings       11 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
 link          172 passed     0 failed
 alarms        300 passed     0 failed
-total        1734 passed     0 failed
+total        1745 passed     0 failed
 ```
 
 The figures are against `core.md` 0.34, `hostid.v1` 0.5, `freshness.v1`
@@ -1032,22 +1034,25 @@ published in both history roots, one file.
     `--cardinality` and `--tokenless`. Its stdin commands are `alarm raise
     <json>`, `resolve`, `confirm … on|off` and `adoption`, found by trying
     (F-133). A short-ttl copy is passed as a contract file;
-  - **the waits:** §2, §6 and §10 run on a 4 s copy of the contract unless
-    `--full`, and `--quick` skips §3's 65 s wait.
+  - **the waits:** §2, §4, §6 and §10 run on a 4 s copy of the contract
+    unless `--full`, and `--quick` skips §3's 65 s wait;
+  - **the exit:** 0 when every check passes, 1 when one fails, and 2 when a
+    check or a section did not run, unless `--only` or `--quick` asked for
+    that subset.
 
   | § | zk2py's owner | The Rust owner example |
   |---|---|---|
   | 1 Raise | 9 of 9 | 9 of 9 |
   | 2 Escalate, refresh, confirm | 9 of 9 at 4 s; 9 of 9 at 900 s | 9 of 9 at 4 s; 9 of 9 at 900 s |
   | 3 Resolve, then delete | 6 of 6 | 6 of 6 |
-  | 4 Re-raise | 2 of 2 | 2 of 2 |
+  | 4 Re-raise, and its confirmations | 3 of 3 at 4 s | 3 of 3 at 4 s |
   | 5 A restart mid-incident | 11 of 11 | 11 of 11 |
   | 6 A hung owner goes stale (+ §2.7's resumption) | 6 of 6 at 4 s | 6 of 6 at 4 s |
   | 7 At the bound | 5 of 5 | 5 of 5 |
   | 8 An absent owner, for a tool | 7 of 7 | 7 of 7 |
   | 9 A key that does not re-derive | 3 of 3 (a zk2py liar) | 3 of 3 (the same liar) |
   | 10 Anything firing, for a tool | 7 of 7 at 4 s | 7 of 7 at 4 s |
-  | **Total, default run** | **65 of 65** | **65 of 65** |
+  | **Total, default run** | **66 of 66** | **66 of 66** |
 
   - **§6 and §10 at 900 s were not run.** Each takes about 15 minutes.
   - **§9's liar is always zk2py's.** Its subject is the tool, and no owner
