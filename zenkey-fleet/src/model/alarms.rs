@@ -472,6 +472,21 @@ impl AlarmBook {
         self.refused
     }
 
+    /// Whether the reader's latest loss — deliveries its queue refused, or
+    /// a stall of its receive path — has no complete GET asked after it
+    /// yet: until one heals it, every key reads unobservable (§2.14 step
+    /// 4), and every window restarts from it (§2.15). A notifier says it
+    /// once for its scope (#800, AD).
+    pub fn loss_unhealed(&self) -> bool {
+        self.loss.is_some_and(|l| l.healed.is_none())
+    }
+
+    /// How the latest GET folded into the book ended: `Some(true)` when it
+    /// ran to its final reply with no error reply; `None` before any.
+    pub fn seed_complete(&self) -> Option<bool> {
+        self.seed.as_ref().map(|(end, _)| end.complete)
+    }
+
     /// Whether a presence read has been folded, and was complete.
     pub fn presence_complete(&self) -> Option<bool> {
         self.presence.map(|b| b.complete)
@@ -1499,6 +1514,7 @@ mod tests {
         assert_eq!(lost[0].change, AlarmChange::Lost);
         assert_eq!(lost[0].firing.answer, AlarmAnswerToken::Unobservable);
         assert_eq!(b.owner_set(&owner, later).reason, Reason::WindowLost);
+        assert!(b.loss_unhealed(), "no GET asked after it yet");
         // A GET after it heals it, and the window counts from that GET.
         let heal = later + Duration::from_secs(1);
         b.seeding();
@@ -1512,6 +1528,8 @@ mod tests {
             wall(),
         );
         assert_eq!(b.owner_set(&owner, heal).reason, Reason::Answered);
+        assert!(!b.loss_unhealed(), "the complete GET after it heals it");
+        assert_eq!(b.seed_complete(), Some(true));
         let w = b.window(&owner, heal + Duration::from_secs(20)).unwrap();
         assert!(w.lossless && w.present_throughout, "{w:?}");
         assert_eq!(
