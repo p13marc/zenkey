@@ -773,36 +773,44 @@ def _side(answer: str) -> str:
 
 
 class ChangeReporter:
-    """§2.16 (0.4), "Reporting changes", over one reader's readings. Each
-    :meth:`update` takes keys' first-question answers now, the latest
-    document's severity, and the change that led there, and returns what
-    to report:
+    """§2.16 (0.4, 0.6), "Reporting changes", over one reader's readings.
+    Each :meth:`update` takes keys' first-question answers now, the latest
+    document's severity, and the change that led there, and returns what to
+    report. Every answer is compared with the key's **last report**, the
+    one a reader of the reports holds, never with an answer read and not
+    reported:
     - **the answer after the change**, never the change's name alone;
-    - **a change** is the answer moving between yes, no and neither, or,
-      while yes, the severity moving, either way. A refresh, a
-      confirmation, and a raise of an alarm already reported firing at its
-      severity are none;
+    - **a change** is the answer moving from the last report between yes,
+      no and neither, or, while yes, the severity moving, either way. A
+      refresh, a confirmation, and a raise of an alarm already reported
+      firing at its severity are none;
+    - **a key's first answer** (0.6), at the first reading or after it,
+      "moves from no report": yes is reported (the SHOULD); no is not, there
+      being no report to clear; neither is not, whether the reader's own
+      sight makes it so, which "is no answer to report", or the key's own,
+      which "MAY be reported" and which zk2py does not (the other branch of
+      the MAY). A key with no report keeps none until it reads yes;
     - **a loss** (a key reading §2.14 step 4's ``incomplete``) is reported
       once for the scope, the MAY taken: one report when the first key goes
-      lossy, none for a second loss while any key is still unhealed, and
-      one, "observable again", when the last lossy key heals. No key the
-      loss made unobservable is reported; each keeps its last report, and is
-      reported again, as a change against that last report, once a GET
-      answers it or the establishing GET leaves it out (SPEC-FINDINGS
-      F-139);
-    - **an alarm firing at the first reading** is reported (the SHOULD), and
-      so is a key first read later that is firing. A key first read at no
-      or neither is recorded, not reported: nothing moved.
+      lossy, none for a second loss while any key is unhealed, and one,
+      "observable again", when the last lossy key heals. No key the loss
+      made unobservable is reported; "each key then keeps its last report
+      through the loss", and its answer once healed "is a change to report
+      only if it moved from that last report" (0.6).
 
     Scope-level reports carry no key: ``unobservable``/``incomplete`` for a
     loss, ``observable``/``healed`` when it heals. With ``partial`` the
     readings are some of the scope's keys (one owner's, say), and keys left
     out of them keep their state. Without it they are the whole scope, and a
-    key known before that is not among them is never dropped silently: it
-    is reported once, ``unobservable``/``not_read``, then forgotten."""
+    key whose last report was yes or no that is not among them is never
+    dropped silently: it is reported once, ``unobservable``/``not_read``,
+    then forgotten."""
 
     def __init__(self) -> None:
-        self.last: dict[str, tuple[str, str | None]] = {}
+        #: each key's last report: (yes | no | neither, severity while yes)
+        self.reported: dict[str, tuple[str, str | None]] = {}
+        #: every key read, reported or not
+        self.known: set[str] = set()
         self.lossy: set[str] = set()
         self.loss_reported = False
 
@@ -810,32 +818,42 @@ class ChangeReporter:
                partial: bool = False) -> list[Report]:
         out: list[Report] = []
         for key, (a, _, _) in readings.items():
+            self.known.add(key)
             if a.reason == "incomplete":
                 self.lossy.add(key)
             else:
                 self.lossy.discard(key)
-        gone = [] if partial else sorted((set(self.last) | self.lossy) - set(readings))
+        gone = [] if partial else sorted(self.known - set(readings))
         for key in gone:
             self.lossy.discard(key)
+            self.known.discard(key)
         if self.lossy and not self.loss_reported:
             out.append(Report(None, UNOBSERVABLE, "incomplete", None, "loss"))
             self.loss_reported = True
         for key in gone:
-            self.last.pop(key, None)
-            out.append(Report(key, UNOBSERVABLE, "not_read", None, "gone"))
+            # §2.16: a key with no report has nothing to clear, and is
+            # forgotten: a reappearance is a first answer, which "moves from
+            # no report". A key with a report keeps it, so a reappearance is
+            # compared with it: one last reported yes or no is reported
+            # gone (neither) and keeps that report, so a later no clears it.
+            last = self.reported.get(key)
+            if last is not None and last[0] != "neither":
+                self.reported[key] = ("neither", None)
+                out.append(Report(key, UNOBSERVABLE, "not_read", None, "gone"))
         for key in sorted(readings):
             a, severity, change = readings[key]
             if key in self.lossy:
                 continue  # the loss is reported once; the key keeps its last report
             side = _side(a.answer)
             now = (side, severity if side == YES else None)
-            before = self.last.get(key)
-            self.last[key] = now
-            if before is None:
+            last = self.reported.get(key)
+            if last is None:
                 if side == YES:
-                    out.append(Report(key, a.answer, a.reason, severity, change or "first reading"))
+                    self.reported[key] = now
+                    out.append(Report(key, a.answer, a.reason, severity, change or "first answer"))
                 continue
-            if now != before:
+            if now != last:
+                self.reported[key] = now
                 out.append(Report(key, a.answer, a.reason, now[1], change))
         if self.loss_reported and not self.lossy:
             out.append(Report(None, "observable", "healed", None, "healed"))
@@ -1325,14 +1343,19 @@ class AlarmsReader:
                           keys_known=keys_known, timeout=self.timeout, lost_at=losses[-1] if losses else None)
 
     def scope_read(self, systems: str = "*", services: str = "*") -> ScopeRead:
-        """§2.15 "Whole" (0.5): a presence read of the scope now, whole when
-        it ran to its final reply and no loss was seen since it began."""
-        began = time.monotonic_ns()
+        """§2.15 "Whole" (0.5, 0.6): a presence read of the scope now, dated
+        by the instant it was asked. Whether it is whole is
+        :meth:`scope_whole`'s, at the instant the second question is asked."""
         sr = owners_by_presence(self.session, systems, services)
         for a in sr.owners:
             self.add_owner(a)
-        lost_since = any(t >= began for t in self.losses())
-        return ScopeRead(sr.owners, sr.whole and not lost_since)
+        return sr
+
+    def scope_whole(self, sr: ScopeRead) -> bool:
+        """§2.15 "Whole": the presence read ran to its final reply, and "a
+        loss heard at or after that instant counts against it, wherever its
+        replies arrive" (0.6)."""
+        return presence_read_whole(sr.whole, sr.asked_ns, self.losses())
 
     def close(self) -> None:
         self.stall.close()
@@ -1371,10 +1394,23 @@ class ScopeRead:
     whole: bool = True
     archive_short: bool = False
     skipped: int = 0
+    #: the presence read's ask, on the reader's monotonic clock (0.6: "a
+    #: presence read is dated as a GET is, by the instant it was asked")
+    asked_ns: int | None = None
 
     def union(self, other: "ScopeRead") -> "ScopeRead":
+        asks = [x for x in (self.asked_ns, other.asked_ns) if x is not None]
         return ScopeRead(sorted(set(self.owners) | set(other.owners)), self.whole and other.whole,
-                         self.archive_short or other.archive_short, self.skipped + other.skipped)
+                         self.archive_short or other.archive_short, self.skipped + other.skipped,
+                         min(asks) if asks else None)
+
+
+def presence_read_whole(complete: bool, asked_ns: int | None, losses: Iterable[int]) -> bool:
+    """§2.15 "Whole" (0.6): a presence read that ran to its final reply,
+    "dated as a GET is, by the instant it was asked: a loss heard at or
+    after that instant counts against it, wherever its replies arrive". A
+    read with no ask on record cannot be dated, so it is not whole."""
+    return complete and asked_ns is not None and not any(t >= asked_ns for t in losses)
 
 
 def owners_by_presence(tool: Any, systems: str = "*", services: str = "*") -> ScopeRead:
@@ -1382,8 +1418,10 @@ def owners_by_presence(tool: Any, systems: str = "*", services: str = "*") -> Sc
     whether ``alarms.v1`` is theirs is each descriptor's (§2.14 step 2)."""
     from . import live
 
+    asked = time.monotonic_ns()
     pres = live.list_presence(tool, f"zk2/{systems}/{services}/@zk/**")
-    return ScopeRead(sorted({f"{p['system']}/{p['service']}" for p in pres.instances}), whole=pres.complete)
+    return ScopeRead(sorted({f"{p['system']}/{p['service']}" for p in pres.instances}), whole=pres.complete,
+                     asked_ns=asked)
 
 
 def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: str = "*",
