@@ -84,8 +84,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   loss at the refresh's start; the owners in scope with how each was known
   (F-131), and `scope_read` (the latest presence read complete and nothing
   lost since it was asked, text 0.6; an archive plays no part, F-137); and
-  the
-  `AlarmTransition`s a notifier routes. `judge::alarms` and
+  the `AlarmTransition`s a notifier routes. `judge::alarms` and
   `report::alarms` complete it. Every verdict is `zenkey_model::alarms`'s,
   never re-derived. The watchdog's `alert-firing` holds one feed per
   selector (`RuleAlarms`, `SweepOutcome::alarms`), and the doctor's

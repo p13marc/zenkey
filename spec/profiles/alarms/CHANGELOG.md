@@ -55,16 +55,17 @@ cases do not; `keys.json` (75), `documents.json` (62) and
 - **"Lost none of their moves since"** (§2.15, "Whole"). zk2py counted a
   loss from the instant the presence read began. §2.15 now dates a
   presence read as a GET is dated, by the instant it was asked: a loss
-  heard after that counts against it, wherever its replies arrive, since
-  the token a loss took may have appeared after the read was answered.
-  zk2py's reading stands.
+  heard at or after that counts against it, wherever its replies arrive,
+  since the token a loss took may have appeared after the read was
+  answered. zk2py's reading stands.
   - **The reference did not.** Its book folds a presence read when the
     refresh ends, and a notifier drains its subscription beside the
     refresh, so a loss folded while the refresh ran came first, and the
     read, folded after, read whole. One-shot tools, which drain nothing
     while they read, were not affected. The book now dates the read by its
     ask (`AlarmBook::presence_read`'s `at`) and leaves it not whole when a
-    loss it holds is later.
+    loss it holds is at or after it, as a GET heals a loss only when asked
+    after it.
 - **A key's first answer** (§2.16). zk2py recorded a key first read at no
   or neither after the first reading, and reported neither. The text now
   says a key's first answer, at the first reading or after it, moves from
