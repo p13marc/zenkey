@@ -20,11 +20,12 @@
 //! - **one key's reading** ([`KeyReading`]): its owner's presence and
 //!   descriptor (§2.13: found by descriptor, never by token), its
 //!   observations as `freshness.v1` judges them (the subscription's last
-//!   delivery, the GET's reply aged against a trusted clock), the latest
-//!   sample, `previous_instance` (the latest put's stamp id is not a present
-//!   descriptor's `meta.zid`, by value; never with no `meta.zid`), and
-//!   whether the owner's alarms are known whole — for `firing`,
-//!   `stale_firing` and `rederives`;
+//!   delivery, the GET's reply aged against a trusted clock, dated by when
+//!   its GET was asked), the latest sample, `previous_instance` (the latest
+//!   put's stamp id is not a present descriptor's `meta.zid`, by value;
+//!   never with no `meta.zid`), whether the owner's alarms are known whole,
+//!   and whether the latest GET left the key out (§2.14 steps 4 and 5, text
+//!   0.5) — for `firing`, `stale_firing` and `rederives`;
 //! - **one owner's alarms** (§2.15): the latest GET as its seed, and its
 //!   window — from the subscription's declaration plus the reply timeout,
 //!   or, after a loss or a gap in the owner's presence, from the first
@@ -34,7 +35,8 @@
 //!   `owner_set`;
 //! - **the owners in scope** (§2.15, F-131): those a presence read finds,
 //!   those an earlier reading of its own knew, those an archive's keys
-//!   name, each with how it was known — for `any_firing`;
+//!   name, each with how it was known, and whether the reads that found
+//!   them were whole (text 0.5, F-137) — for `any_firing`;
 //! - **a reader's transitions** ([`AlarmTransition`], pinned in
 //!   [`crate::report`]): §2.6's per sample, `lost` on every key at a loss
 //!   (unobservable, never ok), and `judged` when a key's answer moves with
@@ -50,7 +52,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use zenkey_model::alarms::{
     self as am, Alarm, AlarmRef, Answer, AnyFiring, Invalid, Judged, Latest, Listing, OwnerAlarms,
-    Payload, Presence, Reading, Reason, Seed, SetJudged, SetVerdict, Severity, Track, Window,
+    Payload, Presence, Reading, Reason, ScopeRead, Seed, SetJudged, SetVerdict, Severity, Track,
+    Window,
 };
 use zenkey_model::freshness::{ClockMeasure, Last, Observation, Reply, StampAge};
 use zenkey_model::grammar::{Addr, InstanceId, ZkKey};
@@ -356,13 +359,14 @@ impl Break {
 struct LatestSample {
     doc: Option<std::result::Result<Alarm, Invalid>>,
     stamp: Option<Timestamp>,
-    at: Instant,
     via: AlarmVia,
 }
 
 /// The last GET's reply for one key.
 #[derive(Debug, Clone, Copy)]
 struct GotReply {
+    /// When its GET was asked, once the GET ended ([`AlarmBook::seeded`]);
+    /// its arrival until then.
     asked_at: Instant,
     delete: bool,
     stamp: Option<Timestamp>,
@@ -376,6 +380,10 @@ struct KeyEntry {
     track: Track,
     merged: Held,
     latest: Option<LatestSample>,
+    /// The last arrival of anything of it, by either path, admitted by the
+    /// merge or not: a GET asked after it that did not answer the key left
+    /// it out (§2.14 step 5).
+    arrived: Instant,
     /// The subscription's last delivery of it, and whether a delete.
     sub_last: Option<(Instant, bool)>,
     got: Option<GotReply>,
@@ -392,6 +400,17 @@ struct Basis {
     complete: bool,
 }
 
+/// The latest GET folded: how it ended, how many keys of each owner it
+/// answered with a value, and every key it answered, a `reply_del`
+/// included. A key it did not answer, with nothing of it arriving after it
+/// was asked, it left out (§2.14 step 5).
+#[derive(Debug, Clone)]
+struct LastSeed {
+    end: SeedEnd,
+    members: BTreeMap<Addr, usize>,
+    answered: BTreeSet<String>,
+}
+
 /// One reader's alarms under a scope: see the module doc.
 #[derive(Debug, Clone)]
 pub struct AlarmBook {
@@ -402,9 +421,8 @@ pub struct AlarmBook {
     presence: Option<Basis>,
     owners: BTreeMap<Addr, OwnerEntry>,
     keys: BTreeMap<String, KeyEntry>,
-    /// The latest GET, how it ended, and how many keys of each owner it
-    /// answered with a value.
-    seed: Option<(SeedEnd, BTreeMap<Addr, usize>)>,
+    /// The latest GET folded.
+    seed: Option<LastSeed>,
     /// The GET in flight: what it has answered so far.
     pending: BTreeMap<Addr, usize>,
     pending_keys: BTreeSet<String>,
@@ -484,12 +502,27 @@ impl AlarmBook {
     /// How the latest GET folded into the book ended: `Some(true)` when it
     /// ran to its final reply with no error reply; `None` before any.
     pub fn seed_complete(&self) -> Option<bool> {
-        self.seed.as_ref().map(|(end, _)| end.complete)
+        self.seed.as_ref().map(|s| s.end.complete)
     }
 
     /// Whether a presence read has been folded, and was complete.
     pub fn presence_complete(&self) -> Option<bool> {
         self.presence.map(|b| b.complete)
+    }
+
+    /// Whether the reads that found the owners in scope were whole (§2.15,
+    /// text 0.5, F-137): across a face, the deployment's word; otherwise
+    /// the latest presence read ran to its final reply, and nothing was
+    /// lost since — a loss may have taken an instance token's appearance.
+    /// An archive's read plays no part: an owner known only by its keys,
+    /// which a complete presence read does not find, is absent, and never
+    /// stops a no.
+    pub fn scope_read(&self) -> ScopeRead {
+        if self.spec.face.is_some() || self.presence.is_some_and(|b| b.complete) {
+            ScopeRead::Whole
+        } else {
+            ScopeRead::NotWhole
+        }
     }
 
     /// How the reader trusts its clock, as the report spells it.
@@ -643,11 +676,13 @@ impl AlarmBook {
             track: Track::default(),
             merged: Held::Nothing,
             latest: None,
+            arrived: s.at,
             sub_last: None,
             got: None,
             gone_at: None,
             reported: None,
         });
+        entry.arrived = entry.arrived.max(s.at);
         let incoming = s.stamp.as_ref().map(crate::bus::seed::stamp_of);
         let admitted = zenkey_model::seed::admits(entry.merged, incoming);
         if s.via == AlarmVia::Get {
@@ -674,7 +709,6 @@ impl AlarmBook {
         entry.latest = Some(LatestSample {
             doc,
             stamp: s.stamp,
-            at: s.at,
             via: s.via,
         });
         let key = s.key.clone();
@@ -690,9 +724,8 @@ impl AlarmBook {
     }
 
     /// The GET ended: the owners' seed (§2.15). A complete one heals a loss
-    /// and a gap asked before it, and an owner that answered it holds no
-    /// key it did not answer that nothing newer has shown (core S2: the
-    /// owner answers every live key).
+    /// and a gap asked before it; a key it left out of an owner whose alarms
+    /// it established holds nothing ([`AlarmBook::sweep`], §2.14 step 5).
     pub fn seeded(&mut self, end: SeedEnd, now: Instant, wall: SystemTime) -> Vec<AlarmTransition> {
         let members = std::mem::take(&mut self.pending);
         let answered = std::mem::take(&mut self.pending_keys);
@@ -704,21 +737,31 @@ impl AlarmBook {
                 g.heal(end);
             }
         }
-        if end.complete {
-            for (key, e) in &mut self.keys {
-                if answered.contains(key) || members.get(&e.owner).copied().unwrap_or(0) == 0 {
-                    continue;
-                }
-                if e.latest.as_ref().is_some_and(|l| l.at < end.asked_at) {
-                    e.latest = None;
-                    e.track = Track::default();
-                    e.merged = Held::Nothing;
-                    e.gone_at = Some(now);
-                }
+        // A reply is dated by the instant its GET was asked, never by its
+        // arrival: a loss after the ask, before the reply came, may hold a
+        // put newer than the owner's answer (§2.14 step 4, core §4.2).
+        for k in &answered {
+            if let Some(g) = self.keys.get_mut(k).and_then(|e| e.got.as_mut()) {
+                g.asked_at = end.asked_at;
             }
         }
-        self.seed = Some((end, members));
+        self.seed = Some(LastSeed {
+            end,
+            members,
+            answered,
+        });
         self.sweep(now, wall)
+    }
+
+    /// Whether the latest GET left `key` out: it ran to its final reply,
+    /// did not answer the key, with a value or a `reply_del`, and nothing of
+    /// the key arrived after it was asked (§2.14 step 5). With the owner's
+    /// alarms established, that GET established them (§2.15): it was asked
+    /// after every loss, or the window lost a delivery.
+    fn left_out(&self, key: &str, e: &KeyEntry) -> bool {
+        self.seed.as_ref().is_some_and(|s| {
+            s.end.complete && !s.answered.contains(key) && e.arrived < s.end.asked_at
+        })
     }
 
     /// One GET folded whole: [`AlarmBook::seeding`], each reply, then
@@ -786,8 +829,32 @@ impl AlarmBook {
 
     /// Every key whose first answer moved since it was last reported, with
     /// no sample: gone stale, its owner gone or back, its owner's answer
-    /// dropped it. Forgets the keys gone for [`FORGET_AFTER`].
+    /// dropped it. A key the GET that established its owner's alarms left
+    /// out holds nothing from now (§2.14 step 5, text 0.3), so a later put
+    /// of it is a raise; it is forgotten [`FORGET_AFTER`] later, as are the
+    /// keys deleted.
     pub fn sweep(&mut self, now: Instant, wall: SystemTime) -> Vec<AlarmTransition> {
+        let established: BTreeSet<Addr> = self
+            .owners
+            .keys()
+            .filter(|a| self.owner_set(a, now).verdict == SetVerdict::Established)
+            .cloned()
+            .collect();
+        let dropped: Vec<String> = self
+            .keys
+            .iter()
+            .filter(|(k, e)| {
+                e.latest.is_some() && established.contains(&e.owner) && self.left_out(k, e)
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in dropped {
+            let e = self.keys.get_mut(&k).expect("a key the book holds");
+            e.latest = None;
+            e.track = Track::default();
+            e.merged = Held::Nothing;
+            e.gone_at.get_or_insert(now);
+        }
         self.keys.retain(|_, e| {
             e.gone_at
                 .is_none_or(|g| now.saturating_duration_since(g) < FORGET_AFTER)
@@ -927,10 +994,10 @@ impl AlarmBook {
     /// `addr`'s seed: the latest GET, and the keys of `addr` it answered
     /// with a value.
     fn seed_of(&self, addr: &Addr) -> Option<Seed> {
-        let (end, members) = self.seed.as_ref()?;
-        Some(if end.complete {
+        let s = self.seed.as_ref()?;
+        Some(if s.end.complete {
             Seed::Complete {
-                members: members.get(addr).copied().unwrap_or(0),
+                members: s.members.get(addr).copied().unwrap_or(0),
             }
         } else {
             Seed::Incomplete
@@ -1004,6 +1071,7 @@ impl AlarmBook {
             .map(|t| zid_value(&t.get_id().to_string()));
         let previous_instance = !zids.is_empty() && stamp_id.is_some_and(|id| !zids.contains(&id));
         let held_whole = self.owner_set(&e.owner, now).verdict == SetVerdict::Established;
+        let left_out = self.left_out(key, e);
         let severity = e
             .latest
             .as_ref()
@@ -1016,6 +1084,7 @@ impl AlarmBook {
             latest,
             previous_instance,
             held_whole,
+            left_out,
             severity,
             payload: e.latest.as_ref().map(|l| l.doc.clone()),
             alert_key: e.alarm.alert_key.clone(),
@@ -1105,9 +1174,10 @@ impl AlarmBook {
     }
 
     /// §5's second question at `at_least` over the owners in scope
-    /// (§2.15): each owner's set, and each of its alarms' first answer with
-    /// its latest document's severity. A key refused at [`MAX_KEYS`] could
-    /// be firing, so the answer is then never *no*.
+    /// (§2.15): each owner's set, each of its alarms' first answer with its
+    /// latest document's severity, and whether the scope's reads were whole
+    /// ([`AlarmBook::scope_read`]). A key refused at [`MAX_KEYS`] could be
+    /// firing, so the answer is then never *no*.
     pub fn any_firing(&self, at_least: Severity, now: Instant, wall: SystemTime) -> AnyFiring {
         let rows: Vec<(SetJudged, Vec<FirstAnswer>)> = self
             .owners
@@ -1125,7 +1195,7 @@ impl AlarmBook {
             .iter()
             .map(|(set, alarms)| OwnerAlarms { set: *set, alarms })
             .collect();
-        let mut out = am::any_firing(at_least, &owners, am::ScopeRead::Whole);
+        let mut out = am::any_firing(at_least, &owners, self.scope_read());
         if self.refused > 0 && out.answer == Answer::No {
             out.answer = Answer::Unobservable;
             out.reason = Reason::AlarmUnobservable;
@@ -1147,6 +1217,10 @@ pub struct KeyReading {
     pub latest: Option<Latest>,
     pub previous_instance: bool,
     pub held_whole: bool,
+    /// The latest GET left the key out (§2.14 step 5): with `held_whole`,
+    /// the sample held is none, and a loss before that GET is healed for it
+    /// (step 4, text 0.5, F-136).
+    pub left_out: bool,
     /// The latest document's severity, when one reads.
     pub severity: Option<Severity>,
     /// The latest sample's document: `None` for no sample, `Some(None)` for
@@ -1163,7 +1237,7 @@ impl KeyReading {
             latest: self.latest,
             previous_instance: self.previous_instance,
             held_whole: self.held_whole,
-            left_out: false,
+            left_out: self.left_out,
         }
     }
 
@@ -1617,6 +1691,234 @@ mod tests {
             .unwrap()
             .rederives();
         assert_eq!(mismatch.reason, Reason::Mismatch);
+    }
+
+    const B: &str = "zk2/lab/svc/alarms.v1/state/alarms/0000000000000001";
+
+    /// A GET of the scope's alarms, asked at `asked_at`, answering `replies`.
+    fn get(b: &mut AlarmBook, asked_at: Instant, replies: Vec<AlarmSample>) -> Vec<AlarmTransition> {
+        b.seed(
+            SeedRead {
+                asked_at,
+                complete: true,
+                replies,
+                discarded: 0,
+            },
+            asked_at,
+            wall(),
+        )
+    }
+
+    /// B, an alarm the owner still holds, as its GET answers it.
+    fn b_reply(at: Instant) -> AlarmSample {
+        let mut b = put(at, 1, doc("info", "firing", 3), AlarmVia::Get);
+        b.key = B.into();
+        b
+    }
+
+    /// A subscriber that held A firing, then lost deliveries — A's resolve
+    /// and delete among them, past the tombstone window by its re-seed.
+    fn lost_a_resolve() -> (AlarmBook, Instant, Instant) {
+        let t0 = Instant::now();
+        let mut b = book(true);
+        b.subscribed(t0);
+        b.presence_read(&presence(true, Some(ZID)), t0);
+        get(&mut b, t0, vec![]);
+        b.sample(put(
+            t0 + Duration::from_secs(1),
+            1,
+            doc("warning", "firing", 1),
+            AlarmVia::Subscription,
+        ));
+        let loss = t0 + Duration::from_secs(100);
+        b.lose(
+            AlarmLoss {
+                dropped: 2,
+                stalled: false,
+            },
+            loss,
+            wall(),
+        );
+        let j = b.reading(A, loss, wall()).unwrap().firing();
+        assert_eq!((j.answer, j.reason), (Answer::Unobservable, Reason::Incomplete));
+        (b, t0, loss)
+    }
+
+    /// F-136 (text 0.5): the complete GET that establishes the owner's
+    /// alarms, asked after the loss, leaves A out, and nothing of A arrives
+    /// after it: A holds nothing, and the loss is healed for it — not held,
+    /// reported as the verdict moving. Its stale question is not asked.
+    #[test]
+    fn the_establishing_get_after_a_loss_heals_a_key_it_left_out() {
+        let (mut b, _, loss) = lost_a_resolve();
+        let heal = loss + Duration::from_secs(1);
+        // A refresh: presence read again, then the GET.
+        b.presence_read(&presence(true, Some(ZID)), heal);
+        let moved = get(&mut b, heal, vec![b_reply(heal)]);
+        assert_eq!(
+            b.owner_set(&"lab/svc".parse().unwrap(), heal).reason,
+            Reason::Answered
+        );
+        let r = b.reading(A, heal, wall()).unwrap();
+        assert!(r.held_whole && r.left_out, "{r:?}");
+        let j = r.firing();
+        assert_eq!((j.answer, j.reason), (Answer::No, Reason::NotHeld));
+        assert_eq!(r.stale().reason, Reason::NotFiring);
+        assert!(b.seen(A).is_none(), "the sample held is none (§2.14 step 5)");
+        assert!(
+            moved
+                .iter()
+                .any(|t| t.key == A && t.change == AlarmChange::Judged
+                    && t.firing.reason == "not_held"),
+            "{moved:?}"
+        );
+        assert_eq!(
+            b.any_firing(Severity::Info, heal, wall()).answer,
+            Answer::Yes,
+            "B fires"
+        );
+        assert_eq!(
+            b.any_firing(Severity::Warning, heal, wall()).reason,
+            Reason::NoneFiring,
+            "A no longer stops a no"
+        );
+        // A put of A after that GET is a raise, read as any other.
+        let again = heal + Duration::from_secs(2);
+        let t = b
+            .sample(put(again, 0, doc("warning", "firing", 9), AlarmVia::Subscription))
+            .unwrap();
+        assert_eq!(t.change, AlarmChange::Raised);
+    }
+
+    /// F-136, the other way: a complete GET after the loss that does not
+    /// establish the owner's alarms (it answers nothing, and no window is
+    /// longer than 900 s yet) heals nothing for A (core O5); once its window
+    /// passes 900 s, lossless, it establishes them, and A is not held.
+    #[test]
+    fn an_empty_get_heals_a_left_out_key_only_once_its_window_establishes() {
+        let (mut b, _, loss) = lost_a_resolve();
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let reseed = loss + Duration::from_secs(1);
+        b.presence_read(&presence(true, Some(ZID)), reseed);
+        get(&mut b, reseed, vec![]);
+        let soon = reseed + Duration::from_secs(60);
+        assert_eq!(b.owner_set(&owner, soon).reason, Reason::WindowShort);
+        let j = b.reading(A, soon, wall()).unwrap().firing();
+        assert_eq!((j.answer, j.reason), (Answer::Unobservable, Reason::Incomplete));
+        assert_eq!(
+            b.any_firing(Severity::Warning, soon, wall()).reason,
+            Reason::OwnerUnobservable
+        );
+        let later = reseed + Duration::from_secs(1000);
+        assert_eq!(b.owner_set(&owner, later).reason, Reason::Window);
+        let j = b.reading(A, later, wall()).unwrap().firing();
+        assert_eq!((j.answer, j.reason), (Answer::No, Reason::NotHeld));
+        let moved = b.sweep(later, wall());
+        assert!(moved.iter().any(|t| t.key == A), "{moved:?}");
+        assert!(b.seen(A).is_none());
+        assert_eq!(
+            b.any_firing(Severity::Info, later, wall()).reason,
+            Reason::NoneFiring
+        );
+    }
+
+    /// F-136, the third way: a GET asked before the loss, though its reply
+    /// arrives and its end is folded after it, establishes nothing (the
+    /// window lost a delivery) and heals no key — not even one it answered,
+    /// a reply being dated by its GET's ask, never by its arrival.
+    #[test]
+    fn a_get_asked_before_the_loss_heals_nothing() {
+        let t0 = Instant::now();
+        let mut b = book(true);
+        b.subscribed(t0);
+        b.presence_read(&presence(true, Some(ZID)), t0);
+        get(&mut b, t0, vec![]);
+        b.sample(put(t0, 1, doc("warning", "firing", 1), AlarmVia::Subscription));
+        let asked = t0 + Duration::from_secs(10);
+        let loss = asked + Duration::from_millis(5);
+        b.seeding();
+        b.lose(
+            AlarmLoss {
+                dropped: 1,
+                stalled: false,
+            },
+            loss,
+            wall(),
+        );
+        let late = loss + Duration::from_millis(5);
+        b.sample(b_reply(late));
+        b.seeded(
+            SeedEnd {
+                asked_at: asked,
+                complete: true,
+            },
+            late,
+            wall(),
+        );
+        assert_eq!(
+            b.owner_set(&"lab/svc".parse().unwrap(), late).reason,
+            Reason::WindowLost
+        );
+        for k in [A, B] {
+            let j = b.reading(k, late, wall()).unwrap().firing();
+            assert_eq!(
+                (j.answer, j.reason),
+                (Answer::Unobservable, Reason::Incomplete),
+                "{k}"
+            );
+        }
+        assert!(b.seen(A).is_some(), "nothing dropped: nothing established");
+    }
+
+    /// F-137 (text 0.5): a presence read possibly incomplete may have missed
+    /// an owner, so "is anything firing?" is never no over it, nor not
+    /// asked; a complete read makes it no again, and a loss since — which
+    /// may have taken an instance token's appearance — unobservable again.
+    #[test]
+    fn a_scope_whose_presence_read_was_not_whole_is_never_no() {
+        let t0 = Instant::now();
+        let mut b = book(true);
+        let mut partial = presence(true, Some(ZID));
+        partial.complete = false;
+        b.presence_read(&partial, t0);
+        get(&mut b, t0, vec![b_reply(t0)]);
+        assert_eq!(
+            b.owner_set(&"lab/svc".parse().unwrap(), t0).verdict,
+            SetVerdict::Established,
+            "the owner it found is known whole"
+        );
+        assert_eq!(b.scope_read(), ScopeRead::NotWhole);
+        let a = b.any_firing(Severity::Warning, t0, wall());
+        assert_eq!(
+            (a.answer, a.reason, a.established),
+            (Answer::Unobservable, Reason::ScopeIncomplete, 1)
+        );
+        assert_eq!(
+            b.any_firing(Severity::Info, t0, wall()).answer,
+            Answer::Yes,
+            "a yes whatever else is unknown"
+        );
+        b.presence_read(&presence(true, Some(ZID)), t0);
+        assert_eq!(b.scope_read(), ScopeRead::Whole);
+        assert_eq!(
+            b.any_firing(Severity::Warning, t0, wall()).reason,
+            Reason::NoneFiring
+        );
+        b.lose(
+            AlarmLoss {
+                dropped: 1,
+                stalled: false,
+            },
+            t0,
+            wall(),
+        );
+        assert_eq!(b.scope_read(), ScopeRead::NotWhole);
+        let empty = book(true);
+        assert_eq!(
+            empty.any_firing(Severity::Info, t0, wall()).reason,
+            Reason::ScopeIncomplete,
+            "no presence read made: never not asked"
+        );
     }
 
     /// A tokenless owner (§2.13), found by its descriptor, is asked; a
