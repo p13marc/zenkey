@@ -1,0 +1,55 @@
+# alarms.v1's standard contract (spec/profiles/alarms/v1.md §3): the active
+# alarms of one service, one state resource per alarm. Published in
+# spec/profiles/.history/alarms.v1/ (revision 1.0, sha256:95579151…), and,
+# from before the contract moved here (#800), in examples/zk2/.history.
+# Doc strings are outside the fingerprint (core §9.5), and so are comments;
+# the JSON Schema's descriptions are inside it.
+#
+# Key:        zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>
+# Example:    zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms/a659f813308ad1da
+# Fleet-wide: zk2/*/*/alarms.v1/state/alarms/*   (one major per subscription, core §1.7)
+#
+# THE KEY RECIPE (v1.md §2.2, §2.3; zenkey_model::alarms::derive), byte for byte
+# ZenSight's (zensight-common/src/alert.rs, RFC 11 §3.1):
+#
+#   input     = rule ++ ( "\n" ++ name ++ "=" ++ value )*   one term per discriminating label,
+#                                                          ascending by name, then by value,
+#                                                          in byte order
+#   alert_key = lowercase_hex(fnv1a_64(utf8(input)))       16 digits, all 64 bits
+#
+#   FNV-1a 64: offset basis 0xcbf29ce484222325, prime 0x100000001b3.
+#   Host-scoped labels are removed first: the label named `host`, and every label whose name
+#   starts with `host.`. The system and the service never enter the input.
+#   A rule or a label that breaks the framing is sanitized, not refused (v1.md §2.3).
+#
+#   Test vector: rule `link_down`, labels {peer: r2, port: eth0, host: h-3fa9c2d41b7e}
+#   input = "link_down\npeer=r2\nport=eth0"
+#         (27 bytes: 6c696e6b5f646f776e 0a 706565723d7232 0a 706f72743d65746830)
+#   alert_key = a659f813308ad1da
+#
+# Lifecycle (v1.md §2.5): put firing; escalate or refresh it; put resolved, then delete it.
+[interface]
+name    = "alarms"
+major   = 1
+minor   = 0
+summary = "The active alarms of one service, one state resource per alarm"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/alarms.v1.json"]
+
+[resources."alarms/{alert_key}"]
+kind        = "state"
+type        = "json:alarms.v1.Alarm"
+params      = { alert_key = "string" }
+cardinality = 256
+reliability = "reliable"
+congestion  = "block"
+priority    = "interactive_high"
+express     = true
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+One alarm, keyed by the recipe of alarms.v1 §2.2 over its own document. Put firing, put again on
+an escalation or a refresh, confirmed at least every 450 s while it fires (§2.7), put resolved
+and then deleted (§2.5). QoS is v1's `alert` profile: reliable, block, interactive-high, express.
+At most 256 per service, or the descriptor's lower bound (§2.8)."""

@@ -168,10 +168,12 @@ fn every_standard_contract_is_published_and_compatible() {
     let problems = zenkey_model::history::check_tagged(&root);
     assert!(problems.is_empty(), "{problems:#?}");
     let files = standard_contracts();
-    assert!(
-        files.iter().any(|p| p.ends_with("health/health.v1.toml")),
-        "health.v1's standard contract: {files:?}"
-    );
+    for standard in ["health/health.v1.toml", "alarms/alarms.v1.toml"] {
+        assert!(
+            files.iter().any(|p| p.ends_with(standard)),
+            "{standard}, a standard contract: {files:?}"
+        );
+    }
     let mut ifaces = Vec::new();
     for p in &files {
         let rel = p.strip_prefix(profiles()).unwrap().display().to_string();

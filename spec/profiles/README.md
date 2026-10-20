@@ -20,7 +20,7 @@ and `examples/zk2/`.
 ```text
 profiles/
   README.md               this file: the index, the template, the process
-  .history/               published revisions of the profiles' standard contracts (health.v1, config.v1)
+  .history/               published revisions of the profiles' standard contracts (health.v1, config.v1, alarms.v1)
   <name>/
     v<major>.md           the normative text of one wire major
     CHANGELOG.md          the versions of that text

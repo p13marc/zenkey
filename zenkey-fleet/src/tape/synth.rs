@@ -917,6 +917,8 @@ message Pose {
             "examples/zk2/zenoh-modem",
             // `health.v1`, its profile's standard contract (#721).
             "spec/profiles/health",
+            // `alarms.v1`, its profile's standard contract (#800).
+            "spec/profiles/alarms",
         ] {
             // A bindings file beside the contracts is a problem to skip, not
             // a contract.

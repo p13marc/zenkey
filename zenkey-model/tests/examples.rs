@@ -1,7 +1,7 @@
 //! Every example contract under `examples/zk2/` validates with no finding at
 //! all, fingerprints and bundles (#608), and the set's cross-contract checks
 //! pass, with the profiles' standard contracts in the set (`health.v1`,
-//! #721), which `tests/profiles.rs` checks on their own.
+//! #721; `alarms.v1`, #800), which `tests/profiles.rs` checks on their own.
 
 use std::path::{Path, PathBuf};
 
@@ -89,9 +89,10 @@ fn every_example_contract_validates_fingerprints_and_bundles() {
         failures.is_empty(),
         "example contracts with findings: {failures:?}"
     );
-    // 23 since `health.v1` moved under `spec/profiles/` (#721).
+    // 23 since `health.v1` moved under `spec/profiles/` (#721), 22 since
+    // `alarms.v1` did (#800).
     assert!(
-        contracts.len() >= 23,
+        contracts.len() >= 22,
         "only {} contracts found",
         contracts.len()
     );

@@ -49,7 +49,7 @@ The v1 surface, re-counted from
 | host services | v1's producer names: `sysinfo`, `netlink`, `netring`, `systemd`, `logs`, `hostspec`, `parallax`, `probe`, `pve`, `historian`, plus the process identities `correlator`, `policy-compiler`, `exporter-prometheus`, `exporter-otel`. A second instance is just another service (`netring-2`) implementing the same interface. |
 | device services | one per polled device: `snmp.<device>`, `modbus.<device>`, `gnmi.<device>`, `netflow.<exporter>`, `bmc.<chassis>`, `container.<name>`. Each poller keeps its own service (`snmp`, …) for what belongs to the process. The instance id is the device's continuity epoch. |
 | fleet singletons | `zk2/fleet/catalog` (`zs.catalog.v1`) and `zk2/fleet/desired` (`zs.desired.v1`), single-writer under `redundancy.v1` with ZenSight's claim protocol as the reference. They replace v1's verbatim service origins `@catalog` and `@desired` ([`../shapes.md`](../shapes.md) row 4). |
-| framework set | interfaces every service implements: `health.v1` ([`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml), the profile [`health.v1`](../../../spec/profiles/health/v1.md)), `alarms.v1`, `zs.evidence.v1`, `zs.thresholds.v1`, `views.v1`; also `zs.errors.v1` and `zs.artifacts.v1` (named, not written in this cut) |
+| framework set | interfaces every service implements: `health.v1` ([`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml), the profile [`health.v1`](../../../spec/profiles/health/v1.md)), `alarms.v1` ([`spec/profiles/alarms/alarms.v1.toml`](../../../spec/profiles/alarms/alarms.v1.toml), the profile [`alarms.v1`](../../../spec/profiles/alarms/v1.md)), `zs.evidence.v1`, `zs.thresholds.v1`, `views.v1`; also `zs.errors.v1` and `zs.artifacts.v1` (named, not written in this cut) |
 | schema kind | **jsonschema**: ZenSight's types are serde structs on a CBOR wire. The shared telemetry point is `schemas/telemetry.v1.json`. |
 
 Example keys, for host `h-3fa9c2d41b7e`:
@@ -72,7 +72,6 @@ zk2/h-3fa9c2d41b7e/snmp.router01/@zk/alive/zs.snmp.v1/<instance>/<fp16>
 
 | Contract | What | Resources |
 |---|---|---|
-| [`alarms.v1.toml`](alarms.v1.toml) | The generic alarm profile, with ZenSight's alert-key recipe byte-exact (RFC 11 §3.1, test vector `a659f813308ad1da`) | 1 |
 | [`zs.evidence.v1.toml`](zs.evidence.v1.toml) | Identity evidence: `self`, `device/{device}`, `names/{ip}`, `relation/{relation_id}` | 4 |
 | [`zs.thresholds.v1.toml`](zs.thresholds.v1.toml) | Threshold rules: state, `set`, `applied/{topic}`, the desired requirement | 3 |
 | [`views.v1.toml`](views.v1.toml) | The ViewSet presentation document | 1 |
@@ -114,7 +113,7 @@ description as `doc`, `when` mapped to `optional` + `gate`, and v1's
 | state `sensor` (registration document) | 20 | **deleted**: the instance descriptor (host, build, capabilities, profiles, r3.2 §3.10) |
 | state `evidence/self` | 20 | `zs.evidence.v1` `self` |
 | state `evidence/device/{device}`, `evidence/names/{ip_slug}`, `evidence/relation/{relation_id}` | 8, 1, 4 | `zs.evidence.v1` `device/{device}`, `names/{ip}`, `relation/{relation_id}` |
-| state `alert/{alert_key}` | 20 | `alarms.v1` `alarms/{alert_key}` |
+| state `alert/{alert_key}` | 20 | `alarms.v1` `alarms/{alert_key}`, the profile's standard contract ([`alarms.v1`](../../../spec/profiles/alarms/v1.md) §3), with ZenSight's alert-key recipe byte for byte (§2.2, test vector `a659f813308ad1da`) |
 | state `applied/{topic}` | 15 | `zs.thresholds.v1` `applied/{topic}` |
 | state `artifact/{kind}`, procedures `artifact/{request,cancel,status}`, `[[blob]]` artifact/tree/store | 10, 30, 30 | `zs.artifacts.v1`: a `jobs.v1` job whose Ready state carries a `blob.v1` reference (holder system, holder service, hash). Not written. |
 | procedures `thresholds`, `thresholds/set` | 15 × 2 | `zs.thresholds.v1` state `thresholds`, `@op set` |
@@ -202,7 +201,7 @@ interfaces from presence and contracts, then subscribes per interface.
 | `v1/*/state/**` (GUI `subscription.rs:146`) | `zk2/*/*/*/state/**`, exact, but it now also carries the fleet catalog and desired populations (G7) |
 | `v1/*/events/**` (GUI `subscription.rs:160`, OTel `subscriber.rs:180`, historian `timeline.rs:53`, storage `configs/router-events-storage.json5:95`) | **No exact selector** (G6). Per interface: `zk2/*/*/zs.snmp.v1/stream/traps/*` and `zk2/*/*/zs.snmp_poller.v1/stream/strays/**`. |
 | `v1/*/state/*/alert/*` (GUI `subscription.rs:359`, Prometheus `subscriber.rs:186`, OTel `subscriber.rs:158`, historian `timeline.rs:123`, correlator `subscriber.rs:84`, zenwatch `rules.rs:244` on branch `v1`) | `zk2/*/*/alarms.v1/state/alarms/*`, exact, one major per subscription |
-| `v1/*/state/*/alive` liveliness (GUI `subscription.rs:281`, Prometheus `:235`, OTel `:204`, correlator `:122`, zenwatch `engine.rs:610`, `rules.rs:245` on branch `v1`) | every instance: `zk2/*/*/@zk/instance/*`. "Is the owner of these alarms present" (S6): `zk2/*/*/@zk/alive/alarms.v1/**`. |
+| `v1/*/state/*/alive` liveliness (GUI `subscription.rs:281`, Prometheus `:235`, OTel `:204`, correlator `:122`, zenwatch `engine.rs:610`, `rules.rs:245` on branch `v1`) | every instance: `zk2/*/*/@zk/instance/*`. "Is the owner of these alarms present" (S6): `zk2/*/*/@zk/alive/alarms.v1/**`, or, with `alarms.v1` in the tokenless set, the instance tokens and their descriptors ([`alarms.v1`](../../../spec/profiles/alarms/v1.md) §2.13). |
 | `v1/*/state/*/device/*/alive` (GUI `subscription.rs:333`; hand-spelled at `zensight-common/src/keyexpr.rs:875`) | `zk2/*/*/@zk/alive/zs.snmp.v1/**`, and the same for zs.modbus.v1, zs.gnmi.v1, zs.netflow.v1, zs.bmc.v1, zs.container.v1. An instance change is the counter discontinuity. |
 | `v1/*/state/*/evidence/**` + `…/evidence/names/*` (correlator `subscriber.rs:45`, `:55`; hand-spelled `keyexpr.rs:373`) | `zk2/*/*/zs.evidence.v1/state/**` and `…/state/names/*`. The correlator's two overlapping subscriptions collapse into one. Storage `router-evidence-storage.json5` → the same selector. |
 | `v1/*/state/*/health` (rerun; `keyexpr.rs:336`) | `zk2/*/*/health.v1/state/**` |
@@ -320,7 +319,7 @@ Each gap: what it is · the evidence · the proposed correction.
    - *Correction:* the contract value is the interface-wide ceiling. The descriptor MAY declare a lower bound per instance and resource, and conformance checks the descriptor's.
 3. **G3. A profile's per-implementer parameters have no home.**
    - *Evidence:* the alarm-key recipe excludes "the label named `host`, *and any label the producer documents as host-scoped*" (RFC 11 §3.1). ZenSight's set is `host.*` (`alert.rs:285-305`). A standard contract cannot carry implementer annotations, and the descriptor has no slot.
-   - *Correction:* `alarms.v1` fixes the excluded set normatively (`host` and `host.*`), as `alarms.v1.toml` does here. More generally, the descriptor's `profiles` entries may carry parameters.
+   - *Correction:* `alarms.v1` fixes the excluded set normatively (`host` and `host.*`), as [`alarms.v1`](../../../spec/profiles/alarms/v1.md) §2.2 does. More generally, the descriptor's `profiles` entries may carry parameters.
 4. **G4. Dot-packed references break on dotted service names, and device-service names have no derivation.**
    - *Evidence:* AlertRef `<origin>.<producer>.<alert_key>` splits on the first two dots (`alert.rs:378-408`, RFC 11 §3.2), so `h-….snmp.router01.<key>` parses wrong. Target names allow `.` and capitals (`zensight-common/src/targets.rs:179`). r3.2 §3.5 and `../shapes.md` bless `snmp.router01` without saying how a device name becomes a chunk.
    - *Correction:* r3.x states the derivation `<parent>.<slug(device)>` (the parent dot-free, split on the first dot, §3.1's slug rule). Payload references become structured fields keyed by multi-parameter templates (`acks/{system}/{service}/{alert_key}`), never dot-packed.
