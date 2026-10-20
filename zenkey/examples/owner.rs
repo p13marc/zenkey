@@ -8,6 +8,8 @@
 //!     [--tokenless <iface>]... [--clock-reference <key>] [--clock-offset-ms <ms>]
 //!     [--cardinality <iface>:<resource>=<n>]...
 //!     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
+//!     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
+//!     [--alarms-rules <rule>[,<rule>...]]
 //!     <address> <contract.toml>...
 //! ```
 //!
@@ -173,6 +175,66 @@
 //! desired document `config desired` bound: that binding is the
 //! deployment's, so the new instance converges it again, its view carrying
 //! no `desired` until it has acted (§2.18; text 0.3, F-114).
+//!
+//! **`alarms.v1`** (`spec/profiles/alarms/v1.md`, #800) is implemented by
+//! the runtime ([`zenkey::alarms`]) with `--alarms`, implied by any
+//! `--alarms-*` option, or when a contract file given is the standard one
+//! (its fingerprint is `95579151…`, as `spec/profiles/alarms/alarms.v1.toml`
+//! is). With `--alarms`, an `alarms.v1` contract file of another revision is
+//! implemented by the runtime on that revision instead, its
+//! `freshness.ttl_s` setting the confirmation period: a runner's copy of
+//! the standard contract with a short horizon is its fast tier. Each firing
+//! alarm is re-put every 427.5 s at the standard horizon (§2.7).
+//!
+//! - `--alarms-record <file>` is the owner's persistent record
+//!   ([`zenkey::alarms::FileRecord`]): read at start, and rewritten whole
+//!   after every put and every delete. It is JSON, `{"profile":
+//!   "alarms.v1", "alarms": {<alert key>: <document>, …}}`, each document
+//!   as it was put, the resolved one included until its delete.
+//! - `--alarms-archive <system>/<service>` is an archive on the owner's own
+//!   side (core §4.4), read explicitly at start when the record has
+//!   nothing (§2.9), within 2 s.
+//! - `--alarms-rules <rule>,…` are the rules the owner evaluates: a firing
+//!   document of another rule found at start is resolved (§2.9, step 3).
+//!   By default, every rule.
+//! - `--cardinality alarms.v1:state/alarms/{alert_key}=<n>` lowers the bound
+//!   (§2.8), before the adoption.
+//!
+//! **A restart is the process's**, as §5 of the scenarios runs it: kill the
+//! owner (a process that ends without closing), or close its standard input
+//! (a clean close, which resolves and deletes nothing, §2.9), then start it
+//! again with the same `--alarms-record`. It comes up on a new session,
+//! with a new zid, and before its tokens it deletes what its record holds
+//! resolved, undecodable or under a key that does not re-derive, resolves
+//! what a rule no longer evaluated raised, and puts the rest again with
+//! their timestamps. A runner writes documents into the record only while
+//! no owner runs on it.
+//!
+//! Its commands, each answered by one line:
+//!
+//! ```text
+//! alarm raise <json>                      the condition holds: {"rule", "severity", "summary", "labels"?, "category"?}
+//! alarm resolve <alert_key>               the resolved put, then the delete (§2.5)
+//! alarm confirm <alert_key>|all on|off    off: the owner stops evaluating it, and lets it go stale (§2.7)
+//! alarm list                              the alarms held
+//! alarm adoption                          what the start took over (§2.9)
+//! ```
+//!
+//! `raise` is answered `alarm <act> <alert_key> <document>`, `act` being
+//! what the runtime made of it from what it holds (§2.5): `raised`,
+//! `escalated` (another severity: a new `timestamp`), `refreshed` (its
+//! summary, category or a host-scoped label changed: the `timestamp` kept,
+//! `observed_at_ms` set), or `unchanged` (nothing put); `document` is the
+//! alarm's JSON on one line. A raise past the bound is answered `refused
+//! …`, naming the bound and whose it is (core §2.7). `resolve` is answered
+//! `alarm resolved <alert_key> <document>`, the resolved document, or
+//! `alarm none <alert_key>` when none is held there. `confirm` is answered
+//! as it was asked, `alarm confirm <alert_key>|all on|off`; any act on an
+//! alarm turns its confirmation back on. `list` is answered `alarm held
+//! <json>`, an object of the documents held by alert key. `adoption` is
+//! answered `alarm adoption source=<record|archive|nothing> adopted=<keys>
+//! retired=<key>:<resolved|undecodable|phantom>,… resolved=<keys>
+//! over_bound=<keys>`, each list comma-separated, `-` when empty.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -181,6 +243,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use zenkey::alarms::{self, Alarms, Condition, FileRecord};
 use zenkey::config_v1::{self, Configuration, DesiredConfig, Startup};
 use zenkey::health::{self, Effective, Health, Level};
 use zenkey::hostid::{HostIdMinter, HostIdSource};
@@ -234,6 +297,15 @@ pub struct Options {
     pub config_apply_after_ms: u64,
     /// Without `--config-no-persist`: a persisted layer (§2.13).
     pub config_persist: bool,
+    /// `--alarms`, or implied by an `--alarms-*` option or the standard
+    /// contract among the files: `alarms.v1` by the runtime.
+    pub alarms: bool,
+    /// `--alarms-record <file>`: the owner's persistent record (§2.9).
+    pub alarms_record: Option<PathBuf>,
+    /// `--alarms-archive <system>/<service>`: an archive on its own side.
+    pub alarms_archive: Option<String>,
+    /// `--alarms-rules <rule>,…`: the rules it evaluates; `None`: every one.
+    pub alarms_rules: Option<Vec<String>>,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
@@ -264,6 +336,8 @@ impl Options {
              [--clock-reference <key>] [--clock-offset-ms <ms>] \
              [--cardinality <iface>:<resource>=<n>]... \
              [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist] \
+             [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>] \
+             [--alarms-rules <rule>[,<rule>...]] \
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
@@ -282,6 +356,10 @@ impl Options {
             config_floor_s: 10,
             config_apply_after_ms: 1000,
             config_persist: true,
+            alarms: false,
+            alarms_record: None,
+            alarms_archive: None,
+            alarms_rules: None,
             address: String::new(),
             contracts: Vec::new(),
         };
@@ -382,6 +460,34 @@ impl Options {
                     o.config = true;
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--alarms" => {
+                    o.alarms = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--alarms-record" => {
+                    o.alarms_record = Some(PathBuf::from(value));
+                    o.alarms = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--alarms-archive" => {
+                    value
+                        .parse::<zenkey::model::grammar::Addr>()
+                        .map_err(|e| format!("--alarms-archive {value:?}: {e}"))?;
+                    o.alarms_archive = Some(value.clone());
+                    o.alarms = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--alarms-rules" => {
+                    o.alarms_rules = Some(
+                        value
+                            .split(',')
+                            .filter(|r| !r.is_empty())
+                            .map(str::to_owned)
+                            .collect(),
+                    );
+                    o.alarms = true;
+                    rest = tail;
+                }
                 [flag, ..] if flag.starts_with("--") => return Err(usage()),
                 _ => break,
             }
@@ -425,6 +531,7 @@ pub async fn run_with(
     }
     config.clock_reference = opts.clock_reference.clone();
     let mut imps = Vec::new();
+    let mut alarms_revision = None;
     for f in &opts.contracts {
         let l = load_path(f);
         let Some(c) = l.contract else {
@@ -449,6 +556,18 @@ pub async fn run_with(
         {
             opts.config = true;
             continue;
+        }
+        // And alarms.v1 (#800): the standard one, or with --alarms another
+        // revision of it.
+        if imp.iface() == &alarms::iface() {
+            if imp.fingerprint().hex().to_string() == alarms::FINGERPRINT {
+                opts.alarms = true;
+                continue;
+            }
+            if opts.alarms {
+                alarms_revision = Some(imp);
+                continue;
+            }
         }
         imps.push(imp);
     }
@@ -516,6 +635,7 @@ pub async fn run_with(
         minter,
         imps,
         configured,
+        alarms_revision,
     };
     let mut up = ctx.up(Vec::new()).await?;
     say(format!("ready {}", up.svc.instance_key()?));
@@ -555,6 +675,9 @@ struct Ctx<'a> {
     imps: Vec<Implementation>,
     /// config.v1's startup and device, with `--config`.
     configured: Option<(Startup, Arc<config::SimDevice>)>,
+    /// The revision of alarms.v1 among the files, with `--alarms`; `None`:
+    /// the standard one.
+    alarms_revision: Option<Implementation>,
 }
 
 /// One running instance of the service, and what it holds.
@@ -565,6 +688,7 @@ struct Up {
     health: Option<Health>,
     members: Members,
     config: Option<Configuration>,
+    alarms: Option<Alarms>,
 }
 
 impl Up {
@@ -664,8 +788,13 @@ impl Ctx<'_> {
             }
         }
         // Core §3.3: a template's bound lowered in the descriptor, which the
-        // runtime then keeps (§2.7).
+        // runtime then keeps (§2.7). alarms.v1's goes in its startup, set
+        // before the adoption.
+        let alarms_iface = alarms::iface().to_string();
         for (iface, resource, n) in &opts.cardinality {
+            if opts.alarms && *iface == alarms_iface {
+                continue;
+            }
             b.cardinality(&iface.parse()?, resource, *n)?;
         }
         // health.v1 §2.3: its status and checks before the tokens; the status
@@ -698,6 +827,39 @@ impl Ctx<'_> {
             }
             None => None,
         };
+        // alarms.v1 §2.9: the previous instance's alarms taken over here,
+        // before the tokens.
+        let alarms = if opts.alarms {
+            let mut startup = alarms::Startup::default();
+            if let Some(path) = &opts.alarms_record {
+                startup = startup.with_record(Arc::new(FileRecord::new(path)));
+            }
+            if let Some(a) = &opts.alarms_archive {
+                startup = startup.with_archive(a.parse()?, Duration::from_secs(2));
+            }
+            if let Some(rules) = &opts.alarms_rules {
+                startup = startup.evaluating(rules.iter().cloned());
+            }
+            for (iface, resource, n) in &opts.cardinality {
+                if *iface == alarms_iface {
+                    if resource != alarms::ALARMS {
+                        return Err(format!(
+                            "--cardinality {iface}:{resource}: alarms.v1's template is {}",
+                            alarms::ALARMS
+                        )
+                        .into());
+                    }
+                    startup = startup.with_cardinality(*n);
+                }
+            }
+            let imp = self
+                .alarms_revision
+                .clone()
+                .unwrap_or_else(alarms::implementation);
+            Some(b.alarms_with(imp, startup).await?)
+        } else {
+            None
+        };
         // §8.2 "State values" (F-68): the value is put before the tokens, so a
         // GET made the moment they appear finds it.
         for w in &states {
@@ -711,6 +873,7 @@ impl Ctx<'_> {
             health,
             members,
             config,
+            alarms,
         })
     }
 }
@@ -932,6 +1095,85 @@ async fn config_command(
     Ok(device_line(device, cfg.schema()))
 }
 
+/// A document on one line.
+fn one_line(doc: &alarms::Alarm) -> String {
+    serde_json::to_string(doc).unwrap_or_default()
+}
+
+/// A list as `adoption` answers it: comma-separated, `-` when empty.
+fn listed(items: impl IntoIterator<Item = String>) -> String {
+    let v: Vec<String> = items.into_iter().collect();
+    if v.is_empty() {
+        "-".to_owned()
+    } else {
+        v.join(",")
+    }
+}
+
+/// Answers an `alarm` command (the module doc's).
+async fn alarm_command(words: &[&str], rest: &str, a: &Alarms) -> Result<String, String> {
+    match words {
+        ["alarm", "raise", _, ..] => {
+            let c: Condition = serde_json::from_str(rest).map_err(|e| {
+                format!("not a condition {{rule, severity, summary, labels?, category?}}: {e}")
+            })?;
+            let done = a.raise(c).await.map_err(|e| e.to_string())?;
+            Ok(format!(
+                "alarm {} {} {}",
+                done.act.as_str(),
+                done.alert_key,
+                one_line(&done.document)
+            ))
+        }
+        ["alarm", "resolve", key] => match a.resolve(key).await.map_err(|e| e.to_string())? {
+            Some(done) => Ok(format!(
+                "alarm resolved {} {}",
+                done.alert_key,
+                one_line(&done.document)
+            )),
+            None => Ok(format!("alarm none {key}")),
+        },
+        ["alarm", "confirm", key, on @ ("on" | "off")] => {
+            let on_ = *on == "on";
+            if *key == "all" {
+                a.set_confirming_all(on_).await;
+            } else if !a.set_confirming(key, on_).await {
+                return Err(format!("no firing alarm is held on {key}"));
+            }
+            Ok(format!("alarm confirm {key} {on}"))
+        }
+        ["alarm", "list"] => {
+            let held: serde_json::Map<String, serde_json::Value> = a
+                .held()
+                .await
+                .into_iter()
+                .map(|(k, d)| (k, serde_json::to_value(d).unwrap_or_default()))
+                .collect();
+            Ok(format!("alarm held {}", serde_json::Value::Object(held)))
+        }
+        ["alarm", "adoption"] => {
+            let r = a.adoption();
+            Ok(format!(
+                "alarm adoption source={} adopted={} retired={} resolved={} over_bound={}",
+                r.source.as_str(),
+                listed(r.adopted),
+                listed(
+                    r.retired
+                        .into_iter()
+                        .map(|(k, why)| format!("{k}:{}", why.as_str()))
+                ),
+                listed(r.resolved),
+                listed(r.over_bound)
+            ))
+        }
+        _ => Err(
+            "usage: alarm raise <json> | resolve <alert_key> | confirm <alert_key>|all on|off | \
+             list | adoption"
+                .to_owned(),
+        ),
+    }
+}
+
 /// Answers one command line (the module doc's) but `config restart`.
 async fn command(
     line: &str,
@@ -941,6 +1183,15 @@ async fn command(
     let words: Vec<&str> = line.split_whitespace().collect();
     let refuse = |why: &str| format!("refused {}: {why}", words.join(" "));
     let rest = |n: usize| words.get(n..).map(|w| w.join(" ")).unwrap_or_default();
+    if words.first() == Some(&"alarm") {
+        let Some(a) = &up.alarms else {
+            return refuse("alarms.v1 is not implemented here (--alarms)");
+        };
+        return match alarm_command(&words, &rest(2), a).await {
+            Ok(answer) => answer,
+            Err(why) => refuse(&why),
+        };
+    }
     if words.first() == Some(&"config") {
         let (Some(cfg), Some((_, device))) = (&up.config, configured) else {
             return refuse("config.v1 is not implemented here (--config)");
@@ -1076,7 +1327,9 @@ async fn main() {
         .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("warn,zenkey::config_v1=info")
+                tracing_subscriber::EnvFilter::new(
+                    "warn,zenkey::config_v1=info,zenkey::alarms=info",
+                )
             }),
         )
         .init();
