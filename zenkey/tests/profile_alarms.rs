@@ -25,7 +25,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use common::{SETTLE, T, addr, client, config, eventually, router};
+use common::{T, addr, client, config, eventually, router};
 use zenkey::alarms::{
     self, Act, Alarms, Condition, FileRecord, Retired, Severity, Source, Startup,
 };
@@ -1064,7 +1064,6 @@ async fn a_re_mint_puts_every_alarm_again() {
     );
     assert!(svc.alarms().is_some());
     svc.close().await.unwrap();
-    let _ = SETTLE;
 }
 
 /// §2.9's second source: with no record, a restart adopts from an explicit
