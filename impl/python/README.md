@@ -99,13 +99,14 @@ hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
-link          156 passed     0 failed
-total        1414 passed     0 failed
+link          169 passed     0 failed
+total        1427 passed     0 failed
 ```
 
 The figures are against `core.md` 0.32, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.6, which changed no
-fixture (nor did core 0.31 or 0.32). `link.v1` 0.5 added ten `lints.json` cases
+0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.7. `link.v1` 0.7
+added 13 `lints.json` cases and changed three; 0.6, core 0.31 and core
+0.32 changed no fixture. `link.v1` 0.5 added ten `lints.json` cases
 and changed one. `link.v1` 0.4
 added 18 `lints.json` cases, and 0.3 one `plan.json` case and eight
 `lints.json` cases. `link.v1` 0.2
@@ -152,11 +153,11 @@ fixtures:
   conforms. §11's expected 7 gives that branch's outcome exactly.
 - Core 0.32 resolved F-123, found against its 0.31, in zk2py's wording:
   a principal's complement is taken per message and flow.
-- F-124 and F-125 are open, from a last cold read of `link.v1` 0.6, each
-  measured (`SPEC-FINDINGS.md`, "At core 0.32"):
-  - a block whose access control is not enabled enforces nothing, and
-    passes every check;
-  - two faces with one far principal carry each other's denies.
+- `link.v1` 0.7 resolved F-124 and F-125, found in a last cold read of its
+  0.6: `block_disabled`, and a far principal of two faces carrying both
+  plans' denies, warned by `far_of_two_faces`.
+- Nothing is open. A cold read of 0.7 found nothing more to guess
+  (`SPEC-FINDINGS.md`, "At link.v1 0.7").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -853,7 +854,7 @@ python -m zk2py.live_interop --only config       # the live runner's config run
   range, and restores a hot group left part applied once: zk2py's device
   reports it as `{"refused": words, "partial": {…}}`.
 
-## link.v1 (profile text 0.6, core 0.32)
+## link.v1 (profile text 0.7, core 0.32)
 
 ```bash
 just py-link
@@ -861,7 +862,8 @@ just py-link
 
 - **`zk2py.link`**, from the text alone:
   - the face policy (§2.1): `parse_policy` reads the TOML file and reports
-    the linter's findings, each `{code, severity, face, at}`, sorted;
+    the linter's findings, each `{code, severity, face, at}`, sorted,
+    `far_of_two_faces` among them (0.7);
   - `link.exposure` (§2.2): `exposure`, and whether a resource's pushes
     cross a face (§2.7, §2.8);
   - the plan (§2.3, §2.5 to §2.12): `plan` derives each face's denies, with
@@ -880,8 +882,10 @@ just py-link
     0.5). `check_router_block` reads a router's whole block, each subject
     that can match the far principal's session checked alone
     (`subject_denies`). A block zenoh refuses at load, or an unknown face,
-    raises `BlockError`, and a rule without `flows` applies to both
-    (measured). `lint` is `lints.json`'s reading;
+    raises `BlockError`. `block_disabled` reports a block whose `enabled`
+    is false, or absent from a router's configuration; a missing
+    `default_permission` reads as `deny` and a rule without `flows` as both
+    flows (0.7, measured). `lint` is `lints.json`'s reading;
   - a generator for zenoh-python routers: `compile_faces` puts a plan's
     denies in the far principal's policy of zk2py's generated block,
     narrows every other principal's subject off the face, and under
@@ -893,10 +897,10 @@ just py-link
     the owner's `state/**` and `@state/**` for a state GET, an operation's
     template pattern for a call;
   - §5's "Is this provider live across the face?" (`liveness_across`).
-- **The `link` conformance family:** 156 of 156, every case passing the
+- **The `link` conformance family:** 169 of 169, every case passing the
   first time it ran.
 - **`just py-link`** (`python -m zk2py.link_scenarios`) runs `scenarios.md`
-  §1 to §11 as 0.6 writes them, 79 of 79, every section, on zenoh-python
+  §1 to §13 as 0.7 writes them, 89 of 89, every section, on zenoh-python
   routers: N with usrpwd and the block zk2py compiles under `deny` (and
   `allow` in §7, §9, §10 and §11),
   listening on TCP (the near side) and on a `unixsock-stream` path (the
@@ -937,6 +941,13 @@ just py-link
     §11.2 exactly: the stricter complement, under which X receives nothing
     at all while a probe on a key no contract declares shows its session
     is live.
+  - §12 takes out of the generator's block what zenoh defaults: `enabled`
+    (false: nothing is enforced, and the tool reports `block_disabled`),
+    `default_permission` (`deny`), and a rule's `flows` (both flows).
+  - §13 gives the policy a second face, `sat`, with the same far
+    principal. The linter warns `far_of_two_faces`, and over the radio
+    face G receives no push, since `ground`'s policy carries `sat`'s
+    wholesale denies too.
   - §5's face goes down as G's session closing, its merged members kept.
 - **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
   core S3).
@@ -1042,7 +1053,7 @@ impl/python/
                                 ConfigOwner, SimDevice, the reader of §5
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
-    link_scenarios.py link.v1   scenarios.md §1–§11 on zenoh-python routers, over examples/zk2/link/
+    link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge
