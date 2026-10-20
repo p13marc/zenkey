@@ -9,8 +9,10 @@
 //! re-raise fires again; an alarm already firing when the daemon starts is
 //! told, and its resolve delivered. New with alarms.v1: an owner that goes
 //! away leaves its alarm unobservable, last-known — never resolved, never
-//! ok; a restart with a state file is no news; and `alert-firing` runs as
-//! zenctl's watchdog runs it.
+//! ok; a restart with a state file is no news; a lost reading (a router's
+//! restart) is said once by the observer; `alert-firing` runs as zenctl's
+//! watchdog runs it; and the daemon publishes the alarm and its `alarms`
+//! check.
 
 mod util;
 
@@ -502,6 +504,94 @@ async fn a_lost_reading_is_said_once_by_the_observer_and_the_get_after_it_heals_
         all.len(),
         1,
         "A kept its word through the loss, and the healing GET found it firing: {all:?}"
+    );
+    running.stop().await;
+}
+
+/// A daemon with an `alerts` rule is the zk2 service it always is: its
+/// `firing/{rule_id}` names the alarm that fires, under its identity and
+/// its document's severity, and its `health.v1` carries an `alarms` check,
+/// OK while its reader reads whole.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_daemon_with_alerts_publishes_the_alarm_and_its_alarms_check() {
+    use util::engine::TestPublish;
+    use zenwatch::zk2::zenwatch_v1;
+    const ADDRESS: &str = "ops-1/zenwatch";
+    let (_router, ep) = zk2::router().await;
+    let owners = zk2::client_ns(&ep, Some(NS)).await;
+    let tool = zk2::client_ns(&ep, Some(NS)).await;
+    let (_svc, alarms) = owner(&owners).await;
+    zk2::tokens(&tool, &format!("zk2/{OWNER}/@zk/instance/*"), 1).await;
+    alarms
+        .raise(alarm_a(Severity::Warning, "link to r2 down on eth0"))
+        .await
+        .expect("A raised");
+    let ops = Capture::default();
+    let running = engine::start(
+        zk2::daemon_bus(&ep, NS).await,
+        vec![alerts_rule("fleet-alerts", &["ops"])],
+        ops.clone(),
+        Options {
+            clocks_synced: true,
+            publish: Some(TestPublish::at(ADDRESS)),
+            ..Options::default()
+        },
+    )
+    .await;
+    about_a(&ops, "fleet-alerts", 1).await;
+    zk2::tokens(&tool, "zk2/ops-1/zenwatch/@zk/instance/*", 1).await;
+
+    let zw = zenwatch_v1::Consumer::from_inner(
+        zenkey::consumer::Consumer::for_tool(
+            &tool,
+            zenwatch_v1::contract(),
+            &[ADDRESS],
+            &BTreeMap::new(),
+        )
+        .expect("a tool's consumer"),
+    )
+    .expect("a zenwatch.v1 consumer");
+    let id = zenwatch::rules::rule_id("fleet-alerts");
+    zk2::eventually("the alarm's firing document", || async {
+        match zw.get_firing_member(&id, zk2::T).await {
+            Ok(zenkey::typed::StateGet::Answered(v)) => v.iter().any(|c| {
+                matches!(c, zenkey::typed::Current::Value { value: Ok(doc), .. }
+                    if doc.id == format!("fleet-alerts:{}", a_key())
+                        && doc.state == "firing"
+                        && doc.severity == "warning")
+            }),
+            _ => false,
+        }
+    })
+    .await;
+
+    let report = zenkey_fleet::run_health(
+        &tool,
+        NS,
+        zenkey_fleet::HealthTarget::One(ADDRESS.parse().expect("an address")),
+        zenkey_fleet::HealthSpec {
+            timeout: zk2::T,
+            window: None,
+            grace: Duration::from_millis(100),
+            clocks_synced: true,
+            face: None,
+        },
+    )
+    .await;
+    let row = report.services.first().expect("the daemon's row");
+    let alarms_check = row
+        .checks
+        .iter()
+        .find(|c| c.check == "alarms")
+        .unwrap_or_else(|| panic!("an alarms check: {row:?}"));
+    assert_eq!(
+        alarms_check.level,
+        zenkey_fleet::report::LevelRead::Token("ok"),
+        "{alarms_check:?}"
+    );
+    assert!(
+        alarms_check.detail.contains("a complete read"),
+        "{alarms_check:?}"
     );
     running.stop().await;
 }
