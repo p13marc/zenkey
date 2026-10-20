@@ -31,7 +31,10 @@ tests of zenctl (#800, AC).
   host. §6 measures nothing else.
 - **The horizon** is the contract's, 900 s, so the owner confirms each
   firing alarm at least every 450 s. §2 waits 455 s and §6 about 910 s, and
-  a runner MAY keep them in a slow tier.
+  a runner MAY keep them in a slow tier. The reference keeps them there,
+  and its default run checks what §2's and §6's owner puts on a copy of
+  the standard contract with `freshness.ttl_s = 4`, made in memory and
+  never published (0.2).
 - **Jitter.** A gap between deliveries is measured at S. The reference
   allows 200 ms on loopback.
 
@@ -119,9 +122,11 @@ holds two more documents, written by a test before the restart:
    answered with them (a MUST), S receives:
    - A firing, unchanged, `timestamp` *t₀* kept, under the new instance's
      stamp id. S reads it **confirmed**.
-   - a delete of R's key, and of P's key.
-   - B: a put, then at its first evaluation a resolved put and a delete.
-     S reads **resolved**, then **retired**.
+   - a delete of R's key, and of P's key. S reads each **retired**: it
+     held neither (§2.6, 0.2).
+   - B: a put, unchanged, which S reads **confirmed**; then, at its first
+     evaluation, a resolved put and a delete, which S reads **resolved**,
+     then **retired** (0.2).
 4. G's reply holds A, stamped by the new instance, whose `meta.zid` is the
    stamp's id; G judges A **yes**, `firing`, never `previous_instance`.
 
@@ -174,7 +179,9 @@ holds two more documents, written by a test before the restart:
    **not asked**, `absent`, and shows the archived document, firing, as
    last-known, with its stamp, never as firing now (core S6). T's answer
    to "is anything firing at or above `warning`?" over `zk2/lab/*` counts
-   the owner as not asked, and is not **yes** (§2.15).
+   the owner as not asked, and is not **yes** (§2.15). T knows of the
+   owner from its step 1, so the owner is in scope though no token of it
+   is found (§2.15, "the owners in scope", 0.2).
 
 ## §9 A key that does not re-derive, for a tool (§2.2, §2.3, §5)
 

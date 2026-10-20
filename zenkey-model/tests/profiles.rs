@@ -1546,7 +1546,9 @@ fn alarms_keys() {
 
 /// `alarms/conformance/documents.json`: a payload → whether it reads, and
 /// the owner's errors and warnings (alarms.v1 §2.4, §2.3). The model's
-/// reading of the schema agrees with the schema's own validation.
+/// reading of the schema agrees with the schema's own validation. A case
+/// with `text` gives the payload as its text, read as strict JSON first
+/// (text 0.2, F-126).
 #[test]
 fn alarms_documents() {
     let path = profiles().join("alarms/conformance/documents.json");
@@ -1555,14 +1557,19 @@ fn alarms_documents() {
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
         let what = format!("{}", case["note"]);
-        let v = &case["document"];
-        let read = alarms::Alarm::from_json(v);
-        let schema_ok = zenkey_model::validate::validate(&b, ty, v).is_ok();
-        assert_eq!(
-            schema_ok,
-            !matches!(read, Err(alarms::Invalid::Schema(_))),
-            "{what}: the model reads the schema as validate does: {read:?}"
-        );
+        let read = if let Some(text) = case.get("text") {
+            alarms::decode(text.as_str().expect("text").as_bytes())
+        } else {
+            let v = &case["document"];
+            let read = alarms::Alarm::from_json(v);
+            let schema_ok = zenkey_model::validate::validate(&b, ty, v).is_ok();
+            assert_eq!(
+                schema_ok,
+                !matches!(read, Err(alarms::Invalid::Schema(_))),
+                "{what}: the model reads the schema as validate does: {read:?}"
+            );
+            read
+        };
         let got = match &read {
             Err(e) => json!({"readable": false, "errors": [e.as_str()], "warnings": []}),
             Ok(a) => {

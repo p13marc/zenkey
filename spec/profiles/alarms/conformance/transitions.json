@@ -827,7 +827,91 @@
           }
         }
       ]
+    },
+    {
+      "expect": [
+        "raised",
+        "confirmed"
+      ],
+      "note": "labels absent, then labels {}: equal, so confirmed (0.2, F-127)",
+      "samples": [
+        {
+          "put": {
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link down",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "labels": {},
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link down",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "confirmed"
+      ],
+      "note": "labels {}, then labels absent: equal both ways (0.2, F-127)",
+      "samples": [
+        {
+          "put": {
+            "labels": {},
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link down",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link down",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        "raised",
+        "refreshed"
+      ],
+      "note": "category absent, then category \"\": an empty value is not an absent member, so refreshed (0.2, F-127)",
+      "samples": [
+        {
+          "put": {
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link down",
+            "timestamp": 1760950000000
+          }
+        },
+        {
+          "put": {
+            "category": "",
+            "rule": "link_down",
+            "severity": "warning",
+            "state": "firing",
+            "summary": "link down",
+            "timestamp": 1760950000000
+          }
+        }
+      ]
     }
   ],
-  "description": "alarms.v1 §2.6: one key's samples, in the owner's stamp order (core §4.2), each {\"put\": its payload, decoded as JSON} or \"delete\" (a delete or a reply_del) -> the transition each one makes against the document held before it: raised, escalated, refreshed, confirmed, resolved, retired, or unreadable (a payload documents.json reads as unreadable, after which nothing is held). The reader starts holding nothing. Two documents are equal when every member §2.4 names is equal."
+  "description": "alarms.v1 §2.6: one key's samples, in the owner's stamp order (core §4.2), each {\"put\": its payload, decoded as JSON} or \"delete\" (a delete or a reply_del) -> the transition each one makes against the document held before it: raised, escalated, refreshed, confirmed, resolved, retired, or unreadable (a payload documents.json reads as unreadable, after which nothing is held). The reader starts holding nothing. Two documents are equal when every member §2.4 names is equal, `labels` absent being equal to `labels: {}` and any other member absent equal only to itself absent (0.2)."
 }

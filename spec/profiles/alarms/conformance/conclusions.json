@@ -2447,7 +2447,169 @@
         "state": "acked"
       },
       "question": "rederives"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        },
+        "stale_firing": {
+          "answer": "unobservable",
+          "reason": "incomplete"
+        }
+      },
+      "face": null,
+      "held_whole": false,
+      "latest": "firing",
+      "note": "a loss, a fresh put, and a complete GET that drew nothing for the key: a GET heals the loss only of a key it answered (0.2, F-128)",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 1200,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": null,
+          "via": "get"
+        }
+      ],
+      "presence": "present",
+      "previous_instance": false,
+      "question": "reading"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "answered",
+        "verdict": "established"
+      },
+      "face": {
+        "reachable": true
+      },
+      "note": "across a face, a GET by grant that the owner answered, and a window: presence does not cross, so whether the owner was present throughout is not asked (0.2, F-130)",
+      "presence": "across_face",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 2
+      },
+      "window": {
+        "listened_s": 30,
+        "lossless": true,
+        "present_throughout": false
+      }
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "across_face",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "reachable": true
+      },
+      "note": "across a face, an empty GET and a window not present throughout: still across_face, never owner_gap (0.2, F-130)",
+      "presence": "across_face",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": {
+        "listened_s": 1200,
+        "lossless": true,
+        "present_throughout": false
+      }
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "across_face",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "reachable": true
+      },
+      "note": "across a face, an empty GET and no window: across_face, before no_member (0.2, F-130)",
+      "presence": "across_face",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 0
+      },
+      "window": null
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "seed_incomplete",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a GET that ended at its timeout, and a window that lost a delivery: the seed is judged first (0.2, F-130)",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": false
+      },
+      "window": {
+        "listened_s": 1200,
+        "lossless": false,
+        "present_throughout": true
+      }
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "reason": "window_lost",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "an answered GET, and a window that lost a delivery and over which the owner was not present throughout: the loss is judged first (0.2, F-130)",
+      "presence": "present",
+      "question": "owner_set",
+      "seed": {
+        "complete": true,
+        "members": 1
+      },
+      "window": {
+        "listened_s": 10,
+        "lossless": false,
+        "present_throughout": false
+      }
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "reason": "presence_incomplete",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "presence possibly incomplete, and no GET: §2.14's step 1 first (0.2, F-130)",
+      "presence": "incomplete",
+      "question": "owner_set",
+      "seed": null,
+      "window": null
     }
   ],
-  "description": "alarms.v1 §2.14, §2.15, §5: what a tool may conclude, by `question`. `reading`: one reading of one alarm key -> §5's first question (`firing`, §2.14) and its last (`stale_firing`), each an answer (yes, no, unobservable, not_asked) and a reason. A reading is the owner's `presence` (present, absent, incomplete, across_face), its `descriptor` when present ({lists, token}, null when not read), the `face` when across one ({reachable}: whether the deployment lets this reader reach the alarms, §2.11), the key's `observations` as freshness.v1's judgements.json writes them (judged at 900 s; a GET among them is the reader's re-seed, made after any loss its subscription had), the `latest` sample by the owner's stamp (firing, resolved, deleted, undecodable, or null when none was read), `previous_instance` (that latest put stamped by an earlier instance of the owner) and `held_whole` (the owner's alarms established in this reading, §2.15). `owner_set`: an owner's presence, its descriptor and face as above, its `seed` (the S4 GET: {complete: true, members}, {complete: false} for one that ended at its timeout or with an error reply, or null when none was made) and its `window` ({listened_s, lossless, present_throughout}, or null) -> whether its alarms are known whole (established, unobservable, not_asked) and a reason. `any_firing`: a severity `at_least` and the owners in scope, each with its set's verdict and its alarms (the first question's answer, and the latest document's severity, null when none reads) -> §5's second question: an answer, a reason, the count of alarms firing at or above the severity, and the owners counted by verdict. `rederives`: the alert key a key carries and its payload (a decoded document, or \"delete\") -> §5's third question."
+  "description": "alarms.v1 §2.14, §2.15, §5: what a tool may conclude, by `question`. `reading`: one reading of one alarm key -> §5's first question (`firing`, §2.14) and its last (`stale_firing`), each an answer (yes, no, unobservable, not_asked) and a reason. A reading is the owner's `presence` (present, absent, incomplete, across_face), its `descriptor` when present ({lists, token}, null when not read), the `face` when across one ({reachable}: whether the deployment lets this reader reach the alarms, §2.11), the key's `observations` as freshness.v1's judgements.json writes them (judged at 900 s; a GET among them is the reader's re-seed, made after any loss its subscription had), the `latest` sample by the owner's stamp (firing, resolved, deleted, undecodable, or null when none was read), `previous_instance` (that latest put stamped by an earlier instance of the owner) and `held_whole` (the owner's alarms established in this reading, §2.15). `owner_set`: an owner's presence, its descriptor and face as above, its `seed` (the S4 GET: {complete: true, members}, {complete: false} for one that ended at its timeout or with an error reply, or null when none was made) and its `window` ({listened_s, lossless, present_throughout}, or null) -> whether its alarms are known whole (established, unobservable, not_asked) and a reason. `any_firing`: a severity `at_least` and the owners in scope, each with its set's verdict and its alarms (the first question's answer, and the latest document's severity, null when none reads) -> §5's second question: an answer, a reason, the count of alarms firing at or above the severity, and the owners counted by verdict. `rederives`: the alert key a key carries and its payload (a decoded document, or \"delete\") -> §5's third question: yes (`strict`, `sanitized`), no (`mismatch`), not asked for a delete (`no_document`), unobservable for a payload that does not read (`undecodable`)."
 }

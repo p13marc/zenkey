@@ -4,6 +4,171 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.2 — 2026-10-20: the cold reader's findings, and what the runtime settled (#800, AB; #609)
+
+Two readings of 0.1 met here. The spec-only implementation read it cold
+(zk2py round 38): every fixture passed, 281 checks of `alarms.v1`'s 1715,
+and it filed seven findings, F-126 to F-132. The runtime (`zenkey::alarms`,
+#800's AB) puts what the text asks of an owner over the standard contract,
+embedded, and runs `scenarios.md` §1 to §7 on in-process routers. Building
+it found five more places where 0.1 left an owner to infer. Written against
+core 0.34, unchanged.
+
+Each answer is stated in the text, and pinned by a fixture case where a
+fixture can pin it. One answer adds to the model, F-126's `decode`, and one
+changes it, F-130's window across a face. No case that existed before
+changes: the new cases were written by hand and pass as written. The
+evidence is now `documents.json`, 58 cases, `transitions.json`, 27, and
+`conclusions.json`, 95; `keys.json` is unchanged, at 75.
+
+**Answered: the seven findings.**
+- **F-126, how a payload's bytes become a document** (§2.4). 0.1 judged a
+  JSON value, and left the bytes to the parser, so a duplicate member, a
+  non-finite number or a lone surrogate escape read as each parser chose:
+  two readers could read two severities from one put, or derive two keys.
+  - Now a reader reads a payload as core §3.3's D000 reads a descriptor:
+    strict JSON (UTF-8, RFC 8259 with nothing after the value, no
+    duplicate member at any depth, every number finite, every string with
+    a UTF-8 form). Anything else is undecodable. An owner's MUST to put
+    documents of the schema now says "as strict JSON".
+  - §2.2's "whose names are distinct" now holds by that rule.
+  - The reference had no reading of bytes at all: it read decoded values.
+    `zenkey_model::alarms::decode` is now one, through the model's strict
+    JSON, as bundles and descriptors are read; a refusal is
+    `Invalid::Json`, token `json`. zk2py's reading stands.
+  - `documents.json`: nine cases given as their `text`. A duplicate
+    severity, a duplicate label name, a duplicate member the schema does
+    not name, `NaN`, `Infinity`, a lone surrogate, and text after the
+    value are `json`; a document, and a surrogate pair, read.
+- **F-127, `labels` absent and `labels: {}`** (§2.6). Equal. Neither has a
+  label, both derive one key and say the same, and an owner that omits an
+  empty map and one that writes it put the same document: read as
+  unequal, a reader would count a refresh no owner made.
+  - That is the reference's reading: its document type reads an absent
+    `labels` as an empty map. zk2py's reading changes.
+  - Any other member absent is equal only to itself absent. An empty
+    `category` is a value a tool shows and filters by, so `category: ""`
+    is not an absent one, and its change is a refresh.
+  - `transitions.json`: three cases, the two orders of `labels` and an
+    empty `category`.
+- **F-128, what a GET after a loss heals** (§2.14 step 4, §2.15). Reading
+  1, the narrower one, the reference's and zk2py's: step 4 holds until a
+  GET has answered **this key**, with a value or a `reply_del`. A GET that
+  drew nothing for the key, complete or not, heals nothing for it: an
+  empty reply set is no verdict (core O5), as §2.15's `no_member` already
+  said of a whole owner.
+  - §2.15 now says over which span a window is lossless: from its
+    declaration, or, after a loss, from the first complete GET that
+    followed it, a reader's re-seed (core §4.2). A loss before that GET is
+    healed by it, one after it is not, and `window`'s 900 s count over that
+    span. The model takes `lossless` and `listened` as given, and its
+    `Window` doc says so.
+  - `conclusions.json`: the case zk2py named, a loss, a put 10 s old and a
+    complete GET that drew nothing for the key: `incomplete`.
+- **F-129, an earlier instance told by a stamp's id** (§2.14 step 5). The
+  step now compares the id with the present descriptor's `meta.zid` by
+  value, and says what each of the three cases reads.
+  - **Another session's stamp,** a router's re-stamp or any break of S1,
+    reads `previous_instance` too: not asked, shown as last-known. It is
+    also core §4.2's foreign stamp, a finding a tool reports apart.
+  - **No `meta.zid`:** a stamp is unattributable, never foreign (core
+    §3.3), and the reader goes on to step 6.
+  - **A re-mint that keeps its session** keeps its zid, and is not told
+    apart. §2.9 says so too: the owner still puts every alarm again at a
+    re-mint, which keeps its GET answers its own, and the reference's
+    re-mint (`Service::new_epoch`) does, before its new descriptor and
+    tokens. Core §1.5 already asks a new session, a SHOULD.
+  - No fixture: `previous_instance` is the reader's input, as it was.
+- **F-130, the owner verdict's reasons, a face, and their order** (§2.15).
+  The verdict is now an ordered list, the model's order and zk2py's:
+  §2.14's steps 1 and 2 with their reasons (`presence_incomplete`,
+  `no_descriptor` and `face_closed` included, which 0.1's fixture had and
+  its text did not); the seed (`no_seed`, `seed_incomplete`); the window
+  (`window_lost`, then `owner_gap`); `answered`; across a face, an empty
+  GET (`across_face`); `no_member` and `window_short`; then `window`.
+  - **"Present and listed"** now reads "§2.14's steps 1 and 2 do not
+    answer", so an owner across a face that does not close the alarms goes
+    on, the deployment's word standing for its descriptor. 0.1's fixture
+    already established one by `answered`.
+  - **A window across a face** is not asked whether its owner was present
+    throughout: presence does not cross. **A change of the model:** it
+    read `owner_gap` there, so a reader that said "not known present" made
+    every owner across a face with a subscription unobservable, `answered`
+    included, which the text and the fixture's `answered` case rule out.
+    0.1's across-face case carried `present_throughout: true`, and passes
+    either way.
+  - `conclusions.json`: six cases. Across a face: `answered` with a window
+    not present throughout, an empty GET with such a window, and an empty
+    GET with none (`across_face` before `no_member`). And the overlaps: a
+    timed-out GET with a lossy window (`seed_incomplete`), a lossy window
+    not present throughout (`window_lost`), presence possibly incomplete
+    with no GET (`presence_incomplete`).
+- **F-131, which owners are in scope** (§2.15). The services a selector
+  selects that the reader knows of: those its presence read finds
+  (§2.13), and those it knew of before, by an earlier reading of its own
+  or an archive's keys (core S6). One known only the second way, which a
+  complete presence read does not find, is absent, not asked; a tool says
+  which owners it asked and how it knew of each. `scenarios.md` §8 says
+  how T knows of `lab/svc`: its own step 1. No model change: `any_firing`
+  counts the owners its caller gives.
+- **F-132, the third question's reasons** (§5). The row now names
+  `no_document` for a delete and `undecodable` for a payload that does not
+  read, as `conclusions.json` expected, and the fixture's description
+  names them.
+
+**Stated: the round's other guesses,** each the model's reading already.
+- At §2.14's step 6, a freshness that `freshness.v1` does not ask
+  (observations that contradict the latest sample) reads unobservable,
+  with its reason, as an unobservable one does.
+- §5's last question reads a put that does not read as `undecodable`,
+  whatever its freshness.
+- `scenarios.md` §5 spells out the readings §2.6 decides: R's and P's
+  deletes read retired, since S held neither, and B's unchanged re-put
+  reads confirmed, before its resolved and retired.
+
+**Stated: what the runtime settled.**
+- **A duplicate observation is no act** (§2.5). The condition found again
+  at the severity and with the content held: the owner puts nothing, or
+  the same document, which confirms it. `scenarios.md` §1 already expected
+  either; §2.5's table had no row for it. The reference puts nothing.
+- **An evaluation confirms again** (§2.7). An owner that stopped
+  confirming an alarm it no longer evaluated, and evaluates it again,
+  confirms it again. The reference turns an alarm's confirmation back on at
+  any act on it.
+- **The work's order at a restart, and the bound** (§2.9). 0.1's order
+  decides what each document found gets. The owner deletes and resolves
+  before it adopts, so that a key it retires takes none of the bound's
+  room. Past the bound, it adopts up to it and neither resolves nor
+  deletes the rest: a resolve would say their condition cleared, and
+  §2.5 forbids a firing alarm's delete outside a restart's retirements. A
+  reader that held one reads it as the previous instance's last word,
+  stale within 900 s. The reference adopts in key order and names the rest
+  in its report.
+- **What the record holds** (§2.9, a SHOULD). Each alarm's latest
+  document as put, by its key, a resolved one included until its delete.
+  Without that, a process that ends between a resolve's put and its delete
+  would have its restart put the alarm firing again after its resolve,
+  which a reader reads as a raise under an old `timestamp`; with it, the
+  restart finds the alarm resolved and deletes it (step 1). The reference
+  saves the record after every put and every delete.
+- **An owner's puts are strict JSON** (§2.4, with F-126).
+
+**Deliberately not stated.**
+- **The record's format.** It is the owner's own, as 0.1 said. The
+  reference's (`zenkey::alarms::FileRecord`) is a JSON file, `{"profile":
+  "alarms.v1", "alarms": {<alert key>: <document>}}`, and the record seam
+  is the application's (`zenkey::alarms::Record`).
+- **A delete that fails after a resolved put.** §2.5's MUST bounds it by the
+  tombstone window. The reference holds the alarm resolved and unconfirmed,
+  and deletes it at its next resolve; when to retry is an implementation's.
+- **§2.8's report of a refusal** stays a SHOULD on the owner: the reference
+  returns core §2.7's refusal to its writer, naming the bound and whose it
+  is, and leaves the `health.v1` check to the application.
+- **No change to `freshness.v1`.** §2.7's "evaluator stuck" is a case of
+  `freshness.v1` §2.4's "a value it no longer vouches for", which that text
+  words as "the source it reports went away"; its wording is
+  `freshness.v1`'s to widen.
+
 ## 0.1 — 2026-10-20: the first text, draft (#800, AA)
 
 `alarms.v1` is the profile of #613 that zenwatch's `alerts`, the
