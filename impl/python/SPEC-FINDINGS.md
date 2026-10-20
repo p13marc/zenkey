@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Thirty-nine rounds.**
+**Forty rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -83,9 +83,12 @@ where that was not enough, or where the spec said two things.
   Nothing was found in core 0.33 or 0.34 themselves. `alarms.v1` 0.2
   resolved all seven, F-127 against zk2py's reading.
 - F-133 and F-134 were found against `alarms.v1` 0.2, read cold and run
-  live against the Rust owner example's `--alarms` (see "At alarms.v1 0.2"
-  at the end). F-133 is against the example's documentation, not the
-  spec.
+  live against the Rust owner example's `--alarms` (see "At alarms.v1
+  0.2"). F-133 is against the example's documentation, not the spec.
+  `alarms.v1` 0.3 resolved both.
+- F-135 and F-136 were found against `alarms.v1` 0.3, read cold and run
+  live against the owner example at 0.3 (see "At alarms.v1 0.3" at the
+  end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -6288,6 +6291,24 @@ its answers, and that a contract file named `alarms.v1` replaces the
 embedded one. Or a section in `scenarios.md` naming the example's commands
 per step, as its conventions name the reference's test file.
 
+**Status at alarms.v1 0.3: resolved.** `owner --help` (the 0.3 build,
+`owner-ac`) exits 0 and prints the interface whole:
+- what standard output carries, and the refusal forms;
+- each command word, and for `alarm` each command;
+- the condition's JSON, every answer line, and the adoption line's
+  `retired=<key>:<resolved|undecodable|phantom>`;
+- the record's format, and to write into it only while no owner runs on
+  it;
+- that an `alarms.v1` contract file of another revision is implemented on
+  it ("every 1.9 s at 4 s");
+- `--cardinality alarms.v1:state/alarms/{alert_key}=<n>`, and a restart as
+  a kill or a closed stdin.
+
+`scenarios.md`'s conventions now name `owner --help` as the agreed
+interface. Every assumption zk2py's adapter (`RustAlarms`) made by trying
+in round 39 is what the help now says, and no answer changed. Driven from
+it alone, the owner example passes §1 to §10, 74 of 74.
+
 ### F-134 · ambiguity · alarms.v1 0.2 §2.4: "nothing after its value", and whitespace
 
 > §2.4 (0.2): "UTF-8, JSON (RFC 8259) with nothing after its value, no
@@ -6323,6 +6344,15 @@ rested on `jcs.loads`, measured to behave identically.
 or "and no whitespace before or after it". Either way, a fixture case
 `{…}\n` would pin it.
 
+**Status at alarms.v1 0.3: resolved by 0.3, as zk2py read it.** §2.4:
+"nothing after its value but whitespace … Whitespace (0.3) is RFC 8259's
+`ws`, before the value and after it … Any other character after the value,
+a form feed or a no-break space included, is text after it."
+`documents.json`'s four new cases pass unchanged. The `readings` family's
+11 cases now cite 0.3, as cases beyond the fixture's: CRLF, VT, U+2028,
+NUL, a second value, and a byte-order mark before the value, which zk2py
+refuses since RFC 8259's `JSON-text` has none.
+
 **Where zk2py's reading of alarms.v1 0.2 needed a guess, beyond the
 findings.**
 - **Where the window starts.** §2.15's window "runs from its declaration".
@@ -6338,3 +6368,189 @@ findings.**
   of them". zk2py's stand-in archive (`health.v1`'s §6) slugs every chunk,
   wildcards included, where core §4.4 keeps `*` and `**`. So §8 GETs A's
   concrete archive key. That is zk2py's stand-in's limit, not the text's.
+
+## At alarms.v1 0.3 (#609)
+
+`alarms.v1` 0.3 answers F-133 and F-134, each entry above carrying its
+status. It also states round 39's two guesses, against zk2py's reading in
+one: a window counts from its declaration plus the reply timeout. And it
+states five places the reference's tools settled. The core stays at 0.34,
+and no fixture case changed. `documents.json` gains four `text` cases,
+which zk2py passed unchanged.
+
+**What zk2py implemented, from the text alone** (`zk2py.alarms`):
+- **`AlarmsReader`,** a live reader across owners. It replaces round 39's
+  `WindowWatch`:
+  - one subscription;
+  - its receive path watched, a stall or a closed transport being a loss
+    at the instant seen (`budget.StallWatch` now records instants);
+  - each owner's instance tokens watched, a gap being a withdrawn token
+    or a new instance appearing, an owner joining included;
+  - each S4 GET recorded with the instant it was asked.
+- **§2.15's window,** at an instant:
+  - it runs from the declaration plus the reply timeout, ended a lease and
+    the reply timeout before the instant judged;
+  - a loss or a gap breaks it until the first complete GET after it,
+    reading `window_lost` or `owner_gap` until then;
+  - each re-read re-seeds, as the reference's live reader does.
+- **§2.14 step 5's held sample** (0.3): a key the establishing complete
+  GET did not answer, with nothing of it after that GET was asked, holds
+  none, so it reads `not_held`.
+- **A one-shot tool's scope** (§2.15, `scenarios.md` §8): `archive_form`
+  (core §4.4, wildcards kept, every other chunk slugged) and
+  `owners_from_archive`, the owners an archive's keys name.
+
+**`just py-conformance`: 1749 of 1749.** The `alarms` family is 304
+checks (`documents.json` 62). With `readings`' 11, it is 1749 in all.
+
+**`just py-alarms`: 74 of 74** against zk2py's owner and 74 of 74 against
+`owner-ac`, both exiting 0. That is round 39's 66, with:
+- §3: a reader that heard A firing and missed its resolve and delete reads
+  `no, not_held` once the owner's alarms are established by a GET that
+  answers B (0.3's step 5);
+- §8: two tools, as the reference's §8 runs them (0.3):
+  - a live reader, which knows of the owner from step 1;
+  - a one-shot reader made at step 3, which knows of it by `lab/archive`'s
+    keys.
+
+  Each judges A `not_asked, absent` and counts the owner not asked;
+- §10, on `AlarmsReader`: step 2 waits 0.3's span, and four extras follow.
+  On each owner:
+  - a gap in `lab/b`'s presence (a restart) reads `owner_gap` with no GET
+    since;
+  - a complete GET after it heals the gap, and the window runs again from
+    it (`window_short`);
+  - a loss, noted by hand since a zenoh-python callback subscriber has no
+    queue to overflow, reads `window_lost`, and A `unobservable,
+    incomplete` (step 4);
+  - a complete GET after it heals the loss: `answered`, and A `yes,
+    firing`.
+- §5: its SHOULD is checked by a GET at the token (F-135), the arrival
+  order at S printed as an uncounted NOTE.
+
+§2, §6 and §10 ran on the 4 s copy. §2 also ran alone at 900 s on each
+owner: 9 of 9, the owner example re-putting after 427.5 s and zk2py's
+after 449.8 s. §6 at 900 s takes about 15 minutes, beyond a 10-minute
+command, so it was not run at 900 s. Nor was §10's step 2, 0.3's slow
+tier, whose window plus watch is 913 s.
+
+### F-135 · gap · alarms.v1 0.3 scenarios.md §5, expected 3: "Before the new instance token appears", observed at a subscriber
+
+> scenarios.md §5, expected 3: "Before the new instance token appears (a
+> SHOULD), and before any GET is answered with them (a MUST), S receives:
+> A firing, unchanged … a delete of R's key, and of P's key."
+
+The expectation is observed at S, as the order of S's deliveries against
+the new instance token's arrival at S's liveliness subscriber. That order
+is not the owner's.
+- A put of `alarms/{alert_key}` (`interactive_high`, `express`) and a
+  liveliness declaration travel as different messages, and S sees no
+  order kept between them.
+- **Measured:** zk2py's owner puts A, and deletes R's and P's keys, before
+  its descriptor and tokens, by construction (`Owner.before_tokens` runs
+  before step 3). Yet at S the token arrived first in 2 of 7 runs of §5,
+  by 0.04 ms. In the others the put led by 0.06 to 0.99 ms.
+- The owner example, which does more between its puts and its token, led
+  by 0.7 to 1.5 ms in each of its 7 runs. Its margin is wider, not a
+  different order.
+- Core and its other profiles observe "before the tokens" another way:
+  a GET made the moment the token appears, which must already answer the
+  value (presence.md §1; `health.v1` scenarios §1, "Both of T's GETs
+  answer the status … It was put before the tokens"; core §8.2, "a GET
+  made when the interface token appears then finds it").
+
+**zk2py:** §5 checks the SHOULD as core does. G GETs the moment S sees the
+new instance token, and the reply must hold A and B under the new
+instance's stamps, and `reply_del`s for R's and P's keys. Both owners pass
+it in every run. The arrival order at S is printed, not counted.
+
+**Wording:** "3. G GETs the moment S sees the new instance token. Its reply
+holds A and B under the new instance's stamps and a `reply_del` for R's and
+P's keys (the SHOULD; core §8.2, 'State values')", with S's receipts
+listed without an order against the token.
+
+### F-136 · gap · alarms.v1 0.3 §2.14 steps 4 and 5: a key whose resolve and delete a loss took never reads no
+
+> §2.14 step 4: "**A loss.** A subscription lost deliveries, and no GET has
+> answered this key since, with a value or a `reply_del`: **unobservable**,
+> `incomplete` … A GET that drew nothing for the key, complete or not, does
+> not heal the loss for it (0.2): an empty reply set is no verdict (core
+> O5)."
+
+> §2.14 step 5 (0.3): "A sample the reader holds is none (0.3) when a
+> complete GET its owner answered, the one that established its alarms,
+> did not answer the key, and nothing of the key arrived after that GET was
+> asked: the owner answers every live key (core S2), so the key's delete
+> went past the tombstone window unheard"
+
+> CHANGELOG 0.3: "Without it, a reader started before a resolve it did not
+> hear would hold an alarm firing until it went stale."
+
+§2.14 is "the first of these steps that answers", and step 4 comes before
+step 5. Take a reader that holds A firing, whose subscription then lost
+deliveries, A's resolve and delete among them.
+1. Its re-seed, past the tombstone window, is complete, answers B, and
+   draws nothing for A.
+2. §2.15 establishes the owner's alarms: the window runs again from that
+   GET, and it answered a key.
+3. Nothing of A arrives again: it was deleted.
+
+Then:
+- step 4 answers A first, **unobservable**, `incomplete`, since no GET has
+  answered A "with a value or a `reply_del`";
+- none ever will, the key being past the tombstone window;
+- so A stays `incomplete` for as long as the reader holds it;
+- and "is anything firing at or above *S*?" over that owner, established,
+  reads `alarm_unobservable` (§2.15 step 3) for as long, whenever A's last
+  severity is at or above *S*. It can never read **no**.
+
+Step 5's 0.3 sentence describes exactly this key ("its delete went past
+the tombstone window unheard"), and is never reached. It applies only
+where step 4 does not:
+- a reader with no subscription, polling by GET;
+- a sample held from before the subscription.
+
+The CHANGELOG's case, "a reader started before a resolve it did not hear",
+is a reader that lost the resolve. zk2py's model, from the text as
+written:
+- A reads `unobservable, incomplete`;
+- the owner, at warning, reads `alarm_unobservable`;
+- with the subscription left out, the same facts read `no, not_held`.
+
+**zk2py:** the text as written: step 4 first, so such a key reads
+`incomplete` until the reader forgets it. The text never says when a
+reader may forget a key. zk2py's live reader now feeds its own losses into
+step 4: a loss marks the subscription's observations lossy, and a GET is
+the re-seed only when asked after it. §10's extra checks this on both
+owners, A reading `incomplete` after a loss and `yes, firing` once a GET
+re-seeds it.
+
+**Wording:** step 4, "…and no GET has answered this key since, with a value
+or a `reply_del`, and no complete GET that established its owner's alarms
+left it out with nothing of it arriving after that GET was asked (step 5)".
+Or state that a reader forgets a key once an establishing GET leaves it
+out.
+
+**Where zk2py's reading of alarms.v1 0.3 needed a guess, beyond the
+findings.**
+- **"From that GET."** The window "runs again from the first complete GET
+  that followed" a loss or a gap, and "counts … from that GET". zk2py
+  dates a GET by the instant it was asked, as step 5's 0.3 sentence dates
+  one ("after that GET was asked"). Its completion is at most the reply
+  timeout later. Only the margin feels it, as with round 39's "where the
+  window starts".
+- **Which archive.** A one-shot tool "knows of it by the archive's keys",
+  and the text does not say how the tool finds the archive. Core §4.4's
+  archive is a service implementing `archive.v1`, which a tool could find
+  by presence. zk2py's stand-in archive holds no presence, so §8 names
+  `lab/archive` to the tool, as the deployment's word.
+- **The horizon judged at.** §2.7 says the contract's; §2.14 and §2.15 say
+  900 s. On a short-ttl copy the two differ, and the reference judges at
+  900 s whatever revision (0.3, "Deliberately not stated"). zk2py judges at
+  the horizon of the revision the owner implements, §2.7's MUST. That is
+  why its §6 and §10 can run on the 4 s copy. No finding: 0.3 names the
+  question and defers it to a later minor.
+- **A held delete.** Step 5's 0.3 rule makes "a sample the reader holds"
+  none. zk2py applies it to a held delete too, which then reads
+  `not_held` rather than `deleted`. Both are **no**, and both are
+  `not_firing` for the last question.

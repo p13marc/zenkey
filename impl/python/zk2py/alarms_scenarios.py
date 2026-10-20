@@ -974,13 +974,19 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      f"{rb.verdict.expect()}, window {rb.window}")
         t.note_loss()
         ra = t.read("lab/a", horizon=h, get=False)
-        report.check(sec, "extra (0.3): a loss, no GET since: window_lost",
-                     ra.verdict.expect() == {"reason": "window_lost", "verdict": "unobservable"},
-                     f"{ra.verdict.expect()}")
+        ka = key(A, "lab/a")
+        fa = ra.answers(h).get(ka, (None, None))[0]
+        report.check(sec, "extra (0.3): a loss, no GET since: window_lost, and A unobservable, incomplete "
+                          "(§2.14 step 4)",
+                     ra.verdict.expect() == {"reason": "window_lost", "verdict": "unobservable"}
+                     and fa is not None and _pair(fa) == "unobservable, incomplete",
+                     f"{ra.verdict.expect()}, A {fa and _pair(fa)}")
         ra = t.read("lab/a", horizon=h)
-        report.check(sec, "extra (0.3): a complete GET after the loss heals it: lab/a answered",
-                     ra.verdict.expect() == {"reason": "answered", "verdict": "established"},
-                     f"{ra.verdict.expect()}, window {ra.window}")
+        fa = ra.answers(h).get(ka, (None, None))[0]
+        report.check(sec, "extra (0.3): a complete GET after the loss heals it: lab/a answered, A yes, firing",
+                     ra.verdict.expect() == {"reason": "answered", "verdict": "established"}
+                     and fa is not None and _pair(fa) == "yes, firing",
+                     f"{ra.verdict.expect()}, A {fa and _pair(fa)}, window {ra.window}")
     finally:
         bus.close()
 

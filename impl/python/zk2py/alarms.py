@@ -1168,9 +1168,10 @@ class AlarmsReader:
         if get:
             self.seed(address)
         seeds = self.seeds.get(address) or []
+        losses = self.losses()
         return read_owner(self.session, address, subscriber=self.subscriber, window=self.window(address),
                           seed=seeds[-1] if seeds else None, trust=self.trust, get=False, horizon=horizon,
-                          keys_known=keys_known, timeout=self.timeout)
+                          keys_known=keys_known, timeout=self.timeout, lost_at=losses[-1] if losses else None)
 
     def close(self) -> None:
         self.stall.close()
@@ -1266,7 +1267,7 @@ class OwnerReading:
 def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = None,
                window: Window | None = None, seed: SeedGet | None = None, trust: fr.ClockTrust | None = None,
                get: bool = True, horizon: fr.Horizon = HORIZON, keys_known: Iterable[str] = (),
-               timeout: float = 1.0) -> OwnerReading:
+               timeout: float = 1.0, lost_at: int | None = None) -> OwnerReading:
     """One reading of ``address`` (``<system>/<service>``):
     - presence (core §8.1) by a liveliness GET of its instance tokens, the
       descriptor through it (§2.13: never the interface token);
@@ -1275,6 +1276,10 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
       ``get``, one made now;
     - the subscription ``subscriber`` made before it, for the key's
       observations, and its ``window`` (:class:`AlarmsReader`'s), for §2.15;
+    - §2.14 step 4: with ``lost_at``, the last instant the reader saw its
+      subscription lose, each key's subscription observation is a lossy
+      one, and the GET is among the observations, the re-seed that heals
+      a key it answers, only when it was asked after that instant;
     - §2.14 step 5 (0.3): a key the reader holds a sample of, which the
       complete GET that established the owner's alarms did not answer, with
       nothing of it arriving after that GET was asked, holds none;
@@ -1314,7 +1319,8 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
         obs: list[Any] = []
         cands: list[tuple[int, int, str, bytes, str | None]] = []
         if subscriber is not None:
-            obs.append(subscriber.observation(key))
+            o = subscriber.observation(key)
+            obs.append(o if lost_at is None else fr.Subscription(o.listened_ns, False, o.last))
             for x in subscriber.of(key):
                 if x.stamp_ns is not None:
                     cands.append((x.stamp_ns, _zid(x.stamp_id) or 0, x.kind, x.payload, x.stamp_id))
@@ -1327,7 +1333,8 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
                 if r.stamp_ns is not None:
                     cands.append((r.stamp_ns, _zid(r.stamp_id) or 0, "delete" if r.deleted else "put",
                                   r.payload, r.stamp_id))
-            obs.append(g.observation(trust))
+            if lost_at is None or seed.asked_ns >= lost_at:
+                obs.append(g.observation(trust))
         latest, prev, doc, sid = None, False, None, None
         if seed is not None and seed.complete and verdict.verdict == ESTABLISHED and key not in replies \
                 and subscriber is not None \
