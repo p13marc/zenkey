@@ -1,0 +1,12 @@
+# One principal bound by a user name and a CN both (acl-gen.trycmd, #788):
+# zenoh would match its subject only for a session presenting both, so the
+# enrollment is refused whole, with or without a face policy.
+
+[[principal]]
+user     = "tc-h1"
+cn       = "tc-h1.example"
+services = ["h1/tc"]
+
+[[service]]
+address    = "h1/tc"
+implements = ["tc.netif.v1"]

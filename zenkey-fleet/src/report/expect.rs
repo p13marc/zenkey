@@ -75,9 +75,12 @@ pub struct ExpectReport {
     /// The key expressions subscribed, base-relative: what the window could
     /// see, and no wider. Empty when only presence was asked.
     pub selectors: Vec<String>,
-    /// The window actually observed (shorter than requested on early
-    /// success).
+    /// The window actually observed: shorter than requested on early
+    /// success, which only existential claims (`--at-least`, `--present`)
+    /// allow. A rate bound, `--absent`, `--valid-payload` and `--qos
+    /// declared` read the window whole (#801).
     pub window_s: f64,
+    /// The window closed once every claim held, before `--for` ran out.
     pub ended_early: bool,
     pub samples: u64,
     pub keys_seen: usize,

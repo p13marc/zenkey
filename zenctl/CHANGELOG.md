@@ -6,6 +6,32 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a universal claim reads the window whole (#801)
+
+`check expect --valid-payload` and `--qos declared` ended the window at the
+first `--at-least` samples when no rate bound was set (early success), so
+"every payload conforms" vouched for one payload: #781 measured a 10 ms
+window with an intruder's invalid samples never read. The maintainer
+decided #781's question: a universal claim holds the window open.
+
+| Before | Now | Notes |
+|---|---|---|
+| `--valid-payload`, `--qos declared`: the window closed once `--at-least` samples conformed (`ended_early: true`) | the window runs its whole `--for`; `ended_early` is `false` and `window_s` is the window asked for | `--at-least` and `--present` alone are existential and still end it early. A rate bound and `--absent` already read it whole. A script that relied on a fast met answer gets it after `--for` |
+| a met `--valid-payload` or `--qos declared` with `dropped > 0` was met (exit 0) | impaired, exit 2: "sample(s) dropped while the claim needs completeness (O6)" | a dropped sample may be the one that broke the claim, as `--absent`'s and `--rate-max`'s already were |
+
+## Unreleased (`main`, zk2) — a principal bound by a user name and a CN both is refused everywhere (#788)
+
+zenoh matches one value of each property a subject names, so a subject
+naming a user name and a CN matches only a session presenting both (measured
+over mTLS in `link.v1`'s scenarios §11). Under `allow`, a session presenting
+one of them matched no subject and was allowed everything: a principal
+enrolled with both was weaker than one enrolled with either. Core 0.33 §11.1
+makes the generator refuse it.
+
+| Before | Now | Notes |
+|---|---|---|
+| `acl gen` without `--face-policy` planned a principal enrolled with a `user` and a `cn` as one subject naming both; with a face it was a refused row (exit 1) | the enrollment is refused before any plan, with or without `--face-policy`: `Error: --enrollment: principal "…" is bound by a user name and a CN both`, exit 2, every such principal named | the input is refused, not the row: a plan printed around that principal would leave it unrestricted under `allow`. Bind each principal by `user` or by `cn`. A principal bound by a zid, or running a service the file does not declare, is still a refused row (exit 1) |
+
 ## Unreleased (`main`, zk2) — a block not enabled, and two faces of one far principal: `link.v1` 0.7 (#769, LH)
 
 zk2py's round 36 found two gaps (F-124, F-125). A router config whose

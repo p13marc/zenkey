@@ -3127,6 +3127,10 @@ async fn check_expect_judges_samples_values_qos_and_presence() {
     exits(&run, 0);
     let doc = run.json();
     assert_eq!(doc["verdict"], "met", "{run}");
+    // Universal claims read the window whole (#801): met at the fifth
+    // sample, it still ran its second.
+    assert_eq!(doc["ended_early"], false, "{run}");
+    assert_eq!(doc["window_s"], 1.0, "{run}");
     assert_eq!(doc["presence"]["holders"], json!(["host-a/tc"]));
     assert_eq!(doc["presence"]["complete"], true);
     assert_eq!(
@@ -3152,18 +3156,17 @@ async fn check_expect_judges_samples_values_qos_and_presence() {
         )
         .await,
     );
-    // A ceiling nothing here reaches keeps the window open its whole second:
-    // without a rate bound, early success ends it at the first valid sample,
-    // which under load was the owner's every time before the intruder's
-    // (#781).
+    // `--valid-payload` holds the window open its whole second, so the
+    // intruder's samples are read whatever arrives first. Before #801 early
+    // success ended it at the first valid sample, which under load was the
+    // owner's every time (#781).
     let run = bus
-        .until(&expect(&["--valid-payload", "--rate-max", "1000"]), |r| {
-            r.code == 1
-        })
+        .until(&expect(&["--valid-payload"]), |r| r.code == 1)
         .await;
     exits(&run, 1);
     let doc = run.json();
     assert_eq!(doc["verdict"], "not_met", "{run}");
+    assert_eq!(doc["ended_early"], false, "{run}");
     assert!(
         doc["violations"].to_string().contains("/default/eth1"),
         "the violation names its key: {run}"

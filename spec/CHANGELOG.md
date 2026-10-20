@@ -3,6 +3,41 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.33 — 2026-10-20: one kind of name per principal (#788)
+
+The reference generator found it while finishing `link.v1` (LE, F-121),
+and the maintainer decided it on #788. No fixture case changed, and none is
+added.
+
+**Changed: an input binding one principal by both a user name and a CN
+(§11.1, the input).**
+- **The gap.** §11.1 binds each principal "to a user name or a certificate
+  CN", and said nothing of an input naming both. zenoh 1.10.1 matches one
+  value of each property a subject names, so a subject naming a user name
+  and a CN matches only a session presenting both (measured over mTLS,
+  `link.v1` scenarios §11). Under `allow`, that principal's session
+  presenting one of them matched no subject and was allowed everything: a
+  principal enrolled with both was weaker than one enrolled with either.
+  The reference wrote such a subject everywhere but on a router with a
+  constrained face, where `link.v1` §2.4 (0.5) already refused it.
+- **The rule.** A generator MUST refuse the input. The reference refuses
+  the whole enrollment before any plan (`zenctl acl gen`, exit 2), naming
+  every such principal: a plan printed around a refused principal would
+  leave it unrestricted under `allow`.
+- **Both implementations already do this.** zk2py's generator binds a
+  principal by its user name alone and has no CN subject. The reference
+  refuses since #788.
+
+**Deliberately not changed.**
+- **No subject per kind.** Writing a user-name subject and a CN subject
+  into one policy, so either name gets the grants, would make one
+  principal two credentials. Nothing asked for it, and §11.1 says "or".
+- **`link.v1` §2.4.** Its refusal on a router with a face stands, now a
+  case of this rule. Its text is unchanged.
+- **The other refusals.** A principal bound by a zid, or one running a
+  service the input does not declare, is still the generator's to refuse
+  per principal (the reference: a refused row, exit 1).
+
 ## 0.32 — 2026-10-19: a principal's complement, per message and flow (#769)
 
 The spec-only implementation (zk2py, round 35) read 0.31 cold and filed

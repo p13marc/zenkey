@@ -12,9 +12,15 @@
 //!   observed with zero drops.
 //! - **2 / Impaired** — the observation cannot carry the claim: the
 //!   subscriber dropped samples under a claim that needs completeness
-//!   (absence, a rate ceiling, or a shortfall that the dropped samples could
-//!   have filled), a presence read that ended at its timeout, or the
-//!   session/watch failed outright.
+//!   (absence, a rate ceiling, a universal claim, or a shortfall that the
+//!   dropped samples could have filled), a presence read that ended at its
+//!   timeout, or the session/watch failed outright.
+//!
+//! **Early success** (#801) ends the window once every claim holds, but
+//! only when every claim is existential (`count`, `present`). A rate bound,
+//! `absent`, and a universal claim (`valid_payload`, `qos_declared`: every
+//! sample in the window) read the window whole: ended at the first valid
+//! sample, "every payload conforms" would vouch for one payload.
 //!
 //! **zk2** (#612, FJ8b). The expectation is written over a zk2 address and
 //! resource, not a selector: the window is a subscription through the
@@ -49,7 +55,9 @@ use crate::judge::condition;
 use crate::model::catalog::Revision;
 use crate::model::examples::Examples;
 use crate::model::target::Target;
-use crate::report::{Conformance, ExpectPresence, ExpectReport, ExpectVerdict, WatchEvent};
+use crate::report::{
+    Conformance, ExpectPresence, ExpectReport, ExpectVerdict, Judgement, WatchEvent,
+};
 
 /// What must hold within the window.
 #[derive(Debug, Clone)]
@@ -66,9 +74,11 @@ pub struct ExpectSpec {
     /// Every observed payload must conform to its declared type (§7.2,
     /// §7.3). A payload that *cannot* be checked (a raw type, a key no
     /// resource resolves) fails the assertion with its reason — asking for
-    /// validity and getting "unknowable" is not met.
+    /// validity and getting "unknowable" is not met. A universal claim: it
+    /// holds the window open, and any drop makes it `Impaired` (#801).
     pub valid_payload: bool,
     /// Every observed sample must ride its resource's declared QoS (§2.4).
+    /// A universal claim, as [`valid_payload`](Self::valid_payload) is.
     pub qos_declared: bool,
     /// Assert silence instead: no sample may arrive. The only absence claim
     /// this tool makes, and only because the verdict states its window and
@@ -136,7 +146,13 @@ pub async fn run_expect(
     } else {
         spec.count.unwrap_or(1)
     };
-    let no_rate_bounds = spec.rate_min.is_none() && spec.rate_max.is_none();
+    // Only existential claims may end the window early (#801): a rate is
+    // measured over the whole window, and a universal claim reads every
+    // sample in it.
+    let may_end_early = spec.rate_min.is_none()
+        && spec.rate_max.is_none()
+        && !spec.valid_payload
+        && !spec.qos_declared;
     let alive = format!("zk2/{}/@zk/alive/{}/**", target.address, revision.iface());
 
     let mut samples: u64 = 0;
@@ -187,7 +203,7 @@ pub async fn run_expect(
                     violations.push(format!("{}: {}", s.key, m.summary()));
                 }
                 let presence_met = !spec.present || presence.as_ref().is_some_and(|p| !p.holders.is_empty());
-                if no_rate_bounds
+                if may_end_early
                     && violations.total() == 0
                     && samples >= need
                     && need > 0
@@ -225,7 +241,7 @@ pub async fn run_expect(
                     },
                 });
                 let met = presence.as_ref().is_some_and(|p| !p.holders.is_empty());
-                if met && (watch.is_none() || (no_rate_bounds && violations.total() == 0 && samples >= need && need > 0)) {
+                if met && (watch.is_none() || (may_end_early && violations.total() == 0 && samples >= need && need > 0)) {
                     ended_early = true;
                     break;
                 }
@@ -316,17 +332,7 @@ pub async fn run_expect(
     } else if unmet.is_empty() {
         // Every claim held on its face — but a met completeness claim under
         // drops is unobservable, never ok (O6).
-        let met_states = [
-            spec.absent.then(|| {
-                condition::judge_silence(condition::SilenceEvidence {
-                    sample_within: false,
-                    span_observed: true,
-                    drop_free: dropped == 0,
-                })
-            }),
-            spec.rate_max
-                .map(|_| condition::judge_excess(false, dropped)),
-        ];
+        let met_states = completeness(spec, dropped);
         if met_states
             .into_iter()
             .flatten()
@@ -369,4 +375,63 @@ pub async fn run_expect(
         unmet,
         verdict,
     })
+}
+
+/// The judgement of each met claim that needs completeness, under the
+/// window's drops: `absent` (silence), a rate ceiling, and a universal
+/// claim (`valid_payload`, `qos_declared`). A dropped sample may be the one
+/// that broke a universal claim, as a ceiling's may be the one over it
+/// (#801), so each is unobservable under drops.
+fn completeness(spec: &ExpectSpec, dropped: u64) -> [Option<Judgement>; 3] {
+    [
+        spec.absent.then(|| {
+            condition::judge_silence(condition::SilenceEvidence {
+                sample_within: false,
+                span_observed: true,
+                drop_free: dropped == 0,
+            })
+        }),
+        spec.rate_max
+            .map(|_| condition::judge_excess(false, dropped)),
+        (spec.valid_payload || spec.qos_declared).then(|| condition::judge_excess(false, dropped)),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unobservable(spec: &ExpectSpec, dropped: u64) -> bool {
+        completeness(spec, dropped)
+            .into_iter()
+            .flatten()
+            .any(|j| j.is_unobservable())
+    }
+
+    /// A met universal claim cannot vouch for the samples it missed (#801):
+    /// under drops it is unobservable, as `absent` and a ceiling are; an
+    /// existential claim is not one, and a clean window carries them all.
+    #[test]
+    fn a_universal_claim_needs_every_sample() {
+        let universal = [
+            ExpectSpec {
+                valid_payload: true,
+                ..ExpectSpec::default()
+            },
+            ExpectSpec {
+                qos_declared: true,
+                ..ExpectSpec::default()
+            },
+        ];
+        for spec in &universal {
+            assert!(unobservable(spec, 3), "{spec:?}");
+            assert!(!unobservable(spec, 0), "{spec:?}");
+        }
+        let existential = ExpectSpec {
+            count: Some(5),
+            present: true,
+            ..ExpectSpec::default()
+        };
+        assert!(!unobservable(&existential, 3));
+    }
 }
