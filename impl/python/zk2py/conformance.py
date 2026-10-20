@@ -761,12 +761,18 @@ def _alarms_keys(path: Path) -> list[Result]:
 
 
 def _alarms_documents(path: Path) -> list[Result]:
-    """alarms.v1 §2.4, §2.3: a decoded payload -> readable, the owner's
-    errors and its warnings, in the order checked."""
+    """alarms.v1 §2.4, §2.3: a payload, decoded or (0.2) as its text ->
+    readable, the owner's errors and its warnings, in the order checked."""
     from . import alarms
 
-    return [_check(f"documents #{i}: {c['note']}", alarms.check(c["document"]), c["expect"])
-            for i, c in enumerate(_load_json(path)["cases"])]
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        # A case gives the decoded `document`, or (0.2) its `text`, whose
+        # UTF-8 bytes are the payload.
+        got = alarms.check_payload(c["text"].encode("utf-8", "surrogatepass")) if "text" in c \
+            else alarms.check(c["document"])
+        out.append(_check(f"documents #{i}: {c['note']}", got, c["expect"]))
+    return out
 
 
 def _alarms_transitions(path: Path) -> list[Result]:
@@ -928,6 +934,37 @@ def _budget_lossless(path: Path) -> list[Result]:
     return out
 
 
+#: zk2py's own readings where a finding is open, each case naming it. Not a
+#: fixture family: these are zk2py's choices, stated as cases so that a
+#: later text's fixture can overturn them visibly. alarms.v1 0.2 §2.4's
+#: "nothing after its value" (F-134): RFC 8259's ws around the value reads,
+#: anything else after it does not.
+_F134_DOC = b'{"timestamp":1760950000000,"rule":"link_down","severity":"warning","state":"firing","summary":"s"}'
+_READABLE = {"readable": True, "errors": [], "warnings": []}
+_NOT_JSON = {"readable": False, "errors": ["json"], "warnings": []}
+READINGS = [
+    ("F-134", "a line feed after the document", _F134_DOC + b"\n", _READABLE),
+    ("F-134", "a carriage return and a line feed after it", _F134_DOC + b"\r\n", _READABLE),
+    ("F-134", "RFC 8259's four whitespace bytes before and after it", b" \t\r\n" + _F134_DOC + b" \t\r\n",
+     _READABLE),
+    ("F-134", "a no-break space after it (U+00A0)", _F134_DOC + "\u00a0".encode(), _NOT_JSON),
+    ("F-134", "a line separator after it (U+2028)", _F134_DOC + "\u2028".encode(), _NOT_JSON),
+    ("F-134", "a vertical tab after it", _F134_DOC + b"\x0b", _NOT_JSON),
+    ("F-134", "a form feed after it", _F134_DOC + b"\x0c", _NOT_JSON),
+    ("F-134", "a NUL after it", _F134_DOC + b"\x00", _NOT_JSON),
+    ("F-134", "text after it", _F134_DOC + b"x", _NOT_JSON),
+    ("F-134", "a second value after a line feed", _F134_DOC + b"\n{}", _NOT_JSON),
+    ("F-134", "a byte-order mark before it", b"\xef\xbb\xbf" + _F134_DOC, _NOT_JSON),
+]
+
+
+def family_readings(root: Path) -> list[Result]:
+    """zk2py's own readings of open findings (:data:`READINGS`)."""
+    from . import alarms
+
+    return [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
+
+
 BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_population, "rate.json": _budget_rate,
                    "lossless.json": _budget_lossless}
 
@@ -1005,6 +1042,8 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "budget": family_budget,
     "seed": family_seed,
     "examples": family_examples,
+    # zk2py's own readings of open findings: not a fixture family.
+    "readings": family_readings,
     # The profiles, one family each (profiles/README.md, "How the harnesses
     # take profiles in").
     **{name: _profile_family(name) for name in PROFILE_FIXTURES},

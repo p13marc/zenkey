@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -322,9 +324,10 @@ def in_schema(value: Any) -> bool:
 @dataclass(frozen=True)
 class Alarm:
     """A document that reads (§2.4), its integral numbers as integers. A
-    member left out is None; `labels` absent is None, never `{}`, since
-    "Equal is equal in every member this text names" (§2.6; SPEC-FINDINGS
-    F-127)."""
+    member left out is None, but `labels` absent is `{}`: §2.6 (0.2, F-127),
+    "`labels` absent is equal to `labels: {}` … Any other member absent is
+    equal only to itself absent, so `category: ""` is not an absent
+    `category`"."""
 
     timestamp: int
     rule: str
@@ -333,7 +336,7 @@ class Alarm:
     summary: str
     observed_at_ms: int | None = None
     category: str | None = None
-    labels: dict[str, str] | None = None
+    labels: dict[str, str] = field(default_factory=dict)
 
     @property
     def firing(self) -> bool:
@@ -358,7 +361,7 @@ def read(value: Any) -> Alarm | None:
     a = Alarm(timestamp=int(value["timestamp"]), rule=value["rule"], severity=value["severity"],
               state=value["state"], summary=value["summary"],
               observed_at_ms=None if obs is None else int(obs), category=value.get("category"),
-              labels=None if "labels" not in value else dict(value["labels"]))
+              labels=dict(value.get("labels", {})))
     return a if _in_range(a.timestamp) and _in_range(a.observed_at_ms) else None
 
 
@@ -376,22 +379,59 @@ def _utf8(value: Any) -> bool:
     return True
 
 
+class NotStrict(ValueError):
+    """§2.4 "Strict JSON first" (0.2): bytes that are not strict JSON."""
+
+
+#: RFC 8259 §2's ``ws``: space, horizontal tab, line feed, carriage return.
+#: zk2py's reading of §2.4's "nothing after its value" (SPEC-FINDINGS F-134,
+#: open at 0.2): whitespace of these four bytes may stand before and after
+#: the value, as RFC 8259's ``JSON-text = ws value ws`` has it; any other
+#: byte after the value (another space character, a second value, a NUL)
+#: is text after it, and refused. A byte-order mark before it is refused.
+JSON_WS = b" \t\n\r"
+
+
+def strict_json(payload: bytes) -> Any:
+    """§2.4 (0.2, F-126): "UTF-8, JSON (RFC 8259) with nothing after its
+    value, no duplicate member at any depth, every number finite, and every
+    string with a UTF-8 form, so no lone surrogate escape". Raises
+    :class:`NotStrict`."""
+    # The whitespace is stripped here, explicitly, so the reading does not
+    # rest on the JSON library's own (F-134).
+    try:
+        value = jcs.loads(payload.strip(JSON_WS))
+    except jcs.JsonError as e:
+        raise NotStrict(str(e)) from e
+    if not _utf8(value):
+        raise NotStrict("a string with no UTF-8 form")
+    return value
+
+
 def decode(payload: bytes) -> Alarm | None:
     """A sample's payload, JSON (the contract's encoding, core §7.2), read as
-    §2.4 says. zk2py reads strict JSON: a duplicate member, NaN, or a
-    string with no UTF-8 form (a lone surrogate escape) does not read
-    (SPEC-FINDINGS F-126)."""
+    §2.4 says: strict JSON first, then the schema and the time range."""
     try:
-        value = jcs.loads(payload)
-    except jcs.JsonError:
+        return read(strict_json(payload))
+    except NotStrict:
         return None
-    return read(value) if _utf8(value) else None
+
+
+def check_payload(payload: bytes) -> dict[str, Any]:
+    """documents.json's reading of a case given as its `text` (0.2): `json`
+    when the bytes are not strict JSON, else :func:`check`."""
+    try:
+        value = strict_json(payload)
+    except NotStrict:
+        return {"readable": False, "errors": ["json"], "warnings": []}
+    return check(value)
 
 
 def check(value: Any) -> dict[str, Any]:
-    """documents.json's reading: `readable`, the owner's `errors` (MUSTs
-    broken) and its `warnings` (SHOULDs broken), in the order checked.
-    Unreadable reports `schema`, else `time_range`, and nothing else."""
+    """documents.json's reading of a decoded value: `readable`, the owner's
+    `errors` (MUSTs broken) and its `warnings` (SHOULDs broken), in the
+    order checked. Unreadable reports `schema`, else `time_range`, and
+    nothing else."""
     if not in_schema(value):
         return {"readable": False, "errors": ["schema"], "warnings": []}
     a = read(value)
@@ -406,7 +446,7 @@ def check(value: Any) -> dict[str, Any]:
     if not is_framed(a.rule, a.labels):
         warnings.append("unframed")
     # §2.4's form is a SHOULD on every name, a host-scoped one included.
-    for name in sorted(a.labels or {}, key=lambda n: n.encode("utf-8")):
+    for name in sorted(a.labels, key=lambda n: n.encode("utf-8")):
         if NAME_FORM.fullmatch(name) is None:
             warnings.append("label_name_form")
     return {"readable": True, "errors": errors, "warnings": warnings}
@@ -501,11 +541,13 @@ class Reading:
     held_whole: bool = False
 
 
-def judge(r: Reading, question: str = Q_FIRING) -> Answer:
+def judge(r: Reading, question: str = Q_FIRING, horizon: fr.Horizon = HORIZON) -> Answer:
     """§2.14: "the first of these steps that answers". ``question`` is
     :data:`Q_FIRING` ("is this alarm firing?") or :data:`Q_STALE` ("is this
     firing alarm past its horizon, its owner present?"), which "reads the
-    same steps, with other answers in three places"."""
+    same steps, with other answers in three places". ``horizon`` is the
+    contract's: 900 s for the standard one, another for a short-ttl copy
+    (scenarios.md's conventions, 0.2)."""
     stale_q = question == Q_STALE
     across = r.presence == "across_face"
     obs = list(r.observations)
@@ -551,7 +593,7 @@ def judge(r: Reading, question: str = Q_FIRING) -> Answer:
     if r.previous_instance:
         return Answer(NOT_ASKED, "previous_instance", "an earlier instance's last word, shown as last-known")
     # 6. Its freshness, at 900 s (§2.7).
-    v = fr.judge("state", HORIZON, obs)
+    v = fr.judge("state", horizon, obs)
     if stale_q:
         if r.latest != FIRING:
             return Answer(UNOBSERVABLE, "undecodable", "the latest put does not read")
@@ -605,13 +647,14 @@ class Verdict:
 
 
 def owner_set(presence: str, descriptor: dict[str, Any] | None, face: dict[str, Any] | None,
-              seed: Seed | None, window: Window | None) -> Verdict:
-    """§2.15 "Established", else unobservable, else not asked, checked in
-    this order (zk2py's, SPEC-FINDINGS F-130): §2.14's steps 1 and 2 with
-    their reasons; no GET; a GET not complete; a window that lost a
-    delivery; an owner not present throughout; a GET that answered a key
-    (`answered`); across a face, an empty GET; no window; a window of 900 s
-    or less; else `window`."""
+              seed: Seed | None, window: Window | None, ttl_s: float = TTL_S) -> Verdict:
+    """§2.15 "The order" (0.2, F-130): §2.14's steps 1 and 2 with their
+    reasons; the seed (`no_seed`, `seed_incomplete`); the window
+    (`window_lost`, then `owner_gap`, which "across a face … is not asked
+    there"); `answered`; across a face, an empty GET (`across_face`);
+    `no_member` and `window_short`; then `window`. ``window`` is over §2.15's
+    span (from its declaration, or after a loss from the first complete GET
+    that followed it), as the caller measured it."""
     if presence == "absent":
         return Verdict(NOT_ASKED, "absent")
     if presence == "incomplete":
@@ -633,7 +676,7 @@ def owner_set(presence: str, descriptor: dict[str, Any] | None, face: dict[str, 
         return Verdict(UNOBSERVABLE, "seed_incomplete")
     if window is not None and not window.lossless:
         return Verdict(UNOBSERVABLE, "window_lost")
-    if window is not None and not window.present_throughout:
+    if window is not None and not across and not window.present_throughout:
         return Verdict(UNOBSERVABLE, "owner_gap")
     if seed.members > 0:
         return Verdict(ESTABLISHED, "answered")
@@ -641,7 +684,7 @@ def owner_set(presence: str, descriptor: dict[str, Any] | None, face: dict[str, 
         return Verdict(UNOBSERVABLE, "across_face")
     if window is None:
         return Verdict(UNOBSERVABLE, "no_member")
-    if window.listened_s <= TTL_S:
+    if window.listened_s <= ttl_s:
         return Verdict(UNOBSERVABLE, "window_short")
     return Verdict(ESTABLISHED, "window")
 
@@ -711,3 +754,445 @@ def rederives(alert_key: str, payload: Any) -> Answer:
     if d.key != alert_key:
         return Answer(NO, "mismatch", f"the document derives {d.key}")
     return Answer(YES, "strict") if d.framed else Answer(YES, "sanitized", "keyed through §2.3's step")
+
+
+# == the runtime half: an owner, and a reader on a bus =================================
+
+REPO = Path(__file__).resolve().parents[3]
+CONTRACT = REPO / "spec" / "profiles" / "alarms" / "alarms.v1.toml"
+
+
+def load(ttl_s: int | None = None) -> Any:
+    """The standard contract (§3), or a copy of it with ``freshness.ttl_s =
+    ttl_s``, read in memory at the standard contract's path so its schema
+    resolves, and never published: scenarios.md's conventions (0.2) for a
+    run that cannot wait 900 s. The copy is another revision, with a
+    fingerprint of its own, which an owner serves like any contract."""
+    from .contract import load_contract
+
+    if ttl_s is None:
+        c = load_contract(CONTRACT)
+    else:
+        text = CONTRACT.read_text(encoding="utf-8")
+        old = f'"freshness.ttl_s" = {TTL_S}'
+        if text.count(old) != 1:
+            raise ValueError(f"{CONTRACT}: {old} not found once")
+        c = load_contract(CONTRACT, text=text.replace(old, f'"freshness.ttl_s" = {int(ttl_s)}'))
+    if not c.valid:
+        raise ValueError(f"{CONTRACT}: {c.codes}")
+    return c
+
+
+def horizon_of(contract: Any) -> fr.Horizon:
+    """The horizon of the contract's one resource."""
+    r = next(r for r in contract.canonical["resources"] if r["template"] == TEMPLATE)
+    return fr.horizon("state", r["annotations"])
+
+
+def document_bytes(doc: dict[str, Any]) -> bytes:
+    """An owner's put, as strict JSON (§2.4, 0.2): UTF-8, members sorted."""
+    return json.dumps(doc, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode("utf-8")
+
+
+class Record:
+    """§2.9 "What the record holds" (0.2, a SHOULD): each alarm's latest
+    document as put, by the key it was put on, a resolved one included until
+    its delete. In memory, or a JSON file (``path``) saved after every put
+    and delete: ``{"profile": "alarms.v1", "alarms": {<key>: <document>}}``.
+    The format is zk2py's own, as the text leaves it."""
+
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path
+        self.docs: dict[str, bytes] = {}
+        if path is not None and path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.docs = {k: document_bytes(v) if isinstance(v, dict) else v.encode("utf-8")
+                         for k, v in data.get("alarms", {}).items()}
+
+    def put(self, key: str, payload: bytes) -> None:
+        self.docs[key] = payload
+        self._save()
+
+    def delete(self, key: str) -> None:
+        self.docs.pop(key, None)
+        self._save()
+
+    def items(self) -> list[tuple[str, bytes]]:
+        return sorted(self.docs.items())
+
+    def _save(self) -> None:
+        if self.path is None:
+            return
+        out: dict[str, Any] = {}
+        for k, v in self.docs.items():
+            try:
+                out[k] = json.loads(v)
+            except ValueError:
+                out[k] = v.decode("utf-8", "replace")
+        self.path.write_text(json.dumps({"profile": PROFILE, "alarms": out}, sort_keys=True), encoding="utf-8")
+
+
+class AlarmsOwner:
+    """A service's ``alarms.v1`` (§2.5, §2.7 to §2.9), over
+    :class:`zk2py.owner.Owner`: ``owner`` is the service, built with the
+    alarms contract (the standard one, or ``contract``) and any others.
+    - Each act puts the whole document on its one key (§2.5). A new
+      `timestamp` is the clock's instant, or the previous one plus 1 where
+      the clock has not passed it. A duplicate observation puts nothing.
+    - Confirmations are the owner's freshness re-puts (§2.7). An alarm whose
+      condition it no longer evaluates is not confirmed
+      (:meth:`stop_evaluating`), until an act on it.
+    - The bound is the owner's (§2.8): a raise beyond it raises
+      :class:`zk2py.owner.BudgetExceeded`, and resolves or deletes nothing.
+    - At start, it adopts from ``record`` (§2.9) before the tokens, in 0.2's
+      order: resolved, deleted; undecodable or not re-deriving, deleted;
+      firing under a rule outside ``rules``, resolved; then the rest
+      adopted, up to the bound, unchanged.
+    - A clean close leaves its alarms (§2.9)."""
+
+    def __init__(self, system: str, service: str, *, contract: Any = None, contracts: list[Any] | None = None,
+                 record: Record | None = None, rules: set[str] | None = None, now_ms: Any = None,
+                 **owner_kw: Any) -> None:
+        from .owner import Owner
+
+        self.contract = contract or load()
+        self.record = record if record is not None else Record()
+        self.rules = rules
+        self.now_ms = now_ms or (lambda: time.time_ns() // 1_000_000)
+        self.held: dict[str, Alarm] = {}
+        #: the latest transition's `timestamp` on each key, as far as it knows
+        self.last_ts: dict[str, int] = {}
+        #: §2.9: what the start did with each document of the record
+        self.adoption: list[tuple[str, str]] = []
+        self.owner = Owner(system, service, [self.contract, *(contracts or [])],
+                           before_tokens=self._adopt, **owner_kw)
+
+    # keys
+    def key(self, alert_key: str) -> str:
+        k = key_of(self.owner.system, self.owner.service, alert_key)
+        if k is None:
+            raise ValueError(f"{self.owner.system}/{self.owner.service}: no name (core §1.2)")
+        return k
+
+    def key_for(self, rule: str, labels: dict[str, str] | None = None) -> str:
+        return self.key(derive(rule, labels).key)
+
+    def start(self) -> None:
+        self.owner.start()
+
+    def close(self) -> None:
+        """§2.9 "A clean close leaves them": the tokens go, the alarms stay."""
+        self.owner.close()
+
+    # puts
+    def _put(self, key: str, doc: dict[str, Any]) -> Alarm:
+        payload = document_bytes({k: v for k, v in doc.items() if v is not None})
+        a = decode(payload)
+        assert a is not None, doc
+        self.owner.set_state(key, payload)
+        self.held[key] = a
+        self.last_ts[key] = max(self.last_ts.get(key, a.timestamp), a.timestamp)
+        self.record.put(key, payload)
+        return a
+
+    def _delete(self, key: str) -> None:
+        self.owner.delete_state(key)
+        self.held.pop(key, None)
+        self.record.delete(key)
+
+    def _new_ts(self, key: str) -> int:
+        now, last = self.now_ms(), self.last_ts.get(key)
+        return now if last is None or now > last else last + 1
+
+    @staticmethod
+    def _doc(a: Alarm, **change: Any) -> dict[str, Any]:
+        doc: dict[str, Any] = {"timestamp": a.timestamp, "rule": a.rule, "severity": a.severity,
+                               "state": a.state, "summary": a.summary}
+        if a.observed_at_ms is not None:
+            doc["observed_at_ms"] = a.observed_at_ms
+        if a.category is not None:
+            doc["category"] = a.category
+        if a.labels:
+            doc["labels"] = dict(a.labels)
+        doc.update(change)
+        return {k: v for k, v in doc.items() if v is not None}
+
+    # §2.5's acts
+    def raise_alarm(self, rule: str, labels: dict[str, str] | None, severity: str, summary: str,
+                    category: str | None = None) -> str:
+        """The condition found: a raise, an escalation, a refresh, or, for a
+        duplicate observation, ``none`` (0.2: "the owner puts nothing").
+        Returns the act."""
+        if severity not in SEVERITIES:
+            raise ValueError(f"severity {severity!r}")
+        key = self.key_for(rule, labels)
+        held = self.held.get(key)
+        base = {"rule": rule, "severity": severity, "state": FIRING, "summary": summary,
+                "category": category, "labels": dict(labels) if labels else None}
+        if held is None or not held.firing:
+            self._put(key, {**base, "timestamp": self._new_ts(key)})
+            return RAISED
+        if held.severity != severity:
+            self._put(key, {**base, "timestamp": self._new_ts(key)})
+            return ESCALATED
+        if (held.summary, held.category, held.labels) == (summary, category, dict(labels or {})):
+            # §2.5 (0.2): no act; §2.7 (0.2): "An evaluation that finds the
+            # condition again confirms it again", so confirmations stopped
+            # by stop_evaluating resume.
+            self.owner.reopen_writer(key)
+            return "none"
+        observed = max(self.now_ms(), held.timestamp)
+        self._put(key, {**base, "timestamp": held.timestamp, "observed_at_ms": observed})
+        return REFRESHED
+
+    def resolve(self, rule: str, labels: dict[str, str] | None = None) -> bool:
+        """§2.5: a resolved put, a new `timestamp` and no `observed_at_ms`,
+        then the delete, at once. False when nothing firing is held."""
+        key = self.key_for(rule, labels)
+        held = self.held.get(key)
+        if held is None or not held.firing:
+            return False
+        self._resolve_key(key, held)
+        return True
+
+    def _resolve_key(self, key: str, held: Alarm) -> None:
+        self._put(key, self._doc(held, state=RESOLVED, observed_at_ms=None, timestamp=self._new_ts(key)))
+        self.owner.close_writer(key)  # §2.7: a resolved alarm is never confirmed
+        self._delete(key)
+
+    def stop_evaluating(self, rule: str, labels: dict[str, str] | None = None) -> None:
+        """§2.7: "MUST NOT confirm an alarm whose condition it has stopped
+        evaluating": the owner's re-puts of it stop; it keeps its tokens and
+        answers its GETs."""
+        self.owner.close_writer(self.key_for(rule, labels))
+
+    def confirm(self, rule: str, labels: dict[str, str] | None = None) -> None:
+        """§2.7 (0.2): "An evaluation that finds the condition again confirms
+        it again": the document put again unchanged."""
+        key = self.key_for(rule, labels)
+        held = self.held[key]
+        payload = self.record.docs.get(key) or document_bytes(self._doc(held))
+        self.owner.set_state(key, payload)
+
+    # §2.9
+    def _adopt(self, owner: Any) -> None:
+        from .owner import BudgetExceeded
+
+        adopt: list[tuple[str, bytes, Alarm]] = []
+        for key, payload in self.record.items():
+            ref, a = parse_key(key), decode(payload)
+            if a is not None and not a.firing:
+                self.adoption.append((key, "deleted: resolved, its delete lost"))
+                self._delete(key)
+            elif a is None or ref is None or rederives(ref["alert_key"], a).answer != YES:
+                self.adoption.append((key, "deleted: undecodable, or its key does not re-derive"))
+                self._delete(key)
+            elif self.rules is not None and a.rule not in self.rules:
+                self.adoption.append((key, "resolved: its rule no longer evaluated"))
+                self.held[key], self.last_ts[key] = a, a.timestamp
+                self._resolve_key(key, a)
+            else:
+                adopt.append((key, payload, a))
+        for key, payload, a in adopt:
+            try:
+                owner.set_state(key, payload)
+            except BudgetExceeded:
+                # 0.2: "adopts up to the bound, and neither resolves nor
+                # deletes the rest".
+                self.adoption.append((key, "not adopted: past the bound"))
+                continue
+            self.held[key], self.last_ts[key] = a, a.timestamp
+            self.adoption.append((key, "adopted"))
+
+
+# -- the reader on a bus (§2.13 to §2.15) ----------------------------------------------
+
+class WindowWatch:
+    """§2.15's window (0.2) over one subscription, for the owners it
+    covers. It "runs from its declaration" (no loss is ever known to a
+    zenoh-python callback subscriber, so never from a re-seed). Lossless
+    and present throughout are core §2.7's (0.25), as :class:`zk2py.budget.Window`
+    reads them:
+    - **lossless** is established from the resource's QoS (``reliable``,
+      ``block``, the contract's) and the reader's own receive path, a
+      :class:`zk2py.budget.StallWatch` on its session;
+    - **present throughout**: the owner's instance token held when the
+      watch started, none withdrawn, and one held one lease after the
+      window's end plus the reply timeout (core §2.7: "A tool watches the
+      owner's instance tokens for one lease after the window's end … and
+      its reply timeout more").
+    :meth:`windows` ends the window now, waits out that watch, and returns
+    each owner's :class:`Window`."""
+
+    def __init__(self, session: Any, subscriber: fr.Subscriber, addresses: Iterable[str], *,
+                 qos: tuple[str, str] = ("reliable", "block"), lease_s: float = 10.0, reply_timeout_s: float = 1.0,
+                 wait_before_close_s: float = 5.0) -> None:
+        import zenoh
+
+        from . import budget as bg
+        from . import live
+
+        self.session, self.subscriber, self.qos = session, subscriber, qos
+        self.lease_s, self.reply_timeout_s = lease_s, reply_timeout_s
+        self.stall = bg.StallWatch(session, bg.stall_bound(int(wait_before_close_s * 1000), int(lease_s * 1000)))
+        self.lock = threading.Lock()
+        self.withdrawn: dict[str, bool] = {}
+        self.at_start: dict[str, bool] = {}
+        self.subs = []
+        for a in addresses:
+            self.withdrawn[a] = False
+
+            def got(smp: Any, a: str = a) -> None:
+                if smp.kind == zenoh.SampleKind.DELETE:
+                    with self.lock:
+                        self.withdrawn[a] = True
+
+            self.subs.append(session.liveliness().declare_subscriber(f"zk2/{a}/@zk/instance/*",
+                                                                     zenoh.handlers.Callback(got)))
+            pres = live.list_presence(session, f"zk2/{a}/@zk/instance/*")
+            self.at_start[a] = bool(pres.instances) and pres.complete
+
+    def windows(self) -> dict[str, Window]:
+        from . import budget as bg
+        from . import live
+
+        end = time.monotonic_ns()
+        watch_until = end + int((self.lease_s + self.reply_timeout_s) * fr.NS)
+        while time.monotonic_ns() < watch_until:
+            time.sleep(min(0.1, (watch_until - time.monotonic_ns()) / fr.NS))
+        gap, closed = self.stall.reading()
+        lossless, _ = bg.lossless(*self.qos, stall_gap_ms=gap, stall_bound_ms=self.stall.bound_ms,
+                                  transport_closed=closed)
+        listened = (end - self.subscriber.declared_ns) / fr.NS
+        out = {}
+        for a in self.at_start:
+            pres = live.list_presence(self.session, f"zk2/{a}/@zk/instance/*")
+            with self.lock:
+                present = self.at_start[a] and not self.withdrawn[a] and bool(pres.instances)
+            out[a] = Window(listened, lossless and self.subscriber.complete, present)
+        return out
+
+    def close(self) -> None:
+        self.stall.close()
+        for x in self.subs:
+            try:
+                x.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+
+
+def _zid(text: Any) -> int | None:
+    """Core §3.3 (0.11): a zid compares by value."""
+    try:
+        return int(str(text), 16)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass
+class OwnerReading:
+    """One reading of one owner's alarms (§2.14, §2.15): its presence and
+    descriptor, the S4 GET, the window, the verdict on its alarms, and one
+    :class:`Reading` per alarm key the reader knows of, with its latest
+    document (None for a delete, or a put that does not read)."""
+
+    address: str
+    presence: str
+    descriptor: dict[str, Any] | None
+    meta_zid: str | None
+    seed: Seed | None
+    window: Window | None
+    verdict: Verdict
+    readings: dict[str, Reading] = field(default_factory=dict)
+    documents: dict[str, Alarm | None] = field(default_factory=dict)
+    stamps: dict[str, str | None] = field(default_factory=dict)
+    #: §2.14 step 5 (0.2): GET replies whose stamp's id is not ``meta.zid``,
+    #: by value: core §4.2's foreign stamp, "a finding a tool reports
+    #: apart". After §2.9's re-put, no reply of the present instance carries
+    #: an earlier one's stamp.
+    foreign: list[str] = field(default_factory=list)
+
+    def answers(self, horizon: fr.Horizon = HORIZON) -> dict[str, tuple[Answer, Answer]]:
+        return {k: (judge(r, Q_FIRING, horizon), judge(r, Q_STALE, horizon)) for k, r in self.readings.items()}
+
+    def owner_read(self, horizon: fr.Horizon = HORIZON) -> OwnerRead:
+        """For :func:`any_firing`: the verdict, and each alarm's first
+        answer with its latest document's severity."""
+        return OwnerRead(self.verdict.verdict, tuple(
+            AlarmRead(judge(r, Q_FIRING, horizon).answer,
+                      None if self.documents.get(k) is None else self.documents[k].severity)
+            for k, r in self.readings.items()))
+
+
+def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = None,
+               window: Window | None = None, trust: fr.ClockTrust | None = None, get: bool = True,
+               horizon: fr.Horizon = HORIZON, keys_known: Iterable[str] = (), timeout: float = 1.0) -> OwnerReading:
+    """One reading of ``address`` (``<system>/<service>``):
+    - presence (core §8.1) by a liveliness GET of its instance tokens, the
+      descriptor through it (§2.13: never the interface token);
+    - the S4 GET of ``…/alarms.v1/state/alarms/*``, aged against ``trust``;
+    - the subscription ``subscriber`` made before it, for the key's
+      observations, and its ``window`` (:class:`WindowWatch`'s), for §2.15;
+    - each key the subscription or the GET knows, and ``keys_known`` (an
+      earlier reading's): its observations, and its latest sample merged by
+      the owner's stamp (core §4.2), `previous_instance` when that put's
+      stamp id is not ``meta.zid`` by value (§2.14 step 5, 0.2)."""
+    from . import live
+
+    pres = live.list_presence(tool, f"zk2/{address}/@zk/**")
+    presence = "present" if pres.instances else "absent" if pres.complete else "incomplete"
+    descriptor, meta_zid = None, None
+    if presence == "present":
+        inst = pres.instances[0]["instance"]
+        d = live.get_descriptor(tool, f"zk2/{address}/@zk/instance/{inst}", timeout=timeout)
+        if len(d) == 1 and d[0].ok:
+            doc = json.loads(d[0].payload)
+            meta_zid = (doc.get("meta") or {}).get("zid")
+            entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == PROFILE), None)
+            descriptor = {"lists": False} if entry is None else {"lists": True, "token": entry.get("token", True)}
+    prefix = f"zk2/{address}/{PROFILE}/{TOKEN}/{PREFIX}/"
+    seed, replies = None, {}
+    if get:
+        st = live.get_state(tool, prefix + "*", timeout=timeout)
+        replies = {r.key: r for r in st.replies if r.key.startswith(prefix)}
+        seed = Seed(complete=not st.errors, members=sum(1 for r in replies.values() if not r.deleted))
+    verdict = owner_set(presence, descriptor, None, seed, window, ttl_s=horizon.ttl_s or TTL_S)
+    out = OwnerReading(address, presence, descriptor, meta_zid, seed, window, verdict)
+    if meta_zid is not None:
+        out.foreign = sorted(k for k, r in replies.items() if _zid(r.stamp_id) != _zid(meta_zid))
+    known = set(keys_known) | set(replies)
+    if subscriber is not None:
+        with subscriber.lock:
+            known |= {k for k in subscriber.deliveries if k.startswith(prefix)}
+    trust = trust or fr.ClockTrust(word=True)
+    for key in sorted(known):
+        obs: list[Any] = []
+        cands: list[tuple[int, int, str, bytes, str | None]] = []
+        if subscriber is not None:
+            obs.append(subscriber.observation(key))
+            for x in subscriber.of(key):
+                if x.stamp_ns is not None:
+                    cands.append((x.stamp_ns, _zid(x.stamp_id) or 0, x.kind, x.payload, x.stamp_id))
+        if get:
+            r = replies.get(key)
+            if r is None:
+                g = fr.GetReading(None)
+            else:
+                g = fr.GetReading("delete" if r.deleted else "put", r.stamp_ns, r.stamp_id, r.stamp, r.payload)
+                if r.stamp_ns is not None:
+                    cands.append((r.stamp_ns, _zid(r.stamp_id) or 0, "delete" if r.deleted else "put",
+                                  r.payload, r.stamp_id))
+            obs.append(g.observation(trust))
+        latest, prev, doc, sid = None, False, None, None
+        if cands:
+            _, _, kind, payload, sid = max(cands, key=lambda c: (c[0], c[1]))
+            if kind == "delete":
+                latest = "deleted"
+            else:
+                doc = decode(payload)
+                latest = "undecodable" if doc is None else doc.state
+                prev = meta_zid is not None and _zid(sid) != _zid(meta_zid)
+        out.readings[key] = Reading(presence, descriptor, None, obs, latest, prev,
+                                    verdict.verdict == ESTABLISHED)
+        out.documents[key], out.stamps[key] = doc, sid
+    return out

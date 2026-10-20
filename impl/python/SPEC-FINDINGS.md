@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Thirty-eight rounds.**
+**Thirty-nine rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -79,8 +79,13 @@ where that was not enough, or where the spec said two things.
 - Nothing new was found against `link.v1` 0.7, read cold once more (see
   "At link.v1 0.7").
 - F-126 to F-132 were found against `alarms.v1`'s text 0.1, the sixth
-  profile, read cold with core 0.33 and 0.34 (see "At alarms.v1 0.1" at the
-  end). Nothing was found in core 0.33 or 0.34 themselves.
+  profile, read cold with core 0.33 and 0.34 (see "At alarms.v1 0.1").
+  Nothing was found in core 0.33 or 0.34 themselves. `alarms.v1` 0.2
+  resolved all seven, F-127 against zk2py's reading.
+- F-133 and F-134 were found against `alarms.v1` 0.2, read cold and run
+  live against the Rust owner example's `--alarms` (see "At alarms.v1 0.2"
+  at the end). F-133 is against the example's documentation, not the
+  spec.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -5846,6 +5851,16 @@ gives its payloads already decoded.
 that is not strict JSON (RFC 8259 with no duplicate member, every string
 valid Unicode) as undecodable, as core §3.3's D000 reads a descriptor."
 
+**Status at alarms.v1 0.2: resolved by 0.2, as zk2py read it.** §2.4,
+"Strict JSON first": "a payload's bytes as core §3.3's D000 reads a
+descriptor: UTF-8, JSON (RFC 8259) with nothing after its value, no
+duplicate member at any depth, every number finite, and every string with
+a UTF-8 form … A payload that is not strict JSON is undecodable." §2.2's
+"whose names are distinct" now cites it. `documents.json`'s nine `text`
+cases (token `json`) pass through `alarms.strict_json`, which is
+`alarms.decode`'s reading from round 38. One phrase is left to read:
+"nothing after its value" (F-134).
+
 ### F-127 · ambiguity · alarms.v1 0.1 §2.6: "equal", with `labels` absent or `{}`
 
 > §2.6: "**Equal** is equal in every member this text names (§2.4)."
@@ -5867,6 +5882,13 @@ it, but a tool that counts refreshes would.
 
 **Wording:** §2.6, "`labels` absent is equal to `{}`", or "a member absent
 is equal only to itself absent".
+
+**Status at alarms.v1 0.2: resolved by 0.2, against zk2py's reading.**
+§2.6: "`labels` absent is equal to `labels: {}` … Any other member absent
+is equal only to itself absent, so `category: ""` is not an absent
+`category`." zk2py now reads an absent `labels` as `{}` (`Alarm.labels`).
+`transitions.json`'s three new cases failed under round 38's reading (two
+of them) and pass now.
 
 ### F-128 · ambiguity · alarms.v1 0.1 §2.14 step 4, with §2.15: what a GET after a loss heals
 
@@ -5916,6 +5938,17 @@ answered. For §2.15, it takes `lossless` as given.
   instance, "lost no delivery since that GET, and for `window`, over the
   window".
 
+**Status at alarms.v1 0.2: resolved by 0.2, reading 1, zk2py's.** §2.14
+step 4: "no GET has answered this key since, with a value or a
+`reply_del` … A GET that drew nothing for the key, complete or not, does
+not heal the loss for it". §2.15, "The window": "from its declaration, or,
+after a loss, from the first complete GET that followed it … which heals a
+loss before it and not one after it". `conclusions.json` pins the case
+zk2py named, a put 10 s old: `incomplete`. zk2py's live reader never knows
+of a loss (a zenoh-python callback subscriber has no queue), so its window
+always runs from the declaration, and a stall or a closed transport makes
+it lossy (`WindowWatch`).
+
 ### F-129 · gap · alarms.v1 0.1 §2.14 step 5: an earlier instance, told by a stamp's id
 
 > §2.14 step 5: "a put stamped by an earlier instance of the owner than the
@@ -5949,6 +5982,15 @@ one session.
 earlier instance stamped it or another session did (core §4.2's finding).
 With no `meta.zid`, step 6. A re-mint that keeps its session is not told
 apart."
+
+**Status at alarms.v1 0.2: resolved by 0.2, all three cases stated.**
+§2.14 step 5: the id compared "by value"; another session's stamp reads
+`previous_instance` too, "also core §4.2's foreign stamp, a finding a tool
+reports apart"; with no `meta.zid`, "the reader goes on to step 6"; a
+re-mint that keeps its session "is not told apart" (§2.9 too). zk2py's
+reader (`read_owner`) does each: `previous_instance` by value, step 6
+without `meta.zid`, and the GET replies stamped by another session listed
+apart (`OwnerReading.foreign`), which scenario §5 step 4 asserts empty.
 
 ### F-130 · gap · alarms.v1 0.1 §2.15 "Established": the reasons, a face, and their order
 
@@ -6003,6 +6045,15 @@ Across a face, it takes a window's `present_throughout` as given.
 - for a face, either "a window across a face is never present throughout",
   or "across a face, `answered` needs no window".
 
+**Status at alarms.v1 0.2: resolved by 0.2, zk2py's order, with one change.**
+§2.15, "The order": §2.14's steps 1 and 2 with their reasons; the seed;
+the window (`window_lost`, then `owner_gap`); `answered`; across a face,
+an empty GET; `no_member` and `window_short`; then `window`. "Present and
+listed" now reads "§2.14's steps 1 and 2 do not answer". The change:
+"Across a face, presence does not cross, so whether the owner was present
+is not asked there", which round 38's `owner_set` asked (`owner_gap`).
+zk2py follows; two of the six new cases failed before it did.
+
 ### F-131 · gap · alarms.v1 0.1 §2.15, with scenarios §8: which owners are in scope
 
 > §2.15: "**Anything firing at or above a severity *S*,** over the owners in
@@ -6033,6 +6084,13 @@ and those the tool knew of before: by an earlier reading, or by an
 archive's keys (core S6). An owner known only the second way is absent:
 not asked."
 
+**Status at alarms.v1 0.2: resolved by 0.2, as zk2py did it.** §2.15, "The
+owners in scope": "those its presence read finds … and those it knew of
+before, by an earlier reading of its own or by an archive's keys (core
+S6). An owner known only the second way … is absent: not asked."
+`scenarios.md` §8: "T knows of the owner from its step 1". zk2py's §8 runs
+exactly that, on both owners.
+
 ### F-132 · gap · alarms.v1 0.1 §5: the third question's reasons for a delete and an undecodable payload
 
 > §5, "Does this key re-derive from its document?": "**Not asked:** a
@@ -6052,6 +6110,9 @@ from §2.14.
 
 **Wording:** "**Not asked:** a delete, which carries no document
 (`no_document`). **Unobservable:** the payload undecodable (`undecodable`)."
+
+**Status at alarms.v1 0.2: resolved by 0.2.** §5's third row names
+`no_document` and `undecodable`, and so does the fixture's description.
 
 **Where zk2py's reading of alarms.v1 0.1 needed a guess, beyond the
 findings.** No fixture case reaches these:
@@ -6082,3 +6143,198 @@ findings.** No fixture case reaches these:
   The persistent record's format is the owner's own.
 - **§8** needs F-131's answer. Its archive will be zk2py's stand-in for
   `archive.v1`, as in `health.v1`'s §6.
+
+## At alarms.v1 0.2 (#609)
+
+`alarms.v1` 0.2 answers F-126 to F-132; each entry above carries its
+status. It also states three of round 38's other guesses as zk2py had made
+them, and settles five places the reference's owner met. The core stays at
+0.34.
+
+**zk2py's changes for 0.2.**
+- **§2.4, strict JSON first** (`alarms.strict_json`, `check_payload`):
+  `documents.json` gives nine cases as their `text`, refused as `json`
+  before `schema`. This is round 38's `decode`, now a separate step.
+- **§2.6:** `labels` absent equals `{}` (F-127, the one answer against
+  zk2py).
+- **§2.15:** across a face, a window's presence is not asked (F-130).
+
+**`just py-conformance`: 1745 of 1745** (after review of PR #807: 1734
+from the fixtures, and 11 of zk2py's own readings of F-134 in a family
+of their own, `readings`).
+- At the start of the round, the `alarms` family stopped at
+  `documents.json`'s first `text` case, which round 38's runner did not
+  read (exit 2).
+- With those cases read through round 38's `decode`, 296 of 300 passed. The
+  four failures were the two new F-127 cases and two of the six new F-130
+  cases.
+- The `alarms` family is now 300 checks: `keys.json` 120, `documents.json`
+  58, `transitions.json` 27 and `conclusions.json` 95. Every other family
+  is unchanged.
+
+**The live half: `just py-alarms`** (`python -m zk2py.alarms_scenarios`).
+It runs `scenarios.md` §1 to §10 against zk2py's owner, or, with
+`--owner <exe>` (or `ZK2PY_OWNER`), against the Rust owner example as a
+black box. The example is `owner-ab`, the build at the text 0.2 commit. It
+is driven by its flags and its `alarm` stdin commands (F-133), and it
+takes the short-ttl copy as a contract file. Each section runs on an
+in-process router R1 of its own, with S, G and T as clients. Three
+sections wait out the horizon, so by default they run on a copy of the
+contract with `freshness.ttl_s = 4`, and `--full` runs them at 900 s:
+- §2 waits three confirmation periods, 455 s at 900;
+- §6 waits ttl + 1.5 s, 905 s at 900;
+- §10 waits ttl + 1 s, 905 s at 900.
+
+| § | What | zk2py's owner | The Rust owner example |
+|---|---|---|---|
+| 1 | Raise; the duplicate; one key whatever the label order | 9 of 9 | 9 of 9 |
+| 2 | Escalate, refresh, confirm | 9 of 9 at ttl 4, and 9 of 9 at 900 s (re-put after 449.9 s) | 9 of 9 at ttl 4, and 9 of 9 at 900 s (re-put after 427.5 s) |
+| 3 | Resolve, delete within 1 s, `reply_del`, nothing 65 s later | 6 of 6 | 6 of 6 |
+| 4 | Re-raise, and its confirmations (ttl 4 s) | 3 of 3 | 3 of 3 |
+| 5 | A restart mid-incident, from the owner's record, and its adoption | 11 of 11 | 11 of 11 |
+| 6 | A hung owner goes stale, and an extra check of 0.2's §2.7 resumption | 6 of 6 at ttl 4 | 6 of 6 at ttl 4 |
+| 7 | At the bound of 2 | 5 of 5 | 5 of 5 |
+| 8 | An absent owner, last-known, out of scope by presence | 7 of 7 | 7 of 7 |
+| 9 | A key that does not re-derive (T against a zk2py liar) | 3 of 3 | 3 of 3 (the same liar) |
+| 10 | Anything firing, a tokenless owner | 7 of 7 at ttl 4 | 7 of 7 at ttl 4 |
+
+Each column totals 66 of 66 on the default run, and exits 0.
+- §4's third check, added after review of PR #807, goes beyond
+  `scenarios.md`. A resolve closes the alarm's writer, since a resolved
+  alarm is never confirmed. The re-raise's put reopens it: `Owner.set_state`
+  clears the writer's closed mark, whatever the act. The check shows two
+  confirmations after the re-raise, unchanged, 1.8 s and 1.9 s apart at
+  ttl 4.
+- So §4 runs on the short-ttl copy too, unless `--full`.
+- The runner exits 2 for any check or section not run, unless `--only` or
+  `--quick` asked for that subset. §2 also ran at 900 s,
+alone, on each owner: 9 of 9, about 7.6 minutes each.
+
+**Not run:**
+- **§6 and §10 at 900 s.** Each takes about 15 minutes, beyond the
+  10 minutes a command here may take in the foreground. They ran on the
+  4 s copy, as the reference's default run does for §2 and §6.
+- **§9 against the Rust owner.** Its subject is T, zk2py's tool. The
+  owner example has no way to put a document on another key, and the text
+  gives an owner none, so the liar is a zk2py owner putting raw documents.
+  The section runs identically in both modes.
+
+**What running both owners found in zk2py's own owner.** The text was not
+at fault in any of these.
+- **Templated state had no re-puts.** zk2py's owner registered a horizon
+  only for parameterless state. `alarms/{alert_key}` is the first
+  templated state with a horizon it has run, so its alarms would never
+  have been confirmed. freshness.v1 §2.4 covers every member, and
+  `Owner` now re-puts a templated state's members from their first put.
+- **0.2's §2.7, "An evaluation that finds the condition again confirms it
+  again".** zk2py read a duplicate observation as no act (§2.5) and left
+  stopped confirmations stopped.
+  - Measured on the owner example: after `alarm confirm <k> off`, an
+    unchanged `alarm raise` puts at once, then every 1.9 s at ttl 4.
+  - zk2py now reopens the writer the same way.
+  - §6 has an extra check of it, beyond `scenarios.md`, which both owners
+    pass.
+- **§2.15's window** is now core §2.7's (0.25), as §2.15 cites it.
+  `WindowWatch` establishes lossless from the QoS and the reader's receive
+  path, and checks the owner's instance token one lease and the reply
+  timeout past the window's end. Before, zk2py read the subscriber's own
+  flag and never waited.
+
+**Measured beside the text, with no finding:**
+- Both owners put `application/json`, strict JSON with no whitespace
+  around the value.
+- Both put the duplicate raise of §1 as nothing.
+- At 900 s, the owner example re-puts after 427.5 s and zk2py after
+  449.9 s. Both are within 450 s, and `freshness.v1` §2.4 fixes no margin.
+- The owner example's record is keyed by alert key, not by the full key
+  the text's SHOULD names. Within one owner's address the two are one.
+- In §5, both owners put A again and delete R's and P's keys before the
+  new instance token, the text's SHOULD, and both adopt only after their
+  deletes and resolves (0.2's order).
+
+### F-133 · gap · the owner example's `--alarms` (#800, AB): its stdin surface is undocumented
+
+Not the spec: the reference's example, which this round was to drive as a
+black box from "the binary's own help (`owner --help`) and `scenarios.md`".
+
+`owner --help` prints one usage line. It names `--alarms`,
+`--alarms-record <file>`, `--alarms-archive <system>/<service>` and
+`--alarms-rules <rule>[,<rule>...]`, and says nothing of the rest:
+- **The stdin commands.** The command word is `alarm`, which zk2py found
+  by trying words. `help`, `alarms`, `alarms raise` and bare `raise` all
+  answer `refused …: unknown command`. Only a malformed `alarm` command
+  prints the command's usage: `alarm raise <json> | resolve <alert_key> |
+  confirm <alert_key>|all on|off | list | adoption`.
+- **The condition's JSON**, `{rule, severity, summary, labels?,
+  category?}`. It shows only in a refusal of a malformed one.
+- **The answers**, which a runner must parse:
+  - `alarm raised|escalated|refreshed|unchanged <alert_key> <document>`;
+  - `alarm resolved …`;
+  - `refused <line>: <reason>`;
+  - `alarm adoption source=… adopted=… retired=<key>:<why>,… resolved=…
+    over_bound=…`.
+- **That a short-ttl copy is passed as a contract file** (it is, and its
+  fingerprint is zk2py's in-memory copy's). The round's instructions said
+  the help mentions this; it does not.
+- **The record file's format**, `{"profile": "alarms.v1", "alarms":
+  {<alert key>: <document>}}`. §5 needs it to write R and P, and zk2py read
+  it from the file the example wrote.
+
+`scenarios.md` documents none of it. The health and config surfaces have
+the same shape (a usage per command word, reached only by an error).
+
+**What would fix it:** `--help` listing each command word with its usage,
+its answers, and that a contract file named `alarms.v1` replaces the
+embedded one. Or a section in `scenarios.md` naming the example's commands
+per step, as its conventions name the reference's test file.
+
+### F-134 · ambiguity · alarms.v1 0.2 §2.4: "nothing after its value", and whitespace
+
+> §2.4 (0.2): "UTF-8, JSON (RFC 8259) with nothing after its value, no
+> duplicate member at any depth, every number finite, and every string with
+> a UTF-8 form"
+
+RFC 8259's `JSON-text = ws value ws` allows whitespace after the value, a
+trailing newline included. "Nothing after its value" read literally
+refuses it. So a put of `{…}\n`, as an owner that writes with a newline
+makes one, reads as a document to one reader and as undecodable to the
+other.
+- `documents.json`'s case "text after the document" has `{}` after the
+  value, which both readings refuse.
+- No case has whitespace alone after the value.
+- Core's D000, which §2.4 cites, says only "strict JSON".
+
+Neither owner puts any whitespace (measured above), so the two
+implementations do not differ on each other's puts.
+
+**zk2py:** RFC 8259's reading. Its four whitespace bytes (space, tab,
+LF, CR) around the value read, and anything else after it is `json`: a
+no-break space, U+2028, a vertical tab, a form feed, a NUL, text, or a
+second value. A byte-order mark before it is `json` too.
+- `alarms.strict_json` strips exactly those four bytes itself
+  (`alarms.JSON_WS`), so the reading does not rest on the JSON library's.
+- `just py-conformance`'s `readings` family states it as 11 cases, each
+  naming F-134. A later text's fixture would overturn them visibly.
+
+That was made explicit after review of PR #807. Before, the same reading
+rested on `jcs.loads`, measured to behave identically.
+
+**Wording:** "nothing after its value but whitespace (RFC 8259's `ws`)",
+or "and no whitespace before or after it". Either way, a fixture case
+`{…}\n` would pin it.
+
+**Where zk2py's reading of alarms.v1 0.2 needed a guess, beyond the
+findings.**
+- **Where the window starts.** §2.15's window "runs from its declaration".
+  Core §2.7, which §2.15 cites for lossless and presence, counts a
+  window's span "from its subscription's declaration plus its reply
+  timeout". zk2py counts from the declaration, as §2.15 says. The 1 s
+  differs only at the 900 s margin, where every firing alarm is put twice
+  over (§2.7).
+- **§10 is slow too.** `scenarios.md`'s conventions name §2 and §6 as the
+  slow tier, but §10's step 2 listens 905 s too. zk2py runs it on the
+  short-ttl copy beside §2 and §6.
+- **§8's archive form.** `scenarios.md` §8 has T GET "the archive's form
+  of them". zk2py's stand-in archive (`health.v1`'s §6) slugs every chunk,
+  wildcards included, where core §4.4 keeps `*` and `**`. So §8 GETs A's
+  concrete archive key. That is zk2py's stand-in's limit, not the text's.

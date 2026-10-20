@@ -76,7 +76,8 @@ case name. It exits with:
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
-| alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
+| alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
+| readings | | `alarms` | not a fixture family: zk2py's own readings where a finding is open, each case naming it. Today, F-134's 11 cases: RFC 8259's whitespace around a payload's value reads, anything else after it is `json`. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
@@ -96,18 +97,22 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
+readings       11 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
 link          172 passed     0 failed
-alarms        281 passed     0 failed
-total        1715 passed     0 failed
+alarms        300 passed     0 failed
+total        1745 passed     0 failed
 ```
 
 The figures are against `core.md` 0.34, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.7 and `alarms.v1` 0.1.
-`alarms.v1` 0.1 added its four fixture files, 281 checks, and moved its
+0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.7 and `alarms.v1` 0.2.
+`alarms.v1` 0.2 added 19 cases, nine of `documents.json` given as their
+`text` (strict JSON first), three of `transitions.json` and seven of
+`conclusions.json`, and changed none. `alarms.v1` 0.1 added its four
+fixture files, 281 checks, and moved its
 standard contract under `spec/profiles/`: one more `examples` check, its
 revision in both history roots. `layout` now checks the six profiles'
 directories that hold fixtures. Core 0.34 added
@@ -167,8 +172,13 @@ fixtures:
   plans' denies, warned by `far_of_two_faces`.
 - A cold read of `link.v1` 0.7 found nothing more to guess
   (`SPEC-FINDINGS.md`, "At link.v1 0.7").
-- F-126 to F-132, found against `alarms.v1` 0.1, are open
-  (`SPEC-FINDINGS.md`, "At alarms.v1 0.1").
+- `alarms.v1` 0.2 resolved F-126 to F-132, found against its 0.1. F-127
+  went against zk2py's reading (`labels` absent equals `{}`), and F-130
+  changed what a window across a face asks. The others went as zk2py read
+  them.
+- F-133 (the owner example's undocumented `--alarms` stdin surface) and
+  F-134 (§2.4's "nothing after its value", and whitespace) are open
+  (`SPEC-FINDINGS.md`, "At alarms.v1 0.2").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -963,11 +973,18 @@ just py-link
 - **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
   core S3).
 
-## alarms.v1 (profile text 0.1, core 0.34)
+## alarms.v1 (profile text 0.2, core 0.34)
 
-`alarms.v1` is the sixth profile (`spec/profiles/alarms/`), read cold in
-round 38. Its standard contract moved from `examples/zk2/` unchanged, and
-its revision 1.0 is published in both history roots, one file.
+```bash
+just py-alarms                                   # against zk2py's owner
+just py-alarms --owner <exe>                     # against the Rust owner example (or ZK2PY_OWNER)
+just py-alarms --only 2 --full                   # §2 at the contract's 900 s, about 8 minutes
+```
+
+`alarms.v1` is the sixth profile (`spec/profiles/alarms/`). zk2py read its
+0.1 cold in round 38, and its 0.2 cold and live in round 39. Its standard
+contract moved from `examples/zk2/` unchanged, and its revision 1.0 is
+published in both history roots, one file.
 - **`zk2py.alarms`**, the reader's and the tool's half, from the text
   alone:
   - **the key** (§2.2, §2.3): `derive` runs the recipe through the
@@ -976,23 +993,70 @@ its revision 1.0 is published in both history roots, one file.
     the input as it is. `is_host_scoped` compares exactly;
   - **the reference** (§2.12): `key_of` builds an alarm's key from its
     system, service and alert key, slugged, and `parse_key` reads one back;
-  - **the document** (§2.4): `read` is the reader's, against the 1.0
-    schema read from `spec/` by core §7.3's subset (`validate`) and the
-    time range. `decode` reads a payload as strict JSON (F-126). `check`
-    adds the owner's errors and warnings;
+  - **the document** (§2.4): `strict_json` first (0.2), then `read`
+    against the 1.0 schema, read from `spec/` by core §7.3's subset
+    (`validate`), and the time range. `decode` does all three on a
+    payload, and `check` / `check_payload` add the owner's errors and
+    warnings;
   - **transitions** (§2.6): `Transitions`, each sample against the
-    document held before it;
+    document held before it, an absent `labels` equal to `{}` (0.2);
   - **the conclusions:** `judge` answers §2.14's two questions from one
-    `Reading`, with freshness by `zk2py.freshness` at 900 s. `owner_set`
-    (§2.15) says whether an owner's alarms are established. `any_firing`
+    `Reading`, with freshness by `zk2py.freshness` at the contract's
+    horizon. `owner_set` gives §2.15's verdict in 0.2's order. `any_firing`
     asks "anything at or above *S*?", and `rederives` is §5's third
     question.
-- **The `alarms` conformance family:** 281 of 281, every case passing the
-  first time it ran.
+- **The owner half**, `AlarmsOwner`, over zk2py's owner:
+  - §2.5's acts; a duplicate observation puts nothing, and resumes
+    confirmations stopped (§2.7, 0.2);
+  - confirmations as freshness re-puts, which zk2py's owner now makes for
+    a templated state's members too;
+  - the bound (§2.8);
+  - §2.9's adoption from a `Record` before the tokens, deletes and
+    resolves before adoption, up to the bound;
+  - `load(ttl)`, the short-ttl copy of the contract.
+- **The reader on a bus**, `read_owner`:
+  - presence and the descriptor;
+  - the S4 GET;
+  - `WindowWatch`, §2.15's window with core §2.7's lossless and presence,
+    the owner watched one lease past the window's end;
+  - each key's reading, its latest merged by stamp, `previous_instance` by
+    `meta.zid` compared by value;
+  - another session's GET stamps listed apart (0.2).
+- **The `alarms` conformance family:** 300 of 300. 0.1's cases passed the
+  first time they ran. 0.2's passed once zk2py followed F-127 and F-130.
 - **The vocabulary** (core 0.34): `alarms` is published with no key, so
   every `alarms.<key>` draws W105.
-- **Not yet:** an owner (§2.5, §2.7 to §2.9) and `scenarios.md` §1 to
-  §10, for a later round against the owner example.
+- **`just py-alarms`** (`python -m zk2py.alarms_scenarios`) runs
+  `scenarios.md` §1 to §10, each on an in-process router of its own:
+  - **zk2py's owner** by default;
+  - **the Rust owner example** with `--owner <exe>` (or `ZK2PY_OWNER`), a
+    black box. Its flags are `--alarms`, `--alarms-record`, `--alarms-rules`,
+    `--cardinality` and `--tokenless`. Its stdin commands are `alarm raise
+    <json>`, `resolve`, `confirm … on|off` and `adoption`, found by trying
+    (F-133). A short-ttl copy is passed as a contract file;
+  - **the waits:** §2, §4, §6 and §10 run on a 4 s copy of the contract
+    unless `--full`, and `--quick` skips §3's 65 s wait;
+  - **the exit:** 0 when every check passes, 1 when one fails, and 2 when a
+    check or a section did not run, unless `--only` or `--quick` asked for
+    that subset.
+
+  | § | zk2py's owner | The Rust owner example |
+  |---|---|---|
+  | 1 Raise | 9 of 9 | 9 of 9 |
+  | 2 Escalate, refresh, confirm | 9 of 9 at 4 s; 9 of 9 at 900 s | 9 of 9 at 4 s; 9 of 9 at 900 s |
+  | 3 Resolve, then delete | 6 of 6 | 6 of 6 |
+  | 4 Re-raise, and its confirmations | 3 of 3 at 4 s | 3 of 3 at 4 s |
+  | 5 A restart mid-incident | 11 of 11 | 11 of 11 |
+  | 6 A hung owner goes stale (+ §2.7's resumption) | 6 of 6 at 4 s | 6 of 6 at 4 s |
+  | 7 At the bound | 5 of 5 | 5 of 5 |
+  | 8 An absent owner, for a tool | 7 of 7 | 7 of 7 |
+  | 9 A key that does not re-derive | 3 of 3 (a zk2py liar) | 3 of 3 (the same liar) |
+  | 10 Anything firing, for a tool | 7 of 7 at 4 s | 7 of 7 at 4 s |
+  | **Total, default run** | **66 of 66** | **66 of 66** |
+
+  - **§6 and §10 at 900 s were not run.** Each takes about 15 minutes.
+  - **§9's liar is always zk2py's.** Its subject is the tool, and no owner
+    may put a document on another key.
 
 ## What it does not cover
 
@@ -1096,7 +1160,9 @@ impl/python/
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
-    alarms.py         alarms.v1 the key and the sanitizing step, references, the document, transitions, the conclusions
+    alarms.py         alarms.v1 the key and the sanitizing step, references, strict JSON, the document, transitions,
+                                the conclusions, AlarmsOwner, the reader on a bus
+    alarms_scenarios.py alarms.v1 scenarios.md §1–§10 against zk2py's owner or the Rust owner example
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge
