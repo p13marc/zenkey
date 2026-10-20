@@ -256,13 +256,21 @@ impl Reader {
 
 /// What a reader's book and its last refresh's reads let its rules
 /// conclude: an unhealed loss first (counted since `lost_whole`, the loss
-/// count when the sight was last whole), then the presence read, then the
-/// GET.
+/// count when the sight was last whole), then the keys its bound refused,
+/// then the presence read, then the GET.
 pub fn sight(book: &AlarmBook, log: &AlarmReadLog, lost_whole: u64) -> Sight {
     if book.loss_unhealed() {
         return Sight::Lost {
             lost: book.lost().saturating_sub(lost_whole).max(1),
         };
+    }
+    if book.refused() > 0 {
+        return Sight::Incomplete(format!(
+            "{} alarm key(s) refused at the reader's bound of {} keys: an alarm past it is \
+             never read",
+            book.refused(),
+            zenkey_fleet::model::alarms::MAX_KEYS
+        ));
     }
     match &log.presence {
         Some(Err(e)) => {
