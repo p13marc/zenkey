@@ -1,10 +1,12 @@
 name: CI
+# `impl/python/**` is zk2py (#609), which nothing here builds or reads: a
+# Python round is checked by python.yml instead of a full Rust run.
 on:
   push:
     branches: [main, v1]
-    paths-ignore: ['**.md', 'docs/**', 'LICENSE*']
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE*', 'impl/python/**']
   pull_request:
-    paths-ignore: ['**.md', 'docs/**', 'LICENSE*']
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE*', 'impl/python/**']
   # manual re-run path (flaky job, runner was offline, cache experiments)
   workflow_dispatch:
 
@@ -109,18 +111,22 @@ jobs:
       - uses: https://github.com/Swatinem/rust-cache@v2.9.2
         with:
           cache-targets: false
+      # The newest nextest this install-action release has a manifest for.
+      - uses: https://github.com/taiki-e/install-action@v2.87.7
+        with:
+          tool: cargo-nextest@0.9.143
       - run: cargo build --workspace --all-targets --locked
-      - run: cargo test --workspace --locked
+      # One process per test, across binaries at once: the suite is mostly
+      # waiting on real clocks, and `cargo test` ran its binaries one after
+      # another, so the waits added up (.config/nextest.toml).
+      - run: cargo nextest run --workspace --locked --profile ci
+      - run: cargo test --workspace --doc --locked
       # Benches are a gate, not decoration: the baseline in
       # docs/bench-baseline.md is only worth reading if the code behind it
       # still compiles. `--all-targets` above already compiles and links
-      # them (harness = false benches included) on every run. The
+      # them (harness = false benches included) on every run, PRs too. The
       # release-profile build is a second full tree in the same workspace,
-      # so a PR only checks the benches with release settings (no codegen,
-      # but cfg(debug_assertions) and release-only lints apply), and pushes
-      # and manual dispatch do the full build.
-      - if: github.event_name == 'pull_request'
-        run: cargo check --workspace --benches --release --locked
+      # so it runs on pushes and manual dispatch only.
       - if: github.event_name != 'pull_request'
         run: cargo bench --workspace --no-run --locked
 

@@ -1,0 +1,37 @@
+# The Python lane (#609): zk2py, the second implementation written from
+# spec/ and examples/zk2/ alone, against the conformance fixtures. ci.yml
+# ignores `impl/python/**`, since nothing there builds or reads it, so a
+# Python round no longer pays for a full Rust run; this checks what such a
+# change can break instead, offline, in seconds.
+#
+# zk2py is judged against the spec at the same commit. An amendment lands
+# before the Python round that implements it (the chunk, then the round), so
+# a spec/ change does not trigger this lane: on that commit zk2py is
+# expected to be behind, and the next round brings it level. The live
+# scenarios (`just py-health`, `py-config`, …) take minutes each and stay
+# local.
+name: Python
+on:
+  push:
+    branches: [main]
+    paths: ['impl/python/**', '.forgejo/workflows/python.yml']
+  pull_request:
+    paths: ['impl/python/**', '.forgejo/workflows/python.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v7.0.1
+      # `just py-conformance`, spelled out: a venv with a hash-checked pip,
+      # the pinned requirements, and protoc 3.21.12 (core §9.5).
+      - shell: bash
+        run: |
+          protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
+          ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
+            target/py-venv/bin/python -m zk2py.conformance spec/conformance
