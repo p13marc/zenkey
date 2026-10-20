@@ -311,9 +311,9 @@ class Bus:
             return [(t, k) for t, kind, k in self.tokens if kind == "put" and f"zk2/{address}/" in k]
 
     def read(self, session: Any, address: str = ADDRESS, *, subscriber: fr.Subscriber | None = None,
-             get: bool = True, horizon: fr.Horizon = al.HORIZON, watch: Any = None,
+             get: bool = True, horizon: fr.Horizon = al.HORIZON, window: Any = None,
              keys_known: tuple[str, ...] = ()) -> al.OwnerReading:
-        return al.read_owner(session, address, subscriber=subscriber, watch=watch, trust=self.trust, get=get,
+        return al.read_owner(session, address, subscriber=subscriber, window=window, trust=self.trust, get=get,
                              horizon=horizon, keys_known=keys_known)
 
     def close(self) -> None:
@@ -795,16 +795,20 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         time.sleep(0.5)
         from . import live
 
+        # T subscribes, then GETs (each reading's), and its window over
+        # both owners is §2.15's: core §2.7's lossless and presence, the
+        # owners watched one lease and the reply timeout past its end.
         sub = fr.Subscriber(bus.t_session, f"zk2/lab/*/{al.PROFILE}/state/alarms/*", bus.trust)
-        watches = {a: al.TokenWatch(bus.t_session, a) for a in ("lab/a", "lab/b")}
-        bus.extra += [sub, *watches.values()]
+        watch = al.WindowWatch(bus.t_session, sub, ("lab/a", "lab/b"))
+        bus.extra += [sub, watch]
 
         def scope() -> tuple[list[al.OwnerReading], list[str]]:
             pres = live.list_presence(bus.t_session, "zk2/lab/*/@zk/**")
             addresses = sorted({f"{p['system']}/{p['service']}" for p in pres.instances})
             alive = sorted({f"{p['system']}/{p['service']}" for p in pres.alive if p["iface"] == al.PROFILE})
-            return [bus.read(bus.t_session, a, subscriber=sub, watch=watches.get(a), horizon=h) for a in addresses], \
-                alive
+            windows = watch.windows()
+            return [bus.read(bus.t_session, a, subscriber=sub, window=windows.get(a), horizon=h)
+                    for a in addresses], alive
 
         reads, alive = scope()
         by = {r.address: r for r in reads}

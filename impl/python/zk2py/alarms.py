@@ -992,40 +992,78 @@ class AlarmsOwner:
 
 # -- the reader on a bus (§2.13 to §2.15) ----------------------------------------------
 
-class TokenWatch:
-    """A liveliness subscriber (with history) on one service's instance
-    tokens, for §2.15's "present throughout": the window's owner "held its
-    instance token from the window's start until one lease after its end"
-    (0.2). Here: a token held when the watch started, and no instance token
-    deleted since."""
+class WindowWatch:
+    """§2.15's window (0.2) over one subscription, for the owners it
+    covers. It "runs from its declaration" (no loss is ever known to a
+    zenoh-python callback subscriber, so never from a re-seed). Lossless
+    and present throughout are core §2.7's (0.25), as :class:`zk2py.budget.Window`
+    reads them:
+    - **lossless** is established from the resource's QoS (``reliable``,
+      ``block``, the contract's) and the reader's own receive path, a
+      :class:`zk2py.budget.StallWatch` on its session;
+    - **present throughout**: the owner's instance token held when the
+      watch started, none withdrawn, and one held one lease after the
+      window's end plus the reply timeout (core §2.7: "A tool watches the
+      owner's instance tokens for one lease after the window's end … and
+      its reply timeout more").
+    :meth:`windows` ends the window now, waits out that watch, and returns
+    each owner's :class:`Window`."""
 
-    def __init__(self, session: Any, address: str) -> None:
+    def __init__(self, session: Any, subscriber: fr.Subscriber, addresses: Iterable[str], *,
+                 qos: tuple[str, str] = ("reliable", "block"), lease_s: float = 10.0, reply_timeout_s: float = 1.0,
+                 wait_before_close_s: float = 5.0) -> None:
         import zenoh
 
+        from . import budget as bg
+        from . import live
+
+        self.session, self.subscriber, self.qos = session, subscriber, qos
+        self.lease_s, self.reply_timeout_s = lease_s, reply_timeout_s
+        self.stall = bg.StallWatch(session, bg.stall_bound(int(wait_before_close_s * 1000), int(lease_s * 1000)))
         self.lock = threading.Lock()
-        self.events: list[tuple[str, str]] = []
-        self.sub = session.liveliness().declare_subscriber(
-            f"zk2/{address}/@zk/instance/*", zenoh.handlers.Callback(self._got), history=True)
-        time.sleep(0.2)
-        with self.lock:
-            self.at_start = any(k == "put" for k, _ in self.events)
+        self.withdrawn: dict[str, bool] = {}
+        self.at_start: dict[str, bool] = {}
+        self.subs = []
+        for a in addresses:
+            self.withdrawn[a] = False
 
-    def _got(self, smp: Any) -> None:
-        import zenoh
+            def got(smp: Any, a: str = a) -> None:
+                if smp.kind == zenoh.SampleKind.DELETE:
+                    with self.lock:
+                        self.withdrawn[a] = True
 
-        with self.lock:
-            self.events.append(("put" if smp.kind == zenoh.SampleKind.PUT else "delete", str(smp.key_expr)))
+            self.subs.append(session.liveliness().declare_subscriber(f"zk2/{a}/@zk/instance/*",
+                                                                     zenoh.handlers.Callback(got)))
+            pres = live.list_presence(session, f"zk2/{a}/@zk/instance/*")
+            self.at_start[a] = bool(pres.instances) and pres.complete
 
-    @property
-    def present_throughout(self) -> bool:
-        with self.lock:
-            return self.at_start and not any(k == "delete" for k, _ in self.events)
+    def windows(self) -> dict[str, Window]:
+        from . import budget as bg
+        from . import live
+
+        end = time.monotonic_ns()
+        watch_until = end + int((self.lease_s + self.reply_timeout_s) * fr.NS)
+        while time.monotonic_ns() < watch_until:
+            time.sleep(min(0.1, (watch_until - time.monotonic_ns()) / fr.NS))
+        gap, closed = self.stall.reading()
+        lossless, _ = bg.lossless(*self.qos, stall_gap_ms=gap, stall_bound_ms=self.stall.bound_ms,
+                                  transport_closed=closed)
+        listened = (end - self.subscriber.declared_ns) / fr.NS
+        out = {}
+        for a in self.at_start:
+            pres = live.list_presence(self.session, f"zk2/{a}/@zk/instance/*")
+            with self.lock:
+                present = self.at_start[a] and not self.withdrawn[a] and bool(pres.instances)
+            out[a] = Window(listened, lossless and self.subscriber.complete, present)
+        return out
 
     def close(self) -> None:
-        try:
-            self.sub.undeclare()
-        except Exception:  # noqa: BLE001 - closing anyway
-            pass
+        self.stall.close()
+        for x in self.subs:
+            try:
+                x.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
 
 
 def _zid(text: Any) -> int | None:
@@ -1067,14 +1105,14 @@ class OwnerReading:
 
 
 def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = None,
-               watch: TokenWatch | None = None, trust: fr.ClockTrust | None = None, get: bool = True,
+               window: Window | None = None, trust: fr.ClockTrust | None = None, get: bool = True,
                horizon: fr.Horizon = HORIZON, keys_known: Iterable[str] = (), timeout: float = 1.0) -> OwnerReading:
     """One reading of ``address`` (``<system>/<service>``):
     - presence (core §8.1) by a liveliness GET of its instance tokens, the
       descriptor through it (§2.13: never the interface token);
     - the S4 GET of ``…/alarms.v1/state/alarms/*``, aged against ``trust``;
-    - the subscription ``subscriber`` made before it, its window lossless as
-      far as it knows, present throughout by ``watch``;
+    - the subscription ``subscriber`` made before it, for the key's
+      observations, and its ``window`` (:class:`WindowWatch`'s), for §2.15;
     - each key the subscription or the GET knows, and ``keys_known`` (an
       earlier reading's): its observations, and its latest sample merged by
       the owner's stamp (core §4.2), `previous_instance` when that put's
@@ -1098,10 +1136,6 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
         st = live.get_state(tool, prefix + "*", timeout=timeout)
         replies = {r.key: r for r in st.replies if r.key.startswith(prefix)}
         seed = Seed(complete=not st.errors, members=sum(1 for r in replies.values() if not r.deleted))
-    window = None
-    if subscriber is not None:
-        window = Window((time.monotonic_ns() - subscriber.declared_ns) / fr.NS, subscriber.complete,
-                        True if watch is None else watch.present_throughout)
     verdict = owner_set(presence, descriptor, None, seed, window, ttl_s=horizon.ttl_s or TTL_S)
     out = OwnerReading(address, presence, descriptor, meta_zid, seed, window, verdict)
     known = set(keys_known) | set(replies)
