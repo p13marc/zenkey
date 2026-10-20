@@ -342,3 +342,15 @@ py-link:
     protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
     ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
         target/py-venv/bin/python -m zk2py.link_scenarios
+
+# The Python implementation's alarms.v1 scenarios (spec/profiles/alarms/
+# scenarios.md §1–§10) on in-process zenoh-python routers, against zk2py's
+# owner, or the Rust owner example with `--owner <path>` (or ZK2PY_OWNER),
+# which this recipe never builds. §2, §6 and §10 run on a 4 s copy of the
+# contract unless `--full`; `--only N`, `--ttl S` and `--quick` pass through.
+py-alarms *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
+    ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
+        target/py-venv/bin/python -m zk2py.alarms_scenarios {{ARGS}}

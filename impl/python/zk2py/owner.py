@@ -290,7 +290,7 @@ class Owner:
                  state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
                  initial: dict[str, bytes] | None = None, hlc: bool = True,
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
-                 tombstone_s: float = TOMBSTONE_WINDOW_S):
+                 tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -348,10 +348,16 @@ class Owner:
           the tokens (§8.2 "State values"; a MUST for health.v1's status,
           health.v1 §2.3).
 
-        Every state member whose resource has a ``freshness.ttl_s`` above 0
-        is re-put, unchanged under a fresh stamp, once ttl/2 has passed
-        since its last put, until its writer closes (:meth:`close_writer`)
-        or the owner closes (freshness.v1 §2.4)."""
+        - ``before_tokens``: called with the owner after the state values
+          held at start are put, before step 3: a restart's own puts and
+          deletes (``alarms.v1`` §2.9: "before it answers a GET with it, and
+          SHOULD before its new instance token").
+
+        Every state member whose resource has a ``freshness.ttl_s`` above 0,
+        a templated one's members included from their first put, is re-put,
+        unchanged under a fresh stamp, once ttl/2 has passed since its last
+        put, until its writer closes (:meth:`close_writer`) or the owner
+        closes (freshness.v1 §2.4)."""
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
@@ -430,6 +436,7 @@ class Owner:
         #: query is handed to it, and answered when it calls
         #: :meth:`answer_state` with what :meth:`state_answer` made
         self.state_hold: Any = None
+        self.before_tokens = before_tokens
 
     # -- keys -------------------------------------------------------------
 
@@ -601,6 +608,8 @@ class Owner:
                     self.set_state(key, b"ok")
         for rel, payload in self.initial.items():
             self.set_state(f"zk2/{self.system}/{self.service}/{rel}", payload)
+        if self.before_tokens is not None:
+            self.before_tokens(self)
         # Step 3: the descriptor's queryable and its first put (§3.3), then a
         # contract queryable per interface.
         self.descriptor = self._descriptor(plan)
@@ -622,6 +631,10 @@ class Owner:
                 self._entities.append(lv.declare_token(
                     f"zk2/{self.system}/{self.service}/@zk/alive/{c.interface}/{self.instance}/{fp16}"))
         if self.horizons:
+            self._ensure_refresher()
+
+    def _ensure_refresher(self) -> None:
+        if self._refresher is None and not self._stop.is_set():
             self._refresher = threading.Thread(target=self._refresh_loop, daemon=True)
             self._refresher.start()
 
@@ -725,6 +738,12 @@ class Owner:
                         priority=getattr(zenoh.Priority, _PRIORITY[r["priority"]]), express=r["express"])
                     self._entities.append(pub)
                     self._publishers[key], self._encodings[key] = pub, enc
+                    # freshness.v1 §2.4 applies to every member of a state
+                    # with a horizon, a templated one's too.
+                    h = freshness.horizon(r["kind"], r["annotations"])
+                    if r["kind"] == "state" and h.horizon == "within":
+                        self.horizons[key] = h
+                        self._ensure_refresher()
                     return
         raise KeyError(f"{key}: no state resource of this owner holds it")
 
@@ -849,9 +868,11 @@ class Owner:
         while the clock guard holds, are not re-put (§2.10). When the guard
         releases, the members whose interval ran out are re-put at the next
         tick."""
-        refresh = min(h.refresh_ns for h in self.horizons.values() if h.refresh_ns)
-        tick = min(max(refresh / 10 / 1e9, 0.01), 0.1)
-        while not self._stop.wait(tick):
+        def tick() -> float:
+            refresh = min((h.refresh_ns for h in list(self.horizons.values()) if h.refresh_ns), default=10**9)
+            return min(max(refresh / 10 / 1e9, 0.01), 0.1)
+
+        while not self._stop.wait(tick()):
             for key, h in list(self.horizons.items()):
                 due = h.refresh_ns - min(h.refresh_ns // 5, 200_000_000)
                 with self._writes:
