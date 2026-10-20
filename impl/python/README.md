@@ -76,16 +76,17 @@ case name. It exits with:
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
+| alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
 
 ```text
-layout         18 passed     0 failed
+layout         19 passed     0 failed
 keys           55 passed     0 failed
 slugs          42 passed     0 failed
 templates      11 passed     0 failed
-contracts      99 passed     0 failed
+contracts     101 passed     0 failed
 sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
@@ -94,17 +95,25 @@ errors         45 passed     0 failed
 compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
-examples      107 passed     0 failed
+examples      108 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
-link          169 passed     0 failed
-total        1427 passed     0 failed
+link          172 passed     0 failed
+alarms        281 passed     0 failed
+total        1715 passed     0 failed
 ```
 
-The figures are against `core.md` 0.32, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3 and `link.v1` 0.7. `link.v1` 0.7
+The figures are against `core.md` 0.34, `hostid.v1` 0.5, `freshness.v1`
+0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.7 and `alarms.v1` 0.1.
+`alarms.v1` 0.1 added its four fixture files, 281 checks, and moved its
+standard contract under `spec/profiles/`: one more `examples` check, its
+revision in both history roots. `layout` now checks the six profiles'
+directories that hold fixtures. Core 0.34 added
+`contracts/w105-alarms-vocabulary`, and 0.33 changed no fixture. Three
+`lints.json` cases came after `link.v1` 0.7, with no text change, and
+zk2py passed them unchanged. `link.v1` 0.7
 added 13 `lints.json` cases and changed three; 0.6, core 0.31 and core
 0.32 changed no fixture. `link.v1` 0.5 added ten `lints.json` cases
 and changed one. `link.v1` 0.4
@@ -156,8 +165,10 @@ fixtures:
 - `link.v1` 0.7 resolved F-124 and F-125, found in a last cold read of its
   0.6: `block_disabled`, and a far principal of two faces carrying both
   plans' denies, warned by `far_of_two_faces`.
-- Nothing is open. A cold read of 0.7 found nothing more to guess
+- A cold read of `link.v1` 0.7 found nothing more to guess
   (`SPEC-FINDINGS.md`, "At link.v1 0.7").
+- F-126 to F-132, found against `alarms.v1` 0.1, are open
+  (`SPEC-FINDINGS.md`, "At alarms.v1 0.1").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -952,6 +963,37 @@ just py-link
 - **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
   core S3).
 
+## alarms.v1 (profile text 0.1, core 0.34)
+
+`alarms.v1` is the sixth profile (`spec/profiles/alarms/`), read cold in
+round 38. Its standard contract moved from `examples/zk2/` unchanged, and
+its revision 1.0 is published in both history roots, one file.
+- **`zk2py.alarms`**, the reader's and the tool's half, from the text
+  alone:
+  - **the key** (§2.2, §2.3): `derive` runs the recipe through the
+    sanitizing step, FNV-1a 64 over the framed input. It reports the
+    string hashed, and whether the strict recipe (`strict_key`) accepts
+    the input as it is. `is_host_scoped` compares exactly;
+  - **the reference** (§2.12): `key_of` builds an alarm's key from its
+    system, service and alert key, slugged, and `parse_key` reads one back;
+  - **the document** (§2.4): `read` is the reader's, against the 1.0
+    schema read from `spec/` by core §7.3's subset (`validate`) and the
+    time range. `decode` reads a payload as strict JSON (F-126). `check`
+    adds the owner's errors and warnings;
+  - **transitions** (§2.6): `Transitions`, each sample against the
+    document held before it;
+  - **the conclusions:** `judge` answers §2.14's two questions from one
+    `Reading`, with freshness by `zk2py.freshness` at 900 s. `owner_set`
+    (§2.15) says whether an owner's alarms are established. `any_firing`
+    asks "anything at or above *S*?", and `rederives` is §5's third
+    question.
+- **The `alarms` conformance family:** 281 of 281, every case passing the
+  first time it ran.
+- **The vocabulary** (core 0.34): `alarms` is published with no key, so
+  every `alarms.<key>` draws W105.
+- **Not yet:** an owner (§2.5, §2.7 to §2.9) and `scenarios.md` §1 to
+  §10, for a later round against the owner example.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -1054,6 +1096,7 @@ impl/python/
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
+    alarms.py         alarms.v1 the key and the sanitizing step, references, the document, transitions, the conclusions
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge

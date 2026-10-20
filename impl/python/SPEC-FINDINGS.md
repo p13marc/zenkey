@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Thirty-six rounds.**
+**Thirty-eight rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -77,7 +77,10 @@ where that was not enough, or where the spec said two things.
 - F-124 and F-125 were found against `link.v1` 0.6, in a last cold read of
   §2.4, §2.15 and §5 (see "At core 0.32"). `link.v1` 0.7 resolved them.
 - Nothing new was found against `link.v1` 0.7, read cold once more (see
-  "At link.v1 0.7" at the end).
+  "At link.v1 0.7").
+- F-126 to F-132 were found against `alarms.v1`'s text 0.1, the sixth
+  profile, read cold with core 0.33 and 0.34 (see "At alarms.v1 0.1" at the
+  end). Nothing was found in core 0.33 or 0.34 themselves.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -5758,3 +5761,324 @@ not a boolean, which zenoh refuses at load (measured above).
   face holds" reads. No case has one.
 - **A non-boolean `enabled`** raises `BlockError` (refused at load,
   measured), where `lints.json` defines `false`, `true` and absent only.
+
+## At alarms.v1 0.1 (#609)
+
+`alarms.v1` 0.1 is the sixth profile (`spec/profiles/alarms/`). zk2py read
+it cold with core 0.33 and 0.34. Its standard contract moved from
+`examples/zk2/` unchanged, and revision 1.0 is in both history roots.
+`zk2py.alarms` is the reader's and the tool's half, from the text alone:
+- the key recipe through the sanitizing step, and §2.12's reference;
+- the document's rules;
+- reading transitions;
+- §2.14's, §2.15's and §5's conclusions.
+
+**Core 0.33** (§11.1): a generator MUST refuse an input that binds one
+principal by both a user name and a CN. zk2py needed no change:
+- its input (`acl.Principal`) binds a principal by its user name alone and
+  has no CN, so no input can bind one principal by both. `acl.py` now says
+  so;
+- `link.compile_faces`, which reads a block the generator wrote, still
+  refuses a subject with both on a router with a face (`link.v1` §2.4).
+
+**Core 0.34** publishes `alarms.v1`'s vocabulary, empty. zk2py moved
+`alarms` from its interim table to its published one, with no key, so
+`contracts/w105-alarms-vocabulary` draws W105.
+
+**`just py-conformance`: 1715 of 1715.** At the start of the round, 1432
+passed and 2 failed: `layout` (the profile's `conformance/` unread) and
+`contracts` (`w105-alarms-vocabulary`).
+
+| Family | Before | After |
+|---|---|---|
+| layout | 18 of 19 | 19 of 19 |
+| contracts | 100 of 101 | 101 of 101 |
+| alarms | (none) | 281 of 281 |
+| the 17 others | 1314 of 1314 | 1314 of 1314 |
+
+The `alarms` family covers four files, every case passing the first time
+it ran:
+- `keys.json`, 120 checks: its 75 cases, each `derive` also against the
+  strict recipe, and each parsed key built back;
+- `documents.json`, 49;
+- `transitions.json`, 24;
+- `conclusions.json`, 88.
+
+`examples` stays byte-identical: `alarms.v1.toml` builds its published
+bundle, and the two history roots hold one file.
+
+**Passing is not deriving.** Two kinds of expectation come from the
+fixture, not the text:
+- the reason §5's third question gives a delete, `no_document` (F-132);
+- the reasons §2.15 gives an owner that fails §2.14's steps 1 and 2
+  (F-130).
+
+And `conclusions.json` passes under two readings of §2.14 step 4, which
+answer a live reading differently (F-128).
+
+### F-126 · gap · alarms.v1 0.1 §2.4: how a payload becomes a document
+
+> §2.4: "A reader MUST read a payload outside the schema, or with a time out
+> of that range, as undecodable"
+
+> §2.2: "The labels are a JSON object, whose names are distinct"
+
+The schema judges a JSON value. The text does not say how a payload's bytes
+become one, so three cases are left to the JSON parser:
+- **A duplicate member:** `"severity"` twice, or a label name twice.
+  Parsers keep the first, keep the last, or refuse. So two readers can read
+  two severities from one put, or derive two keys. §2.2's "whose names are
+  distinct" holds only for a parser that refuses duplicates.
+- **`NaN` and `Infinity`,** which some parsers accept.
+- **A lone surrogate escape** (`"\ud800"`). It is JSON text but has no
+  UTF-8 form, so §2.2's "the input's UTF-8 bytes" do not exist.
+
+The core reads its own documents as strict JSON: a descriptor (D000, "a
+duplicate member included") and a schema (E029). It has no such rule for a
+payload.
+
+**zk2py:** strict JSON (`alarms.decode`, through `jcs.loads`). A duplicate
+member, a non-finite number or a string with no UTF-8 form does not read,
+so the payload is undecodable. No fixture has one, since `documents.json`
+gives its payloads already decoded.
+
+**Wording that would remove the guess:** §2.4, "A reader reads a payload
+that is not strict JSON (RFC 8259 with no duplicate member, every string
+valid Unicode) as undecodable, as core §3.3's D000 reads a descriptor."
+
+### F-127 · ambiguity · alarms.v1 0.1 §2.6: "equal", with `labels` absent or `{}`
+
+> §2.6: "**Equal** is equal in every member this text names (§2.4)."
+
+> §2.4: "**`labels`**, optional: an object of strings."
+
+A document without `labels` and the same document with `"labels": {}`
+derive one key and say the same thing. A reader holding one reads the other
+as **confirmed** if they are equal, and as **refreshed** if not.
+- A typed reader that defaults a missing map to empty reads them as equal.
+- A reader that compares members as JSON reads them as unequal.
+
+`observed_at_ms` and `category` raise no such question: an empty value of
+theirs is not their absence.
+
+**zk2py:** unequal, since an absent member is absent. `transitions.json` has
+no such pair. Neither answer is a transition, so no acknowledgement turns on
+it, but a tool that counts refreshes would.
+
+**Wording:** §2.6, "`labels` absent is equal to `{}`", or "a member absent
+is equal only to itself absent".
+
+### F-128 · ambiguity · alarms.v1 0.1 §2.14 step 4, with §2.15: what a GET after a loss heals
+
+> §2.14 step 4: "**A loss.** A subscription lost deliveries, and no GET
+> answered since: **unobservable**, `incomplete`. A lost delivery may have
+> been this key's latest, so a reader that lost one re-seeds by S4's GET
+> (core §4.2)."
+
+> §2.15: "a reader's S4 GET … ran to its final reply with no error reply …,
+> the reader's subscription, if it has one, lost no delivery and its owner
+> was present throughout"
+
+"No GET answered since" reads two ways:
+1. no GET has answered **this key** since, with a value or a `reply_del`;
+2. no GET has **run** since, to its final reply.
+
+They part when three things hold: the subscription lost deliveries, its
+last put of the key is fresh, and a complete GET since drew nothing for the
+key.
+- Reading 1 stops at step 4: **unobservable**, `incomplete`.
+- Reading 2 goes on to step 6, where the subscription's put is fresh:
+  **yes**, `firing`. Yet by core S2, that complete GET says the owner holds
+  no live key there.
+
+`conclusions.json` does not tell them apart. Its one such case, "a loss,
+and a GET that drew nothing for the key", has its subscription's put 1000 s
+old, so `freshness.v1` reads it `incomplete` either way. zk2py ran all 88
+cases under reading 2 too, and all 88 pass. With that put 10 s old,
+reading 1 answers `incomplete` and reading 2 `firing`.
+
+§2.15 has the same gap from the other side. Its subscription must have
+"lost no delivery", with no "since":
+- a loss that a later complete GET re-seeded still leaves the owner
+  `window_lost`;
+- so "established" never returns on that subscription.
+
+`owner_set`'s inputs carry one `lossless` flag and no order, so no case
+decides this.
+
+**zk2py:** reading 1, the narrower one: a GET heals a loss for a key it
+answered. For §2.15, it takes `lossless` as given.
+
+**Wording:**
+- §2.14 step 4: "and no GET has answered this key since, with a value or a
+  `reply_del`";
+- §2.15: whether a complete GET after a loss re-establishes the owner: for
+  instance, "lost no delivery since that GET, and for `window`, over the
+  window".
+
+### F-129 · gap · alarms.v1 0.1 §2.14 step 5: an earlier instance, told by a stamp's id
+
+> §2.14 step 5: "a put stamped by an earlier instance of the owner than the
+> present one, its stamp's id not the present descriptor's `meta.zid` (core
+> §4.3, §3.3): **not asked**, `previous_instance`. It is that instance's
+> last word"
+
+The step tells an instance by a zid, but an instance is an instance id
+(core §1.5), and the two need not move together:
+- **A re-mint in one session.** Core §1.5 only says an owner SHOULD
+  re-mint in a new session. One that keeps its session keeps its zid. Its
+  earlier instance's put then passes for the present one's, and nobody can
+  check §2.9's re-put.
+- **No `meta.zid`.** It is a SHOULD (core §3.3: "Without it, a stamp's
+  clock is unattributable, never foreign"). Then the step's test has
+  nothing to compare with. The text says neither "every put is the present
+  instance's" nor "none is".
+- **A stamp that is no instance's of the owner:** a router's re-stamp of a
+  put from a session without an HLC, or any writer breaking S1. Core §4.2
+  says "A foreign stamp is a finding". Step 5 instead reads it as
+  `previous_instance`: not asked, shown as last-known, and no finding.
+
+**zk2py:** `Reading.previous_instance` is the caller's input, as the
+fixture's is. zk2py's live reader will set it when the stamp's id, compared
+by value, is not `meta.zid`. It will leave it unset when the descriptor has
+no `meta.zid`, by core §3.3's "never foreign". It cannot see a re-mint in
+one session.
+
+**Wording:** "a put whose stamp's id is not the present descriptor's
+`meta.zid`, by value: **not asked**, `previous_instance`, whether an
+earlier instance stamped it or another session did (core §4.2's finding).
+With no `meta.zid`, step 6. A re-mint that keeps its session is not told
+apart."
+
+### F-130 · gap · alarms.v1 0.1 §2.15 "Established": the reasons, a face, and their order
+
+> §2.15: "**Established.** An owner's alarms are known whole,
+> **established**, when it is present and listed (§2.14, steps 1 and 2), …"
+
+> "**Otherwise unobservable:** no GET (`no_seed`); one that ended at its
+> timeout or with an error reply (`seed_incomplete`); a window that lost a
+> delivery (`window_lost`), or over which the owner was not present
+> throughout (`owner_gap`); an empty GET and no window (`no_member` …), or a
+> window no longer than 900 s (`window_short`); across a face, an empty GET
+> (`across_face` …). Absent and not listed are **not asked**, as in §2.14."
+
+The fixture expects three things the text does not state.
+1. **The reasons of steps 1 and 2.** The list has no reason for presence
+   possibly incomplete, a descriptor not read, or a face closed.
+   `conclusions.json` expects `presence_incomplete`, `no_descriptor` and
+   `face_closed`, which are §2.14's reasons. zk2py carried them over.
+2. **Across a face.** No owner across a face is "present and listed":
+   presence does not cross, and the deployment's word stands for the
+   descriptor. Read as written, no owner across a face is ever established.
+   Yet the fixture establishes one ("across a face, a GET by grant that the
+   owner answered", `answered`). That follows only if "present and listed
+   (§2.14, steps 1 and 2)" means "§2.14's steps 1 and 2 do not answer".
+   - The fixture's across-face case with an empty GET carries a window with
+     `present_throughout: true`. The text says no window across a face can
+     have that ("no window is of a present owner").
+   - A reader that sets it false across a face, as the text suggests, makes
+     every across-face owner with a subscription `owner_gap`, `answered`
+     included.
+3. **The order.** The reasons overlap, and the text never says which wins:
+   - a timed-out GET and a lossy window: `seed_incomplete` or
+     `window_lost`;
+   - across a face, an empty GET and no window: `across_face` or
+     `no_member`.
+
+   No case has two at once.
+
+**zk2py:** `alarms.owner_set` checks, in this order:
+1. §2.14's steps 1 and 2, with their reasons;
+2. `no_seed`, `seed_incomplete`, `window_lost` and `owner_gap`;
+3. `answered`;
+4. `across_face`, `no_member` and `window_short`;
+5. `window`.
+
+Across a face, it takes a window's `present_throughout` as given.
+
+**Wording:**
+- "established when §2.14's steps 1 and 2 do not answer";
+- "otherwise, by the first of these that holds: §2.14's steps 1 and 2,
+  with their reasons; …";
+- for a face, either "a window across a face is never present throughout",
+  or "across a face, `answered` needs no window".
+
+### F-131 · gap · alarms.v1 0.1 §2.15, with scenarios §8: which owners are in scope
+
+> §2.15: "**Anything firing at or above a severity *S*,** over the owners in
+> a scope … Each owner is counted by its verdict: established, unobservable,
+> not asked."
+
+> §2.13: "A reader MUST find `alarms.v1`'s owners through instance tokens
+> and descriptors"
+
+> scenarios §8 step 3: "T's answer to "is anything firing at or above
+> `warning`?" over `zk2/lab/*` counts the owner as not asked"
+
+An owner found through instance tokens is present. Then an absent owner is
+never in scope, and "not asked" counts only the owners whose descriptors do
+not list `alarms.v1`. Scenario §8 expects the absent `lab/svc` to be
+counted, so T must know it some other way:
+- its own step 1;
+- an archive's keys;
+- a list of the services it expects.
+
+The text names none of them.
+
+**zk2py:** `any_firing` counts the owners its caller gives. zk2py's §8 will
+count an owner that T read earlier in the same run, and nothing else.
+
+**Wording:** "The owners in scope are those found by presence (§2.13),
+and those the tool knew of before: by an earlier reading, or by an
+archive's keys (core S6). An owner known only the second way is absent:
+not asked."
+
+### F-132 · gap · alarms.v1 0.1 §5: the third question's reasons for a delete and an undecodable payload
+
+> §5, "Does this key re-derive from its document?": "**Not asked:** a
+> delete, which carries no document. **Unobservable:** the payload
+> undecodable."
+
+`conclusions.json` expects `{"answer": "not_asked", "reason":
+"no_document"}` and `{"answer": "unobservable", "reason": "undecodable"}`.
+- The row names `strict`, `sanitized` and `mismatch` as reasons, but not
+  these two.
+- `no_document` occurs nowhere in the text, nor in the fixture's
+  description.
+
+zk2py passes the delete's case only by copying its expectation. Its own
+guess would have been `deleted`, as in §2.14. `undecodable` it could guess
+from §2.14.
+
+**Wording:** "**Not asked:** a delete, which carries no document
+(`no_document`). **Unobservable:** the payload undecodable (`undecodable`)."
+
+**Where zk2py's reading of alarms.v1 0.1 needed a guess, beyond the
+findings.** No fixture case reaches these:
+- **A not-asked freshness at step 6.** This takes observations that
+  contradict the latest put: a firing put, with every observation an
+  archive or a delete. §2.14 step 6 names fresh, stale and unobservable.
+  zk2py answers unobservable, with `freshness.v1`'s reason.
+- **The last question when the put does not read and its freshness is
+  unobservable** (near the horizon, say): zk2py answers `undecodable`, the
+  line its step 6 puts first. The first question gives `freshness.v1`'s
+  reason.
+- **An archive's document and `latest`.** §0's reading takes the latest
+  sample from "a subscription and a GET merged". So an archive's document
+  is not the latest, yet the fixture's archive cases write `latest:
+  firing`. No answer turns on it, since steps 1 and 3 answer first.
+  zk2py's live reader will follow §0.
+
+**The scenarios** (`scenarios.md` §1 to §10), read for a later live round:
+- **§1 to §4, §6, §7, §9 and §10** can be implemented from the text.
+  zk2py's owner will need three additions: to stop confirming one alarm
+  while it keeps its tokens (§6), a stated cardinality in its descriptor
+  (§7), and a refused raise told to its writer (core §2.7).
+- **§5** leaves two readings of S unsaid, which §2.6 decides:
+  - R's and P's deletes read **retired**, since S never held either;
+  - B's unchanged re-put reads **confirmed**, before its **resolved** and
+    **retired**.
+
+  The persistent record's format is the owner's own.
+- **§8** needs F-131's answer. Its archive will be zk2py's stand-in for
+  `archive.v1`, as in `health.v1`'s §6.
