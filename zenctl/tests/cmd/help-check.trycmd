@@ -36,7 +36,7 @@ Options:
 $ zenctl check expect --help
 Wait for an expectation on a zk2 resource, exit-coded for CI.
 
-An await (#160), written over an address and a resource of its contract (zk2's since #612, FJ8b): samples (`--at-least`, `--absent`), rates (`--rate-min`, `--rate-max`), values (`--valid-payload`: each payload conforms to its declared type), QoS (`--qos declared`) and presence (`--present`: the address holds the interface's token). The subscription is the runtime's consumer, declared BEFORE the window opens (not-asked is not "no", O4); R6's discards and unresolved samples are counted apart from the lag. Exit 0 = met; 1 = not met on a clean observation; 2 = the observation cannot carry the claim (drops under a completeness claim, a presence read that timed out, session failure). `--absent` is legitimate ONLY because of that 2.
+An await (#160), written over an address and a resource of its contract (zk2's since #612, FJ8b): samples (`--at-least`, `--absent`), rates (`--rate-min`, `--rate-max`), values (`--valid-payload`: each payload conforms to its declared type), QoS (`--qos declared`) and presence (`--present`: the address holds the interface's token). The subscription is the runtime's consumer, declared BEFORE the window opens (not-asked is not "no", O4); R6's discards and unresolved samples are counted apart from the lag. Exit 0 = met; 1 = not met on a clean observation; 2 = the observation cannot carry the claim (drops under a completeness claim, which --absent, --rate-max, --valid-payload and --qos declared are; a presence read that timed out; session failure). `--absent` is legitimate ONLY because of that 2.
 
 Usage: zenctl check expect [OPTIONS] <SYSTEM/SERVICE> <IFACE[@FP]> [RESOURCE]
 
@@ -55,7 +55,7 @@ Options:
           A template parameter, `NAME=VALUE` with the value unslugged, repeatable. A parameter not given is a wildcard
 
       --for <SECS>
-          Observation window, seconds
+          Observation window, seconds. It closes early once every claim holds, but only --at-least and --present can end it: a rate, --absent, --valid-payload and --qos declared read it whole
           
           [default: 30]
 
@@ -69,10 +69,10 @@ Options:
           Samples/second ceiling, measured over the full window
 
       --valid-payload
-          Require every observed payload to conform to its declared type: it decodes as the type, and a JSON Schema value satisfies it (spec §7.2, §7.3). "Not checked" fails the assertion, with the reason
+          Require every payload in the window to conform to its declared type: it decodes as the type, and a JSON Schema value satisfies it (spec §7.2, §7.3). "Not checked" fails the assertion, with the reason. The window is read whole, and a drop cannot carry it (exit 2)
 
       --qos <declared>
-          Require every observed sample to ride its resource's declared QoS: priority, congestion control and express (spec §2.4)
+          Require every sample in the window to ride its resource's declared QoS: priority, congestion control and express (spec §2.4). The window is read whole, and a drop cannot carry it (exit 2)
           
           [possible values: declared]
 

@@ -541,6 +541,27 @@ async fn expect_judges_samples_values_and_presence() {
         "{bad:?}"
     );
 
+    // A second of valid payloads, then invalid ones, inside one window: a
+    // universal claim reads the window whole, so the late violation is
+    // found (#801). Early success used to end it at the second valid
+    // sample, met.
+    let valid_then_invalid = async {
+        for i in 0..30 {
+            let body = if i < 20 {
+                json!({"stats": {"rx_bytes": 1}})
+            } else {
+                json!({"no_stats": true})
+            };
+            let _ = writer.put_value(&body).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    let (late, ()) = tokio::join!(run_expect(&bed.tool, aim(), &spec), valid_then_invalid);
+    let late = late.expect("a window");
+    assert_eq!(late.verdict, ExpectVerdict::NotMet, "{late:?}");
+    assert!(!late.ended_early, "{late:?}");
+    assert_eq!(late.window_s, 3.0, "{late:?}");
+
     let nobody = ResolvedTarget::parse("host-z/tc").expect("target");
     let absent = run_expect(
         &bed.tool,

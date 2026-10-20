@@ -937,9 +937,10 @@ pub(crate) enum CheckCmd {
     /// declared BEFORE the window opens (not-asked is not "no", O4); R6's
     /// discards and unresolved samples are counted apart from the lag. Exit
     /// 0 = met; 1 = not met on a clean observation; 2 = the observation
-    /// cannot carry the claim (drops under a completeness claim, a presence
-    /// read that timed out, session failure). `--absent` is legitimate ONLY
-    /// because of that 2.
+    /// cannot carry the claim (drops under a completeness claim, which
+    /// --absent, --rate-max, --valid-payload and --qos declared are; a
+    /// presence read that timed out; session failure). `--absent` is
+    /// legitimate ONLY because of that 2.
     Expect(CheckExpectArgs),
     /// Read a zk2 resource as a consumer does; do values arrive in a window?
     ///
@@ -2514,7 +2515,9 @@ pub(crate) struct CheckExpectArgs {
     /// repeatable. A parameter not given is a wildcard.
     #[arg(long = "param", value_name = "NAME=VALUE", value_parser = param_arg)]
     pub(crate) params: Vec<(String, String)>,
-    /// Observation window, seconds.
+    /// Observation window, seconds. It closes early once every claim holds,
+    /// but only --at-least and --present can end it: a rate, --absent,
+    /// --valid-payload and --qos declared read it whole.
     #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
     pub(crate) for_secs: f64,
     /// Require at least N samples (default 1 unless --absent).
@@ -2529,13 +2532,15 @@ pub(crate) struct CheckExpectArgs {
     /// Samples/second ceiling, measured over the full window.
     #[arg(long, value_name = "HZ")]
     pub(crate) rate_max: Option<f64>,
-    /// Require every observed payload to conform to its declared type: it
-    /// decodes as the type, and a JSON Schema value satisfies it (spec §7.2,
-    /// §7.3). "Not checked" fails the assertion, with the reason.
+    /// Require every payload in the window to conform to its declared type:
+    /// it decodes as the type, and a JSON Schema value satisfies it (spec
+    /// §7.2, §7.3). "Not checked" fails the assertion, with the reason. The
+    /// window is read whole, and a drop cannot carry it (exit 2).
     #[arg(long)]
     pub(crate) valid_payload: bool,
-    /// Require every observed sample to ride its resource's declared QoS:
-    /// priority, congestion control and express (spec §2.4).
+    /// Require every sample in the window to ride its resource's declared
+    /// QoS: priority, congestion control and express (spec §2.4). The
+    /// window is read whole, and a drop cannot carry it (exit 2).
     #[arg(long, value_name = "declared", value_parser = ["declared"])]
     pub(crate) qos: Option<String>,
     /// Assert silence: no sample may arrive within the window.

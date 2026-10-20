@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a universal claim reads the window whole (#801)
+
+`check expect --valid-payload` and `--qos declared` ended the window at the
+first `--at-least` samples when no rate bound was set (early success), so
+"every payload conforms" vouched for one payload: #781 measured a 10 ms
+window with an intruder's invalid samples never read. The maintainer
+decided #781's question: a universal claim holds the window open.
+
+| Before | Now | Notes |
+|---|---|---|
+| `--valid-payload`, `--qos declared`: the window closed once `--at-least` samples conformed (`ended_early: true`) | the window runs its whole `--for`; `ended_early` is `false` and `window_s` is the window asked for | `--at-least` and `--present` alone are existential and still end it early. A rate bound and `--absent` already read it whole. A script that relied on a fast met answer gets it after `--for` |
+| a met `--valid-payload` or `--qos declared` with `dropped > 0` was met (exit 0) | impaired, exit 2: "sample(s) dropped while the claim needs completeness (O6)" | a dropped sample may be the one that broke the claim, as `--absent`'s and `--rate-max`'s already were |
+
 ## Unreleased (`main`, zk2) — a principal bound by a user name and a CN both is refused everywhere (#788)
 
 zenoh matches one value of each property a subject names, so a subject
