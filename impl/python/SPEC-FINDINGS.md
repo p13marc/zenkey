@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty rounds.**
+**Forty-one rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -87,8 +87,12 @@ where that was not enough, or where the spec said two things.
   0.2"). F-133 is against the example's documentation, not the spec.
   `alarms.v1` 0.3 resolved both.
 - F-135 to F-137 were found against `alarms.v1` 0.3, read cold and run
-  live against the owner example at 0.3 (see "At alarms.v1 0.3" at the
-  end). F-137 came from review of PR #809.
+  live against the owner example at 0.3 (see "At alarms.v1 0.3"). F-137
+  came from review of PR #809. `alarms.v1` 0.5 resolved all three, F-137
+  partly against zk2py's reading.
+- F-138 and F-139 were found against `alarms.v1` 0.4 and 0.5, read cold
+  and run live against the owner example at 0.3 (see "At alarms.v1 0.5" at
+  the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -6476,6 +6480,17 @@ holds A and B under the new instance's stamps and a `reply_del` for R's and
 P's keys (the SHOULD; core §8.2, 'State values')", with S's receipts
 listed without an order against the token.
 
+**Status at alarms.v1 0.5: resolved by 0.5, as zk2py checked it.**
+`scenarios.md` §5, step 3: "G GETs the moment S sees the new instance
+token. Then the owner evaluates its rules once." Expected 3: "G's GET at the
+token holds A … and B, unchanged, each under the new instance's stamp id,
+and a `reply_del` of R's key and of P's key, stamped by it … S receives, in
+no order against the token". §2.9 gains "How 'before its token' is
+observed".
+
+zk2py's §5 now takes the GET as a step before the owner's evaluation, and
+checks the `reply_del`s' stamps too. Both owners pass.
+
 ### F-136 · gap · alarms.v1 0.3 §2.14 steps 4 and 5: a key whose resolve and delete a loss took never reads no
 
 > §2.14 step 4: "**A loss.** A subscription lost deliveries, and no GET has
@@ -6538,6 +6553,19 @@ left it out with nothing of it arriving after that GET was asked (step 5)".
 Or state that a reader forgets a key once an establishing GET leaves it
 out.
 
+**Status at alarms.v1 0.5: resolved by 0.5, against zk2py's reading.**
+§2.14 step 4: "…nor has the GET that established its owner's alarms
+(§2.15) left it out (step 5)". Step 5 defines "left the key out" once, "for
+an owner established either way (`answered` or `window`)", a delete
+included.
+- zk2py's judge now reads `Reading.left_out`, which heals step 4 and makes
+  the held sample none.
+- Its reader computes `left_out` instead of dropping the sample.
+- `conclusions.json`'s six new `reading` cases pass.
+- §3's extra shows it live, on both owners. A reader that held A firing and
+  noted the loss that took A's resolve and delete reads `no, not_held`
+  once its re-seed, answering B, establishes the owner.
+
 ### F-137 · gap · alarms.v1 0.3 §2.15: the second question over a scope whose read was not whole
 
 > §2.15 (0.2, 0.3): "**The owners in scope** of a selector … are the
@@ -6578,6 +6606,26 @@ read possibly incomplete, an archive's GET short of its final reply, a key
 that does not read back): **unobservable**, `owner_unobservable`" (or a
 reason of its own).
 
+**Status at alarms.v1 0.5: resolved by 0.5, partly against zk2py's
+reading.**
+- §2.15 "Whole": "the reader's latest presence read of them ran to its
+  final reply … and, for a reader that follows instance tokens since, it
+  lost none of their moves".
+- A step of its own: "the reads that found the scope were not whole …
+  **unobservable**, `scope_incomplete`". It comes after
+  `owner_unobservable` and before an alarm's.
+- "An archive's read plays no part in it". An owner known only by an
+  archive's keys is absent and stops no answer, so an archive read cut
+  short "can leave out only such an owner".
+
+zk2py changes on both points:
+- the phantom unobservable owner is gone, replaced by
+  `any_firing(scope_whole)`;
+- `ScopeRead.whole` is the presence read's alone, and an archive's read
+  only sets `archive_short`.
+
+The six new `any_firing` cases pass.
+
 **After review of PR #809** (zk2py's code; F-135 tightened, F-137 added):
 - **The window's healing** is a pure function, `window_span`, with six
   cases in `readings`.
@@ -6617,3 +6665,164 @@ findings.**
   none. zk2py applies it to a held delete too, which then reads
   `not_held` rather than `deleted`. Both are **no**, and both are
   `not_firing` for the last question.
+
+## At alarms.v1 0.5 (#609)
+
+Two texts, read cold together, with the core unchanged at 0.34:
+- **0.4** adds §2.16, "Reporting changes", which the reference notifier
+  settled. It changes no fixture.
+- **0.5** answers F-135 to F-137, each entry above carrying its status. It
+  states two of round 40's guesses, both as zk2py read them:
+  - "A GET is dated by the instant it was asked, its replies included";
+  - a held delete reads `not_held`.
+
+`conclusions.json` goes from 95 cases to 107. Every `reading` case gains
+`left_out`, every `any_firing` case `scope_whole`, and six cases each are
+new for F-136 and F-137. The owner black box is still 0.3's, `owner-ac`.
+
+**What zk2py implemented, from the texts alone:**
+- **§2.14 steps 4 and 5 (0.5):** `Reading.left_out`, which heals step 4
+  and makes the held sample none, so the key reads `not_held`.
+  `read_owner` computes it, and no longer drops the sample.
+- **§2.15 "Whole" (0.5):**
+  - `any_firing(scope_whole)`, with step 3 `scope_incomplete`;
+  - `ScopeRead.whole`, the presence read's alone, with `archive_short`
+    for an archive's read, which plays no part;
+  - `AlarmsReader.scope_read`, not whole after a loss seen since its
+    presence read began.
+- **§2.16 (0.4):** `ChangeReporter`. It reports §2.14's answer after each
+  change, never the change's name alone. A change is the answer moving
+  between yes, no and neither, or, while yes, the severity moving. A loss
+  is reported once for the scope (the MAY), and each key again once
+  healed (F-139). An alarm firing at the first reading is reported (the
+  SHOULD).
+
+**`just py-conformance`: 1844 of 1844.**
+- At the start of the round, 7 of `conclusions.json`'s new cases failed:
+  the three F-136 cases whose `left_out` makes the held sample none (one
+  healing step 4 after a loss, two without a loss), and four of the F-137
+  cases.
+- The `alarms` family is 316. `readings` is 94:
+  - §2.4's whitespace, 11;
+  - the window's healing, 6;
+  - 0.5's scope, 2;
+  - §2.16's reporter, 75: one per `transitions.json` case (27), one per
+    `conclusions.json` reading (47), and a loss sequence.
+
+**`just py-alarms`: 80 of 80** against zk2py's owner and 80 of 80 against
+`owner-ac`, both exiting 0. That is round 40's 74, with:
+- §3's extra now losing the resolve, which reads `no, not_held` (0.5);
+- §5's GET at the token taken before the owner's evaluation, its
+  `reply_del`s stamped by the new instance (0.5);
+- §8 and §10 reading the scope as 0.5 says;
+- §10 running the change reporter live. It reports:
+  - the first reading's firing alarm, with its answer;
+  - nothing for A's confirmations;
+  - B's raise at its severity, and B's resolve and delete as **no**;
+  - a loss once for the scope, and no key for it;
+  - nothing when the healed A still fires at its severity.
+
+§2, §4, §6 and §10 ran on the 4 s copy. §10's step 2 at 900 s stayed
+out, as before.
+
+### F-138 · gap · alarms.v1 0.5 conformance/conclusions.json: `left_out` and `scope_whole` undescribed
+
+> core Appendix E: "Each fixture file states its own format in its
+> `description` member."
+
+> CHANGELOG 0.5: "`conclusions.json` gains the two inputs in every case it
+> reads them in"
+
+`conclusions.json`'s description is 0.3's, and names neither input.
+- **`scope_whole`** reads plainly from §2.15's "Whole".
+- **`left_out`** is wider in the fixture than the text's term.
+  - §2.14 step 5 defines "left the key out" for "the GET that established
+    its owner's alarms" only.
+  - Yet two cases give `left_out: true` for an owner whose alarms are not
+    established (`held_whole: false`): "a GET after it that left the key
+    out but did not establish its owner's alarms", and "the GET that left
+    the key out was asked before the loss".
+  - Both expect `incomplete`. So in the fixture, `left_out` means a GET
+    left the key out, and the judge counts it only with `held_whole`.
+  - An implementation reading `left_out` as the text's term, "the
+    establishing GET left it out", without that gate, reads those two
+    cases `no, not_held`.
+
+**zk2py:** `left_out` counts only with `held_whole` (`judge`: `left_out =
+r.left_out and r.held_whole`), which passes all six. That reading came from
+the cases' notes, not from a stated format.
+
+**Wording:** the description: "`left_out`: a GET, the latest after any
+loss, answered the key with neither a value nor a `reply_del`, and nothing
+of the key arrived after it was asked; it is §2.14 step 5's left-out key
+only when that GET established the owner's alarms (`held_whole`).
+`any_firing` … `scope_whole`: whether the reads that found the scope are
+whole (§2.15)."
+
+### F-139 · ambiguity · alarms.v1 0.4 §2.16: "reports each key again" after a loss
+
+> §2.16: "**A loss is the reader's.** … A tool MAY report it once for its
+> scope rather than once per key, if it then reports no key's answer the
+> loss made unobservable, and reports each key again as the GET that heals
+> the loss answers it, or, establishing its owner's alarms, leaves it out"
+
+> §2.16: "**What is a change to report:** the answer moving between yes,
+> no and neither; and, while yes, the document's severity moving"
+
+"Reports each key again" reads two ways:
+1. **Every key is reported anew** once healed, whether or not its answer
+   moved. An alarm firing before the loss and firing after it is reported
+   firing a second time.
+2. **Reporting resumes for each key** as healed, against its last report.
+   A key whose answer did not move is not reported, as "What is a change to
+   report" says.
+
+For a notifier the two differ by one page per firing alarm after every
+loss. The CHANGELOG 0.4 suggests reading 2: "each key keeps its last report
+until the GET that heals the loss answers it". The text does not say it.
+
+**zk2py:** reading 2. `ChangeReporter` keeps each key's last report through
+the loss and reports a healed key only if its answer moved. `readings`
+checks it (a loss, A still firing, B now `no`: B alone is reported), and so
+does §10 live.
+
+**Wording:** "…and reports each key again, against its last report, as the
+GET that heals the loss answers it", or "…reports each key's answer again,
+moved or not".
+
+**After review of PR #812** (zk2py's code; no finding changed):
+- **`left_out` and a `reply_del`.** A key the owner answered with a
+  `reply_del` was never left out: the GET's replies keep every reply, so it
+  reads `deleted`. The rule is now a pure function, `is_left_out`, with six
+  cases in `readings`, the `reply_del` among them.
+- **The loss instants** of `note_loss` and of the stall watch were already
+  on one monotonic clock, `scope_read`'s too. Unchanged.
+- **`ChangeReporter`'s loss** is now tracked per key:
+  - one scope report when the first key goes lossy;
+  - none for a second loss while any key is unhealed;
+  - an "observable again" report when the last one heals, after which a
+    later loss is reported again.
+
+  A partial update (one owner's keys) heals only its own keys. In an update
+  of the whole scope, a key known before that is missing is reported once,
+  `unobservable`/`not_read`, never dropped silently. Four loss sequences
+  pin these cases, and §10's live check now expects "observable again".
+- A `conclusions.json` case missing `left_out` or `scope_whole` fails alone.
+  §5's GET at the token, if it does not come within 5 s, is a failed check
+  with its cause.
+
+`just py-conformance`: 1853 of 1853 (`readings` 103). `just py-alarms`: 80
+of 80 on each owner.
+
+**Where zk2py's reading of alarms.v1 0.4 and 0.5 needed a guess, beyond
+the findings.**
+- **A key first read after the first reading** at **no** or **neither** (a
+  late resolve, say) is recorded, not reported. Nothing moved from a report
+  never made. A key first read **yes** is reported, as at the first
+  reading.
+- **"Lost none of their moves since"** (§2.15 "Whole"): zk2py counts a loss
+  seen from the instant the presence read began.
+- **The session cut off from every router** (0.4, "Deliberately not
+  stated"). zenoh answers its reads at once, complete and empty. zk2py's
+  reader does not guard against it: such a reader would read every owner
+  absent and heal a loss. The text defers it to the core.
