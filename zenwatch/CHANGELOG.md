@@ -10,7 +10,7 @@ aliases and no shims, except where the two spellings were always one fact
 ## Unreleased (`main`, zk2) — the alarm rules on `alarms.v1` (#800, AD)
 
 `alerts` and `alert-firing` are back, on `alarms.v1`
-(`spec/profiles/alarms/v1.md`, text 0.3): what FL2 left dark until zk2's
+(`spec/profiles/alarms/v1.md`, text 0.4): what FL2 left dark until zk2's
 alarm profile existed. Both read through the session in the deployment's
 namespace, so their selectors are base-relative (`zk2/…`), unlike every
 other rule's wire selector. `zenwatch.v1` is unchanged, and so is the

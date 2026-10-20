@@ -214,7 +214,7 @@ rest of #613 is not written:
 | `config.v1` | zenctl's `config`, zengui's Config tool, zenoh-modem's configuration plane |
 | `blob.v1` | zenctl's `blob`, zengui's Blob browser, ZenSight's artifacts |
 | `media.v1` | zengui's Media viewer, ZenSight's parallax. An explicit `@stream` carries frames meanwhile. |
-| `alarms.v1` | Specified (#800, text 0.3): the runtime's owner (`zenkey::alarms`), zenctl's `alarms`, the watchdog's and `record --on`'s `alert-firing`, the doctor's `alarm-key` and `alarm-stale`, zenwatch's `alerts` and `alert-firing` (#800's AD). Still waiting: ZenSight's alerts |
+| `alarms.v1` | Specified (#800, text 0.4): the runtime's owner (`zenkey::alarms`), zenctl's `alarms`, the watchdog's and `record --on`'s `alert-firing`, the doctor's `alarm-key` and `alarm-stale`, zenwatch's `alerts` and `alert-firing` (#800's AD). Still waiting: ZenSight's alerts |
 | `redundancy.v1` | exclusivity: O1's at-most-once holds only while one instance serves. ZenSight's catalog and desired singletons |
 | `desired.v1` | durable commands keyed by their target; ZenSight's desired state |
 | `link.v1` | per-resource exposure across a constrained face; zenoh-modem's RF and SBD faces |

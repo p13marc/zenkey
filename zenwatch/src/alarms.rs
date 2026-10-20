@@ -15,13 +15,14 @@
 //!   alarms last-known), an earlier instance's put, a put that does not
 //!   read — never ok.
 //!
-//! **What notifies.** A move of that state, and, while firing, a move of
-//! the document's severity (an escalation, either way: §2.5). A refresh and
-//! a confirmation are not transitions (§0): at the state and severity held
-//! they say nothing, and nor does a raise of an alarm already said firing
-//! at its severity. The severity is the document's, and the notification
-//! carries the fleet's pinned [`AlarmTransition`], the document rendered
-//! through the contract (`rendering: schema`).
+//! **What notifies** (§2.16, text 0.4, which this rule settled). A move of
+//! that state, and, while firing, a move of the document's severity (an
+//! escalation, either way: §2.5). A refresh and a confirmation are not
+//! transitions (§0): at the state and severity held they say nothing, and
+//! nor does a raise of an alarm already said firing at its severity. The
+//! severity is the document's, and the notification carries the fleet's
+//! pinned [`AlarmTransition`], the document rendered through the contract
+//! (`rendering: schema`).
 //!
 //! **What the reader has not established moves nothing.** An answer whose
 //! reason is this reader's own sight ([`NOT_YET`]: a loss no GET has healed
