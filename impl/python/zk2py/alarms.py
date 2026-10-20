@@ -774,7 +774,7 @@ def _side(answer: str) -> str:
 
 class ChangeReporter:
     """§2.16 (0.4), "Reporting changes", over one reader's readings. Each
-    :meth:`update` takes every key's first-question answer now, the latest
+    :meth:`update` takes keys' first-question answers now, the latest
     document's severity, and the change that led there, and returns what
     to report:
     - **the answer after the change**, never the change's name alone;
@@ -782,31 +782,50 @@ class ChangeReporter:
       while yes, the severity moving, either way. A refresh, a
       confirmation, and a raise of an alarm already reported firing at its
       severity are none;
-    - **a loss** (§2.14 step 4's ``incomplete``) is reported once for the
-      scope, the MAY taken: no key the loss made unobservable is reported,
-      each keeps its last report, and each is reported again, as a change
-      against that last report, once a GET answers it or the establishing
-      GET leaves it out (SPEC-FINDINGS F-139);
-    - **an alarm firing at the first reading** is reported (the SHOULD),
-      and so is a key first read later that is firing. A key first read at
-      no or neither is recorded, not reported: nothing was reported before
-      it, so nothing moved."""
+    - **a loss** (a key reading §2.14 step 4's ``incomplete``) is reported
+      once for the scope, the MAY taken: one report when the first key goes
+      lossy, none for a second loss while any key is still unhealed, and
+      one, "observable again", when the last lossy key heals. No key the
+      loss made unobservable is reported; each keeps its last report, and is
+      reported again, as a change against that last report, once a GET
+      answers it or the establishing GET leaves it out (SPEC-FINDINGS
+      F-139);
+    - **an alarm firing at the first reading** is reported (the SHOULD), and
+      so is a key first read later that is firing. A key first read at no
+      or neither is recorded, not reported: nothing moved.
+
+    Scope-level reports carry no key: ``unobservable``/``incomplete`` for a
+    loss, ``observable``/``healed`` when it heals. With ``partial`` the
+    readings are some of the scope's keys (one owner's, say), and keys left
+    out of them keep their state. Without it they are the whole scope, and a
+    key known before that is not among them is never dropped silently: it
+    is reported once, ``unobservable``/``not_read``, then forgotten."""
 
     def __init__(self) -> None:
         self.last: dict[str, tuple[str, str | None]] = {}
+        self.lossy: set[str] = set()
         self.loss_reported = False
 
-    def update(self, readings: dict[str, tuple[Answer, str | None, str | None]]) -> list[Report]:
+    def update(self, readings: dict[str, tuple[Answer, str | None, str | None]],
+               partial: bool = False) -> list[Report]:
         out: list[Report] = []
-        lossy = [k for k, (a, _, _) in readings.items() if a.reason == "incomplete"]
-        if lossy and not self.loss_reported:
+        for key, (a, _, _) in readings.items():
+            if a.reason == "incomplete":
+                self.lossy.add(key)
+            else:
+                self.lossy.discard(key)
+        gone = [] if partial else sorted((set(self.last) | self.lossy) - set(readings))
+        for key in gone:
+            self.lossy.discard(key)
+        if self.lossy and not self.loss_reported:
             out.append(Report(None, UNOBSERVABLE, "incomplete", None, "loss"))
             self.loss_reported = True
-        if not lossy:
-            self.loss_reported = False
+        for key in gone:
+            self.last.pop(key, None)
+            out.append(Report(key, UNOBSERVABLE, "not_read", None, "gone"))
         for key in sorted(readings):
             a, severity, change = readings[key]
-            if a.reason == "incomplete":
+            if key in self.lossy:
                 continue  # the loss is reported once; the key keeps its last report
             side = _side(a.answer)
             now = (side, severity if side == YES else None)
@@ -818,6 +837,9 @@ class ChangeReporter:
                 continue
             if now != before:
                 out.append(Report(key, a.answer, a.reason, now[1], change))
+        if self.loss_reported and not self.lossy:
+            out.append(Report(None, "observable", "healed", None, "healed"))
+            self.loss_reported = False
         return out
 
 
@@ -1105,6 +1127,18 @@ class SeedGet:
     @property
     def seed(self) -> Seed:
         return Seed(self.complete, sum(1 for r in self.replies.values() if not r.deleted))
+
+
+def is_left_out(seed: SeedGet | None, established: bool, key: str, arrivals: Iterable[int]) -> bool:
+    """§2.14 step 5 (0.5): "the GET that established its owner's alarms,
+    either way (`answered` or `window`), left the key out: it answered the
+    key with neither a value nor a `reply_del`, and nothing of the key
+    arrived after that GET was asked". ``seed.replies`` holds every reply,
+    a ``reply_del`` included, so a key answered by one is not left out (it
+    reads ``deleted``). ``arrivals``: the key's deliveries, on the reader's
+    monotonic clock."""
+    return seed is not None and seed.complete and established and key not in seed.replies \
+        and not any(t >= seed.asked_ns for t in arrivals)
 
 
 def seed_get(tool: Any, address: str, timeout: float = 1.0) -> SeedGet:
@@ -1499,8 +1533,8 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
         # answered the key with neither a value nor a reply_del, and nothing
         # of the key arrived after that GET was asked". The judge reads it
         # (Reading.left_out), healing step 4 and making the sample none.
-        left_out = seed is not None and seed.complete and verdict.verdict == ESTABLISHED and key not in replies \
-            and (subscriber is None or not any(x.arrival_ns >= seed.asked_ns for x in subscriber.of(key)))
+        left_out = is_left_out(seed, verdict.verdict == ESTABLISHED, key,
+                               [] if subscriber is None else [x.arrival_ns for x in subscriber.of(key)])
         if cands:
             _, _, kind, payload, sid = max(cands, key=lambda c: (c[0], c[1]))
             if kind == "delete":

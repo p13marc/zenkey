@@ -77,7 +77,7 @@ case name. It exits with:
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
-| readings | | `alarms` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 94: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), and 75 of §2.16's change reporter: over every `transitions.json` case, every `conclusions.json` reading, and a loss. |
+| readings | | `alarms` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 103: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 78 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, and four loss sequences), and six of §2.14 step 5's left-out key, a `reply_del` among them. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
@@ -97,14 +97,14 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
-readings       94 passed     0 failed
+readings      103 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
 link          172 passed     0 failed
 alarms        316 passed     0 failed
-total        1844 passed     0 failed
+total        1853 passed     0 failed
 ```
 
 The figures are against `core.md` 0.34, `hostid.v1` 0.5, `freshness.v1`
@@ -1049,7 +1049,9 @@ published in both history roots, one file.
     (`scope_incomplete`, 0.5). An archive's read cut short only sets
     `archive_short`;
   - `ChangeReporter`, §2.16 (0.4): the answer after each change, a loss
-    once for the scope, a firing alarm at the first reading.
+    once for the scope until its last key heals ("observable again"), a key
+    gone from the scope reported rather than dropped, a firing alarm at the
+    first reading.
 - **The `alarms` conformance family:** 316 of 316. 0.1's cases passed the
   first time they ran, 0.2's once zk2py followed F-127 and F-130, 0.3's
   unchanged, and 0.5's once zk2py read `left_out` and `scope_whole`.

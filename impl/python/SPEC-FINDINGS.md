@@ -6790,6 +6790,30 @@ does §10 live.
 GET that heals the loss answers it", or "…reports each key's answer again,
 moved or not".
 
+**After review of PR #812** (zk2py's code; no finding changed):
+- **`left_out` and a `reply_del`.** A key the owner answered with a
+  `reply_del` was never left out: the GET's replies keep every reply, so it
+  reads `deleted`. The rule is now a pure function, `is_left_out`, with six
+  cases in `readings`, the `reply_del` among them.
+- **The loss instants** of `note_loss` and of the stall watch were already
+  on one monotonic clock, `scope_read`'s too. Unchanged.
+- **`ChangeReporter`'s loss** is now tracked per key:
+  - one scope report when the first key goes lossy;
+  - none for a second loss while any key is unhealed;
+  - an "observable again" report when the last one heals, after which a
+    later loss is reported again.
+
+  A partial update (one owner's keys) heals only its own keys. In an update
+  of the whole scope, a key known before that is missing is reported once,
+  `unobservable`/`not_read`, never dropped silently. Four loss sequences
+  pin these cases, and §10's live check now expects "observable again".
+- A `conclusions.json` case missing `left_out` or `scope_whole` fails alone.
+  §5's GET at the token, if it does not come within 5 s, is a failed check
+  with its cause.
+
+`just py-conformance`: 1853 of 1853 (`readings` 103). `just py-alarms`: 80
+of 80 on each owner.
+
 **Where zk2py's reading of alarms.v1 0.4 and 0.5 needed a guess, beyond
 the findings.**
 - **A key first read after the first reading** at **no** or **neither** (a

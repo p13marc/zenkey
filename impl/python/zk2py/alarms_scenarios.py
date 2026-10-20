@@ -637,7 +637,12 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         new_instance = o.instance
         # 0.5: "G GETs the moment S sees the new instance token. Then the
         # owner evaluates its rules once": the GET first, B still firing.
-        _wait(lambda: "st" in at_token, 5.0)
+        seen = _wait(lambda: "st" in at_token, 5.0)
+        if not seen:
+            new_tokens = [k for _, k in bus.token_puts() if not k.endswith(old_instance)]
+            report.check(sec, "3. G's GET at the new instance token, before the owner's evaluation", False,
+                         "no GET within 5 s: " + ("S saw no new instance token" if not new_tokens
+                                                  else f"the GET did not return ({new_tokens})"))
         o.resolve(B)  # its first evaluation finds B's condition clear
         time.sleep(1.0)
         tok = [t for t, k in bus.token_puts() if k.endswith(new_instance)]
@@ -650,7 +655,6 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      first_a is not None and _doc(first_a) is not None and _doc(first_a).firing  # type: ignore[union-attr]
                      and _doc(first_a).timestamp == t0 and _zid_eq(first_a.stamp_id, g.meta_zid),  # type: ignore[union-attr]
                      f"{first_a and _doc(first_a)}, stamp {first_a and first_a.stamp_id}, meta.zid {g.meta_zid}")
-        seen = _wait(lambda: "st" in at_token, 5.0)
         st = at_token.get("st")
         rep_at = {} if st is None else {r.key: r for r in st.replies}
         a_at, b_at = rep_at.get(ka), rep_at.get(kb)
@@ -957,14 +961,16 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             alive = sorted({f"{p['system']}/{p['service']}" for p in pres.alive if p["iface"] == al.PROFILE})
             return [t.read(a, horizon=h, get=get) for a in sr.owners], alive
 
-        def report_changes(reads: list[al.OwnerReading]) -> list[tuple[str | None, str, str, str | None]]:
-            # §2.16 (0.4): each key's first answer, after its change
+        def report_changes(reads: list[al.OwnerReading],
+                           partial: bool = False) -> list[tuple[str | None, str, str, str | None]]:
+            # §2.16 (0.4): each key's first answer, after its change; a
+            # partial reading is one owner's keys
             feed = {}
             for r in reads:
                 for k, (f1, _) in r.answers(h).items():
                     d = r.documents.get(k)
                     feed[k] = (f1, None if d is None else d.severity, None)
-            return [(x.key, x.answer, x.reason, x.severity) for x in reporter.update(feed)]
+            return [(x.key, x.answer, x.reason, x.severity) for x in reporter.update(feed, partial=partial)]
 
         reads, alive = scope()
         by = {r.address: r for r in reads}
@@ -1027,7 +1033,7 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      rb.verdict.expect() == {"reason": "window_short", "verdict": "unobservable"}
                      and rb.window is not None and rb.window.present_throughout,
                      f"{rb.verdict.expect()}, window {rb.window}")
-        got = report_changes([rb])
+        got = report_changes([rb], partial=True)
         report.check(sec, "extra (§2.16): B's resolve and delete are reported as the answer after them, no",
                      len(got) == 1 and got[0][:2] == (kb, al.NO), f"{got}")
         t.note_loss()
@@ -1039,7 +1045,7 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      ra.verdict.expect() == {"reason": "window_lost", "verdict": "unobservable"}
                      and fa is not None and _pair(fa) == "unobservable, incomplete",
                      f"{ra.verdict.expect()}, A {fa and _pair(fa)}")
-        got = report_changes([ra])
+        got = report_changes([ra], partial=True)
         report.check(sec, "extra (§2.16): the loss is reported once for the scope, and no key for it (the MAY)",
                      got == [(None, al.UNOBSERVABLE, "incomplete", None)], f"{got}")
         ra = t.read("lab/a", horizon=h)
@@ -1048,8 +1054,9 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      ra.verdict.expect() == {"reason": "answered", "verdict": "established"}
                      and fa is not None and _pair(fa) == "yes, firing",
                      f"{ra.verdict.expect()}, A {fa and _pair(fa)}, window {ra.window}")
-        got = report_changes([ra])
-        report.check(sec, "extra (§2.16): healed, A still firing at warning: nothing to report", got == [], f"{got}")
+        got = report_changes([ra], partial=True)
+        report.check(sec, "extra (§2.16): healed, A still firing at warning: no key to report, the scope "
+                          "observable again", got == [(None, "observable", "healed", None)], f"{got}")
     finally:
         bus.close()
 

@@ -808,6 +808,11 @@ def _alarms_conclusions(path: Path) -> list[Result]:
     out: list[Result] = []
     for i, c in enumerate(_load_json(path)["cases"]):
         q, name = c["question"], f"conclusions #{i} {c['question']}: {c['note']}"
+        needs = {"reading": ("left_out",), "any_firing": ("scope_whole",)}.get(q, ())
+        missing = [k for k in needs if k not in c]
+        if missing:
+            out.append((name, False, f"the case lacks {missing} (alarms.v1 0.5)"))
+            continue
         if q == "reading":
             r = alarms.Reading(presence=c["presence"], descriptor=c.get("descriptor"), face=c.get("face"),
                                observations=[_freshness_observation(o) for o in c["observations"]],
@@ -1092,24 +1097,64 @@ def _reporter_conclusions(root: Path) -> list[tuple[str, Any, Any]]:
 
 def _reporter_loss() -> list[tuple[str, Any, Any]]:
     """alarms.v1 0.4 §2.16, "A loss is the reader's": reported once for the
-    scope, no key's answer the loss made unobservable reported, each key
-    reported again against its last report once healed (F-139)."""
+    scope while any key is unhealed, "observable again" when the last heals,
+    no key's answer the loss made unobservable reported, each key reported
+    again against its last report once healed (F-139); a key gone from a
+    whole scope's readings reported, never dropped silently."""
     from . import alarms
 
     yes, inc = alarms.Answer(alarms.YES, "firing"), alarms.Answer(alarms.UNOBSERVABLE, "incomplete")
     no = alarms.Answer(alarms.NO, "not_held")
-    rep = alarms.ChangeReporter()
-    steps = [
-        {"a": (yes, "warning", "raised"), "b": (yes, "critical", "raised")},
-        {"a": (inc, "warning", "loss"), "b": (inc, "critical", "loss")},
-        {"a": (inc, "warning", "loss"), "b": (inc, "critical", "loss")},
-        {"a": (yes, "warning", "healed"), "b": (no, None, "healed")},
+
+    def run(steps: list[tuple[dict[str, Any], bool]]) -> list[list[tuple[Any, ...]]]:
+        rep = alarms.ChangeReporter()
+        return [[(x.key, x.answer, x.reason) for x in rep.update(st, partial=partial)] for st, partial in steps]
+
+    a_yes, b_yes, a_inc, b_inc = ("a", (yes, "warning", None)), ("b", (yes, "critical", None)), \
+        ("a", (inc, "warning", None)), ("b", (inc, "critical", None))
+    start = [("a", "yes", "firing"), ("b", "yes", "firing")]
+    loss, healed = (None, "unobservable", "incomplete"), (None, "observable", "healed")
+    label = "alarms.v1 0.4 §2.16"
+    return [
+        (f"{label}: a loss reported once, the keys kept, each reported again once healed (F-139)",
+         run([(dict([a_yes, b_yes]), False), (dict([a_inc, b_inc]), False), (dict([a_inc, b_inc]), False),
+              ({"a": (yes, "warning", None), "b": (no, None, None)}, False)]),
+         [start, [loss], [], [("b", "no", "not_held"), healed]]),
+        (f"{label}: a second loss while the first is unhealed is not reported again; healed once, at the last key",
+         run([(dict([a_yes, b_yes]), False), (dict([a_inc, b_yes]), False), (dict([a_inc, b_inc]), False),
+              (dict([a_yes, b_inc]), False), (dict([a_yes, b_yes]), False)]),
+         [start, [loss], [], [], [healed]]),
+        (f"{label}: a key gone from the scope's readings during a loss is reported, never dropped silently",
+         run([(dict([a_yes, b_yes]), False), (dict([a_inc, b_inc]), False), (dict([a_yes]), False)]),
+         [start, [loss], [("b", "unobservable", "not_read"), healed]]),
+        (f"{label}: a partial reading (one owner's keys) heals only its own keys",
+         run([(dict([a_yes, b_yes]), False), (dict([a_inc, b_inc]), False), (dict([a_yes]), True),
+              (dict([b_yes]), True)]),
+         [start, [loss], [], [healed]]),
     ]
-    got = [[(x.key, x.answer, x.reason) for x in rep.update(st)] for st in steps]
-    want = [[("a", "yes", "firing"), ("b", "yes", "firing")], [(None, "unobservable", "incomplete")], [],
-            [("b", "no", "not_held")]]
-    return [("alarms.v1 0.4 §2.16: a loss reported once, the keys kept, each reported again once healed (F-139)",
-             got, want)]
+
+
+def _left_out_cases() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.5 §2.14 step 5, "left the key out", as zk2py's reader
+    decides it (alarms.is_left_out) from what its GET answered."""
+    from . import alarms
+    from .live import StateReply
+
+    def seed(**replies: bool) -> Any:
+        return alarms.SeedGet(100, True, {k: StateReply(k, deleted, b"", "", None, None) for k, deleted in
+                                          replies.items()})
+
+    label = "alarms.v1 0.5 §2.14 step 5"
+    cases = [
+        ("the key answered with a reply_del: not left out (it reads deleted)", seed(k=True), True, [], False),
+        ("the key answered with a value: not left out", seed(k=False), True, [], False),
+        ("the key not answered, nothing of it since: left out", seed(other=False), True, [50], True),
+        ("the key not answered, but heard after the GET was asked: not left out", seed(other=False), True, [150],
+         False),
+        ("the owner's alarms not established: no GET left it out", seed(other=False), False, [], False),
+        ("a GET short of its final reply: not left out", alarms.SeedGet(100, False, {}), True, [], False),
+    ]
+    return [(f"{label}: {note}", alarms.is_left_out(sd, est, "k", arr), want) for note, sd, est, arr, want in cases]
 
 
 def family_readings(root: Path) -> list[Result]:
@@ -1119,7 +1164,7 @@ def family_readings(root: Path) -> list[Result]:
 
     out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
-        + _reporter_loss()
+        + _reporter_loss() + _left_out_cases()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
