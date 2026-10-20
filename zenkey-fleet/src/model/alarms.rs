@@ -849,7 +849,9 @@ impl AlarmBook {
             .map(|(k, _)| k.clone())
             .collect();
         for k in dropped {
-            let e = self.keys.get_mut(&k).expect("a key the book holds");
+            let Some(e) = self.keys.get_mut(&k) else {
+                continue;
+            };
             e.latest = None;
             e.track = Track::default();
             e.merged = Held::Nothing;
@@ -1802,6 +1804,33 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(t.change, AlarmChange::Raised);
+    }
+
+    /// F-136's edge: a delivery of A received at the very instant the
+    /// establishing GET is asked counts as after it (every instant is the
+    /// process's monotonic clock; a subscription's taken at receipt). A is
+    /// not left out, and the loss stands for it: `incomplete`, never a
+    /// wrong `not_held`.
+    #[test]
+    fn an_arrival_at_the_gets_ask_is_after_it() {
+        let (mut b, _, loss) = lost_a_resolve();
+        let heal = loss + Duration::from_secs(1);
+        b.presence_read(&presence(true, Some(ZID)), heal);
+        b.sample(put(
+            heal,
+            0,
+            doc("warning", "firing", 9),
+            AlarmVia::Subscription,
+        ));
+        get(&mut b, heal, vec![b_reply(heal)]);
+        let r = b.reading(A, heal, wall()).unwrap();
+        assert!(r.held_whole && !r.left_out, "{r:?}");
+        let j = r.firing();
+        assert_eq!(
+            (j.answer, j.reason),
+            (Answer::Unobservable, Reason::Incomplete)
+        );
+        assert!(b.seen(A).is_some(), "nothing dropped: A was heard");
     }
 
     /// F-136, the other way: a complete GET after the loss that does not
