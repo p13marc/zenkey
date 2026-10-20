@@ -185,7 +185,10 @@ ci:
     ./scripts/check-color.sh
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo build --workspace --all-targets --locked
-    cargo test --workspace --locked
+    # cargo-nextest (`cargo install cargo-nextest --locked`), as CI: the
+    # suite's waits overlap across binaries (.config/nextest.toml).
+    cargo nextest run --workspace --locked --profile ci
+    cargo test --workspace --doc --locked
     cargo bench --workspace --no-run --locked
     just features
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked

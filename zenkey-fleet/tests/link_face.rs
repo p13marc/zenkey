@@ -590,8 +590,13 @@ fn ulid(n: u64) -> String {
 /// the two `@stream`s at 20 Hz with 1 KB payloads, `oper` 10 times, half a
 /// second apart, `peers/x` once, and `fault` and `change` 5 times each in
 /// the first half second.
+///
+/// Paced by deadline, not by a sleep after each round: the far reader's 4 to
+/// 6 downsampled samples assume the 5 s, and under load the puts' own time
+/// would add to each 50 ms and stretch them (7 seen at 12 nextest threads).
 async fn traffic(o: &Owner) {
     let kb = vec![0u8; 1024];
+    let start = tokio::time::Instant::now();
     for i in 0..100u64 {
         o.put("stream/air/dropped_total", i.to_string()).await;
         o.put("stream/air/frames_total", i.to_string()).await;
@@ -607,7 +612,7 @@ async fn traffic(o: &Owner) {
             let ev = if i % 2 == 0 { "fault" } else { "change" };
             o.put(&format!("events/{ev}/{}", ulid(i)), "e").await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep_until(start + Duration::from_millis(50 * (i + 1))).await;
     }
 }
 

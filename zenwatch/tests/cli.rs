@@ -7,8 +7,11 @@
 
 use std::path::PathBuf;
 
+/// `CARGO_TARGET_TMPDIR` is the workspace's one `target/tmp`, and zenctl's
+/// corpus writes contexts into its own `cli-home` there. Under nextest the two
+/// corpora run at once, so this one keeps a home of its own.
 fn test_home() -> PathBuf {
-    let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cli-home");
+    let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("zenwatch-cli-home");
     std::fs::create_dir_all(&home).expect("create the corpus' config root");
     home
 }

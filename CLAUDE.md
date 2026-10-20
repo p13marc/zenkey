@@ -710,6 +710,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 
 Zero warnings is a CI gate. (The fixture-tests codegen round-trip runs on the
 `v1` branch, where the corpus lives; see the strangler note above.)
+CI's `test` job runs the suite with cargo-nextest (`.config/nextest.toml`):
+a process per test, across binaries at once, because most of the suite waits
+on real clocks. `cargo test --workspace` runs the same tests one binary at a
+time; a test must not lean on sharing a process with another. A change only
+under `impl/python/` skips `ci.yml` and runs `python.yml` (zk2py's
+conformance) instead.
 
 ```bash
 cargo run -p zenctl -- service list --namespace zensight -c tcp/127.0.0.1:7447
