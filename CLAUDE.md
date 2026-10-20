@@ -555,7 +555,17 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   other, and `narrowed_too_far` reading user names and CNs apart; text
   0.7, F-124 and F-125, #769 LH: `Block::enabled` and `check_block`'s
   `block_disabled`, and the linter's `far_of_two_faces`, a warning with no
-  face).
+  face), and `alarms.v1`'s (`alarms`, #800 AA: the key recipe byte for
+  byte ZenSight's — `host` and `host.*` removed first, labels by name then
+  value in byte order, FNV-1a 64 — as the strict `alert_key`, the public
+  `sanitize` step and the reader's `derive`, which never refuses; `Alarm`,
+  the 1.0 schema's document, and its checks; `Track`, one key's samples
+  read into transitions, the state taken from the document, never the
+  sample kind; `AlarmRef`, the structured reference and its key; and §5's
+  judges in three states — `firing`, `owner_set`, `any_firing`,
+  `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.1, with
+  core 0.34 publishing its vocabulary empty, and the contract moved under
+  `spec/profiles/alarms/` with its fingerprint unchanged).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -672,7 +682,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.33 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.34 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
