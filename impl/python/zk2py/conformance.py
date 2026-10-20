@@ -960,11 +960,60 @@ READINGS = [
 ]
 
 
-def family_readings(root: Path) -> list[Result]:
-    """zk2py's own cases (:data:`READINGS`)."""
+def _window_cases() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.3 §2.15: a loss or a gap breaks the window until the
+    first complete GET after it, asked strictly after the break was seen (a
+    stall is seen by the tick that ends it). The window runs from 1 s (the
+    declaration plus the reply timeout) to 100 s; instants in seconds."""
     from . import alarms
 
-    return [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
+    def w(losses: list[float], gaps: list[float], gets: list[float]) -> dict[str, Any]:
+        ns = 1_000_000_000
+        x = alarms.window_span(1 * ns, 100 * ns, [int(t * ns) for t in losses], [int(t * ns) for t in gaps],
+                               [int(t * ns) for t in gets])
+        return {"listened_s": x.listened_s, "lossless": x.lossless, "present_throughout": x.present_throughout}
+
+    label = "alarms.v1 0.3 §2.15"
+    return [
+        (f"{label}: a stall seen at 10 s, a GET asked at 9.5 s, inside it: not healed",
+         w([10], [], [9.5]), {"listened_s": 99.0, "lossless": False, "present_throughout": True}),
+        (f"{label}: a GET asked at the instant the stall was seen: not after it, not healed",
+         w([10], [], [10]), {"listened_s": 99.0, "lossless": False, "present_throughout": True}),
+        (f"{label}: a GET asked at 10.5 s heals it, and the window runs from it",
+         w([10], [], [10.5]), {"listened_s": 89.5, "lossless": True, "present_throughout": True}),
+        (f"{label}: a gap at 20 s, no GET after it",
+         w([], [20], [5]), {"listened_s": 99.0, "lossless": True, "present_throughout": False}),
+        (f"{label}: a gap at 20 s, a GET at 21 s heals it",
+         w([], [20], [21]), {"listened_s": 79.0, "lossless": True, "present_throughout": True}),
+        (f"{label}: a loss at 10 s healed at 15 s, a gap at 20 s not",
+         w([10], [20], [15]), {"listened_s": 85.0, "lossless": True, "present_throughout": False}),
+    ]
+
+
+def _scope_cases() -> list[tuple[str, Any, Any]]:
+    """F-137: a scope read that is not whole may miss an owner, so "is
+    anything firing?" over it is never no."""
+    from . import alarms
+
+    quiet = alarms.OwnerRead(alarms.ESTABLISHED)
+    label = "alarms.v1 0.3 §2.15 (F-137)"
+    return [
+        (f"{label}: one established owner with nothing firing, the scope read whole",
+         alarms.any_firing("warning", [quiet] + alarms.ScopeRead(["lab/a"]).owner_reads())["reason"],
+         "none_firing"),
+        (f"{label}: the same, the scope read incomplete (an archive key that did not read back)",
+         alarms.any_firing("warning", [quiet] + alarms.ScopeRead(["lab/a"], False, 1).owner_reads())["reason"],
+         "owner_unobservable"),
+    ]
+
+
+def family_readings(root: Path) -> list[Result]:
+    """zk2py's own cases (:data:`READINGS`, and the window's and the
+    scope's)."""
+    from . import alarms
+
+    out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
+    return out + [_check(note, got, want) for note, got, want in _window_cases() + _scope_cases()]
 
 
 BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_population, "rate.json": _budget_rate,

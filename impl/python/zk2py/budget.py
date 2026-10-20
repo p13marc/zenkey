@@ -319,10 +319,14 @@ class StallWatch:
         return gap // 1_000_000, bool(self.closes)
 
     def losses(self) -> list[int]:
-        """Every instant its path was seen to lose: a stall seen by a tick,
-        a transport of the session closed."""
+        """Every instant its path was seen to lose: a stall seen by a tick
+        (the tick that ends its gap), a transport of the session closed,
+        and a gap still open past the bound when it is read, "the one still
+        open when it is read included", dated now."""
+        now = time.monotonic_ns()
         with self.lock:
-            return sorted(self.stalls + self.closes)
+            open_gap = [now] if now - self.last > self.bound_ms * 1_000_000 else []
+            return sorted(self.stalls + self.closes + open_gap)
 
     def close(self) -> None:
         self._stop.set()

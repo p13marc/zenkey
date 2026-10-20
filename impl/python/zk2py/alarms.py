@@ -1033,6 +1033,33 @@ def seed_get(tool: Any, address: str, timeout: float = 1.0) -> SeedGet:
     return SeedGet(asked, not st.errors, {r.key: r for r in st.replies if r.key.startswith(prefix)})
 
 
+def window_span(start_ns: int, end_ns: int, losses: Iterable[int], gaps: Iterable[int],
+                complete_gets: Iterable[int], lossless_path: bool = True) -> Window:
+    """§2.15's window (0.3) from what a reader recorded, every instant on
+    its monotonic clock: the window's first instant (the declaration plus
+    the reply timeout), its end (a lease and the reply timeout before the
+    instant judged), the instants each loss and each gap was seen, and the
+    instants its complete GETs of the owner were asked. A loss or a gap
+    "breaks the window", which "runs again from the first complete GET that
+    followed" it: a GET asked strictly after the instant the break was
+    seen. A stall is seen by the tick that ends it, so a GET asked inside
+    it heals nothing. ``lossless_path``: the QoS and the reader's own queue
+    (core §2.7)."""
+    gets = sorted(complete_gets)
+    start, lossless, present = start_ns, lossless_path, True
+    for kind, instants in (("loss", losses), ("gap", gaps)):
+        for t in instants:
+            after = next((g for g in gets if g > t), None)
+            if after is None:
+                if kind == "loss":
+                    lossless = False
+                else:
+                    present = False
+            else:
+                start = max(start, after)
+    return Window(max(0, end_ns - start) / fr.NS, lossless, present)
+
+
 class AlarmsReader:
     """A live reader of ``alarms.v1`` across owners (§2.13 to §2.15, text
     0.3): one subscription; its own receive path watched; each owner's
@@ -1072,6 +1099,9 @@ class AlarmsReader:
         #: per owner: [(instant, "delete" | instance id put)]
         self.token_events: dict[str, list[tuple[int, str]]] = {}
         self.held_at_start: dict[str, str | None] = {}
+        #: owners whose presence at the start a complete read did not show:
+        #: the instant that read ended
+        self.unknown_start: dict[str, int] = {}
         self.subs: list[Any] = []
         self.seeds: dict[str, list[SeedGet]] = {}
         #: losses a test notes by hand (``note_loss``): the reader's own
@@ -1089,9 +1119,10 @@ class AlarmsReader:
 
         from . import live
 
-        if address in self.token_events:
-            return
-        self.token_events[address] = []
+        with self.lock:
+            if address in self.token_events:
+                return
+            self.token_events[address] = []
 
         def got(smp: Any, a: str = address) -> None:
             k = str(smp.key_expr)
@@ -1099,10 +1130,19 @@ class AlarmsReader:
             with self.lock:
                 self.token_events[a].append((time.monotonic_ns(), ev))
 
+        # Without history: a token held before the subscription delivers no
+        # put, so only a token that appears after it is an event. Then the
+        # read of what is held, recorded under the lock gaps() reads it by.
         self.subs.append(self.session.liveliness().declare_subscriber(f"zk2/{address}/@zk/instance/*",
                                                                       zenoh.handlers.Callback(got)))
         pres = live.list_presence(self.session, f"zk2/{address}/@zk/instance/*")
-        self.held_at_start[address] = pres.instances[0]["instance"] if pres.instances and pres.complete else None
+        with self.lock:
+            self.held_at_start[address] = pres.instances[0]["instance"] if pres.instances else None
+            if not pres.complete:
+                # §2.15: present throughout is "held its instance token from
+                # the window's start". A read possibly incomplete does not
+                # show it: owner_gap until a complete GET after this read.
+                self.unknown_start[address] = time.monotonic_ns()
 
     def note_loss(self) -> None:
         with self.lock:
@@ -1115,10 +1155,16 @@ class AlarmsReader:
 
     def gaps(self, address: str) -> list[int]:
         """The instants of a gap: a withdrawn instance token, or an instance
-        appearing that is not the one held."""
+        appearing that is not the one held (an owner joining included); and
+        the end of a start-of-window presence read that did not show the
+        owner held (incomplete), or of an :meth:`add_owner` not finished."""
         with self.lock:
             events = list(self.token_events.get(address, []))
-        held, out = self.held_at_start.get(address), []
+            if address not in self.held_at_start:
+                return [time.monotonic_ns()]
+            held = self.held_at_start[address]
+            unknown = self.unknown_start.get(address)
+        out = [] if unknown is None else [unknown]
         for t, ev in events:
             if ev == "delete":
                 held = None
@@ -1140,25 +1186,11 @@ class AlarmsReader:
         from . import budget as bg
 
         now = time.monotonic_ns() if at_ns is None else at_ns
-        end = now - self.lease_ns - self.reply_timeout_ns
-        start = self.declared_ns + self.reply_timeout_ns
-        complete = sorted(g.asked_ns for g in self.seeds.get(address, []) if g.complete and g.asked_ns <= now)
         lossless_qos, _ = bg.lossless(*self.qos)
-        healed_loss = healed_gap = True
-        for kind, instants in (("loss", self.losses()), ("gap", self.gaps(address))):
-            for t in instants:
-                if t > now:
-                    continue
-                after = next((g for g in complete if g >= t), None)
-                if after is None:
-                    if kind == "loss":
-                        healed_loss = False
-                    else:
-                        healed_gap = False
-                else:
-                    start = max(start, after)
-        listened = max(0, end - start) / fr.NS
-        return Window(listened, healed_loss and lossless_qos and self.subscriber.complete, healed_gap)
+        return window_span(self.declared_ns + self.reply_timeout_ns, now - self.lease_ns - self.reply_timeout_ns,
+                           [t for t in self.losses() if t <= now], [t for t in self.gaps(address) if t <= now],
+                           [g.asked_ns for g in self.seeds.get(address, []) if g.complete and g.asked_ns <= now],
+                           lossless_qos and self.subscriber.complete)
 
     def read(self, address: str, *, get: bool = True, horizon: fr.Horizon = HORIZON,
              keys_known: Iterable[str] = ()) -> OwnerReading:
@@ -1195,30 +1227,59 @@ def archive_form(archive: str, selector: str) -> str:
     return f"zk2/{archive}/archive.v1/@state/" + "/".join(body)
 
 
+@dataclass
+class ScopeRead:
+    """The owners a tool found for a scope (§2.15, "the owners in scope"),
+    and whether the read that found them was whole: it ran to its final
+    reply with no error reply, and every key it answered read back
+    (``skipped`` counts those that did not). An incomplete scope may miss
+    an owner, so :meth:`owner_reads` adds one unobservable owner for it,
+    and "is anything firing?" over it is never **no** (SPEC-FINDINGS
+    F-137)."""
+
+    owners: list[str]
+    complete: bool = True
+    skipped: int = 0
+
+    def owner_reads(self) -> list[OwnerRead]:
+        return [] if self.complete else [OwnerRead(UNOBSERVABLE)]
+
+
+def owners_by_presence(tool: Any, systems: str = "*", services: str = "*") -> ScopeRead:
+    """§2.13: the owners a presence read finds, by their instance tokens;
+    whether ``alarms.v1`` is theirs is each descriptor's (§2.14 step 2)."""
+    from . import live
+
+    pres = live.list_presence(tool, f"zk2/{systems}/{services}/@zk/**")
+    return ScopeRead(sorted({f"{p['system']}/{p['service']}" for p in pres.instances}), pres.complete)
+
+
 def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: str = "*",
-                        timeout: float = 1.0) -> list[str]:
+                        timeout: float = 1.0) -> ScopeRead:
     """§2.15 (0.2, 0.3): the owners a tool "knew of before … by an
     archive's keys (core S6)": a GET of the archive's form of
     ``zk2/<systems>/<services>/alarms.v1/state/alarms/*``, each key read
     back (every chunk unslugged) into the alarm key it archives, and that
     key's address. A tool whose readings end with its process knows of an
-    absent owner this way (scenarios.md §8, 0.3)."""
+    absent owner this way (scenarios.md §8, 0.3). A GET that did not run to
+    its final reply, or a key that does not read back, leaves the scope
+    incomplete."""
     from . import live
 
     pattern = archive_form(archive, f"zk2/{systems}/{services}/{PROFILE}/{TOKEN}/{PREFIX}/*")
     head = f"zk2/{archive}/archive.v1/@state/"
     st = live.get_state(tool, pattern, timeout=timeout)
     out: set[str] = set()
+    skipped = 0
     for r in st.replies:
-        if not r.key.startswith(head):
+        values = [slug.unslug(c) for c in r.key[len(head):].split("/")] if r.key.startswith(head) else [None]
+        chunks = [v for v in values if v is not None]
+        ref = parse_key("zk2/" + "/".join(chunks)) if len(chunks) == len(values) else None
+        if ref is None:
+            skipped += 1
             continue
-        values = [slug.unslug(c) for c in r.key[len(head):].split("/")]
-        if any(v is None for v in values):
-            continue
-        ref = parse_key("zk2/" + "/".join(values))  # type: ignore[arg-type]
-        if ref is not None:
-            out.add(f"{ref['system']}/{ref['service']}")
-    return sorted(out)
+        out.add(f"{ref['system']}/{ref['service']}")
+    return ScopeRead(sorted(out), not st.errors and skipped == 0, skipped)
 
 
 def _zid(text: Any) -> int | None:

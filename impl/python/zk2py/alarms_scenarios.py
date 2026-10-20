@@ -639,16 +639,32 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      first_a is not None and _doc(first_a) is not None and _doc(first_a).firing  # type: ignore[union-attr]
                      and _doc(first_a).timestamp == t0 and _zid_eq(first_a.stamp_id, g.meta_zid),  # type: ignore[union-attr]
                      f"{first_a and _doc(first_a)}, stamp {first_a and first_a.stamp_id}, meta.zid {g.meta_zid}")
-        _wait(lambda: "st" in at_token, 5.0)
+        seen = _wait(lambda: "st" in at_token, 5.0)
         st = at_token.get("st")
         rep_at = {} if st is None else {r.key: r for r in st.replies}
-        a_at = rep_at.get(ka)
-        ok = st is not None and not st.errors and a_at is not None and not a_at.deleted \
-            and _zid_eq(a_at.stamp_id, g.meta_zid) and kb in rep_at and not rep_at[kb].deleted \
-            and all(k in rep_at and rep_at[k].deleted for k in (kr, kp))
+        a_at, b_at = rep_at.get(ka), rep_at.get(kb)
+        a_doc = None if a_at is None or a_at.deleted else al.decode(a_at.payload)
+        problems = []
+        if not seen:
+            new_tokens = [k for _, k in bus.token_puts() if not k.endswith(old_instance)]
+            problems.append("no GET at the token within 5 s: " + (
+                "S saw no new instance token" if not new_tokens else f"the GET did not return ({new_tokens})"))
+        elif st is not None and st.errors:
+            problems.append(f"the GET's errors {st.errors}")
+        if seen and (a_doc is None or not a_doc.firing or a_doc.timestamp != t0
+                     or not _zid_eq(a_at.stamp_id if a_at else None, g.meta_zid)):
+            problems.append(f"A not firing under the new instance's stamp with t0 kept: {a_doc}, "
+                            f"stamp {a_at and a_at.stamp_id}")
+        if seen and (b_at is None or b_at.deleted or not _zid_eq(b_at.stamp_id, g.meta_zid)):
+            problems.append(f"B not put by the new instance: {b_at}")
+        for name, k in (("R", kr), ("P", kp)):
+            if seen and not (k in rep_at and rep_at[k].deleted):
+                problems.append(f"no reply_del for {name}'s key")
         report.check(sec, "3. before the new instance token appears (a SHOULD): a GET made the moment S sees it "
-                          "answers A and B under the new instance's stamps, and R's and P's deletes",
-                     ok, f"{sorted((k.rsplit('/', 1)[1], 'del' if r.deleted else 'put') for k, r in rep_at.items())}")
+                          "answers A firing (t0 kept) and B under the new instance's stamps, and a reply_del "
+                          "for each of R's and P's keys",
+                     not problems, "; ".join(problems) or
+                     f"{sorted((k.rsplit('/', 1)[1], 'del' if r.deleted else 'put') for k, r in rep_at.items())}")
         if first_a is not None and tok:
             report.note(sec, f"A's put reached S {(tok[0] - first_a.arrival_ns) / 1e6:+.3f} ms before the new "
                              "instance token did: arrival order at a subscriber, which zenoh does not keep "
@@ -826,7 +842,7 @@ def section8(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "3. the archive's form of the owner's alarms holds A, firing, with its stamp (core S6)",
                      arch_doc is not None and arch_doc.firing and stamp is not None, f"{arch_doc}, {stamp}")
 
-        def step3(name: str, t: al.AlarmsReader, scope: list[str]) -> None:
+        def step3(name: str, t: al.AlarmsReader, scope: al.ScopeRead) -> None:
             r3 = t.read(ADDRESS, keys_known=(ka,))
             report.check(sec, f"3 ({name}). the owner's tokens are gone, a complete read; its GET draws no reply",
                          r3.presence == "absent" and not r3.stamps.get(ka), f"{r3.presence}")
@@ -835,26 +851,28 @@ def section8(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             f3 = al.judge(rd)
             report.check(sec, f"3 ({name}). T judges A not asked, absent; the archived document is last-known",
                          _pair(f3) == "not_asked, absent", _pair(f3))
-            owners = [t.read(a, keys_known=(ka,) if a == ADDRESS else ()).owner_read() for a in scope]
-            ans = al.any_firing("warning", owners)
+            owners = [t.read(a, keys_known=(ka,) if a == ADDRESS else ()).owner_read() for a in scope.owners]
+            ans = al.any_firing("warning", owners + scope.owner_reads())
             report.check(sec, f"3 ({name}). anything firing at or above warning over zk2/lab/*: the owner counted "
                               "not asked, and not yes",
-                         ADDRESS in scope and ans["answer"] != al.YES and ans["owners"][al.NOT_ASKED] >= 1,
+                         ADDRESS in scope.owners and ans["answer"] != al.YES and ans["owners"][al.NOT_ASKED] >= 1,
                          f"{ans}, scope {scope}")
 
-        found = sorted({f"{p['system']}/{p['service']}" for p in live.list_presence(
-            bus.t_session, "zk2/lab/*/@zk/**").instances})
+        found = al.owners_by_presence(bus.t_session, "lab")
         # The live reader: the owners it found (step 1), and presence now.
-        step3("a live reader", live_t, sorted(set(live_t.token_events) | set(found)))
+        step3("a live reader", live_t, al.ScopeRead(sorted(set(live_t.token_events) | set(found.owners)),
+                                                     found.complete))
         # A one-shot tool: presence now, and the archive's keys (0.3).
         once_session = live.open_client(bus.endpoint)
         bus.extra.append(once_session)
         once = al.AlarmsReader(once_session, f"zk2/lab/*/{al.PROFILE}/state/alarms/*", trust=bus.trust)
         bus.extra.append(once)
         by_archive = al.owners_from_archive(once_session, "lab/archive", "lab")
-        report.check(sec, "3 (a one-shot tool). it knows of the owner by the archive's keys (§2.15, 0.3)",
-                     by_archive == [ADDRESS], f"{by_archive}")
-        step3("a one-shot tool", once, sorted(set(found) | set(by_archive)))
+        report.check(sec, "3 (a one-shot tool). it knows of the owner by the archive's keys, a complete read "
+                          "(§2.15, 0.3)", by_archive.owners == [ADDRESS] and by_archive.complete, f"{by_archive}")
+        step3("a one-shot tool", once, al.ScopeRead(sorted(set(found.owners) | set(by_archive.owners)),
+                                                   found.complete and by_archive.complete,
+                                                   by_archive.skipped))
     finally:
         bus.close()
 
@@ -915,10 +933,15 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                             trust=bus.trust)
         bus.extra.append(t)
 
+        unseen: list[al.OwnerRead] = []
+
         def scope(get: bool = True) -> tuple[list[al.OwnerReading], list[str]]:
+            # The owners in scope by presence (§2.13); a read possibly
+            # incomplete may miss one, counted unobservable (F-137).
             pres = live.list_presence(bus.t_session, "zk2/lab/*/@zk/**")
             addresses = sorted({f"{p['system']}/{p['service']}" for p in pres.instances})
             alive = sorted({f"{p['system']}/{p['service']}" for p in pres.alive if p["iface"] == al.PROFILE})
+            unseen[:] = al.ScopeRead(addresses, pres.complete).owner_reads()
             return [t.read(a, horizon=h, get=get) for a in addresses], alive
 
         reads, alive = scope()
@@ -926,10 +949,10 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "1. T finds lab/b by its descriptor, though it holds no alive/alarms.v1 token (§2.13)",
                      "lab/b" in by and by["lab/b"].descriptor == {"lists": True, "token": False} and "lab/b" not in alive,
                      f"{by.get('lab/b') and by['lab/b'].descriptor}, alive {alive}")
-        w = al.any_firing("warning", [r.owner_read(h) for r in reads])
+        w = al.any_firing("warning", [r.owner_read(h) for r in reads] + unseen)
         report.check(sec, "1. at warning: yes, any_firing, 1", (w["answer"], w["reason"], w["firing"]) ==
                      (al.YES, "any_firing", 1), f"{w}")
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads])
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads] + unseen)
         report.check(sec, "1. at critical: unobservable, owner_unobservable",
                      (c["answer"], c["reason"]) == (al.UNOBSERVABLE, "owner_unobservable"), f"{c}")
         report.check(sec, "1. lab/a established (answered), lab/b not (window_short)",
@@ -944,7 +967,7 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             time.sleep(0.2)
         reads, _ = scope()
         by = {r.address: r for r in reads}
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads])
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads] + unseen)
         report.check(sec, f"2. a window over {h.ttl_s} s, lossless, both present: at critical no, none_firing",
                      (c["answer"], c["reason"]) == (al.NO, "none_firing"), f"{c}, window {by['lab/b'].window}")
         report.check(sec, "2. lab/b established by its window",
@@ -953,7 +976,7 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         ob.raise_(B, "critical")
         time.sleep(0.5)
         reads, _ = scope()
-        c = al.any_firing("critical", [r.owner_read(h) for r in reads])
+        c = al.any_firing("critical", [r.owner_read(h) for r in reads] + unseen)
         report.check(sec, "3. lab/b raises B at critical: yes, any_firing, 1",
                      (c["answer"], c["reason"], c["firing"]) == (al.YES, "any_firing", 1), f"{c}")
         # Beyond scenarios.md (0.3): a gap in lab/b's presence breaks the

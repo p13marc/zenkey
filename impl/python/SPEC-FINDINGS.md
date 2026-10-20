@@ -86,9 +86,9 @@ where that was not enough, or where the spec said two things.
   live against the Rust owner example's `--alarms` (see "At alarms.v1
   0.2"). F-133 is against the example's documentation, not the spec.
   `alarms.v1` 0.3 resolved both.
-- F-135 and F-136 were found against `alarms.v1` 0.3, read cold and run
+- F-135 to F-137 were found against `alarms.v1` 0.3, read cold and run
   live against the owner example at 0.3 (see "At alarms.v1 0.3" at the
-  end).
+  end). F-137 came from review of PR #809.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -6400,8 +6400,10 @@ which zk2py passed unchanged.
   (core §4.4, wildcards kept, every other chunk slugged) and
   `owners_from_archive`, the owners an archive's keys name.
 
-**`just py-conformance`: 1749 of 1749.** The `alarms` family is 304
-checks (`documents.json` 62). With `readings`' 11, it is 1749 in all.
+**`just py-conformance`: 1757 of 1757.** The `alarms` family is 304
+checks (`documents.json` 62). `readings` is 19: 11 of §2.4's whitespace,
+and, after review of PR #809, six of the window's healing and two of an
+incomplete scope.
 
 **`just py-alarms`: 74 of 74** against zk2py's owner and 74 of 74 against
 `owner-ac`, both exiting 0. That is round 39's 66, with:
@@ -6460,8 +6462,13 @@ is not the owner's.
   made when the interface token appears then finds it").
 
 **zk2py:** §5 checks the SHOULD as core does. G GETs the moment S sees the
-new instance token, and the reply must hold A and B under the new
-instance's stamps, and `reply_del`s for R's and P's keys. Both owners pass
+new instance token. The reply must hold:
+- A firing, t₀ kept, under the new instance's stamp;
+- B under that stamp too;
+- a `reply_del` for each of R's and P's keys.
+
+A GET that does not come, or a missing reply, is reported with its
+cause. Both owners pass
 it in every run. The arrival order at S is printed, not counted.
 
 **Wording:** "3. G GETs the moment S sees the new instance token. Its reply
@@ -6530,6 +6537,62 @@ or a `reply_del`, and no complete GET that established its owner's alarms
 left it out with nothing of it arriving after that GET was asked (step 5)".
 Or state that a reader forgets a key once an establishing GET leaves it
 out.
+
+### F-137 · gap · alarms.v1 0.3 §2.15: the second question over a scope whose read was not whole
+
+> §2.15 (0.2, 0.3): "**The owners in scope** of a selector … are the
+> services it selects that the reader knows of: those its presence read
+> finds, through instance tokens and descriptors (§2.13), and those it knew
+> of before, by an earlier reading of its own or by an archive's keys (core
+> S6)."
+
+> §2.15, step 5: "otherwise **no**, `none_firing`", and §5: "**No:** Every
+> owner asked in scope established, and none of its alarms reads yes, or
+> unobservable, at *S* or above."
+
+The scope is whatever the reads that find owners returned. Those reads can
+fall short of whole, and the text says nothing of it:
+- a presence read possibly incomplete (core §8.1: "a GET that ran to its
+  timeout");
+- an archive's GET that ended at its timeout or with an error reply;
+- an archive key that does not read back into an alarm's key.
+
+An owner missed that way is in no step of §2.15's list. So the steps read
+as written answer "is anything firing?" with **no**, `none_firing`,
+whenever the owners that were found are established and quiet. Yet an
+owner the read missed may hold a firing alarm. That is the "no" from
+silence that core O5 forbids. For one owner, §2.14 step 1 already makes a
+presence read possibly incomplete **unobservable**; a scope has no such
+step.
+
+**zk2py:** a scope read that is not whole (`ScopeRead.complete` false:
+presence or the archive GET incomplete, or `skipped` > 0) adds one
+**unobservable** owner, so the answer is `owner_unobservable` unless an
+alarm reads yes. Found by review of PR #809, where zk2py's
+`owners_from_archive` dropped an unreadable key silently. The `readings`
+family has the case.
+
+**Wording:** §2.15, the second question: "an owner in scope is
+unobservable, or the reads that found the scope were not whole (a presence
+read possibly incomplete, an archive's GET short of its final reply, a key
+that does not read back): **unobservable**, `owner_unobservable`" (or a
+reason of its own).
+
+**After review of PR #809** (zk2py's code; F-135 tightened, F-137 added):
+- **The window's healing** is a pure function, `window_span`, with six
+  cases in `readings`.
+  - A GET asked inside a stall never healed it: a stall is seen by the tick
+    that ends it, and only a GET asked after that instant heals.
+  - Healing is now strictly after. A GET asked at the very instant a break
+    was seen heals nothing.
+  - A stall still open when the reader judges is now a loss too (core
+    §2.7, "the one still open when it is read included").
+- **The window's start** (`add_owner`): the presence read and the token
+  events share one lock, and the subscription delivers no history, so a
+  token already held is never a gap. A start-of-window presence read
+  possibly incomplete does not show "held its instance token from the
+  window's start". It reads `owner_gap` until a complete GET after that
+  read. A complete, empty read is an absent owner, whose joining is a gap.
 
 **Where zk2py's reading of alarms.v1 0.3 needed a guess, beyond the
 findings.**
