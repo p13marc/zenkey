@@ -197,19 +197,19 @@ async fn deliveries(log: &Log, alert_key: &str, n: usize) -> Vec<Rec> {
     of(&snapshot(log), alert_key)
 }
 
-/// S received `after[put]` before the new instance token `after[token]`,
-/// within [`JITTER`]. The owner puts first (§2.9), but S hears the two on
-/// two subscriptions, a data one and a liveliness one, and a token's
-/// declaration and a put ride the transport on different lanes: under
-/// load the token can overtake a put it followed by a few milliseconds.
-/// What S can bound is the inversion, never the owner's own order.
-#[track_caller]
-fn before_token(after: &[Rec], put: usize, token: usize, what: &str) {
-    assert!(
-        put < token || after[put].at <= after[token].at + JITTER,
-        "{what} before the new instance token, within {JITTER:?}: the put came {:?} after it",
-        after[put].at.saturating_duration_since(after[token].at)
-    );
+/// Waits for the moment S sees a new instance token, past the first `n`
+/// deliveries in its log, polling every millisecond: "before the new
+/// instance token" is observed by a GET made then (§2.9, scenarios §5,
+/// text 0.5, F-135), as core §8.2 observes "before the tokens". The order
+/// of S's receipts against the token is not the owner's: S hears a put and
+/// a token on two subscriptions, as different messages with no order kept
+/// between them.
+async fn at_new_token(log: &Log, n: usize) {
+    let deadline = Instant::now() + common::SETTLE;
+    while !snapshot(log)[n..].iter().any(Rec::is_instance) {
+        assert!(Instant::now() < deadline, "never: the new instance token");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
 }
 
 /// A tool's consumer of `lab/svc`'s `alarms.v1`, on the standard contract.
@@ -685,7 +685,9 @@ async fn s4_re_raise() {
 
 /// §5: a restart adopts from its record. The kept alarms are put again by
 /// the new instance before its instance token and before any GET answers
-/// them; a resolved document and a phantom are deleted; an alarm whose
+/// them — a GET the moment S sees the token answers them under the new
+/// instance's stamps, and a `reply_del` for each key it retired (text 0.5,
+/// F-135); a resolved document and a phantom are deleted; an alarm whose
 /// condition cleared while the owner was down is resolved at its first
 /// evaluation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -705,7 +707,8 @@ async fn s5_a_restart_mid_incident() {
     presence_of(&rs, None).await;
     seen_by(&os).await;
     let a_doc = a.raise(alarm_a(Severity::Critical)).await.unwrap().document;
-    let b_key = a.raise(alarm_b()).await.unwrap().alert_key;
+    let b_raised = a.raise(alarm_b()).await.unwrap();
+    let (b_key, b_doc) = (b_raised.alert_key, b_raised.document);
     deliveries(&s.log, A_KEY, 1).await;
     deliveries(&s.log, &b_key, 1).await;
 
@@ -769,6 +772,40 @@ async fn s5_a_restart_mid_incident() {
     assert!(adoption.resolved.is_empty() && adoption.over_bound.is_empty());
     let svc = b.start().await.unwrap();
     let instance = svc.instance().clone();
+
+    // G GETs the moment S sees the new instance token (the SHOULD, as core
+    // §8.2 observes it): A firing, t0 kept, and B, unchanged, each under the
+    // new instance's stamp id, and a reply_del of R's key and of P's, which
+    // it deleted before its token.
+    at_new_token(&s.log, before.len()).await;
+    let at_token = get(&g).await;
+    assert!(at_token.complete, "the GET at the token ran to its final reply");
+    for (k, doc) in [(A_KEY, &a_doc), (b_key.as_str(), &b_doc)] {
+        let c = reply(&at_token, k).unwrap_or_else(|| panic!("{k} answered at the token"));
+        let Current::Value { sample, .. } = c else {
+            panic!("{k}: a value at the token, not {c:?}")
+        };
+        assert_eq!(
+            &am::decode(&sample.payload().to_bytes()).unwrap(),
+            doc,
+            "{k} unchanged, its timestamp kept"
+        );
+        assert_eq!(
+            c.clock().as_deref(),
+            Some(new_zid.as_str()),
+            "{k} under the new instance's stamp id"
+        );
+    }
+    for k in [r_key.as_str(), p_key] {
+        let c = reply(&at_token, k).unwrap_or_else(|| panic!("{k}: a reply_del at the token"));
+        assert!(matches!(c, Current::Deleted { .. }), "{k}: {c:?}");
+        assert_eq!(
+            c.clock().as_deref(),
+            Some(new_zid.as_str()),
+            "{k}'s delete stamped by the new instance"
+        );
+    }
+
     // The first evaluation: A still holds, B's condition is clear.
     assert_eq!(
         a.raise(alarm_a(Severity::Critical)).await.unwrap().act,
@@ -776,36 +813,21 @@ async fn s5_a_restart_mid_incident() {
     );
     assert_eq!(a.resolve(&b_key).await.unwrap().unwrap().act, Act::Resolved);
 
-    // What S received: before the new instance token, A unchanged under
-    // the new instance's stamp id, the deletes of R's and P's keys, and
-    // B's put; then B's resolved put and delete.
-    eventually("the new instance token reaches S", || async {
-        snapshot(&s.log)[before.len()..]
-            .iter()
-            .any(Rec::is_instance)
-    })
-    .await;
+    // What S received, listed without an order against the token (F-135):
+    // A unchanged under the new instance's stamp id, the deletes of R's and
+    // P's keys, B's put, then B's resolved put and delete.
     deliveries(&s.log, &b_key, 4).await;
     let after = snapshot(&s.log)[before.len()..].to_vec();
-    let token_at = after.iter().position(Rec::is_instance).unwrap();
     let a_put = after
         .iter()
-        .position(|r| r.alert_key() == Some(A_KEY))
+        .find(|r| r.alert_key() == Some(A_KEY))
         .expect("A put again");
-    assert_eq!(after[a_put].doc(), a_doc, "unchanged, t0 kept");
+    assert_eq!(a_put.doc(), a_doc, "unchanged, t0 kept");
     assert_eq!(
-        after[a_put].stamp_id(),
+        a_put.stamp_id(),
         new_zid,
         "under the new instance's stamp id"
     );
-    for k in [&r_key, &p_key.to_owned(), &b_key] {
-        let at = after
-            .iter()
-            .position(|r| r.alert_key() == Some(k.as_str()))
-            .unwrap_or_else(|| panic!("{k} delivered"));
-        before_token(&after, at, token_at, &format!("{k} (a SHOULD)"));
-    }
-    before_token(&after, a_put, token_at, "A (a SHOULD)");
     let all = snapshot(&s.log);
     assert_eq!(
         reads(&of(&all, A_KEY)),
@@ -1035,7 +1057,9 @@ async fn s7_at_the_bound() {
 }
 
 /// A re-mint in one session (§2.9): every alarm is put again before the
-/// new instance's token.
+/// new instance's token — a GET the moment S sees the token answers A under
+/// the re-put's stamp, later than the raise's though the session, and so
+/// the stamp's id, is the same (text 0.5, F-135).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_re_mint_puts_every_alarm_again() {
     let (_r1, ep) = router(None).await;
@@ -1052,21 +1076,23 @@ async fn a_re_mint_puts_every_alarm_again() {
     let mut svc = b.start().await.unwrap();
     presence_of(&rs, None).await;
     seen_by(&os).await;
-    a.raise(alarm_a(Severity::Warning)).await.unwrap();
-    deliveries(&s.log, A_KEY, 1).await;
+    let raised = a.raise(alarm_a(Severity::Warning)).await.unwrap().document;
+    let first = deliveries(&s.log, A_KEY, 1).await[0].stamp.expect("stamped");
+    let g = reader(&rs);
     let n = snapshot(&s.log).len();
     svc.new_epoch().await.unwrap();
-    eventually("the new instance token", || async {
-        snapshot(&s.log)[n..].iter().any(Rec::is_instance)
-    })
-    .await;
-    let after = snapshot(&s.log)[n..].to_vec();
-    let token = after.iter().position(Rec::is_instance).unwrap();
-    let put = after
-        .iter()
-        .position(|r| r.alert_key() == Some(A_KEY))
-        .expect("A put again");
-    before_token(&after, put, token, "A");
+    at_new_token(&s.log, n).await;
+    let at_token = get(&g).await;
+    let c = reply(&at_token, A_KEY).expect("A answered at the token");
+    let Current::Value { sample, .. } = c else {
+        panic!("a value at the token, not {c:?}")
+    };
+    assert_eq!(am::decode(&sample.payload().to_bytes()).unwrap(), raised);
+    assert!(
+        c.timestamp().expect("stamped") > first,
+        "the re-put's stamp, not the raise's"
+    );
+    deliveries(&s.log, A_KEY, 2).await;
     assert_eq!(
         reads(&of(&snapshot(&s.log), A_KEY)),
         [Transition::Raised, Transition::Confirmed]
