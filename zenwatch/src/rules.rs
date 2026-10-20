@@ -50,11 +50,10 @@ pub const V1_ALERT_PLANE: &str = "v1's alert plane (`v1/<origin>/state/<producer
      namespace. Write `zk2/*/*/alarms.v1/state/alarms/*`, or narrower \
      (`zk2/<system>/*/alarms.v1/state/alarms/*`)";
 
-/// What every alarm selector refusal adds: where the selector is read.
-const ALARM_SELECTOR: &str = "an alarm selector is base-relative, read through the \
-     session in the deployment's namespace (bus.namespace, --namespace), so it starts at \
-     zk2/ — unlike a window rule's wire selector, which is watched in no namespace and \
-     carries it";
+/// Why an alarm selector starts at `zk2/`: where it is read.
+const ALARM_SELECTOR: &str = "an alarm selector is read through the session in the \
+     deployment's namespace (bus.namespace, --namespace), so it starts at zk2/ — unlike a \
+     window rule's wire selector, which is watched in no namespace and carries it";
 
 /// What one rule watches.
 #[derive(Debug, Clone, PartialEq)]
@@ -214,14 +213,26 @@ fn is_v1_alert_plane(sel: &str) -> bool {
 
 /// An alarm selector, refused the way the fleet's reader refuses one
 /// (`zenkey_fleet::AlarmScope`): a key expression, base-relative, reaching
-/// an `alarms.v1` key — with where it is read, which is not where a window
-/// rule's selector is.
+/// an `alarms.v1` key. One that is not base-relative is told where it is
+/// read, which is not where a window rule's selector is, and given the
+/// selector it names in the namespace when it carries one.
 fn alarm_selector(sel: &str, head: &str) -> Result<String, RuleError> {
+    let chunks: Vec<&str> = sel.split('/').collect();
+    if chunks.first() != Some(&"zk2") && zenoh::key_expr::KeyExpr::try_from(sel).is_ok() {
+        let suggestion = chunks
+            .iter()
+            .position(|c| *c == "zk2")
+            .map(|i| format!("; write {:?}", chunks[i..].join("/")))
+            .unwrap_or_default();
+        return Err(RuleError(format!(
+            "{head} {sel:?} is not base-relative: {ALARM_SELECTOR}{suggestion}"
+        )));
+    }
     zenkey_fleet::AlarmScope::parse(sel)
         .map(|_| sel.to_string())
         .map_err(|why| {
             let why = crate::exit::without_source_locations(&why);
-            RuleError(format!("{head} {why} — {ALARM_SELECTOR}"))
+            RuleError(format!("{head} {why}"))
         })
 }
 
@@ -432,7 +443,9 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            e.contains("not base-relative") && e.contains("bus.namespace"),
+            e.contains("not base-relative")
+                && e.contains("bus.namespace")
+                && e.contains(r#"write "zk2/*/*/alarms.v1/state/alarms/*""#),
             "{e}"
         );
         for no_alarm in [

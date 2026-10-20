@@ -1,0 +1,8 @@
+// An alarm selector with the namespace on it, as a window rule's wire
+// selector is written: refused, saying where an alarm selector is read.
+{
+  bus: { namespace: "site" },
+  rules: [{ name: "fleet-alarms", rule: "alerts site/zk2/*/*/alarms.v1/state/alarms/*", sinks: ["hook"] }],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },
+  publish: false,
+}

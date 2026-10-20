@@ -8,8 +8,10 @@
 //! that it can no longer read is a fact the operator must hear.
 //!
 //! **Version 2** (#614, FL2). The identities are zk2's — an address for
-//! presence, a zk2 or foreign wire key for a token, a check and subject
-//! under the doctor — and the file names the namespace they were judged in.
+//! presence, a zk2 or foreign wire key for a token, an alarm's
+//! base-relative key under `alerts` (#800, AD: strings like the others, so
+//! the version did not move), a check and subject under the doctor — and
+//! the file names the namespace they were judged in.
 //! A file written in another namespace is refused: its addresses are
 //! another deployment's, and reading them as this one's would resolve or
 //! assume what nobody saw.

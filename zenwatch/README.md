@@ -20,12 +20,13 @@ daemon is a zk2 service of its own, `health.v1` and its own `zenwatch.v1`
 ## Rules
 
 A rule is one spelling of a **closed** vocabulary — no expressions, no
-templating. The seven from `zenctl watchdog`, judged by the engine every
+templating. The eight from `zenctl watchdog`, judged by the engine every
 `tick_s`:
 
 ```
 rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> |
-invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | dropped
+invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> |
+alert-firing <SEL> [info|warning|critical] | dropped
 ```
 
 Selectors are wire keys, watched on a session in no namespace — prefix the
@@ -34,9 +35,16 @@ need to know what a key *is* read it through the contracts:
 `invalid-payload` checks a payload against its declared type (spec §7.2,
 §7.3), `qos-mismatch` the QoS a sample rode against its resource's (§2.4).
 `doctor <CHECK-ID>` runs zk2's doctor for that check every tick.
+`alert-firing <SEL> [info|warning|critical]` (the floor defaults to
+`warning`) is `alarms.v1`'s "is anything firing at or above the floor
+under this selector?" (#800), as `zenctl watchdog` asks it: firing on
+*yes*, ok on *no* — every owner in scope known whole, none of its alarms
+at or above the floor firing or unobservable — and unobservable on every
+other answer, never ok. Its selector is base-relative, like `alerts`'
+(below).
 
-and two of zenwatch's own, one state per *address* or per *token* rather
-than per rule:
+and three of zenwatch's own, one state per *address*, per *token* or per
+*alarm* rather than per rule:
 
 - `instance-gone <SYSTEM/SERVICE>` — either position `*` (`*/tc`,
   `host-a/*`): each address the pattern matches is **up** while one of its
@@ -61,10 +69,31 @@ than per rule:
   anything else — another application's tokens, another namespace's — the
   daemon keeps its own ledger, one state per token key, seeded by a
   liveliness read that says when it ran to its timeout.
-
-`alerts <SEL>` is **dark** until zk2's alarm profile (`alarms.v1`) exists
-(#613): a config that names it is refused, never parsed into a rule that
-could never fire.
+- `alerts <SEL>` — the alarms of `alarms.v1`
+  ([`spec/profiles/alarms/v1.md`](../spec/profiles/alarms/v1.md), #800):
+  each alarm key the selector reaches is an identity of its own, from its
+  raise to its resolve. The selector is **base-relative** —
+  `zk2/*/*/alarms.v1/state/alarms/*`, `zk2/lab/**` — because alarms are
+  read through the session in the deployment's namespace, as every reader
+  of a profile reads them (a selector with the namespace on it is refused,
+  saying so). The engine's live reader (`AlarmFeed`) subscribes, seeds by
+  the owners' GET, re-reads beside the drain every tick and sweeps on the
+  tick. An alarm is **firing** while "is this alarm firing?" reads yes (a
+  fresh firing document of its present owner, §2.14), **ok** on no (put
+  resolved, deleted, or not held by its owner's alarms known whole), and
+  **unobservable** otherwise — stale, its owner gone (its alarms
+  last-known), an earlier instance's put, a put that does not read —
+  never ok. The state comes from the document, never the sample's kind
+  (§2.6). A raise notifies at the document's severity, and so does an
+  **escalation** (a severity change while firing, either way), in its own
+  words; a **refresh** and a **confirmation** say nothing. What this
+  reader has not established yet — a loss no GET has healed, a clock not
+  yet trusted, a subscription not yet listened 900 s — moves no alarm: the
+  rule's `observer` says a loss once, and each alarm keeps its last word
+  until the GET after it decides. An owner's absence is taken from a
+  refresh's presence read, never from a token's withdrawal alone, which a
+  router's restart makes of every owner at once. v1's
+  `alerts v1/*/state/*/alert/*` is refused, saying what to write instead.
 
 **The first look is a baseline.** Everything up when zenwatch starts is
 not news. An address already down is remembered as announced and said
@@ -74,18 +103,34 @@ matches nothing yet) — never paged one by one, as the doctor's baseline
 is. After a restart, the state file's memory is reconciled against it:
 still down is a duplicate, back up is a `resolved`.
 
+An **alarm** already firing at the first look is different, and is told:
+it is its owner's own word that something is wrong, read fresh, its
+document's `timestamp` saying since when — a notifier started at hour
+three of an outage must say so (v1's seeded watch did). With a state file
+it is a duplicate after a restart; a remembered alarm now resolved is a
+`resolved`, and one the reader holds nothing of is resolved once its
+owner's alarms are known whole (alarms.v1 §2.14 step 5's `not_held`). What
+the first look could not establish — an alarm read only by its owner's
+GET while this host's clock is not trusted (`clocks_synced: false`; a
+live put measures it within 450 s), an incomplete read, no owner under
+the selector yet — is said once in an `info` baseline, and each such
+alarm is told when it settles.
+
 ## The three states
 
 Every notification carries `ok` / `firing` / `unobservable` — three, never
 two (RFC 13 §3). `unobservable` is "I could not tell": a drop under a
 completeness claim, an ask that failed, a window shorter than the claim. It
-reaches the sink payload distinguishable from `ok`. A presence or token
-rule whose observer lost events (`Dropped(n)`), or whose read ran to its
-timeout, says `unobservable` once, on its `<rule_id>:observer` identity —
-a token's going or its return may have been in the span it could not see —
-and `observable_again` when a complete re-read stands. An address that was
-firing stays firing through the loss; one whose stop the loss hid is
-found by the re-read and fires then.
+reaches the sink payload distinguishable from `ok`. A presence, token or
+alarm rule whose observer lost events (`Dropped(n)`, an alarm reader's
+refused deliveries or stalled receive path, core §2.7), or whose read ran
+to its timeout, says `unobservable` once, on its `<rule_id>:observer`
+identity — a token's going or its return, an alarm's raise or resolve, may
+have been in the span it could not see — and `observable_again` when a
+complete re-read stands. An address that was firing stays firing through
+the loss; one whose stop the loss hid is found by the re-read and fires
+then. An alarm keeps its last word through the loss, and the GET that
+heals it decides it.
 
 ## Sinks
 
@@ -96,15 +141,24 @@ found by the re-read and fires then.
   (`tls: "starttls" | "tls" | "dangerous"`).
 - `webhook` — the notification as a JSON body (`{ notification, sinks }`,
   the shape pinned in `src/sinks/mod.rs`: `id`, `rule`, `rule_kind`,
-  `kind` — `transition | presence | liveliness | baseline | group |
+  `kind` — `transition | presence | liveliness | alert | baseline | group |
   resolved | observable_again | lost_sight | unobservable | doctor` —
   `state`, `prior`, `severity`, `title`, `message`, `labels`, `at`,
-  `evidence`, `rendering`, `truncated`, `repeat`, `group`, `presence`);
-  2xx is delivered. `presence` is the projection's move that decided a
-  presence notice, as the engine pins it (`zenkey_fleet::report`):
+  `evidence`, `rendering`, `truncated`, `repeat`, `group`, `presence`,
+  `alert`); 2xx is delivered. `presence` is the projection's move that
+  decided a presence notice, as the engine pins it (`zenkey_fleet::report`):
   `{"at", "source": "event|seed|dropped", "address", "change": {"kind":
   "status", "from": "up", "to": "down"}}` (or an `interface_gone`,
-  `member_gone`, …), `null` otherwise.
+  `member_gone`, …), `null` otherwise. `alert` is the alarm's change that
+  decided an `alerts` notice, as the engine pins it: `{"key", "alarm":
+  {"system", "service", "alert_key"}, "change": "raised|escalated|refreshed|
+  confirmed|resolved|retired|unreadable|judged", "firing": {"answer":
+  "yes|no|unobservable|not_asked", "reason", "says"}}`, with `severity`,
+  `document` (the alarm as alarms.v1 writes it), `stamp` and `via`
+  (`subscription|get`) when known; `null` otherwise. An alert's `severity`
+  is its document's, its `labels` the rule's with the document's
+  discriminating labels over them (never `host` or `host.*`), and its
+  `rendering` `schema`: the document rendered through the contract.
 - `exec` — a program with that JSON on stdin and `ZENWATCH_RULE` /
   `ZENWATCH_STATE` / `ZENWATCH_SEVERITY` in the environment. **This is the
   one sink that runs code**; nothing from a notification is ever
@@ -118,9 +172,10 @@ delivery on stdout and sends nothing.
 Everything between a rule's verdict and a delivery — the difference
 between a notifier someone keeps enabled and one they mute in week two.
 Every notice has an **identity** (`id` on the notification: the rule's id
-plus the address, the token's key, `observer`, an engine condition's
-sorted labels, or a doctor finding's check and subject), and the
-discipline keeps one bounded entry per identity:
+plus the address, the token's key, the alarm's base-relative key,
+`observer`, an engine condition's sorted labels, or a doctor finding's
+check and subject), and the discipline keeps one bounded entry per
+identity:
 
 - **`for`** — `for_s` on a rule (or `discipline.for_s` for all) announces
   a firing notice only if it is still firing that long after it started.
@@ -129,7 +184,7 @@ discipline keeps one bounded entry per identity:
   cancelling it, and is itself announced only if it persists past `for` —
   silence is not evidence (RFC 13 §3 O6).
 - **dedup** — the same identity at the same state and severity is not a
-  new notification; a severity change is.
+  new notification; a severity change is (an alarm's escalation).
 - **repeat** — `repeat_s` re-sends a notice still firing after that long,
   once per interval, with `repeat` counting up on the notification. `0`
   (the default) never repeats.
@@ -160,7 +215,8 @@ document): deduplicated, grouped, repeats, cancelled, baselines, evicted.
 `state_file` keeps the ledger across restarts, so a restart does not
 re-page the world: what was announced firing or unobservable, when, when it
 was last sent, how often it repeated, and the address it was about. JSON,
-**version 2** — zk2 identities, and the namespace they were judged in —
+**version 2** — zk2 identities (an alarm's key among them, a string like
+the others), and the namespace they were judged in —
 written atomically (`.tmp` then rename) on the tick when something changed
 and at stop; read once at startup. **Missing is fresh; malformed is exit 2
 naming the path** — silently discarding history is how a resolved notice
@@ -201,7 +257,8 @@ doctor: { every_h: 6, deep: false, sinks: ["ops"], severity_floor: "warning" },
   that this host's clock and the owners' agree within the HLC delta
   (`freshness.v1` §2.6). The doctor listens to no status, so without it the
   `health-*` checks of every service implementing `health.v1` are
-  unobservable. A `doctor health-*` rule reads it too.
+  unobservable. A `doctor health-*` rule reads it too, and so do the alarm
+  rules, which age an owner's GET reply on it.
 - **Baseline, then deltas.** The first run is the baseline: **one** `info`
   notification, "doctor baseline: N finding(s) across M check(s)", naming
   each finding — never one page per finding. Every finding is entered into
@@ -262,12 +319,13 @@ publish: false,                          // or run no service at all
 **`health.v1`** (`spec/profiles/health/v1.md`, through the runtime): the
 status says whether zenwatch can do its job — declared `OK`, raised by the
 runtime to its worst check, re-put every 28.5 s. One check per part of the
-job, at most six of the profile's 64:
+job, at most seven of the profile's 64:
 
 | Check | `OK` | `DEGRADED` | `FAILED` | `UNSPECIFIED` |
 |---|---|---|---|---|
 | `sinks` | no sink's last delivery failed | some sinks' last delivery failed | every sink's: no notification can go out | — |
 | `presence`, `tokens` (when a rule reads them) | a complete read, nothing lost | a read that timed out, events dropped (`Dropped(n)`) until a complete re-read, or the monitor stopped | — | not read yet |
+| `alarms` (when an `alerts` rule reads them) | a complete presence read and GET, nothing lost since | a read that timed out or could not be made, deliveries lost or a stall until a GET heals it, or a reader that stopped | — | not read yet |
 | `doctor` (when scheduled) | not run yet, or the last run happened | the last run could not happen | — | — |
 | `state-file` (when configured) | the last save went through | the last save failed | — | — |
 | `firing` | every rule with something announced is published | the bound refuses some | — | — |
@@ -335,6 +393,8 @@ name. The whole example is [`examples/zenwatch.json5`](examples/zenwatch.json5):
     { name: "tc-gone",       rule: "instance-gone */tc", severity: "error", sinks: ["ops", "mail"] },
     { name: "held-gone",     rule: "liveliness-gone demo/held/*/alive", severity: "error", sinks: ["ops"] },
     { name: "bad-payloads",  rule: "invalid-payload site/zk2/**", sinks: ["ops"] },
+    { name: "fleet-alarms",  rule: "alerts zk2/*/*/alarms.v1/state/alarms/*", labels: { team: "infra" }, sinks: ["ops", "hook"] },
+    { name: "lab-critical",  rule: "alert-firing zk2/lab/** critical", severity: "critical", sinks: ["page"] },
     { name: "observer-drops", rule: "dropped", severity: "info", sinks: ["ops"] },
   ],
   discipline: {
@@ -397,9 +457,12 @@ for the start. An endpoint that does not parse (`127.0.0.1:7447`, no
 `tcp/`) or a namespace that is not a concrete prefix is a refused config,
 exit 2 — `check-config` catches it first.
 
-Rendering is **bounded**: a big document does not become a big push. Every
-rule zk2's port keeps is judged over a window or a token, so today every
-notification renders key-only; the payload path returns with `alerts`.
+Rendering is **bounded**: a big document does not become a big push. An
+alert renders its alarm's document through the contract (`schema`), after
+the facts that fit in a glance — the alarm in three members (system,
+service, alert key), its rule, since when it fires, the change — so the
+cut lands on the payload; every other rule is judged over a window or a
+token and renders key-only.
 
 ## Exit codes
 
@@ -409,7 +472,7 @@ One contract, cited from `src/exit.rs`:
 |---|---|
 | 0 | clean — `run` stopped on SIGINT/SIGTERM or after `--once`; `check-config` found nothing to refuse; `test-sink` delivered |
 | 1 | the act failed — the transport would not open; the test delivery did not go out. A sink failing *during* a run is counted and logged, never fatal |
-| 2 | refused input — a config that does not parse or does not check (a dark or v1 spelling among them), a context that names nothing, a namespace that is not one, contracts that load nothing, a state file malformed, version 1 or another namespace's, a host with no id for the default `@hostid.v1/zenwatch` (hostid.v1 §2.6), a sink name `test-sink` cannot find; the same code as clap's usage errors |
+| 2 | refused input — a config that does not parse or does not check (a v1 spelling among them), a context that names nothing, a namespace that is not one, contracts that load nothing, a state file malformed, version 1 or another namespace's, a host with no id for the default `@hostid.v1/zenwatch` (hostid.v1 §2.6), a sink name `test-sink` cannot find; the same code as clap's usage errors |
 
 ## What it is not
 

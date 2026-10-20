@@ -42,13 +42,34 @@ Error: tests/cmd/fixtures/missing-sink.json5: 1 problem(s) — nothing was run
 ```
 
 The vocabulary is closed — no expressions, no templating — and the refusal
-spells all nine kinds:
+spells all eleven kinds:
 
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/bad-rule.json5
 ? 2
-  rules[0].rule: "if rate(zk2/**) > 5 then page": is not a rule — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | dropped | liveliness-gone <SEL>
+  rules[0].rule: "if rate(zk2/**) > 5 then page": is not a rule — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | alert-firing <SEL> [info|warning|critical] | dropped | instance-gone <SYSTEM/SERVICE> | liveliness-gone <SEL> | alerts <SEL>
 Error: tests/cmd/fixtures/bad-rule.json5: 1 problem(s) — nothing was run
+
+```
+
+The alarm rules read `alarms.v1` (#800, AD): `alerts`, one state per alarm
+key, and `alert-firing`, one state per rule at its floor. Their selectors are
+base-relative, read through the session in the deployment's namespace:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/alarms.json5
+tests/cmd/fixtures/alarms.json5: 2 rule(s), 1 sink(s), no service (publish: false) — ok
+
+```
+
+— so an alarm selector written with the namespace on it, as a window rule's
+wire selector is, is refused, saying where it is read:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/alarms-namespaced.json5
+? 2
+  rules[0].rule: alerts "site/zk2/*/*/alarms.v1/state/alarms/*" is not base-relative: an alarm selector is read through the session in the deployment's namespace (bus.namespace, --namespace), so it starts at zk2/ — unlike a window rule's wire selector, which is watched in no namespace and carries it; write "zk2/*/*/alarms.v1/state/alarms/*"
+Error: tests/cmd/fixtures/alarms-namespaced.json5: 1 problem(s) — nothing was run
 
 ```
 
@@ -95,9 +116,10 @@ Error: cannot read tests/cmd/fixtures/nope.json5: No such file or directory (os 
 
 Each refused by name, with where its question went — never an unknown-field
 error that says nothing, and never parsed into a rule that silently never
-fires: v1's `origin-down` (now `instance-gone`, no alias), the dark `alerts`
-(#613), inhibition switched on (removed: it read v1's catalog), grouping by
-v1's origin chunk, v1's registry dirs, and the doctor's v1 sample:
+fires: v1's `origin-down` (now `instance-gone`, no alias), `alerts` over v1's
+alert plane (what to write instead: alarms.v1's keys, #800 AD), inhibition
+switched on (removed: it read v1's catalog), grouping by v1's origin chunk,
+v1's registry dirs, and the doctor's v1 sample:
 
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/zk2-refusals.json5
@@ -106,8 +128,8 @@ $ zenwatch check-config --config tests/cmd/fixtures/zk2-refusals.json5
   discipline.group_by[0]: "origin" was v1's origin chunk, which zk2 keys do not carry: group by `system` (the <system> of <system>/<service>, a host under hostid.v1) or `address` (<system>/<service>)
   discipline.inhibit: inhibition was removed in the zk2 port (#614): it read v1's catalog (edge/*, entity/*, alias/*) to attribute a symptom to a down host, and no zk2 profile carries those documents. Delete the block, or set `enabled: false`
   doctor.sample: v1's per-family state sample: zk2's deep checks (`state-stamp-foreign`, `population-over-bound`) read every owner's state once and take no sample — remove it
-  rules[0].rule: "origin-down h-3fa9c2d41b7e": v1's origin-down read v1's liveliness roster; in zk2 it is instance-gone <SYSTEM/SERVICE>: an address with no instance token visible to this reader (spec §8.1) — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | dropped | liveliness-gone <SEL>
-  rules[1].rule: "alerts v1/*/state/*/alert/*": alerts read v1's alert plane, and zk2's alarm profile (alarms.v1) does not exist yet: the rule is dark until it does (#613). Refused rather than ignored — a rule that can never fire is a rule that pages nobody
+  rules[0].rule: "origin-down h-3fa9c2d41b7e": v1's origin-down read v1's liveliness roster; in zk2 it is instance-gone <SYSTEM/SERVICE>: an address with no instance token visible to this reader (spec §8.1) — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | alert-firing <SEL> [info|warning|critical] | dropped | instance-gone <SYSTEM/SERVICE> | liveliness-gone <SEL> | alerts <SEL>
+  rules[1].rule: "alerts v1/*/state/*/alert/*": v1's alert plane (`v1/<origin>/state/<producer>/alert/<alert_key>`) is gone: zk2's alarms are alarms.v1's, one key per alarm at zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>, read in the deployment's namespace. Write `zk2/*/*/alarms.v1/state/alarms/*`, or narrower (`zk2/<system>/*/alarms.v1/state/alarms/*`)
 Error: tests/cmd/fixtures/zk2-refusals.json5: 6 problem(s) — nothing was run
 
 ```
@@ -118,7 +140,7 @@ pass one gate:
 ```console
 $ zenwatch run --config tests/cmd/fixtures/alerts.json5 --once --dry-run
 ? 2
-  rules[0].rule: "alerts v1/*/state/*/alert/*": alerts read v1's alert plane, and zk2's alarm profile (alarms.v1) does not exist yet: the rule is dark until it does (#613). Refused rather than ignored — a rule that can never fire is a rule that pages nobody
+  rules[0].rule: "alerts v1/*/state/*/alert/*": v1's alert plane (`v1/<origin>/state/<producer>/alert/<alert_key>`) is gone: zk2's alarms are alarms.v1's, one key per alarm at zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>, read in the deployment's namespace. Write `zk2/*/*/alarms.v1/state/alarms/*`, or narrower (`zk2/<system>/*/alarms.v1/state/alarms/*`)
 Error: tests/cmd/fixtures/alerts.json5: 1 problem(s) — nothing was run
 
 ```

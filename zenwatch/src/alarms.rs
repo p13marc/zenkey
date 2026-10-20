@@ -3,10 +3,10 @@
 //! namespace), one notice per alarm key as §5's first question moves.
 //!
 //! **One state per alarm key**, as `instance-gone` is one per address: the
-//! key's identity is its own (`<rule_id>:zk2/<system>/<service>/alarms.v1/
-//! state/alarms/<alert_key>`, base-relative), from its raise to its
-//! resolve (§2.1). Its state is "is this alarm firing?" (§2.14), read off
-//! the fleet's book, never the sample's kind (§2.6):
+//! notice's identity is `<rule_id>:<key>`, the key base-relative, the
+//! alarm's identity from its raise to its resolve (§2.1). Its state is "is
+//! this alarm firing?" (§2.14), read off the fleet's book, never the
+//! sample's kind (§2.6):
 //! - **firing** while it reads *yes*: a fresh firing document of the
 //!   present instance;
 //! - **ok** on *no*: put resolved, deleted, or not held by its owner's
@@ -35,6 +35,14 @@
 //! `observable_again` when a complete GET after it stands. A key firing
 //! stays firing through the loss, and the GET that heals it decides it, as
 //! an address stays gone through a presence loss ([`crate::presence`]).
+//!
+//! **An owner's absence is a read's.** §2.14 step 1's *absent* is "a
+//! complete read without its instance token": the rule takes it from a
+//! refresh's presence read, never from a live token's withdrawal alone,
+//! which a router's restart makes of every owner at once. Each refresh
+//! judges every key the book holds again, so an owner that did go is said
+//! a tick later. A refresh through a session cut off from every router and
+//! peer makes no read at all (`zenkey_fleet::bus::alarms::cut_off`).
 //!
 //! **The first look** (decided against `presence.rs`'s baseline and v1's
 //! `alerts`). An alarm already firing when zenwatch starts is **told**, as

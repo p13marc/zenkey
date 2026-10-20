@@ -280,7 +280,9 @@ lands at the bus root, where no consumer of the deployment listens.
   `config.v1` (#768), and alerts with `alarms.v1` (#800): `zenctl alarms`,
   the watchdog's `alert-firing`, the doctor's `alarm-key` and `alarm-stale`,
   and `check conform`'s `alarm-key` and `alarm-document` ask its §5
-  questions, and zenwatch's `alerts` is #800's AD.
+  questions; zenwatch's `alerts` notifies the first per alarm key, as it
+  moves, and its `alert-firing` the second, as the watchdog does (#800,
+  AD).
   The population budget was among them until core 0.24 (#735) made it core
   (spec §2.7): `check conform`'s `budget`, `budget-window` and `rate` cases and the doctor's
   `population-over-bound` ask it.

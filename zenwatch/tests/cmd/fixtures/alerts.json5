@@ -1,4 +1,5 @@
-// `alerts` alone: dark until zk2's alarm profile exists (#613).
+// `alerts` over v1's alert plane: refused, saying what to write instead
+// (alarms.v1's keys, read in the deployment's namespace; #800, AD).
 {
   rules: [{ name: "fleet-alerts", rule: "alerts v1/*/state/*/alert/*", sinks: ["hook"] }],
   sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },

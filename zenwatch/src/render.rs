@@ -11,10 +11,11 @@
 //! contract that declares the payload (spec §7.2); a structural reading
 //! when no contract resolves one, prefixed with why and bounded separately
 //! at [`RenderConfig::max_structural_bytes`]; and key-plus-timestamp when
-//! nothing was decoded, with the reason. Every rule zk2's port keeps is
-//! judged over a window or a token, so today every notification is
-//! key-only; the payload path stays for the alerts that zk2's alarm
-//! profile brings back (#613).
+//! nothing was decoded, with the reason. An `alerts` notice renders its
+//! alarm's document through the contract that declares it (`alarms.v1`,
+//! decoded strictly by the fleet's reader: §2.4), so it is `schema` (#800,
+//! AD); every other rule is judged over a window or a token, and renders
+//! key-only.
 
 use std::collections::BTreeMap;
 

@@ -1,11 +1,13 @@
 // zenwatch: one process, one config, N rules, M sinks — on a zk2 deployment.
 //
 // Rules are zenctl watchdog's closed zk2 vocabulary plus
-// `instance-gone <SYSTEM/SERVICE>` and `liveliness-gone <SEL>`. Selectors are
-// wire keys: prefix the deployment's namespace. `alerts` is dark until zk2's
-// alarm profile exists (#613). Secrets are never inline: `{ env: "NAME" }` or
-// `{ file: "/path" }`, and a bare string in a secret position does not parse.
-// `zenwatch check-config` refuses exactly what `run` would.
+// `instance-gone <SYSTEM/SERVICE>`, `liveliness-gone <SEL>` and
+// `alerts <SEL>`. A window rule's selectors are wire keys: prefix the
+// deployment's namespace. The alarm rules' (`alerts`, `alert-firing`) are
+// base-relative, `zk2/…`: alarms.v1 is read in the namespace. Secrets are
+// never inline: `{ env: "NAME" }` or `{ file: "/path" }`, and a bare string
+// in a secret position does not parse. `zenwatch check-config` refuses
+// exactly what `run` would.
 {
   // The deployment: a named context's connection, and the namespace the
   // resolved reads (presence, contracts, the doctor) open their session in.
@@ -15,7 +17,10 @@
   // A revision held here is never retrieved; the rest come from the bus.
   contracts: ["/etc/zenwatch/contracts"],
   // The operator's word that this host's clock and the owners' agree within
-  // the HLC delta (freshness.v1 §2.6): the doctor's health-* checks need it.
+  // the HLC delta (freshness.v1 §2.6): the doctor's health-* checks need it,
+  // and the alarm rules age an owner's GET reply on it (without it, an alarm
+  // firing at the first look is told once a live put measures its owner's
+  // clock, at most 450 s later).
   clocks_synced: false,
   tick_s: 5,
   rules: [
@@ -28,6 +33,12 @@
     // projection: liveliness-gone site/zk2/*/tc/@zk/alive/tc.netif.v1/**
     { name: "held-gone", rule: "liveliness-gone demo/held/*/alive", severity: "error", sinks: ["ops", "page"] },
     { name: "bad-payloads", rule: "invalid-payload site/zk2/**", sinks: ["hook"] },
+    // Every alarm of every service (alarms.v1), one notification per alarm:
+    // firing at its document's severity, resolved, or unobservable (stale,
+    // its owner gone) — never ok while it cannot be read.
+    { name: "fleet-alarms", rule: "alerts zk2/*/*/alarms.v1/state/alarms/*", labels: { team: "infra" }, sinks: ["ops", "hook"] },
+    // Anything critical firing on the lab's hosts: one state for the rule.
+    { name: "lab-critical", rule: "alert-firing zk2/lab/** critical", severity: "critical", sinks: ["page"] },
     { name: "observer-drops", rule: "dropped", severity: "info", sinks: ["hook"] },
   ],
   sinks: {
