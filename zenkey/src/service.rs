@@ -26,7 +26,10 @@
 //! has its status put before step 3, as `health.v1` §2.3 makes a MUST
 //! ([`crate::health`]); one implementing `config.v1` through
 //! [`ServiceBuilder::config_v1`] has its view and status put when it
-//! declares them, as `config.v1` §2.3 makes a MUST ([`crate::config_v1`]).
+//! declares them, as `config.v1` §2.3 makes a MUST ([`crate::config_v1`]);
+//! one implementing `alarms.v1` through [`ServiceBuilder::alarms`] adopts
+//! its previous instance's alarms there, putting each again before
+//! anything is alive (`alarms.v1` §2.9, [`crate::alarms`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
@@ -121,6 +124,8 @@ pub struct ServiceBuilder {
     pub(crate) health: Option<crate::health::Health>,
     /// `config.v1`, once [`ServiceBuilder::config_v1`] implemented it.
     pub(crate) config_v1: Option<crate::config_v1::Configuration>,
+    /// `alarms.v1`, once [`ServiceBuilder::alarms`] implemented it.
+    pub(crate) alarms: Option<crate::alarms::Alarms>,
 }
 
 fn mint() -> InstanceId {
@@ -222,6 +227,7 @@ impl ServiceBuilder {
             closed: tokio::sync::watch::Sender::new(false),
             health: None,
             config_v1: None,
+            alarms: None,
         }
     }
 
@@ -263,6 +269,40 @@ impl ServiceBuilder {
             return Err(Error::Duplicate(iface));
         }
         crate::config_v1::Configuration::declare(self, startup, device).await
+    }
+
+    /// Implements `alarms.v1`, its standard contract embedded
+    /// ([`crate::alarms`]): the template `state/alarms/{alert_key}` is
+    /// exposed and its GETs served, `startup`'s bound applied, and the
+    /// previous instance's alarms adopted from `startup`'s record, else its
+    /// archive, each put again before this returns, so before any GET is
+    /// answered and before the instance token (§2.9). The handle returned
+    /// raises, refreshes and resolves the alarms; each firing one is
+    /// confirmed every 427.5 s (§2.7). Refused when the service implements
+    /// `alarms.v1` already.
+    pub async fn alarms(
+        &mut self,
+        startup: crate::alarms::Startup,
+    ) -> Result<crate::alarms::Alarms> {
+        self.alarms_with(crate::alarms::implementation(), startup)
+            .await
+    }
+
+    /// [`ServiceBuilder::alarms`] on `imp`, another revision of `alarms.v1`
+    /// (R4): its `state/alarms/{alert_key}` must be a JSON state, and its
+    /// `freshness.ttl_s` sets the confirmation period, half of it with the
+    /// refresher's lead (`freshness.v1` §2.4). A later minor, or a test's
+    /// copy with a short horizon.
+    pub async fn alarms_with(
+        &mut self,
+        imp: Implementation,
+        startup: crate::alarms::Startup,
+    ) -> Result<crate::alarms::Alarms> {
+        let iface = crate::alarms::iface();
+        if self.alarms.is_some() || self.implements(&iface) {
+            return Err(Error::Duplicate(iface));
+        }
+        crate::alarms::Alarms::declare(self, imp, startup).await
     }
 
     /// The service's state stamp minter (§4.3): catch-up before the first
@@ -631,6 +671,7 @@ impl ServiceBuilder {
             clock: None,
             health: self.health,
             config_v1: self.config_v1,
+            alarms: self.alarms,
             descriptor: Arc::new(RwLock::new(Arc::from(Vec::new()))),
             session: self.session,
             config: self.config,
@@ -775,6 +816,8 @@ pub struct Service {
     health: Option<crate::health::Health>,
     /// `config.v1`, when the builder implemented it.
     config_v1: Option<crate::config_v1::Configuration>,
+    /// `alarms.v1`, when the builder implemented it.
+    alarms: Option<crate::alarms::Alarms>,
     descriptor: Arc<RwLock<Arc<[u8]>>>,
     session: zenoh::Session,
     config: ServiceConfig,
@@ -897,6 +940,13 @@ impl Service {
     #[must_use]
     pub fn config_v1(&self) -> Option<&crate::config_v1::Configuration> {
         self.config_v1.as_ref()
+    }
+
+    /// Its `alarms.v1`, when [`ServiceBuilder::alarms`] implemented it: the
+    /// handle the builder returned.
+    #[must_use]
+    pub fn alarms(&self) -> Option<&crate::alarms::Alarms> {
+        self.alarms.as_ref()
     }
 
     /// Declares `iface`'s state queryables, once: one over `state/**` and
@@ -1078,6 +1128,10 @@ impl Service {
     /// [`ServiceBuilder::config_v1`]: a new instance is a restart of its
     /// configuration (`config.v1` §2.12), which the runtime makes as a new
     /// service, from the startup values ([`crate::config_v1`]).
+    ///
+    /// A service implementing `alarms.v1` through [`ServiceBuilder::alarms`]
+    /// puts every alarm it holds again first, before the new descriptor and
+    /// tokens (`alarms.v1` §2.9).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
         if self.config_v1.is_some() {
             return Err(Error::Contract(
@@ -1085,6 +1139,11 @@ impl Service {
                  values (config.v1 §2.12): close this service and start another"
                     .to_owned(),
             ));
+        }
+        // alarms.v1 §2.9: each alarm kept put again from the new instance,
+        // before its new instance token.
+        if let Some(a) = &self.alarms {
+            a.reput_all().await?;
         }
         let next = mint();
         let (q, current) = self.serve_descriptor(&next).await?;
@@ -1288,6 +1347,17 @@ impl ServiceBuilder {
 
     pub(crate) fn availability(&self) -> &Arc<crate::operation::Availability> {
         &self.ops
+    }
+
+    /// The budget every writer of `resource` keeps (core §2.7): the
+    /// runtime's own writers made outside the builder (`alarms.v1`'s).
+    pub(crate) fn budget_of(
+        &self,
+        iface: &IfaceId,
+        resource: &str,
+    ) -> Option<Arc<crate::budget::Budget>> {
+        let s = find(&self.impls, iface).ok()?;
+        s.budget(s.imp.resource(resource).ok()?)
     }
 
     /// What a state writer made outside the builder is made of
