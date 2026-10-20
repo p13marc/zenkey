@@ -3,14 +3,16 @@
 //! zenctl explores a bus and zengui renders one; neither tells you when
 //! something is wrong while you are asleep. This is the third binary: one
 //! process, one config, N rules, M sinks. A rule is one spelling of the
-//! closed [`rules::VOCABULARY`] — `zenctl watchdog`'s zk2 seven, plus
-//! `instance-gone <SYSTEM/SERVICE>` (each address up or gone, read from the
-//! fleet's live presence projection by the reading `zenctl watchdog`'s rule
-//! folds too, #747) and `liveliness-gone <SEL>` (the
-//! dead-man's switch on liveliness tokens). `alerts` is dark until zk2's
-//! alarm profile exists (#613). A transition on any rule produces exactly
-//! one notification per sink, and the three states ride through —
-//! `unobservable` is never folded into `ok`.
+//! closed [`rules::VOCABULARY`] — `zenctl watchdog`'s zk2 eight, its
+//! `alert-firing` among them, plus `instance-gone <SYSTEM/SERVICE>` (each
+//! address up or gone, read from the fleet's live presence projection by
+//! the reading `zenctl watchdog`'s rule folds too, #747),
+//! `liveliness-gone <SEL>` (the dead-man's switch on liveliness tokens) and
+//! `alerts <SEL>` (each alarm of `alarms.v1` firing, resolved or
+//! unobservable on its own, read by the fleet's live reader, #800 AD). A
+//! transition on any rule produces exactly one notification per sink, and
+//! the three states ride through — `unobservable` is never folded into
+//! `ok`.
 //!
 //! **zk2 throughout** (#614): the read side — rules, presence, contracts,
 //! the doctor — runs on the in-tree fleet, on two sessions, one in the
@@ -31,13 +33,15 @@
 //! `.zrec` replay and a GUI pane want the same reading; which rule a move
 //! is news to, and whether it is a duplicate, is this daemon's. The split
 //! is visible in the module list: [`engine`] composes the fleet's watchdog
-//! with the projection and its own token ledger and owns [`engine::route`];
-//! [`presence`] and [`liveliness`] turn moves into per-rule notices;
+//! with the projection, its own token ledger and the fleet's alarm readers
+//! and owns [`engine::route`]; [`presence`], [`liveliness`] and [`alarms`]
+//! turn moves into per-rule notices;
 //! [`doctor`] turns the engine's scheduled `run_doctor` into run-over-run
 //! notices on that same stream (#390); [`sinks`] owns the daemon's wire
 //! shapes ([`sinks::Outgoing`]); [`config`] owns the file and its
 //! refusals; [`exit`] cites the contract.
 
+pub mod alarms;
 pub mod bus;
 pub mod cli;
 pub mod config;

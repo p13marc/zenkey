@@ -25,17 +25,18 @@ use clap::{Args, Parser, Subcommand};
     about = "Notify when something is wrong on a zk2 Zenoh deployment (#388)",
     long_about = "Watch N rules and route every genuine state change to M sinks.\n\n\
         Rules are zenctl watchdog's closed zk2 vocabulary — rate-above, rate-below, \
-        silent-for, invalid-payload, qos-mismatch, doctor, dropped — plus \
+        silent-for, invalid-payload, qos-mismatch, doctor, alert-firing, dropped — plus \
         `instance-gone <SYSTEM/SERVICE>` (`*` in either position: each address the \
         pattern matches is up while an instance token is held, and gone when none is with \
         a complete read behind it, read from the live presence projection — under a \
         wildcard only an address seen held can go, and an exact address is watched from \
         the start; one notification per address, zenctl watchdog's rule firing from the \
-        same reading) and \
-        `liveliness-gone <SEL>` (the dead-man's switch on liveliness tokens). `alerts` \
-        is dark until zk2's alarm profile exists (#613). Three states ride every \
-        notification, never two: ok / firing / unobservable, and a drop in the observer \
-        is unobservable, never ok (RFC 13 §3 O6).\n\n\
+        same reading), `liveliness-gone <SEL>` (the dead-man's switch on liveliness \
+        tokens) and `alerts <SEL>` (alarms.v1: each alarm the base-relative selector \
+        reaches, read in the deployment's namespace, is firing, resolved or unobservable \
+        on its own; one notification per alarm). Three states ride every notification, \
+        never two: ok / firing / unobservable, and a drop in the observer is \
+        unobservable, never ok (RFC 13 §3 O6).\n\n\
         Exit codes: 0 clean, 1 the act failed, 2 refused input (`zenwatch/src/exit.rs`)."
 )]
 pub struct Cli {

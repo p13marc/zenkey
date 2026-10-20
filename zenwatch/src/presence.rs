@@ -563,6 +563,7 @@ impl PresenceRule {
             assume,
             passthrough: false,
             reason: "a presence token carries no payload",
+            alert: None,
         }
     }
 
@@ -593,6 +594,7 @@ impl PresenceRule {
             assume,
             passthrough: false,
             reason: "nothing was observed",
+            alert: None,
         }
     }
 
@@ -665,6 +667,7 @@ impl PresenceRule {
             assume: false,
             passthrough: true,
             reason: "a baseline is a count, not a payload",
+            alert: None,
         }
     }
 }

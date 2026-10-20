@@ -1,0 +1,13 @@
+// The alarm rules on alarms.v1 (#800, AD): `alerts`, one state per alarm
+// key, and `alert-firing`, one state per rule at its floor. Their
+// selectors are base-relative (zk2/…), read in the deployment's namespace.
+{
+  bus: { connect: ["tcp/127.0.0.1:7447"], namespace: "site" },
+  clocks_synced: true,
+  rules: [
+    { name: "fleet-alarms", rule: "alerts zk2/*/*/alarms.v1/state/alarms/*", labels: { team: "infra" }, sinks: ["hook"] },
+    { name: "lab-critical", rule: "alert-firing zk2/lab/** critical", severity: "critical", sinks: ["hook"] },
+  ],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/zenwatch" } },
+  publish: false,
+}

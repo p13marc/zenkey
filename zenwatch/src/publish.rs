@@ -13,10 +13,11 @@
 //! - **`health.v1`**, through [`zenkey::health`]: the status says whether
 //!   zenwatch can do its job, declared `OK` and raised by the runtime to
 //!   its worst check (§2.2). The checks are the parts of the job, at most
-//!   six of the profile's 64 ([`checks`]): `sinks` (the last delivery of
-//!   each), `presence` and `tokens` (what the observers' basis lets the
-//!   rules conclude: a monitor's `Dropped(n)` is `DEGRADED` until a
-//!   complete re-read), `doctor` (a scheduled run that could not happen),
+//!   seven of the profile's 64 ([`checks`]): `sinks` (the last delivery of
+//!   each), `presence`, `tokens` and `alarms` (what the observers' basis
+//!   lets the rules conclude: a monitor's `Dropped(n)`, an alarm reader's
+//!   lost delivery or stall, is `DEGRADED` until a complete re-read; #800
+//!   AD for `alarms`), `doctor` (a scheduled run that could not happen),
 //!   `state-file` (a ledger that did not save) and `firing` (rules the
 //!   bound refused). The runtime re-puts the status every 28.5 s.
 //! - **`zenwatch.v1`** (`contracts/zenwatch.v1.toml`), through the
@@ -252,6 +253,7 @@ pub mod check {
     pub const SINKS: &str = "sinks";
     pub const PRESENCE: &str = "presence";
     pub const TOKENS: &str = "tokens";
+    pub const ALARMS: &str = "alarms";
     pub const DOCTOR: &str = "doctor";
     pub const STATE_FILE: &str = "state-file";
     pub const FIRING: &str = "firing";
@@ -334,6 +336,9 @@ pub struct HealthInputs<'a> {
     pub presence: Option<Observer>,
     /// The foreign-token ledger; `None` when no rule reads it.
     pub tokens: Option<Observer>,
+    /// The `alerts` rules' alarm readers, the worst of them (#800, AD);
+    /// `None` when no rule reads alarms.
+    pub alarms: Option<Observer>,
     /// The scheduled doctor; `None` when no `doctor` block is configured.
     pub doctor: Option<DoctorCheck<'a>>,
     /// The state file: `None` when none is configured, `Some(None)` when
@@ -457,6 +462,13 @@ pub fn checks(i: &HealthInputs<'_>) -> Vec<Check> {
     }
     if let Some(o) = i.tokens {
         out.push(observer_check(check::TOKENS, o, "the watched tokens"));
+    }
+    if let Some(o) = i.alarms {
+        out.push(observer_check(
+            check::ALARMS,
+            o,
+            "the alarms the `alerts` rules read",
+        ));
     }
 
     if let Some(d) = i.doctor {
@@ -1007,7 +1019,7 @@ mod tests {
 
     /// The mapping of the module doc's table, pole by pole: a part the
     /// configuration does not have is no check, and nothing here is ever
-    /// more than six of health.v1's 64.
+    /// more than seven of health.v1's 64.
     #[test]
     fn each_part_of_the_job_maps_onto_a_check() {
         let none = sinks(&[("ops", None), ("mail", None)]);
@@ -1015,6 +1027,7 @@ mod tests {
             sinks: &none,
             presence: None,
             tokens: None,
+            alarms: None,
             doctor: None,
             state_file: None,
             firing_refused: 0,
@@ -1062,10 +1075,12 @@ mod tests {
             let cs = checks(&HealthInputs {
                 presence: Some(o),
                 tokens: Some(o),
+                alarms: Some(o),
                 ..base
             });
             assert_eq!(level_of(&cs, check::PRESENCE), Some(want), "{o:?}");
             assert_eq!(level_of(&cs, check::TOKENS), Some(want), "{o:?}");
+            assert_eq!(level_of(&cs, check::ALARMS), Some(want), "{o:?}");
         }
 
         let doc = ZenwatchDoctor {
@@ -1121,6 +1136,7 @@ mod tests {
         let every = checks(&HealthInputs {
             presence: Some(Observer::Complete),
             tokens: Some(Observer::Complete),
+            alarms: Some(Observer::Complete),
             doctor: Some(DoctorCheck {
                 status: DoctorStatus::Pending,
                 every: "6h",
@@ -1129,7 +1145,7 @@ mod tests {
             state_file: Some(None),
             ..base
         });
-        assert_eq!(every.len(), 6);
+        assert_eq!(every.len(), 7);
         assert!(every.len() as u64 <= zenkey_model::health::MAX_CHECKS);
     }
 

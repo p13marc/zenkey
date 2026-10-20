@@ -194,21 +194,36 @@ pub struct ArchivesRead {
 }
 
 impl AlarmRefresh {
-    /// Presence, then the GET, then the archives.
+    /// Presence, then the GET, then the archives — none of them through a
+    /// session cut off from every router and peer ([`cut_off`]).
     pub async fn run(self) -> Refreshed {
         let t = self.spec.timeout;
+        let cut = cut_off(&self.session).await;
         let presence = match self.spec.face {
             Some(_) => None,
             None => Some((
                 Instant::now(),
-                crate::bus::presence::observe(&self.session, &self.scope.presence_scope(), t)
+                match &cut {
+                    Some(why) => Err(why.clone()),
+                    None => crate::bus::presence::observe(
+                        &self.session,
+                        &self.scope.presence_scope(),
+                        t,
+                    )
                     .await
                     .map_err(|e| crate::one_line(&e)),
+                },
             )),
         };
-        let seed = get(&self.session, self.scope.alarms_selector(), t).await;
+        let seed = match &cut {
+            Some(why) => Err(why.clone()),
+            None => get(&self.session, self.scope.alarms_selector(), t).await,
+        };
         let archived = if self.spec.archives && self.spec.face.is_none() {
-            Some(archived(&self.session, &self.scope, t).await)
+            Some(match &cut {
+                Some(why) => Err(why.clone()),
+                None => archived(&self.session, &self.scope, t).await,
+            })
         } else {
             None
         };
@@ -218,6 +233,27 @@ impl AlarmRefresh {
             archived,
         }
     }
+}
+
+/// Why `session` reaches no router and no peer, when it does not (#800,
+/// AD): a read through it is answered at once, complete and empty, though
+/// nothing was asked of anyone — every owner would read absent (§2.14 step
+/// 1), and the GET would heal a loss nobody answered (§2.15). A router's
+/// restart cuts a client off so until it reconnects; the refresh then makes
+/// no read, and says why. A peer alone on its bus reads nothing so too, its
+/// own process's owners included: it cannot tell alone from cut off, and a
+/// reader shares no session with an owner it judges (zenctl and zenwatch
+/// open their own).
+pub async fn cut_off(session: &Session) -> Option<String> {
+    let info = session.info();
+    if info.routers_zid().await.next().is_some() || info.peers_zid().await.next().is_some() {
+        return None;
+    }
+    Some(
+        "this session reaches no router and no peer, so a read would be answered at once, \
+         complete and empty: not made"
+            .to_owned(),
+    )
 }
 
 /// S4's GET of `selector` (core §4.2): target `All`, consolidation
@@ -707,5 +743,44 @@ pub async fn observe(
         listened,
         at: Instant::now(),
         wall: SystemTime::now(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A session cut off from every router and peer makes no read (#800,
+    /// AD): its presence read and its GET would be answered at once,
+    /// complete and empty, so the refresh records why each was not made —
+    /// no owner reads absent, and nothing heals a loss.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_cut_off_makes_no_read() {
+        let mut c = zenoh::Config::default();
+        c.insert_json5("mode", "\"peer\"").unwrap();
+        c.insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+        c.insert_json5("listen/endpoints", "[]").unwrap();
+        let alone = zenoh::open(c).await.expect("a peer of nobody");
+        assert!(cut_off(&alone).await.is_some());
+        let (feed, out) = AlarmFeed::open(
+            &alone,
+            AlarmScope::all(),
+            AlarmSpec::new(Duration::from_millis(200)),
+            false,
+        )
+        .await
+        .expect("the reader opens");
+        assert!(out.is_empty());
+        let log = feed.log();
+        assert!(
+            matches!(&log.presence, Some(Err(why)) if why.contains("no router and no peer")),
+            "{:?}",
+            log.presence
+        );
+        assert!(matches!(&log.seed, Some(Err(_))), "{:?}", log.seed);
+        assert_eq!(feed.book().seed_complete(), None, "no GET was folded");
+        alone.close().await.unwrap();
     }
 }

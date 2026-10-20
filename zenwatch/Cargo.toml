@@ -29,6 +29,9 @@ zenkey-model = { path = "../zenkey-model" }
 zenkey = { path = "../zenkey" }
 zenkey-explorer-config = { workspace = true }
 zenoh = { workspace = true }
+# `select_all` and `join_all` over the `alerts` rules' alarm readers, one per
+# selector (#800, AD), as the fleet's watchdog drives its own.
+futures-util = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

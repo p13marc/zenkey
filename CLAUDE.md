@@ -83,7 +83,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   never re-derived. The watchdog's `alert-firing` holds one feed per
   selector (`RuleAlarms`, `SweepOutcome::alarms`), and the doctor's
   `alarm-key`/`alarm-stale` and `check conform`'s `alarm-key`/
-  `alarm-document` read one GET through the same book.
+  `alarm-document` read one GET through the same book. A session cut off
+  from every router and peer makes no read (`bus::alarms::cut_off`, #800
+  AD): zenoh answers its liveliness reads and GETs at once, complete and
+  empty, which would read every owner absent and heal a loss.
 - `zenkey-explorer-config/` — the **shared explorer config crate**
   (Apache-2.0, **not published**): named connection contexts, the path
   policy (`~/.config/zenkey-explorer/config.toml`, legacy zenctl read
@@ -458,12 +461,21 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   types are `publish.rs`'s structs bound by `json_type`, the committed
   schema held to them by `check_schema`; `build.rs` is zk2's
   `zenkey-build`). zenwatch links no v1 crate. A rule is one spelling of the **closed**
-  vocabulary — `zenctl watchdog`'s zk2 seven on the fleet's watchdog
+  vocabulary — `zenctl watchdog`'s zk2 eight on the fleet's watchdog
   (`rate-above`, `rate-below`, `silent-for`, `invalid-payload`,
-  `qos-mismatch`, `doctor`, `dropped`) plus two of its own:
-  `instance-gone <SYSTEM/SERVICE>` (either position `*`) and
-  `liveliness-gone <SEL>`. They are **not** `Condition`s: a `Condition` is
-  one state per rule, these are one state per address or token. `presence.rs`
+  `qos-mismatch`, `doctor`, `alert-firing <SEL> [info|warning|critical]`,
+  `dropped`) plus three of its own: `instance-gone <SYSTEM/SERVICE>`
+  (either position `*`), `liveliness-gone <SEL>` and `alerts <SEL>` (#800
+  AD, `alarms.rs`: the fleet's `AlarmFeed` per distinct base-relative
+  selector on the namespaced session; one state per alarm key, firing on
+  §5's first answer yes, ok on no, unobservable otherwise, never ok; an
+  escalation notifies, a refresh or confirmation does not; an answer that
+  is only the reader's sight leaves the key at its last word, a loss is
+  the rule's `observer`'s once, and an owner's absence is a refresh's
+  presence read, never a token's withdrawal alone; an alarm firing at the
+  first look is told; alarms.v1 §2.16, text 0.4). They are **not**
+  `Condition`s: a `Condition` is one state per rule, these are one state
+  per address, token or alarm. `presence.rs`
   reads FL1's live projection (a `PresenceFeed` on its own monitor; patterns
   tracked): an address up while an instance token is held, gone only under
   a complete read; `liveliness-gone` on the deployment's zk2 tokens rides it
@@ -473,11 +485,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   are cancel-safe in the `select!`, and a `Dropped(n)` or an incomplete
   read is the rule's `<rule_id>:observer` going `unobservable`, never `ok`.
   The **first look is a baseline**: an address down at start is *assumed*
-  (`NoticeMeta::assume`) and said once in a `baseline` notification;
+  (`NoticeMeta::assume`) and said once in a `baseline` notification (an
+  alarm firing at start is told, not assumed);
   under a wildcard nothing can be gone that was never seen. That address
   reading is the fleet's `model::presence_watch::AddressWatch`, which
   `zenctl watchdog` and `record --on` share (#747). **Refused by
-  name, exit 2, never ignored**: `alerts` (dark until alarms.v1, #613),
+  name, exit 2, never ignored**: `alerts`/`alert-firing` over v1's alert
+  plane (saying what to write), an alarm selector carrying the namespace,
   `origin-down`, inhibition switched on (removed with v1's catalog),
   `group_by: ["origin"]` (zk2 groups by `system`/`address`),
   `bus.registry`, the doctor's `sample`, a version-1 state file.
@@ -487,7 +501,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   **Secrets are env-var names or file paths, never inline**: a bare string
   in a secret position fails to parse. **The three states are preserved**
   into every sink payload; a presence notice carries the engine's pinned
-  `PresenceTransition` (`report::presence`). Routing — which rule, which
+  `PresenceTransition` (`report::presence`), an alert its `AlarmTransition`
+  (`kind: alert`, the document rendered `schema`). Routing — which rule, which
   sink, whether it is a duplicate — is the daemon's (`engine::route`, over
   a `Notice` seam). `--dry-run` swaps every sink for a printing one. **The
   discipline** (#389, `discipline/`) sits between `route` and delivery and
@@ -504,7 +519,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (optional, gated `config:doctor`, after every scheduled run) and
   `counters` (what the bounds cost); health.v1's status declared `OK` and
   raised to its worst check (`sinks`, `presence`, `tokens`, `doctor`,
-  `state-file`, `firing`). It stops last — the final tick, the observers,
+  `state-file`, `firing`, `alarms`). It stops last — the final tick, the observers,
   the sinks drained, then its tokens — so it never pages about its own
   clean stop; and it caches no discovery: it is not the noun
   `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
@@ -745,7 +760,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 - **Decided 2026-10-09 (FL, #614's in-repo half: zengui and zenwatch onto
   zk2, chunks FL1–FL12):**
   - `hostid.v1` and `health.v1` (#613's first tier) come before the port;
-  - zenwatch ports with `alerts` dark until alarms.v1. Inhibition is
+  - zenwatch ports with `alerts` dark until alarms.v1 (lit by #800 AD,
+    2026-10-20). Inhibition is
     removed, not dark: it read v1's catalog, and no profile brings it back;
   - the population budget is core (§2.2, `cardinality`), lit up with a spec
     amendment (0.24, §2.7, #735). This reverses that part of FJ's "kind and

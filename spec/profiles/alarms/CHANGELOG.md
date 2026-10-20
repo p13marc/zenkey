@@ -4,6 +4,75 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-20: what the notifier settled (#800, AD)
+
+0.3 left one surface unnamed on purpose: "No surface for transitions …
+zenwatch's `alerts` is #800's AD; nothing here names its notifications."
+The reference notifier now reads the profile live: zenwatch's `alerts`,
+one state per alarm key, through `zenkey_fleet`'s reader (`AlarmFeed`), and
+its `alert-firing`, the watchdog's. Building it settled what a tool that
+reports each change must preserve, stated in a new §2.16. Written against
+core 0.34, unchanged.
+
+No model change, and no fixture changes: §2.16 reports what §2.6 and
+§2.14 already compute, which `transitions.json` (27) and
+`conclusions.json` (95) pin; `keys.json` (75) and `documents.json` (62) are
+unchanged.
+
+**Stated: what the notifier settled** (§2.16).
+- **The answer after the change, never the name alone.** §2.6 names what a
+  sample did; whether the alarm fires now is §2.14's. A notifier that
+  paged on §2.6's `raised` alone would page for an earlier instance's put,
+  for a key it cannot yet judge, and for a raise heard after a loss; one
+  that resolved on `resolved` alone would resolve from a reading a loss
+  made unobservable. The reference reports the answer after each change,
+  and only a move of it: firing on yes, resolved on no, unobservable on the
+  rest, never ok.
+- **What moves a report:** the answer, and while yes the severity, either
+  way (§2.5's escalate). A refresh and a confirmation are not transitions
+  (§0); nor, to a tool that already reported the alarm firing at its
+  severity, is a raise whose `timestamp` moved without a resolve heard.
+- **A loss, once.** A loss makes every key unobservable at once. Reported
+  per key, one reader's dropped buffer pages once per firing alarm, then
+  again as each heals. The reference reports it once, on the rule's
+  observer, and each key keeps its last report until the GET that heals
+  the loss answers it, as the presence rules keep an address through a
+  presence loss. That is a MAY: a tool that reports each key unobservable
+  is not wrong.
+- **An alarm firing at the first reading is reported** (a SHOULD). The
+  presence rules assume an address already down at their first look,
+  since nothing can be gone that was never seen held; an alarm needs no
+  such premise, it is its owner's own word, and a notifier started at hour
+  three of an outage must say so. v1's seeded watch did; its state file
+  makes it a duplicate after a restart.
+
+**Deliberately not stated.**
+- **Absence between reads.** §2.14 step 1's absent is "a complete read
+  without its instance token". A reader that follows instance tokens live
+  hears every owner's token withdrawn at once when its router restarts:
+  the reference's book reads that absent at once, as presence's word (core
+  §8.1), and its notifier takes absence from its next complete presence
+  read instead, so a router's restart is one observer's loss and not a
+  last-known per alarm. Which a live withdrawal is, is core §8.1's to say
+  for every profile's reader, not this text's.
+- **A read through a session cut off.** A client that has lost its
+  router has every read answered at once, complete and empty, though
+  nothing was asked of anyone: every owner reads absent, and the GET heals
+  a loss nobody answered. The reference's reader makes no read through a
+  session that reaches no router and no peer
+  (`zenkey_fleet::bus::alarms::cut_off`). That a read so made is not
+  complete is core §2.7's and §8.1's, for every reader; this text names no
+  transport.
+- **The scope's answer after a resolve.** An owner established
+  `answered` by a GET that answered a key reads, once that key's resolve
+  is heard and its next GET draws nothing, unobservable (`no_member`)
+  until a window longer than 900 s: "is anything firing?" goes no, then
+  unobservable, after a resolve, and the reference's `alert-firing`
+  reports both. Kept as written: an empty reply set is no verdict (core
+  O5). Per key, a delete stays no.
+- **The notifications themselves** — their kinds, identities and payload —
+  are the tool's.
+
 ## 0.3 — 2026-10-20: the cold reader's round 39, and what the tools settled (#800, AC; #609)
 
 Two readings of 0.2 met here. The spec-only implementation ran it (zk2py

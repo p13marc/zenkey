@@ -7,6 +7,59 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the alarm rules on `alarms.v1` (#800, AD)
+
+`alerts` and `alert-firing` are back, on `alarms.v1`
+(`spec/profiles/alarms/v1.md`, text 0.4): what FL2 left dark until zk2's
+alarm profile existed. Both read through the session in the deployment's
+namespace, so their selectors are base-relative (`zk2/…`), unlike every
+other rule's wire selector. `zenwatch.v1` is unchanged, and so is the
+state file's version.
+
+### Rules
+
+| Before | Now | Notes |
+|---|---|---|
+| `alerts <SEL>`: refused, dark until alarms.v1 (#613) | `alerts <SEL>`, `<SEL>` base-relative and reaching an `alarms.v1` key (`zk2/*/*/alarms.v1/state/alarms/*`, `zk2/lab/**`) | **one state per alarm key**, read by the engine's live reader (`AlarmFeed`, one per distinct selector): firing on §5's "is this alarm firing?" yes, ok on no (resolved, deleted, `not_held`), unobservable otherwise — stale, its owner gone (last-known), an earlier instance's put, an undecodable put — never ok. The state is the document's, never the sample's kind (§2.6) |
+| v1's `alerts`: a put is firing, a delete resolved | a raise fires at the document's severity; an **escalation** (either way) is news, in its own words; a **refresh** and a **confirmation** are nothing; a resolve is one `resolved`; its delete nothing more | v1 notified a put of a resolved document as a firing; a refresh at the same severity was nothing there too |
+| `alerts v1/*/state/*/alert/*` | refused, exit 2, naming what to write (`zk2/*/*/alarms.v1/state/alarms/*`) | under `alert-firing` too |
+| `alerts site/zk2/…` (a namespace-prefixed selector) | refused, exit 2: an alarm selector is base-relative; the message gives the selector without the namespace | the window rules' selectors keep the namespace |
+| `alert-firing <SEL> [<MIN-SEVERITY>]`: refused, dark (#613) | `alert-firing <SEL> [info\|warning\|critical]` (floor `warning`), the engine's, as in `zenctl watchdog` | one state per rule: firing on §5's "is anything firing at or above the floor?" yes, ok on no, unobservable otherwise. A resolve can read ok for a tick, then unobservable at the owner's next empty GET: an empty answer is no verdict until a 900 s window (§2.15) |
+| the observer: `Dropped(n)` on the alert plane | the rule's `<rule_id>:observer`: `unobservable` once on a loss (refused deliveries, a stalled receive path — a router's restart), an incomplete presence read or GET, a reader that stopped; `observable_again` when a complete GET after it stands | each alarm keeps its last word through a loss, and the GET that heals it decides it (§2.14 step 4); an owner's absence is a refresh's presence read, never a token's withdrawal alone |
+| an alert firing at start: re-fired by the seeded watch, the state file deduplicating | the same: an alarm firing at the first look is told (its `timestamp` says since when), a duplicate after a restart with a state file | what the first look cannot establish (a GET reply's clock not trusted without `clocks_synced`, an incomplete read, no owner yet) is said once in an `info` `baseline`, each alarm told when it settles |
+| — | a remembered alarm the reader holds nothing of | resolved (`not_held`) once its owner's alarms are known whole (§2.14 step 5); unobservable when its owner is absent; kept until then |
+
+### Configuration
+
+| Before | Now | Notes |
+|---|---|---|
+| `clocks_synced`: the doctor's `health-*` checks | and the alarm rules | an owner's GET reply is aged on it; without it an alarm read only by a GET is not yet established until a live put of its owner's clock (≤ 450 s) |
+| `tick_s`: the engine rules' cadence | and the `alerts` rules' re-read (presence, the owners' GET) and sweep | |
+
+### The sink payload
+
+| Before | Now | Notes |
+|---|---|---|
+| `kind: "alert"`: dark with `alerts` | `kind: "alert"` | an alarm firing (raised, escalated, read firing at the first look); its resolve is `resolved`, an alarm no longer judged (stale, its owner gone) `lost_sight` |
+| `id: "<rule>:<alert_ref>"` (`origin.producer.alert_key`) | `"<rule_id>:<key>"`, the alarm's key base-relative (`zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>`) | never one dotted string (alarms.v1 §2.12) |
+| — | `alert` | the fleet's pinned `AlarmTransition`: `key`, `alarm` (`system`, `service`, `alert_key`), `change`, `firing` (`answer`, `reason`, `says`), and when known `severity`, `document`, `stamp`, `via`; `null` on every other notice |
+| `severity`: the producer's, else the rule's | the document's (`info`, `warning`, `critical`), else the rule's | |
+| `labels`: the rule's and the alert's, `host` left out | the rule's, the document's discriminating labels over them | `host` and `host.*` left out (§2.2) |
+| `rendering: structural` (no served schema) | `rendering: schema` | the document decoded strictly by the reader (§2.4), rendered after the alarm's three members, its rule, since when it fires and the change |
+
+### What it publishes
+
+| Before | Now | Notes |
+|---|---|---|
+| `health.v1` checks: at most six | at most seven: `alarms` when an `alerts` rule reads them | `DEGRADED` on an incomplete read, a loss or stall until a GET heals it, a reader that stopped; `UNSPECIFIED` before the first read |
+| `zenwatch.v1` | unchanged (1.1) | `firing/{rule_id}` names an `alerts` rule's most severe alarm like any notice; the readers' cost (deliveries lost, stalls) is the `alarms` check's detail and the stop line's, not a counter: a new counter would be a contract revision for one number |
+
+### The state file
+
+| Before | Now | Notes |
+|---|---|---|
+| version 2 | version 2 | an alarm's identity is a string in the namespace it was judged in, as every other; nothing to migrate |
+
 ## Unreleased (`main`, zk2) — the doctor's `config.v1` checks, and `zenwatch.v1` 1.1 (#768, CC)
 
 The scheduled doctor runs the four checks the doctor gained for
@@ -106,8 +159,8 @@ FL3 (above).
 | `origin-down <ORIGIN>` | `instance-gone <SYSTEM/SERVICE>` | refused with that said (exit 2), no alias. Either position `*` (`*/tc`, `host-a/*`). One state **per address**, read from the engine's live presence projection: up while an instance token is held, gone only under a complete read, unobservable otherwise. A pattern's second address is an identity of its own; an exact address is watched from the start |
 | `liveliness-gone v1/*/state/*/alive` | `liveliness-gone <NS>/zk2/<SYSTEM>/<SERVICE>/@zk/instance/*`, or `instance-gone` | on the deployment's own zk2 presence tokens the rule rides the projection, one state per thing that persists: an address (`…/@zk/instance/*`, `…/@zk/**`), an address and interface (`…/@zk/alive/…`), an address, interface and member (`…/@zk/member/…`, a handover is no gap) |
 | `liveliness-gone <any other SEL>` | the same | the daemon's own ledger, one state per token key, seeded by a liveliness read that says when it ran to its timeout (the v1 roster ask never noticed), re-read after every loss |
-| `alerts <SEL>` | — | **dark** until zk2's alarm profile (`alarms.v1`) exists (#613): refused by `check-config` and `run`, exit 2, naming #613 — never parsed into a rule that could never fire |
-| `alert-firing <SEL> [<MIN-SEVERITY>]` | — | dark with `alerts` (#613), refused |
+| `alerts <SEL>` | — | **dark** until zk2's alarm profile (`alarms.v1`) exists (#613): refused by `check-config` and `run`, exit 2, naming #613 — never parsed into a rule that could never fire. Lit by #800's AD (above) |
+| `alert-firing <SEL> [<MIN-SEVERITY>]` | — | dark with `alerts` (#613), refused. Lit by #800's AD (above) |
 | `rate-above`/`rate-below`/`silent-for`/`invalid-payload`/`qos-mismatch` over `v1/…` | the same over zk2 wire keys (`<NS>/zk2/…`) | selectors stay wire keys on the session in no namespace. `invalid-payload` checks a payload against its contract's declared type (spec §7.2, §7.3), `qos-mismatch` against its resource's QoS (§2.4) — contracts from `contracts`/`--contracts` or retrieved from the bus, never a served schema |
 | `doctor <CHECK-ID>` (v1 ids) | `doctor <CHECK-ID>` (zk2 ids, below) | `clocks_synced` reaches a `doctor health-*` rule's doctor |
 | — | the first look is a baseline | an address already down at start is remembered, not paged one by one, and said once in a `baseline` notification per rule (as the scheduled doctor's baseline) |
@@ -160,11 +213,11 @@ a rename.
 |---|---|---|
 | `inhibited_by` | — | removed with inhibition |
 | — | `presence` | the projection's move that decided a presence notice, as the engine pins it (`zenkey_fleet::report`): `at`, `source` (`event`/`seed`/`dropped`), `address`, `change` tagged by `kind`; `null` otherwise |
-| `kind: "alert"` | — | dark with `alerts` |
+| `kind: "alert"` | — | dark with `alerts`; back with #800's AD (above) |
 | — | `kind: "presence"`, `kind: "baseline"` | an address gone; a presence rule's first look |
 | `id: "<rule>:<origin>/<producer>"` (`liveliness-gone`) | `"<rule>:<address>"`, `"<rule>:<address>/<iface>[/<member>]"`, `"<rule>:<token key>"`, `"<rule>:observer"` | |
-| `id: "<rule>:<alert_ref>"` | — | dark with `alerts` |
-| `rendering: schema \| structural \| key_only` | the same words; `key_only` on every rule today | the payload path returns with `alerts` |
+| `id: "<rule>:<alert_ref>"` | — | dark with `alerts`; `"<rule_id>:<key>"` since #800's AD (above) |
+| `rendering: schema \| structural \| key_only` | the same words; `key_only` on every rule today | the payload path returned with `alerts` (#800, AD: `schema`) |
 
 ### The state file
 

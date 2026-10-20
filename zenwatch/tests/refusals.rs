@@ -1,10 +1,11 @@
 //! What zk2's port refuses, through the one gate both `run` and
 //! `check-config` pass (#614, FL2): [`zenwatch::load_checked`]. Each
-//! refusal is an exit 2 naming where its question went — the dark `alerts`
-//! (#613), v1's `origin-down`, inhibition switched on, a version-1 state
-//! file — and nothing is silently ignored. (v1's live `alerts` suite left
-//! with the rule; the transcripts in `tests/cmd/` pin the same refusals as
-//! the binary prints them.)
+//! refusal is an exit 2 naming where its question went — `alerts` over
+//! v1's alert plane (what to write instead, #800 AD), v1's `origin-down`,
+//! inhibition switched on, a version-1 state file — and nothing is
+//! silently ignored. (v1's live `alerts` suite came back on alarms.v1 in
+//! `tests/alerts.rs`; the transcripts in `tests/cmd/` pin the same
+//! refusals as the binary prints them.)
 
 use std::path::{Path, PathBuf};
 
@@ -47,9 +48,15 @@ fn the_ports_refusals_are_exit_two_through_the_shared_gate() {
         "alerts.json5",
         r#"rules: [{ name: "a", rule: "alerts v1/*/state/*/alert/*", sinks: ["hook"] }]"#,
     );
-    refused(&alerts, "#613");
+    refused(&alerts, "v1's alert plane");
     let problems = zenwatch::config::check(&zenwatch::config::load(&alerts).unwrap());
-    assert!(problems[0].message.contains("#613"), "{problems:?}");
+    assert!(
+        problems[0].message.contains("v1's alert plane")
+            && problems[0]
+                .message
+                .contains("zk2/*/*/alarms.v1/state/alarms/*"),
+        "{problems:?}"
+    );
 
     let origin = config(
         dir.path(),

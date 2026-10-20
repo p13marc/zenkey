@@ -665,6 +665,7 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
             repeat: 0,
             group: None,
             presence: None,
+            alert: None,
         },
         sinks: rule.sinks.clone(),
     }

@@ -214,7 +214,7 @@ rest of #613 is not written:
 | `config.v1` | zenctl's `config`, zengui's Config tool, zenoh-modem's configuration plane |
 | `blob.v1` | zenctl's `blob`, zengui's Blob browser, ZenSight's artifacts |
 | `media.v1` | zengui's Media viewer, ZenSight's parallax. An explicit `@stream` carries frames meanwhile. |
-| `alarms.v1` | Specified (#800, text 0.3): the runtime's owner (`zenkey::alarms`), zenctl's `alarms`, the watchdog's and `record --on`'s `alert-firing`, the doctor's `alarm-key` and `alarm-stale`. Still waiting: zenwatch's `alerts` and `alert-firing` (#800's AD), ZenSight's alerts |
+| `alarms.v1` | Specified (#800, text 0.4): the runtime's owner (`zenkey::alarms`), zenctl's `alarms`, the watchdog's and `record --on`'s `alert-firing`, the doctor's `alarm-key` and `alarm-stale`, zenwatch's `alerts` and `alert-firing` (#800's AD). Still waiting: ZenSight's alerts |
 | `redundancy.v1` | exclusivity: O1's at-most-once holds only while one instance serves. ZenSight's catalog and desired singletons |
 | `desired.v1` | durable commands keyed by their target; ZenSight's desired state |
 | `link.v1` | per-resource exposure across a constrained face; zenoh-modem's RF and SBD faces |
@@ -227,9 +227,11 @@ rest of #613 is not written:
   Appendix D), so tcgui's, zenoh-modem's and ZenSight's contracts load
   today. What the profile itself defines, its rules and its standard
   contract, is not there to rely on.
-- **Dark in the tools until their profiles exist:** `config`, `blob`,
-  `export`, the kind checks (`kind-mismatch`) and zenwatch's alert rules.
-  The watchdog's `alert-firing` came back with `alarms.v1` (#800).
+- **Dark in the tools until their profiles exist:** `blob`, `export` and
+  the kind checks (`kind-mismatch`). `config` came back with `config.v1`
+  (#768), and the alert rules with `alarms.v1` (#800): the watchdog's
+  `alert-firing`, and zenwatch's `alerts` and `alert-firing` (one
+  notification per alarm, its selector base-relative: `zk2/…`).
   `field-stuck` has its profile in `freshness.v1`, and waits to be ported
   onto it (tooling guide §6).
 - **The population budget is not dark.** It went dark at FJ9 with v1's

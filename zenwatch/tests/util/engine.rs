@@ -54,8 +54,8 @@ impl TestPublish {
 }
 
 /// How a test's engine runs; [`Options::default`] is a half-second tick,
-/// no grouping, no state file, no self-publication, no doctor, and one
-/// capturing sink, `ops`.
+/// no grouping, no state file, no self-publication, no doctor, no word on
+/// the clocks, and one capturing sink, `ops`.
 pub struct Options {
     pub tick: Duration,
     pub timeout: Duration,
@@ -65,6 +65,9 @@ pub struct Options {
     pub discipline: DisciplineConfig,
     /// Sinks beside the capturing `ops`.
     pub extra_sinks: Vec<Sink>,
+    /// The operator's word on the clocks (`clocks_synced`): every session
+    /// of a test runs on this host.
+    pub clocks_synced: bool,
 }
 
 impl Default for Options {
@@ -76,6 +79,7 @@ impl Default for Options {
             publish: None,
             doctor: None,
             extra_sinks: Vec::new(),
+            clocks_synced: false,
             // No group window, and a group label no notice carries: a test
             // about a rule sees each notification on its own, whatever
             // system its address names.
@@ -158,7 +162,7 @@ pub async fn run_once_refused(
                 hostid: &p.hostid,
             }),
             doctor: None,
-            clocks_synced: false,
+            clocks_synced: opts.clocks_synced,
         },
         std::future::pending::<()>(),
     )
@@ -200,7 +204,7 @@ pub async fn start(bus: DoctorBus, rules: Vec<RuleConfig>, ops: Capture, opts: O
                     hostid: &p.hostid,
                 }),
                 doctor: opts.doctor.as_ref(),
-                clocks_synced: false,
+                clocks_synced: opts.clocks_synced,
             },
             async move {
                 let _ = stop_rx.await;

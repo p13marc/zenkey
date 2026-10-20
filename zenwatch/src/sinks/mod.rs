@@ -13,7 +13,8 @@
 //! here, beside the sinks that emit them, and not in the engine — the engine
 //! never sees them. What they carry of the engine's is the engine's own
 //! pinned shape: a presence notification's [`PresenceTransition`]
-//! (`zenkey_fleet::report`, #614 FL2).
+//! (`zenkey_fleet::report`, #614 FL2), and an alert's [`AlarmTransition`]
+//! (#800, AD).
 
 pub mod dry_run;
 pub mod exec;
@@ -26,7 +27,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use zenkey_fleet::{CondState, PresenceTransition};
+use zenkey_fleet::{AlarmTransition, CondState, PresenceTransition};
 
 use crate::config::{Config, SinkConfig};
 use crate::render::RenderSource;
@@ -42,8 +43,8 @@ use crate::render::RenderSource;
 /// unobservable` is [`LostSight`](NoticeKind::LostSight) and `ok →
 /// unobservable` is [`Unobservable`](NoticeKind::Unobservable).
 ///
-/// `alert` left with the dark `alerts` rule (#613); it returns with
-/// zk2's alarm profile, deliberately.
+/// `alert` left with v1's `alerts` rule (#614, FL2) and came back with
+/// `alarms.v1` (#800, AD): an `alerts` rule's alarm firing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NoticeKind {
@@ -54,6 +55,12 @@ pub enum NoticeKind {
     Presence,
     /// A liveliness token went (`liveliness-gone`).
     Liveliness,
+    /// An alarm fires (`alerts`, #800 AD): §5's first question of
+    /// `alarms.v1` reads yes — raised, escalated, or read firing at the
+    /// first look. Its resolve is a [`Resolved`](NoticeKind::Resolved), and
+    /// an alarm this reader can no longer judge (stale, its owner gone) a
+    /// [`LostSight`](NoticeKind::LostSight).
+    Alert,
     /// A presence rule's first look (#614, FL2): what is down at start,
     /// what could not be seen — said once, the addresses down remembered
     /// rather than paged one by one, as the doctor's baseline is.
@@ -83,6 +90,7 @@ impl NoticeKind {
             NoticeKind::Transition => "transition",
             NoticeKind::Presence => "presence",
             NoticeKind::Liveliness => "liveliness",
+            NoticeKind::Alert => "alert",
             NoticeKind::Baseline => "baseline",
             NoticeKind::Group => "group",
             NoticeKind::Resolved => "resolved",
@@ -105,24 +113,29 @@ pub struct Notification {
     /// `<rule_id>:<what>` — the address for `instance-gone`, the token's
     /// wire key (or, on zk2 presence tokens, the address and what the
     /// token names) for `liveliness-gone`, `observer` for a presence rule's
-    /// own sight, the sorted labels for an engine condition,
-    /// `<check>:<subject>` under `doctor`. Dedup, repeat and the state file
-    /// key on it.
+    /// own sight, the sorted labels for an engine condition, the alarm's key
+    /// for `alerts` (`zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>`,
+    /// base-relative), `<check>:<subject>` under `doctor`. Dedup, repeat and
+    /// the state file key on it.
     pub id: String,
     /// The rule's name, as configured.
     pub rule: String,
     /// The rule's head word (`silent-for`, `instance-gone`,
-    /// `liveliness-gone`, …).
+    /// `liveliness-gone`, `alerts`, …).
     pub rule_kind: String,
     /// What this notification is (#389).
     pub kind: NoticeKind,
     pub state: CondState,
     /// `null` on the first observation — the baseline stated, not invented (O4).
     pub prior: Option<CondState>,
+    /// The rule's, or what the notice carries: an alert's is its
+    /// document's (`info`, `warning`, `critical`).
     pub severity: String,
     pub title: String,
     pub message: String,
-    /// The rule's labels.
+    /// The rule's labels; an alert's, with its document's discriminating
+    /// labels over them (`alarms.v1` §2.2: `host` and `host.*` left out,
+    /// since the system already scopes them).
     pub labels: BTreeMap<String, String>,
     /// RFC 3339 wall clock.
     pub at: String,
@@ -141,6 +154,15 @@ pub struct Notification {
     /// `source` (`event` | `seed` | `dropped`), `address`, and `change`
     /// tagged by `kind`. `null` for everything else.
     pub presence: Option<PresenceTransition>,
+    /// The alarm's change that decided an `alerts` notice (#800, AD), as
+    /// the engine pins it (`zenkey_fleet::report`): `key`, `alarm`
+    /// (`system`, `service`, `alert_key`, never one string, §2.12),
+    /// `change` (`raised`, `escalated`, `refreshed`, `confirmed`,
+    /// `resolved`, `retired`, `unreadable`, `judged`), `firing` (§5's
+    /// first question after it: `answer` `yes` | `no` | `unobservable` |
+    /// `not_asked`, `reason`, `says`), and when known `severity`,
+    /// `document`, `stamp`, `via`. `null` for everything else.
+    pub alert: Option<AlarmTransition>,
 }
 
 /// A notification and the sinks it is routed to. Every named sink gets the
@@ -333,6 +355,7 @@ pub fn test_outgoing(sink: &str) -> Outgoing {
             repeat: 0,
             group: None,
             presence: None,
+            alert: None,
         },
         sinks: vec![sink.to_string()],
     }
@@ -344,8 +367,9 @@ mod tests {
     use zenkey_fleet::{AddressStatus, PresenceChange, PresenceSource};
 
     /// The webhook/exec wire shape: field names, snake_case states, `null`
-    /// prior on a baseline, `unobservable` distinguishable from `ok`, and a
-    /// presence notification's transition in the engine's pinned shape.
+    /// prior on a baseline, `unobservable` distinguishable from `ok`, a
+    /// presence notification's transition and an alert's in the engine's
+    /// pinned shapes.
     #[test]
     fn outgoing_json_shape_is_pinned() {
         let o = Outgoing {
@@ -367,6 +391,7 @@ mod tests {
                 repeat: 0,
                 group: None,
                 presence: None,
+                alert: None,
             },
             sinks: vec!["ops".into(), "mail".into()],
         };
@@ -391,6 +416,7 @@ mod tests {
                     "repeat": 0,
                     "group": null,
                     "presence": null,
+                    "alert": null,
                 },
                 "sinks": ["ops", "mail"],
             })
@@ -428,12 +454,73 @@ mod tests {
             j["notification"].get("inhibited_by").is_none(),
             "inhibition was removed (#614, FL2)"
         );
+        assert_eq!(j["notification"]["alert"], serde_json::Value::Null);
+
+        // An alert (#800, AD): the fleet's pinned transition, the alarm in
+        // three members, §5's first answer after the change, the document
+        // as alarms.v1 writes it.
+        let doc = zenkey_model::alarms::Alarm {
+            timestamp: 1_760_950_000_000,
+            observed_at_ms: None,
+            rule: "link_down".into(),
+            severity: zenkey_model::alarms::Severity::Critical,
+            state: zenkey_model::alarms::State::Firing,
+            summary: "link to r2 down on eth0".into(),
+            category: None,
+            labels: BTreeMap::from([("peer".into(), "r2".into())]),
+        };
+        let mut alert = firing.clone();
+        alert.notification.id =
+            "fleet:zk2/h1/netlink/alarms.v1/state/alarms/a659f813308ad1da".into();
+        alert.notification.kind = NoticeKind::Alert;
+        alert.notification.rule_kind = "alerts".into();
+        alert.notification.severity = "critical".into();
+        alert.notification.rendering = RenderSource::Schema;
+        alert.notification.presence = None;
+        alert.notification.alert = Some(AlarmTransition {
+            key: "zk2/h1/netlink/alarms.v1/state/alarms/a659f813308ad1da".into(),
+            alarm: zenkey_model::alarms::AlarmRef {
+                system: "h1".into(),
+                service: "netlink".into(),
+                alert_key: "a659f813308ad1da".into(),
+            },
+            change: zenkey_fleet::report::AlarmChange::Escalated,
+            firing: zenkey_fleet::report::AlarmAnswer {
+                answer: zenkey_fleet::report::AlarmAnswerToken::Yes,
+                reason: "firing".into(),
+                says: "its owner says it fires, and confirmed it within 900 s".into(),
+            },
+            severity: Some(zenkey_model::alarms::Severity::Critical),
+            document: Some(doc),
+            stamp: None,
+            via: Some(zenkey_fleet::report::AlarmVia::Subscription),
+            lost: None,
+        });
+        let j = serde_json::to_value(&alert).unwrap();
+        assert_eq!(j["notification"]["kind"], "alert");
+        assert_eq!(j["notification"]["rendering"], "schema");
+        assert_eq!(
+            j["notification"]["alert"],
+            serde_json::json!({
+                "key": "zk2/h1/netlink/alarms.v1/state/alarms/a659f813308ad1da",
+                "alarm": {"system": "h1", "service": "netlink", "alert_key": "a659f813308ad1da"},
+                "change": "escalated",
+                "firing": {"answer": "yes", "reason": "firing",
+                           "says": "its owner says it fires, and confirmed it within 900 s"},
+                "severity": "critical",
+                "document": {"timestamp": 1_760_950_000_000_u64, "rule": "link_down",
+                             "severity": "critical", "state": "firing",
+                             "summary": "link to r2 down on eth0", "labels": {"peer": "r2"}},
+                "via": "subscription",
+            })
+        );
         // Every kind spells itself in snake_case, the way a consumer
         // switches on it.
         for k in [
             NoticeKind::Transition,
             NoticeKind::Presence,
             NoticeKind::Liveliness,
+            NoticeKind::Alert,
             NoticeKind::Baseline,
             NoticeKind::Group,
             NoticeKind::Resolved,
