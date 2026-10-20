@@ -77,7 +77,7 @@ case name. It exits with:
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
-| readings | | `alarms` | not a fixture family: zk2py's own readings where a finding is open, each case naming it. Today, F-134's 11 cases: RFC 8259's whitespace around a payload's value reads, anything else after it is `json`. |
+| readings | | `alarms` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 19: 11 of `alarms.v1` 0.3 §2.4's whitespace (F-134: RFC 8259's `ws` around a payload's value reads, anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, and two of an incomplete scope (F-137). |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
@@ -97,19 +97,21 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
-readings       11 passed     0 failed
+readings       19 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
 link          172 passed     0 failed
-alarms        300 passed     0 failed
-total        1745 passed     0 failed
+alarms        304 passed     0 failed
+total        1757 passed     0 failed
 ```
 
 The figures are against `core.md` 0.34, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.7 and `alarms.v1` 0.2.
-`alarms.v1` 0.2 added 19 cases, nine of `documents.json` given as their
+0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.7 and `alarms.v1` 0.3.
+`alarms.v1` 0.3 added four `documents.json` cases, given as their `text`
+(RFC 8259's whitespace), which zk2py passed unchanged. `alarms.v1` 0.2
+added 19 cases, nine of `documents.json` given as their
 `text` (strict JSON first), three of `transitions.json` and seven of
 `conclusions.json`, and changed none. `alarms.v1` 0.1 added its four
 fixture files, 281 checks, and moved its
@@ -176,9 +178,15 @@ fixtures:
   went against zk2py's reading (`labels` absent equals `{}`), and F-130
   changed what a window across a face asks. The others went as zk2py read
   them.
-- F-133 (the owner example's undocumented `--alarms` stdin surface) and
-  F-134 (§2.4's "nothing after its value", and whitespace) are open
-  (`SPEC-FINDINGS.md`, "At alarms.v1 0.2").
+- `alarms.v1` 0.3 resolved F-133 (the owner example's `--help` now
+  documents its `--alarms` surface whole) and F-134 (§2.4's whitespace is
+  RFC 8259's `ws`), both as zk2py read them.
+- F-135 (scenarios §5 observes "before the new instance token" by arrival
+  order at a subscriber, which the bus does not keep), F-136 (after a
+  loss, step 4 keeps a key whose delete was lost `incomplete` for good,
+  before 0.3's `not_held` can answer) and F-137 (the second question over
+  a scope whose read was not whole) are open (`SPEC-FINDINGS.md`, "At
+  alarms.v1 0.3").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -973,7 +981,7 @@ just py-link
 - **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
   core S3).
 
-## alarms.v1 (profile text 0.2, core 0.34)
+## alarms.v1 (profile text 0.3, core 0.34)
 
 ```bash
 just py-alarms                                   # against zk2py's owner
@@ -982,7 +990,8 @@ just py-alarms --only 2 --full                   # §2 at the contract's 900 s, 
 ```
 
 `alarms.v1` is the sixth profile (`spec/profiles/alarms/`). zk2py read its
-0.1 cold in round 38, and its 0.2 cold and live in round 39. Its standard
+0.1 cold in round 38, its 0.2 cold and live in round 39, and its 0.3 in
+round 40. Its standard
 contract moved from `examples/zk2/` unchanged, and its revision 1.0 is
 published in both history roots, one file.
 - **`zk2py.alarms`**, the reader's and the tool's half, from the text
@@ -1014,26 +1023,39 @@ published in both history roots, one file.
   - §2.9's adoption from a `Record` before the tokens, deletes and
     resolves before adoption, up to the bound;
   - `load(ttl)`, the short-ttl copy of the contract.
-- **The reader on a bus**, `read_owner`:
+- **The reader on a bus**, `read_owner`, and `AlarmsReader` (0.3) over
+  it:
   - presence and the descriptor;
-  - the S4 GET;
-  - `WindowWatch`, §2.15's window with core §2.7's lossless and presence,
-    the owner watched one lease past the window's end;
+  - the S4 GET, recorded with the instant it was asked, made again at each
+    re-read;
+  - §2.15's window as core §2.7 counts one: from the declaration plus the
+    reply timeout, ended a lease and the reply timeout before the instant
+    judged, lossless by the QoS and the reader's own receive path. A loss
+    (a stall, a closed transport) or a gap in an owner's presence breaks
+    it until the first complete GET after it;
   - each key's reading, its latest merged by stamp, `previous_instance` by
-    `meta.zid` compared by value;
-  - another session's GET stamps listed apart (0.2).
-- **The `alarms` conformance family:** 300 of 300. 0.1's cases passed the
-  first time they ran. 0.2's passed once zk2py followed F-127 and F-130.
+    `meta.zid` compared by value. A loss is fed into §2.14 step 4. A held
+    key that the establishing GET left out, with nothing of it since,
+    holds none (0.3);
+  - another session's GET stamps listed apart (0.2);
+  - a one-shot tool's owners by an archive's keys (`archive_form`,
+    `owners_from_archive`, 0.3), and by presence (`owners_by_presence`).
+    Each is a `ScopeRead`, and one that is not whole counts an unobservable
+    owner (F-137).
+- **The `alarms` conformance family:** 304 of 304. 0.1's cases passed the
+  first time they ran, 0.2's once zk2py followed F-127 and F-130, and
+  0.3's unchanged.
 - **The vocabulary** (core 0.34): `alarms` is published with no key, so
   every `alarms.<key>` draws W105.
 - **`just py-alarms`** (`python -m zk2py.alarms_scenarios`) runs
   `scenarios.md` §1 to §10, each on an in-process router of its own:
   - **zk2py's owner** by default;
   - **the Rust owner example** with `--owner <exe>` (or `ZK2PY_OWNER`), a
-    black box. Its flags are `--alarms`, `--alarms-record`, `--alarms-rules`,
-    `--cardinality` and `--tokenless`. Its stdin commands are `alarm raise
-    <json>`, `resolve`, `confirm … on|off` and `adoption`, found by trying
-    (F-133). A short-ttl copy is passed as a contract file;
+    black box, driven from its `--help` alone (0.3, F-133): `--alarms`,
+    `--alarms-record`, `--alarms-rules`, `--cardinality` and `--tokenless`;
+    `alarm raise <json>`, `resolve`, `confirm … on|off` and `adoption`; a
+    short-ttl copy passed as a contract file. The runs here are
+    `owner-ac`, the build at text 0.3;
   - **the waits:** §2, §4, §6 and §10 run on a 4 s copy of the contract
     unless `--full`, and `--quick` skips §3's 65 s wait;
   - **the exit:** 0 when every check passes, 1 when one fails, and 2 when a
@@ -1044,17 +1066,18 @@ published in both history roots, one file.
   |---|---|---|
   | 1 Raise | 9 of 9 | 9 of 9 |
   | 2 Escalate, refresh, confirm | 9 of 9 at 4 s; 9 of 9 at 900 s | 9 of 9 at 4 s; 9 of 9 at 900 s |
-  | 3 Resolve, then delete | 6 of 6 | 6 of 6 |
+  | 3 Resolve, then delete (+ 0.3's `not_held`) | 7 of 7 | 7 of 7 |
   | 4 Re-raise, and its confirmations | 3 of 3 at 4 s | 3 of 3 at 4 s |
-  | 5 A restart mid-incident | 11 of 11 | 11 of 11 |
+  | 5 A restart mid-incident (its SHOULD by a GET at the token, F-135) | 11 of 11 | 11 of 11 |
   | 6 A hung owner goes stale (+ §2.7's resumption) | 6 of 6 at 4 s | 6 of 6 at 4 s |
   | 7 At the bound | 5 of 5 | 5 of 5 |
-  | 8 An absent owner, for a tool | 7 of 7 | 7 of 7 |
+  | 8 An absent owner, for a live tool and a one-shot one | 10 of 10 | 10 of 10 |
   | 9 A key that does not re-derive | 3 of 3 (a zk2py liar) | 3 of 3 (the same liar) |
-  | 10 Anything firing, for a tool | 7 of 7 at 4 s | 7 of 7 at 4 s |
-  | **Total, default run** | **66 of 66** | **66 of 66** |
+  | 10 Anything firing, for a tool (+ 0.3's gap and loss) | 11 of 11 at 4 s | 11 of 11 at 4 s |
+  | **Total, default run** | **74 of 74** | **74 of 74** |
 
-  - **§6 and §10 at 900 s were not run.** Each takes about 15 minutes.
+  - **§6 and §10 at 900 s were not run.** §6 takes about 15 minutes, and
+    §10's window and watch past 900 s about 15 too.
   - **§9's liar is always zk2py's.** Its subject is the tool, and no owner
     may put a document on another key.
 

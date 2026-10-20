@@ -291,6 +291,10 @@ class StallWatch:
         self.listener = info.declare_transport_events_listener(zenoh.handlers.Callback(event), history=False)
         self.last = time.monotonic_ns()
         self.gap_ns = 0
+        #: the instants (monotonic ns) a tick found the gap past the bound:
+        #: ``alarms.v1`` §2.15 (0.3) reads "a stall is a loss at the instant
+        #: the reader sees it"
+        self.stalls: list[int] = []
         self._stop = threading.Event()
         self.tick_s = tick_s
         self.thread = threading.Thread(target=self._tick, daemon=True)
@@ -300,7 +304,10 @@ class StallWatch:
         while not self._stop.wait(self.tick_s):
             now = time.monotonic_ns()
             with self.lock:
-                self.gap_ns = max(self.gap_ns, now - self.last)
+                gap = now - self.last
+                self.gap_ns = max(self.gap_ns, gap)
+                if gap > self.bound_ms * 1_000_000:
+                    self.stalls.append(now)
                 self.last = now
 
     def reading(self) -> tuple[int, bool]:
@@ -310,6 +317,16 @@ class StallWatch:
         with self.lock:
             gap = max(self.gap_ns, now - self.last)
         return gap // 1_000_000, bool(self.closes)
+
+    def losses(self) -> list[int]:
+        """Every instant its path was seen to lose: a stall seen by a tick
+        (the tick that ends its gap), a transport of the session closed,
+        and a gap still open past the bound when it is read, "the one still
+        open when it is read included", dated now."""
+        now = time.monotonic_ns()
+        with self.lock:
+            open_gap = [now] if now - self.last > self.bound_ms * 1_000_000 else []
+            return sorted(self.stalls + self.closes + open_gap)
 
     def close(self) -> None:
         self._stop.set()

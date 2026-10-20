@@ -934,35 +934,86 @@ def _budget_lossless(path: Path) -> list[Result]:
     return out
 
 
-#: zk2py's own readings where a finding is open, each case naming it. Not a
-#: fixture family: these are zk2py's choices, stated as cases so that a
-#: later text's fixture can overturn them visibly. alarms.v1 0.2 §2.4's
-#: "nothing after its value" (F-134): RFC 8259's ws around the value reads,
-#: anything else after it does not.
+#: zk2py's own cases, each naming what it reads: an open finding's reading,
+#: so that a later text's fixture can overturn it visibly, or a rule a text
+#: states, beyond its fixture's cases. Not a fixture family. Today:
+#: alarms.v1 §2.4's whitespace, F-134 at 0.2, stated by 0.3 ("RFC 8259's ws,
+#: before the value and after it … Any other character after the value, a
+#: form feed or a no-break space included, is text after it"), whose four
+#: documents.json cases these extend.
 _F134_DOC = b'{"timestamp":1760950000000,"rule":"link_down","severity":"warning","state":"firing","summary":"s"}'
 _READABLE = {"readable": True, "errors": [], "warnings": []}
 _NOT_JSON = {"readable": False, "errors": ["json"], "warnings": []}
 READINGS = [
-    ("F-134", "a line feed after the document", _F134_DOC + b"\n", _READABLE),
-    ("F-134", "a carriage return and a line feed after it", _F134_DOC + b"\r\n", _READABLE),
-    ("F-134", "RFC 8259's four whitespace bytes before and after it", b" \t\r\n" + _F134_DOC + b" \t\r\n",
+    ("alarms.v1 0.3 §2.4 (F-134)", "a line feed after the document", _F134_DOC + b"\n", _READABLE),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a carriage return and a line feed after it", _F134_DOC + b"\r\n", _READABLE),
+    ("alarms.v1 0.3 §2.4 (F-134)", "RFC 8259's four whitespace bytes before and after it", b" \t\r\n" + _F134_DOC + b" \t\r\n",
      _READABLE),
-    ("F-134", "a no-break space after it (U+00A0)", _F134_DOC + "\u00a0".encode(), _NOT_JSON),
-    ("F-134", "a line separator after it (U+2028)", _F134_DOC + "\u2028".encode(), _NOT_JSON),
-    ("F-134", "a vertical tab after it", _F134_DOC + b"\x0b", _NOT_JSON),
-    ("F-134", "a form feed after it", _F134_DOC + b"\x0c", _NOT_JSON),
-    ("F-134", "a NUL after it", _F134_DOC + b"\x00", _NOT_JSON),
-    ("F-134", "text after it", _F134_DOC + b"x", _NOT_JSON),
-    ("F-134", "a second value after a line feed", _F134_DOC + b"\n{}", _NOT_JSON),
-    ("F-134", "a byte-order mark before it", b"\xef\xbb\xbf" + _F134_DOC, _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a no-break space after it (U+00A0)", _F134_DOC + "\u00a0".encode(), _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a line separator after it (U+2028)", _F134_DOC + "\u2028".encode(), _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a vertical tab after it", _F134_DOC + b"\x0b", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a form feed after it", _F134_DOC + b"\x0c", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a NUL after it", _F134_DOC + b"\x00", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "text after it", _F134_DOC + b"x", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a second value after a line feed", _F134_DOC + b"\n{}", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a byte-order mark before it", b"\xef\xbb\xbf" + _F134_DOC, _NOT_JSON),
 ]
 
 
-def family_readings(root: Path) -> list[Result]:
-    """zk2py's own readings of open findings (:data:`READINGS`)."""
+def _window_cases() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.3 §2.15: a loss or a gap breaks the window until the
+    first complete GET after it, asked strictly after the break was seen (a
+    stall is seen by the tick that ends it). The window runs from 1 s (the
+    declaration plus the reply timeout) to 100 s; instants in seconds."""
     from . import alarms
 
-    return [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
+    def w(losses: list[float], gaps: list[float], gets: list[float]) -> dict[str, Any]:
+        ns = 1_000_000_000
+        x = alarms.window_span(1 * ns, 100 * ns, [int(t * ns) for t in losses], [int(t * ns) for t in gaps],
+                               [int(t * ns) for t in gets])
+        return {"listened_s": x.listened_s, "lossless": x.lossless, "present_throughout": x.present_throughout}
+
+    label = "alarms.v1 0.3 §2.15"
+    return [
+        (f"{label}: a stall seen at 10 s, a GET asked at 9.5 s, inside it: not healed",
+         w([10], [], [9.5]), {"listened_s": 99.0, "lossless": False, "present_throughout": True}),
+        (f"{label}: a GET asked at the instant the stall was seen: not after it, not healed",
+         w([10], [], [10]), {"listened_s": 99.0, "lossless": False, "present_throughout": True}),
+        (f"{label}: a GET asked at 10.5 s heals it, and the window runs from it",
+         w([10], [], [10.5]), {"listened_s": 89.5, "lossless": True, "present_throughout": True}),
+        (f"{label}: a gap at 20 s, no GET after it",
+         w([], [20], [5]), {"listened_s": 99.0, "lossless": True, "present_throughout": False}),
+        (f"{label}: a gap at 20 s, a GET at 21 s heals it",
+         w([], [20], [21]), {"listened_s": 79.0, "lossless": True, "present_throughout": True}),
+        (f"{label}: a loss at 10 s healed at 15 s, a gap at 20 s not",
+         w([10], [20], [15]), {"listened_s": 85.0, "lossless": True, "present_throughout": False}),
+    ]
+
+
+def _scope_cases() -> list[tuple[str, Any, Any]]:
+    """F-137: a scope read that is not whole may miss an owner, so "is
+    anything firing?" over it is never no."""
+    from . import alarms
+
+    quiet = alarms.OwnerRead(alarms.ESTABLISHED)
+    label = "alarms.v1 0.3 §2.15 (F-137)"
+    return [
+        (f"{label}: one established owner with nothing firing, the scope read whole",
+         alarms.any_firing("warning", [quiet] + alarms.ScopeRead(["lab/a"]).owner_reads())["reason"],
+         "none_firing"),
+        (f"{label}: the same, the scope read incomplete (an archive key that did not read back)",
+         alarms.any_firing("warning", [quiet] + alarms.ScopeRead(["lab/a"], False, 1).owner_reads())["reason"],
+         "owner_unobservable"),
+    ]
+
+
+def family_readings(root: Path) -> list[Result]:
+    """zk2py's own cases (:data:`READINGS`, and the window's and the
+    scope's)."""
+    from . import alarms
+
+    out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
+    return out + [_check(note, got, want) for note, got, want in _window_cases() + _scope_cases()]
 
 
 BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_population, "rate.json": _budget_rate,
