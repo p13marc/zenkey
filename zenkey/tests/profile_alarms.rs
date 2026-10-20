@@ -1066,3 +1066,81 @@ async fn a_re_mint_puts_every_alarm_again() {
     svc.close().await.unwrap();
     let _ = SETTLE;
 }
+
+/// §2.9's second source: with no record, a restart adopts from an explicit
+/// read of an archive on its own side, last-known, never from a GET of its
+/// own keys; and puts what it adopts again under its new session's stamps.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_restart_adopts_from_an_archive_on_its_own_side() {
+    use zenkey::archive::{Archive, ArchiveConfig, Recorded};
+
+    let (_r1, ep) = router(None).await;
+    let xs = client(&ep).await;
+    let rs = client(&ep).await;
+    let g = reader(&rs);
+    let arch = Archive::start(
+        &xs,
+        ArchiveConfig {
+            service: config("lab/archive"),
+            records: vec![Recorded {
+                owner: addr(SVC),
+                selector: format!("zk2/{SVC}/alarms.v1/state/alarms/*"),
+                implementation: alarms::implementation(),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let os = client(&ep).await;
+    let (b, a) = owner(
+        &os,
+        config(SVC),
+        alarms::implementation(),
+        Startup::default(),
+    )
+    .await;
+    let svc = b.start().await.unwrap();
+    presence_of(&rs, None).await;
+    let raised = a.raise(alarm_a(Severity::Critical)).await.unwrap().document;
+    eventually("the archive records A", || async {
+        arch.confirmed(&key_of(A_KEY)).is_some()
+    })
+    .await;
+    svc.close().await.unwrap();
+    drop(a);
+    os.close().await.unwrap();
+
+    let os = client(&ep).await;
+    let new_zid = os.zid().to_string();
+    let (b, a) = owner(
+        &os,
+        config(SVC),
+        alarms::implementation(),
+        Startup::default().with_archive(addr("lab/archive"), T),
+    )
+    .await;
+    let adoption = a.adoption();
+    assert_eq!(adoption.source, Source::Archive);
+    assert_eq!(adoption.adopted, [A_KEY]);
+    assert_eq!(
+        a.get(A_KEY).await,
+        Some(raised.clone()),
+        "its timestamp kept"
+    );
+    let svc = b.start().await.unwrap();
+    let (presence, zid) = presence_of(&rs, Some(svc.instance())).await;
+    assert_eq!(zid, new_zid);
+    let answer = get(&g).await;
+    let c = reply(&answer, A_KEY).expect("A answered");
+    assert_eq!(
+        c.clock().as_deref(),
+        Some(new_zid.as_str()),
+        "under the new stamps"
+    );
+    let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);
+    assert_eq!(pair(firing), (Answer::Yes, Reason::Firing));
+    svc.close().await.unwrap();
+}
