@@ -72,6 +72,11 @@ class Report:
             print(f"{'PASS' if ok else 'FAIL'} [{section}] {name}" + (f": {detail}" if detail else ""), flush=True)
         return bool(ok)
 
+    def note(self, section: str, text: str) -> None:
+        """A measurement printed and not counted."""
+        with self.lock:
+            print(f"NOTE [{section}] {text}", flush=True)
+
     def cannot(self, section: str, why: str) -> None:
         with self.lock:
             self.not_run.append((section, why))
@@ -281,10 +286,16 @@ class Bus:
         self.tokens: list[tuple[int, str, str]] = []
         self.tlock = threading.Lock()
 
+        #: called, on a thread of its own, with each instance token's key
+        #: the moment S sees it appear
+        self.on_token: Any = None
+
         def got(smp: Any) -> None:
+            put = smp.kind == zenoh.SampleKind.PUT
             with self.tlock:
-                self.tokens.append((time.monotonic_ns(), "put" if smp.kind == zenoh.SampleKind.PUT else "delete",
-                                    str(smp.key_expr)))
+                self.tokens.append((time.monotonic_ns(), "put" if put else "delete", str(smp.key_expr)))
+            if put and self.on_token is not None:
+                threading.Thread(target=self.on_token, args=(str(smp.key_expr),), daemon=True).start()
 
         self.token_sub = self.s_session.liveliness().declare_subscriber(
             "zk2/lab/*/@zk/instance/*", zenoh.handlers.Callback(got), history=True)
@@ -484,9 +495,16 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
     try:
         o = bus.owner(contract=al.load(None if ttl == al.TTL_S else ttl))
         k = key(A)
+        # Beyond scenarios.md, for 0.3's §2.14 step 5: a second reader R,
+        # whose subscription hears A firing and closes before the resolve.
+        r_sub = None if reraise else fr.Subscriber(bus.s_session, f"zk2/{ADDRESS}/{al.PROFILE}/state/alarms/*")
         o.raise_(A, "warning")
         _wait(lambda: bus.s.of(k), 3.0)
         fired = _doc(bus.s.of(k)[-1])
+        if r_sub is not None:
+            _wait(lambda: r_sub.of(k), 3.0)
+            r_sub.close()
+            o.raise_(B, "warning")
         mark = time.monotonic_ns()
         o.resolve(A)
         _wait(lambda: any(x.kind == "delete" for x in bus.deliveries(k, mark)), 5.0)
@@ -516,6 +534,18 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
                 g = bus.read(bus.g_session)
                 report.check(sec, "3. 65 s after the delete, G's GET draws nothing for the key (core S3)",
                              g.seed is not None and g.seed.complete and k not in g.readings, f"{sorted(g.readings)}")
+                # R holds A firing; the GET that establishes the owner's
+                # alarms (it answers B) does not answer A, and nothing of A
+                # reached R after it was asked: A holds none (0.3).
+                assert r_sub is not None
+                rr = al.read_owner(bus.g_session, ADDRESS, subscriber=r_sub, trust=bus.trust)
+                held = [x.kind for x in r_sub.of(k)]
+                f1, f4 = rr.answers().get(k, (None, None))
+                report.check(sec, "extra (§2.14 step 5, 0.3): a reader that held A firing and missed its delete "
+                                  "reads no, not_held",
+                             held == ["put"] and rr.verdict.reason == "answered" and f1 is not None
+                             and _pair(f1) == "no, not_held" and _pair(f4) == "not_asked, not_firing",
+                             f"held {held}, owner {rr.verdict.expect()}, {f1 and _pair(f1)}; {f4 and _pair(f4)}")
         else:
             mark = time.monotonic_ns()
             o.raise_(A, "warning")
@@ -581,6 +611,19 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         else:
             record.put(kr, al.document_bytes(r_doc))
             record.put(kp, record.docs[ka])
+        # Core §8.2's observation of "before the tokens" (presence.md §1,
+        # health.v1's scenarios §1): a GET made the moment the new instance
+        # token appears already answers what was put before it.
+        at_token: dict[str, Any] = {}
+
+        def get_at_token(k: str) -> None:
+            from . import live
+
+            if k.endswith(old_instance) or "st" in at_token:
+                return
+            at_token["st"] = live.get_state(bus.g_session, f"zk2/{ADDRESS}/{al.PROFILE}/state/alarms/*")
+
+        bus.on_token = get_at_token
         mark = time.monotonic_ns()
         o.restart()
         new_instance = o.instance
@@ -596,14 +639,26 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      first_a is not None and _doc(first_a) is not None and _doc(first_a).firing  # type: ignore[union-attr]
                      and _doc(first_a).timestamp == t0 and _zid_eq(first_a.stamp_id, g.meta_zid),  # type: ignore[union-attr]
                      f"{first_a and _doc(first_a)}, stamp {first_a and first_a.stamp_id}, meta.zid {g.meta_zid}")
-        report.check(sec, "3. before the new instance token appears (a SHOULD)",
-                     first_a is not None and bool(tok) and first_a.arrival_ns < tok[0], "")
+        _wait(lambda: "st" in at_token, 5.0)
+        st = at_token.get("st")
+        rep_at = {} if st is None else {r.key: r for r in st.replies}
+        a_at = rep_at.get(ka)
+        ok = st is not None and not st.errors and a_at is not None and not a_at.deleted \
+            and _zid_eq(a_at.stamp_id, g.meta_zid) and kb in rep_at and not rep_at[kb].deleted \
+            and all(k in rep_at and rep_at[k].deleted for k in (kr, kp))
+        report.check(sec, "3. before the new instance token appears (a SHOULD): a GET made the moment S sees it "
+                          "answers A and B under the new instance's stamps, and R's and P's deletes",
+                     ok, f"{sorted((k.rsplit('/', 1)[1], 'del' if r.deleted else 'put') for k, r in rep_at.items())}")
+        if first_a is not None and tok:
+            report.note(sec, f"A's put reached S {(tok[0] - first_a.arrival_ns) / 1e6:+.3f} ms before the new "
+                             "instance token did: arrival order at a subscriber, which zenoh does not keep "
+                             "between a put and a liveliness declaration (SPEC-FINDINGS F-135)")
         report.check(sec, "3. S reads A confirmed", bus.reads(ka)[-1:] == [al.CONFIRMED], f"{bus.reads(ka)}")
         for name, k in (("R", kr), ("P", kp)):
             d = bus.deliveries(k, mark)
             report.check(sec, f"3. a delete of {name}'s key, which S reads retired (0.2)",
-                         [x.kind for x in d] == ["delete"] and bus.reads(k) == [al.RETIRED]
-                         and bool(tok) and d[0].arrival_ns < tok[0], f"{[x.kind for x in d]}, {bus.reads(k)}")
+                         [x.kind for x in d] == ["delete"] and bus.reads(k) == [al.RETIRED],
+                         f"{[x.kind for x in d]}, {bus.reads(k)}")
         b = bus.deliveries(kb, mark)
         report.check(sec, "3. B: a put unchanged, then a resolved put and a delete; S reads confirmed, resolved, "
                           "retired (0.2)",
@@ -731,6 +786,10 @@ def section7(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
 # -- §8 An absent owner, last-known, for a tool ----------------------------------------
 
 def section8(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
+    """Two tools T, as the reference's §8 runs both (0.3): a live reader,
+    which knows of the owner from its step 1, and a one-shot tool, a reader
+    made at step 3, which knows of it by the archive's keys (§2.15)."""
+    from . import live
     from .health_scenarios import StandInArchive
 
     sec = "§8"
@@ -744,7 +803,12 @@ def section8(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         arch = StandInArchive(bus.endpoint, "lab/archive", f"zk2/{ADDRESS}/{al.PROFILE}/state/**", identity)
         bus.extra.append(arch)
         time.sleep(0.5)
-        t1 = bus.read(bus.t_session)
+        live_t = al.AlarmsReader(bus.t_session, f"zk2/lab/*/{al.PROFILE}/state/alarms/*", trust=bus.trust)
+        bus.extra.append(live_t)
+        pres = live.list_presence(bus.t_session, "zk2/lab/*/@zk/**")
+        for a in sorted({f"{p['system']}/{p['service']}" for p in pres.instances}):
+            live_t.add_owner(a)
+        t1 = live_t.read(ADDRESS)
         f1 = t1.answers()[ka][0] if ka in t1.readings else None
         report.check(sec, "1. T judges A yes, firing", f1 is not None and _pair(f1) == "yes, firing", f1 and _pair(f1))
         mark = time.monotonic_ns()
@@ -755,31 +819,42 @@ def section8(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "2. a clean close: S receives no resolved put and no delete of A (§2.9)",
                      not any(x.kind == "delete" or not _doc(x).firing for x in got),  # type: ignore[union-attr]
                      f"{[x.kind for x in got]}")
-        t3 = bus.read(bus.t_session, keys_known=(ka,))
-        report.check(sec, "3. the owner's tokens are gone, a complete read", t3.presence == "absent", t3.presence)
-        report.check(sec, "3. its GET draws no reply", t3.seed is not None and not t3.stamps.get(ka), "")
-        from . import live
-
-        # The archive's form of A's key (core §4.4): every chunk slugged.
-        st = live.get_state(bus.t_session, arch.form(ka))
+        # The archive's form of the owner's alarms (core §4.4: `*` kept).
+        st = live.get_state(bus.t_session, al.archive_form("lab/archive", f"zk2/{ADDRESS}/{al.PROFILE}/state/alarms/*"))
         arch_doc = next((al.decode(r.payload) for r in st.replies if not r.deleted), None)
         stamp = next((r.stamp for r in st.replies if not r.deleted), None)
-        r = t3.readings[ka]
-        r.observations = [*r.observations, fr.Archive()]
-        f3 = al.judge(r)
-        report.check(sec, "3. T judges A not asked, absent", _pair(f3) == "not_asked, absent", _pair(f3))
-        report.check(sec, "3. T shows the archived document, firing, as last-known with its stamp (core S6)",
+        report.check(sec, "3. the archive's form of the owner's alarms holds A, firing, with its stamp (core S6)",
                      arch_doc is not None and arch_doc.firing and stamp is not None, f"{arch_doc}, {stamp}")
-        # T's scope over zk2/lab/*: the services presence finds, and lab/svc,
-        # which T knew of from step 1 (§2.15, "the owners in scope", 0.2).
-        pres = live.list_presence(bus.t_session, "zk2/lab/*/@zk/**")
-        found = sorted({f"{p['system']}/{p['service']}" for p in pres.instances})
-        scope = sorted(set(found) | {ADDRESS})
-        owners = [bus.read(bus.t_session, a, keys_known=(ka,) if a == ADDRESS else ()).owner_read() for a in scope]
-        ans = al.any_firing("warning", owners)
-        report.check(sec, "3. anything firing at or above warning over zk2/lab/*: the owner counted not asked, "
-                          "and not yes", ans["answer"] != al.YES and ans["owners"][al.NOT_ASKED] >= 1,
-                     f"{ans}, scope {scope} (found by presence: {found})")
+
+        def step3(name: str, t: al.AlarmsReader, scope: list[str]) -> None:
+            r3 = t.read(ADDRESS, keys_known=(ka,))
+            report.check(sec, f"3 ({name}). the owner's tokens are gone, a complete read; its GET draws no reply",
+                         r3.presence == "absent" and not r3.stamps.get(ka), f"{r3.presence}")
+            rd = r3.readings[ka]
+            rd.observations = [*rd.observations, fr.Archive()]
+            f3 = al.judge(rd)
+            report.check(sec, f"3 ({name}). T judges A not asked, absent; the archived document is last-known",
+                         _pair(f3) == "not_asked, absent", _pair(f3))
+            owners = [t.read(a, keys_known=(ka,) if a == ADDRESS else ()).owner_read() for a in scope]
+            ans = al.any_firing("warning", owners)
+            report.check(sec, f"3 ({name}). anything firing at or above warning over zk2/lab/*: the owner counted "
+                              "not asked, and not yes",
+                         ADDRESS in scope and ans["answer"] != al.YES and ans["owners"][al.NOT_ASKED] >= 1,
+                         f"{ans}, scope {scope}")
+
+        found = sorted({f"{p['system']}/{p['service']}" for p in live.list_presence(
+            bus.t_session, "zk2/lab/*/@zk/**").instances})
+        # The live reader: the owners it found (step 1), and presence now.
+        step3("a live reader", live_t, sorted(set(live_t.token_events) | set(found)))
+        # A one-shot tool: presence now, and the archive's keys (0.3).
+        once_session = live.open_client(bus.endpoint)
+        bus.extra.append(once_session)
+        once = al.AlarmsReader(once_session, f"zk2/lab/*/{al.PROFILE}/state/alarms/*", trust=bus.trust)
+        bus.extra.append(once)
+        by_archive = al.owners_from_archive(once_session, "lab/archive", "lab")
+        report.check(sec, "3 (a one-shot tool). it knows of the owner by the archive's keys (§2.15, 0.3)",
+                     by_archive == [ADDRESS], f"{by_archive}")
+        step3("a one-shot tool", once, sorted(set(found) | set(by_archive)))
     finally:
         bus.close()
 
@@ -818,6 +893,14 @@ def section9(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
 # -- §10 Anything firing, for a tool ------------------------------------------------------
 
 def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
+    """T is :class:`zk2py.alarms.AlarmsReader`: one subscription, then a GET
+    per owner at each re-read, its window as §2.15 (0.3) counts one. Step 2
+    listens until the window, from the declaration plus the reply timeout to
+    a lease and the reply timeout before the instant T judges, is longer
+    than the horizon. Then, beyond scenarios.md, 0.3's two breaks of a
+    window: a gap in lab/b's presence, and a loss."""
+    from . import live
+
     ttl = ctx["ttl"]
     sec = f"§10 (ttl {ttl} s)"
     contract = al.load(None if ttl == al.TTL_S else ttl)
@@ -828,22 +911,15 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         ob = bus.owner("lab/b", contract=contract, tokenless=True)
         oa.raise_(A, "warning")
         time.sleep(0.5)
-        from . import live
+        t = al.AlarmsReader(bus.t_session, f"zk2/lab/*/{al.PROFILE}/state/alarms/*", ("lab/a", "lab/b"),
+                            trust=bus.trust)
+        bus.extra.append(t)
 
-        # T subscribes, then GETs (each reading's), and its window over
-        # both owners is §2.15's: core §2.7's lossless and presence, the
-        # owners watched one lease and the reply timeout past its end.
-        sub = fr.Subscriber(bus.t_session, f"zk2/lab/*/{al.PROFILE}/state/alarms/*", bus.trust)
-        watch = al.WindowWatch(bus.t_session, sub, ("lab/a", "lab/b"))
-        bus.extra += [sub, watch]
-
-        def scope() -> tuple[list[al.OwnerReading], list[str]]:
+        def scope(get: bool = True) -> tuple[list[al.OwnerReading], list[str]]:
             pres = live.list_presence(bus.t_session, "zk2/lab/*/@zk/**")
             addresses = sorted({f"{p['system']}/{p['service']}" for p in pres.instances})
             alive = sorted({f"{p['system']}/{p['service']}" for p in pres.alive if p["iface"] == al.PROFILE})
-            windows = watch.windows()
-            return [bus.read(bus.t_session, a, subscriber=sub, window=windows.get(a), horizon=h)
-                    for a in addresses], alive
+            return [t.read(a, horizon=h, get=get) for a in addresses], alive
 
         reads, alive = scope()
         by = {r.address: r for r in reads}
@@ -861,14 +937,16 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      and by.get("lab/b") is not None and by["lab/b"].verdict.expect() ==
                      {"reason": "window_short", "verdict": "unobservable"},
                      f"{[(r.address, r.verdict.expect()) for r in reads]}")
-        wait = 905.0 if ttl == al.TTL_S else ttl + 1.0
-        while (time.monotonic_ns() - sub.declared_ns) / fr.NS < wait:
+        # 900 s of window after the declaration plus the reply timeout, and
+        # the lease and the reply timeout of watch after it (0.3).
+        need_ns = int((h.ttl_s + 1.0) * fr.NS) + 2 * t.reply_timeout_ns + t.lease_ns
+        while time.monotonic_ns() - t.declared_ns < need_ns:
             time.sleep(0.2)
         reads, _ = scope()
         by = {r.address: r for r in reads}
         c = al.any_firing("critical", [r.owner_read(h) for r in reads])
-        report.check(sec, f"2. after {wait:g} s lossless, both present: at critical no, none_firing",
-                     (c["answer"], c["reason"]) == (al.NO, "none_firing"), f"{c}")
+        report.check(sec, f"2. a window over {h.ttl_s} s, lossless, both present: at critical no, none_firing",
+                     (c["answer"], c["reason"]) == (al.NO, "none_firing"), f"{c}, window {by['lab/b'].window}")
         report.check(sec, "2. lab/b established by its window",
                      by.get("lab/b") is not None and by["lab/b"].verdict.reason == "window",
                      f"{by.get('lab/b') and by['lab/b'].verdict.expect()}")
@@ -878,6 +956,31 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         c = al.any_firing("critical", [r.owner_read(h) for r in reads])
         report.check(sec, "3. lab/b raises B at critical: yes, any_firing, 1",
                      (c["answer"], c["reason"], c["firing"]) == (al.YES, "any_firing", 1), f"{c}")
+        # Beyond scenarios.md (0.3): a gap in lab/b's presence breaks the
+        # window until a complete GET after it; so does a loss.
+        ob.resolve(B)
+        ob.crash()
+        ob.restart()
+        _wait(lambda: len(t.gaps("lab/b")) >= 2, 5.0)
+        time.sleep(0.5)
+        rb = t.read("lab/b", horizon=h, get=False)
+        report.check(sec, "extra (0.3): a gap in lab/b's presence, no GET since: owner_gap",
+                     rb.verdict.expect() == {"reason": "owner_gap", "verdict": "unobservable"},
+                     f"{rb.verdict.expect()}, gaps {len(t.gaps('lab/b'))}")
+        rb = t.read("lab/b", horizon=h)
+        report.check(sec, "extra (0.3): a complete GET after it heals the gap, and the window runs again from it",
+                     rb.verdict.expect() == {"reason": "window_short", "verdict": "unobservable"}
+                     and rb.window is not None and rb.window.present_throughout,
+                     f"{rb.verdict.expect()}, window {rb.window}")
+        t.note_loss()
+        ra = t.read("lab/a", horizon=h, get=False)
+        report.check(sec, "extra (0.3): a loss, no GET since: window_lost",
+                     ra.verdict.expect() == {"reason": "window_lost", "verdict": "unobservable"},
+                     f"{ra.verdict.expect()}")
+        ra = t.read("lab/a", horizon=h)
+        report.check(sec, "extra (0.3): a complete GET after the loss heals it: lab/a answered",
+                     ra.verdict.expect() == {"reason": "answered", "verdict": "established"},
+                     f"{ra.verdict.expect()}, window {ra.window}")
     finally:
         bus.close()
 

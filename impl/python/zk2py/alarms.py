@@ -384,11 +384,11 @@ class NotStrict(ValueError):
 
 
 #: RFC 8259 §2's ``ws``: space, horizontal tab, line feed, carriage return.
-#: zk2py's reading of §2.4's "nothing after its value" (SPEC-FINDINGS F-134,
-#: open at 0.2): whitespace of these four bytes may stand before and after
-#: the value, as RFC 8259's ``JSON-text = ws value ws`` has it; any other
-#: byte after the value (another space character, a second value, a NUL)
-#: is text after it, and refused. A byte-order mark before it is refused.
+#: §2.4 (0.3, F-134): "Whitespace is RFC 8259's ws, before the value and
+#: after it … Any other character after the value, a form feed or a
+#: no-break space included, is text after it." A byte-order mark before the
+#: value is refused too: zk2py's reading, RFC 8259's ``JSON-text`` having
+#: none.
 JSON_WS = b" \t\n\r"
 
 
@@ -398,7 +398,7 @@ def strict_json(payload: bytes) -> Any:
     string with a UTF-8 form, so no lone surrogate escape". Raises
     :class:`NotStrict`."""
     # The whitespace is stripped here, explicitly, so the reading does not
-    # rest on the JSON library's own (F-134).
+    # rest on the JSON library's own (§2.4, 0.3).
     try:
         value = jcs.loads(payload.strip(JSON_WS))
     except jcs.JsonError as e:
@@ -1007,78 +1007,217 @@ class AlarmsOwner:
 
 # -- the reader on a bus (§2.13 to §2.15) ----------------------------------------------
 
-class WindowWatch:
-    """§2.15's window (0.2) over one subscription, for the owners it
-    covers. It "runs from its declaration" (no loss is ever known to a
-    zenoh-python callback subscriber, so never from a re-seed). Lossless
-    and present throughout are core §2.7's (0.25), as :class:`zk2py.budget.Window`
-    reads them:
-    - **lossless** is established from the resource's QoS (``reliable``,
-      ``block``, the contract's) and the reader's own receive path, a
-      :class:`zk2py.budget.StallWatch` on its session;
-    - **present throughout**: the owner's instance token held when the
-      watch started, none withdrawn, and one held one lease after the
-      window's end plus the reply timeout (core §2.7: "A tool watches the
-      owner's instance tokens for one lease after the window's end … and
-      its reply timeout more").
-    :meth:`windows` ends the window now, waits out that watch, and returns
-    each owner's :class:`Window`."""
+@dataclass
+class SeedGet:
+    """One S4 GET of an owner's ``alarms.v1/state/alarms/*`` (§2.15): when it
+    was asked (the reader's monotonic clock), whether it ran to its final
+    reply with no error reply, and its replies by key."""
 
-    def __init__(self, session: Any, subscriber: fr.Subscriber, addresses: Iterable[str], *,
-                 qos: tuple[str, str] = ("reliable", "block"), lease_s: float = 10.0, reply_timeout_s: float = 1.0,
-                 wait_before_close_s: float = 5.0) -> None:
+    asked_ns: int
+    complete: bool
+    replies: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def seed(self) -> Seed:
+        return Seed(self.complete, sum(1 for r in self.replies.values() if not r.deleted))
+
+
+def seed_get(tool: Any, address: str, timeout: float = 1.0) -> SeedGet:
+    """S4's GET (target ``All``, consolidation ``Latest``) of the owner's
+    alarms, recorded with the instant it was asked."""
+    from . import live
+
+    prefix = f"zk2/{address}/{PROFILE}/{TOKEN}/{PREFIX}/"
+    asked = time.monotonic_ns()
+    st = live.get_state(tool, prefix + "*", timeout=timeout)
+    return SeedGet(asked, not st.errors, {r.key: r for r in st.replies if r.key.startswith(prefix)})
+
+
+class AlarmsReader:
+    """A live reader of ``alarms.v1`` across owners (§2.13 to §2.15, text
+    0.3): one subscription; its own receive path watched; each owner's
+    instance tokens watched; its S4 GETs recorded. :meth:`read` gives one
+    owner's reading at an instant, its window as §2.15 counts one:
+    - **its span** counts as core §2.7 counts a window's, "from the
+      declaration plus the reply timeout, or from that GET, to its end; the
+      owner is watched one lease and the reply timeout past the end. So a
+      reader judging at an instant ends its window that long before it";
+    - **a loss** is a stall of the reader's receive path, or a transport of
+      its session closing (core §2.7, 0.27), "a loss at the instant the
+      reader sees it" (:class:`zk2py.budget.StallWatch`);
+    - **a gap in the owner's presence** is "its instance token withdrawn,
+      or a new instance's appearing", an owner joining included;
+    - each "breaks the window", which "runs again from the first complete
+      GET that followed" it. Until one, a loss is ``window_lost``, a gap
+      ``owner_gap``. zk2py dates a GET by the instant it was asked
+      (SPEC-FINDINGS, "At alarms.v1 0.3").
+    - **lossless** also needs the resource's QoS, ``reliable`` with
+      ``block`` (core §2.7, 0.25), the standard contract's.
+    The owners in scope are those :meth:`add_owner` was given: found by
+    presence, or known before (§2.15, 0.2)."""
+
+    def __init__(self, session: Any, selector: str, addresses: Iterable[str] = (), *,
+                 trust: fr.ClockTrust | None = None, lease_s: float = 10.0, reply_timeout_s: float = 1.0,
+                 wait_before_close_s: float = 5.0, qos: tuple[str, str] = ("reliable", "block"),
+                 timeout: float = 1.0) -> None:
+        from . import budget as bg
+
+        self.session, self.qos, self.timeout = session, qos, timeout
+        self.trust = trust or fr.ClockTrust(word=True)
+        self.lease_ns = int(lease_s * fr.NS)
+        self.reply_timeout_ns = int(reply_timeout_s * fr.NS)
+        self.stall = bg.StallWatch(session, bg.stall_bound(int(wait_before_close_s * 1000), int(lease_s * 1000)))
+        self.subscriber = fr.Subscriber(session, selector, self.trust)
+        self.lock = threading.Lock()
+        #: per owner: [(instant, "delete" | instance id put)]
+        self.token_events: dict[str, list[tuple[int, str]]] = {}
+        self.held_at_start: dict[str, str | None] = {}
+        self.subs: list[Any] = []
+        self.seeds: dict[str, list[SeedGet]] = {}
+        #: losses a test notes by hand (``note_loss``): the reader's own
+        #: queue overflowing, which a zenoh-python callback never does
+        self.noted: list[int] = []
+        for a in addresses:
+            self.add_owner(a)
+
+    @property
+    def declared_ns(self) -> int:
+        return self.subscriber.declared_ns
+
+    def add_owner(self, address: str) -> None:
         import zenoh
 
-        from . import budget as bg
         from . import live
 
-        self.session, self.subscriber, self.qos = session, subscriber, qos
-        self.lease_s, self.reply_timeout_s = lease_s, reply_timeout_s
-        self.stall = bg.StallWatch(session, bg.stall_bound(int(wait_before_close_s * 1000), int(lease_s * 1000)))
-        self.lock = threading.Lock()
-        self.withdrawn: dict[str, bool] = {}
-        self.at_start: dict[str, bool] = {}
-        self.subs = []
-        for a in addresses:
-            self.withdrawn[a] = False
+        if address in self.token_events:
+            return
+        self.token_events[address] = []
 
-            def got(smp: Any, a: str = a) -> None:
-                if smp.kind == zenoh.SampleKind.DELETE:
-                    with self.lock:
-                        self.withdrawn[a] = True
-
-            self.subs.append(session.liveliness().declare_subscriber(f"zk2/{a}/@zk/instance/*",
-                                                                     zenoh.handlers.Callback(got)))
-            pres = live.list_presence(session, f"zk2/{a}/@zk/instance/*")
-            self.at_start[a] = bool(pres.instances) and pres.complete
-
-    def windows(self) -> dict[str, Window]:
-        from . import budget as bg
-        from . import live
-
-        end = time.monotonic_ns()
-        watch_until = end + int((self.lease_s + self.reply_timeout_s) * fr.NS)
-        while time.monotonic_ns() < watch_until:
-            time.sleep(min(0.1, (watch_until - time.monotonic_ns()) / fr.NS))
-        gap, closed = self.stall.reading()
-        lossless, _ = bg.lossless(*self.qos, stall_gap_ms=gap, stall_bound_ms=self.stall.bound_ms,
-                                  transport_closed=closed)
-        listened = (end - self.subscriber.declared_ns) / fr.NS
-        out = {}
-        for a in self.at_start:
-            pres = live.list_presence(self.session, f"zk2/{a}/@zk/instance/*")
+        def got(smp: Any, a: str = address) -> None:
+            k = str(smp.key_expr)
+            ev = "delete" if smp.kind == zenoh.SampleKind.DELETE else k.rsplit("/", 1)[1]
             with self.lock:
-                present = self.at_start[a] and not self.withdrawn[a] and bool(pres.instances)
-            out[a] = Window(listened, lossless and self.subscriber.complete, present)
+                self.token_events[a].append((time.monotonic_ns(), ev))
+
+        self.subs.append(self.session.liveliness().declare_subscriber(f"zk2/{address}/@zk/instance/*",
+                                                                      zenoh.handlers.Callback(got)))
+        pres = live.list_presence(self.session, f"zk2/{address}/@zk/instance/*")
+        self.held_at_start[address] = pres.instances[0]["instance"] if pres.instances and pres.complete else None
+
+    def note_loss(self) -> None:
+        with self.lock:
+            self.noted.append(time.monotonic_ns())
+
+    def seed(self, address: str) -> SeedGet:
+        g = seed_get(self.session, address, self.timeout)
+        self.seeds.setdefault(address, []).append(g)
+        return g
+
+    def gaps(self, address: str) -> list[int]:
+        """The instants of a gap: a withdrawn instance token, or an instance
+        appearing that is not the one held."""
+        with self.lock:
+            events = list(self.token_events.get(address, []))
+        held, out = self.held_at_start.get(address), []
+        for t, ev in events:
+            if ev == "delete":
+                held = None
+                out.append(t)
+            elif ev != held:
+                # a new instance, or an owner joining while the window
+                # listened: "a new instance or a gap" (core §2.7)
+                out.append(t)
+                held = ev
         return out
+
+    def losses(self) -> list[int]:
+        with self.lock:
+            noted = list(self.noted)
+        return sorted(self.stall.losses() + noted)
+
+    def window(self, address: str, at_ns: int | None = None) -> Window:
+        """§2.15's window for ``address``, judged at ``at_ns`` (now)."""
+        from . import budget as bg
+
+        now = time.monotonic_ns() if at_ns is None else at_ns
+        end = now - self.lease_ns - self.reply_timeout_ns
+        start = self.declared_ns + self.reply_timeout_ns
+        complete = sorted(g.asked_ns for g in self.seeds.get(address, []) if g.complete and g.asked_ns <= now)
+        lossless_qos, _ = bg.lossless(*self.qos)
+        healed_loss = healed_gap = True
+        for kind, instants in (("loss", self.losses()), ("gap", self.gaps(address))):
+            for t in instants:
+                if t > now:
+                    continue
+                after = next((g for g in complete if g >= t), None)
+                if after is None:
+                    if kind == "loss":
+                        healed_loss = False
+                    else:
+                        healed_gap = False
+                else:
+                    start = max(start, after)
+        listened = max(0, end - start) / fr.NS
+        return Window(listened, healed_loss and lossless_qos and self.subscriber.complete, healed_gap)
+
+    def read(self, address: str, *, get: bool = True, horizon: fr.Horizon = HORIZON,
+             keys_known: Iterable[str] = ()) -> OwnerReading:
+        """One reading of ``address`` now: a new S4 GET first when ``get``
+        (the reader re-seeds at each re-read), else its latest one."""
+        self.add_owner(address)
+        if get:
+            self.seed(address)
+        seeds = self.seeds.get(address) or []
+        return read_owner(self.session, address, subscriber=self.subscriber, window=self.window(address),
+                          seed=seeds[-1] if seeds else None, trust=self.trust, get=False, horizon=horizon,
+                          keys_known=keys_known, timeout=self.timeout)
 
     def close(self) -> None:
         self.stall.close()
+        self.subscriber.close()
         for x in self.subs:
             try:
                 x.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
+
+
+def archive_form(archive: str, selector: str) -> str:
+    """Core §4.4: "A pattern over its keys is formed from an origin selector
+    the same way, chunk by chunk: the leading zk2 is dropped, * and ** stay
+    as written, and every other chunk is slugged", under the archive's
+    ``archive.v1/@state``."""
+    chunks = selector.split("/")
+    if chunks[0] != "zk2":
+        raise ValueError(f"{selector}: not a zk2 selector")
+    body = [c if c in ("*", "**") else slug.slug(c) for c in chunks[1:]]
+    return f"zk2/{archive}/archive.v1/@state/" + "/".join(body)
+
+
+def owners_from_archive(tool: Any, archive: str, systems: str = "*", services: str = "*",
+                        timeout: float = 1.0) -> list[str]:
+    """§2.15 (0.2, 0.3): the owners a tool "knew of before … by an
+    archive's keys (core S6)": a GET of the archive's form of
+    ``zk2/<systems>/<services>/alarms.v1/state/alarms/*``, each key read
+    back (every chunk unslugged) into the alarm key it archives, and that
+    key's address. A tool whose readings end with its process knows of an
+    absent owner this way (scenarios.md §8, 0.3)."""
+    from . import live
+
+    pattern = archive_form(archive, f"zk2/{systems}/{services}/{PROFILE}/{TOKEN}/{PREFIX}/*")
+    head = f"zk2/{archive}/archive.v1/@state/"
+    st = live.get_state(tool, pattern, timeout=timeout)
+    out: set[str] = set()
+    for r in st.replies:
+        if not r.key.startswith(head):
+            continue
+        values = [slug.unslug(c) for c in r.key[len(head):].split("/")]
+        if any(v is None for v in values):
+            continue
+        ref = parse_key("zk2/" + "/".join(values))  # type: ignore[arg-type]
+        if ref is not None:
+            out.add(f"{ref['system']}/{ref['service']}")
+    return sorted(out)
 
 
 def _zid(text: Any) -> int | None:
@@ -1125,14 +1264,20 @@ class OwnerReading:
 
 
 def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = None,
-               window: Window | None = None, trust: fr.ClockTrust | None = None, get: bool = True,
-               horizon: fr.Horizon = HORIZON, keys_known: Iterable[str] = (), timeout: float = 1.0) -> OwnerReading:
+               window: Window | None = None, seed: SeedGet | None = None, trust: fr.ClockTrust | None = None,
+               get: bool = True, horizon: fr.Horizon = HORIZON, keys_known: Iterable[str] = (),
+               timeout: float = 1.0) -> OwnerReading:
     """One reading of ``address`` (``<system>/<service>``):
     - presence (core §8.1) by a liveliness GET of its instance tokens, the
       descriptor through it (§2.13: never the interface token);
     - the S4 GET of ``…/alarms.v1/state/alarms/*``, aged against ``trust``;
+    - ``seed``, a GET already made (:class:`AlarmsReader`'s), or, with
+      ``get``, one made now;
     - the subscription ``subscriber`` made before it, for the key's
-      observations, and its ``window`` (:class:`WindowWatch`'s), for §2.15;
+      observations, and its ``window`` (:class:`AlarmsReader`'s), for §2.15;
+    - §2.14 step 5 (0.3): a key the reader holds a sample of, which the
+      complete GET that established the owner's alarms did not answer, with
+      nothing of it arriving after that GET was asked, holds none;
     - each key the subscription or the GET knows, and ``keys_known`` (an
       earlier reading's): its observations, and its latest sample merged by
       the owner's stamp (core §4.2), `previous_instance` when that put's
@@ -1151,13 +1296,13 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == PROFILE), None)
             descriptor = {"lists": False} if entry is None else {"lists": True, "token": entry.get("token", True)}
     prefix = f"zk2/{address}/{PROFILE}/{TOKEN}/{PREFIX}/"
-    seed, replies = None, {}
-    if get:
-        st = live.get_state(tool, prefix + "*", timeout=timeout)
-        replies = {r.key: r for r in st.replies if r.key.startswith(prefix)}
-        seed = Seed(complete=not st.errors, members=sum(1 for r in replies.values() if not r.deleted))
-    verdict = owner_set(presence, descriptor, None, seed, window, ttl_s=horizon.ttl_s or TTL_S)
-    out = OwnerReading(address, presence, descriptor, meta_zid, seed, window, verdict)
+    if seed is None and get:
+        seed = seed_get(tool, address, timeout)
+    replies = {} if seed is None else seed.replies
+    verdict = owner_set(presence, descriptor, None, None if seed is None else seed.seed, window,
+                        ttl_s=horizon.ttl_s or TTL_S)
+    out = OwnerReading(address, presence, descriptor, meta_zid, None if seed is None else seed.seed, window,
+                       verdict)
     if meta_zid is not None:
         out.foreign = sorted(k for k, r in replies.items() if _zid(r.stamp_id) != _zid(meta_zid))
     known = set(keys_known) | set(replies)
@@ -1173,7 +1318,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             for x in subscriber.of(key):
                 if x.stamp_ns is not None:
                     cands.append((x.stamp_ns, _zid(x.stamp_id) or 0, x.kind, x.payload, x.stamp_id))
-        if get:
+        if seed is not None:
             r = replies.get(key)
             if r is None:
                 g = fr.GetReading(None)
@@ -1184,6 +1329,13 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
                                   r.payload, r.stamp_id))
             obs.append(g.observation(trust))
         latest, prev, doc, sid = None, False, None, None
+        if seed is not None and seed.complete and verdict.verdict == ESTABLISHED and key not in replies \
+                and subscriber is not None \
+                and not any(x.arrival_ns >= seed.asked_ns for x in subscriber.of(key)):
+            # §2.14 step 5 (0.3): "the owner answers every live key (core
+            # S2), so the key's delete went past the tombstone window
+            # unheard": the held sample is none.
+            cands = []
         if cands:
             _, _, kind, payload, sid = max(cands, key=lambda c: (c[0], c[1]))
             if kind == "delete":

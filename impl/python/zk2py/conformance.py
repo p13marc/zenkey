@@ -934,32 +934,34 @@ def _budget_lossless(path: Path) -> list[Result]:
     return out
 
 
-#: zk2py's own readings where a finding is open, each case naming it. Not a
-#: fixture family: these are zk2py's choices, stated as cases so that a
-#: later text's fixture can overturn them visibly. alarms.v1 0.2 §2.4's
-#: "nothing after its value" (F-134): RFC 8259's ws around the value reads,
-#: anything else after it does not.
+#: zk2py's own cases, each naming what it reads: an open finding's reading,
+#: so that a later text's fixture can overturn it visibly, or a rule a text
+#: states, beyond its fixture's cases. Not a fixture family. Today:
+#: alarms.v1 §2.4's whitespace, F-134 at 0.2, stated by 0.3 ("RFC 8259's ws,
+#: before the value and after it … Any other character after the value, a
+#: form feed or a no-break space included, is text after it"), whose four
+#: documents.json cases these extend.
 _F134_DOC = b'{"timestamp":1760950000000,"rule":"link_down","severity":"warning","state":"firing","summary":"s"}'
 _READABLE = {"readable": True, "errors": [], "warnings": []}
 _NOT_JSON = {"readable": False, "errors": ["json"], "warnings": []}
 READINGS = [
-    ("F-134", "a line feed after the document", _F134_DOC + b"\n", _READABLE),
-    ("F-134", "a carriage return and a line feed after it", _F134_DOC + b"\r\n", _READABLE),
-    ("F-134", "RFC 8259's four whitespace bytes before and after it", b" \t\r\n" + _F134_DOC + b" \t\r\n",
+    ("alarms.v1 0.3 §2.4 (F-134)", "a line feed after the document", _F134_DOC + b"\n", _READABLE),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a carriage return and a line feed after it", _F134_DOC + b"\r\n", _READABLE),
+    ("alarms.v1 0.3 §2.4 (F-134)", "RFC 8259's four whitespace bytes before and after it", b" \t\r\n" + _F134_DOC + b" \t\r\n",
      _READABLE),
-    ("F-134", "a no-break space after it (U+00A0)", _F134_DOC + "\u00a0".encode(), _NOT_JSON),
-    ("F-134", "a line separator after it (U+2028)", _F134_DOC + "\u2028".encode(), _NOT_JSON),
-    ("F-134", "a vertical tab after it", _F134_DOC + b"\x0b", _NOT_JSON),
-    ("F-134", "a form feed after it", _F134_DOC + b"\x0c", _NOT_JSON),
-    ("F-134", "a NUL after it", _F134_DOC + b"\x00", _NOT_JSON),
-    ("F-134", "text after it", _F134_DOC + b"x", _NOT_JSON),
-    ("F-134", "a second value after a line feed", _F134_DOC + b"\n{}", _NOT_JSON),
-    ("F-134", "a byte-order mark before it", b"\xef\xbb\xbf" + _F134_DOC, _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a no-break space after it (U+00A0)", _F134_DOC + "\u00a0".encode(), _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a line separator after it (U+2028)", _F134_DOC + "\u2028".encode(), _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a vertical tab after it", _F134_DOC + b"\x0b", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a form feed after it", _F134_DOC + b"\x0c", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a NUL after it", _F134_DOC + b"\x00", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "text after it", _F134_DOC + b"x", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a second value after a line feed", _F134_DOC + b"\n{}", _NOT_JSON),
+    ("alarms.v1 0.3 §2.4 (F-134)", "a byte-order mark before it", b"\xef\xbb\xbf" + _F134_DOC, _NOT_JSON),
 ]
 
 
 def family_readings(root: Path) -> list[Result]:
-    """zk2py's own readings of open findings (:data:`READINGS`)."""
+    """zk2py's own cases (:data:`READINGS`)."""
     from . import alarms
 
     return [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
