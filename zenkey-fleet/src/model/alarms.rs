@@ -416,14 +416,27 @@ pub struct AlarmBook {
 }
 
 impl AlarmBook {
-    /// An empty book over `scope`.
+    /// An empty book over `scope`. Across a face, the one owner the scope
+    /// names is in it on the deployment's word (§2.11).
     pub fn new(scope: AlarmScope, spec: BookSpec) -> AlarmBook {
+        let mut owners = BTreeMap::new();
+        if spec.face.is_some()
+            && let Some(addr) = scope.one_owner()
+        {
+            owners.insert(
+                addr,
+                OwnerEntry {
+                    known: BTreeSet::from([KnownBy::Word]),
+                    ..OwnerEntry::default()
+                },
+            );
+        }
         AlarmBook {
             scope,
             spec,
             declared: None,
             presence: None,
-            owners: BTreeMap::new(),
+            owners,
             keys: BTreeMap::new(),
             seed: None,
             pending: BTreeMap::new(),
@@ -1602,6 +1615,44 @@ mod tests {
         assert_eq!(
             b.any_firing(Severity::Info, t0, wall()).reason,
             Reason::NoOwner
+        );
+    }
+
+    /// Across a face (§2.11): the owner named is in scope on the
+    /// deployment's word; a face closed to the alarms makes every question
+    /// unobservable, never "nothing fires"; one that lets a GET through
+    /// establishes the owner by its answer.
+    #[test]
+    fn across_a_face_the_word_stands_for_presence() {
+        let t0 = Instant::now();
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let mut spec = BookSpec::new(Duration::from_secs(1));
+        spec.clocks_synced = true;
+        spec.face = Some(false);
+        let closed = AlarmBook::new(AlarmScope::of(&owner), spec);
+        assert_eq!(closed.known_by(&owner), [KnownBy::Word]);
+        let a = closed.any_firing(Severity::Info, t0, wall());
+        assert_eq!(
+            (a.answer, a.reason),
+            (Answer::Unobservable, Reason::OwnerUnobservable)
+        );
+        assert_eq!(closed.owner_set(&owner, t0).reason, Reason::FaceClosed);
+        spec.face = Some(true);
+        let mut open = AlarmBook::new(AlarmScope::of(&owner), spec);
+        open.seed(
+            SeedRead {
+                asked_at: t0,
+                complete: true,
+                replies: vec![put(t0, 10, doc("warning", "firing", 1), AlarmVia::Get)],
+                discarded: 0,
+            },
+            t0,
+            wall(),
+        );
+        assert_eq!(open.owner_set(&owner, t0).reason, Reason::Answered);
+        assert_eq!(
+            open.any_firing(Severity::Warning, t0, wall()).answer,
+            Answer::Yes
         );
     }
 }

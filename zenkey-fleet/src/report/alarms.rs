@@ -172,6 +172,9 @@ pub enum KnownBy {
     Earlier,
     /// An archive's keys name it (core S6).
     Archive,
+    /// The deployment's word, across a constrained face where presence
+    /// does not cross (§2.11).
+    Word,
 }
 
 /// Whether an owner's alarms are known whole (§2.15): the fixtures' set

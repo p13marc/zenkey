@@ -321,6 +321,65 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
     ] {
         assert_eq!(wire(&v, ""), expect(&v));
     }
+    // alarms.v1 (#800, AC): the fixtures' tokens, snake_case.
+    fn known(v: &KnownBy) -> &'static str {
+        match v {
+            KnownBy::Presence => "presence",
+            KnownBy::Earlier => "earlier",
+            KnownBy::Archive => "archive",
+            KnownBy::Word => "word",
+        }
+    }
+    fn change(v: &AlarmChange) -> &'static str {
+        match v {
+            AlarmChange::Raised => "raised",
+            AlarmChange::Escalated => "escalated",
+            AlarmChange::Refreshed => "refreshed",
+            AlarmChange::Confirmed => "confirmed",
+            AlarmChange::Resolved => "resolved",
+            AlarmChange::Retired => "retired",
+            AlarmChange::Unreadable => "unreadable",
+            AlarmChange::Lost => "lost",
+            AlarmChange::Judged => "judged",
+        }
+    }
+    fn latest(v: &AlarmLatest) -> &'static str {
+        match v {
+            AlarmLatest::Firing => "firing",
+            AlarmLatest::Resolved => "resolved",
+            AlarmLatest::Deleted => "deleted",
+            AlarmLatest::Undecodable => "undecodable",
+        }
+    }
+    for v in [
+        KnownBy::Presence,
+        KnownBy::Earlier,
+        KnownBy::Archive,
+        KnownBy::Word,
+    ] {
+        assert_eq!(wire(&v, ""), known(&v));
+    }
+    for v in [
+        AlarmChange::Raised,
+        AlarmChange::Escalated,
+        AlarmChange::Refreshed,
+        AlarmChange::Confirmed,
+        AlarmChange::Resolved,
+        AlarmChange::Retired,
+        AlarmChange::Unreadable,
+        AlarmChange::Lost,
+        AlarmChange::Judged,
+    ] {
+        assert_eq!(wire(&v, ""), change(&v));
+    }
+    for v in [
+        AlarmLatest::Firing,
+        AlarmLatest::Resolved,
+        AlarmLatest::Deleted,
+        AlarmLatest::Undecodable,
+    ] {
+        assert_eq!(wire(&v, ""), latest(&v));
+    }
 }
 
 // ── The consumers join (#224) ─────────────────────────────────────────────

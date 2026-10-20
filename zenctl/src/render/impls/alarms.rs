@@ -89,6 +89,7 @@ impl Render for AlarmsReport {
                     KnownBy::Presence => "presence",
                     KnownBy::Earlier => "an earlier reading",
                     KnownBy::Archive => "an archive's keys",
+                    KnownBy::Word => "the deployment's word",
                 })
                 .collect();
             owners.row([

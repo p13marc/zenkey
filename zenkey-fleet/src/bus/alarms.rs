@@ -550,9 +550,12 @@ impl AlarmFeed {
     /// too.
     async fn restart_watch(&mut self) {
         if self.restart_stall {
-            self.restart_stall = false;
-            self.stall = Some(StallWatch::start(&self.session).await);
+            // Cleared only once the new watch stands: a drain that drops
+            // this future mid-start retries it on its next call.
+            let watch = StallWatch::start(&self.session).await;
+            self.stall = Some(watch);
             self.stall_seen = StallSeen::default();
+            self.restart_stall = false;
         }
     }
 
