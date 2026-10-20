@@ -4,6 +4,24 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## Fixtures after 0.7 — 2026-10-19: two readings §2.1 already decides (#769, LI)
+
+No text change. zk2py (round 37) read two of §2.1's lints by its rule
+"Each key is checked alone. A key whose value is wrong is reported once,
+and checks that need it are skipped", where the reference read them
+otherwise, and no fixture told the two apart:
+- **`batch_over_lease`** needs `batch_bytes`, `link_bps` and `lease_ms`
+  (or its default) alone. It is checked whatever else the face holds, so
+  a face with a wrong `class` still has it. The reference computed it
+  only for a face with no error. A wrong `lease_ms` is reported once,
+  and the lint is skipped.
+- **`shared_protocol`** needs both faces' link protocols. A list naming
+  one zenoh does not is `unknown_protocol`, a wrong value, and the lint
+  is skipped for it. The reference read any well-formed list.
+
+The reference is fixed to the text, and three `lints.json` cases pin it
+(129 in all); zk2py passed all three as it stood.
+
 ## 0.7 — 2026-10-19: a block not enabled, and two faces of one far principal (#769, LH)
 
 The spec-only implementation (zk2py, round 36) read 0.6 cold, passed
