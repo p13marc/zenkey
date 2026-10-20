@@ -77,7 +77,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   stamp and read through the model's `Track` and strict `decode`; each
   owner's seed and window, restarted at the first complete GET after a
   loss or a gap in presence and counted to a lease and the timeout before
-  now; the owners in scope with how each was known (F-131); and the
+  now; the latest GET's answered keys and each key's last arrival, so a
+  key that GET left out reaches the judge as `left_out` and loses its
+  sample once its owner is established, a reply dated by its GET's ask
+  (text 0.5, F-136), and a receive path that could not be watched is a
+  loss at the refresh's start; the owners in scope with how each was known
+  (F-131), and `scope_read` (the latest presence read complete and nothing
+  lost since; an archive plays no part, F-137); and the
   `AlarmTransition`s a notifier routes. `judge::alarms` and
   `report::alarms` complete it. Every verdict is `zenkey_model::alarms`'s,
   never re-derived. The watchdog's `alert-firing` holds one feed per
@@ -369,7 +375,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   revision its descriptor claims (#703). #800's AC added `alarms
   [SELECTOR] [--at-least SEV] [--for SECS] [--clocks-synced]`, a root
   judgement beside `health` (exit 1 an alarm firing at or above the floor,
-  0 none with every owner asked known whole, 2 otherwise), and `check
+  0 none with every owner asked known whole and the presence read that
+  found them complete, 2 otherwise), and `check
   conform`'s `alarm-key` and `alarm-document` (21 cases).
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
@@ -602,9 +609,13 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   the 1.0 schema's document, and its checks; `Track`, one key's samples
   read into transitions, the state taken from the document, never the
   sample kind; `AlarmRef`, the structured reference and its key; and §5's
-  judges in three states — `firing`, `owner_set`, `any_firing`,
-  `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.1, with
-  core 0.34 publishing its vocabulary empty, and the contract moved under
+  judges in three states — `firing` (a `Reading`'s `left_out` beside
+  `held_whole`: a key the GET that established its owner's alarms left out
+  holds nothing, and a loss before that GET is healed for it, F-136),
+  `owner_set`, `any_firing` (over a `ScopeRead`: reads that found the scope
+  not whole are `scope_incomplete`, never no nor not asked, F-137),
+  `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.5 (#800
+  AE), with core 0.34 publishing its vocabulary empty, and the contract moved under
   `spec/profiles/alarms/` with its fingerprint unchanged).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI

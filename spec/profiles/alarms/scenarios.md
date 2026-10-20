@@ -123,14 +123,22 @@ holds two more documents, written by a test before the restart:
 **Steps.**
 1. The owner's process ends without closing. S listens 3 s.
 2. While it is down, B's condition clears.
-3. The owner restarts, and evaluates its rules once.
+3. The owner restarts. G GETs the moment S sees the new instance token.
+   Then the owner evaluates its rules once.
 4. G GETs.
 
 **Expected.**
 1. S receives no delete and no resolved put (§2.9).
 2. Nothing.
-3. Before the new instance token appears (a SHOULD), and before any GET is
-   answered with them (a MUST), S receives:
+3. G's GET at the token holds A firing, unchanged, `timestamp` *t₀* kept,
+   and B, unchanged, each under the new instance's stamp id, and a
+   `reply_del` of R's key and of P's key, stamped by it. The owner put them
+   before its new instance token (a SHOULD) and before it answered a GET
+   with them (a MUST), which a GET made the moment the token appears
+   observes, as core §8.2 observes "before the tokens" (0.5, F-135). S
+   receives, in no order against the token, which it cannot observe (a
+   put and a token are two messages on two subscriptions, with no order
+   kept between them):
    - A firing, unchanged, `timestamp` *t₀* kept, under the new instance's
      stamp id. S reads it **confirmed**.
    - a delete of R's key, and of P's key. S reads each **retired**: it

@@ -240,6 +240,20 @@ pub fn judge(obs: &AlarmObservation, at_least: Severity) -> AlarmsReport {
         .collect();
     let any = book.any_firing(at_least, at, wall);
     let mut says = any.reason.says().to_owned();
+    if any.reason == Reason::ScopeIncomplete {
+        // Which read fell short (§2.15, text 0.5, F-137).
+        says.push_str(match &obs.log.presence {
+            Some(Ok(p)) if !p.complete => {
+                ": the presence read ran to its timeout, so it is possibly incomplete (spec §8.1)"
+            }
+            Some(Err(_)) => ": the presence read could not be made",
+            _ if book.lost() > 0 => {
+                ": deliveries were lost since the last complete presence read, and an instance \
+                 token's appearance may be among them"
+            }
+            _ => ": no presence read was made",
+        });
+    }
     if book.refused() > 0 {
         says.push_str(&format!(
             "; {} alarm key(s) refused at the reader's bound could be firing",
@@ -498,5 +512,54 @@ mod tests {
         let r = judge(&o, Severity::Info);
         assert_eq!(judgement_exit_code(&r.judgement()), 2);
         assert!(r.unobservable.unwrap().contains("no session"));
+    }
+
+    /// F-137 (alarms.v1 text 0.5): a presence read that ran to its timeout
+    /// may have missed an owner, so its one owner established and quiet is
+    /// no "nothing fires": `scope_incomplete`, the read that fell short
+    /// said, exit 2.
+    #[test]
+    fn a_presence_read_not_whole_is_no_verdict_over_nothing_firing() {
+        let mut o = obs(true);
+        let t0 = o.at;
+        let book = o.book.as_mut().unwrap();
+        let resolved = serde_json::to_vec(&serde_json::json!({
+            "timestamp": 2, "rule": "link_down", "severity": "critical",
+            "state": "resolved", "summary": "link to r2 up again",
+            "labels": {"peer": "r2", "port": "eth0"},
+        }))
+        .unwrap();
+        book.sample(AlarmSample {
+            key: A.into(),
+            delete: false,
+            payload: resolved,
+            stamp: Some(stamp(5)),
+            at: t0,
+            wall: wall(),
+            via: AlarmVia::Subscription,
+        });
+        let r = judge(&o, Severity::Warning);
+        assert_eq!(r.any_firing.answer, AlarmAnswerToken::No, "{r:#?}");
+        assert_eq!(judgement_exit_code(&r.judgement()), 0);
+
+        let mut partial = observed(true);
+        partial.complete = false;
+        o.book.as_mut().unwrap().presence_read(&partial, t0);
+        if let Some(Ok(p)) = &mut o.log.presence {
+            p.complete = false;
+        }
+        let r = judge(&o, Severity::Warning);
+        assert_eq!(r.any_firing.answer, AlarmAnswerToken::Unobservable);
+        assert_eq!(r.any_firing.reason, "scope_incomplete");
+        assert!(
+            r.any_firing.says.contains("timeout"),
+            "{}",
+            r.any_firing.says
+        );
+        assert_eq!(
+            r.any_firing.established, 1,
+            "the owner found is still known whole"
+        );
+        assert_eq!(judgement_exit_code(&r.judgement()), 2);
     }
 }

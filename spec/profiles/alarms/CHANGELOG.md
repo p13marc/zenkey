@@ -4,6 +4,168 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-20: the cold reader's round 40 (#800, AE; #609)
+
+The spec-only implementation read 0.3 and ran it live (zk2py round 40):
+1757 of 1757 fixture checks, and `scenarios.md` §1 to §10, 74 of 74,
+against its own owner and against the Rust owner example. It filed three
+findings, F-135 to F-137, and named four guesses; 0.4 changed none of
+the text they cite. Each finding is answered in the text, and the reference — `zenkey_model::alarms`'s
+judges, the fleet's reader, zenctl's `alarms` and the runtime's §5 test —
+is brought to it. Written against core 0.34, unchanged.
+
+The model changes: `Reading` gains `left_out`, and `any_firing` the
+scope's reads (`ScopeRead`), with a reason of its own, `scope_incomplete`.
+`conclusions.json` gains the two inputs in every case it reads them in,
+`left_out` true only where a case's facts already said so (a key the
+establishing GET drew nothing for, and none held), and twelve cases
+written by hand, which pass as written: it is now 107 cases.
+`keys.json` (75), `documents.json` (62) and `transitions.json` (27) are
+unchanged.
+
+**Answered: the three findings.**
+- **F-135, "before the new instance token", observed at S**
+  (`scenarios.md` §5, §2.9). 0.3's expected 3 judged the SHOULD by the
+  order of S's deliveries against the token's arrival. A put and a
+  liveliness token are two messages, on two subscriptions, and nothing
+  keeps an order between them at S: zk2py measured the token first in 2
+  of 7 runs, by 0.04 ms, of an owner that puts before its token by
+  construction, and the reference's test bounded the inversion with the
+  scenarios' 200 ms jitter.
+  - §5 now observes it as core §8.2, `presence.md` §1 and `health.v1`'s
+    §1 do: G GETs the moment S sees the new instance token. Its reply
+    holds A, *t₀* kept, and B, unchanged, each under the new instance's
+    stamp id, and a `reply_del` of R's key and of P's, stamped by it. S's
+    receipts are listed without an order against the token.
+  - The GET is a step, before the owner's first evaluation, so B is still
+    firing when it is asked, as `health.v1` §1 puts T's GETs in its steps.
+  - §2.9 says how "before its token" is observed, for a restart and a
+    re-mint alike.
+  - The reference's §5 test GETs at the token, polled every millisecond,
+    and so does its re-mint test, whose reply carries the re-put's stamp,
+    later than the raise's, the session's zid kept. Their arrival-order
+    bound is gone. zk2py's reading stands; it checked its §5 so already.
+- **F-136, a key whose resolve and delete a loss took never reads no**
+  (§2.14 steps 4 and 5). Step 4 answers before step 5. A reader that lost
+  A's resolve and delete re-seeds past the tombstone window: its GET, which
+  establishes the owner's alarms by answering B, draws nothing for A, and
+  nothing of A arrives again. Step 4 then read A `incomplete` for as long
+  as the reader held it, since no GET would ever answer A again, and "is
+  anything firing?" over that owner could never read no. 0.3's step 5
+  sentence described exactly that key, and was never reached.
+  - Step 4 now holds only while no GET has answered the key since the
+    loss, **nor has the GET that established its owner's alarms left it
+    out**: answered it with neither a value nor a `reply_del`, nothing of
+    the key arriving after that GET was asked. Step 5 then reads it
+    `not_held`.
+  - Why the establishing GET may heal what an empty reply set may not. It
+    was asked after the loss: after a loss a window runs from the first
+    complete GET that followed it, and one that lost a delivery
+    establishes nothing (§2.15). The owner answered it with every live key
+    (core S2), and the window has heard everything since. A GET that did
+    not establish the owner's alarms, or one asked before the loss, heals
+    nothing, as before (core O5).
+  - Step 5's left-out key is defined there once, for both steps, and
+    "the GET that established its owner's alarms" now says either way
+    (`answered` or `window`): 0.3's "a complete GET its owner answered"
+    read as if an owner known whole by its window, whose GET answered
+    nothing, left out no key.
+  - The model's `Reading::left_out` carries it, and the judge applies both
+    steps from it: 0.3's step 5 rule was the reader's (the fleet dropped
+    the sample before judging), and now a fixture pins it.
+  - `conclusions.json`, six `reading` cases: the establishing GET after
+    the loss heals (no, `not_held`); a GET after the loss that did not
+    establish, and one asked before the loss, do not (`incomplete`); 0.3's
+    rule without a loss, for a subscriber and for a GET reader with no
+    subscription; and a put heard after the establishing GET, which is not
+    left out (`incomplete`).
+  - zk2py's reading changes: it read the text as written, step 4 first.
+- **F-137, the second question over a scope whose read was not whole**
+  (§2.15). The scope was whatever the reads that found owners returned,
+  and §2.15 said nothing of a read that fell short: an owner it missed was
+  in no step, so the steps answered no over the owners found, though the
+  one missed might fire — core O5's no from silence.
+  - "The owners in scope" now says when the reads that found them are
+    **whole**: the reader's latest presence read of them ran to its final
+    reply and, for a reader that follows instance tokens since, it lost
+    none of their moves; across a face, the deployment's word. The
+    second question gains a step after `owner_unobservable`: reads not
+    whole, **unobservable**, `scope_incomplete`. §5's table says it.
+  - **A reason of its own**, not `owner_unobservable` with an owner
+    added, as zk2py did. `owner_unobservable` names owners in scope, each
+    with §2.15's reason on its row, and each owner is counted by its
+    verdict. An owner a read missed has no row, no reason, and no verdict:
+    counting it would make the counts something other than owners asked.
+    And the cure differs: an owner's window waits, a scope's read is made
+    again.
+  - **After the owners' own reasons and before an alarm's.** The owners
+    a reader found say why first, as each is counted; then the owners it
+    may have missed; then an established owner's alarm. Before
+    `no_owner`, so a read that found nobody is never "not asked".
+  - **The presence read, not the archive's.** zk2py's three ways a read
+    falls short were a presence read possibly incomplete, an archive's GET
+    short of its final reply, and an archive key that does not read back.
+    Only the first can hide an owner that may fire. An owner that only an
+    archive's keys name, and that a complete presence read does not find,
+    is absent: not asked, and an absent owner never stops a no (§2.15,
+    case "an absent owner is counted apart"). So an archive read short of
+    its final reply, or a key that does not read back, leaves short only
+    the owners a tool counts not asked, and the tool says so. §2.15 says
+    this beside "whole". zk2py's reading changes for the archive's two;
+    its scope answers unobservable where the text answers no.
+  - `conclusions.json`, six `any_firing` cases, each with `scope_whole`:
+    not whole over a quiet established owner, over no owner, and over an
+    absent one (`scope_incomplete`, never no or not asked); with an alarm
+    firing (yes); with an owner unobservable (`owner_unobservable` first);
+    before an established owner's alarm unobservable.
+
+**Answered: the round's guesses.**
+- **"From that GET"** (§2.15). zk2py dated a GET by the instant it was
+  asked, as step 5 dates one. §2.15 now says so, its replies included: a
+  GET asked before a loss heals nothing of it, wherever its replies
+  arrive. zk2py's reading stands. The reference dated a reply by its
+  arrival for the key it answered, so a GET asked before a loss and
+  answered after it healed its keys; it now dates each by its GET's ask.
+- **A held delete** (§2.14 step 5). zk2py made a held delete none, so
+  `not_held`. Step 5 now says "a sample the reader holds, a delete
+  included": both are no, and both `not_firing` for the last question.
+  zk2py's reading stands.
+
+**What the reference changed.**
+- `zenkey_model::alarms`: `Reading::left_out`, steps 4 and 5 read from
+  it; `ScopeRead` and `Reason::ScopeIncomplete`.
+- `zenkey_fleet`'s book: it keeps the latest GET's answered keys and each
+  key's last arrival, and hands the judge `left_out`. A key the
+  establishing GET left out loses its sample at the next sweep, for an
+  owner established either way; before, the book dropped it at the GET's
+  end for any owner that answered a key, established or not, and never
+  for one established by its window. `scope_read()` feeds `any_firing`,
+  and zenctl's report says which read fell short.
+- `zenkey_fleet`'s reader: a receive path that could not be watched is a
+  loss at the refresh's start, before its reads. It was folded after the
+  GET, so that GET, asked before it, never healed it, though 0.3 says a
+  path not watched is "a loss at every re-read", healed by the GET after
+  it.
+
+**Deliberately not stated.**
+- **A key the establishing GET left out that a delivery since shows.**
+  Not left out, so step 4 holds it until a GET answers it, as 0.3 kept "a
+  delivery after a loss does not heal it". With the owner's alarms
+  established such a delivery is newer than the owner's answer, and the
+  window has lost nothing since, so it could heal too. The reference
+  keeps the narrower rule: it never answers wrong, a live reader's next
+  re-read answers the key, and the left-out key, the one no GET would ever
+  answer, is the finding's.
+- **A run's verdict over a read it could not make.** zenctl's `alarms`
+  exits 2 when an archive could not be read (its exit contract: a read it
+  was asked to make failed), though §2.15's answer, which its report
+  carries, is no. That is the tool's, not this text's.
+- **Which archive** a one-shot tool reads (zk2py's guess). Core §4.4's
+  archive is a service implementing `archive.v1`; the reference asks every
+  one presence shows, and a deployment may name one. Neither is this
+  text's.
+- **The horizon a reader judges at** stays as 0.3 left it.
+
 ## 0.4 — 2026-10-20: what the notifier settled (#800, AD)
 
 0.3 left one surface unnamed on purpose: "No surface for transitions …

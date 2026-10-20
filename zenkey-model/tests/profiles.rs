@@ -1710,6 +1710,7 @@ fn alarms_conclusions() {
                         .as_bool()
                         .expect("previous_instance"),
                     held_whole: case["held_whole"].as_bool().expect("held_whole"),
+                    left_out: case["left_out"].as_bool().expect("left_out"),
                 };
                 json!({
                     "firing": alarms_judged(alarms::firing(&r)),
@@ -1781,7 +1782,12 @@ fn alarms_conclusions() {
                         alarms: a,
                     })
                     .collect();
-                let a = alarms::any_firing(at_least, &scope);
+                let read = if case["scope_whole"].as_bool().expect("scope_whole") {
+                    alarms::ScopeRead::Whole
+                } else {
+                    alarms::ScopeRead::NotWhole
+                };
+                let a = alarms::any_firing(at_least, &scope, read);
                 json!({
                     "answer": a.answer.as_str(),
                     "reason": a.reason.as_str(),

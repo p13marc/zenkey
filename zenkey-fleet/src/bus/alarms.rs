@@ -177,6 +177,8 @@ pub struct AlarmRefresh {
 /// What a refresh read, as values.
 #[derive(Debug, Clone)]
 pub struct Refreshed {
+    /// When it started, before any of its reads was asked.
+    pub started: Instant,
     /// The presence read, and when it was taken. `None` across a face.
     pub presence: Option<(Instant, Result<Observed, String>)>,
     pub seed: Result<SeedRead, String>,
@@ -197,6 +199,7 @@ impl AlarmRefresh {
     /// Presence, then the GET, then the archives — none of them through a
     /// session cut off from every router and peer ([`cut_off`]).
     pub async fn run(self) -> Refreshed {
+        let started = Instant::now();
         let t = self.spec.timeout;
         let cut = cut_off(&self.session).await;
         let presence = match self.spec.face {
@@ -228,6 +231,7 @@ impl AlarmRefresh {
             None
         };
         Refreshed {
+            started,
             presence,
             seed,
             archived,
@@ -484,12 +488,29 @@ impl AlarmFeed {
         self.fold(r)
     }
 
-    /// What a refresh read, folded: presence, the archives, then the GET's
-    /// replies and its end; then the receive path's watch and every key's
-    /// verdict. Returns every transition it made.
+    /// What a refresh read, folded: a receive path that could not be
+    /// watched, presence, the archives, then the GET's replies and its end;
+    /// then the receive path's watch and every key's verdict. Returns every
+    /// transition it made.
     pub fn fold(&mut self, r: Refreshed) -> Vec<AlarmTransition> {
         let (now, wall) = (Instant::now(), SystemTime::now());
         let mut out = Vec::new();
+        // A receive path that could not be watched may have lost anything
+        // before this refresh: a loss when it started, which its presence
+        // read and its GET, both asked after it, heal as any loss is healed
+        // (the GET for the keys it answers, and every window restarting from
+        // it; core §2.7, 0.27). Folded at the refresh's start, before its
+        // reads: at the fold it would follow the GET, and heal never.
+        if matches!(self.stall, Some(Err(_))) {
+            out.extend(self.book.lose(
+                AlarmLoss {
+                    dropped: 0,
+                    stalled: true,
+                },
+                r.started,
+                wall,
+            ));
+        }
         match r.presence {
             None => self.log.presence = None,
             Some((at, Ok(o))) => {
@@ -533,19 +554,6 @@ impl AlarmFeed {
                 });
             }
             Some(Err(e)) => self.log.archives = Some(Err(e)),
-        }
-        // A receive path that could not be watched may have lost anything
-        // before this GET: a loss, which the GET heals for the keys it
-        // answers and from which every window restarts (core §2.7, 0.27).
-        if matches!(self.stall, Some(Err(_))) {
-            out.extend(self.book.lose(
-                AlarmLoss {
-                    dropped: 0,
-                    stalled: true,
-                },
-                now,
-                wall,
-            ));
         }
         match r.seed {
             Ok(read) => {

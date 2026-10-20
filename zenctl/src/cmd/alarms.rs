@@ -9,8 +9,9 @@
 //! rendering: resolve the deployment, open a session **in** its namespace,
 //! read, print, and exit through the report's own judgement — §2.15's
 //! answer at the floor: 1 an alarm firing at or above it, 0 none with every
-//! owner asked known whole, 2 no verdict. A verdict verb: every failure
-//! before the run is the reserved 2.
+//! owner asked known whole and the presence read that found them complete,
+//! 2 no verdict. A verdict verb: every failure before the run is the
+//! reserved 2.
 //!
 //! **Why a root judgement, beside `health`.** "Is anything firing?" is a
 //! question whose finding is the yes, in three states — so it is exit-coded,

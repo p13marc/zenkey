@@ -393,7 +393,8 @@ is ahead, and the roll-up; exit 1 on a finding, 2 when one cannot be read) ·
 firing, resolved, stale or not asked, with whether its key re-derives and
 whether it is past its horizon; each owner known whole or not; and "is
 anything firing at or above `--at-least`?" — exit 1 on yes, 0 on no, 2 when
-an owner or an alarm cannot be read) · `zenctl watchdog --rule …`
+an owner, an alarm or the presence read that finds them cannot be read
+whole) · `zenctl watchdog --rule …`
 (conditions, as transitions).
 
 **Router configuration — generated, then checked.**
@@ -847,8 +848,8 @@ exits by:
 
 | question | yes | no | unestablished |
 |---|---|---|---|
-| is this alarm firing? | a fresh firing document of the present instance (the finding) | resolved, a delete, a key its owner's alarms, known whole, do not hold | `not_asked` (its owner absent, not listing alarms.v1, an archive alone, an earlier instance's put); `unobservable` (stale, a loss with no GET since, nothing read, undecodable, a reply's age with no trusted clock) |
-| is anything firing at or above `--at-least`? | an alarm firing at or above it, whatever else is known (the finding, exit 1) | every owner asked known whole, none of its alarms that may be at or above it unobservable (exit 0) | an owner or an alarm unobservable; no owner asked (exit 2) |
+| is this alarm firing? | a fresh firing document of the present instance (the finding) | resolved, a delete, a key its owner's alarms, known whole, do not hold | `not_asked` (its owner absent, not listing alarms.v1, an archive alone, an earlier instance's put); `unobservable` (stale, a loss no GET has healed, nothing read, undecodable, a reply's age with no trusted clock) |
+| is anything firing at or above `--at-least`? | an alarm firing at or above it, whatever else is known (the finding, exit 1) | the presence read that found the owners complete, every owner asked known whole, none of its alarms that may be at or above it unobservable (exit 0) | an owner or an alarm unobservable; a presence read possibly incomplete, which may have missed an owner (`scope_incomplete`); no owner asked (exit 2) |
 | does its key re-derive from its document? | `strict`; `sanitized` names §2.3's SHOULD broken | `mismatch`: a phantom (the doctor's `alarm-key`) | a delete; undecodable |
 | is it past its horizon, its owner present? | stale: about the owner (the doctor's `alarm-stale`) | fresh | its owner absent, not firing, across a face |
 
