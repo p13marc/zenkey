@@ -5,7 +5,9 @@ into zenoh 1.10.1's ``access_control`` block, under
 **The input is zk2py's own** (§11.1 "The input", 0.15: "The format is the
 generator's own"). A deployment is a list of :class:`Principal`, each bound
 to one usrpwd username (§11.3: "Principals are bound by certificate CN or
-username"):
+username"). The input has no CN, so core 0.33's MUST, "A generator MUST
+refuse an input that binds one principal by both", holds by construction:
+no input can bind one principal by both.
 - ``service`` and ``implements``: the Own grant on ``zk2/<system>/<service>``
   for the contracts it serves;
 - ``consumes``: Consume, one :class:`Use` per binding (interface, providers,

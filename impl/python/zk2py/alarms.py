@@ -323,7 +323,8 @@ def in_schema(value: Any) -> bool:
 class Alarm:
     """A document that reads (§2.4), its integral numbers as integers. A
     member left out is None; `labels` absent is None, never `{}`, since
-    "Equal is equal in every member this text names" (§2.6)."""
+    "Equal is equal in every member this text names" (§2.6; SPEC-FINDINGS
+    F-127)."""
 
     timestamp: int
     rule: str
@@ -379,7 +380,7 @@ def decode(payload: bytes) -> Alarm | None:
     """A sample's payload, JSON (the contract's encoding, core §7.2), read as
     §2.4 says. zk2py reads strict JSON: a duplicate member, NaN, or a
     string with no UTF-8 form (a lone surrogate escape) does not read
-    (SPEC-FINDINGS F-130)."""
+    (SPEC-FINDINGS F-126)."""
     try:
         value = jcs.loads(payload)
     except jcs.JsonError:
@@ -487,7 +488,7 @@ class Reading:
       deleted, undecodable, or None when none was read;
     - ``previous_instance``: that latest put stamped by an earlier instance
       of the owner (its stamp's id not the present descriptor's
-      ``meta.zid``);
+      ``meta.zid``; SPEC-FINDINGS F-129);
     - ``held_whole``: the owner's alarms established in this reading
       (§2.15)."""
 
@@ -529,7 +530,8 @@ def judge(r: Reading, question: str = Q_FIRING) -> Answer:
     # 3. An archive alone (freshness.v1 §2.8).
     if obs and all(isinstance(o, fr.Archive) for o in obs):
         return Answer(NOT_ASKED, "last_known", "only an archive's answer was read (core S6)")
-    # 4. A loss, with no GET that answered the key since (core §4.2).
+    # 4. A loss, with no GET that answered the key since (core §4.2): a
+    # value or a reply_del for it, zk2py's reading (SPEC-FINDINGS F-128).
     lost = any(isinstance(o, fr.Subscription) and not o.complete for o in obs)
     reseeded = any(isinstance(o, fr.Get) and o.reply is not None for o in obs)
     if lost and not reseeded:
@@ -605,7 +607,7 @@ class Verdict:
 def owner_set(presence: str, descriptor: dict[str, Any] | None, face: dict[str, Any] | None,
               seed: Seed | None, window: Window | None) -> Verdict:
     """§2.15 "Established", else unobservable, else not asked, checked in
-    this order (zk2py's, SPEC-FINDINGS F-127): §2.14's steps 1 and 2 with
+    this order (zk2py's, SPEC-FINDINGS F-130): §2.14's steps 1 and 2 with
     their reasons; no GET; a GET not complete; a window that lost a
     delivery; an owner not present throughout; a GET that answered a key
     (`answered`); across a face, an empty GET; no window; a window of 900 s
@@ -662,7 +664,9 @@ class OwnerRead:
 def any_firing(at_least: str, owners: Iterable[OwnerRead]) -> dict[str, Any]:
     """§2.15 "Anything firing at or above a severity *S*", its five steps in
     order, with the count of alarms reading yes at *S* or above, and the
-    owners counted by verdict."""
+    owners counted by verdict. Which owners are in scope is the caller's: an
+    absent one is counted only if the caller knows of it (SPEC-FINDINGS
+    F-131)."""
     owners = list(owners)
     counts = {ESTABLISHED: 0, NOT_ASKED: 0, UNOBSERVABLE: 0}
     for o in owners:
@@ -695,7 +699,9 @@ def rederives(alert_key: str, payload: Any) -> Answer:
     """§5 "Does this key re-derive from its document?": `strict` when the
     recipe gives the key, `sanitized` when only §2.3's step does, else
     `mismatch`. A delete carries no document; a payload that does not read
-    is unobservable. The comparison is exact."""
+    is unobservable. The comparison is exact. The reasons of a delete
+    (`no_document`) and of an undecodable payload are the fixture's
+    (SPEC-FINDINGS F-132)."""
     if payload == DELETE:
         return Answer(NOT_ASKED, "no_document", "a delete carries no document")
     doc = payload if isinstance(payload, Alarm) else read(payload)
