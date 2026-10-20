@@ -798,6 +798,9 @@ pub struct Reading<'a> {
     /// owner than the present one: its stamp's id is not the current
     /// descriptor's `meta.zid` (core §4.3, §3.3).
     pub previous_instance: bool,
+    /// Whether the owner's alarms are established in this reading
+    /// ([`owner_set`], §2.15): a key they do not hold then reads not firing.
+    pub held_whole: bool,
 }
 
 /// A question of §5, answered in the three states: a pole of each
@@ -873,6 +876,8 @@ pub enum Reason {
     Incomplete,
     /// Unobservable: nothing of the key was read.
     NotRead,
+    /// Is it firing, no: the owner's alarms, established, do not hold it.
+    NotHeld,
     /// Unobservable: the latest put does not read (§2.4).
     Undecodable,
     /// An owner's alarms established: a complete GET that it answered.
@@ -941,6 +946,7 @@ impl Reason {
             Self::PreviousInstance => "previous_instance",
             Self::Incomplete => "incomplete",
             Self::NotRead => "not_read",
+            Self::NotHeld => "not_held",
             Self::Undecodable => "undecodable",
             Self::Answered => "answered",
             Self::Window => "window",
@@ -990,6 +996,7 @@ impl Reason {
             }
             Self::Incomplete => "deliveries were lost, and no GET answered since",
             Self::NotRead => "nothing of it was read",
+            Self::NotHeld => "its owner's alarms, known whole, do not hold it",
             Self::Undecodable => "its latest put does not read as an alarms.v1 document",
             Self::Answered => "its owner answered a complete GET",
             Self::Window => {
@@ -1083,7 +1090,7 @@ enum Read {
     },
 }
 
-fn read(r: &Reading<'_>, latest_not_firing: impl Fn(Latest) -> Judged) -> Read {
+fn read(r: &Reading<'_>, not_firing: impl Fn(Reason) -> Judged) -> Read {
     use Answer::{NotAsked, Unobservable};
     let f = freshness::judge_all(&horizon(), r.observations);
     if f.verdict == freshness::Verdict::NotAsked && f.reason == freshness::Reason::LastKnown {
@@ -1093,6 +1100,7 @@ fn read(r: &Reading<'_>, latest_not_firing: impl Fn(Latest) -> Judged) -> Read {
         return Read::Done(Judged::new(Unobservable, Reason::Incomplete));
     }
     match r.latest {
+        None if r.held_whole => Read::Done(not_firing(Reason::NotHeld)),
         None => Read::Done(Judged::new(
             Unobservable,
             if matches!(r.presence, Presence::AcrossFace { .. }) {
@@ -1101,7 +1109,8 @@ fn read(r: &Reading<'_>, latest_not_firing: impl Fn(Latest) -> Judged) -> Read {
                 Reason::NotRead
             },
         )),
-        Some(l @ (Latest::Deleted | Latest::Resolved)) => Read::Done(latest_not_firing(l)),
+        Some(Latest::Deleted) => Read::Done(not_firing(Reason::Deleted)),
+        Some(Latest::Resolved) => Read::Done(not_firing(Reason::Resolved)),
         Some(Latest::Firing | Latest::Undecodable) if r.previous_instance => {
             Read::Done(Judged::new(NotAsked, Reason::PreviousInstance))
         }
@@ -1121,16 +1130,7 @@ pub fn firing(r: &Reading<'_>) -> Judged {
     if let Some(j) = premises(r.presence) {
         return j;
     }
-    let (firing, f) = match read(r, |l| {
-        Judged::new(
-            No,
-            if l == Latest::Deleted {
-                Reason::Deleted
-            } else {
-                Reason::Resolved
-            },
-        )
-    }) {
+    let (firing, f) = match read(r, |reason| Judged::new(No, reason)) {
         Read::Done(j) => return j,
         Read::Judge { firing, freshness } => (firing, freshness),
     };
@@ -1585,6 +1585,7 @@ mod tests {
             observations: obs,
             latest: Some(latest),
             previous_instance: false,
+            held_whole: false,
         };
         assert_eq!(firing(&r(&fresh, Latest::Firing)).answer, Answer::Yes);
         assert_eq!(firing(&r(&stale, Latest::Firing)).reason, Reason::Stale);
