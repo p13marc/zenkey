@@ -13,7 +13,8 @@
 //! alert_key(rule, labels)   ─▶ the key │ Unframed: the strict recipe, framed input only      §2.2
 //! sanitize(rule, labels)    ─▶ the discriminating input, with §2.3's substitutions         §2.3
 //! derive(rule, labels)      ─▶ Derived{key, input, framed}: the reader's, never refusing   §2.3
-//! Alarm::from_json(v)       ─▶ Alarm │ Invalid{schema, time_range}; check(a) ─▶ problems   §2.4
+//! decode(bytes)             ─▶ strict JSON first (0.2), then Alarm::from_json              §2.4
+//! Alarm::from_json(v)       ─▶ Alarm │ Invalid{json, schema, time_range}; check(a) ─▶ problems  §2.4
 //! Track::apply(sample)      ─▶ raised │ escalated │ refreshed │ confirmed │ resolved │ retired │ unreadable  §2.6
 //! AlarmRef::key / from_key  ─▶ zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>  §2.12
 //! firing(reading)           ─▶ §5 "is this alarm firing?": yes │ no │ unobservable │ not_asked, + reason
