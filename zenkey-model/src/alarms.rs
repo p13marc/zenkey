@@ -342,6 +342,10 @@ pub struct Alarm {
 /// Why a payload is no document a reader can read (§2.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invalid {
+    /// Not strict JSON (text 0.2, F-126): not UTF-8, not JSON, a duplicate
+    /// member, a number that is not finite, or a string with no UTF-8 form
+    /// (a lone surrogate escape), with why. Only [`decode`] reports it.
+    Json(String),
     /// Outside the 1.0 schema, with where and why.
     Schema(String),
     /// A time outside 0 to 2^53−1 ms, naming the member.
@@ -353,6 +357,7 @@ impl Invalid {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Json(_) => "json",
             Self::Schema(_) => "schema",
             Self::TimeRange(_) => "time_range",
         }
@@ -362,6 +367,7 @@ impl Invalid {
 impl fmt::Display for Invalid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Json(why) => write!(f, "not strict JSON: {why}"),
             Self::Schema(why) => write!(f, "outside alarms.v1.Alarm: {why}"),
             Self::TimeRange(m) => write!(f, "{m} is outside 0 to 2^53-1 ms"),
         }
@@ -511,6 +517,22 @@ impl Alarm {
         }
         out
     }
+}
+
+/// Reads a payload's bytes as a document (§2.4, text 0.2): strict JSON
+/// first, as core §3.3's D000 reads a descriptor (UTF-8, RFC 8259, no
+/// duplicate member at any depth, every number finite, every string with a
+/// UTF-8 form), then [`Alarm::from_json`]. So two readers never read two
+/// severities, or derive two keys, from one put (F-126).
+///
+/// # Errors
+///
+/// [`Invalid::Json`] for bytes that are not strict JSON, else
+/// [`Alarm::from_json`]'s.
+pub fn decode(bytes: &[u8]) -> Result<Alarm, Invalid> {
+    let text = std::str::from_utf8(bytes).map_err(|e| Invalid::Json(format!("not UTF-8: {e}")))?;
+    let v = crate::strict::parse_json(text).map_err(|e| Invalid::Json(e.to_string()))?;
+    Alarm::from_json(&v)
 }
 
 /// The recommended form of a label name (§2.4): one or more
@@ -792,13 +814,19 @@ pub struct Reading<'a> {
     pub presence: Presence,
     /// The observations of the key, judged as `freshness.v1` judges them,
     /// at [`TTL`]. A GET among them is the reader's seed, made after any
-    /// loss its subscription had (core §4.2).
+    /// loss its subscription had (core §4.2): one that answered this key,
+    /// with a value or a `reply_del`, heals the loss for it; one that drew
+    /// nothing for it does not (text 0.2, F-128).
     pub observations: &'a [Observation],
     /// The latest sample read, or `None` when none was.
     pub latest: Option<Latest>,
-    /// Whether that latest put was stamped by an earlier instance of the
-    /// owner than the present one: its stamp's id is not the current
-    /// descriptor's `meta.zid` (core §4.3, §3.3).
+    /// Whether that latest put's stamp's id is not the current
+    /// descriptor's `meta.zid`, compared by value (core §4.3, §3.3): an
+    /// earlier instance stamped it, or another session did, which is also
+    /// core §4.2's foreign-stamp finding. `false` when the descriptor
+    /// carries no `meta.zid`: a stamp is then unattributable, never foreign
+    /// (core §3.3). A re-mint that keeps its session keeps its zid, and is
+    /// not told apart (text 0.2, F-129).
     pub previous_instance: bool,
     /// Whether the owner's alarms are established in this reading
     /// ([`owner_set`], §2.15): a key they do not hold then reads not firing.
@@ -1193,16 +1221,22 @@ pub enum Seed {
 }
 
 /// A reader's subscription window on an owner's alarms, declared before
-/// its GET (core §4.2), as core §2.7 establishes one.
+/// its GET (core §4.2), as core §2.7 establishes one. After a loss, the
+/// window starts again at the first complete GET that followed it, the
+/// reader's re-seed (text 0.2, F-128): a loss before that GET is healed by
+/// it, one after it is not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Window {
     /// How long it has listened, from its declaration plus its reply
-    /// timeout (core §2.7).
+    /// timeout (core §2.7), or since the re-seed that followed its latest
+    /// loss.
     pub listened: Duration,
-    /// It lost no delivery, established as core §2.7 says (0.25, 0.27).
+    /// It lost no delivery over the window, established as core §2.7 says
+    /// (0.25, 0.27).
     pub lossless: bool,
     /// The owner held its instance token from the window's start until one
-    /// lease after its end (core §2.7).
+    /// lease after its end (core §2.7). Not asked across a face, where
+    /// presence does not cross.
     pub present_throughout: bool,
 }
 
@@ -1233,10 +1267,11 @@ pub struct SetJudged {
     pub reason: Reason,
 }
 
-/// Whether an owner's alarms are known whole, by §2.15's order: presence
-/// and the descriptor; the seed; a window that lost a delivery or a gap in
-/// presence; a seed the owner answered; then, for an empty seed, the
-/// window.
+/// Whether an owner's alarms are known whole, by §2.15's order (text 0.2,
+/// F-130): §2.14's steps 1 and 2, with their reasons; the seed; a window
+/// that lost a delivery, then a gap in presence, which is not asked across
+/// a face; a seed the owner answered; then, for an empty seed, the face and
+/// the window.
 #[must_use]
 pub fn owner_set(presence: Presence, seed: Option<Seed>, window: Option<Window>) -> SetJudged {
     let j = |verdict, reason| SetJudged { verdict, reason };
@@ -1255,18 +1290,21 @@ pub fn owner_set(presence: Presence, seed: Option<Seed>, window: Option<Window>)
         Some(Seed::Incomplete) => return j(Unobservable, Reason::SeedIncomplete),
         Some(Seed::Complete { members }) => members,
     };
+    // Across a face presence does not cross, so whether the owner was
+    // present throughout is not asked there (text 0.2, F-130).
+    let across = matches!(presence, Presence::AcrossFace { .. });
     if let Some(w) = window {
         if !w.lossless {
             return j(Unobservable, Reason::WindowLost);
         }
-        if !w.present_throughout {
+        if !w.present_throughout && !across {
             return j(Unobservable, Reason::OwnerGap);
         }
     }
     if members > 0 {
         return j(Established, Reason::Answered);
     }
-    if matches!(presence, Presence::AcrossFace { .. }) {
+    if across {
         return j(Unobservable, Reason::AcrossFace);
     }
     match window {
@@ -1484,6 +1522,40 @@ mod tests {
         assert_eq!(Alarm::from_json(&v), Err(Invalid::TimeRange("timestamp")));
         // Serialized back, the document is the schema's.
         assert_eq!(serde_json::to_value(&a).unwrap(), firing_doc());
+    }
+
+    /// F-126 (text 0.2): a payload is strict JSON before it is a document.
+    #[test]
+    fn a_payload_is_strict_json_first() {
+        let ok = br#"{"timestamp": 1000, "rule": "r", "severity": "info", "state": "firing", "summary": "s"}"#;
+        assert_eq!(decode(ok).expect("reads").rule, "r");
+        for (bad, why) in [
+            (
+                &br#"{"timestamp": 1, "rule": "r", "severity": "info", "severity": "critical", "state": "firing", "summary": "s"}"#[..],
+                "a duplicate member",
+            ),
+            (
+                br#"{"timestamp": 1, "rule": "r", "severity": "info", "state": "firing", "summary": "s", "labels": {"a": "1", "a": "2"}}"#,
+                "a duplicate label",
+            ),
+            (
+                br#"{"timestamp": NaN, "rule": "r", "severity": "info", "state": "firing", "summary": "s"}"#,
+                "NaN",
+            ),
+            (
+                br#"{"timestamp": 1, "rule": "\ud800", "severity": "info", "state": "firing", "summary": "s"}"#,
+                "a lone surrogate",
+            ),
+            (b"\xff", "not UTF-8"),
+            (
+                br#"{"timestamp": 1, "rule": "r", "severity": "info", "state": "firing", "summary": "s"} x"#,
+                "trailing text",
+            ),
+        ] {
+            assert_eq!(decode(bad).map_err(|e| e.as_str()), Err("json"), "{why}");
+        }
+        let schema = br#"{"timestamp": 1, "rule": "r", "severity": "major", "state": "firing", "summary": "s"}"#;
+        assert_eq!(decode(schema).map_err(|e| e.as_str()), Err("schema"));
     }
 
     #[test]
