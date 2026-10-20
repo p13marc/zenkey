@@ -322,9 +322,10 @@ def in_schema(value: Any) -> bool:
 @dataclass(frozen=True)
 class Alarm:
     """A document that reads (§2.4), its integral numbers as integers. A
-    member left out is None; `labels` absent is None, never `{}`, since
-    "Equal is equal in every member this text names" (§2.6; SPEC-FINDINGS
-    F-127)."""
+    member left out is None, but `labels` absent is `{}`: §2.6 (0.2, F-127),
+    "`labels` absent is equal to `labels: {}` … Any other member absent is
+    equal only to itself absent, so `category: ""` is not an absent
+    `category`"."""
 
     timestamp: int
     rule: str
@@ -333,7 +334,7 @@ class Alarm:
     summary: str
     observed_at_ms: int | None = None
     category: str | None = None
-    labels: dict[str, str] | None = None
+    labels: dict[str, str] = field(default_factory=dict)
 
     @property
     def firing(self) -> bool:
@@ -358,7 +359,7 @@ def read(value: Any) -> Alarm | None:
     a = Alarm(timestamp=int(value["timestamp"]), rule=value["rule"], severity=value["severity"],
               state=value["state"], summary=value["summary"],
               observed_at_ms=None if obs is None else int(obs), category=value.get("category"),
-              labels=None if "labels" not in value else dict(value["labels"]))
+              labels=dict(value.get("labels", {})))
     return a if _in_range(a.timestamp) and _in_range(a.observed_at_ms) else None
 
 
@@ -376,22 +377,48 @@ def _utf8(value: Any) -> bool:
     return True
 
 
-def decode(payload: bytes) -> Alarm | None:
-    """A sample's payload, JSON (the contract's encoding, core §7.2), read as
-    §2.4 says. zk2py reads strict JSON: a duplicate member, NaN, or a
-    string with no UTF-8 form (a lone surrogate escape) does not read
-    (SPEC-FINDINGS F-126)."""
+class NotStrict(ValueError):
+    """§2.4 "Strict JSON first" (0.2): bytes that are not strict JSON."""
+
+
+def strict_json(payload: bytes) -> Any:
+    """§2.4 (0.2, F-126): "UTF-8, JSON (RFC 8259) with nothing after its
+    value, no duplicate member at any depth, every number finite, and every
+    string with a UTF-8 form, so no lone surrogate escape". Raises
+    :class:`NotStrict`."""
     try:
         value = jcs.loads(payload)
-    except jcs.JsonError:
+    except jcs.JsonError as e:
+        raise NotStrict(str(e)) from e
+    if not _utf8(value):
+        raise NotStrict("a string with no UTF-8 form")
+    return value
+
+
+def decode(payload: bytes) -> Alarm | None:
+    """A sample's payload, JSON (the contract's encoding, core §7.2), read as
+    §2.4 says: strict JSON first, then the schema and the time range."""
+    try:
+        return read(strict_json(payload))
+    except NotStrict:
         return None
-    return read(value) if _utf8(value) else None
+
+
+def check_payload(payload: bytes) -> dict[str, Any]:
+    """documents.json's reading of a case given as its `text` (0.2): `json`
+    when the bytes are not strict JSON, else :func:`check`."""
+    try:
+        value = strict_json(payload)
+    except NotStrict:
+        return {"readable": False, "errors": ["json"], "warnings": []}
+    return check(value)
 
 
 def check(value: Any) -> dict[str, Any]:
-    """documents.json's reading: `readable`, the owner's `errors` (MUSTs
-    broken) and its `warnings` (SHOULDs broken), in the order checked.
-    Unreadable reports `schema`, else `time_range`, and nothing else."""
+    """documents.json's reading of a decoded value: `readable`, the owner's
+    `errors` (MUSTs broken) and its `warnings` (SHOULDs broken), in the
+    order checked. Unreadable reports `schema`, else `time_range`, and
+    nothing else."""
     if not in_schema(value):
         return {"readable": False, "errors": ["schema"], "warnings": []}
     a = read(value)
@@ -406,7 +433,7 @@ def check(value: Any) -> dict[str, Any]:
     if not is_framed(a.rule, a.labels):
         warnings.append("unframed")
     # §2.4's form is a SHOULD on every name, a host-scoped one included.
-    for name in sorted(a.labels or {}, key=lambda n: n.encode("utf-8")):
+    for name in sorted(a.labels, key=lambda n: n.encode("utf-8")):
         if NAME_FORM.fullmatch(name) is None:
             warnings.append("label_name_form")
     return {"readable": True, "errors": errors, "warnings": warnings}
@@ -606,12 +633,13 @@ class Verdict:
 
 def owner_set(presence: str, descriptor: dict[str, Any] | None, face: dict[str, Any] | None,
               seed: Seed | None, window: Window | None) -> Verdict:
-    """§2.15 "Established", else unobservable, else not asked, checked in
-    this order (zk2py's, SPEC-FINDINGS F-130): §2.14's steps 1 and 2 with
-    their reasons; no GET; a GET not complete; a window that lost a
-    delivery; an owner not present throughout; a GET that answered a key
-    (`answered`); across a face, an empty GET; no window; a window of 900 s
-    or less; else `window`."""
+    """§2.15 "The order" (0.2, F-130): §2.14's steps 1 and 2 with their
+    reasons; the seed (`no_seed`, `seed_incomplete`); the window
+    (`window_lost`, then `owner_gap`, which "across a face … is not asked
+    there"); `answered`; across a face, an empty GET (`across_face`);
+    `no_member` and `window_short`; then `window`. ``window`` is over §2.15's
+    span (from its declaration, or after a loss from the first complete GET
+    that followed it), as the caller measured it."""
     if presence == "absent":
         return Verdict(NOT_ASKED, "absent")
     if presence == "incomplete":
@@ -633,7 +661,7 @@ def owner_set(presence: str, descriptor: dict[str, Any] | None, face: dict[str, 
         return Verdict(UNOBSERVABLE, "seed_incomplete")
     if window is not None and not window.lossless:
         return Verdict(UNOBSERVABLE, "window_lost")
-    if window is not None and not window.present_throughout:
+    if window is not None and not across and not window.present_throughout:
         return Verdict(UNOBSERVABLE, "owner_gap")
     if seed.members > 0:
         return Verdict(ESTABLISHED, "answered")

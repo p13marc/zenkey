@@ -761,12 +761,18 @@ def _alarms_keys(path: Path) -> list[Result]:
 
 
 def _alarms_documents(path: Path) -> list[Result]:
-    """alarms.v1 §2.4, §2.3: a decoded payload -> readable, the owner's
-    errors and its warnings, in the order checked."""
+    """alarms.v1 §2.4, §2.3: a payload, decoded or (0.2) as its text ->
+    readable, the owner's errors and its warnings, in the order checked."""
     from . import alarms
 
-    return [_check(f"documents #{i}: {c['note']}", alarms.check(c["document"]), c["expect"])
-            for i, c in enumerate(_load_json(path)["cases"])]
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        # A case gives the decoded `document`, or (0.2) its `text`, whose
+        # UTF-8 bytes are the payload.
+        got = alarms.check_payload(c["text"].encode("utf-8", "surrogatepass")) if "text" in c \
+            else alarms.check(c["document"])
+        out.append(_check(f"documents #{i}: {c['note']}", got, c["expect"]))
+    return out
 
 
 def _alarms_transitions(path: Path) -> list[Result]:
