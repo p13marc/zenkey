@@ -74,6 +74,10 @@ pub const OBSERVER: &str = "observer";
 /// The identity of an `alerts` rule's baseline notification (passthrough).
 pub const BASELINE: &str = "baseline";
 
+/// §2.14 step 1's absent: taken from a presence read only (see
+/// `AlarmRule::judge`).
+const ABSENT: &str = "absent";
+
 /// The reasons that say only what this reader has not established yet, a
 /// loss included: a key's answer with one of them leaves the key at its
 /// last word (see the module doc). Every other answer — yes, no, and an
@@ -478,7 +482,7 @@ impl AlarmRules {
                 Vec::new()
             }
         };
-        self.absorb(i, &ts, at)
+        self.absorb(i, &ts, false, at)
     }
 
     /// Each reader's refresh — presence, S4's GET — owned, to run beside
@@ -499,7 +503,7 @@ impl AlarmRules {
                 Some(Ok(f)) => f.fold(r),
                 _ => continue,
             };
-            out.extend(self.absorb(i, &ts, at));
+            out.extend(self.absorb(i, &ts, true, at));
         }
         out
     }
@@ -513,7 +517,7 @@ impl AlarmRules {
                 Ok(f) => f.sweep(),
                 Err(_) => Vec::new(),
             };
-            out.extend(self.absorb(i, &ts, at));
+            out.extend(self.absorb(i, &ts, false, at));
         }
         out
     }
@@ -539,8 +543,16 @@ impl AlarmRules {
 
     /// One batch of reader `i`'s transitions, for every rule on it: each
     /// key's notice, the remembered keys its book does not hold, then the
-    /// rule's sight.
-    fn absorb(&mut self, i: usize, ts: &[AlarmTransition], at: &str) -> Vec<RuleNotice> {
+    /// rule's sight. `read` when the batch folds a refresh, whose presence
+    /// read is what an owner's absence stands on: then every key the book
+    /// holds is judged again too.
+    fn absorb(
+        &mut self,
+        i: usize,
+        ts: &[AlarmTransition],
+        read: bool,
+        at: &str,
+    ) -> Vec<RuleNotice> {
         let mut out = Vec::new();
         let Self { readers, rules } = self;
         let Some(reader) = readers.get_mut(i) else {
@@ -550,9 +562,12 @@ impl AlarmRules {
             if let Ok(feed) = &reader.feed {
                 let book = feed.book();
                 for t in ts {
-                    out.extend(rule.judge(t, book, at));
+                    out.extend(rule.judge(t, book, read, at));
                 }
-                out.extend(rule.reconcile(book, at).0);
+                if read {
+                    out.extend(rule.recheck(book, at));
+                }
+                out.extend(rule.reconcile(book, read, at).0);
             }
             let sight = reader.look();
             let state = sight.state();
@@ -659,9 +674,9 @@ impl AlarmRule {
         if let Some(book) = book {
             counts.read(ts, &self.said);
             for t in ts {
-                out.extend(self.judge(t, book, at));
+                out.extend(self.judge(t, book, true, at));
             }
-            let (decided, kept) = self.reconcile(book, at);
+            let (decided, kept) = self.reconcile(book, true, at);
             out.extend(decided);
             counts.kept.extend(kept);
             counts.owners =
@@ -694,9 +709,22 @@ impl AlarmRule {
 
     /// One transition of a key, as this rule says it: `None` when the
     /// change is the reader's (a loss), not established ([`NOT_YET`]), or
-    /// moves neither the state nor, while firing, the severity.
-    fn judge(&mut self, t: &AlarmTransition, book: &AlarmBook, at: &str) -> Option<RuleNotice> {
-        if t.change == AlarmChange::Lost || !settled(&t.firing) {
+    /// moves neither the state nor, while firing, the severity. An owner's
+    /// absence is taken only from a presence read (`read`): §2.14 step 1's
+    /// "a complete read without its instance token", never a live token's
+    /// withdrawal alone, which a router's restart makes of every owner at
+    /// once.
+    fn judge(
+        &mut self,
+        t: &AlarmTransition,
+        book: &AlarmBook,
+        read: bool,
+        at: &str,
+    ) -> Option<RuleNotice> {
+        if t.change == AlarmChange::Lost
+            || !settled(&t.firing)
+            || (!read && t.firing.reason == ABSENT)
+        {
             return None;
         }
         let state = state_of(t.firing.answer);
@@ -737,7 +765,12 @@ impl AlarmRule {
     /// kept at their last word while its alarms are unobservable. A key the
     /// selector no longer reaches is left as remembered; one said ok is
     /// forgotten. Returns the notices, and the keys kept, with why.
-    fn reconcile(&mut self, book: &AlarmBook, at: &str) -> (Vec<RuleNotice>, Vec<String>) {
+    fn reconcile(
+        &mut self,
+        book: &AlarmBook,
+        read: bool,
+        at: &str,
+    ) -> (Vec<RuleNotice>, Vec<String>) {
         let held: BTreeSet<&str> = book.keys().collect();
         let absent: Vec<String> = self
             .said
@@ -797,9 +830,37 @@ impl AlarmRule {
                 via: None,
                 lost: None,
             };
-            out.extend(self.judge(&t, book, at));
+            out.extend(self.judge(&t, book, read, at));
         }
         (out, kept)
+    }
+
+    /// Every key the book holds, judged again at a refresh: what a
+    /// transition deferred to a read (an owner's absence) is decided here,
+    /// as a `judged` change.
+    fn recheck(&mut self, book: &AlarmBook, at: &str) -> Vec<RuleNotice> {
+        let (now, wall) = (Instant::now(), SystemTime::now());
+        let keys: Vec<String> = book.keys().map(str::to_owned).collect();
+        let mut out = Vec::new();
+        for key in keys {
+            let (Some(r), Some(alarm)) = (book.reading(&key, now, wall), AlarmRef::from_key(&key))
+            else {
+                continue;
+            };
+            let t = AlarmTransition {
+                stamp: book.seen(&key).and_then(|s| s.stamp),
+                key,
+                alarm,
+                change: AlarmChange::Judged,
+                firing: answer_of(r.firing()),
+                severity: r.severity,
+                document: None,
+                via: None,
+                lost: None,
+            };
+            out.extend(self.judge(&t, book, true, at));
+        }
+        out
     }
 
     fn notice(
@@ -1138,7 +1199,7 @@ mod tests {
     /// One sample through the book, then the rule.
     fn feed(r: &mut AlarmRule, b: &mut AlarmBook, s: AlarmSample) -> Option<RuleNotice> {
         let t = b.sample(s)?;
-        r.judge(&t, b, "t")
+        r.judge(&t, b, false, "t")
     }
 
     fn says(n: &RuleNotice) -> (CondState, Option<CondState>, Option<&str>) {
@@ -1258,7 +1319,7 @@ mod tests {
         );
         assert_eq!(lost.len(), 1);
         assert!(
-            r.judge(&lost[0], &b, "t").is_none(),
+            r.judge(&lost[0], &b, false, "t").is_none(),
             "the key keeps its word"
         );
         assert_eq!(sight(&b, &whole(), 0), Sight::Lost { lost: 4 });
@@ -1276,7 +1337,7 @@ mod tests {
         let mut out: Vec<RuleNotice> = b
             .sample(reply)
             .into_iter()
-            .filter_map(|t| r.judge(&t, &b, "t"))
+            .filter_map(|t| r.judge(&t, &b, true, "t"))
             .collect();
         let judged = b.seeded(
             AlarmSeedEnd {
@@ -1286,7 +1347,7 @@ mod tests {
             Instant::now(),
             SystemTime::now(),
         );
-        out.extend(judged.iter().filter_map(|t| r.judge(t, &b, "t")));
+        out.extend(judged.iter().filter_map(|t| r.judge(t, &b, true, "t")));
         assert_eq!(out.len(), 1, "{out:?}");
         assert_eq!(
             says(&out[0]),
@@ -1296,7 +1357,9 @@ mod tests {
     }
 
     /// An owner gone: its alarm is last-known, unobservable — never
-    /// resolved, never ok.
+    /// resolved, never ok. A live token's withdrawal alone moves nothing
+    /// (a router's restart withdraws every token at once); the presence
+    /// read after it decides, at the refresh.
     #[test]
     fn an_owner_gone_leaves_its_alarm_unobservable_never_resolved() {
         let mut b = book(true);
@@ -1307,9 +1370,20 @@ mod tests {
             put(doc("warning", "firing", 1, "down"), AlarmVia::Subscription),
         )
         .unwrap();
-        b.presence_read(&presence(false), Instant::now());
+        b.instance(
+            &"lab/svc".parse().unwrap(),
+            &"000000000000000a".parse().unwrap(),
+            false,
+            Instant::now(),
+        );
         let moved = b.sweep(Instant::now(), SystemTime::now());
-        let out: Vec<RuleNotice> = moved.iter().filter_map(|t| r.judge(t, &b, "t")).collect();
+        assert_eq!(moved.len(), 1, "the book reads it absent");
+        assert!(
+            moved.iter().all(|t| r.judge(t, &b, false, "t").is_none()),
+            "a token's withdrawal alone is no read"
+        );
+        b.presence_read(&presence(false), Instant::now());
+        let out = r.recheck(&b, "t");
         assert_eq!(out.len(), 1, "{out:?}");
         assert_eq!(
             says(&out[0]),
@@ -1324,6 +1398,7 @@ mod tests {
             "{}",
             out[0].evidence
         );
+        assert!(r.recheck(&b, "t").is_empty(), "said once");
     }
 
     /// The first look: an alarm read firing is told; one read only by a
