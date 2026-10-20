@@ -898,20 +898,21 @@ pub(crate) enum Command {
     /// no longer finds (absent, not asked). Per alarm, §5's questions: is it
     /// firing (a fresh firing document of the present instance; resolved, a
     /// delete, or a key its owner's alarms, known whole, do not hold, is
-    /// no; stale, a loss with no GET since, an earlier instance's put, are
+    /// no; stale, a loss no GET has healed, an earlier instance's put, are
     /// never yes or no); is it past its horizon, its owner present; does its
     /// key re-derive from its document. Per owner, whether its alarms are
     /// known whole: a complete GET it answered, or a complete empty one and
     /// a lossless window longer than 900 s, the owner present throughout.
     /// Over the scope, "is anything firing at or above --at-least?": yes on
     /// any alarm firing at or above it, whatever else is known; no only
-    /// when every owner asked is known whole and none of its alarms that may
-    /// be at or above it is unobservable. A reply's age needs a trusted
+    /// when the presence read that found the owners was complete, every
+    /// owner asked is known whole, and none of its alarms that may be at or
+    /// above it is unobservable. A reply's age needs a trusted
     /// clock: --clocks-synced is the deployment's word, or the window
     /// measures one on a live put. Exit 1 an alarm firing at or above the
     /// floor (the finding), 0 none, every owner asked known whole, 2 no
-    /// verdict: an owner or an alarm unobservable, no owner asked, or a run
-    /// that could not start.
+    /// verdict: an owner or an alarm unobservable, a presence read possibly
+    /// incomplete, no owner asked, or a run that could not start.
     Alarms(AlarmsArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
