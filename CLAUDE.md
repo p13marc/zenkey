@@ -66,6 +66,24 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `{"answer": "not_asked"}` reaches a script). `report/`'s domain files are
   private and re-exported flat, so `zenkey_fleet::report::Thing` stays the
   one path and the split can be re-cut without a call site moving.
+  `alarms.v1` (#800, AC) runs through all four layers. `bus::alarms`'
+  `AlarmFeed` is the live reader: a liveliness subscription to the owners'
+  instance tokens and one to the alarm keys feed one bounded queue whose
+  refusals are a counted loss, a `bus::stall` watch covers its own receive
+  path, then presence with descriptors, S4's GET and, when asked, every
+  archive's last-known; its refresh is an owned `AlarmRefresh`, run beside
+  a drain and folded after, and `observe`/`run_alarms` is the one-shot
+  reading. `model::alarms`' `AlarmBook` is session-free: each key merged by
+  stamp and read through the model's `Track` and strict `decode`; each
+  owner's seed and window, restarted at the first complete GET after a
+  loss or a gap in presence and counted to a lease and the timeout before
+  now; the owners in scope with how each was known (F-131); and the
+  `AlarmTransition`s a notifier routes. `judge::alarms` and
+  `report::alarms` complete it. Every verdict is `zenkey_model::alarms`'s,
+  never re-derived. The watchdog's `alert-firing` holds one feed per
+  selector (`RuleAlarms`, `SweepOutcome::alarms`), and the doctor's
+  `alarm-key`/`alarm-stale` and `check conform`'s `alarm-key`/
+  `alarm-document` read one GET through the same book.
 - `zenkey-explorer-config/` — the **shared explorer config crate**
   (Apache-2.0, **not published**): named connection contexts, the path
   policy (`~/.config/zenkey-explorer/config.toml`, legacy zenctl read
@@ -241,8 +259,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: twenty-three
-  checks since #768 (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  FJ6's `doctor` judges a zk2 deployment against the core: twenty-five
+  checks since #800's AC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
@@ -338,12 +356,18 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `check schema` take an address, an interface revision and a resource;
   `origin-down` is `instance-gone` — judged per address on FL1's presence
   projection with zenwatch's meaning, and folded into one state per rule
-  (firing while any address is gone; #747) — `alert-firing` is dark until
-  its profile exists (#613), and field-stuck waits to be ported onto
+  (firing while any address is gone; #747) — `alert-firing <SEL>
+  [info|warning|critical]` reads alarms.v1 under a base-relative selector
+  in the namespace (firing on yes, ok on no, unobservable otherwise, never
+  ok; #800, AC), and field-stuck waits to be ported onto
   `freshness.v1`, which exists since #720 (`docs/zk2/tooling-guide.md`
   §6). FK1 (#585) brought back zk2's `why`, the ladder from `namespace`
   to `last-known` (#702), and `check conform`, one service against the
-  revision its descriptor claims (#703).
+  revision its descriptor claims (#703). #800's AC added `alarms
+  [SELECTOR] [--at-least SEV] [--for SECS] [--clocks-synced]`, a root
+  judgement beside `health` (exit 1 an alarm firing at or above the floor,
+  0 none with every owner asked known whole, 2 otherwise), and `check
+  conform`'s `alarm-key` and `alarm-document` (21 cases).
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
   `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
@@ -400,7 +424,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `rate`, `field`, `record`, `replay`, `timeline`, `snapshot`, `graph`,
   `serve`, `gen`, `scout`); `compat` compares two contract revisions
   offline, exit-coded like a judgement; a **judgement** is exit-coded
-  (`check expect|probe|schema|face`, `doctor`, `health`, `watchdog`).
+  (`check expect|probe|schema|face`, `doctor`, `health`, `alarms`,
+  `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
   alone), `--watch` is a bare bool with `--every` as the one period,
