@@ -466,6 +466,12 @@
       ],
       "fingerprint": "sha256:b661ea20132d9de4f8a45fae30d9d6005186f87bdaf6c3e3a21355bc35822d18"
     },
+    "w105-alarms-vocabulary": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:d14962adf71bc5a6da2de2474ca463ede40991ae514476025a9195f5bfcd50ce"
+    },
     "w105-link-downsample": {
       "codes": [
         "W105"

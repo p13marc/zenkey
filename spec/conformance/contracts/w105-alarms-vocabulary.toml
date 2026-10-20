@@ -1,0 +1,13 @@
+# `alarms.v1` publishes its vocabulary empty (core 0.34): an alarm's
+# document always carries its severity (alarms.v1 §2.4), so the interim
+# `severity_default` has nothing to fill. Every `alarms.<key>` draws W105.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["alarms.v1"]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "alarms.severity_default" = "warning" }
