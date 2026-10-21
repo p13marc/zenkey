@@ -1542,9 +1542,23 @@ mod tests {
         assert_eq!(state_of(No), CondState::Ok);
         assert_eq!(state_of(Unobservable), CondState::Unobservable);
         assert_eq!(state_of(NotAsked), CondState::Unobservable, "never ok");
-        for r in NOT_YET {
+        // alarms.v1 §2.16's closed list of the reader's own sight (text 0.7,
+        // F-140), spelled out here so that dropping one from `NOT_YET`
+        // fails.
+        for r in [
+            "incomplete",
+            "presence_incomplete",
+            "no_descriptor",
+            "not_read",
+            "nothing_crossed",
+            "clock_untrusted",
+            "listened_too_short",
+            "near_horizon",
+            "no_observation",
+        ] {
             assert!(!settled(&answer(Unobservable, r)), "{r}");
         }
+        assert_eq!(NOT_YET.len(), 9, "the text's nine, and no more");
         for (a, r) in [
             (Yes, "firing"),
             (No, "resolved"),
