@@ -77,7 +77,7 @@ case name. It exits with:
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
-| readings | | `alarms` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 137: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 86 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, four loss sequences, four of 0.6's first answers, and four of a key gone from the scope), five of 0.6's presence read dated by its ask, six of §2.14 step 5's left-out key, a `reply_del` among them, and 21 of 0.7's two closed lists: each of the twenty neither reasons the first question gives, read from a reading of its own, on its list, and the table's reader's-sight reasons 0.7's nine. |
+| readings | | `alarms` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 137: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 86 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, four loss sequences, four of 0.6's first answers, and four of a key gone from the scope), five of 0.6's presence read dated by its ask, six of §2.14 step 5's left-out key, a `reply_del` among them, and 21 of §2.16's two closed lists: each of the twenty neither reasons the first question gives, read from a reading of its own, on its list, and the table's reader's-sight reasons 0.8's ten. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
@@ -108,9 +108,9 @@ total        1887 passed     0 failed
 ```
 
 The figures are against `core.md` 0.34, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.7 and `alarms.v1` 0.7.
-`alarms.v1` 0.7 changed no fixture, and 0.6 only `conclusions.json`'s
-description.
+0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.7 and `alarms.v1` 0.8.
+`alarms.v1` 0.7 and 0.8 changed no fixture, and 0.6 only
+`conclusions.json`'s description.
 `alarms.v1` 0.5 gave every `conclusions.json` reading `left_out` and every
 `any_firing` case `scope_whole`, and added twelve cases (107), and 0.4 none.
 `alarms.v1` 0.3 added four `documents.json` cases, given as their `text`
@@ -194,10 +194,10 @@ fixtures:
   report through a loss), both as zk2py read them.
 - `alarms.v1` 0.7 resolved F-140: a first neither splits into two closed
   lists.
-- F-141 (freshness.v1's `silent`, the reader's own sight by the list's
-  words, is on neither named list and so falls to "any other reason") is
-  open (`SPEC-FINDINGS.md`, "At alarms.v1 0.7"). zk2py, which reports no
-  first neither, is unaffected.
+- `alarms.v1` 0.8 resolved F-141: `silent` is on the reader's-sight
+  list.
+- None open. A closing whole-text pass over `alarms.v1` 0.8 found nothing
+  more to guess (`SPEC-FINDINGS.md`, "At alarms.v1 0.8").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -992,7 +992,7 @@ just py-link
 - **The owner's tombstone window** is configurable (`Owner(tombstone_s=…)`,
   core S3).
 
-## alarms.v1 (profile text 0.7, core 0.34)
+## alarms.v1 (profile text 0.8, core 0.34)
 
 ```bash
 just py-alarms                                   # against zk2py's owner
@@ -1002,8 +1002,8 @@ just py-alarms --only 2 --full                   # §2 at the contract's 900 s, 
 
 `alarms.v1` is the sixth profile (`spec/profiles/alarms/`). zk2py read its
 0.1 cold in round 38, its 0.2 cold and live in round 39, its 0.3 in round
-40, its 0.4 and 0.5 in round 41, its 0.6 in round 42, and its 0.7 in round
-43. Its standard
+40, its 0.4 and 0.5 in round 41, its 0.6 in round 42, its 0.7 in round 43,
+and its 0.8 in round 44. Its standard
 contract moved from `examples/zk2/` unchanged, and its revision 1.0 is
 published in both history roots, one file.
 - **`zk2py.alarms`**, the reader's and the tool's half, from the text

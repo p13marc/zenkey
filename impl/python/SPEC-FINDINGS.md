@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty-three rounds.**
+**Forty-four rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -96,7 +96,10 @@ where that was not enough, or where the spec said two things.
 - F-140 was found against `alarms.v1` 0.6, read cold and run live (see
   "At alarms.v1 0.6"). `alarms.v1` 0.7 resolved it.
 - F-141 was found against `alarms.v1` 0.7, in a final whole-text pass
-  (see "At alarms.v1 0.7" at the end).
+  (see "At alarms.v1 0.7"). `alarms.v1` 0.8 resolved it.
+- Nothing new was found against `alarms.v1` 0.8, read cold, run live and
+  passed over whole once more: none open (see "At alarms.v1 0.8" at the
+  end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -7057,6 +7060,13 @@ here or across a face, or a GET that drew nothing for a key held (`not_read`,
 `nothing_crossed`, `silent`)"). Or, if the text means it as the owner's, say
 so.
 
+**Status at alarms.v1 0.8: resolved by 0.8, as zk2py read it.** §2.16's
+reader's-sight list now names "a GET that drew nothing for the key
+(`silent`, an empty reply set being no verdict, core O5; 0.8)", so the list
+is ten. zk2py's classification follows: the `silent` row expects the
+sight list, and the tie check 0.8's ten. Each of the twenty neither reasons
+the first question gives is on the list its own criterion names.
+
 **The final whole-text pass over alarms.v1 0.7.** This round re-read §0 to
 §5 and the appendices against zk2py's two halves.
 - **F-141 above** is the one thing still left open.
@@ -7071,3 +7081,45 @@ so.
   - which branch of the MAY (0.7).
 
 Beyond F-141, no rule zk2py met needed a guess.
+
+## At alarms.v1 0.8 (#609)
+
+0.8 answers F-141 by putting `silent` on §2.16's reader's-sight list, which
+is now ten tokens. It considers and keeps a resolved document's
+`severity`, `summary` and `category` unfixed, the point round 43's pass
+noted and did not file. There is no model or fixture change, and the core
+stays at 0.34.
+
+**zk2py:** `READER_SIGHT` and the classification table follow 0.8. Twenty
+checks, each a reading with its reason, answer and list, and a tie check
+that the sight list is 0.8's ten. Its reporter reports no first neither,
+so it meets §2.16 on that branch of the MAY with no change.
+
+**`just py-conformance`: 1887 of 1887** (`alarms` 316, `readings` 137).
+
+**`just py-alarms`: 80 of 80** against zk2py's owner and 80 of 80 against
+`owner-ac`, both exiting 0. §2, §4, §6 and §10 ran on the 4 s copy, with
+§10's step 2 at 900 s left out as before.
+
+**None open.**
+
+**The closing whole-text pass over alarms.v1 0.8.** This round re-read the
+text against zk2py's two halves once more, the reader's and the tool's
+rules in full: §2.6, §2.11 to §2.16, and §5's table.
+- §2.16's lists are closed and consistent. Each of the twenty neither
+  reasons the first question gives is on one list, and on the one its
+  criterion names.
+- Its other bullets are what `ChangeReporter` does:
+  - an earlier instance's put is never a firing to report;
+  - a resolve after a loss waits for the healing GET;
+  - each key keeps its last report through a loss;
+  - a key's first answer moves from no report.
+- §2.11's face closed to the alarms answers both questions unobservable,
+  never no, as zk2py's judge and `any_firing` do.
+
+Nothing a second implementation would have to guess remains. What the text
+defers stays deferred by its own word, and none is a finding:
+- the horizon a reader judges at (0.3);
+- a read through a session cut off from every router (0.4);
+- which branch of the MAY (0.7);
+- a resolved document's other members (0.8).
