@@ -33,10 +33,14 @@
 //! refuse: a counter that never decreases (a step per tick, from the
 //! type's lower bound, held at its upper one), a histogram over the
 //! declared bounds whose counts only grow, and a Point tagged with the
-//! declared kind (a gauge where none is declared), timed a second per tick
-//! and with no `epoch`, which the runtime's writer writes. Any other kind
-//! is the type's own synthesis. A sine-wandering counter would be refused
-//! as a decrease within its epoch (§2.7).
+//! declared kind (a gauge where none is declared), carrying the declared
+//! unit, and with no `epoch`, which the runtime's writer writes. A Point's
+//! `timestamp` is its measurement time (§2.12): the time a caller gives
+//! ([`Synth::sample_at`], a mock owner's clock when it takes the value, so
+//! a rate timed by the Points' timestamps is the rate it publishes at,
+//! #819 TC), else a second per tick from a fixed instant, deterministic.
+//! Any other kind is the type's own synthesis. A sine-wandering counter
+//! would be refused as a decrease within its epoch (§2.7).
 
 use std::collections::BTreeSet;
 
@@ -167,6 +171,20 @@ impl Synth {
         member: Member,
         tick: u64,
     ) -> Result<Synthesized, String> {
+        self.sample_at(revision, r, member, tick, None)
+    }
+
+    /// [`Synth::sample`], a metric Point measured at `measured_ms` (Unix
+    /// epoch milliseconds) when given: the time a mock owner takes its
+    /// value, as an owner's Point carries it (telemetry.v1 §2.12, #819 TC).
+    pub fn sample_at(
+        &self,
+        revision: &Revision,
+        r: &Resource,
+        member: Member,
+        tick: u64,
+        measured_ms: Option<i64>,
+    ) -> Result<Synthesized, String> {
         let (ty, encoding) = member_type(r, member)
             .ok_or_else(|| format!("{}/{} declares no {}", r.token, r.template, member.as_str()))?;
         let bundle = revision.bundle();
@@ -188,7 +206,9 @@ impl Synth {
             TypeId::JsonSchema { .. } => {
                 use zenkey::codec::Codec as _;
                 let metric = match (member, telemetry::declaration_of(revision.contract(), r)) {
-                    (Member::Type, Declaration::Declared(d)) => self.metric(revision, r, &d, tick),
+                    (Member::Type, Declaration::Declared(d)) => {
+                        self.metric(revision, r, &d, tick, measured_ms)
+                    }
                     _ => None,
                 };
                 let value = match metric {
@@ -231,11 +251,20 @@ impl Synth {
     /// A metric resource's value at `tick`, of its declared kind (the module
     /// doc's): `None` for a kind the type's own synthesis serves (a bare
     /// gauge, text or boolean).
-    fn metric(&self, revision: &Revision, r: &Resource, d: &Declared, tick: u64) -> Option<Value> {
+    fn metric(
+        &self,
+        revision: &Revision,
+        r: &Resource,
+        d: &Declared,
+        tick: u64,
+        measured_ms: Option<i64>,
+    ) -> Option<Value> {
         let field = r.template.as_str();
         let step = 1 + fnv(field) % 10;
+        // A histogram is declared with its bounds (§2.2): a Point that
+        // declares none is a gauge here, so every histogram has them.
         let histogram = || {
-            let bounds = d.buckets.clone().unwrap_or_else(|| vec![0.1, 1.0, 10.0]);
+            let bounds = d.buckets.clone()?;
             let mids: Vec<f64> = (0..=bounds.len())
                 .map(
                     |i| match (i.checked_sub(1).map(|j| bounds[j]), bounds.get(i)) {
@@ -248,12 +277,12 @@ impl Synth {
                 .collect();
             let counts: Vec<u64> = (1..=mids.len() as u64).map(|w| tick * w).collect();
             let sum = counts.iter().zip(&mids).map(|(c, m)| *c as f64 * m).sum();
-            wire::Histogram {
+            Some(wire::Histogram {
                 count: counts.iter().sum(),
                 buckets: bounds,
                 counts,
                 sum,
-            }
+            })
         };
         match d.carrier {
             Carrier::Point => {
@@ -265,10 +294,15 @@ impl Synth {
                     MetricKind::Binary => {
                         wire::Value::Binary(splitmix(self.seed ^ tick).to_be_bytes()[..4].to_vec())
                     }
-                    MetricKind::Histogram => wire::Value::Histogram(histogram()),
+                    MetricKind::Histogram => wire::Value::Histogram(histogram()?),
                 };
-                let at = 1_760_000_000_000 + i64::try_from(tick).ok()?.checked_mul(1000)?;
-                serde_json::to_value(wire::Point::new(at, value)).ok()
+                let at = match measured_ms {
+                    Some(at) => at,
+                    None => 1_760_000_000_000 + i64::try_from(tick).ok()?.checked_mul(1000)?,
+                };
+                let mut point = wire::Point::new(at, value);
+                point.unit = d.unit.clone();
+                serde_json::to_value(point).ok()
             }
             Carrier::Bare => match d.kind? {
                 MetricKind::Counter => {
@@ -290,7 +324,7 @@ impl Synth {
                     let v = if unbounded { v } else { v.min(hi) };
                     Some(json!(v as u64))
                 }
-                MetricKind::Histogram => serde_json::to_value(histogram()).ok(),
+                MetricKind::Histogram => serde_json::to_value(histogram()?).ok(),
                 _ => None,
             },
         }
@@ -1129,5 +1163,33 @@ message Pose {
             }
         }
         assert!(metrics > 100, "the metric resources were walked: {metrics}");
+    }
+
+    /// A Point carries its declared unit, and is measured at the time it is
+    /// taken when a caller gives one (#819, TC): a mock owner's Points time
+    /// a rate at the rate it publishes, not a second per tick.
+    #[test]
+    fn a_point_carries_its_unit_and_its_measurement_time() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let (set, _) = crate::model::catalog::ContractSet::load_path(
+            &root.join("zenkey/tests/contracts/meter.v1.toml"),
+        );
+        let rev = set.iter().next().expect("meter.v1");
+        let frames = rev
+            .contract()
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "frames")
+            .expect("frames");
+        let p = |s: Synthesized| serde_json::from_slice::<Value>(&s.bytes).unwrap();
+        let at = Synth::new(3)
+            .sample_at(rev, frames, Member::Type, 4, Some(1_700_000_123_456))
+            .unwrap();
+        let v = p(at);
+        assert_eq!(v["timestamp"], 1_700_000_123_456_i64);
+        assert_eq!(v["unit"], "1", "the declared unit: {v}");
+        assert!(v.get("epoch").is_none(), "the runtime's writer writes it");
+        let fixed = p(Synth::new(3).sample(rev, frames, Member::Type, 4).unwrap());
+        assert_eq!(fixed["timestamp"], 1_760_000_004_000_i64, "deterministic");
     }
 }

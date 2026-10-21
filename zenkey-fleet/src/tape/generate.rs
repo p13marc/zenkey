@@ -466,8 +466,13 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
                 (Kind::State, ..) => spec.rate_hz.unwrap_or(0.5).clamp(0.001, 1000.0),
                 _ => spec.rate_hz.unwrap_or(1.0).clamp(0.001, 1000.0),
             };
+            // telemetry.v1 §2.9: an Epoch attachment is the runtime's
+            // writer's to write, never synthesized (#819, TC).
+            let epoch_attached = zenkey_model::telemetry::declaration_of(rev.contract(), r)
+                .declared()
+                .is_some_and(|d| d.epoch == Some(zenkey_model::telemetry::EpochIn::Attachment));
             let made = synth.sample(rev, r, Member::Type, 0).and_then(|_| {
-                if d.attachment.is_some() {
+                if d.attachment.is_some() && !epoch_attached {
                     synth.sample(rev, r, Member::Attachment, 0).map(|_| ())
                 } else {
                     Ok(())
@@ -479,7 +484,11 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
                 Ok(()) => notes.extend(kept),
             }
             if d.attachment.is_some() {
-                notes.push(if r.kind == Kind::Stream {
+                notes.push(if epoch_attached {
+                    "its attachment is telemetry.v1's Epoch, which the runtime's writer writes: \
+                     the instance id (telemetry.v1 §2.9)"
+                        .to_owned()
+                } else if r.kind == Kind::Stream {
                     "each sample carries a synthesized attachment".to_owned()
                 } else {
                     "the runtime's state and event writers put no attachment: samples go \
@@ -728,7 +737,7 @@ pub async fn run_gen(
                     .map_err(|err| runtime_error(rev, err))?;
                 // A state value held at start goes out before the tokens
                 // (§8.2), so a GET made when they appear finds it.
-                match synth.sample(rev, r, Member::Type, 0) {
+                match synth.sample_at(rev, r, Member::Type, 0, Some(zenkey::telemetry::now_ms())) {
                     Ok(s) => before.put(&e.key, w.put(s.bytes).await.map(|_| ())),
                     Err(why) => before.fail(format!("{}: {why}", e.key)),
                 }
@@ -816,7 +825,10 @@ pub async fn run_gen(
                         }
                     }
                 }
-                match synth.sample(&rev, &r, Member::Type, tick) {
+                // A Point's timestamp is when its value is taken (§2.12),
+                // so a rate timed by the timestamps is the one published at.
+                let now = Some(zenkey::telemetry::now_ms());
+                match synth.sample_at(&rev, &r, Member::Type, tick, now) {
                     Ok(s) => {
                         let put = match &out {
                             Out::State(w) => w.put(s.bytes).await.map(|_| ()),
