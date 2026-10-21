@@ -267,7 +267,19 @@ pub use model::alarms::{
     AlarmBook, AlarmSample, AlarmScope, ArchivedAlarm, BookSpec as AlarmBookSpec, KeyReading,
     SeedEnd as AlarmSeedEnd, SeedRead as AlarmSeedRead,
 };
+// `telemetry.v1` (#819, TC): a scope's metric members read as the
+// profile's reader reads them — the reads, the session-free book they fold
+// into, and the judge.
+pub use bus::telemetry::{
+    SeedSeen as TelemetrySeedSeen, TelemetryObservation, TelemetrySpec, metric_resources,
+    observe as observe_telemetry, run_telemetry,
+};
+pub use judge::telemetry::judge as judge_telemetry;
 pub use model::config::{Assignment, Given, TypedValues};
+pub use model::telemetry::{
+    MemberBook, MetricResource, MetricSample, MetricType, PairPresence, PairSeen, PairTally,
+    SampleVia as MetricVia, TelemetryBook, TelemetryScope,
+};
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};
@@ -506,6 +518,18 @@ const _: () = {
             crate::AlarmScope::all(),
             crate::AlarmSpec::new(std::time::Duration::ZERO),
             zenkey_model::alarms::Severity::Warning,
+        ));
+        // A telemetry reading holds its subscriptions, its queue and its
+        // receive path's watch across awaits (#819, TC).
+        let store = crate::BundleStore::new(std::time::Duration::ZERO);
+        let offline = crate::ContractSet::new();
+        is_send(&crate::run_telemetry(
+            session,
+            "",
+            crate::TelemetryScope::all(),
+            &store,
+            &offline,
+            crate::TelemetrySpec::new(std::time::Duration::ZERO, std::time::Duration::ZERO),
         ));
     }
 

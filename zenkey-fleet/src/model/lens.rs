@@ -64,6 +64,11 @@ pub struct Resolved {
 }
 
 impl Resolved {
+    /// The resource's index in its revision's contract.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
     /// The resource the key resolved to.
     pub fn resource(&self) -> &Resource {
         &self.revision.contract().resources[self.index]

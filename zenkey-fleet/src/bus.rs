@@ -47,5 +47,6 @@ pub mod serve;
 pub mod session;
 pub mod stall;
 pub(crate) mod teardown;
+pub mod telemetry;
 pub mod why;
 pub mod write;
