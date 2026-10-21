@@ -193,7 +193,7 @@ One contract for the whole tool, written once in
 | **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; an act (`pub`, `replay`, `gen`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `watchdog`) land **any** failure
+Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `watchdog`) land **any** failure
 before the question was put on 2, so a dead bus never reads as a pass or as a
 finding.
 
@@ -227,6 +227,10 @@ zenctl health host-a/tc --namespace prod               # one service, its clock 
 # Is anything firing? alarms.v1, exit 1 on an alarm at or above the floor, 2 when an owner cannot be read whole.
 zenctl alarms --namespace prod --clocks-synced --at-least critical
 zenctl alarms 'zk2/lab/**' --namespace prod --clocks-synced --for 905   # an owner with nothing firing, known whole by a window
+
+# Metrics, telemetry.v1: exit 1 on a sample that does not conform or a counter that went backwards within an epoch.
+zenctl telemetry --namespace prod --for 30
+zenctl telemetry 'zk2/rf/modem/**' --namespace prod --across-face --contracts contracts/   # across a constrained face: only in-band epochs establish one
 
 # One expectation over a zk2 resource, for CI or a cron job.
 zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 60 --at-least 1
@@ -394,8 +398,12 @@ firing, resolved, stale or not asked, with whether its key re-derives and
 whether it is past its horizon; each owner known whole or not; and "is
 anything firing at or above `--at-least`?" — exit 1 on yes, 0 on no, 2 when
 an owner, an alarm or the presence read that finds them cannot be read
-whole) · `zenctl watchdog --rule …`
-(conditions, as transitions).
+whole) · `zenctl telemetry [SELECTOR]` (the `telemetry.v1` metric
+members a scope reaches: each resource's declaration, each member's kind and
+unit, its samples' conformance, each pair's continuity with how its epoch
+was had, and a counter's rate — exit 1 on a sample that does not conform or
+a decrease within an established epoch, 2 when nothing could be answered) ·
+`zenctl watchdog --rule …` (conditions, as transitions).
 
 **Router configuration — generated, then checked.**
 `zenctl storage list` (the storages the routers' admin space reports) ·
@@ -428,7 +436,9 @@ show|refresh|clear` (the name cache behind completion) · `zenctl completions
 > cutover|retired|conform`, `config`, `blob`, `export` and `--registry` — and
 > FK1 (#702–#705) brought `why` and `check conform` back in zk2's terms, and
 > CC (#768) `config`, as `config.v1`'s. #800's AC brought v1's
-> `alert-firing` rule back on `alarms.v1`, and added `alarms`.
+> `alert-firing` rule back on `alarms.v1`, and added `alarms`. #819's TC
+> answered v1's `kind-mismatch` on `telemetry.v1`, as `telemetry` and the
+> `telemetry-*` checks.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -697,7 +707,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks twenty-five questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks twenty-seven questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -731,6 +741,8 @@ none.
 | `config-desired` | does an owner report its desired document refused or failed? (`--clocks-synced`; warning) | config.v1 §2.18 |
 | `alarm-key` | does an owner hold an alarm on a key that does not re-derive from its document (error), or only through the sanitizing step (warning)? | alarms.v1 §2.2 |
 | `alarm-stale` | does a present owner hold a firing alarm unconfirmed beyond its 900 s horizon? Neither firing now nor resolved (`--clocks-synced`; warning) | alarms.v1 §2.7 |
+| `telemetry-declaration` | does a contract an owner implements declare a metric resource whose declaration is invalid, so that no reader reads its members? (warning) | telemetry.v1 §2.2 |
+| `telemetry-sample` | does an owner answer a GET of a state metric member with a sample that does not conform? (`--deep`; error) | telemetry.v1 §2.6 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -781,6 +793,15 @@ The `alarm-*` checks (#800) read every owner's
 `alarms.v1/state/alarms/*` with the second presence read. `alarm-key` needs
 no clock: a key is its document's or not. `alarm-stale` ages a reply's
 stamp, so it takes `--clocks-synced`, and is unjudged without it.
+
+The `telemetry-*` checks (#819) read no window. `telemetry-declaration`
+reads every metric resource of the revisions the descriptors name, from the
+contracts alone: an invalid declaration is a contract linter's warning (no
+core code). `telemetry-sample` reads the value replies of the GETs
+`state-stamp-foreign` makes, so it is asked only under `--deep`, and a state
+metric member alone: a stream has no sample to GET. `zenctl telemetry` and
+`check conform`'s `telemetry-*` cases read streams over a window, and the
+continuity no single sample shows.
 
 A `doctor health-*` rule of `watchdog` or `record --on`
 runs the same doctor, so it takes the same word: `watchdog --clocks-synced`,
@@ -879,6 +900,62 @@ re-read each tick: firing on yes, ok on no, unobservable otherwise — never
 ok. `check conform` asks an owner's keys and documents as `alarm-key` and
 `alarm-document`; `get state` reads one alarm's raw value, and
 `--last-known` an archive's.
+
+## `telemetry` — what a metric member says, and whether it went backwards
+
+`telemetry` (#819) reads `telemetry.v1` (`spec/profiles/telemetry/v1.md`)
+as its §2.9–§2.11 reader does: every metric resource the descriptors in the
+namespace declare — a stream or state with a `telemetry.*` annotation, or
+typed by the profile's Point, known by its artifact's id — or those a
+base-relative selector reaches. Over `--for`, one queue fed by the owners'
+instance and member tokens and each resource's members, so samples and token
+moves are folded in the one order received; a presence seed, read again
+after a loss; and S4's GET of each state metric resource, merged with the
+live puts by the owner's stamp. §5's questions:
+
+| question | answered | the finding |
+|---|---|---|
+| is this resource's declaration valid? | `declared`, with its kind, unit, buckets, carrier and where an in-band epoch rides; or `invalid` with its reasons, and its members unobservable | none here (the doctor's `telemetry-declaration` warns) |
+| what is this member's kind, and its unit? | the declared ones, else the conforming Point's; a unit absent is **unknown**, never dimensionless | never |
+| does this sample conform? | `conforms`, `does_not` with its reasons, or `unobservable` (an invalid declaration, bytes that do not decode as §2.6 reads them) | `does_not` (exit 1) |
+| did this counter or histogram go backwards within one epoch? | per pair `same_epoch`, `reset` or `decreased`, the epoch established in-band (a Point's `epoch`, a bare counter's Epoch attachment), by presence (one instance or member epoch alone throughout, no loss between), or assumed | `decreased`, within an established epoch only (exit 1) |
+| what is this counter's rate over the pair? | a rate in the counter's unit per second, or none with why (`reset`, `decreased`, `elapsed`) | never |
+
+A decrease with no established epoch reads as a **reset**: never a finding,
+never a negative rate. A loss on the reader's view — deliveries its queue
+refused, its receive path stalling — leaves every pair across it without
+presence, so it can be `same_epoch` only in-band or assumed. Across a
+constrained face (`--across-face`, with `--contracts` and one owner named),
+presence does not cross: only an in-band epoch establishes one. No clock is
+trusted, so there is no `--clocks-synced`: a rate is timed by two Points'
+timestamps, two of the owner's stamps, or two receipts on this host's
+monotonic clock — never one clock against another.
+
+Exit 1 on a sample that does not conform or a decrease within an established
+epoch; 0 when every question asked was answered without one; **2** when
+nothing could be answered: no metric resource in scope, no sample of one in
+the window, every pair of a counter or histogram assumed (presence
+unobservable throughout and no in-band epoch), or a run that could not start.
+
+```
+$ zenctl telemetry --namespace acme --for 5 -c tcp/127.0.0.1:7447
+telemetry under every metric resource in namespace "acme" — 6 metric resource(s), 2 member(s): 6 sample(s), 6 conform, 0 do not; 4 pair(s), 0 decreased (4 established, 0 assumed)
+✓  lab/meter meter.v1 stream/drops   declared: a bare counter, unit unknown; no in-band epoch: presence is its epoch's evidence; 1 member(s) heard
+✓  lab/meter meter.v1 stream/frames  declared: a Point declared counter, unit 1; its epoch in-band, in the Point; 1 member(s) heard
+…
+·  zk2/lab/meter/meter.v1/stream/drops   counter, unit unknown; 3 sample(s), 3 conform; latest 9; rate 4 /s (unit unknown)
+    5 → 9  same_epoch, established by presence; 4 /s (unit unknown) by arrival over 1.001s
+·  zk2/lab/meter/meter.v1/stream/frames  counter, unit 1; 3 sample(s), 3 conform; latest 20; rate 10 1/s
+    10 → 20  same_epoch, established in-band; 10 1/s by timestamp over 1.000s
+```
+
+The same reading is `check conform`'s `telemetry-sample` and
+`telemetry-continuity`, over its window, for the interface under test. A
+non-conforming metric sample is `invalid` wherever a payload is checked —
+`watch`, `echo`, `check expect --valid-payload`, `check schema`, the
+`invalid-payload` watchdog rule — its reasons named (`telemetry.v1 §2.6
+tag_disagrees: …`). `rate` stays message throughput: a counter's rate is a
+pair's, and a pair is this verb's.
 
 ## `acl gen` — access control from the contracts
 

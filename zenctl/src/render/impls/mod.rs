@@ -30,5 +30,6 @@ pub mod local;
 mod mock;
 mod snapshot;
 pub mod storage;
+mod telemetry;
 mod timeline;
 pub mod zk2;

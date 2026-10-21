@@ -141,23 +141,28 @@ fn basis_words(b: Option<Basis>) -> &'static str {
 
 /// A declaration in words (§2.2).
 pub fn declaration_says(d: &Declaration) -> String {
+    use zenkey_model::telemetry::{Carrier, EpochIn};
     match d {
         Declaration::Declared(d) => {
-            let kind = d
-                .kind
-                .map_or("the kind each Point says".to_owned(), |k| k.to_string());
-            let unit = d.unit.as_deref().map_or_else(
-                || "unit unknown unless a Point says one".to_owned(),
-                |u| format!("unit {u}"),
-            );
-            let epoch = match d.epoch {
-                Some(e) => format!("an in-band epoch in the {}", e.as_str()),
-                None => "no in-band epoch: presence is its epoch's evidence".to_owned(),
+            let what = match (d.carrier, d.kind) {
+                (Carrier::Point, Some(k)) => format!("a Point declared {k}"),
+                (Carrier::Point, None) => "a Point that says its own kind".to_owned(),
+                (Carrier::Bare, Some(k)) => format!("a bare {k}"),
+                (Carrier::Bare, None) => "a bare value".to_owned(),
             };
-            format!(
-                "declared: a {} carrying {kind}, {unit}; {epoch}",
-                d.carrier.as_str()
-            )
+            let unit = match (&d.unit, d.carrier) {
+                (Some(u), _) => format!("unit {u}"),
+                (None, Carrier::Point) => "unit the Point's, else unknown".to_owned(),
+                (None, Carrier::Bare) => "unit unknown".to_owned(),
+            };
+            let cumulative = d.kind.is_none_or(|k| k.is_cumulative());
+            let epoch = match d.epoch {
+                Some(EpochIn::Point) if cumulative => "its epoch in-band, in the Point",
+                Some(EpochIn::Attachment) => "its epoch in-band, in its Epoch attachment",
+                _ if cumulative => "no in-band epoch: presence is its epoch's evidence",
+                _ => "no epoch: a gauge, text, boolean or binary has none",
+            };
+            format!("declared: {what}, {unit}; {epoch}")
         }
         Declaration::Invalid(why) => format!(
             "invalid: {} — its members' kind, conformance and continuity are unobservable \

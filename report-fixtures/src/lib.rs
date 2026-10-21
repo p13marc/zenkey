@@ -722,8 +722,8 @@ pub fn telemetry_report() -> TelemetryReport {
                     Some("counter"),
                     None,
                     None,
-                    "declared: a bare carrying counter, unit unknown unless a Point says one; \
-                          no in-band epoch: presence is its epoch's evidence",
+                    "declared: a bare counter, unit unknown; no in-band epoch: presence is its \
+                     epoch's evidence",
                 ),
                 1,
             ),
@@ -734,7 +734,7 @@ pub fn telemetry_report() -> TelemetryReport {
                     Some("counter"),
                     Some("1"),
                     Some("point"),
-                    "declared: a point carrying counter, unit 1; an in-band epoch in the point",
+                    "declared: a Point declared counter, unit 1; its epoch in-band, in the Point",
                 ),
                 1,
             ),
@@ -745,8 +745,8 @@ pub fn telemetry_report() -> TelemetryReport {
                     Some("gauge"),
                     Some("dBm"),
                     None,
-                    "declared: a bare carrying gauge, unit dBm; no in-band epoch: presence \
-                          is its epoch's evidence",
+                    "declared: a bare gauge, unit dBm; no epoch: a gauge, text, boolean or \
+                     binary has none",
                 ),
                 1,
             ),

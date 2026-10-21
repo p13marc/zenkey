@@ -425,6 +425,68 @@ health in namespace "acme" — worst FAILED: 1 healthy, 1 unhealthy, 1 stale, 1 
     );
 }
 
+/// `zenctl telemetry` (#819, TC): one row per metric resource and per
+/// member, §5's answers spelled apart in every medium — a mark and words in
+/// the table, the fixtures' tokens in `resource` and `member` rows — each
+/// pair's epoch said as established in-band, by presence, or assumed, a
+/// unit unknown never shown as `1`, and the run's judgement leading the
+/// envelope.
+#[test]
+fn a_telemetry_reading_spells_every_answer_apart_in_every_medium() {
+    let report = fx::telemetry_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+telemetry under every metric resource in namespace "acme" — 4 metric resource(s), 3 member(s): 10 sample(s), 8 conform, 2 do not; 5 pair(s), 1 decreased (4 established, 0 assumed)
+✓  lab/meter meter.v1 stream/drops   declared: a bare counter, unit unknown; no in-band epoch: presence is its epoch's evidence; 1 member(s) heard
+✓  lab/meter meter.v1 stream/frames  declared: a Point declared counter, unit 1; its epoch in-band, in the Point; 1 member(s) heard
+✓  lab/meter meter.v1 stream/level   declared: a bare gauge, unit dBm; no epoch: a gauge, text, boolean or binary has none; 1 member(s) heard
+!  lab/meter meter.v1 stream/odd     invalid: the type cannot carry the declared kind (not_a_carrier) — its members' kind, conformance and continuity are unobservable (telemetry.v1 §2.2); 0 member(s) heard
+✗  zk2/lab/meter/meter.v1/stream/drops   counter, unit unknown; 3 sample(s), 3 conform; latest 7; rate 5 /s (unit unknown)
+    2 pair(s): 1 same_epoch, 0 reset, 1 decreased, 0 incomparable, 0 not asked — epochs 0 in-band, 2 by presence, 0 assumed
+    5 → 10  same_epoch, established by presence; 5 /s (unit unknown) by arrival over 1.000s
+    10 → 7  decreased, established by presence; no rate (decreased)
+✗  zk2/lab/meter/meter.v1/stream/frames  counter, unit 1; 4 sample(s), 3 conform, 1 do not (tag_disagrees ×1); latest 3; rate 10 1/s
+    2 pair(s): 1 same_epoch, 1 reset, 0 decreased, 0 incomparable, 0 not asked — epochs 2 in-band, 0 by presence, 0 assumed
+    10 → 20  same_epoch, established in-band; 10 1/s by timestamp over 1.000s
+    20 → 3  reset, established in-band; no rate (reset)
+    the latest that did not conform: tag_disagrees
+✗  zk2/lab/meter/meter.v1/stream/level   gauge, unit dBm; 3 sample(s), 2 conform, 1 do not (wrong_type ×1); latest -70.5
+    1 pair(s): 0 same_epoch, 0 reset, 0 decreased, 0 incomparable, 1 not asked — epochs 0 in-band, 0 by presence, 0 assumed
+    -71.0 → -70.5  not asked
+    the latest that did not conform: wrong_type
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "telemetry");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert!(envelope.get("members").is_none(), "members are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.resources.len() + report.members.len());
+    let continuity: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r["row"] == "member")
+        .flat_map(|r| r["pairs"].as_array().expect("pairs").iter())
+        .map(|p| p["continuity"].as_str().expect("a token"))
+        .collect();
+    assert_eq!(
+        continuity,
+        ["decreased", "not_asked", "reset", "same_epoch"].into()
+    );
+    let drops = rows
+        .iter()
+        .find(|r| r["key"] == "zk2/lab/meter/meter.v1/stream/drops")
+        .expect("drops");
+    assert!(drops.get("unit").is_none(), "unknown, never dimensionless");
+    let said = notes(&report);
+    assert!(said.contains("a decrease judged by presence"), "{said}");
+}
+
 /// `zenctl alarms` (#800, AC): one row per owner and per alarm key, every
 /// answer of §5's questions spelled apart in every medium — a mark and a
 /// word in the table, the profile's own tokens in `owner` and `alarm` rows
@@ -1950,6 +2012,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-explain",
         "storage-list",
         "storage-plan",
+        "telemetry",
         "timeline",
         "why",
     ];

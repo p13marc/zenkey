@@ -832,7 +832,7 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Twenty-five checks, each a question whose finding is the yes: split-brain
+    /// Twenty-seven checks, each a question whose finding is the yes: split-brain
     /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
     /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
     /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
@@ -854,8 +854,11 @@ pub(crate) enum Command {
     /// --clocks-synced; and alarms.v1's alarm-key (a key that does not
     /// re-derive from its document; a warning when it does only through the
     /// sanitizing step) and alarm-stale (a present owner's firing alarm
-    /// unconfirmed beyond 900 s, read only with --clocks-synced). The
-    /// deployment is read through a
+    /// unconfirmed beyond 900 s, read only with --clocks-synced); and
+    /// telemetry.v1's telemetry-declaration (a warning: a metric resource
+    /// whose declaration is invalid, so no reader reads its members) and
+    /// telemetry-sample (with --deep: a state metric member's reply that does
+    /// not conform). The deployment is read through a
     /// session in its namespace; the routers' admin space and the presence
     /// domain through one in no namespace. A check whose input could not be
     /// had is unobservable, with the reason — never clean — and so is every
@@ -914,6 +917,33 @@ pub(crate) enum Command {
     /// verdict: an owner or an alarm unobservable, a presence read possibly
     /// incomplete, no owner asked, or a run that could not start.
     Alarms(AlarmsArgs),
+    /// Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
+    ///
+    /// telemetry.v1's reader (spec/profiles/telemetry/v1.md §2.5–§2.11),
+    /// through a session in the deployment's namespace: presence and each
+    /// descriptor, the revisions they name, and every metric resource those
+    /// declare (a stream or state with a telemetry.* annotation, or typed by
+    /// the profile's Point, known by its artifact's id) — those the
+    /// selector reaches when one is given. Then, over --for, one queue fed by
+    /// the owners' instance and member tokens and each resource's members, a
+    /// seed of presence, and S4's GET of each state metric resource, merged
+    /// by the owner's stamp. Per resource, whether its declaration is valid;
+    /// per member, its kind and unit (the declared ones, else a Point's; a
+    /// unit absent is unknown, never dimensionless), each sample's
+    /// conformance with its reasons, and each pair of consecutive conforming
+    /// samples: its continuity (same_epoch, reset, decreased), with how its
+    /// epoch was had — in-band (a Point's epoch, a bare counter's Epoch
+    /// attachment), by presence (one instance alone throughout, with no
+    /// loss), or assumed — and a counter's rate with its unit. A decrease
+    /// with no established epoch is a reset, never a finding and never a
+    /// negative rate. No clock is trusted: a rate is timed by the Points'
+    /// timestamps, the owner's stamps, or this host's receipt. Exit 1 a
+    /// sample that does not conform, or a decrease within an established
+    /// epoch (the findings); 0 every question asked answered without one; 2
+    /// no verdict: no metric resource in scope, no sample in the window,
+    /// every counter's pair assumed (presence unobservable throughout, no
+    /// in-band epoch), or a run that could not start.
+    Telemetry(TelemetryArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
     /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
@@ -1076,6 +1106,18 @@ pub(crate) enum CheckCmd {
     ///                    JSON of the schema, its times in range,
     ///                    observed_at_ms not before timestamp nor on a
     ///                    resolved document (alarms.v1 §2.4)
+    ///   telemetry-declaration
+    ///                    every metric resource of the interface declares
+    ///                    itself validly: an invalid declaration, read from
+    ///                    the contract, is the violation (telemetry.v1 §2.2)
+    ///   telemetry-sample every sample of a metric resource the window hears
+    ///                    conforms, its reasons named when one does not
+    ///                    (telemetry.v1 §2.6)
+    ///   telemetry-continuity
+    ///                    no counter or histogram decreased within an
+    ///                    established epoch, in-band or by presence watched
+    ///                    over the window; a window whose every pair had its
+    ///                    epoch assumed answers nothing (telemetry.v1 §2.10)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
@@ -3025,6 +3067,43 @@ pub(crate) struct AlarmsArgs {
     /// (alarms.v1 §2.11).
     #[arg(long, value_enum, value_name = "GRANT")]
     pub(crate) across_face: Option<FaceGrant>,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl telemetry`'s flags (#819, TC) — one struct the dispatcher hands
+/// over whole, destructured in the verb (#354).
+#[derive(clap::Args)]
+pub(crate) struct TelemetryArgs {
+    /// The members asked of: a key expression, base-relative (`zk2/…`) —
+    /// one member (`zk2/lab/meter/meter.v1/stream/drops`), one owner's
+    /// (`zk2/lab/meter/**`), a system's (`zk2/lab/**`). Omitted, every
+    /// metric resource the descriptors in the namespace declare.
+    #[arg(value_name = "SELECTOR")]
+    pub(crate) selector: Option<String>,
+    /// The reading's window, seconds: the subscriptions listen this long. A
+    /// pair needs two conforming samples of one member within it.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
+    pub(crate) for_secs: f64,
+    /// The deployment's link lease, seconds: with --wait-before-close, the
+    /// longest this reader may stall before it counts a loss, which leaves
+    /// every pair across it without presence (spec §2.7, 0.27).
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
+    pub(crate) lease: f64,
+    /// The routers' wait_before_close, seconds (spec §2.7, 0.27).
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
+    pub(crate) wait_before_close: f64,
+    /// The one owner the selector names sits across a constrained face
+    /// (spec §8.5), where presence and descriptors do not cross: the
+    /// deployment's word that it implements the contracts --contracts
+    /// holds. No presence is read, so only an in-band epoch establishes one
+    /// (telemetry.v1 §2.14), and a decrease without one reads as a reset.
+    #[arg(long)]
+    pub(crate) across_face: bool,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
