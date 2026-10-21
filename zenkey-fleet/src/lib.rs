@@ -211,8 +211,8 @@ pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
-    OPEN_TIMEOUT, OpenFailure, check_namespace, open, open_in_namespace, open_reporting,
-    open_reporting_within, open_with_config,
+    OPEN_TIMEOUT, OpenFailure, check_namespace, open, open_in_namespace, open_owner_in_namespace,
+    open_reporting, open_reporting_within, open_with_config,
 };
 pub use bus::write::{
     MatchingEvents, Publication, WireQos, WriteAct, check_concrete, check_retire,

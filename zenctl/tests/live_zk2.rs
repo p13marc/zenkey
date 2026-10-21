@@ -6665,3 +6665,52 @@ async fn alarms_s10_anything_firing_for_a_tool_at_900_s() {
     exits(&run, 1);
     bus.keep(alarms_b);
 }
+
+/// #825, and a tool's reading of a mock owner's metrics: `gen` brings up an
+/// owner of `zs.snmp.v1`, whose state resources keep history, on a session
+/// with timestamping on, as a real owner's is (it failed at the first such
+/// resource while its session had it off). T reads its Points near it, with
+/// presence: every sample conforms, its kind its tag.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_brings_up_an_owner_of_history_resources_and_telemetry_reads_it() {
+    let bus = Bus::bare(None).await;
+    let zensight = examples().join("zensight");
+    let zensight = zensight.to_str().expect("a UTF-8 path").to_owned();
+    let mock = bus.spawn(&[
+        "gen",
+        "lab/snmp",
+        "zs.snmp.v1",
+        "--contracts",
+        &zensight,
+        "--duration",
+        "30",
+        "--format",
+        "json",
+    ]);
+    let run = bus
+        .until(
+            &[
+                "telemetry",
+                "zk2/lab/snmp/**",
+                "--contracts",
+                &zensight,
+                "--for",
+                "3",
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0,
+        )
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert!(doc["totals"]["conforms"].as_u64() > Some(0), "{run}");
+    assert_eq!(doc["totals"]["does_not"], 0, "{run}");
+    assert_eq!(doc["presence"]["complete"], true, "{run}");
+    let generated = mock.await.expect("the gen runner");
+    exits(&generated, 0);
+    let docs = documents(&generated.stdout);
+    assert_eq!(docs[1]["report"], "gen", "{generated}");
+    assert_eq!(docs[1]["failed"], 0, "{generated}");
+    assert!(docs[1]["sent"].as_u64() > Some(10), "{generated}");
+}
