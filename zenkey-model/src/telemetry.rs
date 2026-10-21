@@ -1432,9 +1432,10 @@ fn elapsed_ns(a: &Sampled<'_>, b: &Sampled<'_>) -> i128 {
 #[must_use]
 pub fn stamp_ns(ntp64: u64) -> i128 {
     let secs = i128::from(ntp64 >> 32);
-    let frac = u128::from(ntp64 & 0xffff_ffff);
+    // Below 2^32 times 10^9, so below 2^62: no overflow in a u64.
+    let frac = ntp64 & 0xffff_ffff;
     let sub = (frac * 1_000_000_000).div_ceil(1 << 32);
-    secs * 1_000_000_000 + i128::try_from(sub).expect("below 2^31")
+    secs * 1_000_000_000 + i128::from(sub)
 }
 
 /// §2.11's rate: `double(d) / (double(e) / 1e9)`, rounding to nearest.
