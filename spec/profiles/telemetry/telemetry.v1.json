@@ -1,29 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "telemetry.v1.json",
-  "$comment": "The telemetry.v1 profile's self-describing point (r3.2 §4.9), written in the jsonschema kind because ZenSight's wire is serde's internally tagged TelemetryValue in CBOR (zensight-common/src/telemetry.rs:105-134, RFC 11 §4). r3.2 imagines a protobuf oneof: see Gaps G12/G13. Every contract that carries points lists THIS file unchanged, so the type identity (the file's sha256) is shared. Compared with v1's TelemetryPoint, `source` and `metric` are gone: they repeated the key's system/service and resource (r3.2 §3.11).",
+  "$comment": "telemetry.v1's standard schema (spec/profiles/telemetry/v1.md §2.3, §3; core §10 point 1). A contract lists this file, or a copy whose JCS bytes are equal, and a type is the profile's by this artifact's id, never by its name alone. The Point carries one measurement of any kind; a bare value carries a declared kind (§2.4). Every keyword inside telemetry.v1.Value's oneOf, and inside telemetry.v1.Histogram, which a branch reaches, is the pre-profile file's: changing one would be review (core §9.8). Descriptions and comments are annotations (core §7.3).",
   "$defs": {
     "telemetry.v1.Point": {
-      "description": "One measurement. The series is named by the key: (system, service, interface, resource).",
+      "description": "One measurement of one member (§2.3). The series is the key, never a label (§2.12).",
       "type": "object",
       "properties": {
         "timestamp": {
-          "description": "Unix epoch milliseconds when the measurement was taken (not when it was published).",
+          "description": "The measurement time, Unix epoch milliseconds: when the value was taken, not when it was published (§2.12). A rate is timed by it (§2.11).",
           "type": "integer"
         },
         "value": {
           "$ref": "#/$defs/telemetry.v1.Value"
         },
         "labels": {
-          "description": "Context that is not identity: an OID, an interface description, the original (unslugged) gNMI path.",
+          "description": "Context, never identity (§2.12): an OID, an interface description, an unslugged path. A label named unit is context too, not the member's unit (§2.5).",
           "type": "object",
           "additionalProperties": {
             "type": "string"
           }
         },
         "unit": {
-          "description": "UCUM-style unit (By, By/s, 1/s, %, s). Absent means unknown, never dimensionless. The resource's telemetry.unit annotation, when declared, is authoritative.",
+          "description": "The member's unit when its resource declares none (§2.5): 1 to 64 printable ASCII characters, compared byte for byte (§2.2). Absent means unknown, never dimensionless. A declared telemetry.unit is authoritative, and a Point that disagrees does not conform (§2.6).",
           "type": "string"
+        },
+        "epoch": {
+          "$ref": "#/$defs/telemetry.v1.Epoch"
         }
       },
       "required": [
@@ -32,7 +35,7 @@
       ]
     },
     "telemetry.v1.Value": {
-      "description": "Internally tagged: {\"type\": <kind>, \"value\": ...}. The tag is the resource's telemetry.kind spelled on the wire (boolean for bool). A resource without telemetry.kind (the rest-parameter families) is self-described by this tag alone.",
+      "description": "Internally tagged, {\"type\": <kind>, \"value\": ...}: the tag is a kind of §2.2, spelled as telemetry.kind spells it. Where the resource declares a kind, it is authoritative, and a tag that differs does not conform (§2.5, §2.6).",
       "oneOf": [
         {
           "type": "object",
@@ -102,7 +105,7 @@
               "const": "binary"
             },
             "value": {
-              "description": "serde's Vec<u8>: an array of byte values in both JSON and CBOR, not a CBOR byte string (Gap G9).",
+              "description": "Bytes as an array of byte values, in JSON and in CBOR alike (§2.4).",
               "type": "array",
               "items": {
                 "type": "integer",
@@ -134,7 +137,7 @@
       ]
     },
     "telemetry.v1.Histogram": {
-      "description": "Fixed buckets, cumulative since the producer's instance started (RFC 11 §4; zensight-common/src/histogram.rs). counts is per bucket, NOT cumulative, one longer than buckets, overflow last. buckets restate the resource's telemetry.buckets bit for bit; +Inf is implicit.",
+      "description": "Fixed buckets (§2.8): buckets are the bounds, strictly ascending and finite, upper-inclusive, +Inf implicit, equal by value to the resource's telemetry.buckets; counts is per bucket, not cumulative, one longer than buckets, the overflow last; count is their sum; counts and count never decrease within one epoch (§2.9), sum may.",
       "type": "object",
       "properties": {
         "buckets": {
@@ -164,6 +167,12 @@
         "count",
         "sum"
       ]
+    },
+    "telemetry.v1.Epoch": {
+      "description": "An in-band continuity epoch (§2.9): an opaque string, compared for equality, which the owner changes whenever a counter or histogram it carries restarts. A Point carries it as epoch; a bare counter or histogram as an attachment of this type.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
     }
   }
 }

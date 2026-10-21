@@ -30,6 +30,7 @@ use zenkey_model::health::{self, Judged, Level, Listing, Presence, Read, Reading
 use zenkey_model::hostid;
 use zenkey_model::link;
 use zenkey_model::slug::chunk_slug;
+use zenkey_model::telemetry::{self, Datum, Declaration, MetricKind, TypeView};
 use zenkey_model::template::Template;
 
 /// The fixtures this crate runs, as (profile directory, file name).
@@ -55,6 +56,10 @@ const KNOWN: &[(&str, &str)] = &[
     ("alarms", "documents.json"),
     ("alarms", "transitions.json"),
     ("alarms", "conclusions.json"),
+    ("telemetry", "schema.json"),
+    ("telemetry", "declarations.json"),
+    ("telemetry", "samples.json"),
+    ("telemetry", "continuity.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -1812,6 +1817,340 @@ fn alarms_conclusions() {
             }
             other => panic!("question {other:?}"),
         };
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+// --- telemetry.v1 (#819, TA) ------------------------------------------------------
+
+/// The JCS id of a JSON document (core §9.4).
+fn jcs_id(v: &Value) -> String {
+    zenkey_model::schema::sha256_id(&zenkey_model::schema::jcs(v))
+}
+
+/// `telemetry/conformance/schema.json`: the standard schema's published ids
+/// (telemetry.v1 §2.3, §3). The profile's file is the current revision, the
+/// published list is the one `telemetry::PUBLISHED` holds, every type is
+/// defined where it says, and each case's document has the id it says.
+#[test]
+fn telemetry_schema() {
+    let path = profiles().join("telemetry/conformance/schema.json");
+    let mut doc = read_json(&path);
+    let file = read_json(
+        &profiles()
+            .join("telemetry")
+            .join(doc["file"].as_str().expect("file")),
+    );
+    assert_eq!(
+        json!(jcs_id(&file)),
+        doc["current"],
+        "the profile's file is the current revision; after an intended change, publish its id in v1.md §3, telemetry::PUBLISHED and this fixture"
+    );
+    let published: Vec<&str> = doc["published"]
+        .as_array()
+        .expect("published")
+        .iter()
+        .map(|p| p["id"].as_str().expect("id"))
+        .collect();
+    assert_eq!(published, telemetry::PUBLISHED, "telemetry::PUBLISHED");
+    assert_eq!(
+        published.last(),
+        doc["current"].as_str().as_ref(),
+        "the current id is the latest"
+    );
+    let defs = file["$defs"].as_object().expect("$defs");
+    let types: Vec<&str> = doc["types"]
+        .as_array()
+        .expect("types")
+        .iter()
+        .map(|t| t["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(
+        types,
+        [
+            telemetry::POINT,
+            telemetry::VALUE,
+            telemetry::HISTOGRAM,
+            telemetry::EPOCH
+        ]
+    );
+    for t in &types {
+        assert!(defs.contains_key(*t), "{t} is defined in the current file");
+    }
+    let root = repo_root();
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let document = if let Some(p) = case["path"].as_str() {
+            read_json(&root.join(p))
+        } else if let Some(p) = case["bundle"].as_str() {
+            let bytes = std::fs::read(root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+            let b = Bundle::verify(&bytes).unwrap_or_else(|e| panic!("{p}: {e:?}"));
+            let id = b.contract["schemas"]
+                .as_array()
+                .expect("schemas")
+                .iter()
+                .find(|s| s["name"] == telemetry::SCHEMA_STEM)
+                .and_then(|s| s["id"].as_str())
+                .unwrap_or_else(|| panic!("{p}: no artifact named telemetry.v1"))
+                .to_owned();
+            b.schemas[&id]["data"].clone()
+        } else {
+            case["document"].clone()
+        };
+        let id = jcs_id(&document);
+        let got = json!({"id": id, "published": telemetry::is_published(&id)});
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A type as `telemetry/conformance/` writes it.
+fn telemetry_type(v: &Value) -> Option<TypeView<'_>> {
+    match v["kind"].as_str()? {
+        "jsonschema" => Some(TypeView::Json {
+            name: v["name"].as_str().expect("name"),
+            schema: v["schema"].as_str().expect("schema"),
+            root: v.get("root").filter(|r| !r.is_null()),
+        }),
+        "raw" => Some(TypeView::Raw),
+        "protobuf" => Some(TypeView::Protobuf),
+        other => panic!("type kind {other:?}"),
+    }
+}
+
+/// A resolved resource as `telemetry/conformance/` writes it → its
+/// declaration: its annotations given, or merged from its layers (core
+/// §9.3).
+fn telemetry_declaration(r: &Value) -> Declaration {
+    let kind = match r["kind"].as_str().expect("kind") {
+        "stream" => Kind::Stream,
+        "state" => Kind::State,
+        "event" => Kind::Event,
+        "operation" => Kind::Operation,
+        other => panic!("kind {other:?}"),
+    };
+    let annotations = match r.get("layers") {
+        Some(l) => {
+            let mut m = BTreeMap::new();
+            for layer in ["defaults", "kind_defaults", "resource"] {
+                m.extend(annotations(&l[layer]));
+            }
+            m
+        }
+        None => annotations(&r["annotations"]),
+    };
+    let ty = telemetry_type(&r["type"]);
+    let att = telemetry_type(&r["attachment"]);
+    telemetry::declaration(kind, &annotations, ty.as_ref(), att.as_ref())
+}
+
+fn telemetry_declaration_json(d: &Declaration) -> Value {
+    match d {
+        Declaration::Declared(x) => json!({
+            "declaration": d.as_str(),
+            "carrier": x.carrier.as_str(),
+            "kind": x.kind.map(MetricKind::as_str),
+            "unit": x.unit,
+            "buckets": x.buckets,
+            "semantic": x.semantic.map(telemetry::Semantic::as_str),
+            "epoch": x.epoch.map(telemetry::EpochIn::as_str),
+        }),
+        Declaration::Invalid(r) => json!({
+            "declaration": d.as_str(),
+            "reasons": r.iter().map(|r| r.as_str()).collect::<Vec<_>>(),
+        }),
+        Declaration::Ignored | Declaration::NotThisProfiles => json!({"declaration": d.as_str()}),
+    }
+}
+
+/// `telemetry/conformance/declarations.json`: a resolved resource → its
+/// declaration (telemetry.v1 §2.1, §2.2, §2.4).
+#[test]
+fn telemetry_declarations() {
+    let path = profiles().join("telemetry/conformance/declarations.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let got = telemetry_declaration_json(&telemetry_declaration(&case["resource"]));
+        let what = format!("{}: {}", case["note"], case["resource"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A data item as `telemetry/conformance/` writes it: JSON, with
+/// `{"$int"}`, `{"$float"}` and `{"$bytes"}` for what JSON cannot hold.
+fn telemetry_datum(v: &Value) -> Datum {
+    if let Some(m) = v.as_object()
+        && m.len() == 1
+    {
+        let (k, x) = m.iter().next().expect("one member");
+        let text = x.as_str();
+        match (k.as_str(), text) {
+            ("$int", Some(t)) => return Datum::Int(t.parse().expect("an integer within i128")),
+            ("$float", Some("NaN")) => return Datum::Float(f64::NAN),
+            ("$float", Some("Infinity")) => return Datum::Float(f64::INFINITY),
+            ("$float", Some("-Infinity")) => return Datum::Float(f64::NEG_INFINITY),
+            ("$bytes", Some(t)) => {
+                use base64::Engine as _;
+                return Datum::Bytes(
+                    base64::engine::general_purpose::STANDARD
+                        .decode(t)
+                        .expect("base64"),
+                );
+            }
+            _ => {}
+        }
+    }
+    match v {
+        Value::Array(a) => Datum::Array(a.iter().map(telemetry_datum).collect()),
+        Value::Object(m) => Datum::Map(
+            m.iter()
+                .map(|(k, v)| (k.clone(), telemetry_datum(v)))
+                .collect(),
+        ),
+        other => Datum::from_json(other),
+    }
+}
+
+/// `telemetry/conformance/samples.json`: a resolved resource and one
+/// sample → its conformance, and the member's kind and unit as it gives
+/// them (telemetry.v1 §2.5, §2.6).
+#[test]
+fn telemetry_samples() {
+    let path = profiles().join("telemetry/conformance/samples.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let decl = telemetry_declaration(&case["resource"]);
+        let sample = &case["sample"];
+        let value = sample.get("value").map(telemetry_datum);
+        let attachment = sample.get("attachment").map(telemetry_datum);
+        let payload = match &value {
+            Some(value) if sample["undecodable"] != json!(true) => telemetry::Payload::Decoded {
+                value,
+                attachment: attachment.as_ref(),
+            },
+            _ => telemetry::Payload::Undecodable,
+        };
+        let c = telemetry::check(&decl, &payload);
+        let reasons: Vec<&str> = match &c.conformance {
+            telemetry::Conformance::Conforms => Vec::new(),
+            telemetry::Conformance::DoesNot(p) => p.iter().map(|p| p.as_str()).collect(),
+            telemetry::Conformance::Unobservable(u) | telemetry::Conformance::NotAsked(u) => {
+                vec![u.as_str()]
+            }
+        };
+        if let telemetry::Conformance::Conforms = c.conformance {
+            assert!(
+                c.reading.is_some(),
+                "{}: a conforming sample is read",
+                case["note"]
+            );
+        }
+        let got = json!({
+            "conformance": c.conformance.as_str(),
+            "reasons": reasons,
+            "kind": c.kind.map(|(k, _)| k.as_str()),
+            "kind_from": c.kind.map(|(_, f)| f.as_str()),
+            "unit": c.unit.as_ref().map(|(u, _)| u.clone()),
+            "unit_from": c.unit.as_ref().map(|(_, f)| f.as_str()),
+        });
+        let what = format!("{}: {}", case["note"], case["sample"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A sample's value as `continuity.json` writes it, by its kind.
+fn telemetry_measure(kind: &str, v: &Value) -> telemetry::Measure {
+    use telemetry::Measure as M;
+    let f = |v: &Value| v.as_f64().expect("a number");
+    match MetricKind::parse(kind).expect("kind") {
+        MetricKind::Counter => M::Counter(v.as_u64().expect("a counter")),
+        MetricKind::Gauge => M::Gauge(f(v)),
+        MetricKind::Text => M::Text(v.as_str().expect("text").to_owned()),
+        MetricKind::Boolean => M::Boolean(v.as_bool().expect("a boolean")),
+        MetricKind::Binary => M::Binary(Vec::new()),
+        MetricKind::Histogram => M::Histogram(telemetry::Histogram {
+            bounds: v["buckets"]
+                .as_array()
+                .expect("buckets")
+                .iter()
+                .map(f)
+                .collect(),
+            counts: v["counts"]
+                .as_array()
+                .expect("counts")
+                .iter()
+                .map(|c| c.as_u64().expect("a count"))
+                .collect(),
+            count: v["count"].as_u64().expect("count"),
+            sum: f(&v["sum"]),
+        }),
+    }
+}
+
+/// `telemetry/conformance/continuity.json`: two conforming samples of one
+/// member, their unit and the presence seen → the pair's continuity, how
+/// its epoch was had, and its rate (telemetry.v1 §2.9–§2.11).
+#[test]
+fn telemetry_continuity() {
+    let path = profiles().join("telemetry/conformance/continuity.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let measures: Vec<telemetry::Measure> = ["earlier", "later"]
+            .iter()
+            .map(|w| {
+                telemetry_measure(case[*w]["kind"].as_str().expect("kind"), &case[*w]["value"])
+            })
+            .collect();
+        let sampled = |w: &str, m| {
+            let s = &case[w];
+            let int = |v: &Value| -> Option<i128> {
+                v.as_i64()
+                    .map(i128::from)
+                    .or_else(|| v.as_u64().map(i128::from))
+            };
+            telemetry::Sampled {
+                value: m,
+                epoch: s["epoch"].as_str(),
+                timestamp_ms: s["timestamp_ms"].as_i64(),
+                stamp_ns: int(&s["stamp_ns"]),
+                arrival_ns: int(&s["arrival_ns"]).expect("arrival_ns"),
+            }
+        };
+        let (a, b) = (
+            sampled("earlier", &measures[0]),
+            sampled("later", &measures[1]),
+        );
+        let presence = case["presence"].as_object().map(|p| telemetry::Presence {
+            alone_throughout: p["alone_throughout"].as_bool().expect("alone_throughout"),
+            earlier: p["earlier"].as_str(),
+            later: p["later"].as_str(),
+        });
+        let p = telemetry::pair(&a, &b, case["unit"].as_str(), presence.as_ref());
+        let (epoch, via) = match p.basis {
+            None => (None, None),
+            Some(telemetry::Basis::Assumed) => (Some("assumed"), None),
+            Some(telemetry::Basis::Established(v)) => (Some("established"), Some(v.as_str())),
+        };
+        let got = json!({
+            "continuity": p.continuity.as_str(),
+            "epoch": epoch,
+            "via": via,
+            "rate": p.rate.as_ref().ok().map(|r| r.per_s),
+            "rate_unit": p.rate.as_ref().ok().and_then(|r| r.unit.clone()),
+            "no_rate": p.rate.as_ref().err().map(|n| n.as_str()),
+        });
+        let what = format!("{}", case["note"]);
         expect(case, got, &what);
     }
     if bless() {

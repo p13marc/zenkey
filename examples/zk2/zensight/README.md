@@ -50,7 +50,7 @@ The v1 surface, re-counted from
 | device services | one per polled device: `snmp.<device>`, `modbus.<device>`, `gnmi.<device>`, `netflow.<exporter>`, `bmc.<chassis>`, `container.<name>`. Each poller keeps its own service (`snmp`, …) for what belongs to the process. The instance id is the device's continuity epoch. |
 | fleet singletons | `zk2/fleet/catalog` (`zs.catalog.v1`) and `zk2/fleet/desired` (`zs.desired.v1`), single-writer under `redundancy.v1` with ZenSight's claim protocol as the reference. They replace v1's verbatim service origins `@catalog` and `@desired` ([`../shapes.md`](../shapes.md) row 4). |
 | framework set | interfaces every service implements: `health.v1` ([`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml), the profile [`health.v1`](../../../spec/profiles/health/v1.md)), `alarms.v1` ([`spec/profiles/alarms/alarms.v1.toml`](../../../spec/profiles/alarms/alarms.v1.toml), the profile [`alarms.v1`](../../../spec/profiles/alarms/v1.md)), `zs.evidence.v1`, `zs.thresholds.v1`, `views.v1`; also `zs.errors.v1` and `zs.artifacts.v1` (named, not written in this cut) |
-| schema kind | **jsonschema**: ZenSight's types are serde structs on a CBOR wire. The shared telemetry point is `schemas/telemetry.v1.json`. |
+| schema kind | **jsonschema**: ZenSight's types are serde structs on a CBOR wire. The shared telemetry point is `telemetry.v1.Point`, the standard schema of [`telemetry.v1`](../../../spec/profiles/telemetry/v1.md) (`spec/profiles/telemetry/telemetry.v1.json`, its §3). |
 
 Example keys, for host `h-3fa9c2d41b7e`:
 
@@ -85,12 +85,16 @@ zk2/h-3fa9c2d41b7e/snmp.router01/@zk/alive/zs.snmp.v1/<instance>/<fp16>
 | [`zs.desired.v1.toml`](zs.desired.v1.toml) | The desired author, keyed by target host and service | 8 |
 
 The schemas are in [`schemas/`](schemas/): one file per contract, plus
-`telemetry.v1.json` and `zs.common.json`, which several contracts list
-unchanged so that a shared type keeps one identity (G12). The large telemetry
-families of sysinfo, snmp, netring and parallax were transcribed from the v1
-TOMLs by a throwaway script: one resource per subject, with the v1
-description as `doc`, `when` mapped to `optional` + `gate`, and v1's
-`cardinality`, `unit`, `kind` and `buckets` carried over.
+`zs.common.json`, which several contracts list unchanged so that a shared
+type keeps one identity (G12). The telemetry point is `telemetry.v1`'s
+standard schema, which sysinfo, snmp, netring and parallax list from
+`spec/profiles/telemetry/` since their minor 1 (`telemetry.v1` §3,
+Appendix B). The large telemetry families of sysinfo, snmp, netring and
+parallax were transcribed from the v1 TOMLs by a throwaway script: one
+resource per subject, with the v1 description as `doc`, `when` mapped to
+`optional` + `gate`, and v1's `cardinality` carried over. Of v1's
+`unit`, `kind` and `buckets`, only netring's two units are declared: every
+resource is a Point, whose tag says its kind (`telemetry.v1` §2.5).
 
 **Self-check** (a throwaway script, not `zenkey-model`):
 
@@ -337,7 +341,7 @@ Each gap: what it is · the evidence · the proposed correction.
    - *Correction:* an attachment declares its own encoding.
 9. **G9. The wire encoding of a jsonschema type is unspecified.**
    - *Evidence:* ZenSight payloads are CBOR, with JSON accepted by sniffing the first byte (RFC 11 §1; `zensight-common/src/config.rs:524` makes it configurable). §8 rules out several encodings per resource, and §3.9 only says samples carry the Zenoh `Encoding` id. serde's `Vec<u8>` is an array of numbers in both encodings.
-   - *Correction:* a jsonschema resource fixes its encoding (`cbor` | `json`) in the contract; the data model is JSON's; bytes have a stated rule.
+   - *Correction:* a jsonschema resource fixes its encoding (`cbor` | `json`) in the contract; the data model is JSON's; bytes have a stated rule. Core §7.2 does so; the Point's `binary` stays an array of byte values in both encodings, and a CBOR reader keeps a non-finite float ([`telemetry.v1`](../../../spec/profiles/telemetry/v1.md) §2.4, §2.6).
 10. **G10. Raw type families.**
     - *Evidence:* parallax's `[[media]] encoding = "video/*"`, with the codec as a key chunk (`parallax.toml:349-360`). Draft 0 shows only concrete media types.
     - *Correction:* allow `{ raw = "video/*" }`, the subtype carried by the sample's `Encoding`, optionally tied to a template parameter.
@@ -346,10 +350,10 @@ Each gap: what it is · the evidence · the proposed correction.
     - *Correction:* `[interface] annotations` as defaults, plus `[defaults.stream]` / `[defaults.state]` QoS, both expanded into the canonical form.
 12. **G12. Shared and profile types across contracts.**
     - *Evidence:* a type's identity is the sha256 of the schema artifact holding it (§3.9), so `telemetry.v1.Point` and `ThresholdsConfig` stay one type only if every contract lists a byte-identical file. `json:` references are unqualified, so two listed files defining one name collide. A `$ref` across listed files (`zs.desired.v1.json` → `zs.common.json`) is unspecified. So are `prefixItems` (the historian's `(ts, value)` tuples) and an open schema (`DesiredOverride.doc`) in the zk2 subset.
-    - *Correction:* a profile-type reference form (`"telemetry.v1:Point"`) resolved against the profile's published schema with a pinned sha256; a rule that a `json:` name is unique per contract; `$ref` allowed to listed files only; S7 to settle tuples and open schemas.
+    - *Correction:* a profile-type reference form (`"telemetry.v1:Point"`) resolved against the profile's published schema with a pinned sha256; a rule that a `json:` name is unique per contract; `$ref` allowed to listed files only; S7 to settle tuples and open schemas. Core 0.35 settles the profile type without a new form: a standard schema's types are the profile's by their artifact's id (core §10 point 1; [`telemetry.v1`](../../../spec/profiles/telemetry/v1.md) §2.3, §3).
 13. **G13. The schema kind of `telemetry.v1.Point`.**
     - *Evidence:* r3.2 §4.9 says "a protobuf oneof". ZenSight's wire is the CBOR of serde's internally tagged `{"type", "value"}` (`telemetry.rs:105-134`, RFC 11 §4). A protobuf Point re-encodes every telemetry sample in the fleet.
-    - *Correction:* `telemetry.v1` defines Point in jsonschema with the tagged shape as normative, and optionally a protobuf twin with a normative mapping.
+    - *Correction:* `telemetry.v1` defines Point in jsonschema with the tagged shape as normative, and optionally a protobuf twin with a normative mapping. [`telemetry.v1`](../../../spec/profiles/telemetry/v1.md) §2.3 does, with no protobuf twin: a protobuf message is not a carrier at 1.x (§2.4).
 14. **G14. A many-reply fan-out cannot tell "finished" from "timed out" per replier.**
     - *Evidence:* O2 + O6: Zenoh completes the whole query, not each replier. The historian exists to be honest about short answers (`partial`, `covers_from`, `next_cursor`, `history.rs:185-240`), and the GUI merges per series across historians.
     - *Correction:* O6 adds a terminal per-replier marker (a final reply flag in the core envelope or attachment), or requires `partial` on every reply of a fan-out, many-reply operation.
@@ -373,7 +377,7 @@ Each gap: what it is · the evidence · the proposed correction.
     - *Correction:* bundles may carry presentation documents excluded from the fingerprint. Until then, `views.v1` is served as state, scoped by (interface, template).
 21. **G21. Profile annotation vocabularies are unwritten.**
     - *Evidence:* this mapping invents `telemetry.kind/unit/buckets/semantic`, `media.codec_param/tier_param/frame_clock/control/receiver_report` and the list form of `desired.target_param`. The draft-0 example's `freshness.v1` is G18.
-    - *Correction:* each profile ships its annotation table before #608 lints `uses`.
+    - *Correction:* each profile ships its annotation table before #608 lints `uses`. [`telemetry.v1`](../../../spec/profiles/telemetry/v1.md) §4 publishes `kind`, `unit`, `buckets` and `semantic` (core 0.35).
 22. **G22. S5 and U10 have to cover ZenSight's sizes.**
     - *Evidence:* ZenSight seeds 10k entities and 50k edges by wildcard GET (`subscription.rs:388, 472`), and pdns reaches 100k.
     - *Correction:* S5's wildcard-GET matrix adds 50k and 100k. If U10's "collections become streams or operations" wins, the catalog's seed path changes.

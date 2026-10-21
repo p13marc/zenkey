@@ -4,6 +4,31 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8 — 2026-10-21: the counter is `telemetry.v1`'s (#819, TA)
+
+`telemetry.v1` text 0.1 defines the counter type and its epoch that §2.13
+waited for. §2.13 now cites it.
+
+**Changed: §2.13's citations, no rule.**
+- **A counter** is `telemetry.v1`'s: a member whose declared kind, or
+  whose Point's tag, is `counter` (its §2.5, §2.7), where 0.7 said "a
+  resource whose `telemetry.kind` is `counter` (core Appendix D's interim
+  `telemetry` row), until `telemetry.v1` defines its counter type".
+- **Its epoch** rides in the Point's `epoch` or an attachment typed
+  `telemetry.v1.Epoch` (its §2.9), and a decrease without one reads as
+  that profile's reset (its §2.10). The SHOULD's citation adds its §2.9
+  and §2.14.
+
+**Deliberately not changed.**
+- **The rules.** The SHOULD to carry the epoch, and a decrease read as a
+  reset where none crosses, stand as 0.7 wrote them; `telemetry.v1` §2.14
+  states the same from the counter's side.
+- **Everything else:** the plan, the lints, the fixtures, the scenarios,
+  §5's row, and the core the text is written against (0.32), which the
+  citation does not need. zenoh-modem's `sdu/dropped_total` still crosses
+  with no epoch (Appendix B): adding the attachment is its contract's
+  revision, review under core §9.8.
+
 ## Fixtures after 0.7 — 2026-10-19: two readings §2.1 already decides (#769, LI)
 
 No text change. zk2py (round 37) read two of §2.1's lints by its rule

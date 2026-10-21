@@ -28,12 +28,12 @@
 [interface]
 name    = "zs.sysinfo"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "Host CPU, memory, disk, network, sensors and GPU metrics of one host"
 uses    = ["telemetry.v1", "freshness.v1"]
 
 [schemas]
-jsonschema = ["schemas/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.sysinfo.v1.json"]
+jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.sysinfo.v1.json"]
 
 # --- state ---
 

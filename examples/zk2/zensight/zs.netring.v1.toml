@@ -28,12 +28,12 @@
 [interface]
 name    = "zs.netring"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "Wire-level flow, L7 and NDR telemetry of one host's capture points, and its controls"
 uses    = ["telemetry.v1", "freshness.v1"]
 
 [schemas]
-jsonschema = ["schemas/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.netring.v1.json"]
+jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.netring.v1.json"]
 
 # --- configuration topics: state for the current value, an operation to replace it ---
 # v1 served the current value as a read procedure (`<topic>`) and the change as `<topic>/set`, both

@@ -13,8 +13,9 @@ and `examples/zk2/`.
 | [`freshness.v1`](freshness/v1.md) | 0.3 | draft | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
 | [`health.v1`](health/v1.md) | 0.4 | draft | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
 | [`config.v1`](config/v1.md) | 0.3 | draft | 0.28 | 1: [`config.v1.toml`](config/config.v1.toml); 4 through `uses` (`freshness.v1`) | Changing a running service's configuration without locking it out: groups with classes, a change that can cut the link applied only under a window and undone once unless confirmed, persistence as a separate act, and the compact status a constrained face can afford (core §5, §6, O7) |
-| [`link.v1`](link/v1.md) | 0.7 | draft | 0.32 | 2: `link.exposure`; 4 through `uses` | What crosses a constrained face: a deployment's face policy, one per router, and the contract's exposure, compiled into named denies, one downsampling rule per concrete key, the attachment, window floors and liveness evidence; `@zk` never crosses, and no other principal's credentials get across it (core §8.5, R7, S3) |
+| [`link.v1`](link/v1.md) | 0.8 | draft | 0.32 | 2: `link.exposure`; 4 through `uses` | What crosses a constrained face: a deployment's face policy, one per router, and the contract's exposure, compiled into named denies, one downsampling rule per concrete key, the attachment, window floors and liveness evidence; `@zk` never crosses, and no other principal's credentials get across it (core §8.5, R7, S3) |
 | [`alarms.v1`](alarms/v1.md) | 0.8 | draft | 0.34 | 1: [`alarms.v1.toml`](alarms/alarms.v1.toml); 2: published empty; 4 through `uses` (`freshness.v1`) | The active alarms of one service, one state key per alarm, keyed from its document by ZenSight's recipe: raised, escalated, refreshed and resolved, the state read from the document; confirmed every 450 s while firing, so a hung owner's alarms read stale and an absent one's last-known, and "nothing fires" only from an owner's alarms known whole (core S2, S6, O5) |
+| [`telemetry.v1`](telemetry/v1.md) | 0.1 | draft | 0.35 | 1: a standard schema, [`telemetry.v1.json`](telemetry/telemetry.v1.json); 2: `kind`, `unit`, `buckets`, `semantic`; 4 through `uses` | What a metric is: a member's kind and unit, declared or carried by the Point, whose types are the profile's by their artifact's id; whether a sample conforms; a counter's or a histogram's epoch, in-band or from presence, a decrease within an established one the finding and one without evidence a reset; a counter's rate over one epoch; absent is not zero (core §1.5, §7.1, O5) |
 
 ## Layout
 
@@ -28,6 +29,7 @@ profiles/
     scenarios.md          the rules a fixture cannot check
     conformance/          fixtures; each file states its format in its description
     <name>.v<major>.toml  the standard contract, for a profile that defines one
+    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1, 0.35)
 ```
 
 ## The template
@@ -93,6 +95,15 @@ thing in the same place.
   A contract that moves here from elsewhere keeps its published revisions
   where they were, and is copied here byte for byte (core §9.7, 0.23), as
   `health.v1` and `alarms.v1` were from `examples/zk2/.history`.
+- **A standard schema** (core §10 point 1, 0.35) goes in the profile's
+  directory, and has no `.history` of its own: the text publishes each
+  revision's artifact id (its §3), every one of them staying the
+  profile's, and a fixture pins them (`telemetry.v1`'s `schema.json`).
+  The contracts that list it are published in their own histories, so a
+  change to it republishes each of them, compatible or not as core §9.8
+  classifies it. `telemetry.v1`'s moved here from
+  `examples/zk2/zensight/schemas/`, and the four ZenSight contracts list it
+  from here.
 - **A profile that needs the core to change** says so, and the core
   changes first, through [`../CHANGELOG.md`](../CHANGELOG.md).
   `hostid.v1` needed 0.19, so that an instance can declare a profile no
@@ -111,7 +122,10 @@ thing in the same place.
   one interface together, rest on what core §11.2, §11.3 and §9.8 already
   say. `alarms.v1` needed 0.34, so that Appendix D publishes its
   vocabulary empty and drops the interim `severity_default`, every
-  document carrying its severity.
+  document carrying its severity. `telemetry.v1` needed 0.35, so that a
+  profile's first point can be a standard schema, a file whose types are
+  the profile's by their artifact's id, and so that Appendix D publishes
+  its vocabulary.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in
@@ -131,7 +145,7 @@ thing in the same place.
     is named by its interface id, and is published in
     `spec/profiles/.history`, compatible with every earlier revision there.
   - A profile's session-free code lives in `zenkey-model` (`hostid`,
-    `freshness`, `health`, `config`, `link`, `alarms`), and its runtime in
+    `freshness`, `health`, `config`, `link`, `alarms`, `telemetry`), and its runtime in
     `zenkey`. Its scenarios run as tests of the runtime, one test per
     section, named after it, as the core's do. A scenario that is a tool's
     runs as a test of that tool.

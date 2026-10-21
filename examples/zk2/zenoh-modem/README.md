@@ -303,6 +303,11 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
    - *Correction:* `telemetry.v1` states that a counter's decrease is a reset where the epoch is
      unobservable. `link.v1` may require a typed attachment carrying the epoch (r3.2 §3.2) on every
      counter it exposes.
+   - *Status:* [`telemetry.v1`](../../../spec/profiles/telemetry/v1.md) 0.1 states both: a
+     decrease with no epoch evidence reads as a reset (§2.10, §2.14), and a bare counter carries its
+     epoch in an attachment typed `telemetry.v1.Epoch` (§2.4, §2.9), which `link.v1` §2.13 cites.
+     `modem.v3` declares none yet: adding it to `sdu/dropped_total` is a revision, review under
+     core §9.8.
 2. **Occurrence-keyed streams cannot state a rate, so their population bound is uncheckable.** v1's
    `rate = rare | low | burst(600/h)` is enforced by the publisher, which folds the excess into
    `occurrences`. The cardinalities in `modem.v3.toml` (168 to 14,400; 100,800 for `config.v1`) are

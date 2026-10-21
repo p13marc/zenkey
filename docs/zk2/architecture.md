@@ -1119,7 +1119,7 @@ ZenSight is U22's case.
 | thresholds, `<topic>/set`, `applied/{topic}` | `zs.thresholds.v1` + `desired.v1` | |
 | `views` | `views.v1` | |
 
-**Telemetry:** device-defined trees use rest parameters. `telemetry.v1.Point` keeps the self-describing value (counter / gauge / histogram as a protobuf oneof), so the ~600 subjects without a declared `kind` need no back-fill.
+**Telemetry:** device-defined trees use rest parameters. `telemetry.v1.Point` keeps the self-describing value (counter / gauge / histogram as a protobuf oneof), so the ~600 subjects without a declared `kind` need no back-fill. *(Informative, #819: the Point is a JSON Schema type, not a protobuf oneof, as ZenSight's G13 found: `telemetry.v1`'s standard schema, `spec/profiles/telemetry/v1.md` §2.3.)*
 
 **Traps:** occurrence-keyed streams.
 
