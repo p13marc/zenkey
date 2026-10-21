@@ -1550,13 +1550,14 @@ def _telemetry_nulls() -> list[tuple[str, Any, Any]]:
 
 
 def _telemetry_edges() -> list[tuple[str, Any, Any]]:
-    """zk2py's readings of telemetry.v1 0.2's two open findings.
-    - F-150, "past the double's finite range" at its edge: read as IEEE
-      754's round-to-nearest reads it, so an integer's text one past the
-      largest double, and a float's text above it that rounds to it, are
-      finite; the halfway point's text is +Infinity, undecodable.
-    - F-151, an Epoch attachment's JSON read as strict as a payload's: a
-      lone surrogate escape does not decode, so `epoch_invalid`."""
+    """zk2py's readings of telemetry.v1 0.2's F-150 and F-151, which 0.3
+    resolved as zk2py read them (samples.json cases 125 to 130 and 136 now
+    pin both).
+    - F-150, "finite" by rounding: an integer's text one past the largest
+      double, and a float's text above it that rounds to it, are finite;
+      the halfway point's text is +Infinity, undecodable.
+    - F-151, an Epoch attachment read as strictly as a sample: a lone
+      surrogate escape does not decode, so `epoch_invalid`."""
     import sys as _sys
 
     from . import telemetry as tm
@@ -1628,6 +1629,43 @@ def _telemetry_deep() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _telemetry_verdicts() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 0.3 §5 "Over many pairs", zk2py's tool answer over a
+    window (`telemetry.verdict`): a finding; "could not tell" over pairs of
+    counters or histograms whose every epoch was assumed, and, zk2py's
+    reading of F-152, over a counter read with no pair at all; no
+    otherwise, a mix with an established pair and a window of gauges alone
+    included."""
+    from . import telemetry as tm
+
+    def conf(kind: str, ok: bool = True) -> Any:
+        return tm.Conformance(tm.CONFORMS if ok else tm.DOES_NOT, () if ok else ("wrong_type",), kind, "declared",
+                              None, None)
+
+    def pair(cont: str, epoch: str) -> Any:
+        return tm.Pair(cont, epoch, "presence" if epoch == "established" else None, None, None, "kind")
+
+    label = "telemetry.v1 0.3 §5, over many pairs"
+    return [
+        (f"{label}: a sample that does not conform is a finding", tm.verdict([conf("counter", False)], []),
+         tm.FINDING),
+        (f"{label}: a decrease within an established epoch is a finding",
+         tm.verdict([conf("counter")] * 2, [pair("decreased", "established")]), tm.FINDING),
+        (f"{label}: every counter's pair assumed: could not tell",
+         tm.verdict([conf("counter")] * 3, [pair("same_epoch", "assumed"), pair("reset", "assumed")]),
+         tm.COULD_NOT_TELL),
+        (f"{label}: one pair established beside assumed ones: no",
+         tm.verdict([conf("counter")] * 3, [pair("same_epoch", "assumed"), pair("same_epoch", "established")]),
+         tm.NO),
+        (f"{label} (F-152, zk2py's reading): a counter's one sample, no pair at all: could not tell",
+         tm.verdict([conf("counter")], []), tm.COULD_NOT_TELL),
+        (f"{label}: a gauge's samples alone, the continuity question not asked: no",
+         tm.verdict([conf("gauge")] * 2, [pair("not_asked", None)]), tm.NO),
+        (f"{label}: no sample at all: could not tell (silence is never a verdict)", tm.verdict([], []),
+         tm.COULD_NOT_TELL),
+    ]
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -1637,7 +1675,8 @@ def family_readings(root: Path) -> list[Result]:
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
-        + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep()
+        + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
+        + _telemetry_verdicts()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 

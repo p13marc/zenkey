@@ -92,11 +92,17 @@ class _Reader:
                 pairs = [(self.item(), self.item()) for _ in range(arg)]
             return _Map(pairs)
         if major == 6:
-            tag = self._definite(arg)
+            # A chain of tags is read without recursion (telemetry.v1 0.3:
+            # a tag adds no depth), innermost applied first.
+            tags = [self._definite(arg)]
+            while self.pos < len(self.data) and self.data[self.pos] >> 5 == 6:
+                head = self.take(1)[0]
+                tags.append(self._definite(self.argument(head & 0x1F)))
             content = self.item()
-            if self.bignums and tag in (2, 3) and isinstance(content, bytes):
-                n = int.from_bytes(content, "big")
-                return n if tag == 2 else -1 - n
+            for tag in reversed(tags):
+                if self.bignums and tag in (2, 3) and isinstance(content, bytes):
+                    n = int.from_bytes(content, "big")
+                    content = n if tag == 2 else -1 - n
             return content
         raise CborError("unreachable")
 

@@ -1,4 +1,4 @@
-"""``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.2, core 0.35):
+"""``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.3, core 0.35):
 what a metric resource carries, and what a reader may conclude from it.
 
 From the text alone:
@@ -38,9 +38,11 @@ The owner's half (:class:`MeterOwner`) and the reader on a bus
 - a stamp's nanoseconds are NTP64's ``as_nanos``, the fraction rounded up,
   each stamp alone (F-142, :func:`ntp64_ns`).
 
-Where 0.2 still leaves a reading, the guess is named with its finding: an
-integer's or a float's text between the largest double and the halfway
-point above it is read as IEEE 754 rounds it, finite (F-150).
+0.3 answered round 46's two, as zk2py read them: "finite" is by rounding
+(F-150), and an Epoch attachment is read as a sample of its encoding is,
+strict JSON or CBOR, depth included (F-151). It adds a data item's depth,
+at most 256 arrays and maps (:data:`MAX_DEPTH`), and §5's "over many pairs"
+(:func:`verdict`).
 """
 
 from __future__ import annotations
@@ -259,11 +261,29 @@ def _utf8(v: Any) -> bool:
     return True
 
 
+#: §2.6 "Depth" (0.3): "A data item nests at most 256 arrays and maps deep".
+MAX_DEPTH = 256
+
+
+def depth(v: Any) -> int:
+    """§2.6 "Depth" (0.3): "an array or a map at the top is at depth 1, and
+    an array or a map inside another is one deeper. A scalar adds no
+    depth", and a CBOR tag, read as its content, adds none either. Counted
+    without recursion."""
+    deepest, stack = 0, [(v, 1)]
+    while stack:
+        node, d = stack.pop()
+        if isinstance(node, (list, dict)):
+            deepest = max(deepest, d)
+            stack.extend((x, d + 1) for x in (node.values() if isinstance(node, dict) else node))
+    return deepest
+
+
 def _finite(v: Any) -> bool:
-    """0.2's "every number finite": a float that is not an infinity, and an
-    integer whose nearest double is not one (F-150: IEEE 754's rounding, so
-    an integer just past the largest double, which rounds to it, is
-    finite)."""
+    """§2.6 "Finite" (0.3, F-150): "a number's text, an integer's included,
+    is finite when its exact value, rounded to the nearest double (IEEE 754
+    binary64, round to nearest, ties to even), is not an infinity". Python's
+    ``float()`` rounds so, for a float's text as for an integer."""
     if isinstance(v, bool):
         return True
     if isinstance(v, float):
@@ -289,9 +309,8 @@ def decode_json(payload: bytes) -> Any:
     integer within the double's range "is read exactly, however long its
     text". Raises :class:`Undecodable`.
 
-    A value nested past Python's recursion limit is read as undecodable,
-    never a crash: RFC 8259 §9 lets a parser limit the depth of nesting, and
-    this reader's limit is the interpreter's (about a thousand levels)."""
+    §2.6 "Depth" (0.3): an array or a map at depth 257 is undecodable. A
+    value nested past Python's recursion limit is too, never a crash."""
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as e:
@@ -302,6 +321,8 @@ def decode_json(payload: bytes) -> Any:
             raise Undecodable("a string with no UTF-8 form")
         if not _finite(value):
             raise Undecodable("a number past the double's finite range")
+        if depth(value) > MAX_DEPTH:
+            raise Undecodable(f"nested deeper than {MAX_DEPTH} arrays and maps")
     except Undecodable:
         raise
     except RecursionError as e:
@@ -331,6 +352,8 @@ def decode_cbor(payload: bytes) -> Any:
         value = cbor.loads(payload, bignums=True)
         if not textual(value):
             raise Undecodable("a map key that is not text")
+        if depth(value) > MAX_DEPTH:
+            raise Undecodable(f"nested deeper than {MAX_DEPTH} arrays and maps")
     except Undecodable:
         raise
     except cbor.CborError as e:
@@ -339,6 +362,14 @@ def decode_cbor(payload: bytes) -> Any:
         # As decode_json: nested past this reader's depth.
         raise Undecodable("nested past this reader's depth") from e
     return value
+
+
+def decode_attachment(payload: bytes, encoding: str | None = "json") -> Any:
+    """§2.6 check 2 (0.3, F-151): "An Epoch attachment is read as this
+    section reads a sample of its encoding: strict JSON, or CBOR, depth
+    included". Raises :class:`Undecodable`; the caller reads that as an
+    epoch present and not a string."""
+    return decode_cbor(payload) if encoding == "cbor" else decode_json(payload)
 
 
 def decode(payload: bytes, type_: Any, encoding: str | None = "json") -> Any:
@@ -809,6 +840,32 @@ def continuity(a: Read, b: Read, presence: Presence | None, unit: str | None) ->
     if e <= 0:
         return Pair(cont, est, via, None, None, "elapsed")
     return Pair(cont, est, via, rate_of(b.value - a.value, e), None if unit is None else f"{unit}/s", None)
+
+
+FINDING, NO, COULD_NOT_TELL = "finding", "no", "could_not_tell"
+
+
+def verdict(conformances: Iterable[Conformance], pairs: Iterable[Pair]) -> str:
+    """A tool's answer over a window's samples and pairs (§5, with "Over many
+    pairs", 0.3):
+    - ``finding``: a sample that does not conform, or a pair ``decreased``;
+    - ``could_not_tell``: nothing conforms (silence is no verdict), or
+      counters or histograms were read and no pair of theirs had its epoch
+      established: "over pairs of counters or histograms whose every epoch
+      was assumed SHOULD say it could not tell … no decrease could have been
+      found". zk2py reads "every" as holding of no pair too, so a counter
+      read with no pair at all is here as well (F-152);
+    - ``no`` otherwise, a window of gauges, text, booleans or bytes alone
+      included (the continuity question not asked)."""
+    cs, ps = list(conformances), list(pairs)
+    if any(c.conformance == DOES_NOT for c in cs) or any(p.continuity == "decreased" for p in ps):
+        return FINDING
+    if not any(c.conformance == CONFORMS for c in cs):
+        return COULD_NOT_TELL
+    pairing = [c for c in cs if c.conformance == CONFORMS and c.kind in ("counter", "histogram")]
+    if pairing and not any(p.epoch == "established" for p in ps if p.continuity != NOT_ASKED):
+        return COULD_NOT_TELL
+    return NO
 
 
 def kept_reads(arrivals: list[tuple[Read, Any]]) -> list[Read]:
