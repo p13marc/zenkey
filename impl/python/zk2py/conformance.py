@@ -1498,6 +1498,37 @@ def _telemetry_state_order() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _telemetry_nulls() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 §2.6 over a `null` where a Point or its Value holds a
+    member, F-149's reading: a member written `null` is present, and `null`
+    is no value of any kind (§2.4). A Point's `value` written `null` is not
+    an object, so the payload is not a Point; a Value's own `value` written
+    `null` is of no kind's type, so `wrong_type`, for each of the six kinds,
+    never a crash; a Histogram's member written `null` likewise."""
+    from . import telemetry as tm
+
+    point = tm.declare("stream", {}, {"kind": "jsonschema", "name": tm.POINT, "schema": tm.CURRENT, "root": None})
+
+    def read(value: Any) -> Any:
+        c = tm.conform(point, tm.Sample(value))
+        return [c.conformance, list(c.reasons)]
+
+    label = "telemetry.v1 §2.6, a member written null (F-149)"
+    out = [(f"{label}: a Point's value written null is not a Point",
+            read({"timestamp": 1, "value": None}), [tm.DOES_NOT, ["not_a_point"]])]
+    out += [(f"{label}: a {kind} Value's own value written null is wrong_type",
+             read({"timestamp": 1, "value": {"type": kind, "value": None}}), [tm.DOES_NOT, ["wrong_type"]])
+            for kind in tm.KINDS]
+    out += [(f"{label}: a histogram Value whose {member} is null is wrong_type",
+             read({"timestamp": 1, "value": {"type": "histogram", "value": {
+                 **{"buckets": [1.0], "counts": [1, 0], "count": 1, "sum": 0.5}, member: None}}}),
+             [tm.DOES_NOT, ["wrong_type"]]) for member in ("buckets", "counts", "count", "sum")]
+    out += [(f"{label}: a Point's {member} written null is present: {want}",
+             read({"timestamp": 1, member: None, "value": {"type": "gauge", "value": 1}}), [tm.DOES_NOT, [want]])
+            for member, want in (("epoch", "epoch_invalid"), ("unit", "not_a_point"), ("labels", "not_a_point"))]
+    return out
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -1507,7 +1538,7 @@ def family_readings(root: Path) -> list[Result]:
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
-        + _telemetry_state_order()
+        + _telemetry_state_order() + _telemetry_nulls()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 

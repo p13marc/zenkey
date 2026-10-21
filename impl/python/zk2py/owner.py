@@ -624,46 +624,57 @@ class Owner:
         # Step 3: the descriptor's queryable and its first put (§3.3), then a
         # contract queryable per interface.
         self._plan_made = plan
-        self._instance_entities = self._declare_instance(plan, bundles=True)
+        self._instance_entities, self.descriptor = self._declare_instance(plan, self.instance, bundles=True)
         # Step 4 is the second half of _declare_instance.
         if self.horizons:
             self._ensure_refresher()
 
-    def _declare_instance(self, plan: dict[str, list[tuple[dict[str, Any], str]]],
-                          bundles: bool = False) -> list[Any]:
-        """§8.2 steps 3 and 4 for the current instance id: the descriptor's
-        queryable and its first put, the contracts' queryables (once, at
-        start: they are location-free, §8.4), then the instance token and the
-        interface tokens. Returns the entities that belong to this instance,
-        which :meth:`new_epoch` undeclares."""
+    def _declare_instance(self, plan: dict[str, list[tuple[dict[str, Any], str]]], instance: str,
+                          bundles: bool = False) -> tuple[list[Any], bytes]:
+        """§8.2 steps 3 and 4 for ``instance``: the descriptor's queryable and
+        its first put, the contracts' queryables (once, at start: they are
+        location-free, §8.4), then the instance token and the interface
+        tokens. Returns the entities that belong to this instance, which
+        :meth:`new_epoch` undeclares, and its descriptor. It assigns nothing
+        of the owner's: on a failure it undeclares what it declared for the
+        instance and raises, so the caller keeps its id and entities."""
         s = self.session
         assert s is not None
         mine: list[Any] = []
-        self.descriptor = self._descriptor(plan)
-        key, doc = self.instance_key, self.descriptor
-        # §3.3 "The GET": one reply, application/json, no attachment and no
-        # timestamp. Each instance's queryable answers with its own record, so
-        # the old one still answers truly during a re-mint's overlap.
-        mine.append(s.declare_queryable(key, zenoh.handlers.Callback(
-            lambda q, key=key, doc=doc: q.reply(key, doc, encoding="application/json")), complete=True))
-        s.put(key, doc, encoding="application/json", timestamp=self.mint())
-        if bundles:
+        key = f"zk2/{self.system}/{self.service}/@zk/instance/{instance}"
+        doc = self._descriptor(plan, instance)
+        try:
+            # §3.3 "The GET": one reply, application/json, no attachment and
+            # no timestamp. Each instance's queryable answers with its own
+            # record, so the old one still answers truly during a re-mint's
+            # overlap.
+            mine.append(s.declare_queryable(key, zenoh.handlers.Callback(
+                lambda q, key=key, doc=doc: q.reply(key, doc, encoding="application/json")), complete=True))
+            s.put(key, doc, encoding="application/json", timestamp=self.mint())
+            if bundles:
+                for c in self.contracts:
+                    ckey = f"zk2/@zk/contract/{c.interface}/{c.fingerprint.removeprefix('sha256:')}"
+                    data = bundle.build(c)
+                    self._entities.append(s.declare_queryable(
+                        ckey, zenoh.handlers.Callback(lambda q, data=data, ckey=ckey: q.reply(
+                            ckey, data, encoding="application/json")), complete=True))
+            # Step 4: the instance token, then the interface tokens.
+            lv = s.liveliness()
+            mine.append(lv.declare_token(key))
             for c in self.contracts:
-                ckey = f"zk2/@zk/contract/{c.interface}/{c.fingerprint.removeprefix('sha256:')}"
-                data = bundle.build(c)
-                self._entities.append(s.declare_queryable(
-                    ckey, zenoh.handlers.Callback(lambda q, data=data, ckey=ckey: q.reply(
-                        ckey, data, encoding="application/json")), complete=True))
-        # Step 4: the instance token, then the interface tokens.
-        lv = s.liveliness()
-        mine.append(lv.declare_token(key))
-        for c in self.contracts:
-            if c.interface not in self.tokenless and any(status == "exposed" for _, status in plan[c.interface]):
-                fp16 = c.fingerprint.removeprefix("sha256:")[:16]
-                mine.append(lv.declare_token(
-                    f"zk2/{self.system}/{self.service}/@zk/alive/{c.interface}/{self.instance}/{fp16}"))
+                if c.interface not in self.tokenless and any(status == "exposed" for _, status in plan[c.interface]):
+                    fp16 = c.fingerprint.removeprefix("sha256:")[:16]
+                    mine.append(lv.declare_token(
+                        f"zk2/{self.system}/{self.service}/@zk/alive/{c.interface}/{instance}/{fp16}"))
+        except Exception:
+            for e in reversed(mine):
+                try:
+                    e.undeclare()
+                except Exception:  # noqa: BLE001 - rolling back anyway
+                    pass
+            raise
         self._entities.extend(mine)
-        return mine
+        return mine, doc
 
     def new_epoch(self) -> str:
         """Core §1.5 and §8.1: a new instance id while running, "make-before-
@@ -674,8 +685,11 @@ class Owner:
         unchanged"), so the stamps' id stays. Returns the old instance id."""
         assert self.session is not None
         old, old_entities = self.instance, self._instance_entities
-        self.instance = secrets.token_hex(8)
-        self._instance_entities = self._declare_instance(self._plan_made)
+        new = secrets.token_hex(8)
+        # Declared first, assigned after: a declaration that raises leaves
+        # the owner on its old id, with nothing of the new one declared.
+        entities, doc = self._declare_instance(self._plan_made, new)
+        self.instance, self._instance_entities, self.descriptor = new, entities, doc
         for e in old_entities:
             try:
                 e.undeclare()
@@ -693,7 +707,7 @@ class Owner:
                 self._refresher = threading.Thread(target=self._refresh_loop, daemon=True)
                 self._refresher.start()
 
-    def _descriptor(self, plan: dict[str, list[tuple[dict[str, Any], str]]]) -> bytes:
+    def _descriptor(self, plan: dict[str, list[tuple[dict[str, Any], str]]], instance: str | None = None) -> bytes:
         """§3.3: the record, with `profiles` the union of the `uses`, every
         role listed (an unbound one with empty bindings, an optional one
         with ``optional: true``), `unavailable` the listed resources only
@@ -703,7 +717,7 @@ class Owner:
         doc = {
             "format": "zk2-descriptor/0.1",
             "service": f"{self.system}/{self.service}",
-            "instance": self.instance,
+            "instance": self.instance if instance is None else instance,
             "interfaces": [{
                 "iface": c.interface, "contract": c.fingerprint, "minor": c.minor or 0,
                 "token": c.interface not in self.tokenless,

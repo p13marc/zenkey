@@ -468,11 +468,14 @@ def declare(kind: str, annotations: dict[str, Any], type_: Any, attachment: Any 
 @dataclass(frozen=True)
 class Sample:
     """One sample as a reader holds it: its decoded data item and its decoded
-    attachment (``_MISSING`` when it has none), or undecodable."""
+    attachment (``_MISSING`` when it has none), or undecodable. An
+    attachment present whose bytes do not decode as its encoding is
+    ``attachment_undecodable``, with ``attachment`` left ``_MISSING``."""
 
     value: Any = None
     attachment: Any = _MISSING
     undecodable: bool = False
+    attachment_undecodable: bool = False
 
 
 NO_ATTACHMENT = _MISSING
@@ -610,7 +613,13 @@ def conform(decl: Declaration, sample: Sample) -> Conformance:
         timestamp = as_integer(v["timestamp"])
         reasons += _value_reasons(kind, inner, True, decl.buckets)
     else:
-        if decl.epoch == "attachment" and sample.attachment is not _MISSING:
+        if decl.epoch == "attachment" and sample.attachment_undecodable:
+            # F-147, zk2py's reading: an Epoch attachment whose bytes do not
+            # decode is an in-band epoch present and not a string. §2.6's
+            # `undecodable` names the payload ("its JSON or its CBOR"), so
+            # the value is still read.
+            reasons.append("epoch_invalid")
+        elif decl.epoch == "attachment" and sample.attachment is not _MISSING:
             if is_epoch(sample.attachment):
                 epoch = sample.attachment
             else:

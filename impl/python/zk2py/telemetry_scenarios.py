@@ -181,11 +181,6 @@ class Arrival:
     attachment: bytes | None
 
 
-#: An Epoch attachment whose bytes do not decode: present, and not a string
-#: (F-147).
-UNDECODED = object()
-
-
 class Reader:
     """R (``presence``) or R0: the data keys' samples, and for R the owner's
     instance tokens, on one monotonic clock."""
@@ -242,7 +237,9 @@ class Reader:
             try:
                 att = tm.decode_json(a.attachment)
             except tm.Undecodable:
-                att = UNDECODED
+                # F-147: present and undecodable, which conform reads as an
+                # epoch present and not a string (epoch_invalid).
+                return tm.conform(d, tm.Sample(value, attachment_undecodable=True))
         return tm.conform(d, tm.Sample(value, att))
 
     def of(self, res: str, since_ns: int = 0) -> list[tuple[Arrival, tm.Conformance]]:

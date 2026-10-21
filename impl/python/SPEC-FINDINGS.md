@@ -7150,7 +7150,7 @@ needed nothing of the contract reader: a contract lists the file as any
 file, and only the profile's reader compares ids. **`link.v1` 0.8** changed
 wording only, and zk2py's link module reads no `telemetry.*` key.
 
-**`just py-conformance`: 2152 of 2152.** At the start of the round, 1887
+**`just py-conformance`: 2166 of 2166.** At the start of the round, 1887
 passed and 1 failed: `layout`, since the profile's `conformance/` was
 unread.
 
@@ -7158,7 +7158,7 @@ unread.
 |---|---|---|
 | layout | 19 of 20 | 20 of 20 |
 | telemetry | (none) | 243 of 243 |
-| readings | 137 of 137 | 158 of 158 |
+| readings | 137 of 137 | 172 of 172 |
 | the 19 others | 1731 of 1731 | 1731 of 1731 |
 
 The `telemetry` family covers four files, every case passing the first
@@ -7175,7 +7175,7 @@ the profile's file by `../../../spec/profiles/telemetry/telemetry.v1.json`.
 Each loads with no finding, builds its published bundle byte for byte, and
 is compatible with both its revisions.
 
-The 21 new `readings` read Appendix B over the adopters' real contracts,
+Of the 35 new `readings`, 21 read Appendix B over the adopters' real contracts,
 which the fixtures do not. They check zk2py's contract reader, which finds
 each type's root by following its `$ref`s, where the fixtures give the
 roots already followed:
@@ -7187,6 +7187,11 @@ roots already followed:
 - tcgui: no resource this profile's;
 - three of §2.3's copies;
 - two of F-148.
+
+The other 14 read F-149's `null` members (review of PR #821): a Point's
+`value` written `null` is `not_a_point`, a Value's own `value` written
+`null` is `wrong_type` for each of the six kinds, so is a `null` Histogram
+member, and `epoch`, `unit` and `labels` read as F-149 says.
 
 **`just py-telemetry`: 48 of 48**, exiting 0, in about a minute:
 
