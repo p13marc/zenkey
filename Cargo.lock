@@ -8294,6 +8294,7 @@ version = "0.20.0"
 dependencies = [
  "base64 0.23.1",
  "ciborium",
+ "ciborium-ll",
  "prost",
  "prost-reflect",
  "prost-types",

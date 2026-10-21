@@ -24,6 +24,10 @@ base64 = { workspace = true }
 schemars = { workspace = true }
 prost = { workspace = true }
 ciborium = { workspace = true }
+# telemetry.v1's CBOR reader (§2.6, 0.2): headers as they are, so a bignum
+# of any length is an integer and a duplicate map key is seen. Already in
+# the tree through ciborium.
+ciborium-ll = "0.2"
 prost-reflect = { workspace = true }
 prost-types = "0.14"
 protox = "0.9"

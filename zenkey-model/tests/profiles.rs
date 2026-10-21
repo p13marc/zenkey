@@ -1984,6 +1984,15 @@ fn telemetry_declarations() {
     }
 }
 
+/// Bytes from their hex.
+fn unhex(h: &str) -> Vec<u8> {
+    assert!(h.len().is_multiple_of(2), "hex of whole bytes: {h}");
+    (0..h.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&h[i..i + 2], 16).expect("hex"))
+        .collect()
+}
+
 /// A data item as `telemetry/conformance/` writes it: JSON, with
 /// `{"$int"}`, `{"$float"}` and `{"$bytes"}` for what JSON cannot hold.
 fn telemetry_datum(v: &Value) -> Datum {
@@ -2029,8 +2038,22 @@ fn telemetry_samples() {
     for case in doc["cases"].as_array_mut().expect("cases") {
         let decl = telemetry_declaration(&case["resource"]);
         let sample = &case["sample"];
-        let value = sample.get("value").map(telemetry_datum);
-        let attachment = sample.get("attachment").map(telemetry_datum);
+        // The bytes as they came (0.2): JSON text, read strictly; CBOR in
+        // hex; an attachment's bytes as text, read as JSON. A payload that
+        // does not decode is undecodable; an attachment that does not is
+        // its bytes, no string.
+        let value = match (sample.get("json_text"), sample.get("cbor_hex")) {
+            (Some(t), _) => Datum::from_json_bytes(t.as_str().expect("text").as_bytes()),
+            (_, Some(h)) => Datum::from_cbor_bytes(&unhex(h.as_str().expect("hex"))),
+            _ => sample.get("value").map(telemetry_datum),
+        };
+        let attachment = match sample.get("attachment_text") {
+            Some(t) => Some(Datum::attachment(
+                t.as_str().expect("text").as_bytes(),
+                None,
+            )),
+            None => sample.get("attachment").map(telemetry_datum),
+        };
         let payload = match &value {
             Some(value) if sample["undecodable"] != json!(true) => telemetry::Payload::Decoded {
                 value,
@@ -2119,11 +2142,17 @@ fn telemetry_continuity() {
                     .map(i128::from)
                     .or_else(|| v.as_u64().map(i128::from))
             };
+            // A stamp as zenoh carries it, its NTP64 value (0.2), or
+            // already in nanoseconds.
+            let stamp = s["stamp_ntp64"]
+                .as_u64()
+                .map(telemetry::stamp_ns)
+                .or_else(|| int(&s["stamp_ns"]));
             telemetry::Sampled {
                 value: m,
                 epoch: s["epoch"].as_str(),
                 timestamp_ms: s["timestamp_ms"].as_i64(),
-                stamp_ns: int(&s["stamp_ns"]),
+                stamp_ns: stamp,
                 arrival_ns: int(&s["arrival_ns"]).expect("arrival_ns"),
             }
         };
