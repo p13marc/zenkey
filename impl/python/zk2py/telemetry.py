@@ -1,4 +1,4 @@
-"""``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.1, core 0.35):
+"""``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.2, core 0.35):
 what a metric resource carries, and what a reader may conclude from it.
 
 From the text alone:
@@ -23,22 +23,24 @@ The owner's half (:class:`MeterOwner`) and the reader on a bus
 (:class:`Reader`) are below, for ``scenarios.md``; they run in
 :mod:`zk2py.telemetry_scenarios`.
 
-Where the text left a reading to guess, the guess is named with its
-finding (``SPEC-FINDINGS.md``, "At telemetry.v1 0.1"):
-- a JSON payload is read as strict JSON for its members (no duplicate, no
-  lone surrogate), its numbers as RFC 8259's text and IEEE 754's nearest
-  double, so ``1e400`` is +Infinity (F-143);
-- a CBOR tag is read as its content, so a bignum is a byte string, not an
-  integer (F-144);
-- ``counts_length`` is checked whatever the bounds' own checks found
-  (F-145);
-- a pair of a counter and another kind has no rate for ``kind``, which the
-  fixture states and §2.11 alone leaves to ``incomparable`` (F-146);
-- an Epoch attachment that does not decode is an in-band epoch present and
-  not a string, ``epoch_invalid`` (F-147);
-- for state, a pair reads the samples a late joiner's merge keeps (core
-  §4.2), in the owner's stamp order (F-148);
-- a stamp's nanoseconds are zenoh-python's ``NTP64.as_nanos()`` (F-142).
+0.2 answered round 45's findings, F-142 to F-149 (``SPEC-FINDINGS.md``,
+"At telemetry.v1 0.2"), and each answer is followed here:
+- a JSON sample is strict JSON, every number finite, so ``1e400`` and
+  10^400 written out are undecodable (F-143);
+- a CBOR bignum, tag 2 or 3 around a byte string, is the integer it denotes;
+  every other tag is its content (F-144);
+- ``counts_length`` is checked whenever the value is a Histogram (F-145);
+- ``incomparable`` is no reason for a missing rate: such a pair is not of
+  two counters, ``kind`` (F-146);
+- an Epoch attachment that does not decode is ``epoch_invalid`` (F-147);
+- a state member's pairs follow a late joiner's merge (F-148);
+- a member written ``null`` is present (F-149);
+- a stamp's nanoseconds are NTP64's ``as_nanos``, the fraction rounded up,
+  each stamp alone (F-142, :func:`ntp64_ns`).
+
+Where 0.2 still leaves a reading, the guess is named with its finding: an
+integer's or a float's text between the largest double and the halfway
+point above it is read as IEEE 754 rounds it, finite (F-150).
 """
 
 from __future__ import annotations
@@ -166,7 +168,7 @@ def as_integer(v: Any) -> int | None:
 def to_double(v: Any) -> float:
     """§2.2: "the IEEE 754 double nearest its value". An integer beyond the
     double range rounds, as IEEE 754's round-to-nearest does, to an
-    infinity (F-143)."""
+    infinity: a CBOR bignum can be one (a strict JSON sample cannot, 0.2)."""
     if isinstance(v, float):
         return v
     try:
@@ -257,14 +259,35 @@ def _utf8(v: Any) -> bool:
     return True
 
 
+def _finite(v: Any) -> bool:
+    """0.2's "every number finite": a float that is not an infinity, and an
+    integer whose nearest double is not one (F-150: IEEE 754's rounding, so
+    an integer just past the largest double, which rounds to it, is
+    finite)."""
+    if isinstance(v, bool):
+        return True
+    if isinstance(v, float):
+        return math.isfinite(v)
+    if isinstance(v, int):
+        try:
+            float(v)
+        except OverflowError:
+            return False
+        return True
+    if isinstance(v, dict):
+        return all(_finite(x) for x in v.values())
+    if isinstance(v, list):
+        return all(_finite(x) for x in v)
+    return True
+
+
 def decode_json(payload: bytes) -> Any:
-    """§2.6 "The data item", JSON's data model (RFC 8259), read as zk2py
-    reads it (F-143): UTF-8; nothing after the value but RFC 8259's
-    whitespace; no duplicate member and no string without a UTF-8 form
-    (core D000's strict JSON, as ``alarms.v1`` §2.4 reads its payloads);
-    an integer's text exact, any other number its nearest double, so
-    ``1e400`` is +Infinity, IEEE 754's rounding of a value past the largest
-    double. Raises :class:`Undecodable`."""
+    """§2.6 "Strict JSON" (0.2, F-143): "UTF-8, RFC 8259's grammar with
+    nothing after the value but whitespace, no duplicate member at any
+    depth, every string with a UTF-8 form (so no lone surrogate escape),
+    and every number finite", ``1e400`` and 10^400 written out included; an
+    integer within the double's range "is read exactly, however long its
+    text". Raises :class:`Undecodable`."""
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as e:
@@ -277,18 +300,22 @@ def decode_json(payload: bytes) -> Any:
         raise Undecodable(str(e)) from e
     if not _utf8(value):
         raise Undecodable("a string with no UTF-8 form")
+    if not _finite(value):
+        raise Undecodable("a number past the double's finite range")
     return value
 
 
 def decode_cbor(payload: bytes) -> Any:
-    """§2.6, CBOR's data model (RFC 8949): a non-finite float kept as one,
-    never null; an integer of major types 0 and 1 exact; a tag read as its
-    content, so a bignum is a byte string (F-144). Raises
-    :class:`Undecodable`."""
+    """§2.6 "CBOR" (0.2, F-144): an integer is major type 0 or 1, or a
+    bignum, tag 2 or 3 around a byte string of any length, definite or not,
+    the integer it denotes; every other tag, and a tag 2 or 3 around
+    anything but a byte string, is its content; a map's keys are text, none
+    twice; ``undefined`` is ``null``; anything else does not decode. A
+    non-finite float is kept as one. Raises :class:`Undecodable`."""
     from . import cbor
 
     try:
-        value = cbor.loads(payload)
+        value = cbor.loads(payload, bignums=True)
     except cbor.CborError as e:
         raise Undecodable(str(e)) from e
 
@@ -532,7 +559,7 @@ def _value_reasons(kind: str, v: Any, point: bool, declared_buckets: tuple[float
         if not is_number(v):
             return ["wrong_type"]
         # An integer is read exactly (§2.6), so it is never NaN or infinite,
-        # however large; only a float can be (F-143).
+        # however large (a CBOR bignum, 0.2); only a float can be.
         return ["not_finite"] if isinstance(v, float) and not math.isfinite(v) else []
     if kind == "boolean":
         return [] if isinstance(v, bool) else ["wrong_type"]
@@ -566,8 +593,8 @@ def _value_reasons(kind: str, v: Any, point: bool, declared_buckets: tuple[float
         out.append("bounds_invalid")
     if valid and declared_buckets is not None and not bounds_equal(bounds, declared_buckets):
         out.append("bounds_differ")
-    # F-145: counts_length needs the two lengths alone, so it is checked
-    # whatever the bounds' own checks found.
+    # §2.6 check 11 (0.2, F-145): "checked whenever the value is a Histogram
+    # … it needs the two lengths alone".
     if len(counts) != len(bounds) + 1:
         out.append("counts_length")
     if in_range and count != sum(counts):  # type: ignore[arg-type]
@@ -614,10 +641,9 @@ def conform(decl: Declaration, sample: Sample) -> Conformance:
         reasons += _value_reasons(kind, inner, True, decl.buckets)
     else:
         if decl.epoch == "attachment" and sample.attachment_undecodable:
-            # F-147, zk2py's reading: an Epoch attachment whose bytes do not
-            # decode is an in-band epoch present and not a string. §2.6's
-            # `undecodable` names the payload ("its JSON or its CBOR"), so
-            # the value is still read.
+            # §2.6 check 2 (0.2, F-147): "An Epoch attachment whose bytes do
+            # not decode as its encoding is an epoch present and not a
+            # string, zero bytes included; the sample is still read".
             reasons.append("epoch_invalid")
         elif decl.epoch == "attachment" and sample.attachment is not _MISSING:
             if is_epoch(sample.attachment):
@@ -711,6 +737,15 @@ def elapsed_ns(a: Read, b: Read) -> int:
     return b.arrival_ns - a.arrival_ns
 
 
+def ntp64_ns(raw: int) -> int:
+    """§2.11 (0.2, F-142): a stamp's time in nanoseconds "as zenoh reads
+    it: its NTP64 seconds, the high 32 bits, times 10^9, plus its 32-bit
+    fraction times 10^9 divided by 2^32 and rounded up (uhlc's
+    ``NTP64::as_nanos``)", each stamp converted alone."""
+    secs, frac = raw >> 32, raw & 0xFFFFFFFF
+    return secs * 10**9 + -(-(frac * 10**9) // 2**32)
+
+
 def rate_of(d: int, e: int) -> float:
     """§2.11: ``rate = double(d) / (double(e) / 1e9)`` in IEEE 754 binary64,
     round to nearest, ties to even. Python's ``float(int)`` is the double
@@ -754,11 +789,12 @@ def continuity(a: Read, b: Read, presence: Presence | None, unit: str | None) ->
             # §2.10 point 4: "A reader MUST read a decrease it cannot place
             # in one epoch as a reset".
             cont, est = ("reset" if dec else "same_epoch"), "assumed"
-    # §2.11, with continuity.json's order: kind first (F-146).
-    if not (a.kind == "counter" and b.kind == "counter"):
+    # §2.11 and §5 (0.2, F-146): no rate "of an incomparable pair, which is
+    # never of two counters (kind)".
+    if not (a.kind == "counter" and b.kind == "counter") or cont == UNOBSERVABLE:
         return Pair(cont, est, via, None, None, "kind")
     if cont != "same_epoch":
-        return Pair(cont, est, via, None, None, "incomparable" if cont == UNOBSERVABLE else cont)
+        return Pair(cont, est, via, None, None, cont)
     e = elapsed_ns(a, b)
     if e <= 0:
         return Pair(cont, est, via, None, None, "elapsed")
@@ -766,12 +802,11 @@ def continuity(a: Read, b: Read, presence: Presence | None, unit: str | None) ->
 
 
 def kept_reads(arrivals: list[tuple[Read, Any]]) -> list[Read]:
-    """F-148, zk2py's reading for state: a pair reads the samples a late
-    joiner's merge keeps (core §4.2: "merge … per key by the owner's stamp
-    … and keep the newer"), in the order it keeps them, so a GET's reply
-    older than a live sample already held is no sample of a pair. Each
-    arrival is (its read, its :class:`zk2py.seed.Stamp` or None), in
-    arrival order."""
+    """§2.10 (0.2, F-148): "For state, it is in the order a late joiner's
+    merge keeps them (core §4.2) … a sample the merge does not keep (a
+    GET's reply older than a live put already held) is no sample of any
+    pair". Each arrival is (its read, its :class:`zk2py.seed.Stamp` or
+    None), in arrival order."""
     from . import seed
 
     flags = seed.kept([(stamp, "put") for _, stamp in arrivals])

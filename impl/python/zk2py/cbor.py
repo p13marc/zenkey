@@ -2,8 +2,10 @@
 
 Strict means: exactly one data item and no trailing bytes, no duplicate map
 key, well-formed lengths, valid UTF-8 text. Tags are decoded to their
-content (a tagged item is not refused; the spec says nothing about tags).
-Byte strings decode to ``bytes``.
+content (core §5.2: "A tag decodes as its content"). Byte strings decode to
+``bytes``. With ``bignums``, tags 2 and 3 around a byte string are the
+integers they denote (RFC 8949 §3.4.3), as ``telemetry.v1`` 0.2 §2.6 reads
+a sample.
 """
 
 from __future__ import annotations
@@ -21,9 +23,10 @@ _BREAK = object()
 
 
 class _Reader:
-    def __init__(self, data: bytes):
+    def __init__(self, data: bytes, bignums: bool = False):
         self.data = data
         self.pos = 0
+        self.bignums = bignums
 
     def take(self, n: int) -> bytes:
         if self.pos + n > len(self.data):
@@ -89,8 +92,12 @@ class _Reader:
                 pairs = [(self.item(), self.item()) for _ in range(arg)]
             return _Map(pairs)
         if major == 6:
-            self._definite(arg)
-            return self.item()
+            tag = self._definite(arg)
+            content = self.item()
+            if self.bignums and tag in (2, 3) and isinstance(content, bytes):
+                n = int.from_bytes(content, "big")
+                return n if tag == 2 else -1 - n
+            return content
         raise CborError("unreachable")
 
     def _definite(self, arg: int | None) -> int:
@@ -132,10 +139,11 @@ def _half(b: bytes) -> float:
     return sign * math.ldexp(frac + 1024, exp - 25)
 
 
-def loads(data: bytes) -> Any:
+def loads(data: bytes, bignums: bool = False) -> Any:
     """Decode one CBOR data item. Maps become dicts and must have unique
-    keys; a non-text key is kept as is (the caller decides)."""
-    r = _Reader(data)
+    keys; a non-text key is kept as is (the caller decides). ``bignums``
+    reads tags 2 and 3 around a byte string, definite or not, as integers."""
+    r = _Reader(data, bignums)
     item = r.item()
     if r.pos != len(data):
         raise CborError("trailing bytes")
