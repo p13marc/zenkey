@@ -358,8 +358,9 @@ py-alarms *ARGS:
 # The Python implementation's telemetry.v1 scenarios (spec/profiles/telemetry/
 # scenarios.md §1–§9) on in-process zenoh-python routers, §8 also across a
 # face that denies @zk, against zk2py's owner, or the Rust owner example with
-# `--owner <path>` (or ZK2PY_OWNER), which this recipe never builds. About a
-# minute. `--only N` passes through.
+# `--owner <path>` (or ZK2PY_OWNER), which this recipe never builds; with
+# `--tool <zenctl>` (or ZK2PY_ZENCTL), zenctl telemetry judges beside zk2py's
+# reader. About a minute, two with the tool. `--only N` passes through.
 py-telemetry *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
