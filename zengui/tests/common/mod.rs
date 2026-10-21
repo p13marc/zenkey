@@ -35,6 +35,20 @@ pub fn contracts() -> Arc<zengui::services::contracts::LoadedContracts> {
     Arc::new(zengui::services::contracts::load_all(&contract_paths()))
 }
 
+/// The metered world's contracts (#819, TD): [`contract_paths`], the
+/// runtime's `telemetry.v1` scenario contract `meter.v1` (a Point counter
+/// with its epoch in the Point, a bare counter with its epoch in the
+/// attachment, one with neither, a Point histogram and a bare gauge), and
+/// zenoh-modem's `modem.v3`, whose bare numbers carry their units only in
+/// their declarations.
+pub fn metered_contract_paths() -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = contract_paths();
+    paths.push(root.join("../zenkey/tests/contracts/meter.v1.toml"));
+    paths.push(root.join("../examples/zk2/zenoh-modem"));
+    paths
+}
+
 /// Settings for a window with no bus behind it: nothing to dial, the
 /// contracts named (they arrive as a message instead), the default scope.
 pub fn settings() -> Settings {
@@ -130,6 +144,29 @@ pub fn sample_on(
     )
 }
 
+/// [`sample_on`], carrying `attachment` (#819, TD): a bare counter's
+/// in-band epoch rides one (`telemetry.v1` §2.4).
+pub fn sample_attached(
+    key: &str,
+    payload: &[u8],
+    encoding: &str,
+    at: Instant,
+    axes: Axes,
+    attachment: Option<&[u8]>,
+) -> Arc<SampleView> {
+    let mut v = view(
+        key,
+        payload,
+        encoding,
+        zenoh::sample::SampleKind::Put,
+        at,
+        axes,
+    );
+    Arc::get_mut(&mut v).expect("just made").attachment =
+        attachment.map(|a| zenoh::bytes::ZBytes::from(a.to_vec()));
+    v
+}
+
 /// A tombstone (RFC 04 §1.2) — retirement, not an empty put.
 pub fn tombstone(key: &str, at: Instant) -> Arc<SampleView> {
     view(
@@ -194,7 +231,16 @@ pub struct World {
     observed: zenkey_fleet::model::catalog::Observed,
     /// Each publisher's axes ([`Axes::declared`]), resolved once.
     axes: std::collections::BTreeMap<&'static str, Axes>,
+    /// Whether `lab/meter` and `site-a/rf0` publish beside the rest
+    /// ([`World::metered`], #819, TD).
+    metered: bool,
+    /// What the last tick published, as [`World::verdicts`] checks it.
+    last: Vec<Published>,
 }
+
+/// One publisher's payload in one tick: `(key, bytes, encoding,
+/// attachment)`.
+type Published = (&'static str, Vec<u8>, &'static str, Option<Vec<u8>>);
 
 pub const ORIGIN_A: &str = "h-3fa9c2d41b7e";
 pub const ORIGIN_B: &str = "h-9c04d2e1a7f3";
@@ -326,6 +372,173 @@ const SYNTH_FEEDS: &[(&str, &str, &str, &str, &str)] = &[
     ),
 ];
 
+/// `lab/meter`, implementing `meter.v1` (#819, TD).
+pub const METER: &str = "lab/meter";
+/// A Point declared a counter, unit `1`, its epoch in the Point: an epoch
+/// that changes at tick [`FRAMES_RESET_AT`] (a restart the owner marked),
+/// the count starting again — a reset, with no rate across it.
+pub const FRAMES: &str = "zk2/lab/meter/meter.v1/stream/frames";
+/// The tick `frames` starts its second epoch at.
+pub const FRAMES_RESET_AT: u32 = 16;
+/// A bare counter in `By`, its epoch in the Epoch attachment: a drop at
+/// tick [`BYTES_DROP_AT`] within that one epoch — `decreased`, the finding.
+pub const BYTES: &str = "zk2/lab/meter/meter.v1/stream/bytes";
+/// The tick `bytes` goes backwards at.
+pub const BYTES_DROP_AT: u32 = 22;
+/// A bare counter with no unit and no epoch: a drop at tick 14, which no
+/// epoch places, so a reset, assumed — and its unit unknown.
+pub const DROPS: &str = "zk2/lab/meter/meter.v1/stream/drops";
+/// A Point declared a histogram, in `s`, over `[0.005, 0.01, 0.025]`.
+pub const LATENCY: &str = "zk2/lab/meter/meter.v1/stream/latency";
+/// A bare gauge in `dBm`.
+pub const LEVEL: &str = "zk2/lab/meter/meter.v1/stream/level";
+/// `site-a/rf0`, one zenoh-modem device, implementing `modem.v3`.
+pub const MODEM: &str = "site-a/rf0";
+/// modem's `sdu/tx_bytes_total`: a bare JSON integer, a counter in `By` by
+/// its declaration alone.
+pub const TX_BYTES: &str = "zk2/site-a/rf0/modem.v3/stream/sdu/tx_bytes_total";
+/// modem's `radio/rssi`: a bare JSON number, a gauge in `dBm`.
+pub const RSSI: &str = "zk2/site-a/rf0/modem.v3/stream/radio/rssi";
+
+/// The instant tick 0's Points were measured at, Unix epoch milliseconds;
+/// a tick is 250 ms.
+const MEASURED_T0_MS: i64 = 1_792_400_000_000;
+
+/// A Point of `kind` measured at tick `n`, carrying `value`, and `epoch`
+/// and `unit` when given.
+pub fn metric_point(
+    n: u32,
+    kind: &str,
+    value: serde_json::Value,
+    unit: Option<&str>,
+    epoch: Option<&str>,
+) -> Vec<u8> {
+    let mut p = serde_json::json!({
+        "timestamp": MEASURED_T0_MS + 250 * i64::from(n),
+        "value": {"type": kind, "value": value},
+    });
+    if let Some(u) = unit {
+        p["unit"] = serde_json::json!(u);
+    }
+    if let Some(e) = epoch {
+        p["epoch"] = serde_json::json!(e);
+    }
+    serde_json::to_vec(&p).expect("a Point")
+}
+
+/// A counter's count `k` steps into an epoch: never decreasing, its steps
+/// uneven so its rate moves.
+fn count(k: u32) -> u64 {
+    40 * u64::from(k) + 10 * u64::from(k % 4)
+}
+
+/// `(key, payload and attachment at tick n, encoding)`, one row per
+/// metered publisher.
+type MeteredFeed = (
+    &'static str,
+    fn(u32) -> (Vec<u8>, Option<Vec<u8>>),
+    &'static str,
+);
+
+/// The metered publishers (#819, TD): what `lab/meter` and `site-a/rf0`
+/// put each tick, each conforming to its declaration.
+const METERED_FEEDS: &[MeteredFeed] = &[
+    (
+        FRAMES,
+        |n| {
+            let (epoch, k) = if n < FRAMES_RESET_AT {
+                ("00000000000000a1", n)
+            } else {
+                ("00000000000000a2", n - FRAMES_RESET_AT)
+            };
+            (
+                metric_point(
+                    n,
+                    "counter",
+                    serde_json::json!(count(k)),
+                    Some("1"),
+                    Some(epoch),
+                ),
+                None,
+            )
+        },
+        "application/json",
+    ),
+    (
+        BYTES,
+        |n| {
+            let v = if n < BYTES_DROP_AT {
+                1500 * u64::from(n) + 300 * u64::from(n % 3)
+            } else {
+                9000 + 1500 * u64::from(n - BYTES_DROP_AT)
+            };
+            (
+                v.to_string().into_bytes(),
+                Some(br#""00000000000000b1""#.to_vec()),
+            )
+        },
+        "application/json",
+    ),
+    (
+        DROPS,
+        |n| {
+            let v = if n < 14 { n / 2 } else { (n - 14) / 3 };
+            (v.to_string().into_bytes(), None)
+        },
+        "application/json",
+    ),
+    (
+        LATENCY,
+        |n| {
+            let n = u64::from(n);
+            let counts = [n, 2 * n, n, n / 4];
+            let total: u64 = counts.iter().sum();
+            let mean = 0.0105 + 0.0025 * (n as f64 * 0.45).sin();
+            let value = serde_json::json!({
+                "buckets": [0.005, 0.01, 0.025],
+                "counts": counts,
+                "count": total,
+                "sum": (total as f64 * mean * 1e6).round() / 1e6,
+            });
+            (
+                metric_point(
+                    n as u32,
+                    "histogram",
+                    value,
+                    Some("s"),
+                    Some("00000000000000a1"),
+                ),
+                None,
+            )
+        },
+        "application/json",
+    ),
+    (
+        LEVEL,
+        |n| {
+            let v = -71.0 + 6.0 * (f64::from(n) * 0.4).sin();
+            (format!("{v:.1}").into_bytes(), None)
+        },
+        "application/json",
+    ),
+    (
+        TX_BYTES,
+        |n| {
+            let v = 4096 * u64::from(n) + 512 * u64::from(n % 5);
+            (v.to_string().into_bytes(), None)
+        },
+        "application/json",
+    ),
+    (
+        RSSI,
+        |n| {
+            let v = -67.5 + 3.0 * (f64::from(n) * 0.3).cos();
+            (format!("{v:.1}").into_bytes(), None)
+        },
+        "application/json",
+    ),
+];
+
 fn json_point(value: f64) -> Vec<u8> {
     format!(r#"{{"value":{value:.2},"unit":"%","ts":"2026-10-05T09:12:44Z"}}"#).into_bytes()
 }
@@ -364,6 +577,7 @@ fn synth(
 /// `nav.v2` and `host-a/tc` serving `tc.netif.v1`, each with one instance.
 fn deployment(
     set: &zenkey_fleet::ContractSet,
+    addresses: &[(&str, &str)],
 ) -> (
     Arc<zenkey_fleet::Catalog>,
     zenkey_fleet::LivePresence,
@@ -377,7 +591,7 @@ fn deployment(
 
     let mut keys = Vec::new();
     let mut descriptors = BTreeMap::new();
-    for (id, (address, iface)) in (1u64..).zip(World::ADDRESSES) {
+    for (id, (address, iface)) in (1u64..).zip(addresses.iter().copied()) {
         let addr: Addr = address.parse().expect("an address");
         let iface: IfaceId = iface.parse().expect("an interface");
         let revision = set.of_iface(&iface).next().expect("held");
@@ -430,8 +644,28 @@ impl Default for World {
 
 impl World {
     pub fn new() -> World {
-        let contracts = contracts();
-        let (catalog, presence, seeded, observed) = deployment(&contracts.set);
+        World::build(contracts(), &World::ADDRESSES, false)
+    }
+
+    /// The world with `lab/meter` and `site-a/rf0` beside it (#819, TD):
+    /// [`metered_contract_paths`] loaded, both addresses placed by presence,
+    /// and their metric streams publishing each tick ([`METERED_FEEDS`]).
+    pub fn metered() -> World {
+        let contracts = Arc::new(zengui::services::contracts::load_all(
+            &metered_contract_paths(),
+        ));
+        let mut addresses = World::ADDRESSES.to_vec();
+        addresses.push((METER, "meter.v1"));
+        addresses.push((MODEM, "modem.v3"));
+        World::build(contracts, &addresses, true)
+    }
+
+    fn build(
+        contracts: Arc<zengui::services::contracts::LoadedContracts>,
+        addresses: &[(&str, &str)],
+        metered: bool,
+    ) -> World {
+        let (catalog, presence, seeded, observed) = deployment(&contracts.set, addresses);
         let lens =
             zenkey_fleet::Lens::new("", Some(&catalog), &*contracts.set).offline(&contracts.set);
         let axes = FEEDS
@@ -439,6 +673,7 @@ impl World {
             .chain(REFUSED_FEEDS)
             .map(|(key, ..)| *key)
             .chain(SYNTH_FEEDS.iter().map(|(key, ..)| *key))
+            .chain(METERED_FEEDS.iter().map(|(key, ..)| *key))
             .map(|key| (key, Axes::declared(&lens, key)))
             .collect();
         World {
@@ -455,6 +690,8 @@ impl World {
             seeded,
             observed,
             axes,
+            metered,
+            last: Vec::new(),
         }
     }
 
@@ -749,20 +986,26 @@ impl World {
         ))
     }
 
-    /// Every publisher's payload at tick `n`: `(key, bytes, encoding)`.
-    fn payloads(&self, n: u32) -> Vec<(&'static str, Vec<u8>, &'static str)> {
-        let mut out: Vec<_> = FEEDS
+    /// Every publisher's payload at tick `n`.
+    fn payloads(&self, n: u32) -> Vec<Published> {
+        let mut out: Vec<Published> = FEEDS
             .iter()
-            .map(|(key, payload, encoding)| (*key, payload(n), *encoding))
+            .map(|(key, payload, encoding)| (*key, payload(n), *encoding, None))
             .collect();
         for (key, iface, token, template, encoding) in SYNTH_FEEDS {
             let bytes = synth(&self.contracts.set, iface, token, template, n);
-            out.push((key, bytes, encoding));
+            out.push((key, bytes, encoding, None));
+        }
+        if self.metered {
+            for (key, payload, encoding) in METERED_FEEDS {
+                let (bytes, attachment) = payload(n);
+                out.push((key, bytes, encoding, attachment));
+            }
         }
         out.extend(
             REFUSED_FEEDS
                 .iter()
-                .map(|(key, payload, encoding)| (*key, payload(n), *encoding)),
+                .map(|(key, payload, encoding)| (*key, payload(n), *encoding, None)),
         );
         out
     }
@@ -770,14 +1013,32 @@ impl World {
     /// The lens the window resolves with once connected — the same inputs,
     /// session-free — for the checks a scene answers itself.
     pub fn check(&self, key: &str, bytes: &[u8], encoding: &str) -> zenkey_fleet::Checked {
+        self.check_attached(key, bytes, encoding, None)
+    }
+
+    /// [`World::check`] with the sample's attachment (#819, TD): a bare
+    /// counter's in-band epoch is read there (`telemetry.v1` §2.4).
+    pub fn check_attached(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        encoding: &str,
+        attachment: Option<&[u8]>,
+    ) -> zenkey_fleet::Checked {
         zenkey_fleet::Lens::new("", Some(&self.catalog), &*self.contracts.set)
             .offline(&self.contracts.set)
-            .check(
+            .check_sample(
                 key,
                 zenkey_fleet::Member::Type,
                 (!encoding.is_empty()).then_some(encoding),
                 bytes,
+                attachment,
             )
+    }
+
+    /// The contracts this world loaded, as `ContractsLoaded` hands them.
+    pub fn loaded(&self) -> Arc<zengui::services::contracts::LoadedContracts> {
+        Arc::clone(&self.contracts)
     }
 
     /// A key's identity through the lens the window resolves with once
@@ -890,14 +1151,14 @@ impl World {
     /// every publisher's newest payload, through the lens: the four poles,
     /// each on the key that earns it.
     pub fn verdicts(&self, app: &mut Zengui) {
-        let n = self.ticks.saturating_sub(1);
         let batch = self
-            .payloads(n)
-            .into_iter()
-            .map(|(key, bytes, encoding)| {
+            .last
+            .iter()
+            .map(|(key, bytes, encoding, attachment)| {
                 (
                     key.to_string(),
-                    self.check(key, &bytes, encoding).conformance,
+                    self.check_attached(key, bytes, encoding, attachment.as_deref())
+                        .conformance,
                 )
             })
             .collect();
@@ -908,7 +1169,14 @@ impl World {
     /// the tick carries the snapshot, the samples and the counters a real
     /// one would.
     pub fn tick(&mut self, app: &mut Zengui) {
-        self.tick_inner(app, None);
+        self.tick_inner(app, None, None);
+    }
+
+    /// One tick in which `key` publishes `bytes` in place of its feed's
+    /// payload (#819, TD): a scene's one odd sample — a Point whose tag
+    /// disagrees with its declaration — as the newest the key holds.
+    pub fn tick_with(&mut self, app: &mut Zengui, key: &'static str, bytes: Vec<u8>) {
+        self.tick_inner(app, None, Some((key, bytes)));
     }
 
     /// One tick in which, after every feed, a stranger puts `key`'s payload
@@ -918,24 +1186,44 @@ impl World {
     /// Inspector compares the declared QoS against axes the owner did not
     /// choose.
     pub fn tick_with_stranger(&mut self, app: &mut Zengui, key: &'static str) {
-        self.tick_inner(app, Some(key));
+        self.tick_inner(app, Some(key), None);
     }
 
-    fn tick_inner(&mut self, app: &mut Zengui, stranger: Option<&'static str>) {
+    fn tick_inner(
+        &mut self,
+        app: &mut Zengui,
+        stranger: Option<&'static str>,
+        swap: Option<(&'static str, Vec<u8>)>,
+    ) {
         let n = self.ticks;
         let at = self.t0 + Duration::from_millis(250) * (n + 1);
         let mut samples = Vec::new();
-        let payloads = self.payloads(n);
+        let mut payloads = self.payloads(n);
+        if let Some((key, bytes)) = swap {
+            let row = payloads
+                .iter_mut()
+                .find(|p| p.0 == key)
+                .unwrap_or_else(|| panic!("{key} is no publisher of this world"));
+            row.1 = bytes;
+        }
         let feeds = payloads.len();
         let mut stray = None;
-        for (key, body, encoding) in payloads {
+        for (key, body, encoding, attachment) in &payloads {
             self.stats.record(key, body.len(), None, at, None, None);
             let axes = self.axes.get(key).copied().unwrap_or(Axes::DEFAULT);
-            samples.push(sample_on(key, &body, encoding, at, axes));
-            if stranger == Some(key) {
-                stray = Some(sample(key, &body, encoding, at));
+            samples.push(sample_attached(
+                key,
+                body,
+                encoding,
+                at,
+                axes,
+                attachment.as_deref(),
+            ));
+            if stranger == Some(*key) {
+                stray = Some(sample(key, body, encoding, at));
             }
         }
+        self.last = payloads;
         if let Some(key) = stranger {
             let stray = stray.unwrap_or_else(|| panic!("{key} is no publisher of this world"));
             self.stats

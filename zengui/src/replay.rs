@@ -321,9 +321,10 @@ impl ReplayState {
             // A row without `t` (hand-piped ndjson) sits at the
             // previous row's instant: no pacing claim invented.
             let t_prev = rows.last().map_or(0, |r: &ReplayRow| r.t_us);
+            let t_us = t_us.unwrap_or(t_prev);
             rows.push(ReplayRow {
                 qos_recorded,
-                t_us: t_us.unwrap_or(t_prev),
+                t_us,
                 view: Arc::new(SampleView {
                     key: row.key,
                     payload: zenoh::bytes::ZBytes::from(row.payload),
@@ -345,7 +346,11 @@ impl ReplayState {
                     reliability: q.reliability,
                     express: q.express,
                     source: None,
-                    received: loaded_at,
+                    // The capture's receipt, on the capture clock (#819,
+                    // TD): what `telemetry.v1` times a bare counter's rate
+                    // by when no Point timestamp rides it (§2.11) — the
+                    // recording reader's arrival, never the load's.
+                    received: loaded_at + std::time::Duration::from_micros(t_us),
                 }),
             });
         }

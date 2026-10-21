@@ -414,7 +414,67 @@ pub fn section<'a>(
     col = col.push(state_strip(ring, view, matched, drawn, next_seq));
     col = col.push(loss_strip(ring));
     col = col.push(verdict_strip(verdicts));
+    if let Some(why) = invalid_strip(&lines[first..last], verdicts, sp) {
+        col = col.push(why);
+    }
     col.push(content).spacing(sp.sm)
+}
+
+/// How many invalid keys the strip names, at most: the rows are a fixed
+/// height, so a reason has no room on its row, and a strip that grew with
+/// the bus would push the stream off the pane.
+const INVALID_NAMED: usize = 3;
+
+/// Why the drawn rows' invalid keys are invalid (#819, TD): each key's
+/// first violation in the check's own words — a `telemetry.v1` reason
+/// reads `telemetry.v1 §2.6 tag_disagrees: the Point's tag differs from the
+/// declared kind` — and how many more it has. A row's badge counts its
+/// violations, and its row has no room for a sentence; the Inspector lists
+/// every one. `None` when no drawn row is invalid.
+fn invalid_strip<'a>(
+    lines: &[&EchoLine],
+    verdicts: &crate::verdict::VerdictCache,
+    sp: Spacing,
+) -> Option<Element<'a, Message>> {
+    use zenkey_fleet::report::Conformance;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut named = Vec::new();
+    let mut more = 0usize;
+    for line in lines {
+        let Some(Conformance::Invalid { violations }) = verdicts.get(&line.key).map(|v| &v.verdict)
+        else {
+            continue;
+        };
+        if !seen.insert(line.key.as_str()) {
+            continue;
+        }
+        if named.len() == INVALID_NAMED {
+            more += 1;
+            continue;
+        }
+        let first = violations
+            .first()
+            .map_or("no violation named", String::as_str);
+        let rest = match violations.len() {
+            0 | 1 => String::new(),
+            n => format!(" (+{} more)", n - 1),
+        };
+        named.push(kit::muted(format!("invalid · {}: {first}{rest}", line.key)));
+    }
+    if named.is_empty() {
+        return None;
+    }
+    let mut col = Column::new().spacing(sp.xs);
+    for line in named {
+        col = col.push(line);
+    }
+    if more > 0 {
+        col = col.push(kit::muted(format!(
+            "+{} drawn — the Inspector lists every violation",
+            kit::plural(more, "further invalid key")
+        )));
+    }
+    Some(col.into())
 }
 
 /// What the view is doing to the ring: how much of it is on screen, and — the

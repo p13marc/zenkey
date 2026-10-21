@@ -148,6 +148,7 @@ pub(crate) fn update(
                     wire_key: reply.key.clone(),
                     encoding: reply.encoding.clone(),
                     bytes: reply.payload.clone(),
+                    attachment: reply.attachment.clone(),
                 }),
                 _ => Task::none(),
             };
@@ -390,6 +391,7 @@ pub(crate) fn recorded_value(slot: &mut SubjectSlot, replay: &ReplayState) -> Ta
                 wire_key: reply.key.clone(),
                 encoding: reply.encoding.clone(),
                 bytes: reply.payload.clone(),
+                attachment: reply.attachment.clone(),
             },
             move |key, value| Message::Subject(SubjectMsg::RecordedDecoded(id, key, value)),
         )

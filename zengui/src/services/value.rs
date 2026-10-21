@@ -325,6 +325,9 @@ pub struct Decode {
     pub wire_key: String,
     pub encoding: String,
     pub bytes: zenoh::bytes::ZBytes,
+    /// The reply's attachment: a bare counter's in-band epoch rides it,
+    /// and `telemetry.v1` reads it there (§2.4, §2.6; #819, TD).
+    pub attachment: Option<zenoh::bytes::ZBytes>,
 }
 
 pub fn decode(d: Decode) -> Task<Message> {
@@ -346,12 +349,18 @@ pub fn decode_then(
                 wire_key,
                 encoding,
                 bytes,
+                attachment,
             } = d;
             let bytes = bytes.to_bytes();
+            let attachment = attachment.as_ref().map(zenoh::bytes::ZBytes::to_bytes);
             let encoding = (!encoding.is_empty()).then_some(encoding.as_str());
-            let checked =
-                lens.lens()
-                    .check(&wire_key, zenkey_fleet::Member::Type, encoding, &bytes);
+            let checked = lens.lens().check_sample(
+                &wire_key,
+                zenkey_fleet::Member::Type,
+                encoding,
+                &bytes,
+                attachment.as_deref(),
+            );
             lens.nudge(checked.identity.unresolved.as_ref());
             // The conformance rides the check and lands whole: the
             // Inspector renders it, and the cache learns it (#164). The
@@ -374,10 +383,17 @@ pub fn decode_then(
 /// hands their payloads here — a `Task`, because a decode is unbounded work
 /// and a key short of a provider nudges the feed. The render paths only
 /// ever *read* the cache this lands in.
-pub fn validate(
-    lens: LensInputs,
-    batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
-) -> Task<Message> {
+/// One observed sample the batch checks: its key, its encoding, its bytes
+/// and its attachment, which `telemetry.v1` reads a bare counter's in-band
+/// epoch from (§2.4, §2.6; #819, TD).
+pub type ToCheck = (
+    String,
+    String,
+    zenoh::bytes::ZBytes,
+    Option<zenoh::bytes::ZBytes>,
+);
+
+pub fn validate(lens: LensInputs, batch: Vec<ToCheck>) -> Task<Message> {
     validate_then(lens, batch, |out| {
         Message::Bus(crate::message::BusMsg::VerdictsChecked(out))
     })
@@ -388,17 +404,24 @@ pub fn validate(
 /// the replay (#614, FL10b), so neither world's verdicts land in the other.
 pub fn validate_then(
     lens: LensInputs,
-    batch: Vec<(String, String, zenoh::bytes::ZBytes)>,
+    batch: Vec<ToCheck>,
     land: impl FnOnce(Vec<(String, zenkey_fleet::report::Conformance)>) -> Message + Send + 'static,
 ) -> Task<Message> {
     Task::perform(
         async move {
             let over = lens.lens();
             let mut out = Vec::with_capacity(batch.len());
-            for (key, encoding, bytes) in batch {
+            for (key, encoding, bytes, attachment) in batch {
                 let bytes = bytes.to_bytes();
+                let attachment = attachment.as_ref().map(zenoh::bytes::ZBytes::to_bytes);
                 let encoding = (!encoding.is_empty()).then_some(encoding.as_str());
-                let checked = over.check(&key, zenkey_fleet::Member::Type, encoding, &bytes);
+                let checked = over.check_sample(
+                    &key,
+                    zenkey_fleet::Member::Type,
+                    encoding,
+                    &bytes,
+                    attachment.as_deref(),
+                );
                 lens.nudge(checked.identity.unresolved.as_ref());
                 out.push((key, checked.conformance));
             }
