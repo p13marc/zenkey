@@ -356,8 +356,9 @@ py-alarms *ARGS:
         target/py-venv/bin/python -m zk2py.alarms_scenarios {{ARGS}}
 
 # The Python implementation's telemetry.v1 scenarios (spec/profiles/telemetry/
-# scenarios.md §1–§8) against zk2py's owner on in-process zenoh-python
-# routers, §8 also across a face that denies @zk. No Rust build; about a
+# scenarios.md §1–§9) on in-process zenoh-python routers, §8 also across a
+# face that denies @zk, against zk2py's owner, or the Rust owner example with
+# `--owner <path>` (or ZK2PY_OWNER), which this recipe never builds. About a
 # minute. `--only N` passes through.
 py-telemetry *ARGS:
     #!/usr/bin/env bash
