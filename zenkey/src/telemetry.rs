@@ -38,8 +38,9 @@
 //! **The epoch, filled.** A Point whose kind is `counter` or `histogram`
 //! (the declared kind, else its tag) and which carries no `epoch` gets the
 //! writer's epoch as its `epoch`: the JSON object gains the member, as
-//! `"epoch":"<id>",` written after its `{`, and the CBOR map gains an entry,
-//! last; every other byte is the application's. A Point of another kind is
+//! `"epoch":"<id>",` written after its `{`, every other byte the
+//! application's; the CBOR map gains an entry, last, and the item is
+//! encoded again, the same data item. A Point of another kind is
 //! left as it is: its epoch would be a cost on a constrained face (§2.14)
 //! that no reader reads. A bare counter or histogram whose contract types
 //! its attachment `telemetry.v1.Epoch` and which is put with none gets the
@@ -355,8 +356,9 @@ mod meter {
             }
         }
 
-        /// The Point `bytes` with `"epoch": epoch` added, every other byte
-        /// kept: written after a JSON object's `{`, appended to a CBOR map.
+        /// The Point `bytes` with `"epoch": epoch` added: written after a
+        /// JSON object's `{`, every other byte kept; appended to a CBOR map,
+        /// the item encoded again.
         fn with_epoch(&self, bytes: &[u8], epoch: &str) -> Result<Vec<u8>, Reason> {
             let refuse = || Reason::Undecodable("the Point could not take its epoch".to_owned());
             match self.wire {
