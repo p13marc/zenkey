@@ -48,15 +48,31 @@ pub struct NumericLeaves {
     pub truncated: usize,
 }
 
-/// Every numeric leaf of a structural value, addressed by dotted path.
+/// Every numeric leaf of a structural value, addressed by dotted path. A
+/// bare number is the one leaf [`ROOT`], as the field observation names a
+/// document root that is not an object.
 ///
 /// Booleans are not numbers here on purpose: plotting `true` as 1 turns a
-/// state flag into a measurement, which is a different claim.
+/// state flag into a measurement, which is a different claim. (A
+/// `telemetry.v1` boolean is declared a measurement by its contract, and
+/// `crate::metric` plots it so — #819, TD.)
 pub fn numeric_leaves(value: &Value) -> NumericLeaves {
     let mut out = NumericLeaves::default();
     walk(String::new(), value, 0, &mut out);
+    for (path, _) in &mut out.leaves {
+        if path.is_empty() {
+            *path = ROOT.to_string();
+        }
+    }
     out
 }
+
+/// The path of a document root that is not an object — a bare number, such
+/// as zenoh-modem's counters — named like `jq`'s root, as
+/// `zenkey_fleet::judge::field` names it. It used to be the empty path,
+/// which [`value_at`] read as nothing, so a bare number offered a leaf and
+/// plotted only gaps (#819, TD).
+pub const ROOT: &str = "$";
 
 fn walk(path: String, value: &Value, depth: usize, out: &mut NumericLeaves) {
     if depth >= MAX_DEPTH {
@@ -97,7 +113,11 @@ fn join(prefix: &str, key: &str) -> String {
 }
 
 /// Read one dotted path out of a value, if it is a finite number there.
+/// [`ROOT`] reads the value itself.
 pub fn value_at(value: &Value, path: &str) -> Option<f64> {
+    if path == ROOT || path.is_empty() {
+        return value.as_f64().filter(|f| f.is_finite());
+    }
     let mut cur = value;
     for chunk in path.split('.') {
         cur = match cur {
@@ -289,6 +309,17 @@ mod tests {
         let l = numeric_leaves(&Value::Object(map));
         assert_eq!(l.leaves.len(), MAX_LEAVES);
         assert_eq!(l.truncated, 10);
+    }
+
+    /// A bare number is one leaf, the root, and it plots (#819, TD): it
+    /// was the empty path, which read as nothing.
+    #[test]
+    fn a_bare_number_is_the_root_leaf_and_plots() {
+        let l = numeric_leaves(&json!(41.5));
+        assert_eq!(l.leaves, [(ROOT.to_string(), 41.5)]);
+        assert_eq!(value_at(&json!(7), ROOT), Some(7.0));
+        let ring = ring_of(&[(b"1", false), (b"2", false)]);
+        assert_eq!(value_series(&ring, ROOT).points(), [Some(1.0), Some(2.0)]);
     }
 
     #[test]

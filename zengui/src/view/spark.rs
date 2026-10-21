@@ -38,9 +38,12 @@ const STROKE: f32 = 2.0;
 
 /// A labelled sparkline: caption, then the plot.
 ///
-/// `unit` is appended to the caption's numbers when the registry declared one;
-/// `rate` switches the caption to `kit::human_rate`, whose "—" for zero already
-/// means "no measured rate" rather than "measured zero".
+/// `unit` follows the caption's numbers, after a space, when there is one —
+/// a metric's (`telemetry.v1` §2.5, #819 TD): `42 By`, `-67.5 dBm`,
+/// `120 By/s`. [`SeriesTone::Rate`] is the observer's message rate and
+/// reads through `kit::human_rate`, whose "—" for zero already means "no
+/// measured rate" rather than "measured zero"; a counter's §2.11 rate is
+/// the owner's data, drawn as a value, where a measured 0 reads `0`.
 pub fn chart<'a>(
     label: &str,
     series: &'a Series,
@@ -74,7 +77,7 @@ fn caption(label: &str, series: &Series, tone: SeriesTone, unit: Option<&str>) -
     let fmt = |v: f64| match tone {
         SeriesTone::Rate => kit::human_rate(v),
         SeriesTone::Value => match unit {
-            Some(u) => format!("{}{u}", trim(v)),
+            Some(u) => format!("{} {u}", trim(v)),
             None => trim(v),
         },
     };
@@ -266,7 +269,7 @@ mod tests {
         let s = series_of(&[Some(1.0), None, Some(3.0)]);
         assert_eq!(
             caption_text("value", &s, SeriesTone::Value, Some("%")),
-            "value: 3% now · 1% min · 3% max · 3 points · 1 drawn as gaps, not interpolated"
+            "value: 3 % now · 1 % min · 3 % max · 3 points · 1 drawn as gaps, not interpolated"
                 .to_string()
         );
     }

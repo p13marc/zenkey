@@ -160,8 +160,9 @@ pub(crate) fn apply_tick(
     // The chart's inputs all advanced above — the history ring, the rate
     // sampler, the facts behind the unit. Rebuilt once per slot here rather
     // than once per frame (#178, #257).
+    let identities = work.replay.identity_cache(&dep.identity);
     for slot in sub.all_mut() {
-        slot.refresh_series(dep);
+        slot.refresh_series(identities);
     }
     // The tree's shape survived, so point it at this tick's numbers
     // instead of walking 50,000 nodes to move eight of them (#177).

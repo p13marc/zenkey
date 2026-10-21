@@ -254,7 +254,7 @@ pub(crate) fn update(
             let slot = if role == DockRole::Inspector
                 && sub.follow.current != crate::message::Subject::None
             {
-                sub.pin_current(dep)
+                sub.pin_current(work.replay.identity_cache(&dep.identity))
             } else {
                 crate::message::SlotId::FOLLOW
             };

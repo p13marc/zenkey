@@ -381,7 +381,7 @@ fn open(
     work.echo.echo.clear();
     for slot in sub.all_mut() {
         slot.history = None;
-        slot.refresh_series(dep);
+        slot.refresh_series(&dep.identity);
     }
     state.resolve_offline(
         dep.namespace(),

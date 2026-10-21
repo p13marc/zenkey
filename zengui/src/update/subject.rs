@@ -260,7 +260,7 @@ fn select(
     sub.fields.forget_subject();
     sub.why.forget_subject();
     sub.consumers.forget_subject();
-    sub.refresh_series(dep);
+    sub.refresh_series(work.replay.identity_cache(&dep.identity));
 
     match &sub.current {
         // Lazy value-on-demand: one read per subject, nothing ambient

@@ -17,6 +17,7 @@ use crate::message::Message;
 use crate::services;
 use crate::state::Deployment;
 use crate::state::subject::SubjectSlot;
+use crate::state::workspace::ReplayMode;
 use crate::view::detail::{DetailMsg, LastKnown};
 use crate::view::history::HistoryMsg;
 
@@ -25,13 +26,14 @@ use crate::view::history::HistoryMsg;
 pub(crate) fn update(
     slot: &mut SubjectSlot,
     dep: &Deployment,
-    replaying: bool,
+    replay: &ReplayMode,
     msg: DetailMsg,
 ) -> Task<Message> {
+    let replaying = replay.replay.is_some();
     match msg {
         DetailMsg::LeafSelected(path) => {
             slot.series_leaf = Some(path);
-            slot.refresh_series(dep);
+            slot.refresh_series(replay.identity_cache(&dep.identity));
             Task::none()
         }
         DetailMsg::LastKnown(archive) => {

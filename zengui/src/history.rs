@@ -47,6 +47,12 @@ pub struct HistoryEntry {
     /// a timeline that silently substitutes arrival is claiming a fact it
     /// does not have.
     pub timestamp: Option<String>,
+    /// The same stamp, typed (#819, TD): what `telemetry.v1` times a state
+    /// counter's rate by (§2.11) and merges a state member's pairs by
+    /// (§2.10). `None` when the sample carried none, and for a snapshot's
+    /// or a replayed row, whose stamp is the file's text and never
+    /// resurrected as a live one.
+    pub stamp: Option<zenoh::time::Timestamp>,
     /// A `Delete` is a tombstone: authoritative retirement (RFC 04 §1.2),
     /// never an empty value.
     pub is_delete: bool,
@@ -68,6 +74,9 @@ pub struct HistoryEntry {
     pub qos_recorded: bool,
     /// The publishing entity, when SourceInfo rode the sample.
     pub source: Option<zenkey_fleet::SampleSource>,
+    /// The sample's attachment, retained by refcount (#819, TD): a bare
+    /// counter's in-band epoch rides it (`telemetry.v1` §2.4).
+    pub attachment: Option<zenoh::bytes::ZBytes>,
     /// The structural document, when the bytes carry one — the diff's
     /// field-level side. `None` means plain text or opaque bytes, and the
     /// diff falls back to bytes rather than inventing fields.
@@ -95,6 +104,7 @@ impl HistoryEntry {
             seq,
             received: view.received,
             timestamp: view.timestamp.map(|t| t.to_string()),
+            stamp: view.timestamp,
             is_delete,
             len,
             encoding: view.encoding.clone(),
@@ -107,6 +117,7 @@ impl HistoryEntry {
             // row did not (`HistoryRing::push_qos`).
             qos_recorded: true,
             source: view.source,
+            attachment: view.attachment.clone(),
             value,
             preview,
         }
@@ -155,7 +166,12 @@ impl HistoryEntry {
     /// not its bytes), but one that scales with what was actually retained
     /// rather than pretending retention is free.
     fn weight(&self) -> usize {
-        self.preview.len() + self.len * if self.value.is_some() { 2 } else { 1 }
+        self.preview.len()
+            + self.len * if self.value.is_some() { 2 } else { 1 }
+            + self
+                .attachment
+                .as_ref()
+                .map_or(0, zenoh::bytes::ZBytes::len)
     }
 }
 

@@ -51,6 +51,7 @@ pub mod history;
 pub mod keyfacts;
 pub mod link;
 pub mod message;
+pub mod metric;
 pub mod nodes;
 pub mod patharena;
 pub mod prefs;

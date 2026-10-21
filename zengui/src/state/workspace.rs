@@ -495,6 +495,16 @@ impl ReplayMode {
             .as_ref()
             .map(|r| (&r.identity, r.lens.namespace.as_str()))
     }
+
+    /// The identity cache a key is resolved through: the replay's while one
+    /// runs, else `live`, the deployment's (#819, TD) — what a slot's chart
+    /// reads its metric's kind and unit from.
+    pub(crate) fn identity_cache<'a>(
+        &'a self,
+        live: &'a zenkey_fleet::IdentityCache,
+    ) -> &'a zenkey_fleet::IdentityCache {
+        self.identities().map_or(live, |(cache, _)| cache)
+    }
 }
 
 impl Workspace {

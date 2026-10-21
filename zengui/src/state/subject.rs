@@ -24,7 +24,6 @@
 
 use std::sync::Arc;
 
-use super::deployment::Deployment;
 use crate::message::{SlotId, Subject};
 use crate::view;
 
@@ -126,13 +125,13 @@ impl SubjectSlot {
     /// Rebuild the detail section's chart data.
     ///
     /// The one rebuild point (#178): everything that can change the chart
-    /// calls this, and nothing else writes `series`. It takes the deployment
-    /// because a declared unit would be a *contract* fact about the key, not
-    /// something the history ring knows — a zk2 contract declares none
-    /// (#614, FL7, FL8a), so the chart says so, and the parameter keeps the
-    /// one call shape for when a profile declares one.
-    pub(crate) fn refresh_series(&mut self, dep: &Deployment) {
-        self.series = self.series_data(dep);
+    /// calls this, and nothing else writes `series`. It takes the identity
+    /// cache the panes resolve the slot's key through — the deployment's,
+    /// or a replay's offline one (#614, FL7) — because a metric's kind and
+    /// unit are *contract* facts about the key, not something the history
+    /// ring knows (`telemetry.v1` §2.5; #819, TD).
+    pub(crate) fn refresh_series(&mut self, identities: &crate::keyfacts::IdentityCache) {
+        self.series = self.series_data(identities);
     }
 
     /// Derive the detail section's sparkline data from the recorded history
@@ -143,18 +142,48 @@ impl SubjectSlot {
     /// invalidate on every eviction. The leaves come from the newest payload,
     /// so a producer that starts emitting a new field offers it without a
     /// restart.
-    fn series_data(&self, _dep: &Deployment) -> Option<view::detail::SeriesData> {
+    ///
+    /// A key that resolves to a `telemetry.v1` metric resource is read by
+    /// the profile instead (#819, TD; [`crate::metric`]): its value, its
+    /// unit, and a counter's rate. That read is reused while the window and
+    /// the resolution stand still, so a tick that brought the key nothing
+    /// decodes nothing.
+    fn series_data(
+        &self,
+        identities: &crate::keyfacts::IdentityCache,
+    ) -> Option<view::detail::SeriesData> {
         let rec = self.history.as_ref()?;
+        let resolved = identities.get(&rec.key).and_then(|r| r.resolved.as_ref());
+        let metric = resolved.and_then(|r| {
+            let window = crate::metric::Window::of(r, &rec.ring);
+            let held = self
+                .series
+                .as_ref()
+                .and_then(|s| s.metric.as_ref())
+                .filter(|m| m.window == window);
+            match held {
+                Some(m) => Some(Arc::clone(m)),
+                None => crate::metric::read(r, &rec.ring).map(Arc::new),
+            }
+        });
+        let unit = crate::metric::unit_of(resolved, metric.as_deref());
+        // A metric member plots the profile's value; the structural leaves
+        // are for everything else, a metric whose declaration is invalid
+        // included (§2.2: its members are not read).
+        let structural = metric.as_ref().is_none_or(|m| !m.declared());
         // The most recent entry that *is* a document, not simply the most
         // recent one: a tombstone carries no fields, and letting it empty the
         // picker would make the chart vanish on every retirement and come
         // back on the next put.
-        let leaves = rec
-            .ring
-            .iter()
-            .find_map(|e| e.value.as_ref())
-            .map(crate::series::numeric_leaves)
-            .unwrap_or_default();
+        let leaves = if structural {
+            rec.ring
+                .iter()
+                .find_map(|e| e.value.as_ref())
+                .map(crate::series::numeric_leaves)
+                .unwrap_or_default()
+        } else {
+            crate::series::NumericLeaves::default()
+        };
         // The chosen leaf, if the newest payload still carries it — a field
         // that disappeared should not silently keep plotting its own gaps.
         let leaf = self
@@ -167,9 +196,6 @@ impl SubjectSlot {
             Some(p) => crate::series::value_series(&rec.ring, p),
             None => crate::series::Series::new(),
         };
-        // No unit (#614, FL7, FL8a): a zk2 contract declares none, so the
-        // axis says so rather than guess.
-        let unit: Option<String> = None;
         Some(view::detail::SeriesData {
             leaves,
             leaf,
@@ -180,6 +206,7 @@ impl SubjectSlot {
             caches: view::detail::SeriesCaches::default(),
             rate: self.rate_series.series().clone(),
             unit,
+            metric,
         })
     }
 }
@@ -256,7 +283,7 @@ impl SubjectState {
     /// landings route by slot id, so a report in flight for the follow slot
     /// must not be awaited by the pin (only the window *input* carries over;
     /// it is the user's, not the fleet's).
-    pub(crate) fn pin_current(&mut self, dep: &Deployment) -> SlotId {
+    pub(crate) fn pin_current(&mut self, identities: &crate::keyfacts::IdentityCache) -> SlotId {
         let id = self.next_slot;
         self.next_slot = self.next_slot.next();
         let follow = &self.follow;
@@ -290,7 +317,7 @@ impl SubjectState {
             // keeps showing what the follow slot was showing.
             compare_snapshot: follow.compare_snapshot,
         };
-        slot.refresh_series(dep);
+        slot.refresh_series(identities);
         self.pins.push(slot);
         id
     }
@@ -316,6 +343,7 @@ impl SubjectState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::deployment::Deployment;
 
     fn dep() -> Deployment {
         Deployment::new(crate::app::test_settings())
@@ -331,7 +359,7 @@ mod tests {
         sub.follow.current = Subject::Key(key.into());
         sub.follow.history = Some(crate::history::HistoryRecorder::new(key, 10));
 
-        let pin = sub.pin_current(&dep);
+        let pin = sub.pin_current(&dep.identity);
         assert!(pin.is_pin());
         let pinned = sub.slot(pin).expect("just minted");
         assert_eq!(pinned.current.key(), Some(key));
@@ -356,9 +384,9 @@ mod tests {
     fn slot_ids_are_not_reused() {
         let dep = dep();
         let mut sub = SubjectState::default();
-        let first = sub.pin_current(&dep);
+        let first = sub.pin_current(&dep.identity);
         assert!(sub.unpin(first));
-        let second = sub.pin_current(&dep);
+        let second = sub.pin_current(&dep.identity);
         assert_ne!(first, second);
         assert!(sub.slot(first).is_none());
     }
