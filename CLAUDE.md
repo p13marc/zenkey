@@ -93,6 +93,24 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   from every router and peer makes no read (`bus::alarms::cut_off`, #800
   AD): zenoh answers its liveliness reads and GETs at once, complete and
   empty, which would read every owner absent and heal a loss.
+  `telemetry.v1` (#819, TC) runs through all four layers too.
+  `bus::telemetry` reads presence, the descriptors and the metric
+  resources their revisions declare; one bounded queue carries the instance
+  and member token subscriptions and each resource's members, so samples
+  and token moves fold in one order; presence is seeded, and seeded again
+  after a loss, and each state metric resource gets S4's GET. Across a face
+  (`--across-face`) the deployment's word stands in: one named owner and
+  `--contracts`, no presence. `model::telemetry`'s `TelemetryBook` is
+  session-free: each sample through `MetricType::check` (`Datum::decode`
+  and `attachment`, then the model's `check`), consecutive conforming
+  samples through `pair` with the presence seen between them (a loss
+  leaves a pair with none), a state member's in its merge order (one
+  `Held` per key). `judge::telemetry` and `report::telemetry` complete it.
+  `Lens::check_sample` and `sample_conformance` run the profile's `check`
+  after the JSON Schema's, so a Point whose tag, unit, range or bounds
+  disagree is `invalid`, its reasons named: what replaced v1's
+  `kind-mismatch`, in `watch`, `echo`, `check expect`, `check schema`,
+  `payload-type` and the watchdog's `invalid-payload`.
 - `zenkey-explorer-config/` — the **shared explorer config crate**
   (Apache-2.0, **not published**): named connection contexts, the path
   policy (`~/.config/zenkey-explorer/config.toml`, legacy zenctl read
@@ -268,8 +286,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: twenty-five
-  checks since #800's AC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  FJ6's `doctor` judges a zk2 deployment against the core: twenty-seven
+  checks since #819's TC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
@@ -379,7 +397,17 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   judgement beside `health` (exit 1 an alarm firing at or above the floor,
   0 none with every owner asked known whole and the presence read that
   found them complete, 2 otherwise), and `check
-  conform`'s `alarm-key` and `alarm-document` (21 cases).
+  conform`'s `alarm-key` and `alarm-document` (21 cases). #819's TC added
+  `telemetry [SELECTOR] [--for SECS] [--across-face]`, a root judgement
+  over `telemetry.v1` (exit 1 a sample that does not conform or a decrease
+  within an established epoch, 0 everything asked answered clean, 2
+  otherwise, every counter pair's epoch assumed included; no
+  `--clocks-synced`, since every time base subtracts two readings of one
+  clock), the doctor's `telemetry-declaration` (a warning, from contracts)
+  and `telemetry-sample` (`--deep`), and `check conform`'s
+  `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`
+  (24 cases); `gen` and `serve` open an owner's session, timestamping on
+  (#825).
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
   `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
@@ -637,7 +665,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   stamp's nanoseconds per stamp (`stamp_ns`, uhlc's `as_nanos`), a member
   written `null` present, a state member's pairs in its late joiner's
   merge order, `incomparable` no rate's reason; and the owner's `wire`
-  types, `Point`, `Value` and a `Histogram` that observes into its bounds).
+  types, `Point`, `Value` and a `Histogram` that observes into its bounds;
+  text 0.3, F-150 and F-151, #819 TC: a number finite by IEEE rounding,
+  the Epoch attachment read strictly, a depth limit of 256 counted alike in
+  JSON and CBOR, and §2.9's presence only from a complete seed).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -798,7 +829,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     writes foreign keys;
   - profile-backed features (`config`, `blob`, `export`, the kind and budget
     checks, alerts) go dark on `main` until their profiles exist (#613); the
-    `v1` branch keeps them;
+    `v1` branch keeps them. Config came back with #768, alerts with #800,
+    the kind checks with telemetry.v1 (#819 TC), the budget as core 0.24;
   - no zenctl, zengui or zenwatch release from `main` until FJ9; fixes ship
     from `v1`.
 
