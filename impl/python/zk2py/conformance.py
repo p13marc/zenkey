@@ -1135,6 +1135,57 @@ def _reporter_loss() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _first_neither_cases() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.7 §2.16, "A key's first answer": every neither reason
+    the first question gives, each from a reading that yields it, on exactly
+    one of the two closed lists. freshness.v1's `silent`, a held sample
+    whose only observation is a GET that drew nothing for the key, is on
+    no named list, so it falls to "any other reason" (F-141)."""
+    from . import alarms, freshness as fr
+
+    lists = {"lists": True, "token": True}
+
+    def sub(age: Any = 10, complete: bool = True, listened: int = 1200) -> Any:
+        return fr.Subscription(listened * fr.NS, complete, None if age is None else fr.Delivery("put", age * fr.NS))
+
+    def get(reply: Any = "put", age: Any = 10, trusted: bool = True) -> Any:
+        r = None if reply is None else fr.Reply("put", None if age is None else int(age * fr.NS))
+        return fr.Get(r, trusted, fr.DEFAULT_DELTA_NS)
+
+    R = alarms.Reading
+    readings = {
+        "absent": R("absent"), "presence_incomplete": R("incomplete"),
+        "face_closed": R("across_face", face={"reachable": False}),
+        "no_descriptor": R("present"), "not_listed": R("present", {"lists": False}),
+        "last_known": R("present", lists, observations=[fr.Archive()], latest="firing"),
+        "incomplete": R("present", lists, observations=[sub(complete=False)], latest="firing"),
+        "not_read": R("present", lists, observations=[get(None)]),
+        "nothing_crossed": R("across_face", face={"reachable": True}, observations=[get(None)]),
+        "previous_instance": R("present", lists, observations=[sub()], latest="firing", previous_instance=True),
+        "undecodable": R("present", lists, observations=[sub()], latest="undecodable"),
+        "stale": R("present", lists, observations=[sub(age=1000)], latest="firing"),
+        "no_observation": R("present", lists, latest="firing"),
+        "silent": R("present", lists, observations=[get(None)], latest="firing"),
+        "no_stamp": R("present", lists, observations=[get(age=None)], latest="firing"),
+        "clock_untrusted": R("present", lists, observations=[get(trusted=False)], latest="firing"),
+        "clock_disagrees": R("present", lists, observations=[get(age=-5)], latest="firing"),
+        "near_horizon": R("present", lists, observations=[get(age=899.8)], latest="firing"),
+        "listened_too_short": R("present", lists, observations=[sub(age=None, listened=10)], latest="firing"),
+    }
+    got = {}
+    for want, r in readings.items():
+        a = alarms.judge(r)
+        got[a.reason] = alarms.first_neither_list(a.reason) if a.answer not in (alarms.YES, alarms.NO) else a.answer
+    a = alarms.judge(R("present", lists, observations=[sub()], latest="firing"), horizon=fr.Horizon("invalid"))
+    got[a.reason] = alarms.first_neither_list(a.reason)
+    sight = {r: "reader_sight" for r in alarms.READER_SIGHT}
+    other = {r: "other" for r in ("absent", "not_listed", "last_known", "previous_instance", "face_closed",
+                                  "undecodable", "stale", "silent", "no_stamp", "clock_disagrees", "not_a_horizon")}
+    label = "alarms.v1 0.7 §2.16, a key's first answer"
+    return [(f"{label}: every neither reason the first question gives, on exactly one closed list "
+             "(`silent` on 'any other', F-141)", got, {**sight, **other})]
+
+
 def _reporter_gone() -> list[tuple[str, Any, Any]]:
     """alarms.v1 0.6 §2.16 and a key gone from the whole scope's readings:
     a key with no report (a first neither of the key's own, not reported)
@@ -1246,7 +1297,7 @@ def family_readings(root: Path) -> list[Result]:
     out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
-        + _left_out_cases()
+        + _left_out_cases() + _first_neither_cases()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
