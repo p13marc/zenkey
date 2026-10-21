@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty-four rounds.**
+**Forty-five rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -98,8 +98,11 @@ where that was not enough, or where the spec said two things.
 - F-141 was found against `alarms.v1` 0.7, in a final whole-text pass
   (see "At alarms.v1 0.7"). `alarms.v1` 0.8 resolved it.
 - Nothing new was found against `alarms.v1` 0.8, read cold, run live and
-  passed over whole once more: none open (see "At alarms.v1 0.8" at the
-  end).
+  passed over whole once more: none open (see "At alarms.v1 0.8").
+- F-142 to F-149 were found against `telemetry.v1`'s text 0.1, the seventh
+  profile, read cold with core 0.35 and run live against zk2py's owner (see
+  "At telemetry.v1 0.1" at the end). Nothing was found in core 0.35 or
+  `link.v1` 0.8 themselves. All eight are open.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -7123,3 +7126,416 @@ defers stays deferred by its own word, and none is a finding:
 - a read through a session cut off from every router (0.4);
 - which branch of the MAY (0.7);
 - a resolved document's other members (0.8).
+
+## At telemetry.v1 0.1 (#609)
+
+`telemetry.v1` 0.1 is the seventh profile (`spec/profiles/telemetry/`). It
+has no standard contract: its first point is a standard schema,
+`telemetry.v1.json`, whose types are the profile's by their artifact's id
+(core 0.35, §10 point 1). zk2py read it cold with core 0.35 and `link.v1`
+0.8. `zk2py.telemetry` is the reader's and the tool's half, from the text
+alone:
+- the published ids;
+- a resource's declaration and its carrier;
+- a sample's conformance, with the member's kind and unit;
+- a pair's epoch, continuity and rate.
+
+`zk2py.telemetry_scenarios` runs `scenarios.md` §1 to §8 against a zk2py
+owner of `meter.v1`.
+
+**Core 0.35** publishes `telemetry`'s four keys in Appendix D. zk2py moved
+them from its interim table to its published one. W105 reads them as
+before, so no contract's codes changed. §10 point 1's standard schema
+needed nothing of the contract reader: a contract lists the file as any
+file, and only the profile's reader compares ids. **`link.v1` 0.8** changed
+wording only, and zk2py's link module reads no `telemetry.*` key.
+
+**`just py-conformance`: 2166 of 2166.** At the start of the round, 1887
+passed and 1 failed: `layout`, since the profile's `conformance/` was
+unread.
+
+| Family | Before | After |
+|---|---|---|
+| layout | 19 of 20 | 20 of 20 |
+| telemetry | (none) | 243 of 243 |
+| readings | 137 of 137 | 172 of 172 |
+| the 19 others | 1731 of 1731 | 1731 of 1731 |
+
+The `telemetry` family covers four files, every case passing the first
+time it ran:
+- `schema.json`: its 9 cases, and three checks of its header against
+  zk2py's tables: the current id, the published ids in order, and the four
+  types with their first revisions;
+- `declarations.json`: 87;
+- `samples.json`: 101;
+- `continuity.json`: 43, each rate equal to the fixture's bit for bit.
+
+`examples` stays at 108. The four ZenSight contracts' revision 1.1 list
+the profile's file by `../../../spec/profiles/telemetry/telemetry.v1.json`.
+Each loads with no finding, builds its published bundle byte for byte, and
+is compatible with both its revisions.
+
+Of the 35 new `readings`, 21 read Appendix B over the adopters' real contracts,
+which the fixtures do not. They check zk2py's contract reader, which finds
+each type's root by following its `$ref`s, where the fixtures give the
+roots already followed:
+- zenoh-modem: 73 declared metric streams, 23 with a unit, and
+  `sdu/dropped_total` a bare counter with no epoch;
+- each ZenSight contract, at revision 1.1 and in both published bundles:
+  a Point declaring no kind, and netring's two units. The first
+  revision's bundle carries the pre-profile id;
+- tcgui: no resource this profile's;
+- three of §2.3's copies;
+- two of F-148.
+
+The other 14 read F-149's `null` members (review of PR #821): a Point's
+`value` written `null` is `not_a_point`, a Value's own `value` written
+`null` is `wrong_type` for each of the six kinds, so is a `null` Histogram
+member, and `epoch`, `unit` and `labels` read as F-149 says.
+
+**`just py-telemetry`: 48 of 48**, exiting 0, in about a minute:
+
+| § | Checks |
+|---|---|
+| §1 | 10 |
+| §2 | 6 |
+| §3 | 6 |
+| §4 | 5 |
+| §5 | 5 |
+| §6 | 3 |
+| §7 | 5, F-147's reading included |
+| §8 | 8, run twice |
+
+§8's two runs:
+- **R0 alone**, as the reference runtime runs it;
+- **R0F**, behind a second router whose access control denies
+  `zk2/*/*/@zk/**` on its `unixsock-stream` face, in every message and
+  both flows. A control session on the same router, off the face, sees
+  every token that R0F does not. Both read the same pairs.
+
+The Rust owner example's `--telemetry` arrives with #819 TB, so this run
+is zk2py's owner alone. zk2py's owner gained `new_epoch`, core §8.1's
+make-before-break re-mint in one session. §2 checks its overlap: R sees
+I2's token before I1's is withdrawn. The owner's `publish` also gained an
+attachment.
+
+**Passing is not deriving.** Two expectations come from the fixture, not
+the text:
+- the no-rate reason `kind` for a counter paired with another kind
+  (F-146);
+- `epoch: "point"` on a declaration whose Point is the pre-profile
+  revision's, which has no `epoch` member (`declarations.json` case 15).
+  The text's "A Point carries an in-band epoch in its `epoch` member"
+  (§2.4) agrees once that revision's Point counts as the Point (§3).
+
+### F-142 · gap · telemetry.v1 0.1 §2.11 "The elapsed time": a stamp's nanoseconds
+
+> §2.11: "The elapsed time `e` is the later time minus the earlier, an
+> integer of nanoseconds: a Point's milliseconds times 10^6, a stamp's time
+> in nanoseconds as zenoh reads it, a receipt in the reader's nanoseconds."
+
+> §2.11: "Two readers that follow it agree bit for bit."
+
+> core Appendix B: "Its time is an NTP64 value, whose low 32 bits are a
+> fraction of a second, so its unit is 2^−32 s."
+
+A stamp's time is a whole number of 2^−32 s units. Most such values are no
+whole number of nanoseconds, so "in nanoseconds" is a conversion, and "as
+zenoh reads it" names one without stating it. Two readers can follow the
+text and still compute different values of `e`:
+- **Per stamp, then subtract:** convert each stamp with zenoh's own
+  conversion, then subtract. zenoh-python's `NTP64.as_nanos()` gave 1 ns
+  above the floor of the exact value on each of 2,000 HLC stamps measured
+  here.
+- **Subtract, then convert:** take the difference of the two NTP64 values
+  and convert it once, by floor or by rounding.
+
+Measured over 1,999 consecutive HLC stamp pairs on one session, the first
+way and the second (by floor) gave different `e` in about half the pairs:
+950 to 1,018 per run. A 1 ns change in `e` changes the rate's double, so the two readers
+disagree in its last bits.
+
+`continuity.json` gives `stamp_ns` already in nanoseconds (cases 26 and
+27), so no fixture decides. The Point's milliseconds and a receipt's
+nanoseconds are exact, and do not have the problem.
+
+**zk2py:** the first way, zenoh-python's `as_nanos()` per stamp
+(`freshness.stamp_ns_of`, as every zk2py reader of a stamp already does),
+then the difference. `just py-telemetry` prints the measurement with every
+run.
+
+**Wording that would remove the guess:** §2.11, "a stamp's time: the later
+stamp's NTP64 value minus the earlier's, times 10^9, divided by 2^32,
+rounded toward zero". A `continuity.json` case should give two raw NTP64
+values whose two conversions differ.
+
+### F-143 · gap · telemetry.v1 0.1 §2.6 "The data item": a JSON payload's duplicate member, a number past the double range, a lone surrogate
+
+> §2.6: "A sample is read as its decoded data item: JSON's data model for a
+> JSON resource (RFC 8259) …"
+
+> §2.6: "A float (JSON text with a fraction or an exponent, a CBOR float) is
+> the IEEE 754 double it denotes, the nearest one for JSON text."
+
+> §2.6: "A sample the core could not decode (bytes that are not its JSON or
+> its CBOR) is unobservable here (`undecodable`)"
+
+RFC 8259 leaves three things to the parser:
+- whether names repeat: they SHOULD be unique (its §4), and behaviour
+  otherwise is unpredictable;
+- the range of numbers (its §6);
+- what an escaped lone surrogate means (its §8.2).
+
+So the data item of each case below is the parser's choice:
+- **A duplicate member.** A Point with two `timestamp`s, two `value`s or
+  two `epoch`s. A parser may keep the first, keep the last, or refuse.
+  That gives two rates, two kinds, or two epochs (a reset or not), or
+  `undecodable`.
+- **`1e400`.** For "the nearest one", the nearest double by distance is
+  the largest finite one, so a gauge conforms. IEEE 754's
+  round-to-nearest gives +Infinity, which is `not_finite`. A parser that
+  refuses it makes the sample `undecodable`. A counter likewise reads
+  `out_of_range`, `wrong_type` or `undecodable`.
+- **An integer's text beyond the double range** in a gauge (10^400 written
+  out). "An integer is read exactly", so it is a finite number and
+  conforms. A reader that holds numbers as doubles reads +Infinity.
+- **A lone surrogate escape** (`"\ud800"`) in an epoch or a unit. As a
+  code point it is one character, a valid epoch. As text it has no UTF-8
+  form.
+
+`alarms.v1` 0.2 settled the same questions for its payloads ("Strict JSON
+first", F-126). The core states strict JSON for its own documents only
+(D000, E029). `samples.json` gives each sample already decoded, so it has
+none of these cases.
+
+**zk2py** (`telemetry.decode_json`):
+- **The members:** strict JSON's rule, as `alarms.v1` §2.4 reads its
+  payloads. A duplicate member, or a string with no UTF-8 form, makes the
+  sample `undecodable`.
+- **The numbers:** RFC 8259's text, read by §2.6. `1e400` is IEEE 754's
+  +Infinity, so a gauge is `not_finite` and a counter `wrong_type`. An
+  integer's text is exact, so a gauge of 10^400 conforms. A bound of
+  10^400 is read as its double (§2.2), +Infinity, and is `not_finite`.
+
+**Wording:** §2.6, "A JSON sample is read as `alarms.v1` §2.4 reads a
+payload: strict JSON (no duplicate member, every string with a UTF-8
+form); a number past the double range is +Infinity (or: undecodable)."
+The fixture format would need raw text for such a case.
+
+### F-144 · ambiguity · telemetry.v1 0.1 §2.6 "An integer is read exactly": a CBOR bignum, and tags
+
+> §2.6: "**An integer is read exactly:** JSON text with no fraction and no
+> exponent, CBOR's major types 0 and 1."
+
+> `samples.json`: "`{"$int": "<decimal>"}` an integer outside -2^63 to
+> 2^64-1"; case 2, "2^64, an integer by its text: out of range"
+
+CBOR's major types 0 and 1 hold −2^64 to 2^64−1. So in a CBOR resource,
+2^64 can only be a bignum: tag 2 around a byte string (RFC 8949 §3.4.3).
+RFC 8949 defines tags 2 and 3 as integers beyond the major types. Two
+readings give two reasons:
+- **By §2.6's list,** a bignum is no integer, but a tagged byte string. A
+  counter of 2^64 is then `wrong_type`, and a histogram whose `count` is a
+  bignum is no Histogram.
+- **By RFC 8949,** it is the integer 2^64, `out_of_range`, which is what
+  the fixture's `$int` gives for the same value read from JSON text.
+
+Both are `does_not`, so no conformance answer changes, but the reasons
+differ. The text says nothing of other tags either: a `timestamp` under
+tag 1 (epoch time), or a decimal fraction (tag 4) in a gauge. Core §5.2
+reads the error envelope's tags as their content ("A tag decodes as its
+content"), but that rule is the envelope's.
+
+**zk2py:** core §5.2's habit. A tag is read as its content (`zk2py.cbor`),
+so a bignum is a byte string: `wrong_type` for a counter, and `not_a_point`
+for a timestamp. Tag 1 around an integer timestamp reads as that integer.
+
+**Wording:** §2.6, "CBOR's major types 0 and 1, and its bignums (tags 2
+and 3)", or "… and nothing else: a tagged item is read as its content".
+
+### F-145 · ambiguity · telemetry.v1 0.1 §2.6 checks 8 to 12: which check "needs" bounds an earlier check found wrong
+
+> §2.6: "A reader reports every one that applies, in this order, each
+> check made alone, and a check that needs a value an earlier check found
+> wrong skipped"
+
+> §2.6: "10. **`bounds_differ`:** a histogram's bounds, valid, … 11.
+> **`counts_length`:** `counts` not one longer than `buckets`. 12.
+> **`count_sum`:** `count`, and every one of `counts`, in range, and
+> `count` not their sum"
+
+Checks 10 and 12 say what they need. Check 11 does not. When the bounds
+are not finite (8) or invalid (9), `counts_length` reads `buckets`, which
+an earlier check found wrong, but it needs only its length. Two readings
+give two answers:
+- `buckets: []`, `counts: [5, 1]`, `count: 6` is `[bounds_invalid]`, or
+  `[bounds_invalid, counts_length]`;
+- `buckets: [0.005, Infinity]` with four counts is `[not_finite]`, or
+  `[not_finite, counts_length]`.
+
+`samples.json`'s cases 49 (an infinite bound) and 51 (no bounds) both have
+`counts` one longer than `buckets`, so neither decides.
+
+**zk2py:** `counts_length` is checked whenever the value is a Histogram
+(check 6). It needs the two lengths alone, and neither is what checks 8
+and 9 found wrong. `count_sum` is checked by its own stated precondition,
+whatever `counts_length` found.
+
+**Wording:** §2.6 check 11, "… checked whenever the value is a Histogram",
+and a `samples.json` case with no bounds and two counts.
+
+### F-146 · ambiguity · telemetry.v1 0.1 §2.11 and §5: `incomparable`, a no-rate reason no pair reaches
+
+> §2.11: "There is no rate across a reset, a decrease or an incomparable
+> pair, and none of a histogram at this version"
+
+> §5, the fifth question: "None, with why: `reset`, `decreased`,
+> `incomparable`, `elapsed`. **Not asked:** not a counter (`kind`)."
+
+> `continuity.json`: "`kind` (the pair is not of two counters), `reset`,
+> `decreased`, `incomparable`, or `elapsed`"; case 39, a counter then a
+> gauge, `unobservable`, with `no_rate` `kind`
+
+By §2.10 point 2, a pair is incomparable when its kinds differ, or two
+histograms' bounds or `counts` lengths differ. Two counters are therefore
+never incomparable, and an incomparable pair always holds a sample that is
+not a counter. That pair is both incomparable (§2.11's list) and "not a
+counter" (§5's `kind`). Two readings follow:
+- **The pair is incomparable:** §2.11's sentence, so `incomparable`.
+- **The pair is not of two counters:** the fixture, so `kind`.
+
+The fixture takes `kind`. That leaves `incomparable` in a closed list of
+reasons that no pair can produce. A reader that orders §2.11's reasons
+first fails case 39.
+
+**zk2py:** `kind` first, as the fixture says. `incomparable` stays in the
+code for a pair of two counters, which cannot be formed.
+
+**Wording:** §2.11 and §5, drop `incomparable` from the rate's reasons, or
+"`kind`: either sample is not a counter, an incomparable pair included".
+
+### F-147 · gap · telemetry.v1 0.1 §2.6 check 2, with scenarios.md §7 step 3: an Epoch attachment that does not decode, and "an empty string"
+
+> §2.6 check 2: "**`epoch_invalid`:** an in-band epoch present (the
+> Point's `epoch`, or the Epoch attachment, §2.4) that is not a string of
+> 1 to 64 characters"
+
+> §2.6: "A sample the core could not decode (bytes that are not its JSON or
+> its CBOR) is unobservable here (`undecodable`)"
+
+> scenarios.md §7 step 3: "*Raw:* `bytes` at 60, with an empty string as
+> its attachment." Expected 3: "R reads step 3 as `does_not`,
+> `epoch_invalid`"
+
+`samples.json` gives each attachment already decoded ("the decoded
+attachment"), so it has no attachment whose bytes do not decode. On the
+wire:
+- **The JSON text `""`.** The attachment's type is
+  `json:telemetry.v1.Epoch`, so its bytes are JSON text, and §2.14's
+  18 bytes count the quotes. An empty string is then two bytes, which
+  decode to `""`: `epoch_invalid`.
+- **Zero bytes.** "An empty string as its attachment" also reads as zero
+  bytes. Measured, zenoh-python delivers a zero-byte attachment as present
+  and empty (`b''`), which is no JSON value.
+
+Is an attachment that is not JSON (zero bytes, or `x`) `undecodable`, so
+that the sample is unobservable and its value goes unread? Or is it an
+epoch present and not a string, `epoch_invalid`? §2.6's `undecodable`
+names the payload ("its JSON or its CBOR"), not the attachment.
+
+**zk2py:** `epoch_invalid`: the attachment is present and reads as no
+string. §7 runs all three: the JSON `""` (the scenario's step 3), zero
+bytes, and `x`. Each reads `epoch_invalid` and pairs with nothing.
+
+**Wording:** §2.6 check 2, "an Epoch attachment whose bytes do not decode
+as its encoding is an epoch present and not a string". scenarios.md §7
+step 3, "the JSON string `""` (two bytes) as its attachment".
+
+### F-148 · gap · telemetry.v1 0.1 §2.10 "in the order the reader received them", with core §4.2: a state member's pairs
+
+> §2.10: "A **pair** is two conforming samples (§2.6) of one member, in
+> the order the reader received them."
+
+> core §4.2: "A late joiner MUST merge the GET's replies and the
+> subscription's samples per key by the owner's stamp (S1, S2), whichever
+> path brought each one, and keep the newer."
+
+A reader of a state metric that seeds as core §4.2 says receives samples
+by two paths, so the order it receives them in is not the stamp order:
+- a GET's reply of 10 (stamp 1) can arrive after a live put of 12
+  (stamp 2);
+- paired in receipt order, 12 → 10 is a decrease;
+- with the instance alone throughout, that is `decreased`, established:
+  the finding, for a counter that never went down;
+- through the merge, the reply is not kept, and nothing pairs.
+
+`scenarios.md`'s members are all streams. `continuity.json`'s two state
+cases (26 and 27) are in stamp order. So neither decides.
+
+**zk2py:** for state, a pair reads the samples the merge keeps, in the
+order it keeps them (`telemetry.kept_reads`, over `zk2py.seed.kept`). Two
+`readings` checks show both answers.
+
+**Wording:** §2.10, "… in the order the reader received them; for state,
+in the order a late joiner's merge keeps them (core §4.2): a sample the
+merge does not keep is no sample of a pair". A `scenarios.md` section
+should seed a state counter.
+
+### F-149 · ambiguity · telemetry.v1 0.1 §2.6 check 1 and check 2, with core §5.2: a Point's optional member written `null`
+
+> §2.6 check 1: "`labels` present and not an object of strings; `unit`
+> present and not a string"
+
+> §2.6 check 2: "an in-band epoch present (the Point's `epoch` …) that is
+> not a string"
+
+> §2.4: "`null` is no value of any kind, and absent is not zero (§2.12)"
+
+> core §5.2: "A `cause` or `detail` that is `null` is absent."
+
+A Point with `"epoch": null`, `"unit": null` or `"labels": null` has two
+readings:
+- **Present:** in JSON's data model, the member is there. `null` is not a
+  string, so `epoch` gives `epoch_invalid`, and `unit` or `labels` gives
+  `not_a_point`. §2.4's "`null` is no value" leans this way.
+- **Absent:** the core reads its own envelope's optional members so
+  (§5.2). So does a typed reader whose optional field defaults on
+  `null`. The Point then conforms, with no in-band epoch and no unit.
+
+The second reading changes a pair's evidence: a sample whose epoch is
+`null` lends no in-band epoch, so its pair falls to presence. No
+`samples.json` case writes an optional member as `null`.
+
+**zk2py:** present, by the text's literal reading. `null` is not a
+string, so `"epoch": null` is `epoch_invalid`, and a `null` `unit` or
+`labels` is `not_a_point`.
+
+**Wording:** §2.6 check 1, "a member written `null` is present: `null`
+is not a string", and `samples.json` cases for the three members.
+
+### Read and not filed
+
+These were read for and found decided:
+- **Integral floats.** One rule, JSON Schema's `integer`, covers every
+  integer the Point holds: a counter, a timestamp, a byte of `binary`, a
+  count. `-0.0` is the counter 0. `1e300` is an integer out of range. The
+  double 2^64 is out of range, and 2^64−2048 is not.
+- **±0 bounds.** `-0.0` equals `0` as a double, so `[-0.0, 0]` is not
+  ascending, and `[0, 1.0]` matches a declared `[-0.0, 1]`. JCS writes
+  `-0.0` as `0` in a bundle, and the text compares by value, so a bundle
+  reader and a source reader agree.
+- **The rate's bits.** Python's `float(int)` is the nearest double, ties
+  to even, and its division is IEEE's. Every fixture rate matches exactly,
+  2^64−1 over one second included.
+- **The nullable carrier.** Both spellings, and a nullable form with no
+  reading, carry nothing. §2.4's table already matches none of them, so
+  no special case is needed.
+- **Events and operations.** `ignored` when they write a key, whatever its
+  value, else `not_this_profiles`. That holds even for an event typed by
+  the Point (case 79), by §0's "Metric resource", against §2.1's
+  shorter "a Point-typed resource … is a metric resource".
+- **The profile's other types as carriers.** A bare `telemetry.v1.Epoch`
+  carries `text` by §2.4's table, and a bare `telemetry.v1.Value` carries
+  nothing. No fixture covers either.
+- **A freshness re-put of a state Point** carries the same `timestamp`,
+  so its pair with the original has no rate (`elapsed`).

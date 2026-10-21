@@ -838,6 +838,91 @@ def _alarms_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _telemetry_schema(path: Path) -> list[Result]:
+    """telemetry.v1 §2.3, §3: the standard schema's published ids. The
+    file's header first (its ``file``, ``current``, ``published`` and
+    ``types`` against zk2py's tables), then each case's document, by path
+    from the repository's root, as the artifact named ``telemetry.v1``
+    inside a bundle, or inline -> its artifact id (sha256 over its JCS
+    bytes) and whether the profile publishes it."""
+    from . import jcs, telemetry as tm
+
+    data = _load_json(path)
+    repo = path.parents[4]
+    out = [
+        _check("schema: the profile's file is the current revision",
+               tm.artifact_id(jcs.loads((path.parents[1] / data["file"]).read_bytes())), data["current"]),
+        _check("schema: zk2py's published ids are §3's, oldest first",
+               [[i, r] for i, r in tm.PUBLISHED], [[x["id"], x["revision"]] for x in data["published"]]),
+        _check("schema: zk2py's four types, each with its first revision",
+               sorted(tm.TYPES.items()), sorted((t["name"], t["since"]) for t in data["types"])),
+    ]
+    for i, c in enumerate(data["cases"]):
+        name = f"schema #{i}: {c['note']}"
+        if "path" in c:
+            doc = jcs.loads((repo / c["path"]).read_bytes())
+        elif "bundle" in c:
+            doc = tm.bundle_artifact((repo / c["bundle"]).read_bytes())
+        else:
+            doc = c["document"]
+        got = tm.artifact_id(doc) if doc is not None else None
+        out.append(_check(name, {"id": got, "published": tm.is_published(got)}, c["expect"]))
+    return out
+
+
+def _telemetry_resource(r: dict[str, Any]):
+    from . import telemetry as tm
+
+    ann = r["annotations"] if "annotations" in r else tm.resolve(r["layers"])
+    return tm.declare(r["kind"], ann, r["type"], r.get("attachment"))
+
+
+def _telemetry_declarations(path: Path) -> list[Result]:
+    """telemetry.v1 §2.1, §2.2, §2.4: a resolved resource -> its
+    declaration."""
+    return [_check(f"declarations #{i}: {c['note']}", _telemetry_resource(c["resource"]).expect(), c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _telemetry_sample(s: dict[str, Any]):
+    from . import telemetry as tm
+
+    if s.get("undecodable"):
+        return tm.Sample(undecodable=True)
+    return tm.Sample(tm.from_fixture(s["value"]),
+                     tm.from_fixture(s["attachment"]) if "attachment" in s else tm.NO_ATTACHMENT)
+
+
+def _telemetry_samples(path: Path) -> list[Result]:
+    """telemetry.v1 §2.5, §2.6: a resolved resource and one sample -> its
+    conformance, and the member's kind and unit as the sample gives them."""
+    from . import telemetry as tm
+
+    return [_check(f"samples #{i}: {c['note']}",
+                   tm.conform(_telemetry_resource(c["resource"]), _telemetry_sample(c["sample"])).expect(),
+                   c["expect"])
+            for i, c in enumerate(_load_json(path)["cases"])]
+
+
+def _telemetry_continuity(path: Path) -> list[Result]:
+    """telemetry.v1 §2.9 to §2.11: two conforming samples, the counter's
+    unit and what the reader saw of presence -> the pair's continuity, how
+    its epoch was had, and its rate, compared exactly."""
+    from . import telemetry as tm
+
+    def read(x: dict[str, Any]):
+        return tm.Read(x["kind"], tm.from_fixture(x["value"]), x["epoch"], x["timestamp_ms"], x["stamp_ns"],
+                       x["arrival_ns"])
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        p = c["presence"]
+        presence = None if p is None else tm.Presence(bool(p["alone_throughout"]), p["earlier"], p["later"])
+        got = tm.continuity(read(c["earlier"]), read(c["later"]), presence, c["unit"]).expect()
+        out.append(_check(f"continuity #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -853,6 +938,8 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints},
     "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
                "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
+    "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,
+                  "samples.json": _telemetry_samples, "continuity.json": _telemetry_continuity},
 }
 
 
@@ -1301,6 +1388,147 @@ def _left_out_cases() -> list[tuple[str, Any, Any]]:
     return [(f"{label}: {note}", alarms.is_left_out(sd, est, "k", arr), want) for note, sd, est, arr, want in cases]
 
 
+def _telemetry_adopters(root: Path) -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 Appendix B, read over the adopters' real contracts, so
+    the contract reader (each type's root found with its $refs followed,
+    core §9.8) is checked beside the fixtures, which give roots already
+    followed:
+    - zenoh-modem: "Bare values, each declared by telemetry.kind, and 23 by
+      telemetry.unit (By, bit/s, ms, us, %, dB, dBm): every declaration
+      valid"; ``sdu/dropped_total`` a bare counter with no epoch (§2.14);
+    - ZenSight: "No resource declares a kind, so each Point says its own;
+      netring's two units are declared", in each contract's revision 1.1
+      and in the first revision's bundle, which carries the pre-profile id
+      (§2.3: "a reader of an old bundle meets an old id");
+    - tcgui: "no member is this profile's"."""
+    from . import telemetry as tm
+    from .contract import load_contract
+
+    ex = root.parent.parent / "examples" / "zk2"
+    spec = root.parent
+    out: list[tuple[str, Any, Any]] = []
+    label = "telemetry.v1 Appendix B"
+
+    def of(path: Path) -> dict[str, Any]:
+        return tm.contract_declarations(load_contract(path, spec_dir=spec))
+
+    modem = of(ex / "zenoh-modem" / "modem.v3.toml")
+    metric = {k: d for k, d in modem.items() if d.declaration != tm.NOT_THIS}
+    out.append((f"{label}: zenoh-modem's 73 metric streams, each a bare declared counter or gauge",
+                (len(metric), sorted({(k.split("/")[0], d.declaration, d.carrier, d.kind) for k, d in metric.items()
+                                      if d.declaration == tm.DECLARED} - {("stream", tm.DECLARED, "bare", "counter"),
+                                                                          ("stream", tm.DECLARED, "bare", "gauge")}),
+                 sorted(k for k, d in metric.items() if d.declaration != tm.DECLARED)),
+                (73, [], [])))
+    units = sorted({d.unit for d in metric.values() if d.unit is not None})
+    out.append((f"{label}: zenoh-modem's 23 units, of seven spellings, each valid",
+                (sum(d.unit is not None for d in metric.values()), units),
+                (23, sorted(["By", "bit/s", "ms", "us", "%", "dB", "dBm"]))))
+    d = modem.get("stream/sdu/dropped_total")
+    out.append((f"{label}: zenoh-modem's sdu/dropped_total, a bare counter with no epoch (§2.14)",
+                None if d is None else (d.declaration, d.carrier, d.kind, d.epoch), (tm.DECLARED, "bare", "counter", None)))
+    hist = ex / ".history"
+    netring = {"stream/flow/reassembly_gap_bytes_total": "By", "stream/flow/red/{quantile}": "ms"}
+    for iface in ("zs.sysinfo.v1", "zs.netring.v1", "zs.snmp.v1", "zs.parallax.v1"):
+        revisions = [("revision 1.1", of(ex / "zensight" / f"{iface}.toml"))]
+        revisions += [(f"published {b.name[:12]}…", tm.bundle_declarations(b.read_bytes())[1])
+                      for b in sorted((hist / iface).glob("*.bundle.json"))]
+        for tag, decls in revisions:
+            metric = {k: x for k, x in decls.items() if x.declaration != tm.NOT_THIS}
+            out.append((f"{label}: {iface} {tag}: every metric resource a stream Point declaring no kind, "
+                        "its units as written",
+                        (sorted({(x.declaration, x.carrier, x.kind, x.epoch) for x in metric.values()}),
+                         all(k.startswith("stream/") for k in metric),
+                         {k: x.unit for k, x in metric.items() if x.unit is not None}),
+                        ([(tm.DECLARED, "point", None, "point")], True,
+                         netring if iface == "zs.netring.v1" else {})))
+    tc = {}
+    for f in sorted((ex / "tcgui").glob("*.v*.toml")):
+        tc.update({f"{f.stem}:{k}": x for k, x in of(f).items()})
+    out.append((f"{label}: tcgui's composites and the rest, no member this profile's",
+                sorted({x.declaration for x in tc.values()}), [tm.NOT_THIS]))
+    return out
+
+
+def _telemetry_copies() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 §2.3: "A contract that lists a copy of the file, byte for
+    byte or only JCS-equal, carries the profile's types: the id is the
+    same", and a type of the same name in another document does not."""
+    import json as _json
+
+    from . import jcs, telemetry as tm
+
+    doc = tm.load_schema()
+    shuffled = _json.dumps(dict(reversed(list(doc.items()))), indent=3).encode()
+    changed = _json.loads(_json.dumps(doc))
+    changed["$defs"][tm.POINT]["description"] += " (a copy)"
+    other = {"kind": "jsonschema", "name": tm.POINT, "schema": tm.artifact_id(changed), "root": None}
+    label = "telemetry.v1 §2.3"
+    return [
+        (f"{label}: a JCS-equal copy (members reordered, re-indented) has the current id",
+         tm.artifact_id(jcs.loads(shuffled)), tm.CURRENT),
+        (f"{label}: a copy with one description changed has another id, not published",
+         tm.is_published(other["schema"]), False),
+        (f"{label}: its Point is not the Point: no key of the vocabulary, not a metric resource",
+         tm.declare("stream", {}, other).declaration, tm.NOT_THIS),
+    ]
+
+
+def _telemetry_state_order() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 §2.10, "in the order the reader received them", for a
+    state member read as core §4.2's late joiner reads it: the live put of
+    12 (stamp 2) arrives before the GET's reply of 10 (stamp 1), one
+    instance alone throughout. Paired in receipt order, the two read a
+    decrease within an established epoch, the finding; through the merge,
+    which keeps the newer, the reply is no sample, and nothing pairs
+    (F-148, zk2py's reading)."""
+    from . import seed, telemetry as tm
+
+    live = tm.Read("counter", 12, None, None, 2_000_000_000, 1)
+    reply = tm.Read("counter", 10, None, None, 1_000_000_000, 2)
+    alone = tm.Presence(True, "a", "a")
+    by_receipt = tm.continuity(live, reply, alone, None)
+    kept = tm.kept_reads([(live, seed.Stamp(2 << 32, "1")), (reply, seed.Stamp(1 << 32, "1"))])
+    label = "telemetry.v1 §2.10 with core §4.2 (F-148)"
+    return [
+        (f"{label}: paired in receipt order, a stale reply after a live put reads decreased, established",
+         (by_receipt.continuity, by_receipt.epoch), ("decreased", "established")),
+        (f"{label}: through the merge, the reply is not kept, and no pair is formed",
+         [r.value for r in kept], [12]),
+    ]
+
+
+def _telemetry_nulls() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 §2.6 over a `null` where a Point or its Value holds a
+    member, F-149's reading: a member written `null` is present, and `null`
+    is no value of any kind (§2.4). A Point's `value` written `null` is not
+    an object, so the payload is not a Point; a Value's own `value` written
+    `null` is of no kind's type, so `wrong_type`, for each of the six kinds,
+    never a crash; a Histogram's member written `null` likewise."""
+    from . import telemetry as tm
+
+    point = tm.declare("stream", {}, {"kind": "jsonschema", "name": tm.POINT, "schema": tm.CURRENT, "root": None})
+
+    def read(value: Any) -> Any:
+        c = tm.conform(point, tm.Sample(value))
+        return [c.conformance, list(c.reasons)]
+
+    label = "telemetry.v1 §2.6, a member written null (F-149)"
+    out = [(f"{label}: a Point's value written null is not a Point",
+            read({"timestamp": 1, "value": None}), [tm.DOES_NOT, ["not_a_point"]])]
+    out += [(f"{label}: a {kind} Value's own value written null is wrong_type",
+             read({"timestamp": 1, "value": {"type": kind, "value": None}}), [tm.DOES_NOT, ["wrong_type"]])
+            for kind in tm.KINDS]
+    out += [(f"{label}: a histogram Value whose {member} is null is wrong_type",
+             read({"timestamp": 1, "value": {"type": "histogram", "value": {
+                 **{"buckets": [1.0], "counts": [1, 0], "count": 1, "sum": 0.5}, member: None}}}),
+             [tm.DOES_NOT, ["wrong_type"]]) for member in ("buckets", "counts", "count", "sum")]
+    out += [(f"{label}: a Point's {member} written null is present: {want}",
+             read({"timestamp": 1, member: None, "value": {"type": "gauge", "value": 1}}), [tm.DOES_NOT, [want]])
+            for member, want in (("epoch", "epoch_invalid"), ("unit", "not_a_point"), ("labels", "not_a_point"))]
+    return out
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -1309,7 +1537,8 @@ def family_readings(root: Path) -> list[Result]:
     out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
-        + _left_out_cases() + _first_neither_cases()
+        + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
+        + _telemetry_state_order() + _telemetry_nulls()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
