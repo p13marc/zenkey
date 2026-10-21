@@ -7005,8 +7005,17 @@ reports no first neither, which the reader's own sight requires and the
 other list allows. No code changed. `READER_SIGHT` and
 `first_neither_list` exist only for the check.
 
-**`just py-conformance`: 1867 of 1867.** The `alarms` family stays at 316,
-and `readings` is 117 with the classification case.
+**`just py-conformance`: 1867 of 1867** at first. The `alarms` family
+stays at 316, and `readings` is 117 with the classification case.
+
+**After review of PR #816:** the classification is now 21 checks. Each of
+the twenty readings is checked on its own: its answer is neither yes nor
+no, its reason is the one intended, and its list is the one 0.7 gives it.
+A last check ties the table to `READER_SIGHT`. Before, the case keyed what
+it found by the reason the judge returned and dropped the intended one, so
+a reading that drifted to another reason could pass. `not_a_horizon` is in
+the table, with its horizon. `silent` stays on "any other reason", 0.7's
+classification. `just py-conformance`: 1887 of 1887 (`readings` 137).
 
 **`just py-alarms`: 80 of 80** against zk2py's owner and 80 of 80 against
 `owner-ac`, both exiting 0. §2, §4, §6 and §10 ran on the 4 s copy, with

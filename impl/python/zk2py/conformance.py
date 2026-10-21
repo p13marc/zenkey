@@ -1137,10 +1137,12 @@ def _reporter_loss() -> list[tuple[str, Any, Any]]:
 
 def _first_neither_cases() -> list[tuple[str, Any, Any]]:
     """alarms.v1 0.7 §2.16, "A key's first answer": every neither reason
-    the first question gives, each from a reading that yields it, on exactly
-    one of the two closed lists. freshness.v1's `silent`, a held sample
-    whose only observation is a GET that drew nothing for the key, is on
-    no named list, so it falls to "any other reason" (F-141)."""
+    the first question gives, one reading per reason, each checked on its
+    own (the answer neither yes nor no, the reason the one intended, the
+    list the one 0.7 puts it on); then that the table's reader's-sight
+    reasons are exactly 0.7's nine and that it holds twenty distinct
+    reasons. freshness.v1's `silent` is on no named list at 0.7, so it is
+    "any other reason" here (F-141)."""
     from . import alarms, freshness as fr
 
     lists = {"lists": True, "token": True}
@@ -1153,37 +1155,47 @@ def _first_neither_cases() -> list[tuple[str, Any, Any]]:
         return fr.Get(r, trusted, fr.DEFAULT_DELTA_NS)
 
     R = alarms.Reading
-    readings = {
-        "absent": R("absent"), "presence_incomplete": R("incomplete"),
-        "face_closed": R("across_face", face={"reachable": False}),
-        "no_descriptor": R("present"), "not_listed": R("present", {"lists": False}),
-        "last_known": R("present", lists, observations=[fr.Archive()], latest="firing"),
-        "incomplete": R("present", lists, observations=[sub(complete=False)], latest="firing"),
-        "not_read": R("present", lists, observations=[get(None)]),
-        "nothing_crossed": R("across_face", face={"reachable": True}, observations=[get(None)]),
-        "previous_instance": R("present", lists, observations=[sub()], latest="firing", previous_instance=True),
-        "undecodable": R("present", lists, observations=[sub()], latest="undecodable"),
-        "stale": R("present", lists, observations=[sub(age=1000)], latest="firing"),
-        "no_observation": R("present", lists, latest="firing"),
-        "silent": R("present", lists, observations=[get(None)], latest="firing"),
-        "no_stamp": R("present", lists, observations=[get(age=None)], latest="firing"),
-        "clock_untrusted": R("present", lists, observations=[get(trusted=False)], latest="firing"),
-        "clock_disagrees": R("present", lists, observations=[get(age=-5)], latest="firing"),
-        "near_horizon": R("present", lists, observations=[get(age=899.8)], latest="firing"),
-        "listened_too_short": R("present", lists, observations=[sub(age=None, listened=10)], latest="firing"),
-    }
-    got = {}
-    for want, r in readings.items():
-        a = alarms.judge(r)
-        got[a.reason] = alarms.first_neither_list(a.reason) if a.answer not in (alarms.YES, alarms.NO) else a.answer
-    a = alarms.judge(R("present", lists, observations=[sub()], latest="firing"), horizon=fr.Horizon("invalid"))
-    got[a.reason] = alarms.first_neither_list(a.reason)
-    sight = {r: "reader_sight" for r in alarms.READER_SIGHT}
-    other = {r: "other" for r in ("absent", "not_listed", "last_known", "previous_instance", "face_closed",
-                                  "undecodable", "stale", "silent", "no_stamp", "clock_disagrees", "not_a_horizon")}
+    std, invalid = alarms.HORIZON, fr.Horizon("invalid")
+    sight, other = "reader_sight", "other"
+    # (reason intended, reading, horizon, the list 0.7 puts it on)
+    table: list[tuple[str, Any, Any, str]] = [
+        ("absent", R("absent"), std, other),
+        ("presence_incomplete", R("incomplete"), std, sight),
+        ("face_closed", R("across_face", face={"reachable": False}), std, other),
+        ("no_descriptor", R("present"), std, sight),
+        ("not_listed", R("present", {"lists": False}), std, other),
+        ("last_known", R("present", lists, observations=[fr.Archive()], latest="firing"), std, other),
+        ("incomplete", R("present", lists, observations=[sub(complete=False)], latest="firing"), std, sight),
+        ("not_read", R("present", lists, observations=[get(None)]), std, sight),
+        ("nothing_crossed", R("across_face", face={"reachable": True}, observations=[get(None)]), std, sight),
+        ("previous_instance", R("present", lists, observations=[sub()], latest="firing", previous_instance=True),
+         std, other),
+        ("undecodable", R("present", lists, observations=[sub()], latest="undecodable"), std, other),
+        ("stale", R("present", lists, observations=[sub(age=1000)], latest="firing"), std, other),
+        ("no_observation", R("present", lists, latest="firing"), std, sight),
+        ("silent", R("present", lists, observations=[get(None)], latest="firing"), std, other),
+        ("no_stamp", R("present", lists, observations=[get(age=None)], latest="firing"), std, other),
+        ("clock_untrusted", R("present", lists, observations=[get(trusted=False)], latest="firing"), std, sight),
+        ("clock_disagrees", R("present", lists, observations=[get(age=-5)], latest="firing"), std, other),
+        ("near_horizon", R("present", lists, observations=[get(age=899.8)], latest="firing"), std, sight),
+        ("listened_too_short", R("present", lists, observations=[sub(age=None, listened=10)], latest="firing"),
+         std, sight),
+        ("not_a_horizon", R("present", lists, observations=[sub()], latest="firing"), invalid, other),
+    ]
     label = "alarms.v1 0.7 §2.16, a key's first answer"
-    return [(f"{label}: every neither reason the first question gives, on exactly one closed list "
-             "(`silent` on 'any other', F-141)", got, {**sight, **other})]
+    out: list[tuple[str, Any, Any]] = []
+    for want, reading, horizon, want_list in table:
+        a = alarms.judge(reading, alarms.Q_FIRING, horizon)
+        got_list = alarms.first_neither_list(a.reason) if a.answer not in (alarms.YES, alarms.NO) else None
+        out.append((f"{label}: a reading for `{want}` gives neither, `{want}`, on the {want_list} list",
+                    {"answer_neither": a.answer not in (alarms.YES, alarms.NO), "reason": a.reason,
+                     "list": got_list},
+                    {"answer_neither": True, "reason": want, "list": want_list}))
+    reasons = [t[0] for t in table]
+    out.append((f"{label}: the table holds twenty distinct reasons, and its reader's-sight ones are 0.7's nine",
+                {"distinct": len(set(reasons)), "sight": sorted(r for r, _, _, lst in table if lst == sight)},
+                {"distinct": 20, "sight": sorted(alarms.READER_SIGHT)}))
+    return out
 
 
 def _reporter_gone() -> list[tuple[str, Any, Any]]:
