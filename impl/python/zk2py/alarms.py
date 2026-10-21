@@ -767,14 +767,14 @@ class Report:
     change: str | None = None
 
 
-#: §2.16 (0.7), "A key's first answer": neither "splits by its reason, in
-#: two closed lists". The reader's own sight, "which time or the next read
-#: settles", is these nine; "any other reason … MAY be reported". zk2py's
-#: reporter reports no first neither, so it needs neither list; the
-#: readings family checks that every neither reason its judge gives is on
-#: exactly one (SPEC-FINDINGS F-141).
+#: §2.16 (0.7, 0.8), "A key's first answer": neither "splits by its reason,
+#: in two closed lists". The reader's own sight, "which time or the next
+#: read settles", is these ten, `silent` among them since 0.8 (F-141);
+#: "any other reason … MAY be reported". zk2py's reporter reports no first
+#: neither, so it needs neither list; the readings family checks that every
+#: neither reason its judge gives is on exactly one.
 READER_SIGHT = frozenset({"incomplete", "presence_incomplete", "no_descriptor", "not_read", "nothing_crossed",
-                          "clock_untrusted", "listened_too_short", "near_horizon", "no_observation"})
+                          "silent", "clock_untrusted", "listened_too_short", "near_horizon", "no_observation"})
 
 
 def first_neither_list(reason: str) -> str:
