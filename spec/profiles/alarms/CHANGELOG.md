@@ -4,6 +4,57 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-20: the cold reader's round 42 (#800, AG; #609)
+
+The spec-only implementation read 0.6 cold and ran it live (zk2py round
+42): 1861 of 1861 fixture checks, and `scenarios.md` §1 to §10, 80 of 80,
+against its own owner and against the Rust owner example, §10's 905 s
+window left out as before. It resolved F-138 and F-139, both as it had
+read them, and found two bugs of its own against 0.6's new rules (its
+reporter compared an answer with the last answer recorded, not the last
+report; it decided a presence read whole when the read returned, not
+when the question was asked). It filed one finding, F-140, and named no
+guess. Written against core 0.34, unchanged.
+
+No model change and no fixture change: `keys.json` (75), `documents.json`
+(62), `transitions.json` (27) and `conclusions.json` (107) are unchanged.
+
+**Answered: the finding.**
+- **F-140, a key's first answer leaves five reasons unclassified**
+  (§2.16). 0.6 split a first answer of neither into a cause of the key's
+  own, which MAY be reported, and the reader's own sight, which is no
+  answer to report, each by examples. The first question can also answer
+  `face_closed`, `nothing_crossed`, `no_stamp`, `clock_disagrees` and
+  `not_a_horizon`, on neither list, so two tools that take the MAY could
+  report different keys. zk2py takes the other branch, reporting no first
+  neither, and guessed nothing.
+  - Both lists are now closed, by token. **The reader's own sight** is
+    what time or the next read settles: `incomplete`,
+    `presence_incomplete`, `no_descriptor`, `not_read`, `nothing_crossed`,
+    and `freshness.v1`'s `clock_untrusted`, `listened_too_short`,
+    `near_horizon` and `no_observation`. **Any other reason** says
+    something of the alarm, its owner or the deployment that time does not
+    settle, and MAY be reported.
+  - `nothing_crossed` is the reader's sight: across a face that lets the
+    reader reach the alarms, nothing of the key has crossed yet, which is
+    `not_read` across a face. `face_closed` is not: the deployment keeps
+    the reader from the alarms, and no read settles that. `no_stamp`,
+    `clock_disagrees` and `not_a_horizon` are the owner's and the
+    contract's: a put without a stamp, a stamp ahead of the reader's clock
+    beyond δ, a `ttl_s` that is no horizon.
+  - **The reference changed for one.** zenwatch's `alerts` held a key at
+    its last word on its own sight (`NOT_YET`), a list of eight, and read
+    `nothing_crossed` as the key's: a first `nothing_crossed` across a
+    face was reported unobservable, and one after a report moved it.
+    `NOT_YET` is now the text's nine, and its test pins the other list's
+    five as the key's.
+
+**Deliberately not stated.**
+- **Which branch of the MAY.** Reporting a first neither of the key's own
+  tells the operator of a stale or undecodable alarm the notifier found at
+  its first look; not reporting it keeps a notifier to what is firing. The
+  reference reports it, zk2py does not, and both are right.
+
 ## 0.6 — 2026-10-20: the cold reader's round 41 (#800, AF; #609)
 
 The spec-only implementation read 0.4 and 0.5 cold and ran them live
