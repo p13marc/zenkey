@@ -1064,11 +1064,18 @@ async fn the_owner_example_implements_telemetry() {
         format!("telemetry instance {i1}")
     );
     // The embedded meter.v1 is the test file's, fingerprint and all.
-    let d = presence::descriptor(&tool, &"ex/meter".parse().unwrap(), &i1.parse().unwrap(), T)
-        .await
-        .unwrap()
-        .into_descriptor()
-        .unwrap();
+    // `ready` comes before the declarations reach R1: wait for the
+    // descriptor, which follows the state queryables (§8.2).
+    let (addr, instance) = ("ex/meter".parse().unwrap(), i1.parse().unwrap());
+    let d = loop {
+        match presence::descriptor(&tool, &addr, &instance, T)
+            .await
+            .unwrap()
+        {
+            presence::Found::Nothing => continue,
+            found => break found.into_descriptor().unwrap(),
+        }
+    };
     let file = zenkey::Implementation::new(common::contract("meter.v1"));
     let e = d.interfaces.iter().find(|e| e.iface == "meter.v1").unwrap();
     assert_eq!(e.contract, format!("sha256:{}", file.fingerprint().hex()));
