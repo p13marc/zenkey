@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty-six rounds.**
+**Forty-seven rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -106,7 +106,13 @@ where that was not enough, or where the spec said two things.
   F-144 wholly against zk2py's reading.
 - F-150 and F-151 were found against `telemetry.v1` 0.2, read cold and run
   live against zk2py's owner and the Rust owner example's `--telemetry`
-  (see "At telemetry.v1 0.2" at the end). Both are open.
+  (see "At telemetry.v1 0.2"). `telemetry.v1` 0.3 resolved both, as zk2py
+  read them.
+- F-152 to F-155 were found against `telemetry.v1` 0.3, read cold and run
+  with the Rust tool, `zenctl telemetry`, judging zk2py's owner beside
+  zk2py's reader (see "At telemetry.v1 0.3" at the end). F-152 is against
+  the text; F-153 to F-155 are against the tool's help and output. All
+  four are open.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -7714,6 +7720,13 @@ example's writer read them.
 nearest double (IEEE 754, round to nearest) is not an infinity", and a
 `json_text` case one past the largest double.
 
+**Status at telemetry.v1 0.3: resolved by 0.3, as zk2py read it.** §2.6
+"Finite" is by rounding: "a number's text, an integer's included, is
+finite when its exact value, rounded to the nearest double … is not an
+infinity", the edge the tie at 2^1024 − 2^970, which rounds to even,
+2^1024. `samples.json` cases 125 to 130 pin both edges, as floats and as
+integers. They pass unchanged, and round 46's reader passed them too.
+
 ### F-151 · gap · telemetry.v1 0.2 §2.6 check 2, with "Strict JSON": whether an Epoch attachment's JSON is strict
 
 > §2.6 (0.2): "**Strict JSON.** A JSON sample is read as `alarms.v1` §2.4
@@ -7745,3 +7758,219 @@ so the attachment reads `epoch_invalid`.
 **Wording:** §2.6 check 2, "… do not decode as its encoding, read as
 this section reads a sample (strict JSON, or CBOR)", and an
 `attachment_text` case with a lone surrogate.
+
+**Status at telemetry.v1 0.3: resolved by 0.3, as zk2py read it.** §2.6
+check 2: "An Epoch attachment is read as this section reads a sample of its
+encoding: strict JSON, or CBOR, depth included … and so is the JSON text
+`"\ud800"`". zk2py now decodes an attachment by its `attachment_encoding`
+(`telemetry.decode_attachment`). `samples.json` case 136 passes unchanged.
+
+## At telemetry.v1 0.3 (#609)
+
+0.3 answers F-150 and F-151 as zk2py read them. It adds three rules:
+- **a data item's depth** (§2.6): at most 256 arrays and maps, a tag
+  adding none;
+- **presence that stands on a complete read** (§2.9), with a loss between
+  two arrivals establishing neither the same epoch nor a different one;
+- **a SHOULD for a tool over many pairs** (§5): over pairs whose every
+  epoch was assumed, it says it could not tell.
+
+`samples.json` gains twelve cases (137). Everything else is unchanged:
+the schema, `declarations.json`, `continuity.json` and `schema.json`,
+and the core, at 0.35.
+
+**zk2py follows 0.3.**
+- **Depth:** `telemetry.depth` counts arrays and maps without recursion,
+  and a sample past `MAX_DEPTH` (256) is `undecodable`, in JSON and CBOR.
+  `zk2py.cbor` reads a chain of tags without recursion, so a tag adds no
+  depth.
+- **The attachment:** an Epoch attachment is decoded by its own
+  `attachment_encoding` (`decode_attachment`).
+- **Presence:** R's view now stands on a complete liveliness read after
+  its subscription (`Reader.seed_presence`, core §8.1), and gives no
+  presence to an arrival before it.
+- **§5:** `telemetry.verdict` answers over a window: a finding, no, or
+  could not tell.
+
+Of the twelve new cases, round 46's reader read two otherwise: arrays
+nested 257 deep, in JSON and in CBOR. It decoded them up to Python's
+recursion limit and read `wrong_type`. That is the new rule, and the
+cases on F-150 and F-151 passed unchanged.
+
+**`just py-conformance`: 2218 of 2218.**
+
+| Family | Before | After |
+|---|---|---|
+| telemetry | 279 of 281 (the two depth cases) | 281 of 281 |
+| readings | 179 of 179 | 186 of 186: seven of `verdict`, F-152's reading among them |
+| the 20 others | 1751 of 1751 | 1751 of 1751 |
+
+**`just py-telemetry`, three runs, each exiting 0.**
+
+| § | zk2py's owner | The Rust owner (`owner-tb`) | zk2py's owner, `zenctl telemetry` judging too |
+|---|---|---|---|
+| 1 | 12 of 12 | 12 of 12 | 16 of 16 |
+| 2 | 6 of 6 | 6 of 6 | 10 of 10 |
+| 3 | 6 of 6 | 6 of 6 | 10 of 10 |
+| 4 | 5 of 5 | 5 of 5 | 9 of 9 |
+| 5 | 5 of 5 | 5 of 5 | 8 of 8 |
+| 6 | 3 of 3 | 3 of 3 | 8 of 8 |
+| 7 | 6 of 6 | 5 of 5 | 9 of 9 |
+| 8 | 8 of 8 | 8 of 8 | 12 of 12 |
+| 9 | 5 of 5 | 5 of 5 | 8 of 8 |
+| §5 over many pairs, four windows built for the tool | | | 10 of 10, and F-152's note |
+| §2.11's conversion | 1 of 1 | 1 of 1 | 1 of 1 |
+| **Total** | **57 of 57** | **56 of 56** | **101 of 101** |
+
+**The tool against zk2py's owner.** `zenctl telemetry` was read from its
+`--help` alone: `--for`, `-c`, `--across-face` with `--contracts`,
+`--format json`, and exit 0, 1 or 2.
+- **How each section runs it:** the tool starts after the owner is up,
+  over a window covering the section. In §8 it stands across the real
+  face, on R2's `unixsock-stream` endpoint, with `--across-face`. In §9 it
+  starts after O's put of 10, so its own S4 GET seeds that value.
+- **What is compared, member by member,** against zk2py's reader:
+  - the kind and unit and where each came from;
+  - the samples' counts (received, conforming, `does_not`,
+    unobservable) and their problems;
+  - each pair's continuity, epoch, evidence and time base;
+  - each rate: exactly when timed by Points' timestamps or the owner's
+    stamps, within 5 % when timed by receipt, each reader's own clock;
+  - the exit code, against `verdict` over zk2py's reading.
+- **The readers' counterparts:** R for §1 to §7, R0F across the face for
+  §8, and in §9 a witness subscribed from the start, which reads the same
+  three values in the owner's order.
+- **They agree on every member of every section:**
+  - §1 and §2's resets, by presence and in-band;
+  - §3's two `decreased`, and its exit 1;
+  - §4's three problems;
+  - §5's `bounds_differ` and its decrease;
+  - §6's −70.0, and no value for a member never written;
+  - §7's `epoch_invalid` for the `""`, zero-byte and `x` attachments;
+  - §8's assumed reset across the face, beside the Point's in-band one;
+  - §9's merge: 10 → 12 → 15, by presence and the stamps.
+
+  Every rate timed by timestamps or stamps is the same double.
+- **The four windows built for §5's SHOULD:**
+  - counters whose every pair was assumed, and histograms likewise: the
+    tool exits 2 and zk2py says could not tell;
+  - no sample at all: both exit 2;
+  - a counter's one sample and no pair: the tool exits 0, where zk2py
+    says could not tell (F-152).
+
+### F-152 · ambiguity · telemetry.v1 0.3 §5 "Over many pairs": a counter read with no pair at all
+
+> §5 (0.3): "A tool asked "did anything go backwards?" over pairs of
+> counters or histograms whose every epoch was assumed SHOULD say it could
+> not tell, never that nothing went backwards: no decrease could have been
+> found"
+
+The SHOULD names pairs whose every epoch was assumed. It does not name a
+window that read a counter but formed no pair, one sample of it, say. Two
+readings follow:
+- **Vacuous.** Over no pair, "every epoch was assumed" holds, and so does
+  the reason given: "no decrease could have been found". The tool should
+  say it could not tell.
+- **Non-vacuous.** The SHOULD speaks of pairs that exist. With none, the
+  question had nothing to answer, and saying nothing went backwards is not
+  a no without evidence, because no evidence was asked for.
+
+`zenctl telemetry` reads the second way. Over one conforming sample of
+`drops` it exits 0, and its judgement is `not_established`, "0 pair(s),
+none decreased within an established epoch (0 established, 0 assumed)".
+That is the "nothing went backwards" the SHOULD forbids when pairs exist.
+zk2py reads the first way. Its reason ends the same way the text's does:
+nothing could have been found. No fixture decides, since `continuity.json`
+is per pair.
+
+**zk2py:** could not tell (`telemetry.verdict`), recorded as a note beside
+the tool's exit 0, never a failure.
+
+**Wording that would remove the guess:** §5, "… whose every epoch was
+assumed, or that formed no pair of a counter or histogram it read, SHOULD
+say it could not tell", or the opposite, stated.
+
+### F-153 · gap · `zenctl telemetry --help` (#819, TC): "every counter's pair assumed", and histograms
+
+> `zenctl telemetry --help`: "2 no verdict: no metric resource in scope,
+> no sample in the window, every counter's pair assumed (presence
+> unobservable throughout, no in-band epoch)"
+
+> §5 (0.3): "over pairs of counters or histograms whose every epoch was
+> assumed"
+
+The help names counters, and the text names counters or histograms. Read
+as written, a window of histograms whose every pair was assumed exits 0.
+Probed, it exits 2, "every one of the 2 pair(s) of a counter or histogram
+had its epoch assumed". The tool does what the text says, and its help
+says less.
+
+**zk2py:** read from the tool's behaviour, which matches the text. §5's
+probes check both.
+
+**Wording:** the help, "every counter's or histogram's pair assumed".
+
+### F-154 · gap · `zenctl telemetry`'s stderr: "listening" before it listens
+
+> stderr, about 10 ms after the start: "telemetry: listening 6s to the
+> metric members in scope and their owners' tokens (--for)"
+
+> `--help`: "--for <SECS> The reading's window, seconds: the subscriptions
+> listen this long"
+
+The line comes before the tool has read presence, the descriptors and the
+contracts, and so before its subscriptions are declared. Measured:
+- a sample put within about 10 ms of the line was lost in two of two
+  tries;
+- one 50 ms later or more was kept, in four of four.
+
+So a caller that starts its steps on the line loses the first sample of
+the window, and the window's start is not observable. The tool's
+judgement then misses that sample: in one probe, `drops` 10 followed by a
+raw 7 read as one conforming sample of 7, so the decrease was never
+paired and the run exited 0.
+
+**zk2py:** starts its steps 1 s after the line (`TOOL_MARGIN_S`), and
+checks that the tool read every sample zk2py's reader did. It did, in
+every section.
+
+**Wording:** print the line once the subscriptions are declared and
+presence seeded, or say in `--help` how long the window takes to open.
+
+### F-155 · gap · `zenctl telemetry --format json`: a document the help does not describe, and pairs cut to the last 16
+
+> `--help`: "--format … json (one document) or ndjson (one object per row)
+> for scripts"
+
+The help states the semantics, and not one field of the document. A
+script reading it has to infer each of these from runs:
+- **The judgement's `answer`.** It was `established` with exit 1,
+  `not_established` with exit 0 and `unobservable` with exit 2. The last
+  two stand beside "none decreased" and "could not have been found".
+- **A pair's fields:** `base` (`timestamp`, `stamp`, `arrival`), `via`
+  (absent for an assumed pair) and `presence` (`observed`, or `none`
+  across a face).
+- **A member's `pairs`,** which holds the last 16 pairs alone, while its
+  `continuity.pairs` counts all of them. Measured: 25 samples gave 24
+  pairs, and 16 were listed, from 8 → 9. Nothing in the row marks the cut.
+  A script that counts the list, or reads its first pair as the window's
+  first, is wrong without knowing it.
+
+**zk2py:** compares the tool's pair count with its own, and the listed
+pairs with the tail of its own. The sections have at most four pairs per
+member, so none was cut here.
+
+**Wording:** the help, or a pinned schema it names, stating the
+document's fields. A row should say when its `pairs` is a tail, for
+instance with `pairs_listed` beside `continuity.pairs`.
+
+### Read and not filed
+
+- **§2.9's complete read.** "A subscription's history alone" is not a
+  complete read, and core §8.1 says what one is. zk2py's R now makes one
+  after subscribing, and every section's presence evidence held.
+- **§2.9's loss between two arrivals.** zenoh-python's callback handlers
+  lose nothing, so no run here has a loss to read. `continuity.json`'s
+  presence input already says what a reader saw.
+- **The depth's edges:** 256 and 257, in JSON and in CBOR, and a tag
+  around 256. They are pinned by `samples.json` and agree with zk2py.
