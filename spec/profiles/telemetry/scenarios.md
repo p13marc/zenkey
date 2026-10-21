@@ -3,10 +3,11 @@
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. The reference runtime runs §1
-to §8 as tests of `zenkey` (`zenkey/tests/profile_telemetry.rs`, one test
+to §9 as tests of `zenkey` (`zenkey/tests/profile_telemetry.rs`, one test
 per section, named after it: `s1_counter_across_a_restart` to
-`s8_counter_across_a_face`; #819, TB). §8 is also a tool's, and the
-reference tool runs it over a real face (#819, TC).
+`s8_counter_across_a_face`, and `s9_state_counter_seeded`; #819, TB). §8
+is also a tool's, and the reference tool runs it over a real face (#819,
+TC).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.10) are v1.md's rules; core
@@ -53,13 +54,19 @@ reference tool runs it over a real face (#819, TC).
   kind        = "stream"
   type        = "json:Level"
   annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dBm" }
+
+  [resources.total]                        # a bare counter in state (0.2, §9)
+  kind        = "state"
+  type        = "json:Count"
+  annotations = { "telemetry.kind" = "counter" }
   ```
 
   `meter.json` is
   `{"$defs": {"Count": {"type": "integer", "minimum": 0}, "Level": {"type": "number"}}}`.
 - **The owner** is `lab/meter`, implementing `meter.v1` with every
   resource exposed. Its keys are
-  `zk2/lab/meter/meter.v1/stream/{frames,bytes,drops,latency,level}`. It
+  `zk2/lab/meter/meter.v1/stream/{frames,bytes,drops,latency,level}` and
+  `zk2/lab/meter/meter.v1/state/total`, whose GETs it answers (core S2). It
   writes each Point's `timestamp` from its own clock when it takes the
   value, and its `epoch` as its instance id (§2.9). "I1", "I2" name its
   instance ids in the order it mints them.
@@ -216,7 +223,8 @@ tagged `histogram` with I1 as its epoch:
    its attachment.
 2. O starts a new epoch, as in §2 step 2. 500 ms later, it publishes
    `bytes` at 0 and 50, each with I2 as its attachment.
-3. *Raw:* `bytes` at 60, with an empty string as its attachment.
+3. *Raw:* `bytes` at 60, with the JSON string `""` (two bytes) as its
+   attachment (0.2).
 
 **Expected.**
 1. Each attachment of steps 1 and 2 is the owner's instance id when it
@@ -247,3 +255,28 @@ the profile reads alike (§2.14).
 2. R0 pairs `frames` 20 → 3 as `reset`, established in-band: the Point's
    epoch crossed with it.
 3. R0 pairs nothing `decreased`, and derives no negative rate.
+
+## §9 A state counter seeded (§2.10, 0.2; core §4.2)
+
+**Setup.** R is a late joiner of `total` (core §4.2): it subscribes to
+`zk2/lab/meter/meter.v1/state/total`, then GETs it as core S4 says (target
+`All`, consolidation `Latest`), and merges the GET's replies and the
+subscription's samples by the owner's stamp, whichever path brought each.
+It still holds its liveliness subscription.
+
+**Steps.**
+1. O starts, as I1, and puts `total` at 10.
+2. R subscribes, then GETs `total`. O answers 10, with that put's stamp;
+   R holds the reply, unread.
+3. O puts `total` at 12, which R's subscription delivers.
+4. R reads the GET's reply, 10. 200 ms later, O puts `total` at 15.
+
+**Expected.**
+1. R received 12, then 10, then 15. Every sample conforms.
+2. Through the merge, the reply's stamp is below 12's, so R does not keep
+   it: R's samples of `total` are 12 and 15, and it pairs 12 → 15 as
+   `same_epoch`, established by presence (I1 alone throughout), with a
+   rate by the owner's stamps (§2.11): 3 over their nanoseconds' difference.
+3. Paired in the order received, 12 → 10 would read `decreased`,
+   established by presence: the finding, for a counter that never went
+   down. R pairs nothing `decreased`.
