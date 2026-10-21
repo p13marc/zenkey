@@ -582,7 +582,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   half (`config`, #768 CA: the validators in the profile's order of
   refusals, the window, redaction, and `Owner`, a pure state machine whose
   device acts are two-phase, `Step::Act` then `finish`, which the runtime
-  wraps), and `link.v1`'s (`link`, #769 LA: `link.exposure`, the face
+  wraps), `link.v1`'s (`link`, #769 LA: `link.exposure`, the face
   policy a deployment writes per router and its lints, the plan a generator
   derives from both, named denies with `zk` never omitted, one
   downsampling rule per concrete key, the attachment, window floors and
@@ -602,7 +602,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   other, and `narrowed_too_far` reading user names and CNs apart; text
   0.7, F-124 and F-125, #769 LH: `Block::enabled` and `check_block`'s
   `block_disabled`, and the linter's `far_of_two_faces`, a warning with no
-  face), and `alarms.v1`'s (`alarms`, #800 AA: the key recipe byte for
+  face; text 0.8, #819 TA: §2.13 cites `telemetry.v1`'s counter and
+  epoch), `alarms.v1`'s (`alarms`, #800 AA: the key recipe byte for
   byte ZenSight's — `host` and `host.*` removed first, labels by name then
   value in byte order, FNV-1a 64 — as the strict `alert_key`, the public
   `sanitize` step and the reader's `derive`, which never refuses; `Alarm`,
@@ -616,7 +617,17 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   not whole are `scope_incomplete`, never no nor not asked, F-137),
   `rederives`, `stale_firing` — on `freshness` at 900 s; text 0.8 (#800
   AE–AH), with core 0.34 publishing its vocabulary empty, and the contract moved under
-  `spec/profiles/alarms/` with its fingerprint unchanged).
+  `spec/profiles/alarms/` with its fingerprint unchanged), and
+  `telemetry.v1`'s (`telemetry`, #819 TA: the vocabulary, published by
+  core 0.35; the standard schema `spec/profiles/telemetry/telemetry.v1.json`,
+  whose types are the profile's by artifact id (`PUBLISHED`: ZenSight's
+  `3d6276dd…`, 0.1's `715ce537…`; the four ZenSight contracts list it by
+  relative path, republished at minor 1); `declaration`/`declaration_of`
+  over a resolved resource; `check`, one sample's conformance and the
+  member's kind and unit over an exact `Datum` (CBOR's NaN and ±Inf
+  kept, read `not_finite`); `pair`, a pair's continuity: an in-band epoch,
+  else presence, else assumed, with `decreased` only within an established
+  epoch; and its rate by an exact IEEE formula; text 0.1).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -749,7 +760,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.34 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.35 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
