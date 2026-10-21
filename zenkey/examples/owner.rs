@@ -9,7 +9,7 @@
 //!     [--cardinality <iface>:<resource>=<n>]...
 //!     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
 //!     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
-//!     [--alarms-rules <rule>[,<rule>...]]
+//!     [--alarms-rules <rule>[,<rule>...]] [--telemetry]
 //!     <address> <contract.toml>...
 //! ```
 //!
@@ -59,6 +59,11 @@
 //!   answers for that member, and an echo to a fan-out that leaves one
 //!   unbound names no member, so it is refused `internal`, as §5.1 says of
 //!   a server that cannot name one.
+//!
+//! - a metric stream or state with no template parameters (`telemetry.v1`
+//!   §2.1) has its writer declared before start, the one the `telemetry`
+//!   commands put through, so its publisher knows its subscribers before
+//!   the first put; nothing is put on it until a command says so.
 //!
 //! Capabilities named by `capability:` gates are all held, so gated
 //! resources are exposed too.
@@ -240,6 +245,51 @@
 //! answered `alarm adoption source=<record|archive|nothing> adopted=<keys>
 //! retired=<key>:<resolved|undecodable|phantom>,… resolved=<keys>
 //! over_bound=<keys>`, each list comma-separated, `-` when empty.
+//!
+//! **`telemetry.v1`** (`spec/profiles/telemetry/v1.md`, #819) is the
+//! runtime's writers' ([`zenkey::telemetry`]): every writer of a metric
+//! resource checks each put against the resource's declaration, refuses a
+//! counter or histogram below the last value it put in its epoch, and
+//! writes the epoch (the instance id) where the application left it out.
+//! **Its contract.** `--telemetry` implements `meter.v1`, the scenarios'
+//! contract (`spec/profiles/telemetry/scenarios.md`, "Conventions"),
+//! embedded in this example byte for byte as the runtime keeps it
+//! (`zenkey/tests/contracts/meter.v1.toml` and `meter.json`, with the
+//! profile's `telemetry.v1.json`), so the owner needs no file: its
+//! fingerprint is that file's. A contract file given that implements
+//! `meter.v1` is implemented instead, a runner's own copy. The `telemetry`
+//! commands reach the metric resources of every implemented contract,
+//! `--telemetry` or not: a resource is named by its template (`frames`),
+//! or as the descriptor names it (`stream/frames`), and as
+//! `<iface>:<resource>` when two interfaces have it. A resource with
+//! template parameters is refused at this version.
+//!
+//! Its commands, each answered by one line:
+//!
+//! ```text
+//! telemetry put <resource> <json> [<attachment json>]   through the checked writer
+//! telemetry raw <resource> <json> [<attachment json>]   from the session, unchecked
+//! telemetry new-epoch                                   Service::new_epoch (core §8.1)
+//! telemetry instance                                    the current instance id
+//! ```
+//!
+//! `<json>` is the payload as JSON text, sent as written for a JSON
+//! resource and as the same data item in CBOR for a CBOR one; the
+//! attachment, a second JSON text on the line, likewise (`""` is the empty
+//! string, an epoch no reader accepts). `put` goes through the member's
+//! writer, the one `put` and `fill` use, which keeps the last value; it is
+//! answered `telemetry put <key> epoch=<id>`, the epoch the writer holds the
+//! member to (written in the Point's `epoch`, or the Epoch attachment, where
+//! the application left it out, §2.9), or refused `refused <line>:
+//! telemetry.v1 <why>: <words>`, `why` one of `does_not <problem>,…` (§2.6's
+//! tokens, in its order), `undecodable`, `epoch given=<json> current=<id>`
+//! or `decreased epoch=<id>`; nothing is published on a refusal. `raw` puts
+//! the bytes on the member's key from the owner's session with the
+//! resource's encoding, as an owner the text does not allow would, answered
+//! `telemetry raw <key>`. `new-epoch` mints a new instance id
+//! make-before-break, answered `telemetry new-epoch <id>` once the old
+//! tokens are withdrawn: a Point put after it carries the new id. `instance`
+//! is answered `telemetry instance <id>`.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -252,10 +302,11 @@ use zenkey::alarms::{self, Alarms, Condition, FileRecord};
 use zenkey::config_v1::{self, Configuration, DesiredConfig, Startup};
 use zenkey::health::{self, Effective, Health, Level};
 use zenkey::hostid::{HostIdMinter, HostIdSource};
-use zenkey::model::authoring::Kind;
+use zenkey::model::authoring::{Encoding as WireEncoding, Kind};
 use zenkey::model::contract::{Body, Contract, Resource, load_path};
 use zenkey::model::grammar::IfaceId;
 use zenkey::model::schema::TypeId;
+use zenkey::model::telemetry as telemetry_model;
 use zenkey::model::template::{Bindings, Segment};
 use zenkey::operation::OperationServer;
 use zenkey::state::StateWriter;
@@ -311,6 +362,9 @@ pub struct Options {
     pub alarms_archive: Option<String>,
     /// `--alarms-rules <rule>,…`: the rules it evaluates; `None`: every one.
     pub alarms_rules: Option<Vec<String>>,
+    /// `--telemetry`: `meter.v1`, the scenarios' contract, implemented
+    /// (telemetry.v1), unless a contract file implements it.
+    pub telemetry: bool,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
@@ -340,7 +394,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--cardinality <iface>:<resource>=<n>]...
     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
-    [--alarms-rules <rule>[,<rule>...]]
+    [--alarms-rules <rule>[,<rule>...]] [--telemetry]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
 
 Standard output, first:
@@ -358,6 +412,7 @@ Command words:
   put, delete, fill                       one write on a member (core §2.7)
   config ...                              config.v1 (--config)
   alarm ...                               alarms.v1 (--alarms), below
+  telemetry ...                           telemetry.v1's writers, below
 
 alarms.v1 (spec/profiles/alarms/v1.md)
   Implemented by the runtime with --alarms, implied by any --alarms-* option,
@@ -407,6 +462,41 @@ alarms.v1 (spec/profiles/alarms/v1.md)
   A restart is the process's: kill it (no close), or close standard input (a
   clean close, which resolves and deletes nothing), then start it again with
   the same --alarms-record.
+
+telemetry.v1 (spec/profiles/telemetry/v1.md)
+  Every writer of a metric resource checks each put against its declaration,
+  refuses a counter or histogram below the last value it put in its epoch,
+  and writes the epoch (the instance id) where the put leaves it out: a
+  counter's or histogram's Point gains \"epoch\", a bare one whose attachment
+  is telemetry.v1.Epoch gets it as its attachment.
+
+  --telemetry                     implement meter.v1, the scenarios' contract
+                                  (scenarios.md, Conventions), embedded as
+                                  zenkey/tests/contracts/meter.v1.toml has it; a
+                                  meter.v1 contract file given is used instead
+  The commands reach the metric resources of every contract implemented, named
+  by template (frames), as the descriptor names them (stream/frames), or as
+  <iface>:<resource>; a resource with template parameters is refused.
+
+  telemetry put <resource> <json> [<attachment json>]
+                                  through the member's checked writer
+  telemetry raw <resource> <json> [<attachment json>]
+                                  from the owner's session, unchecked
+  telemetry new-epoch             a new instance id, make-before-break
+  telemetry instance              the current instance id
+  <json> is sent as written to a JSON resource, as the same item in CBOR to a
+  CBOR one; the attachment likewise (\"\" is the empty string).
+
+  Answers, one line each:
+    telemetry put <key> epoch=<id>
+    telemetry raw <key>
+    telemetry new-epoch <id>      once the old tokens are withdrawn
+    telemetry instance <id>
+    refused <line>: telemetry.v1 <why>: <words>
+                                  <why>: does_not <problem>[,<problem>...] (v1.md
+                                  §2.6's tokens), undecodable,
+                                  epoch given=<json> current=<id>, decreased epoch=<id>;
+                                  nothing is published
 ";
 
 fn level_name(l: Option<Level>) -> String {
@@ -425,7 +515,7 @@ impl Options {
              [--cardinality <iface>:<resource>=<n>]... \
              [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist] \
              [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>] \
-             [--alarms-rules <rule>[,<rule>...]] \
+             [--alarms-rules <rule>[,<rule>...]] [--telemetry] \
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
@@ -448,6 +538,7 @@ impl Options {
             alarms_record: None,
             alarms_archive: None,
             alarms_rules: None,
+            telemetry: false,
             address: String::new(),
             contracts: Vec::new(),
         };
@@ -576,6 +667,10 @@ impl Options {
                     o.alarms = true;
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--telemetry" => {
+                    o.telemetry = true;
+                    rest = tail;
+                }
                 [flag, ..] if flag.starts_with("--") => return Err(usage()),
                 _ => break,
             }
@@ -658,6 +753,10 @@ pub async fn run_with(
             }
         }
         imps.push(imp);
+    }
+    // telemetry.v1 (#819): the scenarios' meter.v1, unless a file has it.
+    if opts.telemetry && !imps.iter().any(|i| i.iface().to_string() == "meter.v1") {
+        imps.push(Implementation::new(meter_contract()?));
     }
 
     // hostid.v1 §2.7: the system is minted before the session opens, and a
@@ -792,6 +891,13 @@ impl Ctx<'_> {
     /// Answers one command line (the module doc's): `config restart` here,
     /// since it replaces the instance; every other one by [`command`].
     async fn command(&self, line: &str, mut up: Up) -> Result<(String, Up), BoxError> {
+        if line.split_whitespace().next() == Some("telemetry") {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let answer = telemetry_command(line, &mut up, self.session)
+                .await
+                .unwrap_or_else(|why| format!("refused {}: {why}", words.join(" ")));
+            return Ok((answer, up));
+        }
         if line.split_whitespace().collect::<Vec<_>>() != ["config", "restart"] {
             let answer = command(line, &mut up, self.configured.as_ref()).await;
             return Ok((answer, up));
@@ -868,6 +974,24 @@ impl Ctx<'_> {
                             })
                             .await?,
                         );
+                    }
+                    Body::Data(_)
+                        if !r.template.has_params()
+                            && matches!(r.kind, Kind::Stream | Kind::State)
+                            && telemetry_model::declaration_of(&members.contracts[&iface], &r)
+                                .declared()
+                                .is_some() =>
+                    {
+                        // telemetry.v1 (#819): a metric member's writer is
+                        // declared before start, so that its publisher knows
+                        // its subscribers before the first `telemetry put`.
+                        let key = b.key(&iface, &name, &none)?.to_string();
+                        let held = if r.kind == Kind::State {
+                            Held::State(b.declare_state_writer(&iface, &name, &none).await?)
+                        } else {
+                            Held::Stream(Box::new(b.declare_writer(&iface, &name, &none).await?))
+                        };
+                        members.writers.insert(key, held);
                     }
                     _ => {
                         b.expose(&iface, &name)?;
@@ -1027,6 +1151,87 @@ fn bind(r: &Resource, values: &[String]) -> Result<Bindings, String> {
 }
 
 impl Members {
+    /// The writer of the member `key` of `r`, made on its first write: one
+    /// per member, which `put`, `fill` and `telemetry put` share.
+    async fn held(
+        &mut self,
+        svc: &mut Service,
+        iface: &IfaceId,
+        r: &Resource,
+        bound: &Bindings,
+        key: &str,
+    ) -> Result<&Held, String> {
+        if !self.writers.contains_key(key) {
+            let resource = zenkey::implementation::resource_name(r);
+            let err = |e: zenkey::Error| e.to_string();
+            let held = match r.kind {
+                Kind::State => Held::State(
+                    svc.state_writer(iface, &resource, bound)
+                        .await
+                        .map_err(err)?,
+                ),
+                Kind::Stream => Held::Stream(Box::new(
+                    svc.writer(iface, &resource, bound).await.map_err(err)?,
+                )),
+                Kind::Event => Held::Event(svc.event_writer(iface, &resource, bound).map_err(err)?),
+                Kind::Operation => return Err(format!("{resource:?} is an operation")),
+            };
+            self.writers.insert(key.to_owned(), held);
+        }
+        Ok(self.writers.get(key).expect("held"))
+    }
+
+    /// The metric resource `name` names (the module doc's `telemetry`
+    /// commands): its interface and resource, refused unless it is one
+    /// (telemetry.v1 §2.1) without template parameters.
+    fn metric(&self, name: &str) -> Result<(IfaceId, Resource), String> {
+        let (iface, res) = match name.split_once(':') {
+            Some((i, r)) => (Some(i.parse::<IfaceId>().map_err(|e| format!("{e}"))?), r),
+            None => (None, name),
+        };
+        let mut found: Vec<(&IfaceId, &Contract, &Resource)> = self
+            .contracts
+            .iter()
+            .filter(|(i, _)| iface.as_ref().is_none_or(|want| want == *i))
+            .flat_map(|(i, c)| c.resources.iter().map(move |r| (i, c, r)))
+            .filter(|(_, _, r)| {
+                zenkey::implementation::resource_name(r) == res || r.template.as_str() == res
+            })
+            .collect();
+        found.sort_by_key(|(i, _, _)| i.to_string());
+        let (i, c, r) = match found.as_slice() {
+            [] => return Err(format!("no resource {name:?} is implemented here")),
+            [one] => *one,
+            many => {
+                let names: Vec<String> = many
+                    .iter()
+                    .map(|(i, _, r)| format!("{i}:{}", zenkey::implementation::resource_name(r)))
+                    .collect();
+                return Err(format!(
+                    "{name:?} is ambiguous: {}; name one as <iface>:<resource>",
+                    names.join(", ")
+                ));
+            }
+        };
+        match telemetry_model::declaration_of(c, r) {
+            telemetry_model::Declaration::Declared(_) => {}
+            other => {
+                return Err(format!(
+                    "{i} {:?} is not a metric resource (telemetry.v1 §2.1): its declaration is {}",
+                    zenkey::implementation::resource_name(r),
+                    other.as_str()
+                ));
+            }
+        }
+        if r.template.has_params() {
+            return Err(format!(
+                "{i} {:?} has template parameters, which the telemetry commands do not bind",
+                zenkey::implementation::resource_name(r)
+            ));
+        }
+        Ok((i.clone(), r.clone()))
+    }
+
     /// One write on the member of `resource` the values bind (§2.7), or why
     /// not; for `delete`, the state member's delete. Answers its key.
     async fn write(
@@ -1053,24 +1258,7 @@ impl Members {
             .map_err(|e| e.to_string())?
             .to_string();
         let err = |e: zenkey::Error| e.to_string();
-        if !self.writers.contains_key(&key) {
-            let held = match r.kind {
-                Kind::State => Held::State(
-                    svc.state_writer(&iface, resource, &bound)
-                        .await
-                        .map_err(err)?,
-                ),
-                Kind::Stream => Held::Stream(Box::new(
-                    svc.writer(&iface, resource, &bound).await.map_err(err)?,
-                )),
-                Kind::Event => {
-                    Held::Event(svc.event_writer(&iface, resource, &bound).map_err(err)?)
-                }
-                Kind::Operation => return Err(format!("{resource:?} is an operation")),
-            };
-            self.writers.insert(key.clone(), held);
-        }
-        match (self.writers.get(&key).expect("held"), delete) {
+        match (self.held(svc, &iface, &r, &bound, &key).await?, delete) {
             (Held::State(w), false) => w.put("ok").await.map(|_| key).map_err(err),
             (Held::State(w), true) => w.delete().await.map(|_| key).map_err(err),
             (Held::Stream(w), false) => w.put("ok").await.map(|()| key).map_err(err),
@@ -1274,6 +1462,149 @@ async fn alarm_command(words: &[&str], rest: &str, a: &Alarms) -> Result<String,
         _ => Err(
             "usage: alarm raise <json> | resolve <alert_key> | confirm <alert_key>|all on|off | \
              list | adoption"
+                .to_owned(),
+        ),
+    }
+}
+
+/// `meter.v1`, the telemetry.v1 scenarios' contract, as the runtime keeps
+/// it (`zenkey/tests/contracts/`), with the profile's schema: embedded, so
+/// `--telemetry` needs no file.
+const METER_TOML: &str = include_str!("../tests/contracts/meter.v1.toml");
+const METER_JSON: &str = include_str!("../tests/contracts/meter.json");
+const TELEMETRY_JSON: &str = include_str!("../../spec/profiles/telemetry/telemetry.v1.json");
+
+/// `meter.v1` loaded from the embedded files, laid out as the source tree
+/// lays them out, so the contract lists its schemas by the same paths and
+/// keeps its fingerprint.
+fn meter_contract() -> Result<Contract, BoxError> {
+    let root = tempfile::tempdir()?;
+    let contracts = root.path().join("zenkey/tests/contracts");
+    let profile = root.path().join("spec/profiles/telemetry");
+    std::fs::create_dir_all(&contracts)?;
+    std::fs::create_dir_all(&profile)?;
+    std::fs::write(contracts.join("meter.v1.toml"), METER_TOML)?;
+    std::fs::write(contracts.join("meter.json"), METER_JSON)?;
+    std::fs::write(profile.join("telemetry.v1.json"), TELEMETRY_JSON)?;
+    let l = load_path(&contracts.join("meter.v1.toml"));
+    l.contract
+        .ok_or_else(|| format!("meter.v1, embedded:\n{}", l.report).into())
+}
+
+/// The payload and the optional attachment of a `telemetry put|raw`: two
+/// JSON texts, each as written.
+fn json_args(rest: &str) -> Result<(&str, Option<&str>), String> {
+    let mut values = serde_json::Deserializer::from_str(rest).into_iter::<serde_json::Value>();
+    match values.next() {
+        Some(Ok(_)) => {}
+        Some(Err(e)) => return Err(format!("the payload is not JSON: {e}")),
+        None => return Err("a payload, as JSON".to_owned()),
+    }
+    let end = values.byte_offset();
+    let (payload, tail) = (rest[..end].trim(), rest[end..].trim());
+    if tail.is_empty() {
+        return Ok((payload, None));
+    }
+    serde_json::from_str::<serde_json::Value>(tail)
+        .map_err(|e| format!("the attachment is not one JSON text: {e}"))?;
+    Ok((payload, Some(tail)))
+}
+
+/// A JSON text as a resource carries it: as written for JSON, the same
+/// data item for CBOR.
+fn as_wire(text: &str, wire: Option<WireEncoding>) -> Result<Vec<u8>, String> {
+    match wire {
+        Some(WireEncoding::Cbor) => {
+            let v: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+            let mut out = Vec::new();
+            ciborium::into_writer(&v, &mut out).map_err(|e| e.to_string())?;
+            Ok(out)
+        }
+        _ => Ok(text.as_bytes().to_vec()),
+    }
+}
+
+/// A writer's refusal as `telemetry put` answers it (the module doc's).
+fn telemetry_refusal(e: &zenkey::Error) -> String {
+    use zenkey::telemetry::Reason;
+    let zenkey::Error::Telemetry { reason, .. } = e else {
+        return e.to_string();
+    };
+    let why = match &**reason {
+        Reason::DoesNot(problems) => format!(
+            "does_not {}",
+            problems
+                .iter()
+                .map(|p| p.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Reason::Undecodable(_) => "undecodable".to_owned(),
+        Reason::Epoch { given, current } => format!(
+            "epoch given={} current={current}",
+            serde_json::to_string(given).unwrap_or_default()
+        ),
+        Reason::Decreased { epoch, .. } => format!("decreased epoch={epoch}"),
+    };
+    format!("telemetry.v1 {why}: {e}")
+}
+
+/// Answers a `telemetry` command (the module doc's).
+async fn telemetry_command(
+    line: &str,
+    up: &mut Up,
+    session: &zenoh::Session,
+) -> Result<String, String> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let Up { svc, members, .. } = up;
+    match words.as_slice() {
+        ["telemetry", "instance"] => Ok(format!("telemetry instance {}", svc.instance())),
+        ["telemetry", "new-epoch"] => {
+            let id = svc.new_epoch().await.map_err(|e| e.to_string())?;
+            Ok(format!("telemetry new-epoch {id}"))
+        }
+        ["telemetry", verb @ ("put" | "raw"), name, _, ..] => {
+            let (payload, attachment) = json_args(after_words(line, 3))?;
+            let (iface, r) = members.metric(name)?;
+            let Body::Data(d) = &r.body else {
+                return Err(format!("{name:?} is an operation"));
+            };
+            let none = Bindings::new();
+            let resource = zenkey::implementation::resource_name(&r);
+            let key = svc
+                .key(&iface, &resource, &none)
+                .map_err(|e| e.to_string())?
+                .to_string();
+            let bytes = as_wire(payload, d.encoding)?;
+            let attached = attachment
+                .map(|a| as_wire(a, d.attachment_encoding))
+                .transpose()?;
+            if *verb == "raw" {
+                session
+                    .put(&key, bytes)
+                    .encoding(zenkey::writer::wire_encoding(&d.type_, d.encoding, &none))
+                    .attachment(attached)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                return Ok(format!("telemetry raw {key}"));
+            }
+            let (put, epoch) = match members.held(svc, &iface, &r, &none, &key).await? {
+                Held::State(w) => (
+                    w.put_with(bytes, attached).await.map(|_| ()),
+                    w.writer().epoch(),
+                ),
+                Held::Stream(w) => (w.put_with(bytes, attached).await, w.epoch()),
+                Held::Event(_) => return Err(format!("{name:?} is an event")),
+            };
+            put.map_err(|e| telemetry_refusal(&e))?;
+            Ok(format!(
+                "telemetry put {key} epoch={}",
+                epoch.map_or_else(|| "-".to_owned(), |e| e.to_string())
+            ))
+        }
+        _ => Err(
+            "usage: telemetry put <resource> <json> [<attachment json>] | raw <resource> <json> \
+             [<attachment json>] | new-epoch | instance"
                 .to_owned(),
         ),
     }
