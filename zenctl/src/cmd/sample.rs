@@ -89,7 +89,9 @@ impl Line {
                 bytes,
             };
         }
-        let c = lens.check(key, member, encoding, &bytes);
+        // A metric resource's sample is read by telemetry.v1 too, its
+        // attachment with it: a bare counter's epoch rides there (#819, TC).
+        let c = lens.check_sample(key, member, encoding, &bytes, attachment);
         let attachment = attachment.map(|a| lens.render(key, Member::Attachment, None, a));
         Line {
             identity: c.identity,

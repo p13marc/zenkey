@@ -328,7 +328,7 @@ pub use model::namespace::{join as with_namespace, strip as strip_namespace};
 pub use bus::lens::{LensFeed, REFRESH_MIN as LENS_REFRESH_MIN, read as read_lens};
 pub use model::lens::{
     Checked, Lens, Resolution, Resolved, check_payload, conformance, declared_qos, observed_qos,
-    qos_mismatch,
+    qos_mismatch, sample_conformance,
 };
 // A tree's model (#614, FL4): the declared keyspace from the lens, merged
 // with the observed snapshot and the watch set; and each key's identity,

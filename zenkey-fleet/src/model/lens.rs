@@ -339,7 +339,9 @@ impl<'a> Lens<'a> {
 
     /// Rungs 1–7 for one payload of `member`, and its conformance (§7.2,
     /// §7.3). The rendering's key is namespace-relative when the key sits in
-    /// the namespace, and the wire key otherwise.
+    /// the namespace, and the wire key otherwise. A metric resource's
+    /// payload is read by `telemetry.v1` too ([`Lens::check_sample`]), with
+    /// no attachment.
     pub fn check(
         &self,
         wire: &str,
@@ -347,11 +349,31 @@ impl<'a> Lens<'a> {
         encoding: Option<&str>,
         bytes: &[u8],
     ) -> Checked {
+        self.check_sample(wire, member, encoding, bytes, None)
+    }
+
+    /// [`Lens::check`], with the sample's attachment when it carried one:
+    /// a metric resource's payload (`telemetry.v1` §2.1) is then read by
+    /// the profile after its type's own check (§2.6, #819 TC), and a
+    /// sample that does not conform is `invalid` with the profile's reasons
+    /// named — a Point whose tag or unit disagrees with its declaration, a
+    /// counter out of range, a histogram over other bounds. A bare
+    /// counter's in-band epoch rides its attachment (§2.4), which only a
+    /// caller holding the sample can give.
+    pub fn check_sample(
+        &self,
+        wire: &str,
+        member: Member,
+        encoding: Option<&str>,
+        bytes: &[u8],
+        attachment: Option<&[u8]>,
+    ) -> Checked {
         let resolution = self.resolve(wire);
         let key = self.relative(wire).unwrap_or(wire);
         match &resolution.resolved {
             Some(r) => {
-                let (rendering, conformance) = check_resolved(r, member, encoding, bytes);
+                let (rendering, conformance) =
+                    check_resolved(r, member, encoding, bytes, attachment);
                 Checked {
                     identity: resolution.identity,
                     rendering,
@@ -483,6 +505,7 @@ fn check_resolved(
     member: Member,
     encoding: Option<&str>,
     bytes: &[u8],
+    attachment: Option<&[u8]>,
 ) -> (PayloadRendering, Conformance) {
     let resource = r.resource();
     let name = r.resource_name();
@@ -538,6 +561,16 @@ fn check_resolved(
             Conformance::Undecodable { declared, reason },
         ),
     };
+    let conformance = match member {
+        Member::Type => telemetry_conformance(
+            conformance,
+            r.revision.contract(),
+            resource,
+            bytes,
+            attachment,
+        ),
+        _ => conformance,
+    };
     (
         PayloadRendering {
             key: r.key.clone(),
@@ -566,6 +599,7 @@ pub fn check_payload(
     member: Member,
     encoding: Option<&str>,
     bytes: &[u8],
+    attachment: Option<&[u8]>,
 ) -> std::result::Result<crate::report::PayloadCheck, String> {
     let bundle = revision.bundle();
     let name = zenkey::implementation::resource_name(resource);
@@ -604,6 +638,16 @@ pub fn check_payload(
                 "{media_type} is a raw type: it declares no structure to check bytes against"
             ));
         }
+    };
+    let conformance = match member {
+        Member::Type => telemetry_conformance(
+            conformance,
+            revision.contract(),
+            resource,
+            bytes,
+            attachment,
+        ),
+        _ => conformance,
     };
     Ok(crate::report::PayloadCheck {
         iface: revision.iface().to_string(),
@@ -656,6 +700,73 @@ pub fn conformance(revision: &Revision, rendering: &PayloadRendering) -> Conform
         },
         Rendered::Structural { why, .. } => Conformance::NotChecked {
             reason: why.words(),
+        },
+    }
+}
+
+/// [`conformance`] of a sample in hand (a `watch` delivery, #819 TC): the
+/// rendering's, then, for a metric resource's payload, `telemetry.v1`'s
+/// reading of its bytes and its attachment (§2.6), as
+/// [`Lens::check_sample`] reads them.
+pub fn sample_conformance(
+    revision: &Revision,
+    rendering: &PayloadRendering,
+    payload: &[u8],
+    attachment: Option<&[u8]>,
+) -> Conformance {
+    let c = conformance(revision, rendering);
+    let Some(res) = &rendering.resource else {
+        return c;
+    };
+    if res.member != Member::Type.as_str() {
+        return c;
+    }
+    let contract = revision.contract();
+    match contract
+        .resources
+        .iter()
+        .find(|r| zenkey::implementation::resource_name(r) == res.resource)
+    {
+        Some(r) => telemetry_conformance(c, contract, r, payload, attachment),
+        None => c,
+    }
+}
+
+/// A payload's conformance, read again by `telemetry.v1` when its resource
+/// is a metric resource (§2.1, §2.6; #819 TC): a sample that does not
+/// conform is `invalid`, the profile's reasons named after the type's own.
+/// The type's verdict stands otherwise: bytes the core could not decode
+/// stay undecodable, a raw type stays not checked, and a sample the
+/// profile cannot read (an invalid declaration, bytes that are not strict
+/// JSON) adds nothing — `zenctl telemetry` and the checks say why.
+fn telemetry_conformance(
+    c: Conformance,
+    contract: &zenkey_model::contract::Contract,
+    resource: &Resource,
+    payload: &[u8],
+    attachment: Option<&[u8]>,
+) -> Conformance {
+    if !matches!(c, Conformance::Valid | Conformance::Invalid { .. }) {
+        return c;
+    }
+    let Some(ty) = crate::model::telemetry::MetricType::of(contract, resource) else {
+        return c;
+    };
+    let zenkey_model::telemetry::Conformance::DoesNot(problems) =
+        ty.check(payload, attachment).conformance
+    else {
+        return c;
+    };
+    let words = problems
+        .into_iter()
+        .map(crate::model::telemetry::problem_words);
+    match c {
+        Conformance::Invalid { mut violations } => {
+            violations.extend(words);
+            Conformance::Invalid { violations }
+        }
+        _ => Conformance::Invalid {
+            violations: words.collect(),
         },
     }
 }
@@ -998,6 +1109,63 @@ mod tests {
             lens.provenance(Some("lab/m"), "a1b"),
             Provenance::Unattributable,
             "no meta.zid: unattributable, never foreign"
+        );
+    }
+
+    /// A metric resource's sample is read by `telemetry.v1` after its type
+    /// (#819, TC): a Point the schema admits whose tag or unit disagrees with
+    /// the declaration is `invalid` with the profile's reasons, and a bare
+    /// counter's Epoch attachment is read where the sample gives one.
+    #[test]
+    fn a_metric_sample_is_read_by_telemetry_v1() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/meter.v1.toml");
+        let (set, problems) = ContractSet::load_path(&path);
+        assert!(problems.is_empty(), "{problems:?}");
+        let lens = Lens::new("", None, &set).offline(&set);
+        let frames = "zk2/lab/meter/meter.v1/stream/frames";
+        let bytes = |v: serde_json::Value| serde_json::to_vec(&v).unwrap();
+        let check = |key: &str, v: serde_json::Value, a: Option<&[u8]>| {
+            lens.check_sample(key, Member::Type, None, &bytes(v), a)
+                .conformance
+        };
+        assert_eq!(
+            check(
+                frames,
+                json!({"timestamp": 1, "value": {"type": "counter", "value": 3}}),
+                None
+            ),
+            Conformance::Valid
+        );
+        let Conformance::Invalid { violations } = check(
+            frames,
+            json!({"timestamp": 1, "value": {"type": "gauge", "value": 3.5}, "unit": "By"}),
+            None,
+        ) else {
+            panic!("a Point whose tag and unit disagree is invalid");
+        };
+        assert_eq!(violations.len(), 2, "{violations:?}");
+        assert!(violations[0].starts_with("telemetry.v1 §2.6 tag_disagrees"));
+        assert!(violations[1].starts_with("telemetry.v1 §2.6 unit_disagrees"));
+        let bytes_key = "zk2/lab/meter/meter.v1/stream/bytes";
+        assert_eq!(
+            check(bytes_key, json!(60), Some(b"\"e1\"")),
+            Conformance::Valid
+        );
+        let Conformance::Invalid { violations } = check(bytes_key, json!(60), Some(b"\"\"")) else {
+            panic!("an empty epoch is epoch_invalid");
+        };
+        assert!(violations[0].contains("epoch_invalid"), "{violations:?}");
+        // The level gauge is a bare number: a string is the schema's
+        // violation first, then the profile's.
+        let Conformance::Invalid { violations } =
+            check("zk2/lab/meter/meter.v1/stream/level", json!("x"), None)
+        else {
+            panic!("a string is no gauge");
+        };
+        assert!(
+            violations.last().unwrap().contains("wrong_type"),
+            "{violations:?}"
         );
     }
 }
