@@ -354,3 +354,14 @@ py-alarms *ARGS:
     protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
     ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
         target/py-venv/bin/python -m zk2py.alarms_scenarios {{ARGS}}
+
+# The Python implementation's telemetry.v1 scenarios (spec/profiles/telemetry/
+# scenarios.md §1–§8) against zk2py's owner on in-process zenoh-python
+# routers, §8 also across a face that denies @zk. No Rust build; about a
+# minute. `--only N` passes through.
+py-telemetry *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
+    ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
+        target/py-venv/bin/python -m zk2py.telemetry_scenarios {{ARGS}}

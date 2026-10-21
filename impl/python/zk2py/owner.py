@@ -43,6 +43,11 @@ bound to nothing (§3.2). Then step 1 (resources, and the state values),
 step 3 (the descriptor's queryable and its first put, then the bundles'
 queryables) and step 4 (the instance token, then the interface tokens).
 
+**Re-minting (§8.1).** :meth:`Owner.new_epoch` starts a new instance id
+while running, make-before-break: the new descriptor's queryable and first
+put, then its tokens, and only then the old ones undeclared. Each instance's
+descriptor queryable answers with its own record, so the overlap reads true.
+
 The session is a zenoh *router* listening on a loopback port, or, with
 ``connect``, a client of a router: the second is what ``state.md §1`` and
 ``presence.md §1–§2`` need. Timestamping (the HLC) is enabled, as §4.3
@@ -439,6 +444,10 @@ class Owner:
         #: :meth:`answer_state` with what :meth:`state_answer` made
         self.state_hold: Any = None
         self.before_tokens = before_tokens
+        #: §8.2's plan, kept for a re-mint (:meth:`new_epoch`)
+        self._plan_made: dict[str, list[tuple[dict[str, Any], str]]] = {}
+        #: the current instance's descriptor queryable and tokens
+        self._instance_entities: list[Any] = []
 
     # -- keys -------------------------------------------------------------
 
@@ -614,26 +623,67 @@ class Owner:
             self.before_tokens(self)
         # Step 3: the descriptor's queryable and its first put (§3.3), then a
         # contract queryable per interface.
+        self._plan_made = plan
+        self._instance_entities = self._declare_instance(plan, bundles=True)
+        # Step 4 is the second half of _declare_instance.
+        if self.horizons:
+            self._ensure_refresher()
+
+    def _declare_instance(self, plan: dict[str, list[tuple[dict[str, Any], str]]],
+                          bundles: bool = False) -> list[Any]:
+        """§8.2 steps 3 and 4 for the current instance id: the descriptor's
+        queryable and its first put, the contracts' queryables (once, at
+        start: they are location-free, §8.4), then the instance token and the
+        interface tokens. Returns the entities that belong to this instance,
+        which :meth:`new_epoch` undeclares."""
+        s = self.session
+        assert s is not None
+        mine: list[Any] = []
         self.descriptor = self._descriptor(plan)
-        self._entities.append(s.declare_queryable(
-            self.instance_key, zenoh.handlers.Callback(self._descriptor_handler), complete=True))
-        s.put(self.instance_key, self.descriptor, encoding="application/json", timestamp=self.mint())
-        for c in self.contracts:
-            key = f"zk2/@zk/contract/{c.interface}/{c.fingerprint.removeprefix('sha256:')}"
-            data = bundle.build(c)
-            self._entities.append(s.declare_queryable(
-                key, zenoh.handlers.Callback(lambda q, data=data, key=key: q.reply(
-                    key, data, encoding="application/json")), complete=True))
+        key, doc = self.instance_key, self.descriptor
+        # §3.3 "The GET": one reply, application/json, no attachment and no
+        # timestamp. Each instance's queryable answers with its own record, so
+        # the old one still answers truly during a re-mint's overlap.
+        mine.append(s.declare_queryable(key, zenoh.handlers.Callback(
+            lambda q, key=key, doc=doc: q.reply(key, doc, encoding="application/json")), complete=True))
+        s.put(key, doc, encoding="application/json", timestamp=self.mint())
+        if bundles:
+            for c in self.contracts:
+                ckey = f"zk2/@zk/contract/{c.interface}/{c.fingerprint.removeprefix('sha256:')}"
+                data = bundle.build(c)
+                self._entities.append(s.declare_queryable(
+                    ckey, zenoh.handlers.Callback(lambda q, data=data, ckey=ckey: q.reply(
+                        ckey, data, encoding="application/json")), complete=True))
         # Step 4: the instance token, then the interface tokens.
         lv = s.liveliness()
-        self._entities.append(lv.declare_token(self.instance_key))
+        mine.append(lv.declare_token(key))
         for c in self.contracts:
             if c.interface not in self.tokenless and any(status == "exposed" for _, status in plan[c.interface]):
                 fp16 = c.fingerprint.removeprefix("sha256:")[:16]
-                self._entities.append(lv.declare_token(
+                mine.append(lv.declare_token(
                     f"zk2/{self.system}/{self.service}/@zk/alive/{c.interface}/{self.instance}/{fp16}"))
-        if self.horizons:
-            self._ensure_refresher()
+        self._entities.extend(mine)
+        return mine
+
+    def new_epoch(self) -> str:
+        """Core §1.5 and §8.1: a new instance id while running, "make-before-
+        break": the new descriptor's queryable and first put, then its
+        tokens, in §8.2's order, and only then the old ones undeclared, "an
+        overlap, never a gap". The session is kept (core §1.5's SHOULD of a
+        new session is not taken: ``telemetry.v1`` scenarios §2, "the process
+        unchanged"), so the stamps' id stays. Returns the old instance id."""
+        assert self.session is not None
+        old, old_entities = self.instance, self._instance_entities
+        self.instance = secrets.token_hex(8)
+        self._instance_entities = self._declare_instance(self._plan_made)
+        for e in old_entities:
+            try:
+                e.undeclare()
+            except Exception:  # noqa: BLE001 - withdrawn anyway when the session closes
+                pass
+            if e in self._entities:
+                self._entities.remove(e)
+        return old
 
     def _ensure_refresher(self) -> None:
         """Start the re-put thread once, never after :meth:`close` set
@@ -915,10 +965,12 @@ class Owner:
                     self._held[key] = _Held(held.payload, held.encoding, stamp, time.monotonic())
                     self.reputs.append((key, stamp))
 
-    def publish(self, key: str, payload: bytes, timestamp: zenoh.Timestamp | None = None) -> None:
+    def publish(self, key: str, payload: bytes, timestamp: zenoh.Timestamp | None = None,
+                attachment: bytes | None = None) -> None:
         """Put a stream sample on its declared publisher, with the
         resource's Encoding (§7.2), stamped ``timestamp`` when given (else
-        by the session, core §4.1)."""
+        by the session, core §4.1), and with ``attachment`` when given (its
+        bytes as the resource's attachment encoding writes them, §7.2)."""
         if key not in self._publishers:
             self._member_publisher(key)
         if key in self._member_of:
@@ -931,10 +983,12 @@ class Owner:
             if key not in self._stream_last or now - self._stream_last[key] >= 3600:
                 self._check_budget(key, len(live))
             self._stream_last[key] = now
-        if timestamp is None:
-            self._publishers[key].put(payload, encoding=self._encodings[key])
-        else:
-            self._publishers[key].put(payload, encoding=self._encodings[key], timestamp=timestamp)
+        kw: dict[str, Any] = {"encoding": self._encodings[key]}
+        if timestamp is not None:
+            kw["timestamp"] = timestamp
+        if attachment is not None:
+            kw["attachment"] = attachment
+        self._publishers[key].put(payload, **kw)
 
     # -- the consumer's side (§3.2) ---------------------------------------
 
@@ -961,11 +1015,6 @@ class Owner:
             self._entities.append(self.session.declare_subscriber(k, zenoh.handlers.Callback(received)))
 
     # -- handlers ---------------------------------------------------------
-
-    def _descriptor_handler(self, query: zenoh.Query) -> None:
-        # §3.3 "The GET": one reply, application/json, no attachment and no
-        # timestamp.
-        query.reply(self.instance_key, self.descriptor, encoding="application/json")
 
     def _state_handler(self, query: zenoh.Query) -> None:
         """S2: "every matching live key, plus a reply_del for each matching
