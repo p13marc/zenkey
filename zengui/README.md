@@ -115,11 +115,41 @@ declared type, and **the value, read by what the key is**:
   nothing, and why.
 
 Beside it: the declared QoS against the axes the newest sample rode, each
-differing axis named with both sides; the history ring and its series (no
-unit: zk2 contracts carry none); **why** (zk2's ladder, on a key or an
+differing axis named with both sides; the history ring and its series;
+**why** (zk2's ladder, on a key or an
 address; `not_asked` is never "no"); **fields**, over a stated window and
 bounds; and **consumers**, the R3 edges descriptors declare, never a matching
 status. Stamps are attributed through the lens (O7).
+
+**A metric** (`telemetry.v1`, `spec/profiles/telemetry/v1.md`) is read the
+way the profile's reader reads one, through the engine's `TelemetryBook`
+over the key's recorded history:
+
+- the identity shows **METRIC KIND** and **UNIT** beside TYPE, each with
+  where it came from: `counter · declared`, `dBm · from the Point`. A unit
+  nothing declares and no Point carries reads `unknown (§2.5)`, never blank
+  and never dimensionless. zenoh-modem's bare numbers carry theirs in their
+  declarations alone, and read them;
+- the Series section plots the profile's value: a Point's `value.value` or
+  the bare value, a boolean as 1 or 0, and a histogram's mean,
+  `sum / count`, the one number of a histogram in its member's unit (a gap
+  while its count is 0). Text and bytes are not plotted. Each chart names
+  its unit once, `counter [By]: 4096 now · …`;
+- a counter gets a second chart, its **§2.11 rate**, in the counter's unit
+  and `/s`, timed by the Points' timestamps, the owner's stamps or arrival,
+  as the section says. A reset is a gap, with no rate across it and none
+  restarted from zero;
+- each **decrease within one epoch** is a finding, with how its epoch was
+  established. zengui reads no presence for an epoch, because its presence
+  and its samples arrive on two monitors, in no one order (§2.9), so an
+  epoch here is in-band or assumed. Where every pair's was assumed, the
+  section says that no decrease could have been found (§5);
+- a sample that does not conform is not plotted, and the profile's reasons
+  are listed in its words (`telemetry.v1 §2.6 tag_disagrees: …`). Echo
+  names each drawn invalid row's first violation under its strips;
+- the engine's EWMA stays beside them, named `message rate (samples/s)`;
+- the Fields sparks carry the member's unit on its value path alone;
+- a resource that is no metric says why its axis has no unit.
 
 **The Activity dock** holds the session's parallel streams: echo (pause
 without lying about the gap, filter by key expression and substring, drill
@@ -218,8 +248,10 @@ straight to it. Ctrl-C stops both.
 
 `spray` (`examples/spray.rs`) is a zk2 deployment in namespace `spray` —
 nav, camera, perception, teleop, thrusters, a planner and a tc backend, real
-services serving their contracts from `examples/zk2/`, and a service
-implementing `health.v1` alone — beside the traffic no zk2 service would
+services serving their contracts from `examples/zk2/`, a service
+implementing `health.v1` alone, and `lab/meter`, whose metrics are
+`telemetry.v1`'s (`zenkey/tests/contracts/meter.v1.toml`, `--meter`) —
+beside the traffic no zk2 service would
 send: an interface token with no instance token, a second answerer on an
 owner's state, garbage on an owned key, an unowned key, a key in another
 namespace, and foreign keys. Each of those reads what it is: the owners' keys
@@ -236,6 +268,11 @@ What else to look at:
 - **Nodes**: select `host-a/sysmon` for its `health.v1` reading. Its status
   cycles OK → DEGRADED → OK, so "read again" moves it.
 - **Send → get / call**: `nav.v2`'s `set_origin` at `robot1/nav`.
+- **A metric**: watch `lab/meter` and select one of its streams. `frames`
+  is a Point counter in `1`, `bytes` a bare counter in `By` with its epoch
+  in the attachment, `drops` a counter whose unit reads unknown, `latency`
+  a histogram whose mean is plotted in `s`. Each owner's term ends after an
+  hour as a new instance, which a counter reads as a reset.
 - `just gui-demo-bounded` trips both bounds immediately, so the status strip
   reads `N keys (+M retired — bound reached)` **and**
   `identities: N cached (+M retired — cache bound reached)`. Two
