@@ -93,7 +93,11 @@ class _Reader:
             return _Map(pairs)
         if major == 6:
             # A chain of tags is read without recursion (telemetry.v1 0.3:
-            # a tag adds no depth), innermost applied first.
+            # a tag adds no depth), innermost applied first. The list holds
+            # one number per tag head, each at least one byte of the
+            # payload, so its memory is bounded by the payload's length and
+            # by nothing else: a caller that must bound memory bounds the
+            # payload it reads.
             tags = [self._definite(arg)]
             while self.pos < len(self.data) and self.data[self.pos] >> 5 == 6:
                 head = self.take(1)[0]

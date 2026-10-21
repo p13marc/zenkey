@@ -300,6 +300,16 @@ def _offers(offers: Any) -> str:
 
 # -- the readers ---------------------------------------------------------------------------
 
+def fold_seed(tokens: list[tuple[int, str, str]], read: list[str], t: int) -> list[tuple[int, str, str]]:
+    """§2.9 (0.3): a complete read's instances folded into a subscription's
+    token moves as of the read's end ``t``. The subscription's word wins:
+    an instance it saw appear or withdrawn keeps that word, so a reply sent
+    before a withdrawal never brings the token back; one it never mentioned
+    is held from ``t``."""
+    heard = {inst for _, _, inst in tokens}
+    return list(tokens) + [(t, "put", inst) for inst in read if inst not in heard]
+
+
 @dataclass
 class Arrival:
     arrival_ns: int
@@ -328,6 +338,8 @@ class Reader:
         #: §2.9 (0.3): the presence view "stands on a complete read of the
         #: tokens", never a subscription's history alone; None until one
         self.seeded_ns: int | None = None
+        #: why the view stands on nothing, when no complete read came back
+        self.unseeded: str | None = None
         self.arrivals: list[Arrival] = []
         self.tokens: list[tuple[int, str, str]] = []  # (t_ns, put|delete, instance)
         self.presence = presence
@@ -344,23 +356,31 @@ class Reader:
                 f"zk2/{ADDRESS}/@zk/instance/*", zenoh.handlers.Callback(token), history=True))
             self.seed_presence()
 
+    #: §2.9 (0.3): a read that comes back possibly incomplete is made again
+    SEED_TRIES = 3
+
     def seed_presence(self) -> bool:
         """§2.9 (0.3): a complete liveliness read after the subscription
-        (core §8.1: ended at the routers' final reply, no error reply). Its
-        tokens are folded in as of its end, beside the subscription's."""
+        (core §8.1: ended at the routers' final reply, no error reply), made
+        up to :data:`SEED_TRIES` times. Its tokens are folded in as of its
+        end, and only for an instance the subscription has said nothing of:
+        a token the subscription saw appear or withdrawn, before the read
+        ended, keeps the subscription's word, so a reply sent before a
+        withdrawal never brings the token back. With no complete read, the
+        view stands on nothing, and :attr:`unseeded` says why."""
         from . import live
 
-        got = live.list_presence(self.session, f"zk2/{ADDRESS}/@zk/instance/*", timeout=1.0)
-        if not got.complete:
+        for attempt in range(1, self.SEED_TRIES + 1):
+            got = live.list_presence(self.session, f"zk2/{ADDRESS}/@zk/instance/*", timeout=1.0)
+            if got.complete:
+                break
+        else:
+            self.unseeded = (f"no complete liveliness read in {self.SEED_TRIES} tries ({got.reading}): presence is "
+                             "unobservable for this reader, so no pair of its has presence evidence")
             return False
         t = time.monotonic_ns()
         with self.lock:
-            held = set()
-            for _, kind, inst in self.tokens:
-                (held.add if kind == "put" else held.discard)(inst)
-            for x in got.instances:
-                if x["instance"] not in held:
-                    self.tokens.append((t, "put", x["instance"]))
+            self.tokens[:] = fold_seed(self.tokens, [x["instance"] for x in got.instances], t)
             self.seeded_ns = t
         return True
 
@@ -503,7 +523,8 @@ def _short(v: Any) -> Any:
 class Bus:
     """R1, then R's and R0's sessions and subscriptions, before any owner."""
 
-    def __init__(self, mode: Any, contract: Any, *, face: bool = False, tool: Path | None = None) -> None:
+    def __init__(self, mode: Any, contract: Any, *, face: bool = False, tool: Path | None = None,
+                 report: Report | None = None, sec: str = "") -> None:
         from . import live
         from .live_interop import _r1
 
@@ -517,6 +538,10 @@ class Bus:
         self.R0 = Reader(self.r0_session, contract, presence=False)
         self.face: Face | None = Face(self.endpoint, contract) if face else None
         self.owners: list[Any] = []
+        readers = [("R", self.R)] + ([("R0F", self.face.R0F), ("N2", self.face.N2)] if self.face else [])
+        for name, reader in readers:
+            if reader.unseeded is not None and report is not None:
+                report.note(sec, f"{name}: {reader.unseeded}")
         time.sleep(0.3)
 
     def tool_start(self, window_s: float, *, across_face: bool = False, endpoint: str | None = None,
@@ -743,16 +768,26 @@ def _rates_agree(zk: Any, tool: Any, base: str) -> bool:
 
 
 def compare_tool(report: Report, sec: str, run: ToolRun, reader: Reader, *, keys: list[str] | None = None,
-                 label: str = "the tool", since_ns: int | None = None,
-                 open_finding: str | None = None) -> tuple[int, dict[str, Any]]:
+                 label: str = "the tool", since_ns: int | None = None, open_finding: str | None = None,
+                 writes: bool = True) -> tuple[int, dict[str, Any]]:
     """The tool's reading of the window against zk2py's, member by member:
     kind and unit, the samples' counts and problems, each pair's continuity,
     epoch, evidence, time base and rate; then its exit code against
     :func:`zk2py.telemetry.verdict` over zk2py's own reading."""
     code, doc = run.finish()
     zk, tool = zk2py_view(reader, run.ready_ns if since_ns is None else since_ns, keys), _tool_view(doc)
+    margin = (f" (the steps started {TOOL_MARGIN_S} s after the tool's listening line, F-154; "
+              f"exit {code})")
+    if writes:
+        # so that the tool mode cannot pass while testing nothing
+        report.check(sec, f"{label}: zk2py's reader read samples in the tool's window", bool(zk),
+                     "zk2py's view is empty" + margin)
     report.check(sec, f"{label}: the members it read samples of are zk2py's", sorted(tool) == sorted(zk),
-                 f"tool {sorted(tool)}, zk2py {sorted(zk)}")
+                 f"tool {sorted(tool)}, zk2py {sorted(zk)}" + margin)
+    zk_n = {k: v["samples"]["received"] for k, v in zk.items()}
+    tool_n = {k: v["samples"]["received"] for k, v in tool.items()}
+    report.check(sec, f"{label} read every sample zk2py's reader did ({sum(zk_n.values())} of them)",
+                 tool_n == zk_n, f"tool {tool_n}, zk2py {zk_n}" + margin)
     for key in sorted(set(zk) & set(tool)):
         z, t = zk[key], tool[key]
         diffs = [f"{what}: zk2py {z[what]}, tool {t[what]}" for what in ("kind", "unit", "samples", "problems")
@@ -772,7 +807,7 @@ def compare_tool(report: Report, sec: str, run: ToolRun, reader: Reader, *, keys
         member = key.removeprefix(f"{BASE}/")
         report.check(sec, f"{label} agrees on {member}: kind and unit, {z['samples']['received']} samples and their "
                           f"problems, {len(z['pairs'])} pairs (continuity, epoch, evidence, time base, rate)",
-                     not diffs, "; ".join(diffs) or f"pairs {[x[:6] for x in t['pairs']]}")
+                     not diffs, "; ".join(diffs) + margin if diffs else f"pairs {[x[:6] for x in t['pairs']]}")
     want = tm.verdict([c for v in zk.values() for c in v["conformances"]],
                       [x for v in zk.values() for x in v["pair_objects"]])
     if open_finding is not None and code != EXIT[want]:
@@ -780,7 +815,8 @@ def compare_tool(report: Report, sec: str, run: ToolRun, reader: Reader, *, keys
                          f"{EXIT[want]}); judgement {doc.get('judgement')}")
     else:
         report.check(sec, f"{label}'s exit is zk2py's verdict over the window ({want}: exit {EXIT[want]})",
-                     code == EXIT[want], f"exit {code}, judgement {doc.get('judgement')}")
+                     code == EXIT[want], f"exit {code}, judgement {doc.get('judgement')}"
+                     + ("" if code == EXIT[want] else margin))
     return code, doc
 
 
@@ -826,7 +862,7 @@ def _descriptor(bus: Bus, o: Any) -> dict[str, Any] | None:
 
 def section1(report: Report, mode: Any, contract: Any, tool: Path | None = None) -> None:
     sec = "§1"
-    bus = Bus(mode, contract, tool=tool)
+    bus = Bus(mode, contract, tool=tool, report=report, sec=sec)
     try:
         o = bus.owner()
         i1 = o.instance
@@ -909,7 +945,7 @@ def section1(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 def section2(report: Report, mode: Any, contract: Any, tool: Path | None = None) -> None:
     sec = "§2"
-    bus = Bus(mode, contract, tool=tool)
+    bus = Bus(mode, contract, tool=tool, report=report, sec=sec)
     try:
         o = bus.owner()
         i1 = o.instance
@@ -968,7 +1004,7 @@ def section2(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 def section3(report: Report, mode: Any, contract: Any, tool: Path | None = None) -> None:
     sec = "§3"
-    bus = Bus(mode, contract, tool=tool)
+    bus = Bus(mode, contract, tool=tool, report=report, sec=sec)
     try:
         o = bus.owner()
         i1 = o.instance
@@ -1009,7 +1045,7 @@ def section3(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 def section4(report: Report, mode: Any, contract: Any, tool: Path | None = None) -> None:
     sec = "§4"
-    bus = Bus(mode, contract, tool=tool)
+    bus = Bus(mode, contract, tool=tool, report=report, sec=sec)
     try:
         o = bus.owner()
         bus.appeared(o.instance)
@@ -1055,7 +1091,7 @@ def section4(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 def section5(report: Report, mode: Any, contract: Any, tool: Path | None = None) -> None:
     sec = "§5"
-    bus = Bus(mode, contract, tool=tool)
+    bus = Bus(mode, contract, tool=tool, report=report, sec=sec)
     try:
         o = bus.owner()
         bus.appeared(o.instance)
@@ -1101,7 +1137,7 @@ def section5(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 def section6(report: Report, mode: Any, contract: Any, tool: Path | None = None) -> None:
     sec = "§6"
-    bus = Bus(mode, contract, tool=tool)
+    bus = Bus(mode, contract, tool=tool, report=report, sec=sec)
     try:
         o = bus.owner()
         bus.appeared(o.instance)
@@ -1146,7 +1182,7 @@ def section6(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 def section7(report: Report, mode: Any, contract: Any, tool: Path | None = None) -> None:
     sec = "§7"
-    bus = Bus(mode, contract, tool=tool)
+    bus = Bus(mode, contract, tool=tool, report=report, sec=sec)
     try:
         o = bus.owner()
         i1 = o.instance
@@ -1219,7 +1255,7 @@ def section7(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 def section8(report: Report, mode: Any, contract: Any, tool: Path | None = None) -> None:
     sec = "§8"
-    bus = Bus(mode, contract, face=True, tool=tool)
+    bus = Bus(mode, contract, face=True, tool=tool, report=report, sec=sec)
     try:
         assert bus.face is not None
         time.sleep(0.5)
@@ -1282,9 +1318,11 @@ def section9(report: Report, mode: Any, contract: Any, tool: Path | None = None)
     from . import live
 
     sec = "§9"
-    bus = Bus(mode, contract, tool=tool)
+    bus = Bus(mode, contract, tool=tool, report=report, sec=sec)
     witness_session = live.open_client(bus.endpoint)
     witness = Reader(witness_session, contract, presence=True, selector=TOTAL)
+    if witness.unseeded is not None:
+        report.note(sec, f"the witness: {witness.unseeded}")
     try:
         o = bus.owner()
         i1 = o.instance
@@ -1362,7 +1400,7 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
     so no presence is read), a counter's one sample with no pair (F-152),
     and no sample at all."""
     sec = "§5 over many pairs"
-    bus = Bus("zk2py", contract, tool=tool)
+    bus = Bus("zk2py", contract, tool=tool, report=report, sec=sec)
     try:
         o = bus.owner()
         bus.appeared(o.instance)
@@ -1388,7 +1426,7 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
                      open_finding="F-152")
         run = bus.tool_start(4)
         assert run is not None
-        compare_tool(report, sec, run, bus.R, label="the tool, no sample at all")
+        compare_tool(report, sec, run, bus.R, label="the tool, no sample at all", writes=False)
     finally:
         bus.close()
 
@@ -1476,6 +1514,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {tool} not found (the path came from {zsource})", file=sys.stderr)
             return 2
     report = Report()
+    if tool is not None:
+        try:
+            v = subprocess.run([str(tool), "--version"], capture_output=True, text=True, timeout=30)
+            report.note("tool", f"{tool}: {(v.stdout or v.stderr).strip() or f'--version printed nothing (exit {v.returncode})'}")
+        except (OSError, subprocess.TimeoutExpired) as e:
+            report.note("tool", f"{tool}: --version did not run ({e})")
     run(report, mode, args.only, tool)
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed

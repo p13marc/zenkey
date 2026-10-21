@@ -7797,30 +7797,30 @@ nested 257 deep, in JSON and in CBOR. It decoded them up to Python's
 recursion limit and read `wrong_type`. That is the new rule, and the
 cases on F-150 and F-151 passed unchanged.
 
-**`just py-conformance`: 2218 of 2218.**
+**`just py-conformance`: 2226 of 2226.**
 
 | Family | Before | After |
 |---|---|---|
 | telemetry | 279 of 281 (the two depth cases) | 281 of 281 |
-| readings | 179 of 179 | 186 of 186: seven of `verdict`, F-152's reading among them |
+| readings | 179 of 179 | 194 of 194: seven of `verdict`, F-152's reading among them; five of tag chains and three of §2.9's seed folded (review of PR #828) |
 | the 20 others | 1751 of 1751 | 1751 of 1751 |
 
 **`just py-telemetry`, three runs, each exiting 0.**
 
 | § | zk2py's owner | The Rust owner (`owner-tb`) | zk2py's owner, `zenctl telemetry` judging too |
 |---|---|---|---|
-| 1 | 12 of 12 | 12 of 12 | 16 of 16 |
-| 2 | 6 of 6 | 6 of 6 | 10 of 10 |
-| 3 | 6 of 6 | 6 of 6 | 10 of 10 |
-| 4 | 5 of 5 | 5 of 5 | 9 of 9 |
-| 5 | 5 of 5 | 5 of 5 | 8 of 8 |
-| 6 | 3 of 3 | 3 of 3 | 8 of 8 |
-| 7 | 6 of 6 | 5 of 5 | 9 of 9 |
-| 8 | 8 of 8 | 8 of 8 | 12 of 12 |
-| 9 | 5 of 5 | 5 of 5 | 8 of 8 |
-| §5 over many pairs, four windows built for the tool | | | 10 of 10, and F-152's note |
+| 1 | 12 of 12 | 12 of 12 | 18 of 18 |
+| 2 | 6 of 6 | 6 of 6 | 12 of 12 |
+| 3 | 6 of 6 | 6 of 6 | 12 of 12 |
+| 4 | 5 of 5 | 5 of 5 | 11 of 11 |
+| 5 | 5 of 5 | 5 of 5 | 10 of 10 |
+| 6 | 3 of 3 | 3 of 3 | 10 of 10 |
+| 7 | 6 of 6 | 5 of 5 | 11 of 11 |
+| 8 | 8 of 8 | 8 of 8 | 14 of 14 |
+| 9 | 5 of 5 | 5 of 5 | 10 of 10 |
+| §5 over many pairs, four windows built for the tool | | | 17 of 17, and F-152's note |
 | §2.11's conversion | 1 of 1 | 1 of 1 | 1 of 1 |
-| **Total** | **57 of 57** | **56 of 56** | **101 of 101** |
+| **Total** | **57 of 57** | **56 of 56** | **126 of 126** |
 
 **The tool against zk2py's owner.** `zenctl telemetry` was read from its
 `--help` alone: `--for`, `-c`, `--across-face` with `--contracts`,
@@ -7836,7 +7836,9 @@ cases on F-150 and F-151 passed unchanged.
   - each pair's continuity, epoch, evidence and time base;
   - each rate: exactly when timed by Points' timestamps or the owner's
     stamps, within 5 % when timed by receipt, each reader's own clock;
-  - the exit code, against `verdict` over zk2py's reading.
+  - the exit code, against `verdict` over zk2py's reading;
+  - and, in each window, that zk2py's reader read samples and that the
+    tool read every one of them (review of PR #828).
 - **The readers' counterparts:** R for §1 to §7, R0F across the face for
   §8, and in §9 a witness subscribed from the start, which reads the same
   three values in the owner's order.
