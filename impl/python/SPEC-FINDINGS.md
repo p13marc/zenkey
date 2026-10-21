@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty-two rounds.**
+**Forty-three rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -94,7 +94,9 @@ where that was not enough, or where the spec said two things.
   and run live against the owner example at 0.3 (see "At alarms.v1 0.5").
   `alarms.v1` 0.6 resolved both, as zk2py read them.
 - F-140 was found against `alarms.v1` 0.6, read cold and run live (see
-  "At alarms.v1 0.6" at the end).
+  "At alarms.v1 0.6"). `alarms.v1` 0.7 resolved it.
+- F-141 was found against `alarms.v1` 0.7, in a final whole-text pass
+  (see "At alarms.v1 0.7" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -6956,5 +6958,107 @@ reports no first neither, so it never needs the classification.
 `just py-conformance`: 1866 of 1866 (`readings` 116). `just py-alarms`: 80
 of 80 on each owner.
 
+**Status at alarms.v1 0.7: resolved by 0.7.** §2.16: "Neither splits by
+its reason, in two closed lists".
+- **The reader's own sight**, nine tokens: `incomplete`,
+  `presence_incomplete`, `no_descriptor`, `not_read`, `nothing_crossed`,
+  `clock_untrusted`, `listened_too_short`, `near_horizon`,
+  `no_observation`.
+- **"Any other reason"**, which names `face_closed`, `no_stamp`,
+  `clock_disagrees` and `not_a_horizon` among them.
+
+Of the five this finding named:
+- `nothing_crossed` is the reader's sight;
+- `face_closed`, `no_stamp`, `clock_disagrees` and `not_a_horizon` are on
+  the other list.
+
+zk2py's reporter, on the branch of the MAY that reports no first neither,
+meets the text unchanged. One reason the text names on neither list
+remains: F-141.
+
 **Where zk2py's reading of alarms.v1 0.6 needed a guess, beyond the
 findings:** none.
+
+## At alarms.v1 0.7 (#609)
+
+0.7 answers F-140: §2.16's first answer of neither "splits by its reason,
+in two closed lists". There is no model or fixture change, and the core
+stays at 0.34.
+
+**Is every reason the first question can give on exactly one list?** Yes,
+by construction: the second list is "any other reason". zk2py checked it
+concretely, driving its judge over one reading for each of the twenty
+neither reasons §2.14 can give (`readings`):
+- **The reader's own sight (9):** `incomplete`, `presence_incomplete`,
+  `no_descriptor`, `not_read`, `nothing_crossed`, `clock_untrusted`,
+  `listened_too_short`, `near_horizon`, `no_observation`.
+- **Any other reason (11):** `absent`, `not_listed`, `last_known`,
+  `previous_instance`, `face_closed`, `undecodable`, `stale`, `no_stamp`,
+  `clock_disagrees`, `not_a_horizon`, and `silent`.
+
+Ten of the eleven fit the second list's criterion, "something of the
+alarm, its owner or the deployment that time does not settle". `silent`
+does not (F-141).
+
+**zk2py's reporter meets 0.7** on the branch of the MAY it takes. It
+reports no first neither, which the reader's own sight requires and the
+other list allows. No code changed. `READER_SIGHT` and
+`first_neither_list` exist only for the check.
+
+**`just py-conformance`: 1867 of 1867.** The `alarms` family stays at 316,
+and `readings` is 117 with the classification case.
+
+**`just py-alarms`: 80 of 80** against zk2py's owner and 80 of 80 against
+`owner-ac`, both exiting 0. §2, §4, §6 and §10 ran on the 4 s copy, with
+§10's step 2 at 900 s left out as before.
+
+### F-141 · gap · alarms.v1 0.7 §2.16 "A key's first answer": `silent` is the reader's own sight, but on neither named list
+
+> §2.16 (0.7): "**The reader's own sight**, which time or the next read
+> settles: … nothing read yet, here or across a face (`not_read`,
+> `nothing_crossed`); and, from `freshness.v1`, a clock not yet trusted …
+> and no observation to judge (`no_observation`)." "**Any other reason**
+> says something of the alarm, its owner or the deployment that time does
+> not settle … It MAY be reported."
+
+> §2.14 step 6: "unobservable … **unobservable**, with `freshness.v1`'s
+> reason"; `freshness.v1` §2.6: no reply for the member, `silent` (core O5,
+> S6).
+
+The first question gives `unobservable`, `silent` at step 6 when the
+reader holds a sample of the key and its only observation is a GET that
+drew nothing for it. That happens, for instance, to a reader that reads
+by GET alone. Its earlier GET answered the key. Its latest drew nothing
+for it, and did not establish the owner's alarms (an empty reply set, no
+window), so step 5's left-out key does not apply. zk2py's judge gives it
+(`readings`).
+- `silent` is silence, "no verdict" (core O5), and the next read settles
+  it. That is the reader's own sight by the list's own words, a sibling of
+  `not_read` and `no_observation`.
+- The closed reader's-sight list does not name it, so it falls to "any
+  other reason".
+- A tool that takes the MAY would report a first `silent`, and so report a
+  key on nothing but its own silence, which §2.16 keeps out for every
+  other "nothing read yet".
+
+**zk2py:** unaffected. Its reporter reports no first neither.
+
+**Wording:** name `silent` on the reader's-sight list ("nothing read yet,
+here or across a face, or a GET that drew nothing for a key held (`not_read`,
+`nothing_crossed`, `silent`)"). Or, if the text means it as the owner's, say
+so.
+
+**The final whole-text pass over alarms.v1 0.7.** This round re-read §0 to
+§5 and the appendices against zk2py's two halves.
+- **F-141 above** is the one thing still left open.
+- **Considered and not filed:** a resolved document's other members. §2.5's
+  table fixes a resolve's `state`, `timestamp` and `observed_at_ms`, not its
+  `severity`, `summary` or `category`. Both owners keep them as held, and
+  no reader rule reads them on a resolved document: §2.14 and §2.15 answer
+  no, and §2.16 reports no with no severity. So no answer turns on them.
+- **Deferred by the text itself, and not findings:**
+  - the horizon a reader judges at (0.3);
+  - a read through a session cut off from every router (0.4);
+  - which branch of the MAY (0.7).
+
+Beyond F-141, no rule zk2py met needed a guess.
