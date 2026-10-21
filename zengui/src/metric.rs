@@ -223,6 +223,9 @@ pub struct MetricRead {
 /// nothing reuses the last read rather than decoding the ring again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Window {
+    /// The member, namespace-relative: two members of one templated
+    /// resource are two windows however their rings line up.
+    pub key: String,
     pub oldest: Option<u64>,
     pub newest: Option<u64>,
     pub fingerprint: String,
@@ -232,6 +235,7 @@ pub struct Window {
 impl Window {
     pub fn of(resolved: &Resolved, ring: &HistoryRing) -> Window {
         Window {
+            key: resolved.key.clone(),
             oldest: ring.iter().next_back().map(|e| e.seq),
             newest: ring.newest().map(|e| e.seq),
             fingerprint: resolved.revision.fingerprint().to_string(),
