@@ -1173,6 +1173,12 @@ async fn the_owner_example_implements_telemetry() {
     let p: serde_json::Value = serde_json::from_slice(&payload).unwrap();
     assert_eq!(p["epoch"], serde_json::json!(i2));
 
+    // The state counter (§9, text 0.2) puts through its state writer.
+    assert_eq!(
+        o.ask("telemetry put total 3").await,
+        format!("telemetry put zk2/ex/meter/meter.v1/state/total epoch={i2}")
+    );
+
     // What is refused here, before any writer.
     for (cmd, why) in [
         (

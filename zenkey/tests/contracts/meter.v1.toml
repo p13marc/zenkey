@@ -1,7 +1,8 @@
 # telemetry.v1's scenarios (#819, TB), as `spec/profiles/telemetry/scenarios.md`
 # states the contract: a Point declared a counter, a bare counter with its
-# epoch in the attachment, one without, a Point declared a histogram, and a
-# bare gauge. The profile's schema is listed by its path from here.
+# epoch in the attachment, one without, a Point declared a histogram, a bare
+# gauge, and (0.2, §9) a bare counter in state. The profile's schema is
+# listed by its path from here.
 [interface]
 name  = "meter"
 major = 1
@@ -36,3 +37,8 @@ annotations = { "telemetry.kind" = "histogram", "telemetry.unit" = "s", "telemet
 kind        = "stream"
 type        = "json:Level"
 annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dBm" }
+
+[resources.total]                        # a bare counter in state (0.2, §9)
+kind        = "state"
+type        = "json:Count"
+annotations = { "telemetry.kind" = "counter" }

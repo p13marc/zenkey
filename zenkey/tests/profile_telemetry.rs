@@ -1,6 +1,8 @@
-//! `spec/profiles/telemetry/scenarios.md` §1–§8 (`telemetry.v1`, #819,
+//! `spec/profiles/telemetry/scenarios.md` §1–§9 (`telemetry.v1`, #819,
 //! TB), one test per section, named after it. §8 runs here as R0 alone; the
-//! tool's run behind a real face is #819's TC.
+//! tool's run behind a real face is #819's TC. §9 (text 0.2) seeds a state
+//! counter, its pairs taken through the late joiner's merge
+//! (`zenkey_model::seed`).
 //!
 //! Common setup, the text's: R1 is a router with timestamping on, a
 //! router's default; each test brings up its own, on an ephemeral port. The
@@ -69,11 +71,12 @@ fn key_of(resource: &str) -> String {
 // O, the owner
 // ---------------------------------------------------------------------------
 
-/// O: its session, its service and a writer per resource.
+/// O: its session, its service, a writer per stream, and `total`'s.
 struct Owner {
     session: zenoh::Session,
     svc: Service,
     writers: BTreeMap<&'static str, Writer>,
+    total: zenkey::state::StateWriter,
 }
 
 /// O started on a session of its own, as a client of the router at `ep`.
@@ -89,11 +92,16 @@ async fn start(ep: &str) -> Owner {
             .unwrap();
         writers.insert(r, w);
     }
+    let total = b
+        .declare_state_writer(&meter(), "state/total", &Bindings::new())
+        .await
+        .unwrap();
     let svc = b.start().await.unwrap();
     let o = Owner {
         session,
         svc,
         writers,
+        total,
     };
     for w in o.writers.values() {
         eventually("R's subscription reaches O", || async {
@@ -922,6 +930,14 @@ async fn s7_an_in_band_epoch_on_a_bare_counter() {
         .await
         .unwrap_err();
     assert_eq!(refusal(e).problems(), [Problem::EpochInvalid]);
+    // An attachment that does not decode, zero bytes here, is an epoch
+    // that is not a string (§2.6 check 2, text 0.2).
+    let e = o
+        .w("bytes")
+        .put_with(serde_json::to_vec(&60).unwrap(), Some(Vec::new()))
+        .await
+        .unwrap_err();
+    assert_eq!(refusal(e).problems(), [Problem::EpochInvalid]);
     let e = o
         .w("bytes")
         .put_with(serde_json::to_vec(&60).unwrap(), Some(b"\"i9\"".to_vec()))
@@ -1008,6 +1024,155 @@ async fn s8_counter_across_a_face() {
     o.end().await;
 }
 
+/// §9 (text 0.2): a state counter seeded. A GET's reply older than a live
+/// put is not kept by the late joiner's merge (core §4.2), so it is no
+/// sample of a pair, and nothing reads decreased; paired in the order
+/// received, it would be the finding.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s9_state_counter_seeded() {
+    use zenkey::model::seed::{self, Stamp};
+    use zenoh::query::{ConsolidationMode, QueryTarget, Reply};
+    use zenoh::time::Timestamp;
+
+    /// One sample of `total` as R took it: when, its bytes, its stamp.
+    struct Got {
+        at: i128,
+        payload: Vec<u8>,
+        stamp: Timestamp,
+    }
+    let (_r1, ep) = router(None).await;
+    let rs = client(&ep).await;
+    let r = reader(&rs).await;
+
+    // 1. I1: total 10.
+    let o = start(&ep).await;
+    let i1 = o.instance();
+    r.token(&i1, true).await;
+    o.total.put_value(&10u64).await.unwrap();
+
+    // 2. R subscribes, then GETs as S4 says; the reply held, unread.
+    let key = format!("zk2/{SVC}/meter.v1/state/total");
+    let t0 = r.t0;
+    let since = move || i128::try_from(t0.elapsed().as_nanos()).unwrap();
+    let log: Arc<Mutex<Vec<Got>>> = Arc::default();
+    let w = Arc::clone(&log);
+    let _sub = rs
+        .declare_subscriber(&key)
+        .callback(move |x: Sample| {
+            w.lock().unwrap().push(Got {
+                at: since(),
+                payload: x.payload().to_bytes().into_owned(),
+                stamp: *x.timestamp().expect("the owner's stamp (S1)"),
+            });
+        })
+        .await
+        .unwrap();
+    eventually("R's subscription reaches O", || async {
+        o.total.writer().matching().await.unwrap()
+    })
+    .await;
+    let replies = rs
+        .get(&key)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::Latest)
+        .timeout(common::T)
+        .with(flume::unbounded::<Reply>())
+        .await
+        .unwrap();
+    eventually("O answered the GET", || async { !replies.is_empty() }).await;
+
+    // 3. O puts 12, which R's subscription delivers.
+    o.total.put_value(&12u64).await.unwrap();
+    eventually("12 delivered", || async { log.lock().unwrap().len() == 1 }).await;
+    // 4. R reads the reply, 10; 200 ms later, O puts 15.
+    let reply = replies.recv_async().await.unwrap().into_result().unwrap();
+    log.lock().unwrap().push(Got {
+        at: since(),
+        payload: reply.payload().to_bytes().into_owned(),
+        stamp: *reply.timestamp().expect("the stored stamp (S2)"),
+    });
+    tokio::time::sleep(SPACING).await;
+    o.total.put_value(&15u64).await.unwrap();
+    eventually("15 delivered", || async { log.lock().unwrap().len() == 3 }).await;
+
+    // 1. Received: 12, 10, 15, each conforming.
+    let decl = r.declaration("total");
+    let got = std::mem::take(&mut *log.lock().unwrap());
+    let checked: Vec<Checked> = got
+        .iter()
+        .map(|g| {
+            let v = Datum::from_json_bytes(&g.payload).expect("strict JSON");
+            tm::check(
+                &decl,
+                &Payload::Decoded {
+                    value: &v,
+                    attachment: None,
+                },
+            )
+        })
+        .collect();
+    let values: Vec<&Measure> = checked
+        .iter()
+        .map(|c| &c.reading.as_ref().expect("conforms").value)
+        .collect();
+    assert_eq!(
+        values,
+        [
+            &Measure::Counter(12),
+            &Measure::Counter(10),
+            &Measure::Counter(15)
+        ]
+    );
+    let sampled = |i: usize| Sampled {
+        value: values[i],
+        epoch: None,
+        timestamp_ms: None,
+        stamp_ns: Some(telemetry::stamp_ns(&got[i].stamp)),
+        arrival_ns: got[i].at,
+    };
+    let pair_of = |a: usize, b: usize| {
+        let (alone, earlier, later) = r.presence(got[a].at, got[b].at);
+        let presence = Presence {
+            alone_throughout: alone,
+            earlier: earlier.as_deref(),
+            later: later.as_deref(),
+        };
+        tm::pair(&sampled(a), &sampled(b), None, Some(&presence))
+    };
+
+    // 2. The merge does not keep the reply: 12 → 15, the same epoch, timed
+    // by the owner's stamps.
+    let stamps: Vec<Option<Stamp>> = got
+        .iter()
+        .map(|g| {
+            Some(Stamp {
+                time: g.stamp.get_time().as_u64(),
+                id: u128::from_le_bytes(g.stamp.get_id().to_le_bytes()),
+            })
+        })
+        .collect();
+    assert_eq!(seed::merge(&stamps), [true, false, true]);
+    let kept = pair_of(0, 2);
+    assert_eq!(
+        (kept.continuity, kept.basis),
+        (Continuity::SameEpoch, BY_PRESENCE)
+    );
+    let e = telemetry::stamp_ns(&got[2].stamp) - telemetry::stamp_ns(&got[0].stamp);
+    assert_eq!(
+        kept.rate,
+        Ok(Rate {
+            per_s: tm::rate_per_s(3, e),
+            unit: None
+        })
+    );
+    // 3. Paired as received, 12 → 10 would be the finding.
+    assert_eq!(
+        (pair_of(0, 1).continuity, pair_of(0, 1).basis),
+        (Continuity::Decreased, BY_PRESENCE)
+    );
+    o.end().await;
+}
+
 /// The writer's epoch, filled where the application leaves it out and
 /// refused where it differs, on the wire as R reads it: a counter Point
 /// gains `epoch` and keeps every other byte; a Point with another epoch,
@@ -1029,6 +1194,10 @@ async fn the_writer_writes_the_epoch() {
         .unwrap_err();
     assert!(matches!(refusal(e), Reason::Epoch { .. }));
     let e = o.w("frames").put(b"not json".to_vec()).await.unwrap_err();
+    assert!(matches!(refusal(e), Reason::Undecodable(_)));
+    // Strict JSON (§2.6, text 0.2): a duplicate member does not decode.
+    let twice = br#"{"timestamp": 1, "timestamp": 2, "value": {"type": "counter", "value": 4}}"#;
+    let e = o.w("frames").put(twice.to_vec()).await.unwrap_err();
     assert!(matches!(refusal(e), Reason::Undecodable(_)));
     o.w("frames")
         .put_value(&Point::new(3, 5u64).with_epoch(i1.clone()))

@@ -25,7 +25,8 @@
 //! | §2.1, §2.2 a metric resource: a stream or a state whose declaration is valid | each writer of a resource whose [`zenkey_model::telemetry::declaration_of`] is `declared`; one that is `invalid` is logged as a warning when the service implements it, and its writers check nothing (a reader reads nothing of it) |
 //! | §2.4 a raw type carries `binary`, bytes, always | a raw resource's writers check nothing: no byte string can fail |
 //! | §2.6 a sample that does not conform | refused, [`Reason::DoesNot`] with the problems in §2.6's order; nothing published |
-//! | §2.6 a sample the core could not decode | refused, [`Reason::Undecodable`] |
+//! | §2.6 a sample the core could not decode: a JSON one that is not strict JSON (a duplicate member, a number past the double, a lone surrogate, trailing bytes), a CBOR one that is not one item (0.2) | refused, [`Reason::Undecodable`], read by `zenkey_model::telemetry::Datum::decode`, the readers' decoder |
+//! | §2.6 check 2, an Epoch attachment that does not decode is an epoch that is not a string (0.2) | refused, [`Reason::DoesNot`] with `epoch_invalid` |
 //! | §2.7 within one epoch, no counter below one put before for that member | refused, [`Reason::Decreased`], against the last counter this writer put in the epoch, judged by [`zenkey_model::telemetry::pair`] |
 //! | §2.8 within one epoch, no `count` or bucket's count below one put before | refused, [`Reason::Decreased`], as a counter, the last histogram this writer put |
 //! | §2.9 the in-band epoch: the instance id, or a member epoch on a template that declares `epoch` | filled when left out ([`Point::epoch`], the Epoch attachment); any other refused, [`Reason::Epoch`] |
@@ -99,13 +100,25 @@ pub fn point(value: impl Into<Value>) -> Point {
     Point::new(now_ms(), value)
 }
 
+/// A state sample's stamp in nanoseconds, as a pair times it (§2.11, 0.2,
+/// F-142): zenoh's `NTP64::as_nanos` of the stamp's time, which
+/// [`zenkey_model::telemetry::stamp_ns`] states for any reader. A pair's
+/// elapsed time is the later stamp's less the earlier's.
+#[cfg(feature = "zenoh")]
+#[must_use]
+pub fn stamp_ns(ts: &zenoh::time::Timestamp) -> i128 {
+    i128::from(ts.get_time().as_nanos())
+}
+
 /// Why a writer refused a metric sample (§2.6–§2.9): nothing was published.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reason {
     /// The sample does not conform (§2.6): the problems, in its order.
     DoesNot(Vec<Problem>),
-    /// The bytes are not the resource's encoding: no data item to read
-    /// (§2.6), what the decoder said.
+    /// The payload's bytes are not the resource's encoding as §2.6 reads
+    /// it (0.2): strict JSON, or CBOR; no data item to read. An attachment
+    /// is never undecodable: an Epoch attachment that does not decode is an
+    /// epoch that is not a string, [`Problem::EpochInvalid`].
     Undecodable(String),
     /// An in-band epoch (the Point's `epoch`, or the Epoch attachment) that
     /// is not the writer's (§2.9).
@@ -317,13 +330,17 @@ mod meter {
                 .expect("a metric's declaration is declared")
         }
 
+        /// The payload's data item (§2.6, 0.2): strict JSON, or CBOR with
+        /// its bignums.
         fn decode(wire: Option<WireEncoding>, bytes: &[u8]) -> Result<Datum, Reason> {
-            match wire {
-                Some(WireEncoding::Cbor) => Datum::from_cbor_bytes(bytes)
-                    .ok_or_else(|| Reason::Undecodable("not one CBOR data item".to_owned())),
-                _ => Datum::from_json_bytes(bytes)
-                    .ok_or_else(|| Reason::Undecodable("not one JSON text".to_owned())),
-            }
+            Datum::decode(bytes, wire).ok_or_else(|| {
+                Reason::Undecodable(match wire {
+                    Some(WireEncoding::Cbor) => {
+                        "not one CBOR data item this profile reads".to_owned()
+                    }
+                    _ => "not one strict JSON text".to_owned(),
+                })
+            })
         }
 
         /// `epoch` encoded as the Epoch attachment is (§2.4).
@@ -510,13 +527,10 @@ mod meter {
                     Some(ZBytes::from(self.metric.epoch_attachment(&epoch))),
                     Some(Datum::Text(epoch.clone())),
                 ),
+                // §2.6 check 2 (0.2, F-147): an attachment that does not
+                // decode is an epoch present and not a string.
                 (Some(EpochIn::Attachment), Some(a)) => {
-                    let datum = Metric::decode(self.metric.attachment_wire, &a.to_bytes())
-                        .map_err(|_| {
-                            Reason::Undecodable(
-                                "the attachment is not a telemetry.v1.Epoch's encoding".to_owned(),
-                            )
-                        })?;
+                    let datum = Datum::attachment(&a.to_bytes(), self.metric.attachment_wire);
                     (Some(a), Some(datum))
                 }
                 (_, a) => (a, None),
@@ -576,6 +590,34 @@ mod meter {
                     measure,
                 },
             ))
+        }
+    }
+}
+
+#[cfg(all(test, feature = "zenoh"))]
+mod tests {
+    use zenoh::time::{NTP64, Timestamp, TimestampId};
+
+    /// The runtime's stamp nanoseconds are zenoh's, and the model's
+    /// statement of them (§2.11, 0.2).
+    #[test]
+    fn a_stamps_nanoseconds_are_zenohs() {
+        let id = TimestampId::try_from([1u8; 16]).unwrap();
+        for raw in [
+            0u64,
+            1,
+            2,
+            5,
+            (1_760_000_000 << 32) | 1,
+            (1_760_000_000 << 32) | 0xffff_ffff,
+            u64::MAX,
+        ] {
+            let ts = Timestamp::new(NTP64(raw), id);
+            assert_eq!(
+                super::stamp_ns(&ts),
+                zenkey_model::telemetry::stamp_ns(raw),
+                "{raw:#x}"
+            );
         }
     }
 }
