@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -89,9 +90,11 @@ class Refused(RuntimeError):
     §2.6's tokens, or ``decreased`` (§2.7, §2.8), ``undecodable``, or
     ``epoch_given`` (the example's own: an in-band epoch not the owner's)."""
 
-    def __init__(self, reasons: list[str], text: str = ""):
-        super().__init__(text or ", ".join(reasons))
+    def __init__(self, reasons: list[str], answer: str = ""):
+        super().__init__(answer or ", ".join(reasons))
         self.reasons = reasons
+        #: the writer's answer as it came, for a check's failure detail
+        self.answer = answer or f"zk2py's writer: {', '.join(reasons)}"
 
 
 def now_ms() -> int:
@@ -219,21 +222,38 @@ class RustMeter:
         line = f"telemetry {verb} {res} {json.dumps(item)}"
         return line if attachment is None else f"{line} {json.dumps(attachment)}"
 
+    #: The help's ``<why>``: "does_not <problem>[,<problem>...] (v1.md
+    #: §2.6's tokens), undecodable, epoch given=<json> current=<id>,
+    #: decreased epoch=<id>", then ": <words>".
+    WHY = re.compile(r"(?P<why>does_not (?P<problems>[a-z_]+(?:,[a-z_]+)*)|undecodable"
+                     r"|epoch given=(?P<given>.+?) current=(?P<current>[0-9a-f]{16})"
+                     r"|decreased epoch=(?P<epoch>[0-9a-f]{16})): (?P<words>.+)")
+
     def put(self, res: str, item: Any, attachment: Any = None) -> None:
+        """A checked put. A refusal is read only in the form the help gives,
+        ``refused <line>: telemetry.v1 <why>: <words>``, its problems §2.6's
+        tokens; any other answer raises with the answer as it came, so a
+        change in the example's wording fails its section loudly."""
         line = self._line("put", res, item, attachment)
         got = self._cmd(line)
-        if got.startswith("telemetry put "):
+        if got.startswith("telemetry put ") and re.fullmatch(r"telemetry put \S+ epoch=[0-9a-f]{16}", got):
             return
         prefix = f"refused {line}: telemetry.v1 "
-        if not got.startswith(prefix):
-            raise RuntimeError(f"{line!r}: cannot read the answer {got!r}")
-        why = got[len(prefix):].split(": ", 1)[0]
-        word, _, rest = why.partition(" ")
-        reasons = {"does_not": rest.split(","), "decreased": ["decreased"], "undecodable": ["undecodable"],
-                   "epoch": ["epoch_given"]}.get(word)
-        if reasons is None:
-            raise RuntimeError(f"{line!r}: an unknown refusal {why!r}")
-        raise Refused(reasons, why)
+        m = self.WHY.fullmatch(got[len(prefix):]) if got.startswith(prefix) else None
+        if m is None:
+            raise RuntimeError(f"{line!r}: an answer not in the form the help gives: {got!r}")
+        if m["problems"] is not None:
+            reasons = m["problems"].split(",")
+            unknown = [r for r in reasons if r not in tm.SAMPLE_REASONS]
+            if unknown:
+                raise RuntimeError(f"{line!r}: problems that are not §2.6's tokens, {unknown}: {got!r}")
+        elif m["why"] == "undecodable":
+            reasons = ["undecodable"]
+        elif m["given"] is not None:
+            reasons = ["epoch_given"]
+        else:
+            reasons = ["decreased"]
+        raise Refused(reasons, got)
 
     def raw(self, res: str, item: Any, attachment: Any = None) -> None:
         line = self._line("raw", res, item, attachment)
@@ -252,16 +272,29 @@ class RustMeter:
         self.p.close()
 
 
-def raw_step(o: Any, res: str, item: Any, attachment: Any = None) -> list[str] | None:
+@dataclass
+class Offer:
+    """What the checked writer said of a raw step's value: its reasons, and
+    its answer as it came (None and "accepted" when it took the value)."""
+
+    reasons: list[str] | None
+    answer: str
+
+
+def raw_step(o: Any, res: str, item: Any, attachment: Any = None) -> Offer:
     """A *raw* step: the checked writer is offered the same value first, and
-    its refusal recorded; then the value goes out unchecked. None when the
-    checked writer took it (and so published it)."""
+    its refusal recorded; then the value goes out unchecked. When the
+    checked writer takes it (and so publishes it), nothing more is sent."""
     try:
         o.put(res, item, attachment)
     except Refused as e:
         o.raw(res, item, attachment)
-        return e.reasons
-    return None
+        return Offer(e.reasons, e.answer)
+    return Offer(None, "accepted: the checked writer published it")
+
+
+def _offers(offers: Any) -> str:
+    return "; ".join(f"{x.reasons} from {x.answer!r}" for x in offers)
 
 
 # -- the readers ---------------------------------------------------------------------------
@@ -720,7 +753,7 @@ def section3(report: Report, mode: Any, contract: Any) -> None:
         o.put("frames", _frames(10))
         o.put("drops", 10)
         time.sleep(APART_S)
-        refused = (raw_step(o, "frames", point(7, "counter", epoch=i1)), raw_step(o, "drops", 7))
+        offers = (raw_step(o, "frames", point(7, "counter", epoch=i1)), raw_step(o, "drops", 7))
         time.sleep(0.5)
         R, R0 = bus.R, bus.R0
         ok = all(_all_conform(r, res)[0] and len(r.of(res)) == 2 for r in (R, R0) for res in ("frames", "drops"))
@@ -741,7 +774,7 @@ def section3(report: Report, mode: Any, contract: Any) -> None:
                      len(f0) == 1 and _pair_is(f0[0][2], "decreased", "established", "in_band"),
                      f"{[_p(p) for _, _, p in f0]}")
         report.check(sec, "4. the checked writer, holding its owner to §2.7, refuses both puts of step 2, sent raw",
-                     refused == (["decreased"], ["decreased"]), f"{refused}")
+                     [x.reasons for x in offers] == [["decreased"], ["decreased"]], _offers(offers))
     finally:
         bus.close()
 
@@ -756,11 +789,11 @@ def section4(report: Report, mode: Any, contract: Any) -> None:
         bus.appeared(o.instance)
         o.put("frames", _frames(1))
         time.sleep(APART_S)
-        refused = [raw_step(o, "frames", point(3.5, "gauge", epoch=o.instance))]
+        offers = [raw_step(o, "frames", point(3.5, "gauge", epoch=o.instance))]
         time.sleep(APART_S)
-        refused.append(raw_step(o, "frames", point(2, "counter", unit="By", epoch=o.instance)))
+        offers.append(raw_step(o, "frames", point(2, "counter", unit="By", epoch=o.instance)))
         time.sleep(APART_S)
-        refused.append(raw_step(o, "level", "x"))
+        offers.append(raw_step(o, "level", "x"))
         time.sleep(APART_S)
         o.put("frames", _frames(5))
         time.sleep(0.5)
@@ -783,7 +816,8 @@ def section4(report: Report, mode: Any, contract: Any) -> None:
                      len(fr) == 1 and fr[0][:2] == (1, 5) and fr[0][2].continuity == "same_epoch",
                      f"{[(a, b, _p(p)) for a, b, p in fr]}")
         report.check(sec, "5. the checked writer refuses steps 2 to 4 before sending, each sent raw",
-                     refused == [["tag_disagrees"], ["unit_disagrees"], ["wrong_type"]], f"{refused}")
+                     [x.reasons for x in offers] == [["tag_disagrees"], ["unit_disagrees"], ["wrong_type"]],
+                     _offers(offers))
     finally:
         bus.close()
 
@@ -804,9 +838,9 @@ def section5(report: Report, mode: Any, contract: Any) -> None:
 
         o.put("latency", h(declared, [3, 10, 2, 1], 0.19))
         time.sleep(APART_S)
-        refused = [raw_step(o, "latency", h([0.005, 0.01, 0.05], [3, 10, 2, 1], 0.19, o.instance))]
+        offers = [raw_step(o, "latency", h([0.005, 0.01, 0.05], [3, 10, 2, 1], 0.19, o.instance))]
         time.sleep(APART_S)
-        refused.append(raw_step(o, "latency", h(declared, [3, 9, 2, 1], 0.18, o.instance)))
+        offers.append(raw_step(o, "latency", h(declared, [3, 9, 2, 1], 0.18, o.instance)))
         time.sleep(APART_S)
         o.put("latency", h(declared, [4, 12, 2, 1], -1.0))
         time.sleep(0.5)
@@ -826,7 +860,7 @@ def section5(report: Report, mode: Any, contract: Any) -> None:
                      bool(p) and all(x.rate is None and x.no_rate == "kind" for _, _, x in p),
                      f"{[x.no_rate for _, _, x in p]}")
         report.check(sec, "5. the checked writer refuses steps 2 and 3, each sent raw",
-                     refused == [["bounds_differ"], ["decreased"]], f"{refused}")
+                     [x.reasons for x in offers] == [["bounds_differ"], ["decreased"]], _offers(offers))
     finally:
         bus.close()
 
@@ -891,7 +925,7 @@ def section7(report: Report, mode: Any, contract: Any) -> None:
             time.sleep(APART_S)
         mark = time.monotonic_ns()
         # Step 3 (0.2): "the JSON string "" (two bytes) as its attachment".
-        refused = raw_step(o, "bytes", 60, "")
+        offer = raw_step(o, "bytes", 60, "")
         time.sleep(0.5)
         R, R0 = bus.R, bus.R0
         atts = [a.attachment for a, _ in R.of("bytes")]
@@ -914,7 +948,8 @@ def section7(report: Report, mode: Any, contract: Any) -> None:
                      s3 is not None and tail[0][0].attachment == b'""'
                      and (s3.conformance, s3.reasons) == (tm.DOES_NOT, ("epoch_invalid",))
                      and [(a, b) for a, b, _ in R.pairs("bytes")] == [(100, 200), (200, 0), (0, 50)], f"{s3}")
-        report.note(sec, f"the checked writer's answer to step 3, before it went raw: refused {refused}")
+        report.check(sec, "3. the checked writer refuses step 3's empty epoch (epoch_invalid, §2.6 check 2), so "
+                          "it went raw", offer.reasons == ["epoch_invalid"], _offers([offer]))
         if o.rust:
             # The example's raw takes "<attachment json>": its help says the
             # attachment is JSON, and it refuses "the attachment is not one
@@ -1116,14 +1151,16 @@ def run(report: Report, mode: Any, only: list[str] | None) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.telemetry_scenarios", description=__doc__.split("\n")[0])
     ap.add_argument("--only", action="append", choices=sorted(SECTIONS, key=int), help="run only these sections")
-    ap.add_argument("--owner", type=Path, default=os.environ.get("ZK2PY_OWNER") or None,
-                    help="run against the Rust owner example at this path (--telemetry)")
+    ap.add_argument("--owner", type=Path, default=None,
+                    help="run against the Rust owner example at this path (--telemetry); default $ZK2PY_OWNER")
     args = ap.parse_args(argv)
     mode: Any = "zk2py"
-    if args.owner is not None:
-        exe = Path(args.owner)
+    env = os.environ.get("ZK2PY_OWNER") or None
+    owner, source = (args.owner, "--owner") if args.owner is not None else (env, "ZK2PY_OWNER")
+    if owner is not None:
+        exe = Path(owner)
         if not exe.is_file():
-            print(f"error: {exe} not found", file=sys.stderr)
+            print(f"error: {exe} not found (the path came from {source})", file=sys.stderr)
             return 2
         mode = exe
     report = Report()

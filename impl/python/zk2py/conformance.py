@@ -1595,6 +1595,39 @@ def _telemetry_edges() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _telemetry_deep() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 §2.6, a sample nested deeper than zk2py's reader goes
+    (review of PR #826): read as undecodable, never a crash. RFC 8259 §9
+    lets a parser limit nesting; zk2py's limit is Python's recursion's. A
+    JSON Point whose `labels` nest 100,000 objects deep, a JSON array as
+    deep in a gauge, and a CBOR array as deep."""
+    from . import telemetry as tm
+
+    point = tm.declare("stream", {}, {"kind": "jsonschema", "name": tm.POINT, "schema": tm.CURRENT, "root": None})
+    gauge = tm.declare("stream", {tm.KIND: "gauge"}, {"kind": "jsonschema", "name": "Level",
+                                                      "schema": "sha256:" + "a" * 64, "root": {"type": "number"}})
+    n = 100_000
+
+    def read(decl: Any, decode: Any, payload: bytes) -> Any:
+        try:
+            c = tm.conform(decl, tm.Sample(decode(payload)))
+        except tm.Undecodable:
+            c = tm.conform(decl, tm.Sample(undecodable=True))
+        return [c.conformance, list(c.reasons)]
+
+    labels = b'{"timestamp": 1, "value": {"type": "gauge", "value": 1}, "labels": ' + b'{"a": ' * n + b'"x"' \
+        + b"}" * n + b"}"
+    want = [tm.UNOBSERVABLE, ["undecodable"]]
+    label = "telemetry.v1 §2.6, nested 100,000 deep (review of PR #826)"
+    return [
+        (f"{label}: a JSON Point's labels: undecodable, no crash", read(point, tm.decode_json, labels), want),
+        (f"{label}: a JSON array in a gauge: undecodable, no crash",
+         read(gauge, tm.decode_json, b"[" * n + b"1" + b"]" * n), want),
+        (f"{label}: a CBOR array in a gauge: undecodable, no crash",
+         read(gauge, tm.decode_cbor, b"\x81" * n + b"\x01"), want),
+    ]
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -1604,7 +1637,7 @@ def family_readings(root: Path) -> list[Result]:
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
-        + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges()
+        + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 

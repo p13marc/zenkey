@@ -287,21 +287,27 @@ def decode_json(payload: bytes) -> Any:
     depth, every string with a UTF-8 form (so no lone surrogate escape),
     and every number finite", ``1e400`` and 10^400 written out included; an
     integer within the double's range "is read exactly, however long its
-    text". Raises :class:`Undecodable`."""
+    text". Raises :class:`Undecodable`.
+
+    A value nested past Python's recursion limit is read as undecodable,
+    never a crash: RFC 8259 §9 lets a parser limit the depth of nesting, and
+    this reader's limit is the interpreter's (about a thousand levels)."""
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as e:
         raise Undecodable(f"not UTF-8: {e}") from e
     try:
         value = json.loads(text.strip(" \t\r\n"), object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
+        if not _utf8(value):
+            raise Undecodable("a string with no UTF-8 form")
+        if not _finite(value):
+            raise Undecodable("a number past the double's finite range")
     except Undecodable:
         raise
+    except RecursionError as e:
+        raise Undecodable("nested past this reader's depth") from e
     except ValueError as e:
         raise Undecodable(str(e)) from e
-    if not _utf8(value):
-        raise Undecodable("a string with no UTF-8 form")
-    if not _finite(value):
-        raise Undecodable("a number past the double's finite range")
     return value
 
 
@@ -314,11 +320,6 @@ def decode_cbor(payload: bytes) -> Any:
     non-finite float is kept as one. Raises :class:`Undecodable`."""
     from . import cbor
 
-    try:
-        value = cbor.loads(payload, bignums=True)
-    except cbor.CborError as e:
-        raise Undecodable(str(e)) from e
-
     def textual(v: Any) -> bool:
         if isinstance(v, dict):
             return all(isinstance(k, str) and textual(x) for k, x in v.items())
@@ -326,8 +327,17 @@ def decode_cbor(payload: bytes) -> Any:
             return all(textual(x) for x in v)
         return True
 
-    if not textual(value):
-        raise Undecodable("a map key that is not text")
+    try:
+        value = cbor.loads(payload, bignums=True)
+        if not textual(value):
+            raise Undecodable("a map key that is not text")
+    except Undecodable:
+        raise
+    except cbor.CborError as e:
+        raise Undecodable(str(e)) from e
+    except RecursionError as e:
+        # As decode_json: nested past this reader's depth.
+        raise Undecodable("nested past this reader's depth") from e
     return value
 
 

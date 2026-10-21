@@ -7635,14 +7635,14 @@ Of the 24 new `samples.json` cases, round 45's decoders read seven
 differently: `1e400`, 10^400, and the five bignums. Those are exactly the
 answers that went against zk2py's reading.
 
-**`just py-conformance`: 2196 of 2196.** At the start of the round, round
+**`just py-conformance`: 2199 of 2199.** At the start of the round, round
 45's runner passed the 21 families before `telemetry`, then stopped there
 with exit 2: it read `value` from a `json_text` case (a `KeyError`).
 
 | Family | Before | After |
 |---|---|---|
 | telemetry | crashed (243 of 243 at 0.1) | 269 of 269 |
-| readings | 172 of 172 | 176 of 176: four of F-150's and F-151's readings |
+| readings | 172 of 172 | 179 of 179: four of F-150's and F-151's readings, three of a sample nested past the reader's depth (review of PR #826) |
 | the 20 others | 1751 of 1751 | 1751 of 1751 |
 
 **`just py-telemetry`, §1 to §9.** Every check passes, judged by zk2py's
@@ -7656,11 +7656,11 @@ reader, against both owners:
 | 4 A Point whose tag disagrees | 5 of 5 | 5 of 5 |
 | 5 Histograms, other bounds and a decrease | 5 of 5 | 5 of 5 |
 | 6 Absence is not zero | 3 of 3 | 3 of 3 |
-| 7 An in-band epoch on a bare counter | 5 of 5 | 4 of 4 |
+| 7 An in-band epoch on a bare counter (+ step 3's refusal, review of PR #826) | 6 of 6 | 5 of 5 |
 | 8 A counter that crosses a face (R0, and R0F across a real face) | 8 of 8 | 8 of 8 |
 | 9 A state counter seeded | 5 of 5 | 5 of 5 |
 | §2.11's conversion against zenoh-python | 1 of 1 | 1 of 1 |
-| **Total** | **56 of 56** | **55 of 55** |
+| **Total** | **57 of 57** | **56 of 56** |
 
 What the black box showed:
 - **Its `--help` was enough to drive it.** Nothing had to be found by
