@@ -1,0 +1,3731 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a counter at 0",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 0
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "2^64-1, read exactly: never through a double, which would make it 2^64",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 18446744073709551615
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "out_of_range"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "2^64, an integer by its text: out of range",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": {
+          "$int": "18446744073709551616"
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "out_of_range"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "2^64 as a float, the double that 18446744073709551615.0 also denotes: out of range",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 1.8446744073709552e+19
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "2^64-2048, the largest double below 2^64, is an integral float in range",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 1.844674407370955e+19
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "out_of_range"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a negative count",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": -1
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "out_of_range"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "-2^63-1, an integer by its text, below every range",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": {
+          "$int": "-9223372036854775809"
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "an integral float is that integer: 5.0 is 5",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 5.0
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "-0.0 is the integer 0",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": -0.0
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "out_of_range"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "1e300 is an integral double, so an integer, out of range",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 1e+300
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a fraction is not a count",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 5.5
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a string is not a count",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": "5"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "null is not a count, and not zero",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": null
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "NaN, which CBOR can carry, is not an integer",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": {
+          "$float": "NaN"
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "infinity is not an integer",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": {
+          "$float": "Infinity"
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a counter with its epoch in the attachment, an instance id",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "attachment": "3fa9c2d41b7e0001",
+        "value": 7
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "epoch_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "an empty epoch",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "attachment": "",
+        "value": 7
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "64 characters, counted as code points, is an epoch",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "attachment": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "value": 7
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "epoch_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "65 is not",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "attachment": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "value": 7
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "epoch_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "an epoch that is not a string",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "attachment": 5,
+        "value": 7
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "no attachment: no in-band epoch, and the sample conforms",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 7
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "epoch_invalid",
+          "out_of_range"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "an epoch and a wrong value: both reported",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "attachment": "",
+        "value": -7
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "an attachment on a counter that declares no Epoch is not read",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "attachment": "",
+        "value": 7
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "a gauge in dBm, with a sign and a fraction",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": -71.5
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "an integer is a number",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 3
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "not_finite"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "a gauge's NaN, which CBOR can carry: not finite",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": {
+          "$float": "NaN"
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "not_finite"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "-infinity",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": {
+          "$float": "-Infinity"
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "a large finite double is a gauge",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 1e+300
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "a string is not a number",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": "3"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "a boolean is not a number",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": true
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "zenoh-modem's integer gauge: the kind asks a number, and the schema's integer is the core's to check",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Gauge",
+          "root": {
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 2.5
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "text",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a text member",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "text"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Label",
+          "root": {
+            "type": "string"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": "up"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "text",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a number is not text",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "text"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Label",
+          "root": {
+            "type": "string"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 1
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "boolean",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a boolean member",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "boolean"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Flag",
+          "root": {
+            "type": "boolean"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": false
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "boolean",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "1 is not a boolean",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "boolean"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Flag",
+          "root": {
+            "type": "boolean"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 1
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "boolean",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "\"true\" is not a boolean",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "boolean"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Flag",
+          "root": {
+            "type": "boolean"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": "true"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "binary",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a raw sample's bytes are binary",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "binary"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "raw",
+          "media_type": "application/octet-stream"
+        }
+      },
+      "sample": {
+        "value": {
+          "$bytes": "AAEC/w=="
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "binary",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "no bytes at all is binary too",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "binary"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "raw",
+          "media_type": "application/octet-stream"
+        }
+      },
+      "sample": {
+        "value": {
+          "$bytes": ""
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "RFC 11 §4's histogram, over the declared bounds",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "bounds_differ"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "other bounds",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.05
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "bounds_differ"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "one bound fewer, with counts one longer than it: the bounds differ",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            3
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "bounds equal by value: integral floats are the integers",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            1,
+            2,
+            5
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            1.0,
+            2.0,
+            5.0
+          ],
+          "count": 1,
+          "counts": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "sum": 0.5
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "bounds equal by value: 0 equals the declared -0.0",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            -0.0,
+            1
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0,
+            1.0
+          ],
+          "count": 2,
+          "counts": [
+            1,
+            1,
+            0
+          ],
+          "sum": 0.5
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "counts_length"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "counts not one longer than the bounds",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            3
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "count_sum"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "count is not the sum of counts",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 15,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "out_of_range"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "a negative bucket count: out of range, and the sum check, which needs it, skipped",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 14,
+          "counts": [
+            3,
+            10,
+            2,
+            -1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "out_of_range"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "count 2^64, an integer by its text: out of range",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": {
+            "$int": "18446744073709551616"
+          },
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "not_finite"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "sum NaN",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": {
+            "$float": "NaN"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "a sum may be negative",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": -3.5
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "not_finite"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "a bound that is infinite: not finite, and the checks of the bounds skipped",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            {
+              "$float": "Infinity"
+            },
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "bounds_invalid"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "bounds not ascending: invalid, and not compared with the declaration",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.01,
+            0.005,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "bounds_invalid"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "no bounds: one bucket is not a histogram here",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [],
+          "count": 5,
+          "counts": [
+            5
+          ],
+          "sum": 1.0
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "a count that is a fraction: not a Histogram",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10.5,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "an integral float count is an integer",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16.0,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "sum missing: not a Histogram",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "counts that are strings",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            "3",
+            "10",
+            "2",
+            "1"
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "bounds_differ",
+          "count_sum"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "other bounds and a wrong count: both reported, in order",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.05
+          ],
+          "count": 17,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "s",
+        "unit_from": "declared"
+      },
+      "note": "a histogram that is not an object",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": [
+          3,
+          10,
+          2,
+          1
+        ]
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "ZenSight's sysinfo: a counter Point; the kind is its tag, the unit unknown",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 42
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": "Cel",
+        "unit_from": "point"
+      },
+      "note": "a gauge Point with its unit: the member's unit is the Point's",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "unit": "Cel",
+          "value": {
+            "type": "gauge",
+            "value": 21.5
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a label named unit is context, never the unit (§2.5)",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "labels": {
+            "oid": "1.3.6.1.2.1.2.2.1.10",
+            "unit": "bytes"
+          },
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "gauge",
+            "value": 3
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "netring: the declared unit is the member's, and a Point that agrees conforms",
+      "resource": {
+        "annotations": {
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "unit": "By",
+          "value": {
+            "type": "counter",
+            "value": 7
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a Point with no unit takes the declared one",
+      "resource": {
+        "annotations": {
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 7
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "unit_disagrees"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a Point whose unit differs from the declared one",
+      "resource": {
+        "annotations": {
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "unit": "KiBy",
+          "value": {
+            "type": "counter",
+            "value": 7
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "unit_disagrees"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "units compare byte for byte: By is not by",
+      "resource": {
+        "annotations": {
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "unit": "by",
+          "value": {
+            "type": "counter",
+            "value": 7
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "unit_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a Point whose unit is no unit",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "unit": "",
+          "value": {
+            "type": "gauge",
+            "value": 3
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "tag_disagrees"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a Point whose tag differs from the declared kind: the member stays a counter",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "gauge",
+            "value": 7.5
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "tag_disagrees",
+          "unit_disagrees"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "the tag and the unit both disagree",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "unit": "ms",
+          "value": {
+            "type": "gauge",
+            "value": 7.5
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "out_of_range"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a counter Point below 0",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": -1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a counter Point at 2^64-1",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 18446744073709551615
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a counter Point whose value is an integral float",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 5.0
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [
+          "bounds_differ"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a Point declared histogram over other bounds",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "histogram",
+            "value": {
+              "buckets": [
+                0.1,
+                0.2,
+                0.3
+              ],
+              "count": 16,
+              "counts": [
+                3,
+                10,
+                2,
+                1
+              ],
+              "sum": 0.19
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "histogram",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a Point declared histogram over its bounds",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "histogram",
+            "value": {
+              "buckets": [
+                0.005,
+                0.01,
+                0.025
+              ],
+              "count": 16,
+              "counts": [
+                3,
+                10,
+                2,
+                1
+              ],
+              "sum": 0.19
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "histogram",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a self-described histogram is checked with no declaration",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "histogram",
+            "value": {
+              "buckets": [
+                1,
+                2,
+                3
+              ],
+              "count": 16,
+              "counts": [
+                3,
+                10,
+                2,
+                1
+              ],
+              "sum": 0.19
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "bounds_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a self-described histogram's bounds must still ascend",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "histogram",
+            "value": {
+              "buckets": [
+                3,
+                2,
+                1
+              ],
+              "count": 16,
+              "counts": [
+                3,
+                10,
+                2,
+                1
+              ],
+              "sum": 0.19
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_finite"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a gauge Point's NaN, from CBOR",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "gauge",
+            "value": {
+              "$float": "NaN"
+            }
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "text",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a text Point",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "text",
+            "value": "up"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "boolean",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a boolean Point",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "boolean",
+            "value": true
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "binary",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a binary Point: an array of byte values",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "binary",
+            "value": [
+              0,
+              255,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a binary Point with a value above 255",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "binary",
+            "value": [
+              0,
+              256
+            ]
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a counter Point carrying its epoch",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "epoch": "3fa9c2d41b7e0001",
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 9
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "epoch_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "an empty epoch",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "epoch": "",
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 9
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "epoch_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "an epoch that is not a string",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "epoch": 9,
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 9
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a member the schema does not name is tolerated (core §9.8)",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "source": "h-3fa9c2d41b7e",
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 9
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "counter",
+        "kind_from": "point",
+        "reasons": [],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a timestamp as an integral float is an integer",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000.0,
+          "value": {
+            "type": "counter",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "no timestamp: not a Point",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "value": {
+            "type": "counter",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a timestamp with a fraction",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1.5,
+          "value": {
+            "type": "counter",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a timestamp beyond 2^63-1",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": {
+            "$int": "9223372036854775808"
+          },
+          "value": {
+            "type": "counter",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a timestamp that is a string",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": "1700000000000",
+          "value": {
+            "type": "counter",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "a tag that is not one of the six: not a Point, though a kind is declared",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "summary",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "v1's bool is no tag",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "bool",
+            "value": true
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a value without its value",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter"
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a value that is not an object",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "value": 42
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "labels that are not strings",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "labels": {
+            "ifindex": 3
+          },
+          "timestamp": 1700000000000,
+          "value": {
+            "type": "counter",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a unit that is not a string",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": {
+          "timestamp": 1700000000000,
+          "unit": 5,
+          "value": {
+            "type": "counter",
+            "value": 1
+          }
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_a_point"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a bare number where a Point is declared",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "value": 42
+      }
+    },
+    {
+      "expect": {
+        "conformance": "unobservable",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "declaration_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "an invalid declaration: nothing is read",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "bool"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Flag",
+          "root": {
+            "type": "boolean"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": true
+      }
+    },
+    {
+      "expect": {
+        "conformance": "unobservable",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "undecodable"
+        ],
+        "unit": "By",
+        "unit_from": "declared"
+      },
+      "note": "bytes the core could not decode: the declared kind and unit stand",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "undecodable": true
+      }
+    },
+    {
+      "expect": {
+        "conformance": "unobservable",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "undecodable"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "an undecodable Point: no kind",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      },
+      "sample": {
+        "undecodable": true
+      }
+    },
+    {
+      "expect": {
+        "conformance": "not_asked",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "not_this_profiles"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "a composite state: not this profile's",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "NetworkInterface",
+          "root": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "up": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "schema": "sha256:b1e64344ce96a42218cc0ed0f45d72d6f601c46c6639d39c67a78e686d28054e"
+        }
+      },
+      "sample": {
+        "value": {
+          "name": "eth0",
+          "up": true
+        }
+      }
+    },
+    {
+      "expect": {
+        "conformance": "not_asked",
+        "kind": null,
+        "kind_from": null,
+        "reasons": [
+          "ignored"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "an event: ignored",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": null,
+        "kind": "event",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "value": 1
+      }
+    }
+  ],
+  "description": "telemetry.v1 §2.5, §2.6: a resolved resource, as declarations.json writes it, and one sample -> its conformance, and the member's kind and unit as the sample gives them. sample is {\"undecodable\": true} (bytes the core could not decode) or {value, attachment?}: the decoded data item and the decoded attachment, absent when the sample has none. A data item is written as JSON, read by its text: a number with no fraction and no exponent is an integer, read exactly; any other number is the IEEE double it denotes. Three objects of one member stand for what this file's JSON cannot hold: {\"$int\": \"<decimal>\"} an integer outside -2^63 to 2^64-1, {\"$float\": \"NaN\" | \"Infinity\" | \"-Infinity\"} a float that is not finite (CBOR carries them), {\"$bytes\": \"<base64>\"} a byte string (a raw payload's bytes). An integer as JSON Schema's integer reads one is an integer, or an integral finite float, the integer it equals. expect.conformance is conforms, does_not (reasons, every one that applies, in this order, each check made alone and a check that needs a value an earlier one found wrong skipped: not_a_point, epoch_invalid, unit_invalid, tag_disagrees, unit_disagrees, wrong_type, out_of_range, not_finite, bounds_invalid, bounds_differ, counts_length, count_sum, as v1.md §2.6 defines them), unobservable (declaration_invalid, or undecodable) or not_asked (not_this_profiles, or ignored); reasons is [] when it conforms. A Point is an object with timestamp an integer from -2^63 to 2^63-1, value an object with type one of the six kinds and a member value, labels, if present, an object of strings, and unit, if present, a string; other members are tolerated, and a Point that is not one is checked no further. An in-band epoch (a Point's epoch, or, for a bare counter or histogram whose declaration's epoch is attachment, the attachment) is a string of 1 to 64 Unicode code points. A value's kind is the Point's tag, or the declared kind for a bare value. expect.kind and expect.unit are the member's kind and unit as this sample gives them, and kind_from and unit_from where each came from (declared, or point), null when none: the declared kind and unit always, unless the declaration is invalid or not asked; the Point's tag and its unit only when the sample conforms. A null unit is unknown, never dimensionless."
+}

@@ -1,0 +1,2353 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "counter",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "zenoh-modem's sdu/tx_sdus_total: a bare counter, its type an integer from 0 (§2.4)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "counter",
+        "semantic": null,
+        "unit": "By"
+      },
+      "note": "zenoh-modem's sdu/tx_bytes_total: a counter in By",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": "ms"
+      },
+      "note": "zenoh-modem's Gauge, an integer: a gauge in ms",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "ms"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Gauge",
+          "root": {
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": "dBm"
+      },
+      "note": "zenoh-modem's Measure, a number: a gauge in dBm, which is not UCUM's spelling and is valid (§2.2)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": "us"
+      },
+      "note": "zenoh-modem's us, UCUM's microsecond",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "us"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": "bit/s"
+      },
+      "note": "a unit with a slash and a percent are printable ASCII",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "bit/s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": "%"
+      },
+      "note": "%",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "%"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a gauge on a type of integer or number",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Reading",
+          "root": {
+            "type": [
+              "integer",
+              "number"
+            ]
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "state carries metrics too",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "text",
+        "semantic": "identity",
+        "unit": null
+      },
+      "note": "a text member on a string",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "text",
+          "telemetry.semantic": "identity"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Label",
+          "root": {
+            "type": "string"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "boolean",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a boolean on a boolean",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "boolean"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Flag",
+          "root": {
+            "type": "boolean"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "binary",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "binary on a raw type, of any media type (§2.4)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "binary"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "raw",
+          "media_type": "application/octet-stream"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": [
+          0.005,
+          0.01,
+          0.025
+        ],
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "histogram",
+        "semantic": null,
+        "unit": "s"
+      },
+      "note": "a bare histogram: the profile's Histogram, by its artifact's id",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram",
+          "telemetry.unit": "s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": null,
+        "semantic": null,
+        "unit": null
+      },
+      "note": "ZenSight's sysinfo: a Point and no annotation; each sample says its kind (§2.5)",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": null,
+        "semantic": null,
+        "unit": "By"
+      },
+      "note": "ZenSight's netring: a Point with a declared unit",
+      "resource": {
+        "annotations": {
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": null,
+        "semantic": null,
+        "unit": "ms"
+      },
+      "note": "the pre-profile Point's id is the profile's too (§3): a reader of an old bundle meets it",
+      "resource": {
+        "annotations": {
+          "telemetry.unit": "ms"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:3d6276dd302873ca5938013a44d460267971123fd25500f189e30be718f9dc1e"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": null,
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a Point on state",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": "counter",
+        "semantic": "bytes",
+        "unit": "By"
+      },
+      "note": "a Point with a declared kind, which is authoritative",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.semantic": "bytes",
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": [
+          0.005,
+          0.01,
+          0.025
+        ],
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": "histogram",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a Point declared histogram, with its buckets",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": "text",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a Point declared text",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "text"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": "binary",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a Point declared binary: the Point carries every kind",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "binary"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "a type named telemetry.v1.Point in another artifact is not the Point (§2.3): with no key of the vocabulary, not a metric resource",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": {
+            "type": "object"
+          },
+          "schema": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_missing"
+        ]
+      },
+      "note": "the same, with a unit: annotations, no kind, and not the Point",
+      "resource": {
+        "annotations": {
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": {
+            "type": "object"
+          },
+          "schema": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a Histogram named alike in another artifact cannot carry a histogram",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": {
+            "type": "object"
+          },
+          "schema": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": "attachment",
+        "kind": "counter",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a bare counter whose attachment is the profile's Epoch carries its epoch there (§2.4)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": [
+          1.0,
+          2.0
+        ],
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": "attachment",
+        "kind": "histogram",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a bare histogram with the Epoch attachment",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            1,
+            2
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Histogram",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "counter",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "an attachment named alike in another artifact is no epoch",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "type": "string"
+          },
+          "schema": "sha256:abababababababababababababababababababababababababababababababab"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "an Epoch attachment on a gauge carries nothing: only a counter's or a histogram's epoch rides there",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": null,
+        "semantic": null,
+        "unit": null
+      },
+      "note": "an Epoch attachment on a Point: the Point's own member is the epoch's place",
+      "resource": {
+        "annotations": {},
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "counter",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "another attachment on a counter is no epoch",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "Label",
+          "root": {
+            "type": "string"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_value"
+        ]
+      },
+      "note": "v1's bool is not a kind: boolean is (Appendix A)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "bool"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Flag",
+          "root": {
+            "type": "boolean"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_value"
+        ]
+      },
+      "note": "kinds compare byte for byte",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "Counter"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_value"
+        ]
+      },
+      "note": "a kind that is not one of the six",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "summary"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_value"
+        ]
+      },
+      "note": "a kind that is not a string",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": 1
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "unit_value"
+        ]
+      },
+      "note": "an empty unit",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": ""
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "unit_value"
+        ]
+      },
+      "note": "a unit with a space",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "m s"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+      },
+      "note": "64 characters is a unit",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "unit_value"
+        ]
+      },
+      "note": "65 is not",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "unit_value"
+        ]
+      },
+      "note": "a unit outside ASCII (a contract holding one is E027 anyway)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "°C"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "unit_value"
+        ]
+      },
+      "note": "a unit with a control character",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "m\ts"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "unit_value"
+        ]
+      },
+      "note": "a unit that is not a string",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": 1
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": [
+          0.0,
+          1.0,
+          2.5,
+          10.0
+        ],
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": "histogram",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "buckets compare as doubles: integers and integral floats alike",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0,
+            1.0,
+            2.5,
+            10
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": [
+          -0.0,
+          1.0
+        ],
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": "histogram",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "-0.0 is a bound below 1",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            -0.0,
+            1
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_value"
+        ]
+      },
+      "note": "-0.0 equals 0, so [-0.0, 0] is not strictly ascending",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            -0.0,
+            0
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_value"
+        ]
+      },
+      "note": "an empty list is no buckets",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_value"
+        ]
+      },
+      "note": "a repeated bound",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            1,
+            1
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_value"
+        ]
+      },
+      "note": "descending bounds",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            2,
+            1
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_value"
+        ]
+      },
+      "note": "a bound that is not a number",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0,
+            "1"
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_value"
+        ]
+      },
+      "note": "buckets that are not an array",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": 5,
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "histogram_without_buckets"
+        ]
+      },
+      "note": "a histogram declared without buckets",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_without_histogram"
+        ]
+      },
+      "note": "buckets on a Point that declares no kind",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ]
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_without_histogram"
+        ]
+      },
+      "note": "buckets on a gauge",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_value"
+        ]
+      },
+      "note": "buckets beside a kind that is not one: the kind is reported, and the check that needs it skipped",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "bool"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_missing",
+          "buckets_without_histogram"
+        ]
+      },
+      "note": "buckets and no kind on a number: nothing says what they describe",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ]
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "buckets_value",
+          "kind_missing"
+        ]
+      },
+      "note": "core's ok-float-integral fixture: buckets [0.5, 1e21, -0.0] on a raw stream load (no core lint reads values), and read as invalid here",
+      "resource": {
+        "annotations": {
+          "freshness.ttl_s": 60.0,
+          "telemetry.buckets": [
+            0.5,
+            1e+21,
+            -0.0
+          ]
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "raw",
+          "media_type": "text/plain"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": "temperature",
+        "unit": "Cel"
+      },
+      "note": "a semantic of the closed eight",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.semantic": "temperature",
+          "telemetry.unit": "Cel"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "semantic_value"
+        ]
+      },
+      "note": "semantics compare byte for byte",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.semantic": "Temperature"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "semantic_value"
+        ]
+      },
+      "note": "a semantic outside the eight",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.semantic": "speed"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_value",
+          "unit_value",
+          "buckets_value",
+          "semantic_value"
+        ]
+      },
+      "note": "every value wrong at once: each is reported, and not_a_carrier, which needs the kind, is skipped",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [],
+          "telemetry.kind": "bool",
+          "telemetry.semantic": "x",
+          "telemetry.unit": ""
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "kind_missing"
+        ]
+      },
+      "note": "a unit alone on a number: kind_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.unit": "By"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a counter needs a type of exactly integer: a number is not one",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "integer or number is not exactly integer",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Reading",
+          "root": {
+            "type": [
+              "integer",
+              "number"
+            ]
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a nullable integer (null in the type) carries nothing: null is no value of any kind",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "MaybeCount",
+          "root": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "the nullable form, whose reading adds null to the type, carries nothing either",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "MaybeLevel",
+          "root": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a string is not a boolean",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "boolean"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Label",
+          "root": {
+            "type": "string"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "no JSON Schema type carries binary",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "binary"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Label",
+          "root": {
+            "type": "string"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a raw type carries binary alone",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "raw",
+          "media_type": "application/octet-stream"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a histogram needs the profile's Histogram: a bare integer is not one",
+      "resource": {
+        "annotations": {
+          "telemetry.buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "telemetry.kind": "histogram"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "tcgui's composite state, no annotation: not a metric resource",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "NetworkInterface",
+          "root": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "up": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "schema": "sha256:b1e64344ce96a42218cc0ed0f45d72d6f601c46c6639d39c67a78e686d28054e"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a kind on a composite object: not a carrier at 1.x",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "NetworkInterface",
+          "root": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "up": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "schema": "sha256:b1e64344ce96a42218cc0ed0f45d72d6f601c46c6639d39c67a78e686d28054e"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "an array is not a carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Samples",
+          "root": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a root with no type, a oneOf, is not a carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Either",
+          "root": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "a protobuf message is not a carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "protobuf",
+          "name": "nav.v2.Position",
+          "schema": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "a protobuf message with no annotation: not a metric resource",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "protobuf",
+          "name": "nav.v2.Position",
+          "schema": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "only freshness.v1's key: not a metric resource",
+      "resource": {
+        "annotations": {
+          "freshness.ttl_s": 60
+        },
+        "attachment": null,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "a key outside the vocabulary is W105's, and makes no metric resource",
+      "resource": {
+        "annotations": {
+          "telemetry.foo": 1
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "NetworkInterface",
+          "root": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "up": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "schema": "sha256:b1e64344ce96a42218cc0ed0f45d72d6f601c46c6639d39c67a78e686d28054e"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a key outside the vocabulary beside a kind is not read",
+      "resource": {
+        "annotations": {
+          "telemetry.foo": 1,
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "an event that writes a kind: ignored, whatever its value (§2.2)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": null,
+        "kind": "event",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "an event whose kind is not one is ignored too: its value is never read",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "bool"
+        },
+        "attachment": null,
+        "kind": "event",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "an event typed by the Point, with no annotation: not a metric resource",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "event",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "an operation that writes a kind: ignored",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge"
+        },
+        "attachment": null,
+        "kind": "operation",
+        "type": null
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "an operation with none: not this profile's",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "kind": "operation",
+        "type": null
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "[defaults.stream] gives the kind; the resource writes nothing",
+      "resource": {
+        "attachment": null,
+        "kind": "stream",
+        "layers": {
+          "defaults": {},
+          "kind_defaults": {
+            "telemetry.kind": "gauge"
+          },
+          "resource": {}
+        },
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a resource's own kind overrides [defaults.stream]'s",
+      "resource": {
+        "attachment": null,
+        "kind": "stream",
+        "layers": {
+          "defaults": {},
+          "kind_defaults": {
+            "telemetry.kind": "counter"
+          },
+          "resource": {
+            "telemetry.kind": "gauge"
+          }
+        },
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": "ms"
+      },
+      "note": "[defaults.<kind>] overrides [defaults], key by key: the unit from one, the kind from the other",
+      "resource": {
+        "attachment": null,
+        "kind": "stream",
+        "layers": {
+          "defaults": {
+            "telemetry.kind": "counter",
+            "telemetry.unit": "By"
+          },
+          "kind_defaults": {
+            "telemetry.unit": "ms"
+          },
+          "resource": {
+            "telemetry.kind": "gauge"
+          }
+        },
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "[defaults] spreads a kind to an event, which ignores it",
+      "resource": {
+        "attachment": null,
+        "kind": "event",
+        "layers": {
+          "defaults": {
+            "telemetry.kind": "gauge"
+          },
+          "kind_defaults": {},
+          "resource": {}
+        },
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_carrier"
+        ]
+      },
+      "note": "[defaults] spreads a kind onto a composite state: the author's error, read as such",
+      "resource": {
+        "attachment": null,
+        "kind": "state",
+        "layers": {
+          "defaults": {
+            "telemetry.kind": "gauge"
+          },
+          "kind_defaults": {},
+          "resource": {}
+        },
+        "type": {
+          "kind": "jsonschema",
+          "name": "NetworkInterface",
+          "root": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "up": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "schema": "sha256:b1e64344ce96a42218cc0ed0f45d72d6f601c46c6639d39c67a78e686d28054e"
+        }
+      }
+    }
+  ],
+  "description": "telemetry.v1 §2.1, §2.2, §2.4: a resolved resource -> its declaration. resource.kind is the authoring kind (stream, state, event, operation; @stream and @state are read as stream and state). Its annotations are either annotations, already resolved, or layers {defaults, kind_defaults, resource}, which a reader merges key by key, resource over kind_defaults over defaults (core §9.3). resource.type is its payload type, null for an operation: {kind: jsonschema, name, schema (the artifact's id), root (the named definition's schema with its $refs followed, as core §9.8 follows them, or null when not needed)}, {kind: raw, media_type} or {kind: protobuf, name, schema}. resource.attachment is its attachment's type in the same form, or null. A type is the profile's Point, Histogram or Epoch when its kind is jsonschema, its name is telemetry.v1.Point, telemetry.v1.Histogram or telemetry.v1.Epoch, and its schema is one of the ids schema.json publishes. expect.declaration is one of: \"not_this_profiles\" (a stream or state with no key of the vocabulary, kind, unit, buckets or semantic, under telemetry., and not typed by the Point; or an event or an operation that writes none); \"ignored\" (an event or an operation that writes one, whatever its value); \"invalid\", with reasons, in this order, each key checked alone and a check that needs a wrong value skipped: kind_value, unit_value, buckets_value, semantic_value (a key present whose value is not one: kind exactly one of counter, gauge, histogram, text, boolean, binary; unit a string of 1 to 64 bytes, each 0x21 to 0x7E; buckets a non-empty array of numbers, strictly ascending as IEEE doubles, -0.0 equal to 0; semantic exactly one of temperature, power, bytes, duration, ratio, count, identity, state), kind_missing (no kind, and the type is not the Point), buckets_without_histogram (valid buckets, and a valid kind other than histogram, or none), histogram_without_buckets (kind histogram, no buckets), not_a_carrier (a valid kind the type cannot carry: the Point carries every kind; the profile's Histogram carries histogram; a raw type carries binary; any other JSON Schema type carries by its root's type, read as a set of names: counter exactly {integer}, gauge a non-empty subset of {integer, number}, boolean exactly {boolean}, text exactly {string}, a root with no type carrying nothing; nothing else carries); or \"declared\", with carrier (point, or bare), kind (null for a Point that declares none), unit, buckets (as doubles), semantic, each null when absent, and epoch: point for a Point carrier, attachment for a bare counter or histogram whose attachment is the profile's Epoch, else null."
+}

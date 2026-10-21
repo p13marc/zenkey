@@ -78,6 +78,11 @@
 //!   on top of [`freshness`] (`spec/profiles/alarms/v1.md`, #800). The
 //!   owner's puts, its confirmations and its adoption at a restart are the
 //!   runtime's.
+//! - [`telemetry`]: `telemetry.v1`'s vocabulary and standard schema, the
+//!   declaration read from a resolved resource, one sample's conformance
+//!   with the member's kind and unit, and a pair's continuity and rate, its
+//!   epoch in-band or from presence (`spec/profiles/telemetry/v1.md`,
+//!   #819). The owner's in-band epoch is the runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -105,6 +110,7 @@ pub mod schema;
 pub mod seed;
 pub mod slug;
 mod strict;
+pub mod telemetry;
 pub mod template;
 mod toml10;
 mod unbundle;

@@ -138,3 +138,47 @@ fn every_example_is_published_and_compatible_with_its_history() {
         assert_eq!(v.class(), Class::Compatible, "{rel}: {:#?}", v.findings);
     }
 }
+
+/// `telemetry.v1` (#819, TA): every metric resource under `examples/zk2/`
+/// reads a valid declaration (telemetry.v1 §2.2, §2.4), its root schema
+/// resolved from the contract's own artifacts: zenoh-modem's 73 streams,
+/// each declared by `telemetry.kind` and 23 by `telemetry.unit` (`dBm` and
+/// `us` among them), netring's two declared units, and every resource typed
+/// by the profile's Point with no kind, which is not invalid. No example
+/// writes the vocabulary on an event or an operation.
+#[test]
+fn every_example_telemetry_declaration_is_valid() {
+    use zenkey_model::telemetry::{self, Carrier, Declaration};
+    let mut failures = Vec::new();
+    let (mut kinds, mut units, mut points) = (0, 0, 0);
+    for p in contract_files(&examples()) {
+        let rel = p.strip_prefix(examples()).unwrap().display().to_string();
+        let c = load_path(&p).contract.expect("validated above");
+        for r in &c.resources {
+            let at = format!("{rel}: {} {}", r.token.as_str(), r.template.as_str());
+            match telemetry::declaration_of(&c, r) {
+                Declaration::Declared(d) => {
+                    kinds += usize::from(d.kind.is_some());
+                    units += usize::from(d.unit.is_some());
+                    points += usize::from(d.carrier == Carrier::Point);
+                    if d.carrier == Carrier::Point {
+                        assert!(
+                            c.uses.iter().any(|u| u.to_string() == telemetry::PROFILE),
+                            "{at}: a contract carrying the Point lists telemetry.v1 (§2.1)"
+                        );
+                    }
+                }
+                Declaration::Invalid(why) => failures.push(format!("{at}: {why:?}")),
+                Declaration::Ignored => failures.push(format!("{at}: ignored")),
+                Declaration::NotThisProfiles => {}
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!(kinds, 73, "zenoh-modem's declared kinds");
+    assert_eq!(units, 25, "zenoh-modem's 23 units and netring's 2");
+    assert_eq!(
+        points, 355,
+        "ZenSight's Point-typed resources: sysinfo 136, snmp 127, netring 75, parallax 17"
+    );
+}

@@ -1,0 +1,109 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "id": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9",
+        "published": true
+      },
+      "note": "the profile's file: the current revision",
+      "path": "spec/profiles/telemetry/telemetry.v1.json"
+    },
+    {
+      "bundle": "examples/zk2/.history/zs.sysinfo.v1/9954b8e4f56cd6cd6d5584b9bbf926a6db88ecded901a70ce5e0770820b8377e.bundle.json",
+      "expect": {
+        "id": "sha256:3d6276dd302873ca5938013a44d460267971123fd25500f189e30be718f9dc1e",
+        "published": true
+      },
+      "note": "zs.sysinfo.v1's first revision carries ZenSight's pre-profile file"
+    },
+    {
+      "bundle": "examples/zk2/.history/zs.netring.v1/7185e5ea5a1017c85a6427868eb6c9653317eab83d89db9bd7de66074e11820c.bundle.json",
+      "expect": {
+        "id": "sha256:3d6276dd302873ca5938013a44d460267971123fd25500f189e30be718f9dc1e",
+        "published": true
+      },
+      "note": "zs.netring.v1's first revision"
+    },
+    {
+      "bundle": "examples/zk2/.history/zs.snmp.v1/59d5cfbe3347337c267069e28664bc8223da9160c08e048f87b063d5057dffa6.bundle.json",
+      "expect": {
+        "id": "sha256:3d6276dd302873ca5938013a44d460267971123fd25500f189e30be718f9dc1e",
+        "published": true
+      },
+      "note": "zs.snmp.v1's first revision"
+    },
+    {
+      "bundle": "examples/zk2/.history/zs.parallax.v1/4116ef6e20ce269e8afbe59374af65b95787f78dfe8009ddb34b4b50226d4651.bundle.json",
+      "expect": {
+        "id": "sha256:3d6276dd302873ca5938013a44d460267971123fd25500f189e30be718f9dc1e",
+        "published": true
+      },
+      "note": "zs.parallax.v1's first revision"
+    },
+    {
+      "bundle": "examples/zk2/.history/zs.sysinfo.v1/6e670d2cdd90a47d2a8261e43dcc54977afe0553413175771b52030e572bc693.bundle.json",
+      "expect": {
+        "id": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9",
+        "published": true
+      },
+      "note": "zs.sysinfo.v1's revision 1.1 lists the profile's file"
+    },
+    {
+      "bundle": "examples/zk2/.history/zs.netring.v1/b61d171fd3295470b308e0dd75c309a36bc5df367374ff2065a2f547c30c72ad.bundle.json",
+      "expect": {
+        "id": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9",
+        "published": true
+      },
+      "note": "zs.netring.v1's revision 1.1"
+    },
+    {
+      "bundle": "examples/zk2/.history/zs.snmp.v1/f80ecc6fdf8a318546c90f7f1c0b157fbf21950c43d2ac21af9f39f130fee778.bundle.json",
+      "expect": {
+        "id": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9",
+        "published": true
+      },
+      "note": "zs.snmp.v1's revision 1.1"
+    },
+    {
+      "bundle": "examples/zk2/.history/zs.parallax.v1/d0594cf7f40f802c99043f42c5fed0edbe82383345c66ae103e5465572fbd18a.bundle.json",
+      "expect": {
+        "id": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9",
+        "published": true
+      },
+      "note": "zs.parallax.v1's revision 1.1"
+    }
+  ],
+  "current": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9",
+  "description": "telemetry.v1 §2.3, §3: the standard schema's published artifact ids. file is the profile's schema, a path relative to this profile's directory, and current its artifact's id: sha256 over the document's JCS bytes (RFC 8785; core §7.1, §9.4), as sha256:<64 lowercase hex>. published lists every id the profile publishes, oldest first, each with the text that published it; a type of an artifact whose id is listed is the profile's. types are the profile's type names, each a $defs member of every published revision that defines it (since: the first revision that does). Each case names a document, by path (relative to the repository's root) or as the artifact named telemetry.v1 inside a bundle (a path to a bundle, core §9.6), or inline (document) -> expect.id, its artifact id, and expect.published, whether that id is listed.",
+  "file": "telemetry.v1.json",
+  "published": [
+    {
+      "id": "sha256:3d6276dd302873ca5938013a44d460267971123fd25500f189e30be718f9dc1e",
+      "note": "ZenSight's file before the profile: Point, Value and Histogram, the Point without epoch. The four ZenSight contracts' first revisions carry it.",
+      "revision": "zensight"
+    },
+    {
+      "id": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9",
+      "note": "telemetry.v1 0.1: the Point's epoch and telemetry.v1.Epoch added, the descriptions rewritten.",
+      "revision": "0.1"
+    }
+  ],
+  "types": [
+    {
+      "name": "telemetry.v1.Point",
+      "since": "zensight"
+    },
+    {
+      "name": "telemetry.v1.Value",
+      "since": "zensight"
+    },
+    {
+      "name": "telemetry.v1.Histogram",
+      "since": "zensight"
+    },
+    {
+      "name": "telemetry.v1.Epoch",
+      "since": "0.1"
+    }
+  ]
+}

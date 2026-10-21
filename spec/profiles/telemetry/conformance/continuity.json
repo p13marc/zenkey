@@ -1,0 +1,1532 @@
+{
+  "cases": [
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 5.0,
+        "rate_unit": "By/s",
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000002000,
+        "value": 20
+      },
+      "note": "one in-band epoch, a counter that grew: 10 By over 2 s",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "decreased",
+        "epoch": "established",
+        "no_rate": "decreased",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 10
+      },
+      "note": "one in-band epoch, and a decrease: the finding",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "established",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "77c0e19a5b2d0002",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 3
+      },
+      "note": "the epoch changed, and the counter restarted: a reset, and no rate across it",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "established",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "77c0e19a5b2d0002",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 30
+      },
+      "note": "the epoch changed and the value grew: still a reset, never a rate from the old epoch's value",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "decreased",
+        "epoch": "established",
+        "no_rate": "decreased",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 10
+      },
+      "note": "an in-band epoch is first: it says one epoch where presence saw two instances",
+      "presence": {
+        "alone_throughout": false,
+        "earlier": "a",
+        "later": "b"
+      },
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 15.0,
+        "rate_unit": null,
+        "via": "presence"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 25
+      },
+      "note": "an in-band epoch on one sample only is no in-band evidence: presence answers",
+      "presence": {
+        "alone_throughout": true,
+        "earlier": "a",
+        "later": "a"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "3fa9c2d41b7e0001",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "assumed",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 5
+      },
+      "note": "an in-band epoch on one sample only, and no presence: assumed",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 10.0,
+        "rate_unit": null,
+        "via": "presence"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 20
+      },
+      "note": "one instance alone throughout, no loss: one epoch, by presence",
+      "presence": {
+        "alone_throughout": true,
+        "earlier": "a",
+        "later": "a"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "decreased",
+        "epoch": "established",
+        "no_rate": "decreased",
+        "rate": null,
+        "rate_unit": null,
+        "via": "presence"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "note": "one instance throughout, and a decrease: the finding, established by presence",
+      "presence": {
+        "alone_throughout": true,
+        "earlier": "a",
+        "later": "a"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "established",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": "presence"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 1
+      },
+      "note": "another instance alone at each arrival: another epoch, a reset",
+      "presence": {
+        "alone_throughout": false,
+        "earlier": "a",
+        "later": "b"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "established",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": "presence"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 25
+      },
+      "note": "another instance, and the value grew: a reset all the same",
+      "presence": {
+        "alone_throughout": false,
+        "earlier": "a",
+        "later": "b"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "established",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": "presence"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 1
+      },
+      "note": "a member token's epoch counts for a template that declares epoch: another one, a reset",
+      "presence": {
+        "alone_throughout": false,
+        "earlier": "3fa9c2d41b7e0001",
+        "later": "77c0e19a5b2d0002"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "assumed",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "note": "the same instance at both arrivals, with a loss between: nothing established, and a decrease reads as a reset",
+      "presence": {
+        "alone_throughout": false,
+        "earlier": "a",
+        "later": "a"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "assumed",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "note": "two instances present at the earlier arrival (a re-mint's overlap): nothing established",
+      "presence": {
+        "alone_throughout": false,
+        "earlier": null,
+        "later": "b"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "assumed",
+        "no_rate": null,
+        "rate": 2.0,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 12
+      },
+      "note": "the same, with no decrease: one epoch, assumed, and a rate",
+      "presence": {
+        "alone_throughout": false,
+        "earlier": null,
+        "later": "b"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 20
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "assumed",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 10
+      },
+      "note": "across a face, no epoch and no presence: a decrease is a reset, never a finding or a negative rate",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "assumed",
+        "no_rate": null,
+        "rate": 10.0,
+        "rate_unit": "By/s",
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 20
+      },
+      "note": "across a face, a counter that grew: one epoch assumed, and its rate",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "assumed",
+        "no_rate": null,
+        "rate": 0.0,
+        "rate_unit": "By/s",
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 10
+      },
+      "note": "an unchanged counter: a rate of 0",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 4294967290
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "assumed",
+        "no_rate": "reset",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 5
+      },
+      "note": "a 32-bit counter's wrap, published unwidened, with no evidence: a reset (§2.7)",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 4294967290
+      },
+      "expect": {
+        "continuity": "decreased",
+        "epoch": "established",
+        "no_rate": "decreased",
+        "rate": null,
+        "rate_unit": null,
+        "via": "presence"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 5
+      },
+      "note": "the same wrap within an established epoch: the finding the producer avoids by widening",
+      "presence": {
+        "alone_throughout": true,
+        "earlier": "a",
+        "later": "a"
+      },
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 18446744073709551615
+      },
+      "expect": {
+        "continuity": "decreased",
+        "epoch": "established",
+        "no_rate": "decreased",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 1,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 0
+      },
+      "note": "from 2^64-1 to 0 in one epoch",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 1.8446744073709552e+19,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 18446744073709551615
+      },
+      "note": "0 to 2^64-1 in one second: the difference is exact, then rounded once to a double",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 333.3333333333333,
+        "rate_unit": "1/s",
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000003,
+        "value": 1
+      },
+      "note": "1 over 3 ms: double(1) / (double(3000000) / 1e9)",
+      "presence": null,
+      "unit": "1"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 100,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 1428571428.5714285,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 107,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "note": "10 over 7 ns, by receipt",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 123456789012345
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 11.43116428202307,
+        "rate_unit": "By/s",
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700086400123,
+        "value": 123456789999999
+      },
+      "note": "a large count over a long time",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 1000.0,
+        "rate_unit": "By/s",
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 5000000000,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 1000
+      },
+      "note": "the Point's timestamps time the rate, not the arrivals",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": 1760000000000000000,
+        "timestamp_ms": null,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 2000.0,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 3000000000,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": 1760000000500000000,
+        "timestamp_ms": null,
+        "value": 1000
+      },
+      "note": "state with no Point: the owner's stamps time it, not the arrivals",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": 1760000000000000000,
+        "timestamp_ms": null,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 250.0,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 4000000000,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 1000
+      },
+      "note": "one stamp missing: the arrivals time it",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 1
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": "elapsed",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 2
+      },
+      "note": "equal timestamps: no rate",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 1
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": "elapsed",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 2
+      },
+      "note": "timestamps that go back: no rate, and the continuity is the values'",
+      "presence": null,
+      "unit": "By"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000000000,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "assumed",
+        "no_rate": null,
+        "rate": 5.0,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": 1700000001000,
+        "value": 5
+      },
+      "note": "a counter whose unit is unknown has a rate with none",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 19,
+          "counts": [
+            4,
+            12,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "note": "a histogram that grew in one epoch: no rate at this version",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "expect": {
+        "continuity": "decreased",
+        "epoch": "established",
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 15,
+          "counts": [
+            3,
+            9,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "note": "a histogram whose count fell in one epoch: the finding",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "expect": {
+        "continuity": "decreased",
+        "epoch": "established",
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 17,
+          "counts": [
+            5,
+            9,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "note": "one bucket fell, though count did not: the finding",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 0.19
+        }
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 17,
+          "counts": [
+            4,
+            10,
+            2,
+            1
+          ],
+          "sum": -2.0
+        }
+      },
+      "note": "only sum fell: an observation may be negative, so no decrease",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "expect": {
+        "continuity": "reset",
+        "epoch": "assumed",
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 1,
+          "counts": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "sum": 1.0
+        }
+      },
+      "note": "a histogram that fell with no evidence: a reset",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "expect": {
+        "continuity": "unobservable",
+        "epoch": null,
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.1,
+            0.2,
+            0.3
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "note": "two self-described histograms over other bounds cannot be compared",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "expect": {
+        "continuity": "unobservable",
+        "epoch": null,
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            3
+          ],
+          "sum": 1.0
+        }
+      },
+      "note": "other bounds, one fewer",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            -0.0,
+            1.0
+          ],
+          "count": 2,
+          "counts": [
+            1,
+            1,
+            0
+          ],
+          "sum": 1.0
+        }
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0,
+            1
+          ],
+          "count": 3,
+          "counts": [
+            1,
+            2,
+            0
+          ],
+          "sum": 1.0
+        }
+      },
+      "note": "bounds equal by value: integral floats and -0.0",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "unobservable",
+        "epoch": null,
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "gauge",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 3.5
+      },
+      "note": "an undeclared Point's tags differ: incomparable",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 10
+      },
+      "expect": {
+        "continuity": "unobservable",
+        "epoch": null,
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "histogram",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": {
+          "buckets": [
+            0.005,
+            0.01,
+            0.025
+          ],
+          "count": 16,
+          "counts": [
+            3,
+            10,
+            2,
+            1
+          ],
+          "sum": 1.0
+        }
+      },
+      "note": "a counter, then a histogram: incomparable",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "gauge",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 21.5
+      },
+      "expect": {
+        "continuity": "not_asked",
+        "epoch": null,
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "gauge",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": 19.0
+      },
+      "note": "two gauges have no continuity",
+      "presence": {
+        "alone_throughout": true,
+        "earlier": "a",
+        "later": "a"
+      },
+      "unit": "Cel"
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": null,
+        "kind": "text",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": "up"
+      },
+      "expect": {
+        "continuity": "not_asked",
+        "epoch": null,
+        "no_rate": "kind",
+        "rate": null,
+        "rate_unit": null,
+        "via": null
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": null,
+        "kind": "text",
+        "stamp_ns": null,
+        "timestamp_ms": null,
+        "value": "down"
+      },
+      "note": "two text samples have none either",
+      "presence": null,
+      "unit": null
+    }
+  ],
+  "description": "telemetry.v1 §2.9, §2.10, §2.11: two conforming samples of one member, earlier and later in the order the reader received them, the counter's unit as §2.5 read it (null when unknown), and what the reader saw of presence -> the pair's continuity, how its epoch was had, and its rate. Each sample is {kind, value, epoch, timestamp_ms, stamp_ns, arrival_ns}: kind is the sample's kind (§2.5); value its value, a counter an integer from 0 to 2^64-1, a gauge a number, a histogram {buckets, counts, count, sum}, text a string; epoch its in-band epoch or null; timestamp_ms a Point's timestamp or null; stamp_ns the owner's stamp in nanoseconds since the Unix epoch, for state, or null; arrival_ns its receipt on the reader's monotonic clock, in nanoseconds. presence is null (no presence evidence: across a constrained face, for instance) or {alone_throughout: one instance, or for a template that declares epoch one member epoch, alone and without a loss on the presence view from before the earlier arrival to after the later one's; earlier, later: the only instance (or member epoch) present at that arrival, null when there was none or several}. The epoch: both samples' in-band epochs when both carry one (equal: same; else different; via in_band); else presence (alone_throughout: same; else earlier and later both non-null and different: different; via presence); else unobservable. A decrease: a counter below the earlier one, or a histogram whose count or any bucket's count is below the earlier's. expect.continuity is the first that holds: not_asked (neither sample is a counter or a histogram); unobservable (the kinds differ, or two histograms' bounds differ as doubles, -0.0 equal to 0, or their counts differ in length); with the epoch same: decreased on a decrease, else same_epoch; different: reset; unobservable: reset on a decrease, else same_epoch. expect.epoch is established (same or different) or assumed (unobservable), null for not_asked and unobservable; expect.via is in_band, presence or null. expect.rate is a number only for two counters whose continuity is same_epoch and whose elapsed time e is above 0: e in nanoseconds from the first time base both samples have (timestamp_ms times 10^6, then stamp_ns, then arrival_ns), rate = double(d) / (double(e) / 1e9), d the later value minus the earlier, double(n) the IEEE 754 double nearest the integer n, each operation rounded to nearest, ties to even; compared exactly. expect.rate_unit is the unit followed by /s, null when the unit is null or there is no rate. expect.no_rate is null with a rate, else why: kind (the pair is not of two counters), reset, decreased, incomparable, or elapsed (e is 0 or less)."
+}
