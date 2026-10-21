@@ -218,7 +218,7 @@ rest of #613 is not written:
 | `redundancy.v1` | exclusivity: O1's at-most-once holds only while one instance serves. ZenSight's catalog and desired singletons |
 | `desired.v1` | durable commands keyed by their target; ZenSight's desired state |
 | `link.v1` | per-resource exposure across a constrained face; zenoh-modem's RF and SBD faces |
-| `telemetry.v1` | Specified (#819, text 0.1): its vocabulary and standard schema, `telemetry.v1.Point`, and the session-free reading of a declaration, a sample, and a pair's continuity and rate (`zenkey_model::telemetry`). Still waiting: the runtime's Points with their epoch (#819's TB), the fleet's continuity reader, `check conform`'s and the doctor's `telemetry-*` in place of `kind-mismatch`, and zengui's units (its TC) |
+| `telemetry.v1` | Specified (#819, text 0.2): its vocabulary and standard schema, `telemetry.v1.Point`, and the session-free reading of a declaration, a sample's bytes, and a pair's continuity and rate (`zenkey_model::telemetry`); the runtime's writers refuse what a metric's declaration refuses and write the epoch, the instance id (`zenkey::telemetry`, #819's TB). Still waiting: the fleet's continuity reader, `check conform`'s and the doctor's `telemetry-*` in place of `kind-mismatch`, and zengui's units (its TC) |
 | `views.v1` | ZenSight's GUI's presentation documents |
 | `timing.v1`, `arbitration.v1`, `clock.v1` | deadlines, arbitration between commanders, simulated time |
 | `jobs.v1` | work that outlives a query timeout |

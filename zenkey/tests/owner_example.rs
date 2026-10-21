@@ -1028,3 +1028,214 @@ fn the_help_documents_the_alarms_surface() {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
 }
+
+/// `telemetry.v1` in the owner example (#819, TB): `--telemetry` implements
+/// the scenarios' `meter.v1`, embedded, its fingerprint the test file's; a
+/// put goes through the member's checked writer, which writes the epoch
+/// and answers a refusal with its reason, nothing published; `raw` puts
+/// what the writer refuses, as written; `new-epoch` moves the epoch.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_implements_telemetry() {
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let data = tool
+        .declare_subscriber("zk2/ex/meter/meter.v1/stream/*")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let next = || async {
+        let s = tokio::time::timeout(SETTLE, data.recv_async())
+            .await
+            .expect("a sample")
+            .unwrap();
+        let attachment = s.attachment().map(|a| a.to_bytes().into_owned());
+        (
+            s.key_expr().as_str().to_owned(),
+            s.payload().to_bytes().into_owned(),
+            attachment,
+        )
+    };
+    let o = spawn_owner(&["--connect", &ep, "--telemetry", "ex/meter"]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let i1 = ready.rsplit('/').next().unwrap().to_owned();
+    assert_eq!(
+        o.ask("telemetry instance").await,
+        format!("telemetry instance {i1}")
+    );
+    // The embedded meter.v1 is the test file's, fingerprint and all.
+    // `ready` comes before the declarations reach R1: wait for the
+    // descriptor, which follows the state queryables (§8.2).
+    let (addr, instance) = ("ex/meter".parse().unwrap(), i1.parse().unwrap());
+    let d = loop {
+        match presence::descriptor(&tool, &addr, &instance, T)
+            .await
+            .unwrap()
+        {
+            presence::Found::Nothing => continue,
+            found => break found.into_descriptor().unwrap(),
+        }
+    };
+    let file = zenkey::Implementation::new(common::contract("meter.v1"));
+    let e = d.interfaces.iter().find(|e| e.iface == "meter.v1").unwrap();
+    assert_eq!(e.contract, format!("sha256:{}", file.fingerprint().hex()));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let frames = "zk2/ex/meter/meter.v1/stream/frames";
+    let counter = |ts: u64, n: u64| {
+        format!(r#"{{"timestamp": {ts}, "value": {{"type": "counter", "value": {n}}}}}"#)
+    };
+    assert_eq!(
+        o.ask(&format!("telemetry put frames {}", counter(1, 10)))
+            .await,
+        format!("telemetry put {frames} epoch={i1}")
+    );
+    let (key, payload, _) = next().await;
+    assert_eq!(key, frames);
+    let p: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+    assert_eq!(p["epoch"], serde_json::json!(i1), "the writer wrote it");
+
+    // Refusals: a decrease, a tag that disagrees; nothing published.
+    let down = o
+        .ask(&format!("telemetry put stream/frames {}", counter(2, 7)))
+        .await;
+    assert!(
+        down.starts_with(&format!(
+            "refused telemetry put stream/frames {}: telemetry.v1 decreased epoch={i1}: ",
+            counter(2, 7)
+        )),
+        "{down}"
+    );
+    let gauge = r#"{"timestamp": 3, "value": {"type": "gauge", "value": 3.5}}"#;
+    let tag = o
+        .ask(&format!("telemetry put meter.v1:frames {gauge}"))
+        .await;
+    assert!(
+        tag.contains(": telemetry.v1 does_not tag_disagrees: "),
+        "{tag}"
+    );
+    // Raw: the bytes as written, from the session.
+    let raw = format!(
+        r#"{{"timestamp": 2, "value": {{"type": "counter", "value": 7}}, "epoch": "{i1}"}}"#
+    );
+    assert_eq!(
+        o.ask(&format!("telemetry raw frames {raw}")).await,
+        format!("telemetry raw {frames}")
+    );
+    let (_, payload, _) = next().await;
+    assert_eq!(
+        payload,
+        raw.as_bytes(),
+        "the refused ones published nothing"
+    );
+
+    // A bare counter's epoch rides its attachment; an empty one is refused.
+    let bytes = "zk2/ex/meter/meter.v1/stream/bytes";
+    assert_eq!(
+        o.ask("telemetry put bytes 100").await,
+        format!("telemetry put {bytes} epoch={i1}")
+    );
+    let (_, payload, attachment) = next().await;
+    assert_eq!(
+        (payload, attachment),
+        (b"100".to_vec(), Some(format!("\"{i1}\"").into_bytes()))
+    );
+    let empty = o.ask(r#"telemetry put bytes 60 """#).await;
+    assert!(
+        empty.contains(": telemetry.v1 does_not epoch_invalid: "),
+        "{empty}"
+    );
+    let other = o.ask(r#"telemetry put bytes 60 "i9""#).await;
+    assert!(
+        other.contains(&format!(": telemetry.v1 epoch given=\"i9\" current={i1}: ")),
+        "{other}"
+    );
+    assert_eq!(
+        o.ask(r#"telemetry raw bytes 60 """#).await,
+        format!("telemetry raw {bytes}")
+    );
+    let (_, payload, attachment) = next().await;
+    assert_eq!(
+        (payload, attachment),
+        (b"60".to_vec(), Some(b"\"\"".to_vec()))
+    );
+
+    // A new epoch: the next Point carries it, and starts again.
+    let moved = o.ask("telemetry new-epoch").await;
+    let i2 = moved
+        .strip_prefix("telemetry new-epoch ")
+        .unwrap()
+        .to_owned();
+    assert_ne!(i1, i2);
+    assert_eq!(
+        o.ask("telemetry instance").await,
+        format!("telemetry instance {i2}")
+    );
+    assert_eq!(
+        o.ask(&format!("telemetry put frames {}", counter(5, 0)))
+            .await,
+        format!("telemetry put {frames} epoch={i2}")
+    );
+    let (_, payload, _) = next().await;
+    let p: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+    assert_eq!(p["epoch"], serde_json::json!(i2));
+
+    // The state counter (§9, text 0.2) puts through its state writer.
+    assert_eq!(
+        o.ask("telemetry put total 3").await,
+        format!("telemetry put zk2/ex/meter/meter.v1/state/total epoch={i2}")
+    );
+
+    // What is refused here, before any writer.
+    for (cmd, why) in [
+        (
+            "telemetry put nope 1",
+            "no resource \"nope\" is implemented here",
+        ),
+        ("telemetry put frames {", "the payload is not JSON"),
+        (
+            "telemetry put frames 1 2 3",
+            "the attachment is not one JSON text",
+        ),
+        ("telemetry nope", "usage: telemetry put"),
+    ] {
+        let a = o.ask(cmd).await;
+        assert!(a.starts_with(&format!("refused {cmd}: {why}")), "{a}");
+    }
+    o.stop().await;
+
+    // Without --telemetry, a resource that is no metric is named so.
+    let contract = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/interop.v1.toml");
+    let o = spawn_owner(&["ex/interop", &contract.display().to_string()]);
+    line(&o.lines).await;
+    line(&o.lines).await;
+    let a = o.ask("telemetry put state/status 1").await;
+    assert!(
+        a.contains(
+            "is not a metric resource (telemetry.v1 §2.1): its declaration is not_this_profiles"
+        ),
+        "{a}"
+    );
+    o.stop().await;
+}
+
+/// `owner --help` documents the `telemetry` surface (#819, TB).
+#[test]
+fn the_help_documents_the_telemetry_surface() {
+    for piece in [
+        "--telemetry",
+        "telemetry put <resource> <json> [<attachment json>]",
+        "telemetry raw <resource> <json> [<attachment json>]",
+        "telemetry new-epoch",
+        "telemetry instance",
+        "telemetry put <key> epoch=<id>",
+        "telemetry raw <key>",
+        "telemetry new-epoch <id>",
+        "telemetry instance <id>",
+        "refused <line>: telemetry.v1 <why>: <words>",
+        "does_not <problem>[,<problem>...]",
+        "epoch given=<json> current=<id>, decreased epoch=<id>",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}

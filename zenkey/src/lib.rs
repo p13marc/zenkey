@@ -14,6 +14,7 @@
 //! | [`retrieval`]: fetching a contract bundle | §8.4 |
 //! | [`writer`]: the contract's QoS and `Encoding` on every sample; events | §2.4–§2.6, §7.2 |
 //! | [`budget`]: a new member refused at the bound, an occurrence beyond the rate (#741) | §2.7 |
+//! | [`telemetry`]: a metric's writer refuses what `telemetry.v1` forbids, and writes the epoch: the instance's, or a member's | `telemetry.v1` §2.6–§2.9; §1.5, §8.1 |
 //! | [`qos`]: the contract's QoS as zenoh spells it | §2.4 |
 //! | [`consumer`]: data through a role's bindings | §3.2 R1–R7 |
 //! | [`operation`]: serving calls; [`client`]: calling them, one address or a fleet; [`ownership`]: the split-brain diagnosis | §5.1 O1–O7, §5.2, §6 |
@@ -54,7 +55,12 @@
 //! `zenkey_model::alarms`'s recipe and put whole, each firing alarm
 //! confirmed every 450 s until the owner stops evaluating it, a raise past
 //! the bound refused, and a restart's adoption from the application's
-//! record, else an archive on its own side, before anything is alive.
+//! record, else an archive on its own side, before anything is alive;
+//! `telemetry.v1` is [`telemetry`] (#819): every writer of a metric resource
+//! checks each sample against its declaration, refuses a counter or
+//! histogram that goes down within its epoch, and writes the epoch a reader
+//! reads (the instance id, or a member's epoch) where the application left
+//! it out.
 
 #[cfg(feature = "zenoh")]
 pub mod alarms;
@@ -94,6 +100,7 @@ pub mod service;
 pub mod shm;
 #[cfg(feature = "zenoh")]
 pub mod state;
+pub mod telemetry;
 #[cfg(feature = "zenoh")]
 pub mod typed;
 #[cfg(feature = "zenoh")]

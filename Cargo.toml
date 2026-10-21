@@ -70,6 +70,7 @@ dirs = "7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ciborium = "0.2"
+ciborium-ll = "0.2"
 schemars = "1"
 base64 = "0.23"
 prost = "0.14"

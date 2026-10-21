@@ -1,0 +1,44 @@
+# telemetry.v1's scenarios (#819, TB), as `spec/profiles/telemetry/scenarios.md`
+# states the contract: a Point declared a counter, a bare counter with its
+# epoch in the attachment, one without, a Point declared a histogram, a bare
+# gauge, and (0.2, §9) a bare counter in state. The profile's schema is
+# listed by its path from here.
+[interface]
+name  = "meter"
+major = 1
+minor = 0
+uses  = ["telemetry.v1"]
+
+[schemas]
+jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "meter.json"]
+
+[resources.frames]                       # a Point, declared a counter
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
+
+[resources.bytes]                        # a bare counter, its epoch in the attachment
+kind        = "stream"
+type        = "json:Count"
+attachment  = "json:telemetry.v1.Epoch"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "By" }
+
+[resources.drops]                        # a bare counter, no epoch
+kind        = "stream"
+type        = "json:Count"
+annotations = { "telemetry.kind" = "counter" }
+
+[resources.latency]                      # a Point, declared a histogram
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+annotations = { "telemetry.kind" = "histogram", "telemetry.unit" = "s", "telemetry.buckets" = [0.005, 0.01, 0.025] }
+
+[resources.level]                        # a bare gauge
+kind        = "stream"
+type        = "json:Level"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dBm" }
+
+[resources.total]                        # a bare counter in state (0.2, §9)
+kind        = "state"
+type        = "json:Count"
+annotations = { "telemetry.kind" = "counter" }

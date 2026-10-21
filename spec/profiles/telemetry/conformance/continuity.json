@@ -1526,7 +1526,69 @@
       "note": "two text samples have none either",
       "presence": null,
       "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "stamp_ntp64": 7559142440960000001,
+        "timestamp_ms": null,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": null,
+        "rate": 999.9999989999999,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 3000000000,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "stamp_ntp64": 7559142445254967301,
+        "timestamp_ms": null,
+        "value": 1000
+      },
+      "note": "F-142: a stamp's nanoseconds are each stamp's, converted alone (NTP64's as_nanos, its fraction rounded up), then subtracted: 1000000001 ns here, where the floor of the converted difference is 1000000000",
+      "presence": null,
+      "unit": null
+    },
+    {
+      "earlier": {
+        "arrival_ns": 0,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "stamp_ntp64": 7559142440960000001,
+        "timestamp_ms": null,
+        "value": 0
+      },
+      "expect": {
+        "continuity": "same_epoch",
+        "epoch": "established",
+        "no_rate": "elapsed",
+        "rate": null,
+        "rate_unit": null,
+        "via": "in_band"
+      },
+      "later": {
+        "arrival_ns": 1000000000,
+        "epoch": "e",
+        "kind": "counter",
+        "stamp_ns": null,
+        "stamp_ntp64": 7559142440960000002,
+        "timestamp_ms": null,
+        "value": 5
+      },
+      "note": "F-142: two stamps one fraction unit apart can be 0 ns apart as zenoh reads them: no rate (elapsed)",
+      "presence": null,
+      "unit": null
     }
   ],
-  "description": "telemetry.v1 §2.9, §2.10, §2.11: two conforming samples of one member, earlier and later in the order the reader received them, the counter's unit as §2.5 read it (null when unknown), and what the reader saw of presence -> the pair's continuity, how its epoch was had, and its rate. Each sample is {kind, value, epoch, timestamp_ms, stamp_ns, arrival_ns}: kind is the sample's kind (§2.5); value its value, a counter an integer from 0 to 2^64-1, a gauge a number, a histogram {buckets, counts, count, sum}, text a string; epoch its in-band epoch or null; timestamp_ms a Point's timestamp or null; stamp_ns the owner's stamp in nanoseconds since the Unix epoch, for state, or null; arrival_ns its receipt on the reader's monotonic clock, in nanoseconds. presence is null (no presence evidence: across a constrained face, for instance) or {alone_throughout: one instance, or for a template that declares epoch one member epoch, alone and without a loss on the presence view from before the earlier arrival to after the later one's; earlier, later: the only instance (or member epoch) present at that arrival, null when there was none or several}. The epoch: both samples' in-band epochs when both carry one (equal: same; else different; via in_band); else presence (alone_throughout: same; else earlier and later both non-null and different: different; via presence); else unobservable. A decrease: a counter below the earlier one, or a histogram whose count or any bucket's count is below the earlier's. expect.continuity is the first that holds: not_asked (neither sample is a counter or a histogram); unobservable (the kinds differ, or two histograms' bounds differ as doubles, -0.0 equal to 0, or their counts differ in length); with the epoch same: decreased on a decrease, else same_epoch; different: reset; unobservable: reset on a decrease, else same_epoch. expect.epoch is established (same or different) or assumed (unobservable), null for not_asked and unobservable; expect.via is in_band, presence or null. expect.rate is a number only for two counters whose continuity is same_epoch and whose elapsed time e is above 0: e in nanoseconds from the first time base both samples have (timestamp_ms times 10^6, then stamp_ns, then arrival_ns), rate = double(d) / (double(e) / 1e9), d the later value minus the earlier, double(n) the IEEE 754 double nearest the integer n, each operation rounded to nearest, ties to even; compared exactly. expect.rate_unit is the unit followed by /s, null when the unit is null or there is no rate. expect.no_rate is null with a rate, else why: kind (the pair is not of two counters), reset, decreased, incomparable, or elapsed (e is 0 or less)."
+  "description": "telemetry.v1 §2.9, §2.10, §2.11: two conforming samples of one member, earlier and later in the order the reader received them, the counter's unit as §2.5 read it (null when unknown), and what the reader saw of presence -> the pair's continuity, how its epoch was had, and its rate. Each sample is {kind, value, epoch, timestamp_ms, stamp_ns, arrival_ns}: kind is the sample's kind (§2.5); value its value, a counter an integer from 0 to 2^64-1, a gauge a number, a histogram {buckets, counts, count, sum}, text a string; epoch its in-band epoch or null; timestamp_ms a Point's timestamp or null; stamp_ns the owner's stamp in nanoseconds since the Unix epoch, for state, or null, or, since 0.2, stamp_ntp64 in its place: the stamp's raw NTP64 value, whose nanoseconds are its high 32 bits times 10^9 plus its low 32 bits times 10^9 divided by 2^32 and rounded up (zenoh's NTP64::as_nanos), each stamp converted alone; arrival_ns its receipt on the reader's monotonic clock, in nanoseconds. presence is null (no presence evidence: across a constrained face, for instance) or {alone_throughout: one instance, or for a template that declares epoch one member epoch, alone and without a loss on the presence view from before the earlier arrival to after the later one's; earlier, later: the only instance (or member epoch) present at that arrival, null when there was none or several}. The epoch: both samples' in-band epochs when both carry one (equal: same; else different; via in_band); else presence (alone_throughout: same; else earlier and later both non-null and different: different; via presence); else unobservable. A decrease: a counter below the earlier one, or a histogram whose count or any bucket's count is below the earlier's. expect.continuity is the first that holds: not_asked (neither sample is a counter or a histogram); unobservable (the kinds differ, or two histograms' bounds differ as doubles, -0.0 equal to 0, or their counts differ in length); with the epoch same: decreased on a decrease, else same_epoch; different: reset; unobservable: reset on a decrease, else same_epoch. expect.epoch is established (same or different) or assumed (unobservable), null for not_asked and unobservable; expect.via is in_band, presence or null. expect.rate is a number only for two counters whose continuity is same_epoch and whose elapsed time e is above 0: e in nanoseconds from the first time base both samples have (timestamp_ms times 10^6, then stamp_ns, then arrival_ns), rate = double(d) / (double(e) / 1e9), d the later value minus the earlier, double(n) the IEEE 754 double nearest the integer n, each operation rounded to nearest, ties to even; compared exactly. expect.rate_unit is the unit followed by /s, null when the unit is null or there is no rate. expect.no_rate is null with a rate, else why: kind (the pair is not of two counters, an incomparable pair included), reset, decreased, or elapsed (e is 0 or less)."
 }

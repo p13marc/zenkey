@@ -17,6 +17,13 @@
 //! non-finite floats), measures what it saw of presence and when each
 //! sample arrived, and hands them over as values. The owner's in-band
 //! epoch is the runtime's.
+//!
+//! [`decode`] reads a sample's bytes as §2.6 reads them (text 0.2): strict
+//! JSON, and CBOR with its bignums, into a [`Datum`] whose integers are
+//! exact. [`wire`] is the standard schema's types as an owner puts them:
+//! the Point, its tagged value and the histogram, with serde (#819, TB).
+//! [`stamp_ns`] is a state sample's stamp in nanoseconds, as zenoh reads it
+//! (§2.11, 0.2).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -26,6 +33,9 @@ use serde_json::Value;
 use crate::authoring::Kind;
 use crate::contract::{Body, Contract, Resource};
 use crate::schema::{Artifact, ArtifactData, TypeId};
+
+pub mod decode;
+pub mod wire;
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "telemetry.v1";
@@ -613,8 +623,14 @@ pub enum Datum {
     Null,
     Bool(bool),
     /// An integer: JSON text with no fraction and no exponent, CBOR's major
-    /// types 0 and 1.
+    /// types 0 and 1, or a bignum (tags 2 and 3, 0.2).
     Int(i128),
+    /// An integer beyond i128 (0.2): JSON text within the double's finite
+    /// range, or a CBOR bignum of any length, held as its nearest double
+    /// (infinite past the double's range). No range of §2.6 admits one:
+    /// as an integer it reads beyond every bound, as a number it is that
+    /// double.
+    BigInt(f64),
     /// A float: JSON text with a fraction or an exponent, a CBOR float.
     Float(f64),
     Text(String),
@@ -625,7 +641,9 @@ pub enum Datum {
 
 impl Datum {
     /// A JSON value as a datum: an integer JSON number exactly, any other
-    /// as its double.
+    /// as its double. `serde_json` holds no integer beyond 64 bits, and
+    /// keeps the last of two duplicate members: a sample's bytes are read by
+    /// [`Datum::from_json_bytes`], strict JSON (§2.6, 0.2).
     #[must_use]
     pub fn from_json(v: &Value) -> Self {
         match v {
@@ -672,20 +690,49 @@ impl Datum {
                 }
                 Self::Map(out)
             }
+            C::Tag(t @ (2 | 3), inner) if matches!(**inner, C::Bytes(_)) => {
+                let C::Bytes(m) = &**inner else {
+                    return None;
+                };
+                decode::bignum_of(*t == 3, m)
+            }
             C::Tag(_, inner) => Self::from_cbor(inner)?,
             _ => return None,
         })
     }
 
-    /// One CBOR data item and nothing after it, as a datum.
+    /// One JSON text, as strict JSON reads it (§2.6, 0.2; [`decode::json`]):
+    /// `None` when the bytes are not one, the sample `undecodable`.
+    #[must_use]
+    pub fn from_json_bytes(bytes: &[u8]) -> Option<Self> {
+        decode::json(bytes)
+    }
+
+    /// One CBOR data item and nothing after it, its bignums integers (§2.6,
+    /// 0.2; [`decode::cbor`]): `None` when the bytes are not one.
     #[must_use]
     pub fn from_cbor_bytes(bytes: &[u8]) -> Option<Self> {
-        let mut r = bytes;
-        let v: ciborium::Value = ciborium::from_reader(&mut r).ok()?;
-        if !r.is_empty() {
-            return None;
+        decode::cbor(bytes)
+    }
+
+    /// A sample's bytes as `encoding` carries them: JSON unless CBOR.
+    #[must_use]
+    pub fn decode(bytes: &[u8], encoding: Option<crate::authoring::Encoding>) -> Option<Self> {
+        match encoding {
+            Some(crate::authoring::Encoding::Cbor) => decode::cbor(bytes),
+            _ => decode::json(bytes),
         }
-        Self::from_cbor(&v)
+    }
+
+    /// An attachment's bytes as the datum a reader checks (§2.6 check 2,
+    /// 0.2): decoded as `encoding` carries it, or, when they do not decode,
+    /// the bytes themselves, which are no string, so an Epoch attachment
+    /// that does not decode is an epoch present and not a string:
+    /// `epoch_invalid`, the sample still read. Zero bytes are such an
+    /// attachment.
+    #[must_use]
+    pub fn attachment(bytes: &[u8], encoding: Option<crate::authoring::Encoding>) -> Self {
+        Self::decode(bytes, encoding).unwrap_or_else(|| Self::Bytes(bytes.to_vec()))
     }
 
     fn get(&self, k: &str) -> Option<&Self> {
@@ -699,7 +746,7 @@ impl Datum {
     fn number(&self) -> Option<f64> {
         match self {
             Self::Int(i) => Some(*i as f64),
-            Self::Float(f) => Some(*f),
+            Self::Float(f) | Self::BigInt(f) => Some(*f),
             _ => None,
         }
     }
@@ -713,6 +760,8 @@ impl Datum {
             Self::Int(i) => Some(*i),
             // `as` saturates a float to the integer's bound.
             Self::Float(f) if f.is_finite() && f.fract() == 0.0 => Some(*f as i128),
+            // Beyond i128: past every bound, on its side.
+            Self::BigInt(f) => Some(if *f < 0.0 { i128::MIN } else { i128::MAX }),
             _ => None,
         }
     }
@@ -1199,7 +1248,8 @@ pub struct Sampled<'a> {
     pub epoch: Option<&'a str>,
     /// The Point's `timestamp`, for a Point.
     pub timestamp_ms: Option<i64>,
-    /// The owner's stamp, in nanoseconds since the Unix epoch, for state.
+    /// The owner's stamp, in nanoseconds since the Unix epoch, for state:
+    /// [`stamp_ns`] of its NTP64 value (0.2).
     pub stamp_ns: Option<i128>,
     /// When the reader received it, in nanoseconds on its monotonic clock.
     pub arrival_ns: i128,
@@ -1305,11 +1355,11 @@ pub enum Basis {
 /// Why a pair has no rate (§2.11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoRate {
-    /// Not asked: the pair is not of counters.
+    /// Not asked: the pair is not of two counters, an incomparable pair
+    /// included, since two counters are always comparable (0.2, F-146).
     Kind,
     Reset,
     Decreased,
-    Incomparable,
     /// The elapsed time is 0 or less.
     Elapsed,
 }
@@ -1321,7 +1371,6 @@ impl NoRate {
             Self::Kind => "kind",
             Self::Reset => "reset",
             Self::Decreased => "decreased",
-            Self::Incomparable => "incomparable",
             Self::Elapsed => "elapsed",
         }
     }
@@ -1374,6 +1423,21 @@ fn elapsed_ns(a: &Sampled<'_>, b: &Sampled<'_>) -> i128 {
     }
 }
 
+/// A state sample's stamp in nanoseconds (§2.11, 0.2, F-142), from its raw
+/// NTP64 value: the seconds (the high 32 bits) times 10^9, plus the 32-bit
+/// fraction times 10^9 divided by 2^32, rounded up. uhlc's
+/// `NTP64::as_nanos`, which zenoh reads a stamp's time with; a pair's
+/// elapsed time is the later stamp's nanoseconds less the earlier's, each
+/// converted alone.
+#[must_use]
+pub fn stamp_ns(ntp64: u64) -> i128 {
+    let secs = i128::from(ntp64 >> 32);
+    // Below 2^32 times 10^9, so below 2^62: no overflow in a u64.
+    let frac = ntp64 & 0xffff_ffff;
+    let sub = (frac * 1_000_000_000).div_ceil(1 << 32);
+    secs * 1_000_000_000 + i128::from(sub)
+}
+
 /// §2.11's rate: `double(d) / (double(e) / 1e9)`, rounding to nearest.
 #[must_use]
 pub fn rate_per_s(d: u64, elapsed_ns: i128) -> f64 {
@@ -1409,10 +1473,12 @@ pub fn pair(
         .then(|| decreased(earlier.value, later.value))
         .flatten()
     else {
+        // Incomparable (§2.10): never two counters, so no rate by kind
+        // (§2.11, 0.2).
         return Pair {
             continuity: Continuity::Unobservable,
             basis: None,
-            rate: no_rate(NoRate::Incomparable),
+            rate: Err(NoRate::Kind),
         };
     };
     let (continuity, basis) = match epochs(earlier.epoch, later.epoch, presence) {

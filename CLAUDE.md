@@ -347,7 +347,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   synthetic in the descriptor's `meta`; `gen` synthesizes every member
   deterministically per (seed, tick) (`tape::synth`: the §7.3 JSON Schema
   subset, validated; protobuf with every field filled; raw bytes of the media
-  type's size class). `bench call` times each reply where it arrives and
+  type's size class; a metric resource's value by its declared kind, a
+  counter or histogram never decreasing, so the runtime's checked writer
+  accepts it, #819 TB). `bench call` times each reply where it arrives and
   attributes it by key, envelopes and silence counted apart. `.zrec` is
   version 3 (header `excluded`, rows `qos_axes`; 1 and 2 still read), and
   `record --on` refuses the rules that judge v1.
@@ -627,7 +629,15 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   member's kind and unit over an exact `Datum` (CBOR's NaN and ±Inf
   kept, read `not_finite`); `pair`, a pair's continuity: an in-band epoch,
   else presence, else assumed, with `decreased` only within an established
-  epoch; and its rate by an exact IEEE formula; text 0.1).
+  epoch; and its rate by an exact IEEE formula; text 0.1; text 0.2,
+  F-142 to F-149, #819 TB: a sample's bytes read by `Datum::decode` and
+  `Datum::attachment` (`decode`: strict JSON as D000 reads it, so `1e400`
+  is undecodable; a CBOR bignum is an integer and any other tag its
+  content; an Epoch attachment that does not decode is `epoch_invalid`), a
+  stamp's nanoseconds per stamp (`stamp_ns`, uhlc's `as_nanos`), a member
+  written `null` present, a state member's pairs in its late joiner's
+  merge order, `incomparable` no rate's reason; and the owner's `wire`
+  types, `Point`, `Value` and a `Histogram` that observes into its bounds).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -721,6 +731,19 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   takes another revision (a test's short-ttl copy), and the owner
   example's `--alarms` drives it from stdin (`alarm raise|resolve|confirm|
   list|adoption`).
+  `telemetry` (#819, TB) holds an owner to `telemetry.v1`: every
+  `Writer`/`StateWriter` of a metric resource (declaration `declared`, raw
+  excepted) decodes each put strictly (`zenkey_model::telemetry::Datum::
+  decode`), runs the model's `check`, and refuses an in-band epoch other
+  than its own and a counter or histogram below the last value it put in
+  the epoch (judged by `pair`; a delete keeps it, since a reader pairs
+  across one), all `Error::Telemetry`, nothing published; it fills a
+  counter's or histogram's Point `epoch`, and a bare one's Epoch
+  attachment, with the instance id, or the member's epoch on the template
+  that declares `epoch`; `new_epoch` moves it. No off switch: a raw
+  publisher or the session is unchecked, which is how a test writes what
+  the text refuses. The owner example's `--telemetry` embeds `meter.v1`
+  and drives it from stdin (`telemetry put|raw|new-epoch|instance`).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
