@@ -9,11 +9,12 @@
 #
 # `spray` (zengui/examples/spray.rs) is a zk2 deployment in namespace
 # `spray`: nav, camera, perception, teleop, thrusters, a planner and a tc
-# backend, real services serving their contracts from examples/zk2/, and a
-# service implementing health.v1 alone. Beside it runs the traffic no zk2
-# service would send: an interface token with no instance token, a second
-# answerer on an owner's state, garbage on an owned key, an unowned key, a
-# key in another namespace, and foreign keys.
+# backend, real services serving their contracts from examples/zk2/, a
+# service implementing health.v1 alone, and `lab/meter`, whose metrics are
+# telemetry.v1's (zenkey/tests/contracts/meter.v1.toml). Beside it runs the
+# traffic no zk2 service would send: an interface token with no instance
+# token, a second answerer on an owner's state, garbage on an owned key, an
+# unowned key, a key in another namespace, and foreign keys.
 #
 # `just gui-demo` opens zengui on it with `--namespace spray`: the pump on a
 # session in no namespace, presence and the contracts on one in the
@@ -31,7 +32,10 @@
 #     wears a budget badge, mostly "unobservable" and saying why.
 #   * The Inspector. A state key's value is the owner's S4 GET, and a
 #     stream's that declares history the owner's @adv cache; the declared
-#     QoS against the observed axes; why, fields and consumers.
+#     QoS against the observed axes; why, fields and consumers. A metric
+#     of lab/meter (watch it) reads its kind and unit beside its type,
+#     plots its value in that unit, and a counter its telemetry.v1 rate,
+#     with a reset at each new term of the owner.
 #   * The Workbench. Nodes per address from presence (select host-a/sysmon
 #     for its health.v1 reading), the doctor (with `deep` on it finds the
 #     spray's token-missing and state-stamp-foreign), Send (a foreign

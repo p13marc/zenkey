@@ -53,6 +53,10 @@ async fn the_spray_is_a_deployment_and_the_doctor_finds_its_non_conformance() {
         keys: 0,
         seed: 42,
         contracts: PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/zk2")),
+        meter: PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zenkey/tests/contracts/meter.v1.toml"
+        )),
     };
     let up = spray::Spray::start(&args)
         .await
@@ -68,7 +72,7 @@ async fn the_spray_is_a_deployment_and_the_doctor_finds_its_non_conformance() {
 
     let mut want: Vec<String> = up.instances.keys().cloned().collect();
     want.push(spray::PHANTOM.to_owned());
-    assert_eq!(want.len(), 10, "nine services and the phantom: {want:?}");
+    assert_eq!(want.len(), 11, "ten services and the phantom: {want:?}");
     let deadline = tokio::time::Instant::now() + SETTLE;
     loop {
         let listing =
@@ -178,6 +182,10 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
         keys: 0,
         seed: 42,
         contracts: PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/zk2")),
+        meter: PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zenkey/tests/contracts/meter.v1.toml"
+        )),
     };
     let up = spray::Spray::start(&args)
         .await
@@ -269,6 +277,28 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
          spray's holders"
     );
     assert!(shows(&app, "valid"), "and conforms to its declared type");
+
+    // A metric of `lab/meter` (#819, TD): its kind and unit are its
+    // contract's, retrieved from the spray's holders, and the Inspector
+    // says them beside its type before a sample of it is recorded.
+    let key = format!("{NAMESPACE}/zk2/{}/meter.v1/stream/bytes", spray::METER);
+    let deadline = tokio::time::Instant::now() + SETTLE;
+    while !shows(&app, "By · declared") && tokio::time::Instant::now() < deadline {
+        let read = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+            key.clone(),
+        ))));
+        tokio::time::timeout(SETTLE, drive(&mut app, read))
+            .await
+            .expect("the selection settles");
+        if !shows(&app, "By · declared") {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+    assert!(
+        shows(&app, "By · declared"),
+        "a bare counter's unit is its declaration's"
+    );
+    assert!(shows(&app, "counter · declared"));
 
     up.stop().await;
     let _ = std::fs::remove_dir_all(&home);
