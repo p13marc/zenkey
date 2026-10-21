@@ -243,8 +243,8 @@ mod tests {
     use super::*;
     use crate::authoring::Kind;
     use crate::telemetry::{
-        Conformance, Datum, Declaration, KIND, PUBLISHED, Payload, Problem, TypeView, UNIT,
-        BUCKETS, check, declaration,
+        BUCKETS, Conformance, Datum, Declaration, KIND, PUBLISHED, Payload, Problem, TypeView,
+        UNIT, check, declaration,
     };
     use serde_json::{Value as Json, json};
 

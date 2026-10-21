@@ -557,8 +557,7 @@ mod meter {
                         stamp_ns: None,
                         arrival_ns: 0,
                     };
-                    if pair(&at(before), &at(after), None, None).continuity
-                        == Continuity::Decreased
+                    if pair(&at(before), &at(after), None, None).continuity == Continuity::Decreased
                     {
                         return Err(Reason::Decreased {
                             epoch,
