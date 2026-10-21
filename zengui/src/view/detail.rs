@@ -712,64 +712,65 @@ fn metric_section<'a>(
             &data.caches.counter_rate,
             sp,
         ));
-        if let Some(base) = m.rate_base {
-            col = col.push(kit::muted(match base {
-                "timestamp" => "timed by the Points' timestamps, the measurement times (§2.11)",
-                "stamp" => "timed by the owner's stamps (§2.11)",
-                _ => {
-                    "timed by arrival on this reader's clock — no Point timestamp or owner \
-                      stamp rides these samples (§2.11)"
-                }
-            }));
-        }
-        if matches!(data.unit, Unit::Unknown) {
-            col = col.push(kit::muted(
-                "the counter's unit is unknown, so its rate's is too (§2.11)",
-            ));
-        }
-        if m.no_rate.reset + m.no_rate.decreased > 0 {
-            col = col.push(kit::muted(format!(
-                "no rate across a reset or a decrease: {} drawn as gaps, never \
-                 restarted from zero (§2.11)",
-                kit::plural((m.no_rate.reset + m.no_rate.decreased) as usize, "pair"),
-            )));
-        }
-        if m.no_rate.elapsed > 0 {
-            col = col.push(kit::muted(format!(
-                "{} with no elapsed time between its samples, so no rate (§2.11)",
-                kit::plural(m.no_rate.elapsed as usize, "pair"),
-            )));
-        }
     }
-    if m.kind.is_some_and(|(k, _)| k.is_cumulative()) {
-        col = col.push(continuity(m, sp));
+    let cumulative = m.kind.is_some_and(|(k, _)| k.is_cumulative());
+    // The finding first, under the charts it explains; the words on how
+    // the rate was had and how each pair answered after it.
+    if cumulative {
+        col = col.push(decreases(m, sp));
+    }
+    if m.rate.is_some() {
+        col = col.push(rate_notes(m, data, sp));
+    }
+    if cumulative {
+        col = col.push(pairs(m, sp));
     }
     col = col.push(message_rate(data, sp));
     col.into()
 }
 
-/// A counter's or a histogram's pairs (§2.10): how each answered, how its
-/// epoch was had, and each decrease within an established epoch as the
-/// finding — and, where no epoch was ever established, that no decrease
-/// could have been found (§5, "over many pairs").
-fn continuity<'a>(m: &'a MetricRead, sp: Spacing) -> Element<'a, Message> {
+/// How a counter's rate was had (§2.11): its time base, its unit when the
+/// counter's is unknown, and the pairs that have none.
+fn rate_notes<'a>(m: &'a MetricRead, data: &'a SeriesData, sp: Spacing) -> Element<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
+    if let Some(base) = m.rate_base {
+        col = col.push(kit::muted(match base {
+            "timestamp" => "timed by the Points' timestamps, the measurement times (§2.11)",
+            "stamp" => "timed by the owner's stamps (§2.11)",
+            _ => {
+                "timed by arrival on this reader's clock — no Point timestamp or owner \
+                 stamp rides these samples (§2.11)"
+            }
+        }));
+    }
+    if matches!(data.unit, Unit::Unknown) {
+        col = col.push(kit::muted(
+            "the counter's unit is unknown, so its rate's is too (§2.11)",
+        ));
+    }
+    if m.no_rate.reset + m.no_rate.decreased > 0 {
+        col = col.push(kit::muted(format!(
+            "no rate across a reset or a decrease: {} drawn as gaps, never \
+             restarted from zero (§2.11)",
+            kit::plural((m.no_rate.reset + m.no_rate.decreased) as usize, "pair"),
+        )));
+    }
+    if m.no_rate.elapsed > 0 {
+        col = col.push(kit::muted(format!(
+            "{} with no elapsed time between its samples, so no rate (§2.11)",
+            kit::plural(m.no_rate.elapsed as usize, "pair"),
+        )));
+    }
+    col.into()
+}
+
+/// Each decrease within an established epoch, as the finding it is
+/// (§2.10), with how its epoch was had (§2.9's residual risk).
+fn decreases<'a>(m: &'a MetricRead, sp: Spacing) -> Element<'a, Message> {
     use crate::view::theme::SeverityTone;
     use zenkey_model::telemetry::Via;
     let t = &m.tally;
     let mut col = Column::new().spacing(sp.xs);
-    let mut line = format!(
-        "pairs (§2.10): {} same epoch · {} reset · {} decreased",
-        t.same_epoch, t.reset, t.decreased
-    );
-    if t.unobservable > 0 {
-        line.push_str(&format!(" · {} incomparable", t.unobservable));
-    }
-    line.push_str(&format!(
-        " — epoch in-band in {}, assumed in {}; presence is not read for an epoch here \
-         (its tokens and these samples arrive on two monitors, §2.9)",
-        t.in_band, t.assumed
-    ));
-    col = col.push(kit::muted(line));
     for d in &m.decreases {
         col = col.push(kit::finding(
             SeverityTone::Error,
@@ -802,6 +803,28 @@ fn continuity<'a>(m: &'a MetricRead, sp: Spacing) -> Element<'a, Message> {
             )
         )));
     }
+    col.into()
+}
+
+/// A counter's or a histogram's pairs (§2.10): how each answered and how
+/// its epoch was had — and, where no epoch was ever established, that no
+/// decrease could have been found (§5, "over many pairs").
+fn pairs<'a>(m: &'a MetricRead, sp: Spacing) -> Element<'a, Message> {
+    let t = &m.tally;
+    let mut col = Column::new().spacing(sp.xs);
+    let mut line = format!(
+        "pairs (§2.10): {} same epoch · {} reset · {} decreased",
+        t.same_epoch, t.reset, t.decreased
+    );
+    if t.unobservable > 0 {
+        line.push_str(&format!(" · {} incomparable", t.unobservable));
+    }
+    line.push_str(&format!(
+        " — epoch in-band in {}, assumed in {}; presence is not read for an epoch here \
+         (its tokens and these samples arrive on two monitors, §2.9)",
+        t.in_band, t.assumed
+    ));
+    col = col.push(kit::muted(line));
     if t.asked() > 0 && t.in_band + t.by_presence == 0 {
         col = col.push(kit::muted(
             "no decrease could be found: every pair's epoch was assumed — no in-band \

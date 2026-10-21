@@ -98,6 +98,7 @@ mod detail;
 mod doctor;
 mod echo;
 mod history;
+mod metric;
 mod nodes;
 mod replay;
 mod sections;

@@ -683,3 +683,106 @@ async fn replay_resolves_offline_never_through_the_live_catalog() {
     assert!(app.tree.replay_skeleton.is_none());
     assert!(app.work.verdicts.payloads.get(key).is_none());
 }
+
+/// A replayed metric reads as a live one (#819, TD): through the replay's
+/// offline lens, a Point counter timed by its Points' timestamps, a bare
+/// counter timed by the capture's `t` (each row's receipt by the recording
+/// reader), and an Epoch attachment the row carries placing a decrease in
+/// one epoch — the finding. A row that carries no attachment (a capture
+/// that recorded none) leaves the epoch assumed, so the same decrease reads
+/// as a reset, never a finding (telemetry.v1 §2.10).
+#[test]
+fn a_replayed_metric_reads_as_a_live_one() {
+    use zenkey_model::telemetry::{MetricKind, Source, Via};
+    let meter = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/meter.v1.toml");
+    let loaded = crate::services::contracts::load_all(&[meter]);
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    let select = |app: &mut Zengui, key: &str| {
+        let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+            key.into(),
+        ))));
+    };
+    let header = r#"{"zrec":3,"selectors":["zk2/**"],"base":"","captured_at":"x","excluded":["@stream","@state","@op","@zk","@adv"]}"#;
+    let frames = "zk2/lab/meter/meter.v1/stream/frames";
+    let point = |t_us: u64, ts: u64, n: u64, epoch: &str| {
+        format!(
+            r#"{{"key":"{frames}","t":{t_us},"encoding":"application/json","value":{{"timestamp":{ts},"value":{{"type":"counter","value":{n}}},"epoch":"{epoch}"}}}}"#
+        )
+    };
+    let file = [
+        header.to_string(),
+        point(0, 1_000, 0, "e1"),
+        point(500_000, 2_000, 10, "e1"),
+        point(1_000_000, 3_000, 30, "e1"),
+        point(1_500_000, 4_000, 4, "e2"),
+        point(2_000_000, 5_000, 8, "e2"),
+    ]
+    .join("\n");
+    let mut app = test_app();
+    let _ = app.update(Message::Bus(crate::message::BusMsg::ContractsLoaded(
+        Arc::new(loaded.clone()),
+    )));
+    let _ = open_replay(&mut app, file.as_bytes());
+    select(&mut app, frames);
+    let _ = scrub(&mut app, 2_000_000);
+    let m = app.sub.follow.series.as_ref().unwrap().metric.clone();
+    let m = m.expect("the offline lens resolves a metric");
+    assert_eq!(m.kind, Some((MetricKind::Counter, Source::Declared)));
+    assert_eq!(m.unit, Some(("1".into(), Source::Declared)));
+    assert_eq!(m.rate_base, Some("timestamp"));
+    assert_eq!(
+        m.rate.as_ref().unwrap().points(),
+        [None, Some(20.0), None, Some(4.0)],
+        "rows after the selection: a rate, the reset's gap, a rate"
+    );
+    assert_eq!(m.resets.in_band, 1);
+
+    let bytes = "zk2/lab/meter/meter.v1/stream/bytes";
+    let bare = |t_us: u64, n: u64, epoch: Option<&str>| {
+        let attachment = epoch
+            .map(|e| format!(r#","attachment":"\"{e}\"""#))
+            .unwrap_or_default();
+        format!(
+            r#"{{"key":"{bytes}","t":{t_us},"encoding":"application/json","value":{n}{attachment}}}"#
+        )
+    };
+    for (epoch, decreased, assumed) in [(Some("b1"), 1, 0), (None, 0, 1)] {
+        let file = [
+            header.to_string(),
+            bare(0, 0, epoch),
+            bare(500_000, 100, epoch),
+            bare(1_000_000, 150, epoch),
+            bare(1_500_000, 40, epoch),
+            bare(2_000_000, 90, epoch),
+        ]
+        .join("\n");
+        let mut app = test_app();
+        let _ = app.update(Message::Bus(crate::message::BusMsg::ContractsLoaded(
+            Arc::new(loaded.clone()),
+        )));
+        let _ = open_replay(&mut app, file.as_bytes());
+        select(&mut app, bytes);
+        let _ = scrub(&mut app, 2_000_000);
+        let m = app
+            .sub
+            .follow
+            .series
+            .as_ref()
+            .unwrap()
+            .metric
+            .clone()
+            .unwrap();
+        assert_eq!(m.rate_base, Some("arrival"), "the capture's t times it");
+        assert_eq!(
+            m.rate.as_ref().unwrap().points(),
+            [None, Some(100.0), None, Some(100.0)],
+            "50 By over each half second of the capture clock"
+        );
+        assert_eq!(m.rate_unit.as_deref(), Some("By/s"));
+        assert_eq!((m.decreases.len(), m.resets.assumed), (decreased, assumed));
+        if decreased > 0 {
+            assert_eq!(m.decreases[0].via, Via::InBand);
+        }
+    }
+}

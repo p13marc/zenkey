@@ -654,6 +654,38 @@ mod tests {
         assert_eq!(m.path_unit("value.value.sum"), Some(m.unit()));
     }
 
+    /// An invalid declaration is read as one (§2.2): nothing of its
+    /// samples is, its unit and kind are unobservable, and its reasons are
+    /// the fleet's words.
+    #[test]
+    fn an_invalid_declaration_reads_nothing_of_its_samples() {
+        let l = zenkey_model::contract::load_str(
+            "[interface]\nname = \"m\"\nmajor = 1\nuses = [\"telemetry.v1\"]\n\
+             [resources.up]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+             annotations = { \"telemetry.kind\" = \"bool\" }\n",
+            std::path::Path::new("."),
+            None,
+        );
+        let rev = zenkey_fleet::Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            zenkey_fleet::report::ContractSource::File,
+        );
+        let mut set = zenkey_fleet::ContractSet::new();
+        set.insert(rev);
+        let r = resolve(&set, "zk2/lab/m/m.v1/stream/up");
+        let m = read(&r, &ring(&[(b"yes", None)])).expect("a metric resource");
+        assert!(!m.declared());
+        assert_eq!(m.unit(), Unit::Unobservable);
+        assert_eq!(m.kind_words(), "unobservable (§2.2)");
+        assert!(
+            m.invalid().unwrap().contains("kind_value"),
+            "{:?}",
+            m.invalid()
+        );
+        assert_eq!(m.samples, 0, "its samples are not read");
+        assert!(m.value.is_empty());
+    }
+
     /// A resource that is no metric has no read; its unit is said as such,
     /// and a key no contract resolves says that instead.
     #[test]

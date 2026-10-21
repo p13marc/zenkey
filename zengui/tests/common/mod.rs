@@ -1036,6 +1036,18 @@ impl World {
             )
     }
 
+    /// What the last tick published: `(key, bytes, encoding, attachment)`.
+    pub fn published(&self) -> impl Iterator<Item = (&str, &[u8], &str, Option<&[u8]>)> {
+        self.last
+            .iter()
+            .map(|(k, b, e, a)| (*k, b.as_slice(), *e, a.as_deref()))
+    }
+
+    /// The metered publishers' keys (#819, TD).
+    pub fn metered_keys() -> impl Iterator<Item = &'static str> {
+        METERED_FEEDS.iter().map(|(key, ..)| *key)
+    }
+
     /// The contracts this world loaded, as `ContractsLoaded` hands them.
     pub fn loaded(&self) -> Arc<zengui::services::contracts::LoadedContracts> {
         Arc::clone(&self.contracts)

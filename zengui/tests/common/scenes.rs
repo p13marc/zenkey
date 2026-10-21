@@ -259,13 +259,21 @@ pub const ALL: &[Scene] = &[
                    (§2.5, §2.6)",
     },
     // The histogram's newest Point tagged a gauge: it does not conform, and
-    // the Inspector says why in the profile's words, as echo does in the
-    // Activity dock.
+    // the Inspector says why in the profile's words.
     Scene {
         name: "inspector-metric-tag-disagrees",
         size: DESKTOP,
         build: metric_tag_disagrees,
         landmark: "telemetry.v1 §2.6 tag_disagrees: the Point's tag differs from the declared kind",
+    },
+    // The same verdict in the Activity dock: echo pinned to the key, its
+    // badge counting the violation and its strip naming it.
+    Scene {
+        name: "watch-metric-invalid",
+        size: DESKTOP,
+        build: watch_metric_invalid,
+        landmark: "invalid · zk2/lab/meter/meter.v1/stream/latency: telemetry.v1 §2.6 \
+                   tag_disagrees: the Point's tag differs from the declared kind",
     },
     // zenoh-modem's units (#819's "done when"): a bare JSON integer that is
     // a counter in `By` by its declaration alone, its rate in `By/s`.
@@ -1174,15 +1182,15 @@ fn metric_histogram(theme: ThemeChoice) -> Zengui {
 
 /// One more tick in which `latency` publishes a Point tagged a gauge — the
 /// schema admits it, and telemetry.v1 does not (§2.6, check 4) — then the
-/// newest payloads checked again, so the echo's badge and strip carry the
-/// verdict the Inspector explains.
-fn metric_tag_disagrees(theme: ThemeChoice) -> Zengui {
-    let (mut app, mut world) = metered(prefs(theme), LATENCY, 28);
+/// newest payloads checked again, so the tree's badge carries the verdict
+/// the Inspector explains.
+fn tag_disagrees(prefs: Prefs) -> Zengui {
+    let (mut app, mut world) = metered(prefs, LATENCY, 28);
     world.tick_with(
         &mut app,
         LATENCY,
         super::metric_point(
-            30,
+            29,
             "gauge",
             serde_json::json!(0.0125),
             Some("s"),
@@ -1190,8 +1198,18 @@ fn metric_tag_disagrees(theme: ThemeChoice) -> Zengui {
         ),
     );
     world.verdicts(&mut app);
-    // Echo pinned to the subject, its default: the strip names the key's
-    // first violation in the Activity dock.
+    app
+}
+
+fn metric_tag_disagrees(theme: ThemeChoice) -> Zengui {
+    tag_disagrees(prefs(theme))
+}
+
+/// [`tag_disagrees`] in the Watch layout, echo pinned to the key (its
+/// default): the Activity dock's account of the verdict.
+fn watch_metric_invalid(theme: ThemeChoice) -> Zengui {
+    let mut app = tag_disagrees(prefs(theme));
+    preset(&mut app, LayoutPreset::Watch);
     send(
         &mut app,
         Message::Workspace(WorkspaceMsg::ActivityTab(ActivityTab::Echo)),

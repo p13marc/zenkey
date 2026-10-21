@@ -724,8 +724,8 @@ fn the_detail_pane_labels_the_series_it_plots() {
     assert!(ui.find("Series").is_ok());
     assert!(
         ui.find(
-            "value: 42 percent now · 41 percent min · 42 percent max · 3 points · \
-             1 drawn as gaps, not interpolated"
+            "value [percent]: 42 now · 41 min · 42 max · 3 points · 1 drawn as gaps, \
+             not interpolated"
         )
         .is_ok(),
         "the caption carries the numbers, the unit and the gap count"
