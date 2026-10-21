@@ -154,6 +154,8 @@ layout.
   it must mint a new instance id **without restarting the process**: r3.2 §3.5 says MUST. zk2's
   start-up order (§3.10) and Rust shape (§3.14) describe only a start, so `zenkey` needs a
   `Service::new_epoch()` with a stated order (README gap 16). The contract crate only documents
-  that every `telemetry.kind = "counter"` resource is reset across an epoch.
+  that every `telemetry.kind = "counter"` resource is reset across an epoch, as
+  [`telemetry.v1`](../../../spec/profiles/telemetry/v1.md) §2.7 and §2.9 state it: a reader pairs
+  two samples across a new instance as a reset, and derives no rate across it (§2.10, §2.11).
 - **The host id.** `hostid.v1` mints it. Today the derivation is salted per application
   (`zenoh-modem-host-id-v1`), so README gap 22 decides what `modem-contract` stops exporting.

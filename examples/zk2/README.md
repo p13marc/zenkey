@@ -86,7 +86,7 @@ defaulted or written out.
 ```toml
 [schemas]
 protobuf   = ["proto/nav/v2/nav.proto"]   # proto2/proto3 only (no editions yet)
-jsonschema = ["schemas/nav.json", "../profiles/telemetry/v1/telemetry.json"]
+jsonschema = ["schemas/nav.json", "../../../spec/profiles/telemetry/telemetry.v1.json"]   # a profile's standard schema, by its path
 ```
 
 **Type references**, used by `type`, `attachment`, `request`, `response`,
@@ -96,7 +96,7 @@ jsonschema = ["schemas/nav.json", "../profiles/telemetry/v1/telemetry.json"]
 |---|---|
 | `"nav.v2.Position"` | a protobuf message, fully qualified, defined in a listed `.proto` file. The well-known types (`google.protobuf.Empty`, …) are always available. |
 | `"json:Status"` | the `$defs/Status` definition. ✱ The name must be unique across the listed files (lint). |
-| ✱ `"json:telemetry#Point"` | the qualified form: `$defs/Point` in the listed file whose stem is `telemetry`. This is how a contract refers to a profile type or another interface's type (D7). |
+| ✱ `"json:telemetry.v1#telemetry.v1.Point"` | the qualified form: `$defs/telemetry.v1.Point` in the listed file whose stem is `telemetry.v1`. This is how a contract refers to another interface's type, or to a profile's type, which is the profile's by its artifact's id (D7; core §10 point 1, 0.35). The unqualified `json:telemetry.v1.Point` resolves the same when no other listed file defines the name. |
 | `{ raw = "image/jpeg" }` | opaque bytes of a media type. Generic tools show the type and size and never decode it. |
 | ✱ `{ raw = "video/*", media_param = "codec" }` | a raw family. The sample's `Encoding` carries the concrete subtype, and `media_param` ties it to a template parameter (D6). |
 
@@ -190,7 +190,7 @@ profile must be listed in `uses`.
 |---|---|
 | `freshness.v1` | `ttl_s` (seconds; `0` = never stale) |
 | `timing.v1` | `period_ms`, `deadline_ms`, `lifespan_ms` |
-| `telemetry.v1` | `unit` (UCUM), `kind` (`counter` \| `gauge` \| `histogram` \| `text`), `buckets` (list), `semantic` |
+| `telemetry.v1` | `kind` (`counter` \| `gauge` \| `histogram` \| `text` \| `boolean` \| `binary`), `unit` (UCUM SHOULD, compared byte for byte), `buckets` (iff `histogram`), `semantic`: published by [`telemetry.v1`](../../spec/profiles/telemetry/v1.md) §4 (core 0.35), which also holds the standard schema, `telemetry.v1.Point` among it |
 | `link.v1` | `exposure` (`host` \| `link`, default `host`): published by [`link.v1`](../../spec/profiles/link/v1.md) §4 (core 0.29), which dropped `downsample_ms`, a face's rate being its face policy's `interval_s` |
 | `arbitration.v1` | `policy` (`priority` \| `freshest` \| `lease`) |
 | `desired.v1` | `target_param` (template parameter naming the target), `target` (`self.system` \| `self.service`) |
