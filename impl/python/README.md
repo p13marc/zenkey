@@ -77,13 +77,14 @@ case name. It exits with:
 | config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
-| readings | | `alarms` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 137: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 86 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, four loss sequences, four of 0.6's first answers, and four of a key gone from the scope), five of 0.6's presence read dated by its ask, six of §2.14 step 5's left-out key, a `reply_del` among them, and 21 of §2.16's two closed lists: each of the twenty neither reasons the first question gives, read from a reading of its own, on its list, and the table's reader's-sight reasons 0.8's ten. |
+| telemetry | profiles/telemetry §2.1–§2.11, §3 | `telemetry` | every file of `spec/profiles/telemetry/conformance/`: `schema.json` (the standard schema's published ids, the file's header against zk2py's tables, and each case's document by path, inside a bundle, or inline), `declarations.json` (a resolved resource's declaration), `samples.json` (one sample's conformance, and the member's kind and unit) and `continuity.json` (a pair's continuity, its epoch's evidence and its rate, compared exactly). An unknown file there fails. |
+| readings | | `alarms`, `telemetry` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 158. Of `telemetry.v1`, 21: Appendix B over the adopters' real contracts (zenoh-modem's 73 declared streams and 23 units, `sdu/dropped_total` a bare counter with no epoch, each ZenSight contract's revision 1.1 and both published bundles a Point declaring no kind, netring's two units, tcgui's resources none this profile's), three of §2.3's copies (a JCS-equal one keeps the id; a changed one is not the Point) and two of F-148's state order. Of `alarms.v1`, 137: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 86 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, four loss sequences, four of 0.6's first answers, and four of a key gone from the scope), five of 0.6's presence read dated by its ask, six of §2.14 step 5's left-out key, a `reply_del` among them, and 21 of §2.16's two closed lists: each of the twenty neither reasons the first question gives, read from a reading of its own, on its list, and the table's reader's-sight reasons 0.8's ten. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
 
 ```text
-layout         19 passed     0 failed
+layout         20 passed     0 failed
 keys           55 passed     0 failed
 slugs          42 passed     0 failed
 templates      11 passed     0 failed
@@ -97,18 +98,27 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
-readings      137 passed     0 failed
+readings      158 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
 config        330 passed     0 failed
 link          172 passed     0 failed
 alarms        316 passed     0 failed
-total        1887 passed     0 failed
+telemetry     243 passed     0 failed
+total        2152 passed     0 failed
 ```
 
-The figures are against `core.md` 0.34, `hostid.v1` 0.5, `freshness.v1`
-0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.7 and `alarms.v1` 0.8.
+The figures are against `core.md` 0.35, `hostid.v1` 0.5, `freshness.v1`
+0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.8, `alarms.v1` 0.8 and
+`telemetry.v1` 0.1. `telemetry.v1` 0.1 added its four fixture files, 240
+cases and three checks of `schema.json`'s header, which passed the first
+time they ran, and core 0.35 moved its vocabulary to Appendix D's published
+table, which changed no fixture. `layout` now checks the seven profiles'
+directories that hold fixtures. The four ZenSight contracts' revision 1.1
+list the profile's file from `spec/profiles/telemetry/`, and `examples`
+loads, builds, publishes and classifies each against both revisions with no
+change. `link.v1` 0.8 changed wording only.
 `alarms.v1` 0.7 and 0.8 changed no fixture, and 0.6 only
 `conclusions.json`'s description.
 `alarms.v1` 0.5 gave every `conclusions.json` reading `left_out` and every
@@ -196,8 +206,10 @@ fixtures:
   lists.
 - `alarms.v1` 0.8 resolved F-141: `silent` is on the reader's-sight
   list.
-- None open. A closing whole-text pass over `alarms.v1` 0.8 found nothing
-  more to guess (`SPEC-FINDINGS.md`, "At alarms.v1 0.8").
+- A closing whole-text pass over `alarms.v1` 0.8 found nothing more to
+  guess (`SPEC-FINDINGS.md`, "At alarms.v1 0.8").
+- F-142 to F-148 are open, found against `telemetry.v1` 0.1 read cold with
+  core 0.35 (`SPEC-FINDINGS.md`, "At telemetry.v1 0.1").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -1102,6 +1114,72 @@ published in both history roots, one file.
   - **§9's liar is always zk2py's.** Its subject is the tool, and no owner
     may put a document on another key.
 
+## telemetry.v1 (profile text 0.1, core 0.35)
+
+```bash
+just py-telemetry                                # §1–§8 against zk2py's owner, about a minute
+just py-telemetry --only 8                       # one section
+```
+
+`telemetry.v1` is the seventh profile (`spec/profiles/telemetry/`), and the
+first whose first point is a standard schema (core 0.35), not a standard
+contract. zk2py read its 0.1 cold in round 45.
+- **`zk2py.telemetry`**, the reader's and the tool's half, from the text
+  alone:
+  - **the standard schema** (§2.3, §3): the two published ids, oldest
+    first, and `is_profile_type`, a type the profile's by its kind, its
+    name and its artifact's id, and only from the revision that defines it;
+  - **the declaration** (§2.1, §2.2, §2.4): `declare`, every reason in
+    §2.2's order, each key alone and a check that needs a wrong value
+    skipped; `carries`, §2.4's table over the root's `type` as a set, so
+    both spellings of a nullable carry nothing; `contract_declarations` and
+    `bundle_declarations` find each type's root with its `$ref`s followed,
+    as core §9.8 follows them;
+  - **a sample** (§2.5, §2.6): `conform`, the twelve reasons in order, the
+    member's kind and unit as the sample gives them. Integers are read
+    exactly and an integral double is the integer it equals; `decode_json`
+    and `decode_cbor` read a payload's bytes (F-143, F-144);
+  - **a pair** (§2.9 to §2.11): `epoch_of`, `continuity` and `rate_of`,
+    `double(d) / (double(e) / 1e9)` in Python's IEEE doubles, equal bit for
+    bit to every fixture rate; `kept_reads`, a state pair through core
+    §4.2's merge (F-148).
+- **The owner half**, `MeterOwner` in `zk2py.telemetry_scenarios`, over
+  zk2py's owner: Points timed by the owner's clock and carrying its instance
+  id as their epoch, the Epoch attachment of a bare counter as a JSON
+  string, and a writer that refuses what its declaration refuses and a
+  decrease within one epoch. zk2py's owner gained `new_epoch`, core §8.1's
+  make-before-break re-mint in one session, and an attachment on
+  `publish`.
+- **The `telemetry` conformance family:** 243 of 243, every case passing
+  the first time it ran.
+- **The vocabulary** (core 0.35): `telemetry`'s four keys moved from zk2py's
+  interim table to its published one, and W105 reads them as before.
+- **`just py-telemetry`** (`python -m zk2py.telemetry_scenarios`) runs
+  `scenarios.md` §1 to §8, each on an in-process router of its own,
+  against `meter.v1`, transcribed from the text into
+  `interop/telemetry/`. R and R0 are client sessions of R1; R's liveliness
+  watch and both subscriptions are declared before the owner starts. §8
+  runs twice: R0 alone, as the reference runtime does, and R0F behind a
+  second router whose access control denies `zk2/*/*/@zk/**` on its
+  `unixsock-stream` face, with a control off the face that sees the tokens
+  R0F does not. The Rust owner example's `--telemetry` comes with #819 TB.
+
+  | § | zk2py's owner |
+  |---|---|
+  | 1 A counter across a restart | 10 of 10 |
+  | 2 A counter across `new_epoch` in one process | 6 of 6 |
+  | 3 A decrease within one epoch | 6 of 6 |
+  | 4 A Point whose tag disagrees | 5 of 5 |
+  | 5 Histograms, other bounds and a decrease | 5 of 5 |
+  | 6 Absence is not zero | 3 of 3 |
+  | 7 An in-band epoch on a bare counter (+ F-147's two other attachments) | 5 of 5 |
+  | 8 A counter that crosses a face (R0, and R0F across a real face) | 8 of 8 |
+  | **Total** | **48 of 48** |
+
+  - **F-142's measurement** prints with every run: zenoh-python's
+    `NTP64.as_nanos()` against the exact nanoseconds of 2,000 HLC stamps,
+    and how often two conversions of a stamp pair give two elapsed times.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -1207,6 +1285,9 @@ impl/python/
     alarms.py         alarms.v1 the key and the sanitizing step, references, strict JSON, the document, transitions,
                                 the conclusions, AlarmsOwner, the reader on a bus
     alarms_scenarios.py alarms.v1 scenarios.md §1–§10 against zk2py's owner or the Rust owner example
+    telemetry.py      telemetry.v1 the standard schema's ids, declarations, carriers, a sample's conformance,
+                                a pair's epoch, continuity and rate, a contract's and a bundle's resources
+    telemetry_scenarios.py telemetry.v1 scenarios.md §1–§8 against zk2py's owner, §8 across a face too
     budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, the stall watch, readings on a bus
     budget_scenarios.py §2.7    scenarios/budget.md §1–§7 and §1's stalled reader: the measurements, and the owner keeping its budget
     seed.py           §4.2      a late joiner's seed: subscribe, then S4's GET, merged by stamp; the pure merge
@@ -1214,6 +1295,7 @@ impl/python/
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
                       sysinfo_x, tracker, order, order_b, budget, plans; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1;
+                      telemetry/ meter.v1 and meter.json, telemetry.v1's scenarios' contract;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 
