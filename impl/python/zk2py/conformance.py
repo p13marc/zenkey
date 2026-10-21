@@ -1136,13 +1136,13 @@ def _reporter_loss() -> list[tuple[str, Any, Any]]:
 
 
 def _first_neither_cases() -> list[tuple[str, Any, Any]]:
-    """alarms.v1 0.7 §2.16, "A key's first answer": every neither reason
+    """alarms.v1 0.8 §2.16, "A key's first answer": every neither reason
     the first question gives, one reading per reason, each checked on its
     own (the answer neither yes nor no, the reason the one intended, the
-    list the one 0.7 puts it on); then that the table's reader's-sight
-    reasons are exactly 0.7's nine and that it holds twenty distinct
-    reasons. freshness.v1's `silent` is on no named list at 0.7, so it is
-    "any other reason" here (F-141)."""
+    list the one 0.8 puts it on); then that the table's reader's-sight
+    reasons are exactly 0.8's ten and that it holds twenty distinct
+    reasons. freshness.v1's `silent` is on the reader's-sight list since
+    0.8 (F-141)."""
     from . import alarms, freshness as fr
 
     lists = {"lists": True, "token": True}
@@ -1157,7 +1157,7 @@ def _first_neither_cases() -> list[tuple[str, Any, Any]]:
     R = alarms.Reading
     std, invalid = alarms.HORIZON, fr.Horizon("invalid")
     sight, other = "reader_sight", "other"
-    # (reason intended, reading, horizon, the list 0.7 puts it on)
+    # (reason intended, reading, horizon, the list 0.8 puts it on)
     table: list[tuple[str, Any, Any, str]] = [
         ("absent", R("absent"), std, other),
         ("presence_incomplete", R("incomplete"), std, sight),
@@ -1173,7 +1173,7 @@ def _first_neither_cases() -> list[tuple[str, Any, Any]]:
         ("undecodable", R("present", lists, observations=[sub()], latest="undecodable"), std, other),
         ("stale", R("present", lists, observations=[sub(age=1000)], latest="firing"), std, other),
         ("no_observation", R("present", lists, latest="firing"), std, sight),
-        ("silent", R("present", lists, observations=[get(None)], latest="firing"), std, other),
+        ("silent", R("present", lists, observations=[get(None)], latest="firing"), std, sight),
         ("no_stamp", R("present", lists, observations=[get(age=None)], latest="firing"), std, other),
         ("clock_untrusted", R("present", lists, observations=[get(trusted=False)], latest="firing"), std, sight),
         ("clock_disagrees", R("present", lists, observations=[get(age=-5)], latest="firing"), std, other),
@@ -1182,7 +1182,7 @@ def _first_neither_cases() -> list[tuple[str, Any, Any]]:
          std, sight),
         ("not_a_horizon", R("present", lists, observations=[sub()], latest="firing"), invalid, other),
     ]
-    label = "alarms.v1 0.7 §2.16, a key's first answer"
+    label = "alarms.v1 0.8 §2.16, a key's first answer"
     out: list[tuple[str, Any, Any]] = []
     for want, reading, horizon, want_list in table:
         a = alarms.judge(reading, alarms.Q_FIRING, horizon)
@@ -1192,7 +1192,7 @@ def _first_neither_cases() -> list[tuple[str, Any, Any]]:
                      "list": got_list},
                     {"answer_neither": True, "reason": want, "list": want_list}))
     reasons = [t[0] for t in table]
-    out.append((f"{label}: the table holds twenty distinct reasons, and its reader's-sight ones are 0.7's nine",
+    out.append((f"{label}: the table holds twenty distinct reasons, and its reader's-sight ones are 0.8's ten",
                 {"distinct": len(set(reasons)), "sight": sorted(r for r, _, _, lst in table if lst == sight)},
                 {"distinct": 20, "sight": sorted(alarms.READER_SIGHT)}))
     return out
