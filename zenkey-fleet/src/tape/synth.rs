@@ -27,6 +27,16 @@
 //! cannot be reproduced cannot bisect a consumer bug. Numeric leaves wander
 //! on a sine, phase-offset by the field's name so siblings do not move in
 //! lockstep; everything else is stable or cycles with the tick.
+//!
+//! **A metric resource** (`telemetry.v1`, #819 TB), whose declaration is
+//! valid, gets a value of its kind, which the runtime's writer would not
+//! refuse: a counter that never decreases (a step per tick, from the
+//! type's lower bound, held at its upper one), a histogram over the
+//! declared bounds whose counts only grow, and a Point tagged with the
+//! declared kind (a gauge where none is declared), timed a second per tick
+//! and with no `epoch`, which the runtime's writer writes. Any other kind
+//! is the type's own synthesis. A sine-wandering counter would be refused
+//! as a decrease within its epoch (§2.7).
 
 use std::collections::BTreeSet;
 
@@ -36,6 +46,7 @@ use zenkey_model::authoring::Encoding as WireEncoding;
 use zenkey_model::bundle::Bundle;
 use zenkey_model::contract::{Body, Resource};
 use zenkey_model::schema::TypeId;
+use zenkey_model::telemetry::{self, Carrier, Declaration, Declared, MetricKind, wire};
 use zenkey_model::validate::{resolve_ref, satisfies, validate};
 
 use crate::model::catalog::Revision;
@@ -176,7 +187,26 @@ impl Synth {
         match ty {
             TypeId::JsonSchema { .. } => {
                 use zenkey::codec::Codec as _;
-                let value = self.json(bundle, canonical, tick)?;
+                let metric = match (member, telemetry::declaration_of(revision.contract(), r)) {
+                    (Member::Type, Declaration::Declared(d)) => self.metric(revision, r, &d, tick),
+                    _ => None,
+                };
+                let value = match metric {
+                    Some(v) => {
+                        validate(bundle, canonical, &v).map_err(|violations| {
+                            format!(
+                                "the synthesized metric does not validate: {}",
+                                violations
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join("; ")
+                            )
+                        })?;
+                        v
+                    }
+                    None => self.json(bundle, canonical, tick)?,
+                };
                 let bytes = zenkey::codec::Json::<Value>::encode(&value, encoding)?;
                 Ok(Synthesized {
                     bytes,
@@ -195,6 +225,74 @@ impl Synth {
                 bytes: self.raw(media_type, tick),
                 value: None,
             }),
+        }
+    }
+
+    /// A metric resource's value at `tick`, of its declared kind (the module
+    /// doc's): `None` for a kind the type's own synthesis serves (a bare
+    /// gauge, text or boolean).
+    fn metric(&self, revision: &Revision, r: &Resource, d: &Declared, tick: u64) -> Option<Value> {
+        let field = r.template.as_str();
+        let step = 1 + fnv(field) % 10;
+        let histogram = || {
+            let bounds = d.buckets.clone().unwrap_or_else(|| vec![0.1, 1.0, 10.0]);
+            let mids: Vec<f64> = (0..=bounds.len())
+                .map(
+                    |i| match (i.checked_sub(1).map(|j| bounds[j]), bounds.get(i)) {
+                        (Some(lo), Some(hi)) => f64::midpoint(lo, *hi),
+                        (None, Some(hi)) => *hi,
+                        (Some(lo), None) => lo + 1.0,
+                        (None, None) => 0.0,
+                    },
+                )
+                .collect();
+            let counts: Vec<u64> = (1..=mids.len() as u64).map(|w| tick * w).collect();
+            let sum = counts.iter().zip(&mids).map(|(c, m)| *c as f64 * m).sum();
+            wire::Histogram {
+                count: counts.iter().sum(),
+                buckets: bounds,
+                counts,
+                sum,
+            }
+        };
+        match d.carrier {
+            Carrier::Point => {
+                let value = match d.kind.unwrap_or(MetricKind::Gauge) {
+                    MetricKind::Counter => wire::Value::Counter(tick * step),
+                    MetricKind::Gauge => wire::Value::Gauge(self.wander(field, tick, 0.0, 100.0)),
+                    MetricKind::Text => wire::Value::Text(format!("state-{}", tick % 4)),
+                    MetricKind::Boolean => wire::Value::Boolean(tick.is_multiple_of(2)),
+                    MetricKind::Binary => {
+                        wire::Value::Binary(splitmix(self.seed ^ tick).to_be_bytes()[..4].to_vec())
+                    }
+                    MetricKind::Histogram => wire::Value::Histogram(histogram()),
+                };
+                let at = 1_760_000_000_000 + i64::try_from(tick).ok()?.checked_mul(1000)?;
+                serde_json::to_value(wire::Point::new(at, value)).ok()
+            }
+            Carrier::Bare => match d.kind? {
+                MetricKind::Counter => {
+                    let Body::Data(data) = &r.body else {
+                        return None;
+                    };
+                    let TypeId::JsonSchema { name, schema } = &data.type_ else {
+                        return None;
+                    };
+                    let root =
+                        telemetry::root_schema(&revision.contract().artifacts, schema, name)?;
+                    let obj = root.as_object()?;
+                    let (lo, lo_open, hi, hi_open) = JsonWalk::bounds(obj);
+                    let lo = if lo_open { lo.floor() + 1.0 } else { lo.ceil() }.max(0.0);
+                    let hi = if hi_open { hi.ceil() - 1.0 } else { hi.floor() };
+                    let unbounded =
+                        !obj.contains_key("maximum") && !obj.contains_key("exclusiveMaximum");
+                    let v = lo + (tick * step) as f64;
+                    let v = if unbounded { v } else { v.min(hi) };
+                    Some(json!(v as u64))
+                }
+                MetricKind::Histogram => serde_json::to_value(histogram()).ok(),
+                _ => None,
+            },
         }
     }
 
@@ -966,5 +1064,70 @@ message Pose {
             }
         }
         assert!(checked > 50, "the examples were walked: {checked}");
+    }
+
+    /// A metric resource's samples are ones its writer accepts
+    /// (`telemetry.v1`, #819 TB): each conforms to the declaration, and a
+    /// counter or histogram never decreases from tick to tick, so the
+    /// runtime refuses none as a decrease within its epoch.
+    #[test]
+    fn a_metric_resource_synthesizes_what_its_writer_accepts() {
+        use zenkey_model::telemetry::{Conformance, Continuity, Datum, Payload, Sampled};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut metrics = 0;
+        for dir in [
+            "examples/zk2/zensight",
+            "examples/zk2/zenoh-modem",
+            "zenkey/tests/contracts/meter.v1.toml",
+        ] {
+            let (set, _) = crate::model::catalog::ContractSet::load_path(&root.join(dir));
+            for rev in set.iter() {
+                for r in &rev.contract().resources {
+                    let decl = telemetry::declaration_of(rev.contract(), r);
+                    let Some(d) = decl.declared() else { continue };
+                    if matches!(r.kind, zenkey_model::authoring::Kind::Event) {
+                        continue;
+                    }
+                    let Body::Data(data) = &r.body else { continue };
+                    metrics += 1;
+                    let mut last = None;
+                    for tick in 0..6 {
+                        let s = Synth::new(3).sample(rev, r, Member::Type, tick).unwrap();
+                        let datum = match data.type_ {
+                            TypeId::Raw { .. } => Datum::Bytes(s.bytes.clone()),
+                            _ => Datum::decode(&s.bytes, data.encoding).expect("decodes"),
+                        };
+                        // The epoch the runtime would write, where it would.
+                        let epoch = Datum::Text("00000000000000aa".into());
+                        let attachment = (d.epoch
+                            == Some(zenkey_model::telemetry::EpochIn::Attachment))
+                        .then_some(&epoch);
+                        let c = telemetry::check(
+                            &decl,
+                            &Payload::Decoded {
+                                value: &datum,
+                                attachment,
+                            },
+                        );
+                        let what = format!("{} {}/{} at {tick}", rev.iface(), r.token, r.template);
+                        assert_eq!(c.conformance, Conformance::Conforms, "{what}: {datum:?}");
+                        let now = c.reading.expect("read").value;
+                        if let Some(before) = &last {
+                            let at = |value| Sampled {
+                                value,
+                                epoch: Some("e"),
+                                timestamp_ms: None,
+                                stamp_ns: None,
+                                arrival_ns: 0,
+                            };
+                            let p = telemetry::pair(&at(before), &at(&now), None, None);
+                            assert_ne!(p.continuity, Continuity::Decreased, "{what}");
+                        }
+                        last = Some(now);
+                    }
+                }
+            }
+        }
+        assert!(metrics > 100, "the metric resources were walked: {metrics}");
     }
 }

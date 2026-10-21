@@ -797,6 +797,9 @@ pub async fn run_gen(
                     () = &mut run_over => return (i, tally),
                 }
             }
+            let epoch_attached = zenkey_model::telemetry::declaration_of(rev.contract(), &r)
+                .declared()
+                .is_some_and(|d| d.epoch == Some(zenkey_model::telemetry::EpochIn::Attachment));
             loop {
                 if e.events_cap.is_some_and(|cap| tally.sent >= cap) {
                     (&mut run_over).await;
@@ -818,6 +821,9 @@ pub async fn run_gen(
                         let put = match &out {
                             Out::State(w) => w.put(s.bytes).await.map(|_| ()),
                             Out::Event(w) => w.put(s.bytes).await.map(|_| ()),
+                            // telemetry.v1 §2.9: an Epoch attachment is the
+                            // runtime's writer's to write (#819, TB).
+                            Out::Stream(w) if epoch_attached => w.put(s.bytes).await,
                             Out::Stream(w) => {
                                 match synth.sample(&rev, &r, Member::Attachment, tick) {
                                     Ok(a) => w.put_with(s.bytes, Some(a.bytes)).await,
