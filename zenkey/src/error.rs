@@ -50,6 +50,16 @@ pub enum Error {
     /// live (#741). It names the resource, the bound and whose it is.
     #[error(transparent)]
     Budget(Box<crate::budget::Refusal>),
+    /// A metric sample `telemetry.v1` forbids, refused with nothing
+    /// published (`spec/profiles/telemetry/v1.md` §2.6–§2.9, #819): one
+    /// that does not conform, a counter or histogram below the last value
+    /// the writer put in the same epoch, or an in-band epoch other than the
+    /// owner's. It names the member's key, and the reason.
+    #[error("telemetry.v1: {member}: {reason}: refused, nothing published")]
+    Telemetry {
+        member: String,
+        reason: Box<crate::telemetry::Reason>,
+    },
     /// A payload does not encode or decode as its declared type (§7.2): a
     /// value reply or a sample that is not what the contract says, or a
     /// value its codec cannot write.

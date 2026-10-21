@@ -422,6 +422,12 @@ impl Refresher {
 /// a put of a key without a value while the live members are at the bound
 /// is refused, [`Error::Budget`], nothing stored or published; a put to a
 /// live key adds no member, and a delete frees one.
+///
+/// On a metric resource it holds its puts to `telemetry.v1` as
+/// [`Writer`] does ([`crate::telemetry`]), [`Error::Telemetry`] before
+/// anything is minted, stored or published. A re-put is the value last
+/// put, unchanged, its epoch the one it was put in; a delete forgets no
+/// last value (the module doc's).
 pub struct StateWriter {
     writer: Arc<Writer>,
     key: OwnedKeyExpr,
@@ -551,13 +557,17 @@ impl StateWriter {
         attachment: Option<impl Into<ZBytes>>,
     ) -> Result<Timestamp> {
         let mut held = self.member.held.lock().await;
+        // telemetry.v1 (#819): a metric sample is checked before anything
+        // is minted, stored or published, its epoch written in.
+        let (payload, attachment, pending) = self
+            .writer
+            .meter(payload.into(), attachment.map(Into::into))
+            .await?;
         let ts = self.minter.mint()?;
         // §2.7 (#741): a new live member at the bound is refused, nothing
         // stored or published. After the mint, so a stopped clock never
         // leaves a member counted live without a value.
         self.writer.admit()?;
-        let payload: ZBytes = payload.into();
-        let attachment: Option<ZBytes> = attachment.map(Into::into);
         let bytes = payload.to_bytes().into_owned();
         let kept = attachment.as_ref().map(|a| a.to_bytes().into_owned());
         if self.period.is_some() {
@@ -570,7 +580,17 @@ impl StateWriter {
         drop(held);
         self.member.wake.notify_one();
         sent?;
+        if let Some(p) = pending {
+            p.commit();
+        }
         Ok(ts)
+    }
+
+    /// The resource's `telemetry.v1` declaration, when it is a metric
+    /// resource whose puts this writer checks ([`crate::telemetry`]).
+    #[must_use]
+    pub fn telemetry(&self) -> Option<&zenkey_model::telemetry::Declared> {
+        self.writer.telemetry()
     }
 
     /// Re-puts the member's current value now, unchanged, under a fresh

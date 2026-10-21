@@ -17,6 +17,9 @@
 //! non-finite floats), measures what it saw of presence and when each
 //! sample arrived, and hands them over as values. The owner's in-band
 //! epoch is the runtime's.
+//!
+//! [`wire`] is the standard schema's types as an owner puts them: the
+//! Point, its tagged value and the histogram, with serde (#819, TB).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -26,6 +29,8 @@ use serde_json::Value;
 use crate::authoring::Kind;
 use crate::contract::{Body, Contract, Resource};
 use crate::schema::{Artifact, ArtifactData, TypeId};
+
+pub mod wire;
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "telemetry.v1";
@@ -675,6 +680,14 @@ impl Datum {
             C::Tag(_, inner) => Self::from_cbor(inner)?,
             _ => return None,
         })
+    }
+
+    /// One JSON text, as a datum (§2.6): `None` when the bytes are not one.
+    #[must_use]
+    pub fn from_json_bytes(bytes: &[u8]) -> Option<Self> {
+        serde_json::from_slice::<Value>(bytes)
+            .ok()
+            .map(|v| Self::from_json(&v))
     }
 
     /// One CBOR data item and nothing after it, as a datum.

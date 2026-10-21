@@ -57,6 +57,7 @@ use crate::hostid::{HostIdError, HostIdMinter, Minted};
 use crate::implementation::{Implementation, missing_capability, resource_name};
 use crate::qos;
 use crate::state::{ClockGuard, DEFAULT_WINDOW, Minter, StateWriter, Store};
+use crate::telemetry::{Epochs, Meter, Metric};
 use crate::writer::{EventWriter, Writer};
 
 /// One implemented interface, and what this instance does with it.
@@ -72,12 +73,32 @@ pub(crate) struct ImplState {
     /// Each stream, state and event resource's budget (§2.7, #741), keyed
     /// as `cardinality`: shared by every writer of the resource.
     pub(crate) budgets: BTreeMap<String, Arc<Budget>>,
+    /// Each metric resource's declaration (`telemetry.v1`, #819), keyed as
+    /// `cardinality`: what every writer of it checks.
+    pub(crate) metrics: BTreeMap<String, Arc<Metric>>,
 }
 
 impl ImplState {
     /// The budget every writer of `r` keeps (§2.7).
     fn budget(&self, r: &zenkey_model::contract::Resource) -> Option<Arc<Budget>> {
         self.budgets.get(&resource_name(r)).cloned()
+    }
+
+    /// The `telemetry.v1` meter of a writer of `r` on the member `values`
+    /// binds, for a metric resource.
+    fn meter(
+        &self,
+        r: &zenkey_model::contract::Resource,
+        values: &Bindings,
+        epochs: &Arc<Epochs>,
+    ) -> Option<Meter> {
+        let m = self.metrics.get(&resource_name(r))?;
+        Some(Meter::new(
+            Arc::clone(m),
+            Arc::clone(epochs),
+            self.imp.iface(),
+            values,
+        ))
     }
 }
 
@@ -109,6 +130,9 @@ pub struct ServiceBuilder {
     /// The host name a minted system states as `meta.host` (§2.13).
     host: Option<String>,
     instance: InstanceId,
+    /// The epochs its metric writers write (`telemetry.v1` §2.9), the
+    /// instance id first.
+    epochs: Arc<Epochs>,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
     /// Shared with its operation servers (O3, #621).
@@ -211,13 +235,15 @@ impl ServiceBuilder {
             log_minted(a, m);
         }
         let host = minted.as_ref().and_then(|_| crate::hostid::hostname());
+        let instance = mint();
         Self {
             session: session.clone(),
             config,
             addr,
             minted,
             host,
-            instance: mint(),
+            epochs: Epochs::new(instance.clone()),
+            instance,
             impls: Vec::new(),
             roles: Vec::new(),
             ops: Arc::default(),
@@ -328,6 +354,7 @@ impl ServiceBuilder {
         let s = find(&self.impls, iface)?;
         let r = s.imp.resource(resource)?.clone();
         let budget = s.budget(&r);
+        let meter = s.meter(&r, values, &self.epochs);
         if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
             return Err(Error::Contract(format!(
                 "{iface} {resource:?} is not state"
@@ -337,7 +364,8 @@ impl ServiceBuilder {
         self.state_ifaces.insert(iface.clone());
         let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values)
             .await?
-            .bounded(budget);
+            .bounded(budget)
+            .metered(meter);
         Ok(StateWriter::new(
             w,
             Arc::clone(&self.store),
@@ -393,12 +421,19 @@ impl ServiceBuilder {
             .iter()
             .filter_map(|r| Some((resource_name(r), Arc::new(Budget::new(imp.iface(), r)?))))
             .collect();
+        let metrics = imp
+            .contract()
+            .resources
+            .iter()
+            .filter_map(|r| Some((resource_name(r), Arc::new(Metric::of(imp.contract(), r)?))))
+            .collect();
         self.impls.push(ImplState {
             imp,
             exposed: BTreeSet::new(),
             unavailable: BTreeMap::new(),
             cardinality: BTreeMap::new(),
             budgets,
+            metrics,
         });
         Ok(self)
     }
@@ -604,11 +639,13 @@ impl ServiceBuilder {
         let s = find(&self.impls, iface)?;
         let r = s.imp.resource(resource)?.clone();
         let budget = s.budget(&r);
+        let meter = s.meter(&r, values, &self.epochs);
         self.expose(iface, resource)?;
         Ok(
             Writer::declare(&self.session, key.into_keyexpr(), &r, values)
                 .await?
-                .bounded(budget),
+                .bounded(budget)
+                .metered(meter),
         )
     }
 
@@ -679,6 +716,7 @@ impl ServiceBuilder {
             minted: self.minted,
             host: self.host,
             instance: self.instance,
+            epochs: self.epochs,
             impls: self.impls,
             roles: self.roles,
             minter: self.minter,
@@ -827,6 +865,8 @@ pub struct Service {
     minted: Option<Minted>,
     host: Option<String>,
     instance: InstanceId,
+    /// The epochs its metric writers write (`telemetry.v1` §2.9).
+    epochs: Arc<Epochs>,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
     minter: Arc<Minter>,
@@ -883,11 +923,13 @@ impl Service {
     ) -> Result<Writer> {
         let r = self.exposed(iface, resource)?;
         let key = self.key(iface, resource, values)?;
-        let budget = find(&self.impls, iface)?.budget(&r);
+        let s = find(&self.impls, iface)?;
+        let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
         Ok(
             Writer::declare(&self.session, key.into_keyexpr(), &r, values)
                 .await?
-                .bounded(budget),
+                .bounded(budget)
+                .metered(meter),
         )
     }
 
@@ -909,10 +951,12 @@ impl Service {
         }
         self.ensure_state_server(iface).await?;
         let key = self.key(iface, resource, values)?;
-        let budget = find(&self.impls, iface)?.budget(&r);
+        let s = find(&self.impls, iface)?;
+        let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
         let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values)
             .await?
-            .bounded(budget);
+            .bounded(budget)
+            .metered(meter);
         Ok(StateWriter::new(
             w,
             Arc::clone(&self.store),
@@ -1155,6 +1199,8 @@ impl Service {
         let old_q = self.descriptor_q.replace(q);
         self.descriptor = current;
         self.instance = next.clone();
+        // telemetry.v1 §2.9: every metric writer's epoch moves with it.
+        self.epochs.set_instance(next.clone());
         for (_, t) in old_alive {
             t.undeclare().await.map_err(zenoh)?;
         }
@@ -1169,10 +1215,19 @@ impl Service {
 
     /// Declares the member token of `value` (§8.1), for the interface's
     /// template that declares `epoch`. Returns the member's epoch.
+    ///
+    /// A member's first token takes the epoch a metric writer already wrote
+    /// on it, if one did (`telemetry.v1` §2.9: a member exists from its first
+    /// value, core §8.1); a token declared again is cycled, with a new
+    /// epoch, which every metric writer of the member writes from then on.
     pub async fn declare_member(&mut self, iface: &IfaceId, value: &str) -> Result<InstanceId> {
         self.member_template(iface)?;
         let member = chunk_slug(value);
-        let epoch = mint();
+        let epoch = if self.members.contains_key(&(iface.clone(), member.clone())) {
+            self.epochs.cycled(iface, &member)
+        } else {
+            self.epochs.first_token(iface, &member)
+        };
         let key = member_key(&self.addr, iface, &member, &epoch)?;
         let token = self.token(key).await?;
         if let Some((_, old)) = self
@@ -1192,7 +1247,9 @@ impl Service {
 
     /// Withdraws a member's token.
     pub async fn remove_member(&mut self, iface: &IfaceId, value: &str) -> Result<()> {
-        if let Some((_, t)) = self.members.remove(&(iface.clone(), chunk_slug(value))) {
+        let member = chunk_slug(value);
+        if let Some((_, t)) = self.members.remove(&(iface.clone(), member.clone())) {
+            self.epochs.removed(iface, &member);
             t.undeclare().await.map_err(zenoh)?;
         }
         Ok(())

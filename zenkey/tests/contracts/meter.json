@@ -1,0 +1,1 @@
+{"$defs": {"Count": {"type": "integer", "minimum": 0}, "Level": {"type": "number"}}}

@@ -22,6 +22,7 @@ use zenoh_ext::{AdvancedPublisher, AdvancedPublisherBuilderExt, CacheConfig, Mis
 use crate::budget::Budget;
 use crate::error::{Error, Result, zenoh};
 use crate::qos;
+use crate::telemetry::{Meter, Pending, Reason};
 
 /// The `Encoding` a sample of `ty` carries (§7.2): zenoh's predefined one
 /// for protobuf, JSON and CBOR, and for a raw media type the predefined one
@@ -75,12 +76,20 @@ enum Inner {
 /// Made by its service, it keeps the resource's budget (§2.7, #741): a put
 /// that would make its member a new live one while the live members are at
 /// the bound is refused, [`Error::Budget`], and nothing is published.
+///
+/// On a metric resource (`telemetry.v1`, [`crate::telemetry`]), each put is
+/// checked against the resource's declaration before the budget: a sample
+/// that does not conform, a counter or histogram below the last one this
+/// writer put in its epoch, or an in-band epoch other than the owner's is
+/// refused, [`Error::Telemetry`], and nothing is published; a counter's or
+/// histogram's epoch the application left out is written in.
 pub struct Writer {
     inner: Inner,
     encoding: Encoding,
     wire: Option<WireEncoding>,
     json_typed: bool,
     budget: Option<Arc<Budget>>,
+    meter: Option<Meter>,
 }
 
 impl Writer {
@@ -137,6 +146,7 @@ impl Writer {
             wire: d.encoding,
             json_typed: matches!(d.type_, TypeId::JsonSchema { .. }),
             budget: None,
+            meter: None,
         })
     }
 
@@ -144,6 +154,56 @@ impl Writer {
     pub(crate) fn bounded(mut self, budget: Option<Arc<Budget>>) -> Self {
         self.budget = budget;
         self
+    }
+
+    /// Holds its puts to `telemetry.v1` through `meter`, for a member of a
+    /// metric resource ([`crate::telemetry`]).
+    pub(crate) fn metered(mut self, meter: Option<Meter>) -> Self {
+        self.meter = meter;
+        self
+    }
+
+    /// The resource's `telemetry.v1` declaration, when it is a metric
+    /// resource whose puts this writer checks ([`crate::telemetry`]): its
+    /// kind, unit and bounds, the bounds a [`crate::telemetry::Histogram`]
+    /// is made over.
+    #[must_use]
+    pub fn telemetry(&self) -> Option<&zenkey_model::telemetry::Declared> {
+        self.meter.as_ref().map(Meter::declared)
+    }
+
+    /// The in-band epoch this writer writes now (`telemetry.v1` §2.9): the
+    /// service's instance id, or the member's epoch on the template that
+    /// declares `epoch`. `None` for a resource that is not a metric one.
+    #[must_use]
+    pub fn epoch(&self) -> Option<zenkey_model::grammar::InstanceId> {
+        self.meter.as_ref().map(Meter::epoch)
+    }
+
+    /// Checks a metric sample before it is published (`telemetry.v1`):
+    /// the payload and attachment to publish, the epoch written in, and the
+    /// writer's last value held until [`Pending::commit`]. Unmetered, they
+    /// pass as they are.
+    pub(crate) async fn meter(
+        &self,
+        payload: ZBytes,
+        attachment: Option<ZBytes>,
+    ) -> Result<(ZBytes, Option<ZBytes>, Option<Pending<'_>>)> {
+        let Some(m) = &self.meter else {
+            return Ok((payload, attachment, None));
+        };
+        let (p, a, pending) = m
+            .prepare(payload, attachment)
+            .await
+            .map_err(|reason| self.refused(reason))?;
+        Ok((p, a, Some(pending)))
+    }
+
+    fn refused(&self, reason: Reason) -> Error {
+        Error::Telemetry {
+            member: self.key_expr().as_str().to_owned(),
+            reason: Box::new(reason),
+        }
     }
 
     /// The member's write admitted by its resource's budget now, or refused
@@ -203,19 +263,26 @@ impl Writer {
     /// Puts an encoded payload with an attachment, encoded per the
     /// contract's `attachment` type and `attachment_encoding` (§2.3, §7.2).
     /// Refused, nothing published, when the member would be a new live one
-    /// at the bound (§2.7).
+    /// at the bound (§2.7), or, on a metric resource, when `telemetry.v1`
+    /// forbids the sample ([`crate::telemetry`]).
     pub async fn put_with(
         &self,
         payload: impl Into<ZBytes>,
         attachment: Option<impl Into<ZBytes>>,
     ) -> Result<()> {
+        let (payload, attachment, pending) = self
+            .meter(payload.into(), attachment.map(Into::into))
+            .await?;
         self.admit()?;
-        let attachment: Option<ZBytes> = attachment.map(Into::into);
         match &self.inner {
             Inner::Plain(p) => p.put(payload).attachment(attachment).await,
             Inner::Advanced(p) => p.put(payload).attachment(attachment).await,
         }
-        .map_err(zenoh)
+        .map_err(zenoh)?;
+        if let Some(p) = pending {
+            p.commit();
+        }
+        Ok(())
     }
 
     /// Puts with the owner's stamp (state, S1).
