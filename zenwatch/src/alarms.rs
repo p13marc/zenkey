@@ -28,15 +28,16 @@
 //! reason is this reader's own sight ([`NOT_YET`]: a loss no GET has healed
 //! yet, §2.14 step 4; a clock not yet trusted, `freshness.v1` §2.6; a
 //! subscription not yet listened 900 s; presence or a descriptor not read
-//! whole; nothing read yet, here or across a face — alarms.v1 §2.16's
-//! closed list, text 0.7) leaves the key at its last word, and time or the
-//! next read settles it. A loss is the reader's, not the keys': the rule's
-//! **observer** (`<rule_id>:observer`) says it once — unobservable on a
-//! loss (deliveries refused, the feed's stall), on a presence read or a GET
-//! that ran to its timeout, on a reader that stopped — and
-//! `observable_again` when a complete GET after it stands. A key firing
-//! stays firing through the loss, and the GET that heals it decides it, as
-//! an address stays gone through a presence loss ([`crate::presence`]).
+//! whole; nothing read yet, here or across a face; a GET that drew nothing
+//! for the key — alarms.v1 §2.16's closed list, text 0.8) leaves the key
+//! at its last word, and time or the next read settles it. A loss is the
+//! reader's, not the keys': the rule's **observer** (`<rule_id>:observer`)
+//! says it once — unobservable on a loss (deliveries refused, the feed's
+//! stall), on a presence read or a GET that ran to its timeout, on a reader
+//! that stopped — and `observable_again` when a complete GET after it
+//! stands. A key firing stays firing through the loss, and the GET that
+//! heals it decides it, as an address stays gone through a presence loss
+//! ([`crate::presence`]).
 //!
 //! **An owner's absence is a read's.** §2.14 step 1's *absent* is "a
 //! complete read without its instance token": the rule takes it from a
@@ -91,16 +92,17 @@ const ABSENT: &str = "absent";
 /// The reasons that say only what this reader has not established yet, a
 /// loss included: a key's answer with one of them leaves the key at its
 /// last word (see the module doc). alarms.v1 §2.16 closes the list (text
-/// 0.7, F-140): every other answer — yes, no, and an unobservable or not
+/// 0.7, F-140; `silent` since 0.8, F-141): every other answer — yes, no, and an unobservable or not
 /// asked that says something of the alarm, its owner or the deployment
 /// (`stale`, `absent`, `previous_instance`, `undecodable`, `face_closed`,
 /// `no_stamp`, `clock_disagrees`, `not_a_horizon`, …) — is the key's.
-pub const NOT_YET: [&str; 9] = [
+pub const NOT_YET: [&str; 10] = [
     "incomplete",
     "presence_incomplete",
     "no_descriptor",
     "not_read",
     "nothing_crossed",
+    "silent",
     "clock_untrusted",
     "listened_too_short",
     "near_horizon",
@@ -1543,14 +1545,15 @@ mod tests {
         assert_eq!(state_of(Unobservable), CondState::Unobservable);
         assert_eq!(state_of(NotAsked), CondState::Unobservable, "never ok");
         // alarms.v1 §2.16's closed list of the reader's own sight (text 0.7,
-        // F-140), spelled out here so that dropping one from `NOT_YET`
-        // fails.
+        // F-140; 0.8, F-141), spelled out here so that dropping one from
+        // `NOT_YET` fails.
         for r in [
             "incomplete",
             "presence_incomplete",
             "no_descriptor",
             "not_read",
             "nothing_crossed",
+            "silent",
             "clock_untrusted",
             "listened_too_short",
             "near_horizon",
@@ -1558,7 +1561,7 @@ mod tests {
         ] {
             assert!(!settled(&answer(Unobservable, r)), "{r}");
         }
-        assert_eq!(NOT_YET.len(), 9, "the text's nine, and no more");
+        assert_eq!(NOT_YET.len(), 10, "the text's ten, and no more");
         for (a, r) in [
             (Yes, "firing"),
             (No, "resolved"),

@@ -4,6 +4,41 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8 — 2026-10-21: the cold reader's round 43 (#800, AH; #609)
+
+The spec-only implementation read 0.7 cold and ran it live (zk2py round
+43): 1867 of 1867 fixture checks, and `scenarios.md` §1 to §10, 80 of 80,
+against its own owner and against the Rust owner example, §10's 905 s
+window left out as before. It resolved F-140, drove its judge over every
+neither the first question can give (twenty: nine on the reader's-sight
+list, eleven on the other), and found one that the other list holds
+against its own criterion: F-141. A final pass over the whole text left
+nothing else to a guess. Written against core 0.34, unchanged.
+
+No model change and no fixture change: `keys.json` (75), `documents.json`
+(62), `transitions.json` (27) and `conclusions.json` (107) are unchanged.
+
+**Answered: the finding.**
+- **F-141, `silent` on the wrong list** (§2.16, "A key's first answer").
+  §2.14 step 6 passes `freshness.v1`'s reasons through, and `silent`
+  ("the GET drew no reply for the member") is the first question's answer
+  for a held key whose only observation is a GET that drew nothing, its
+  owner's alarms not established: a reader that reads by GET alone meets
+  it. An empty reply set is no verdict (core O5), and the next read
+  settles it, which is the reader's-sight list's own criterion; 0.7 named
+  it on neither list, so it fell to "any other reason", and a tool taking
+  the MAY reported a key on nothing but its own silence.
+  - `silent` is now on the reader's-sight list, which is ten tokens.
+  - **The reference changed with it.** zenwatch's `NOT_YET` is the text's
+    ten, and its test spells them out. zk2py takes the branch that reports
+    no first neither and was unaffected.
+
+**Considered, not changed.**
+- **A resolved document's `severity`, `summary` and `category`**
+  (§2.5), which zk2py's final pass noted are not fixed by the resolve: no
+  reader rule reads them on a resolved document, and both owners keep the
+  ones held. Fixing them would constrain owners for no answer's sake.
+
 ## 0.7 — 2026-10-20: the cold reader's round 42 (#800, AG; #609)
 
 The spec-only implementation read 0.6 cold and ran it live (zk2py round
