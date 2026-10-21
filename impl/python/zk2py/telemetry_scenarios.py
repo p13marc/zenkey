@@ -1,33 +1,44 @@
 """The ``telemetry.v1`` scenarios (``spec/profiles/telemetry/scenarios.md``,
-text 0.1) against zk2py's owner, on in-process zenoh-python routers:
-``python -m zk2py.telemetry_scenarios [--only 1 …]``.
+text 0.2) on in-process zenoh-python routers, judged by zk2py's reader:
+``python -m zk2py.telemetry_scenarios [--only 1 …] [--owner <exe>]``.
 
-- **The bus** is the text's: R1, a router with timestamping on; the owner O,
-  R and R0 its clients, each with a session of its own.
+Each section runs against one owner, through an adapter:
+- **zk2py's owner** (the default): :class:`PyMeter`;
+- **the Rust owner example** (``--owner <exe>``, or ``ZK2PY_OWNER``), a
+  black box driven by its ``--telemetry`` stdin commands, read from its
+  ``--help`` alone (:class:`RustMeter`): ``telemetry put|raw <resource>
+  <json> [<attachment json>]``, ``telemetry new-epoch``, ``telemetry
+  instance``. It is given no contract file: it implements ``meter.v1`` as it
+  embeds it, and §1 checks that its descriptor's fingerprint is the one zk2py
+  computes for the contract transcribed from the text.
+
+Either way:
+- **The bus** is the text's: R1, a router with timestamping on; O, R and R0
+  its clients, each with a session of its own.
 - **The contract** is ``meter.v1``, transcribed from the text into
   ``impl/python/interop/telemetry/``, listing the profile's file by its path
   from there.
-- **The owner** is ``lab/meter`` (:class:`MeterOwner`), every resource
-  exposed. Each Point's ``timestamp`` is its clock when it takes the value,
-  and its ``epoch`` its instance id; ``bytes`` carries the instance id as
-  its Epoch attachment, a JSON string. Its writer refuses what the
-  declaration refuses (§2.6) and a counter's or a histogram's decrease within
-  one epoch (§2.7, §2.8); a *raw* step puts from the owner's session past
-  the writer. A process's end is the owner's session closing; a new epoch
-  in one process is :meth:`zk2py.owner.Owner.new_epoch`, make-before-break.
+- **O** is ``lab/meter``. The driver is its application: each Point's
+  ``timestamp`` is the host's clock when the step takes the value, and both
+  owners' checked writers fill the epoch where a put leaves it out, as the
+  example's help says of its own ("a counter's or histogram's Point gains
+  "epoch", a bare one whose attachment is telemetry.v1.Epoch gets it as its
+  attachment"). A *raw* step is first offered to the checked writer, whose
+  refusal is recorded, then sent from the owner's session unchecked (zk2py's
+  ``raw``, the example's ``telemetry raw``), carrying the current epoch. A
+  process's end is the owner's session closing (the example's stdin closed,
+  a clean close); a new epoch in one process is make-before-break.
 - **R** subscribes to the data keys and to the owner's instance tokens, with
-  history, both before the owner starts, and records each arrival and each
-  token's appearance and withdrawal on one monotonic clock. **R0** reads no
-  presence (§2.14). "R reads" is :func:`zk2py.telemetry.conform`; "R pairs"
-  is :func:`zk2py.telemetry.continuity` over each two consecutive
-  conforming samples of a member, in arrival order.
-- **§8** runs twice: R0 alone, as the reference runtime does, and R0F, a
-  client of a second router R2 whose access control denies ``@zk`` on its
-  face, a ``unixsock-stream`` link (``link.v1`` §2.6), as the reference tool
-  stands it.
-
-The Rust owner example's ``--telemetry`` arrives with #819 TB; this module
-does not drive it yet.
+  history, both before the owner starts, and records each arrival, its
+  stamp, and each token's appearance and withdrawal on one monotonic clock.
+  **R0** reads no presence (§2.14). "R reads" is
+  :func:`zk2py.telemetry.conform`; "R pairs" is
+  :func:`zk2py.telemetry.continuity` over each two consecutive conforming
+  samples of a stream member in arrival order, and, for state, in the order
+  a late joiner's merge keeps them (§2.10, 0.2).
+- **§8** runs twice: R0 alone, and R0F, a client of a second router R2
+  whose access control denies ``@zk`` on its ``unixsock-stream`` face
+  (``link.v1`` §2.6), with a control off the face.
 
 Exit 0 when every check passes, 1 when any fails, 2 when a section did not
 run, unless ``--only`` asked for a subset.
@@ -38,6 +49,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -46,13 +58,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import seed
 from . import telemetry as tm
 from .alarms_scenarios import Report, _wait
+from .freshness import stamp_ns_of
 
 HERE = Path(__file__).resolve().parent
 CONTRACT = HERE.parent / "interop" / "telemetry" / "meter.v1.toml"
 ADDRESS = "lab/meter"
-PREFIX = f"zk2/{ADDRESS}/meter.v1/stream"
+BASE = f"zk2/{ADDRESS}/meter.v1"
+PREFIX = f"{BASE}/stream"
+TOTAL = f"{BASE}/state/total"
 #: "a section waits 500 ms after a token's withdrawal or appearance before
 #: the next put"; "Samples of one member are published at least 200 ms
 #: apart" (scenarios.md, "Spacing").
@@ -70,26 +86,50 @@ def load() -> Any:
 
 
 class Refused(RuntimeError):
-    """The writer refused a value before sending (scenarios.md §3 to §5)."""
+    """The checked writer refused a put, and sent nothing: ``reasons`` are
+    §2.6's tokens, or ``decreased`` (§2.7, §2.8), ``undecodable``, or
+    ``epoch_given`` (the example's own: an in-band epoch not the owner's)."""
 
-    def __init__(self, reasons: list[str]):
-        super().__init__(", ".join(reasons))
+    def __init__(self, reasons: list[str], answer: str = ""):
+        super().__init__(answer or ", ".join(reasons))
         self.reasons = reasons
+        #: the writer's answer as it came, for a check's failure detail
+        self.answer = answer or f"zk2py's writer: {', '.join(reasons)}"
 
 
-# -- the owner -----------------------------------------------------------------------------
+def now_ms() -> int:
+    return time.time_ns() // 1_000_000
 
-class MeterOwner:
-    """``lab/meter`` over zk2py's owner, a client of R1."""
+
+def point(value: Any, kind: str, *, unit: str | None = None, epoch: str | None = None) -> dict[str, Any]:
+    """A Point timed by the host's clock now; its epoch only when given."""
+    p: dict[str, Any] = {"timestamp": now_ms(), "value": {"type": kind, "value": value}}
+    if unit is not None:
+        p["unit"] = unit
+    if epoch is not None:
+        p["epoch"] = epoch
+    return p
+
+
+# -- the owners --------------------------------------------------------------------------
+
+class PyMeter:
+    """``lab/meter`` over zk2py's owner, a client of R1, with a checked
+    writer: §2.6's refusals against the declaration, and a counter's or a
+    histogram's decrease within this epoch (§2.7: "MUST NOT publish a
+    counter value below one it published before for that member"; §2.8)."""
+
+    rust = False
 
     def __init__(self, endpoint: str, contract: Any) -> None:
         from .owner import Owner
 
         self.contract = contract
         self.decls = tm.contract_declarations(contract)
+        self.rids = {k.split("/", 1)[1]: k for k in self.decls}
         system, service = ADDRESS.split("/")
         self.owner = Owner(system, service, [contract], connect=endpoint)
-        #: §2.7, §2.8: what the writer published in this epoch, by member
+        #: what the writer put in this epoch, by member
         self.published: dict[str, list[Any]] = {}
         self.owner.start()
 
@@ -97,78 +137,164 @@ class MeterOwner:
     def instance(self) -> str:
         return self.owner.instance
 
-    @property
-    def zid(self) -> str:
-        assert self.owner.session is not None
-        return str(self.owner.session.zid())
+    def _key(self, res: str) -> str:
+        return f"{BASE}/{self.rids[res]}"
 
-    def item(self, res: str, value: Any, *, tag: str | None = None, unit: str | None = None) -> Any:
-        """The data item O puts on ``res``: a Point for ``frames`` and
-        ``latency``, timed by O's clock now and carrying its instance id as
-        its epoch (§2.9); the bare value otherwise."""
-        d = self.decls[f"stream/{res}"]
-        if d.carrier != "point":
-            return value
-        p: dict[str, Any] = {"timestamp": time.time_ns() // 1_000_000,
-                             "value": {"type": tag or d.kind, "value": value}, "epoch": self.instance}
-        if unit is not None:
-            p["unit"] = unit
-        return p
+    def _filled(self, res: str, item: Any, attachment: Any) -> tuple[Any, Any]:
+        d = self.decls[self.rids[res]]
+        if d.carrier == "point" and isinstance(item, dict) and "epoch" not in item \
+                and (d.kind or (item.get("value") or {}).get("type")) in ("counter", "histogram"):
+            item = {**item, "epoch": self.instance}
+        if d.epoch == "attachment" and attachment is None:
+            attachment = self.instance
+        return item, attachment
 
-    def attachment(self, res: str) -> bytes | None:
-        """§2.4: a bare counter's Epoch attachment, the instance id as a JSON
-        string (18 bytes, §2.14)."""
-        return json.dumps(self.instance).encode() if self.decls[f"stream/{res}"].epoch == "attachment" else None
-
-    def check(self, res: str, item: Any, attachment: bytes | None) -> list[str]:
-        """The writer's refusals: §2.6's reasons against the declaration,
-        then a decrease within this epoch (§2.7: "MUST NOT publish a counter
-        value below one it published before for that member"; §2.8: a
-        `count`, or a bucket's count)."""
-        d = self.decls[f"stream/{res}"]
-        att = tm.NO_ATTACHMENT if attachment is None else json.loads(attachment)
-        c = tm.conform(d, tm.Sample(item, att))
+    def put(self, res: str, item: Any, attachment: Any = None) -> None:
+        item, attachment = self._filled(res, item, attachment)
+        d = self.decls[self.rids[res]]
+        c = tm.conform(d, tm.Sample(item, tm.NO_ATTACHMENT if attachment is None else attachment))
         if c.conformance != tm.CONFORMS:
-            return list(c.reasons)
+            raise Refused(list(c.reasons))
         if c.kind in ("counter", "histogram"):
             now = tm.read_of(c)
-            for before in self.published.get(res, []):
-                if before.kind == now.kind and tm._decrease(before, now):
-                    return ["decrease_within_epoch"]
-        return []
+            if any(b.kind == now.kind and tm._decrease(b, now) for b in self.published.get(res, [])):
+                raise Refused(["decreased"])
+        self._send(res, item, attachment)
+        if c.kind in ("counter", "histogram"):
+            self.published.setdefault(res, []).append(tm.read_of(c))
 
-    def put(self, res: str, value: Any, **kw: Any) -> Any:
-        """A checked put: raises :class:`Refused` with the writer's reasons,
-        and sends nothing."""
-        item = self.item(res, value, **kw)
-        att = self.attachment(res)
-        reasons = self.check(res, item, att)
-        if reasons:
-            raise Refused(reasons)
-        self.owner.publish(f"{PREFIX}/{res}", json.dumps(item).encode(), attachment=att)
-        c = tm.conform(self.decls[f"stream/{res}"],
-                       tm.Sample(item, tm.NO_ATTACHMENT if att is None else json.loads(att)))
-        self.published.setdefault(res, []).append(tm.read_of(c))
-        return item
+    def raw(self, res: str, item: Any, attachment: Any = None) -> None:
+        """scenarios.md "Raw puts": "from the owner's session, bypassing any
+        check its runtime's writer makes"."""
+        self._send(res, item, attachment)
 
-    def refuses(self, res: str, value: Any, **kw: Any) -> list[str]:
-        """What the writer would refuse of a put, sending nothing."""
-        return self.check(res, self.item(res, value, **kw), self.attachment(res))
+    def raw_bytes(self, res: str, payload: bytes, attachment: bytes | None) -> None:
+        self.owner.publish(self._key(res), payload, attachment=attachment)
 
-    def raw(self, res: str, payload: bytes, attachment: bytes | None = None) -> None:
-        """scenarios.md "Raw puts": "puts its payload on the owner's key from
-        the owner's session, bypassing any check its runtime's writer
-        makes"."""
-        self.owner.publish(f"{PREFIX}/{res}", payload, attachment=attachment)
+    def _send(self, res: str, item: Any, attachment: Any) -> None:
+        payload = json.dumps(item).encode()
+        att = None if attachment is None else json.dumps(attachment).encode()
+        if self.rids[res].startswith("state/"):
+            self.owner.set_state(self._key(res), payload)
+        else:
+            self.owner.publish(self._key(res), payload, attachment=att)
 
     def new_epoch(self) -> str:
         """Core §8.1's re-mint: the writer's record is the old epoch's."""
-        old = self.owner.new_epoch()
+        self.owner.new_epoch()
         self.published.clear()
-        return old
+        return self.instance
 
     def close(self) -> None:
         self.owner.close()
+
+
+class RustMeter:
+    """The owner example with ``--telemetry``, a black box: a child process
+    driven by the stdin commands its ``--help`` documents. Its answers, as
+    the help gives them: ``telemetry put <key> epoch=<id>``, ``telemetry raw
+    <key>``, ``telemetry new-epoch <id>`` ("once the old tokens are
+    withdrawn"), ``telemetry instance <id>``, and ``refused <line>:
+    telemetry.v1 <why>: <words>``, ``<why>`` one of ``does_not
+    <problem>[,<problem>...]``, ``undecodable``, ``epoch given=<json>
+    current=<id>`` and ``decreased epoch=<id>``."""
+
+    rust = True
+
+    def __init__(self, exe: Path, endpoint: str) -> None:
+        from .live_interop import Owner
+
+        self.p = Owner(exe, ADDRESS, [], connect=endpoint, flags=["--telemetry"])
+        k = self.p.wait_for("ready ", 120)
+        if k is None:
+            raise RuntimeError(f"the owner example did not start: {self.p.stderr[-3:]}")
+        self.instance = k.rsplit("/", 1)[1]
+        self.instance_key = k
+
+    def _cmd(self, line: str) -> str:
+        got = self.p.command(line, timeout=10.0)
+        if got is None:
+            raise RuntimeError(f"{line!r}: no answer")
+        return got
+
+    @staticmethod
+    def _line(verb: str, res: str, item: Any, attachment: Any) -> str:
+        line = f"telemetry {verb} {res} {json.dumps(item)}"
+        return line if attachment is None else f"{line} {json.dumps(attachment)}"
+
+    #: The help's ``<why>``: "does_not <problem>[,<problem>...] (v1.md
+    #: §2.6's tokens), undecodable, epoch given=<json> current=<id>,
+    #: decreased epoch=<id>", then ": <words>".
+    WHY = re.compile(r"(?P<why>does_not (?P<problems>[a-z_]+(?:,[a-z_]+)*)|undecodable"
+                     r"|epoch given=(?P<given>.+?) current=(?P<current>[0-9a-f]{16})"
+                     r"|decreased epoch=(?P<epoch>[0-9a-f]{16})): (?P<words>.+)")
+
+    def put(self, res: str, item: Any, attachment: Any = None) -> None:
+        """A checked put. A refusal is read only in the form the help gives,
+        ``refused <line>: telemetry.v1 <why>: <words>``, its problems §2.6's
+        tokens; any other answer raises with the answer as it came, so a
+        change in the example's wording fails its section loudly."""
+        line = self._line("put", res, item, attachment)
+        got = self._cmd(line)
+        if got.startswith("telemetry put ") and re.fullmatch(r"telemetry put \S+ epoch=[0-9a-f]{16}", got):
+            return
+        prefix = f"refused {line}: telemetry.v1 "
+        m = self.WHY.fullmatch(got[len(prefix):]) if got.startswith(prefix) else None
+        if m is None:
+            raise RuntimeError(f"{line!r}: an answer not in the form the help gives: {got!r}")
+        if m["problems"] is not None:
+            reasons = m["problems"].split(",")
+            unknown = [r for r in reasons if r not in tm.SAMPLE_REASONS]
+            if unknown:
+                raise RuntimeError(f"{line!r}: problems that are not §2.6's tokens, {unknown}: {got!r}")
+        elif m["why"] == "undecodable":
+            reasons = ["undecodable"]
+        elif m["given"] is not None:
+            reasons = ["epoch_given"]
+        else:
+            reasons = ["decreased"]
+        raise Refused(reasons, got)
+
+    def raw(self, res: str, item: Any, attachment: Any = None) -> None:
+        line = self._line("raw", res, item, attachment)
+        got = self._cmd(line)
+        if not got.startswith("telemetry raw "):
+            raise RuntimeError(f"{line!r}: {got!r}")
+
+    def new_epoch(self) -> str:
+        got = self._cmd("telemetry new-epoch")
+        if not got.startswith("telemetry new-epoch "):
+            raise RuntimeError(f"telemetry new-epoch: {got!r}")
+        self.instance = got.split()[-1]
+        return self.instance
+
+    def close(self) -> None:
+        self.p.close()
+
+
+@dataclass
+class Offer:
+    """What the checked writer said of a raw step's value: its reasons, and
+    its answer as it came (None and "accepted" when it took the value)."""
+
+    reasons: list[str] | None
+    answer: str
+
+
+def raw_step(o: Any, res: str, item: Any, attachment: Any = None) -> Offer:
+    """A *raw* step: the checked writer is offered the same value first, and
+    its refusal recorded; then the value goes out unchecked. When the
+    checked writer takes it (and so publishes it), nothing more is sent."""
+    try:
+        o.put(res, item, attachment)
+    except Refused as e:
+        o.raw(res, item, attachment)
+        return Offer(e.reasons, e.answer)
+    return Offer(None, "accepted: the checked writer published it")
+
+
+def _offers(offers: Any) -> str:
+    return "; ".join(f"{x.reasons} from {x.answer!r}" for x in offers)
 
 
 # -- the readers ---------------------------------------------------------------------------
@@ -179,11 +305,14 @@ class Arrival:
     key: str
     payload: bytes
     attachment: bytes | None
+    stamp: Any            # a zk2py.seed.Stamp, or None
+    stamp_ns: int | None  # as zenoh reads it (§2.11, 0.2)
+    via: str = "subscription"
 
 
 class Reader:
-    """R (``presence``) or R0: the data keys' samples, and for R the owner's
-    instance tokens, on one monotonic clock."""
+    """R (``presence``) or R0: the data keys' samples with their stamps, and
+    for R the owner's instance tokens, on one monotonic clock."""
 
     def __init__(self, session: Any, contract: Any, *, presence: bool, selector: str = f"{PREFIX}/*") -> None:
         import zenoh
@@ -197,14 +326,7 @@ class Reader:
         self.tokens: list[tuple[int, str, str]] = []  # (t_ns, put|delete, instance)
         self.presence = presence
         self.entities: list[Any] = []
-
-        def got(sample: Any) -> None:
-            t = time.monotonic_ns()
-            att = None if sample.attachment is None else sample.attachment.to_bytes()
-            with self.lock:
-                self.arrivals.append(Arrival(t, str(sample.key_expr), sample.payload.to_bytes(), att))
-
-        self.entities.append(session.declare_subscriber(selector, zenoh.handlers.Callback(got)))
+        self.subscribe(selector)
         if presence:
             def token(sample: Any) -> None:
                 t = time.monotonic_ns()
@@ -215,36 +337,52 @@ class Reader:
             self.entities.append(session.liveliness().declare_subscriber(
                 f"zk2/{ADDRESS}/@zk/instance/*", zenoh.handlers.Callback(token), history=True))
 
+    def record(self, key: str, payload: bytes, attachment: Any, ts: Any, via: str) -> None:
+        t = time.monotonic_ns()
+        att = None if attachment is None else attachment.to_bytes()
+        with self.lock:
+            self.arrivals.append(Arrival(t, key, payload, att, seed.Stamp.of(ts),
+                                         None if ts is None else stamp_ns_of(ts), via))
+
+    def subscribe(self, selector: str) -> None:
+        import zenoh
+
+        def got(sample: Any) -> None:
+            self.record(str(sample.key_expr), sample.payload.to_bytes(), sample.attachment, sample.timestamp,
+                        "subscription")
+
+        self.entities.append(self.session.declare_subscriber(selector, zenoh.handlers.Callback(got)))
+
     # -- reading
 
     def _member(self, key: str) -> str:
         """``<token>/<template>`` of a data key (the meter's templates are
         literal)."""
-        return key.removeprefix(f"zk2/{ADDRESS}/meter.v1/")
+        return key.removeprefix(f"{BASE}/")
 
     def read(self, a: Arrival) -> tm.Conformance:
         """§2.6 against the resource's declaration: the payload decoded by
-        its type and encoding, the attachment by JSON when the declaration's
-        epoch rides there."""
+        its type and encoding (strict JSON, 0.2), the attachment by JSON
+        when the declaration's epoch rides there."""
         rid = self._member(a.key)
         d = self.decls[rid]
         try:
             value = tm.decode(a.payload, self.types[rid], self.encodings[rid] or "json")
         except tm.Undecodable:
             return tm.conform(d, tm.Sample(undecodable=True))
-        att: Any = tm.NO_ATTACHMENT
         if d.epoch == "attachment" and a.attachment is not None:
             try:
                 att = tm.decode_json(a.attachment)
             except tm.Undecodable:
-                # F-147: present and undecodable, which conform reads as an
-                # epoch present and not a string (epoch_invalid).
+                # §2.6 check 2 (0.2): present and undecodable, epoch_invalid.
                 return tm.conform(d, tm.Sample(value, attachment_undecodable=True))
-        return tm.conform(d, tm.Sample(value, att))
+            return tm.conform(d, tm.Sample(value, att))
+        return tm.conform(d, tm.Sample(value))
 
-    def of(self, res: str, since_ns: int = 0) -> list[tuple[Arrival, tm.Conformance]]:
+    def of(self, res: str, since_ns: int = 0, key: str | None = None) -> list[tuple[Arrival, tm.Conformance]]:
+        key = key or f"{PREFIX}/{res}"
         with self.lock:
-            got = [a for a in self.arrivals if a.key == f"{PREFIX}/{res}" and a.arrival_ns >= since_ns]
+            got = [a for a in self.arrivals if a.key == key and a.arrival_ns >= since_ns]
         return [(a, self.read(a)) for a in got]
 
     def held_at(self, t: int) -> set[str]:
@@ -271,19 +409,36 @@ class Reader:
         alone = len(h1) == 1 and not moved
         return tm.Presence(alone, next(iter(h1)) if len(h1) == 1 else None, next(iter(h2)) if len(h2) == 1 else None)
 
-    def pairs(self, res: str, since_ns: int = 0) -> list[tuple[Any, Any, tm.Pair]]:
-        """Each two consecutive conforming samples of a member, in arrival
-        order: (earlier value, later value, the pair)."""
-        unit = self.decls[f"stream/{res}"].unit
-        ok = [(a, c) for a, c in self.of(res, since_ns) if c.conformance == tm.CONFORMS]
+    def _pairs(self, ok: list[tuple[Arrival, tm.Conformance]], unit: str | None) -> list[tuple[Any, Any, tm.Pair]]:
         out = []
         for (a1, c1), (a2, c2) in zip(ok, ok[1:]):
-            r1, r2 = tm.read_of(c1, arrival_ns=a1.arrival_ns), tm.read_of(c2, arrival_ns=a2.arrival_ns)
-            # §2.11: "The rate's unit is the counter's unit (§2.5)", as the
-            # samples gave it
+            # §2.11's time base: "for state, the owner's stamp"
+            r1 = tm.read_of(c1, stamp_ns=a1.stamp_ns if a1.key.startswith(f"{BASE}/state/") else None,
+                            arrival_ns=a1.arrival_ns)
+            r2 = tm.read_of(c2, stamp_ns=a2.stamp_ns if a2.key.startswith(f"{BASE}/state/") else None,
+                            arrival_ns=a2.arrival_ns)
             out.append((_short(r1.value), _short(r2.value),
                         tm.continuity(r1, r2, self.presence_of(a1.arrival_ns, a2.arrival_ns), c2.unit or unit)))
         return out
+
+    def pairs(self, res: str, since_ns: int = 0) -> list[tuple[Any, Any, tm.Pair]]:
+        """A stream member's pairs: each two consecutive conforming samples,
+        in arrival order (§2.10)."""
+        ok = [(a, c) for a, c in self.of(res, since_ns) if c.conformance == tm.CONFORMS]
+        return self._pairs(ok, self.decls[f"stream/{res}"].unit)
+
+    def state_pairs(self, key: str, rid: str, *, merged: bool = True) -> list[tuple[Any, Any, tm.Pair]]:
+        """A state member's pairs (§2.10, 0.2): over the samples a late
+        joiner's merge keeps, by the owner's stamp, whichever path brought
+        each (core §4.2), or with ``merged`` False in the order received,
+        the reading 0.2 rules out (scenarios.md §9 expected 3). Timed by the
+        owner's stamps (§2.11)."""
+        got = self.of("", key=key)
+        if merged:
+            flags = seed.kept([(a.stamp, "put") for a, _ in got])
+            got = [x for x, k in zip(got, flags) if k]
+        ok = [(a, c) for a, c in got if c.conformance == tm.CONFORMS]
+        return self._pairs(ok, self.decls[rid].unit)
 
     def current(self, res: str) -> tuple[Any, int] | None:
         """§2.12: the last conforming sample's value and its age by receipt,
@@ -293,6 +448,10 @@ class Reader:
             return None
         a, c = ok[-1]
         return c.value, time.monotonic_ns() - a.arrival_ns
+
+    def stamp_ids(self, res: str, since_ns: int = 0, until_ns: int | None = None) -> set[str]:
+        return {a.stamp.id for a, _ in self.of(res, since_ns) if a.stamp is not None
+                and (until_ns is None or a.arrival_ns <= until_ns)}
 
     def close(self) -> None:
         for e in self.entities:
@@ -309,32 +468,31 @@ def _short(v: Any) -> Any:
 class Bus:
     """R1, then R's and R0's sessions and subscriptions, before any owner."""
 
-    def __init__(self, contract: Any, *, face: bool = False) -> None:
+    def __init__(self, mode: Any, contract: Any, *, face: bool = False) -> None:
         from . import live
         from .live_interop import _r1
 
-        self.contract = contract
+        self.mode, self.contract = mode, contract
         self.router, self.endpoint, _ = _r1()
         self.r_session = live.open_client(self.endpoint)
         self.r0_session = live.open_client(self.endpoint)
         self.R = Reader(self.r_session, contract, presence=True)
         self.R0 = Reader(self.r0_session, contract, presence=False)
-        self.extra: list[Any] = []
         self.face: Face | None = Face(self.endpoint, contract) if face else None
-        self.owners: list[MeterOwner] = []
+        self.owners: list[Any] = []
         time.sleep(0.3)
 
-    def owner(self) -> MeterOwner:
-        o = MeterOwner(self.endpoint, self.contract)
+    def owner(self) -> Any:
+        o: Any = PyMeter(self.endpoint, self.contract) if self.mode == "zk2py" else RustMeter(self.mode, self.endpoint)
         self.owners.append(o)
         return o
 
-    def appeared(self, instance: str, timeout: float = 3.0) -> bool:
+    def appeared(self, instance: str, timeout: float = 5.0) -> bool:
         ok = _wait(lambda: instance in self.R.held_at(time.monotonic_ns()), timeout)
         time.sleep(SETTLE_S)
         return ok
 
-    def gone(self, instance: str, timeout: float = 3.0) -> bool:
+    def gone(self, instance: str, timeout: float = 5.0) -> bool:
         ok = _wait(lambda: instance not in self.R.held_at(time.monotonic_ns()), timeout)
         time.sleep(SETTLE_S)
         return ok
@@ -370,13 +528,14 @@ class Face:
     def __init__(self, r1_endpoint: str, contract: Any) -> None:
         import zenoh
 
-        self.dir = tempfile.mkdtemp(prefix="zk2py-telemetry-face-")
-        sock = os.path.join(self.dir, "face.sock")
-        conf = zenoh.Config()
-        conf.insert_json5("mode", json.dumps("router"))
+        from . import live
         from .owner import free_loopback_port
 
+        self.dir = tempfile.mkdtemp(prefix="zk2py-telemetry-face-")
+        sock = os.path.join(self.dir, "face.sock")
         near = f"tcp/127.0.0.1:{free_loopback_port()}"
+        conf = zenoh.Config()
+        conf.insert_json5("mode", json.dumps("router"))
         conf.insert_json5("listen/endpoints", json.dumps([f"unixsock-stream/{sock}", near]))
         conf.insert_json5("connect/endpoints", json.dumps([r1_endpoint]))
         conf.insert_json5("scouting/multicast/enabled", "false")
@@ -395,8 +554,6 @@ class Face:
         c.insert_json5("scouting/multicast/enabled", "false")
         self.session = zenoh.open(c)
         self.R0F = Reader(self.session, contract, presence=True)
-        from . import live
-
         self.near_session = live.open_client(near)
         self.N2 = Reader(self.near_session, contract, presence=True)
 
@@ -437,19 +594,36 @@ def _no_finding(*pair_lists: list[tuple[Any, Any, tm.Pair]]) -> tuple[bool, str]
     return not bad, f"{len(every)} pairs, {len(bad)} decreased or negative"
 
 
+def _frames(v: int) -> dict[str, Any]:
+    return point(v, "counter")
+
+
+def _descriptor(bus: Bus, o: Any) -> dict[str, Any] | None:
+    from . import live
+
+    got = live.get_descriptor(bus.r_session, f"zk2/{ADDRESS}/@zk/instance/{o.instance}")
+    return json.loads(got[0].payload) if got and got[0].ok else None
+
+
 # -- §1 A counter across a restart ---------------------------------------------------------
 
-def section1(report: Report, contract: Any) -> None:
+def section1(report: Report, mode: Any, contract: Any) -> None:
     sec = "§1"
-    bus = Bus(contract)
+    bus = Bus(mode, contract)
     try:
         o = bus.owner()
         i1 = o.instance
         bus.appeared(i1)
+        d = _descriptor(bus, o)
+        ifaces = [(x["iface"], x["contract"]) for x in (d or {}).get("interfaces", [])]
+        report.check(sec, "setup: the owner implements meter.v1 as zk2py transcribed it from the text (the same "
+                          "fingerprint), and lists telemetry.v1 in its descriptor's profiles",
+                     ifaces == [("meter.v1", contract.fingerprint)] and "telemetry.v1" in (d or {}).get("profiles", []),
+                     f"{ifaces}, profiles {(d or {}).get('profiles')}, zk2py {contract.fingerprint}")
         mark1 = time.monotonic_ns()
-        for f, d in [(0, 0), (10, 5), (20, 9)]:
-            o.put("frames", f)
-            o.put("drops", d)
+        for f, dv in [(0, 0), (10, 5), (20, 9)]:
+            o.put("frames", _frames(f))
+            o.put("drops", dv)
             time.sleep(APART_S)
         o.close()
         report.check(sec, "2. R sees I1's token withdrawn", bus.gone(i1))
@@ -457,9 +631,9 @@ def section1(report: Report, contract: Any) -> None:
         o2 = bus.owner()
         i2 = o2.instance
         bus.appeared(i2)
-        for f, d in [(0, 0), (4, 2)]:
-            o2.put("frames", f)
-            o2.put("drops", d)
+        for f, dv in [(0, 0), (4, 2)]:
+            o2.put("frames", _frames(f))
+            o2.put("drops", dv)
             time.sleep(APART_S)
         time.sleep(0.3)
         R = bus.R
@@ -469,6 +643,10 @@ def section1(report: Report, contract: Any) -> None:
         report.check(sec, "1. each frames Point carries I1 in step 1 and I2 in step 3, I1 ≠ I2",
                      _epochs(R, "frames", mark1, mark3) == [i1] * 3 and _epochs(R, "frames", mark3) == [i2] * 2
                      and i1 != i2, f"{_epochs(R, 'frames')}, I1 {i1}, I2 {i2}")
+        report.check(sec, "1. the restart is a new session: the stamps' id changes with the instance (core §1.5)",
+                     len(R.stamp_ids("frames", mark1, mark3)) == 1 and len(R.stamp_ids("frames", mark3)) == 1
+                     and R.stamp_ids("frames", mark1, mark3) != R.stamp_ids("frames", mark3),
+                     f"{R.stamp_ids('frames', mark1, mark3)} → {R.stamp_ids('frames', mark3)}")
         fr, dr = R.pairs("frames"), R.pairs("drops")
         got_f = [(a, b, _p(p)) for a, b, p in fr]
         got_d = [(a, b, _p(p)) for a, b, p in dr]
@@ -509,20 +687,20 @@ def section1(report: Report, contract: Any) -> None:
 
 # -- §2 A counter across new_epoch in one process ------------------------------------------
 
-def section2(report: Report, contract: Any) -> None:
+def section2(report: Report, mode: Any, contract: Any) -> None:
     sec = "§2"
-    bus = Bus(contract)
+    bus = Bus(mode, contract)
     try:
         o = bus.owner()
-        i1, zid1 = o.instance, o.zid
+        i1 = o.instance
         bus.appeared(i1)
+        mark1 = time.monotonic_ns()
         for f, d in [(0, 0), (10, 5), (20, 9)]:
-            o.put("frames", f)
+            o.put("frames", _frames(f))
             o.put("drops", d)
             time.sleep(APART_S)
         mark = time.monotonic_ns()
-        o.new_epoch()
-        i2 = o.instance
+        i2 = o.new_epoch()
         gone = bus.gone(i1)
         with bus.R.lock:
             moves = [(k, inst) for t, k, inst in bus.R.tokens if t >= mark]
@@ -530,14 +708,16 @@ def section2(report: Report, contract: Any) -> None:
                      gone and moves[:2] == [("put", i2), ("delete", i1)], f"{moves}")
         mark3 = time.monotonic_ns()
         for f, d in [(0, 0), (3, 3)]:
-            o.put("frames", f)
+            o.put("frames", _frames(f))
             o.put("drops", d)
             time.sleep(APART_S)
         time.sleep(0.3)
         R, R0 = bus.R, bus.R0
-        report.check(sec, "1. every frames Point after step 2 carries I2, the process (its session) unchanged",
-                     _epochs(R, "frames", mark3) == [i2, i2] and o.zid == zid1 and i1 != i2,
-                     f"{_epochs(R, 'frames', mark3)}, zid {zid1} → {o.zid}")
+        ids_before, ids_after = R.stamp_ids("frames", mark1, mark), R.stamp_ids("frames", mark3)
+        report.check(sec, "1. every frames Point after step 2 carries I2, the process unchanged (one stamp id "
+                          "throughout, its session's)",
+                     _epochs(R, "frames", mark3) == [i2, i2] and len(ids_before) == 1 and ids_before == ids_after
+                     and i1 != i2, f"{_epochs(R, 'frames', mark3)}, stamp ids {ids_before} → {ids_after}")
         fr, dr = R.pairs("frames"), R.pairs("drops")
         arr = [a.arrival_ns for a, _ in R.of("drops")]
         pres = R.presence_of(arr[2], arr[3])
@@ -563,19 +743,17 @@ def section2(report: Report, contract: Any) -> None:
 
 # -- §3 A decrease within one epoch --------------------------------------------------------
 
-def section3(report: Report, contract: Any) -> None:
+def section3(report: Report, mode: Any, contract: Any) -> None:
     sec = "§3"
-    bus = Bus(contract)
+    bus = Bus(mode, contract)
     try:
         o = bus.owner()
         i1 = o.instance
         bus.appeared(i1)
-        o.put("frames", 10)
+        o.put("frames", _frames(10))
         o.put("drops", 10)
         time.sleep(APART_S)
-        refused = (o.refuses("frames", 7), o.refuses("drops", 7))
-        o.raw("frames", json.dumps(o.item("frames", 7)).encode())
-        o.raw("drops", b"7")
+        offers = (raw_step(o, "frames", point(7, "counter", epoch=i1)), raw_step(o, "drops", 7))
         time.sleep(0.5)
         R, R0 = bus.R, bus.R0
         ok = all(_all_conform(r, res)[0] and len(r.of(res)) == 2 for r in (R, R0) for res in ("frames", "drops"))
@@ -595,31 +773,29 @@ def section3(report: Report, contract: Any) -> None:
         report.check(sec, "3. R0 pairs frames 10 → 7 as decreased, established in-band: the epoch rides the Point",
                      len(f0) == 1 and _pair_is(f0[0][2], "decreased", "established", "in_band"),
                      f"{[_p(p) for _, _, p in f0]}")
-        report.check(sec, "4. the writer, holding its owner to §2.7, refuses both puts of step 2",
-                     refused == (["decrease_within_epoch"], ["decrease_within_epoch"]), f"{refused}")
+        report.check(sec, "4. the checked writer, holding its owner to §2.7, refuses both puts of step 2, sent raw",
+                     [x.reasons for x in offers] == [["decreased"], ["decreased"]], _offers(offers))
     finally:
         bus.close()
 
 
 # -- §4 A Point whose tag disagrees --------------------------------------------------------
 
-def section4(report: Report, contract: Any) -> None:
+def section4(report: Report, mode: Any, contract: Any) -> None:
     sec = "§4"
-    bus = Bus(contract)
+    bus = Bus(mode, contract)
     try:
         o = bus.owner()
         bus.appeared(o.instance)
-        o.put("frames", 1)
+        o.put("frames", _frames(1))
         time.sleep(APART_S)
-        refused = [o.refuses("frames", 3.5, tag="gauge"), o.refuses("frames", 2, unit="By"), o.refuses("level", "x")]
-        marks = []
-        for res, item in [("frames", o.item("frames", 3.5, tag="gauge")), ("frames", o.item("frames", 2, unit="By"))]:
-            marks.append(time.monotonic_ns())
-            o.raw(res, json.dumps(item).encode())
-            time.sleep(APART_S)
-        o.raw("level", json.dumps("x").encode())
+        offers = [raw_step(o, "frames", point(3.5, "gauge", epoch=o.instance))]
         time.sleep(APART_S)
-        o.put("frames", 5)
+        offers.append(raw_step(o, "frames", point(2, "counter", unit="By", epoch=o.instance)))
+        time.sleep(APART_S)
+        offers.append(raw_step(o, "level", "x"))
+        time.sleep(APART_S)
+        o.put("frames", _frames(5))
         time.sleep(0.5)
         R = bus.R
         frames = R.of("frames")
@@ -639,32 +815,32 @@ def section4(report: Report, contract: Any) -> None:
         report.check(sec, "4. none of them pairs: frames 1 → 5, step 1's with step 5's, same_epoch",
                      len(fr) == 1 and fr[0][:2] == (1, 5) and fr[0][2].continuity == "same_epoch",
                      f"{[(a, b, _p(p)) for a, b, p in fr]}")
-        report.check(sec, "5. the writer refuses steps 2 to 4 before sending",
-                     refused == [["tag_disagrees"], ["unit_disagrees"], ["wrong_type"]], f"{refused}")
+        report.check(sec, "5. the checked writer refuses steps 2 to 4 before sending, each sent raw",
+                     [x.reasons for x in offers] == [["tag_disagrees"], ["unit_disagrees"], ["wrong_type"]],
+                     _offers(offers))
     finally:
         bus.close()
 
 
 # -- §5 Histograms -------------------------------------------------------------------------
 
-def section5(report: Report, contract: Any) -> None:
+def section5(report: Report, mode: Any, contract: Any) -> None:
     sec = "§5"
-    bus = Bus(contract)
+    bus = Bus(mode, contract)
     try:
         o = bus.owner()
         bus.appeared(o.instance)
         declared = [0.005, 0.01, 0.025]
 
-        def h(buckets: list[float], counts: list[int], s: float) -> dict[str, Any]:
-            return {"buckets": buckets, "counts": counts, "count": sum(counts), "sum": s}
+        def h(buckets: list[float], counts: list[int], s: float, epoch: str | None = None) -> dict[str, Any]:
+            return point({"buckets": buckets, "counts": counts, "count": sum(counts), "sum": s}, "histogram",
+                         epoch=epoch)
 
         o.put("latency", h(declared, [3, 10, 2, 1], 0.19))
         time.sleep(APART_S)
-        step2, step3 = h([0.005, 0.01, 0.05], [3, 10, 2, 1], 0.19), h(declared, [3, 9, 2, 1], 0.18)
-        refused = [o.refuses("latency", step2), o.refuses("latency", step3)]
-        o.raw("latency", json.dumps(o.item("latency", step2)).encode())
+        offers = [raw_step(o, "latency", h([0.005, 0.01, 0.05], [3, 10, 2, 1], 0.19, o.instance))]
         time.sleep(APART_S)
-        o.raw("latency", json.dumps(o.item("latency", step3)).encode())
+        offers.append(raw_step(o, "latency", h(declared, [3, 9, 2, 1], 0.18, o.instance)))
         time.sleep(APART_S)
         o.put("latency", h(declared, [4, 12, 2, 1], -1.0))
         time.sleep(0.5)
@@ -683,17 +859,17 @@ def section5(report: Report, contract: Any) -> None:
         report.check(sec, "4. no pair has a rate: a histogram has none at this version (§2.11)",
                      bool(p) and all(x.rate is None and x.no_rate == "kind" for _, _, x in p),
                      f"{[x.no_rate for _, _, x in p]}")
-        report.check(sec, "5. the writer refuses steps 2 and 3",
-                     refused == [["bounds_differ"], ["decrease_within_epoch"]], f"{refused}")
+        report.check(sec, "5. the checked writer refuses steps 2 and 3, each sent raw",
+                     [x.reasons for x in offers] == [["bounds_differ"], ["decreased"]], _offers(offers))
     finally:
         bus.close()
 
 
 # -- §6 Absence is not zero ----------------------------------------------------------------
 
-def section6(report: Report, contract: Any) -> None:
+def section6(report: Report, mode: Any, contract: Any) -> None:
     sec = "§6"
-    bus = Bus(contract)
+    bus = Bus(mode, contract)
     try:
         o = bus.owner()
         bus.appeared(o.instance)
@@ -729,9 +905,9 @@ def section6(report: Report, contract: Any) -> None:
 
 # -- §7 An in-band epoch on a bare counter -------------------------------------------------
 
-def section7(report: Report, contract: Any) -> None:
+def section7(report: Report, mode: Any, contract: Any) -> None:
     sec = "§7"
-    bus = Bus(contract)
+    bus = Bus(mode, contract)
     try:
         o = bus.owner()
         i1 = o.instance
@@ -748,7 +924,8 @@ def section7(report: Report, contract: Any) -> None:
             sent.append(o.instance)
             time.sleep(APART_S)
         mark = time.monotonic_ns()
-        o.raw("bytes", b"60", attachment=json.dumps("").encode())
+        # Step 3 (0.2): "the JSON string "" (two bytes) as its attachment".
+        offer = raw_step(o, "bytes", 60, "")
         time.sleep(0.5)
         R, R0 = bus.R, bus.R0
         atts = [a.attachment for a, _ in R.of("bytes")]
@@ -768,20 +945,26 @@ def section7(report: Report, contract: Any) -> None:
         s3 = tail[0][1] if tail else None
         report.check(sec, "3. R reads step 3 (the JSON text \"\" as its attachment) as does_not, epoch_invalid, "
                           "and pairs it with nothing",
-                     s3 is not None and (s3.conformance, s3.reasons) == (tm.DOES_NOT, ("epoch_invalid",))
+                     s3 is not None and tail[0][0].attachment == b'""'
+                     and (s3.conformance, s3.reasons) == (tm.DOES_NOT, ("epoch_invalid",))
                      and [(a, b) for a, b, _ in R.pairs("bytes")] == [(100, 200), (200, 0), (0, 50)], f"{s3}")
-        # F-147: the other spelling of "an empty string as its attachment",
-        # zero bytes, and an attachment that is not JSON, as zk2py reads them.
+        report.check(sec, "3. the checked writer refuses step 3's empty epoch (epoch_invalid, §2.6 check 2), so "
+                          "it went raw", offer.reasons == ["epoch_invalid"], _offers([offer]))
+        if o.rust:
+            # The example's raw takes "<attachment json>": its help says the
+            # attachment is JSON, and it refuses "the attachment is not one
+            # JSON text", so zero bytes and x cannot be sent through it.
+            report.note(sec, "§2.6 check 2's undecodable attachments (zero bytes, x): not sent, the example's raw "
+                             "takes an attachment's JSON only")
+            return
         mark = time.monotonic_ns()
-        o.raw("bytes", b"61", attachment=b"")
+        o.raw_bytes("bytes", b"61", b"")
         time.sleep(APART_S)
-        o.raw("bytes", b"62", attachment=b"x")
+        o.raw_bytes("bytes", b"62", b"x")
         time.sleep(0.5)
         extra = [(a.attachment, c.conformance, c.reasons) for a, c in R.of("bytes", mark)]
-        report.note(sec, f"F-147: a zero-byte attachment arrives as {extra[0][0] if extra else '?'!r} and reads "
-                         f"{extra[0][1:] if extra else '?'}; the bytes x read {extra[1][1:] if len(extra) > 1 else '?'}")
-        report.check(sec, "F-147 (zk2py's reading): an attachment that does not decode, zero bytes or x, is an "
-                          "epoch present and not a string: epoch_invalid, paired with nothing",
+        report.check(sec, "§2.6 check 2 (0.2): an Epoch attachment that does not decode, zero bytes or x, is "
+                          "epoch_invalid, paired with nothing",
                      len(extra) == 2 and all(e[1:] == (tm.DOES_NOT, ("epoch_invalid",)) for e in extra)
                      and len(R.pairs("bytes")) == 3, f"{extra}")
     finally:
@@ -790,9 +973,9 @@ def section7(report: Report, contract: Any) -> None:
 
 # -- §8 A counter that crosses a face ------------------------------------------------------
 
-def section8(report: Report, contract: Any) -> None:
+def section8(report: Report, mode: Any, contract: Any) -> None:
     sec = "§8"
-    bus = Bus(contract, face=True)
+    bus = Bus(mode, contract, face=True)
     try:
         assert bus.face is not None
         time.sleep(0.5)
@@ -801,7 +984,7 @@ def section8(report: Report, contract: Any) -> None:
         bus.appeared(i1)
         for v in (10, 20):
             o.put("drops", v)
-            o.put("frames", v)
+            o.put("frames", _frames(v))
             time.sleep(APART_S)
         o.close()
         bus.gone(i1)
@@ -809,7 +992,7 @@ def section8(report: Report, contract: Any) -> None:
         bus.appeared(o2.instance)
         for v in (3, 8):
             o2.put("drops", v)
-            o2.put("frames", v)
+            o2.put("frames", _frames(v))
             time.sleep(APART_S)
         time.sleep(0.5)
         F = bus.face.R0F
@@ -840,13 +1023,89 @@ def section8(report: Report, contract: Any) -> None:
         bus.close()
 
 
+# -- §9 A state counter seeded -------------------------------------------------------------
+
+def section9(report: Report, mode: Any, contract: Any) -> None:
+    """R as a late joiner of ``total`` (core §4.2): its subscription first,
+    then S4's GET (target ``All``, consolidation ``Latest``), whose reply it
+    holds unread until 12 has arrived; a witness subscribed from the start
+    shows the stamp of O's put of 10."""
+    import zenoh
+
+    from . import live
+
+    sec = "§9"
+    bus = Bus(mode, contract)
+    witness_session = live.open_client(bus.endpoint)
+    witness = Reader(witness_session, contract, presence=False, selector=TOTAL)
+    try:
+        o = bus.owner()
+        i1 = o.instance
+        bus.appeared(i1)
+        o.put("total", 10)
+        _wait(lambda: len(witness.of("", key=TOTAL)) == 1, 3.0)
+        time.sleep(0.3)
+        R = bus.R
+        R.subscribe(TOTAL)
+        time.sleep(0.2)
+        replies = R.session.get(TOTAL, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST,
+                                timeout=2.0)
+        time.sleep(0.3)
+        o.put("total", 12)
+        _wait(lambda: len(R.of("", key=TOTAL)) == 1, 3.0)
+        held = []
+        for r in replies:
+            if r.ok is not None:
+                s = r.ok
+                R.record(str(s.key_expr), s.payload.to_bytes(), s.attachment, s.timestamp, "get")
+                held.append(seed.Stamp.of(s.timestamp))
+        time.sleep(0.2)
+        o.put("total", 15)
+        _wait(lambda: len(R.of("", key=TOTAL)) == 3, 3.0)
+        time.sleep(0.3)
+        got = R.of("", key=TOTAL)
+        put10 = witness.of("", key=TOTAL)
+        report.check(sec, "2. O answers the GET with 10, under its put's stamp (core S2)",
+                     len(held) == 1 and bool(put10) and held[0] == put10[0][0].stamp and len(got) > 1
+                     and json.loads(got[1][0].payload) == 10,
+                     f"reply stamps {held}, the put's {put10[0][0].stamp if put10 else None}")
+        report.check(sec, "1. R received 12, then 10, then 15, and every sample conforms",
+                     [(json.loads(a.payload), a.via) for a, _ in got] == [(12, "subscription"), (10, "get"),
+                                                                         (15, "subscription")]
+                     and all(c.conformance == tm.CONFORMS for _, c in got),
+                     f"{[(a.payload, a.via, c.conformance) for a, c in got]}")
+        merged = R.state_pairs(TOTAL, "state/total")
+        a12 = [a for a, _ in got if json.loads(a.payload) == 12]
+        a15 = [a for a, _ in got if json.loads(a.payload) == 15]
+        want_rate = tm.rate_of(3, a15[0].stamp_ns - a12[0].stamp_ns) if a12 and a15 else None
+        report.check(sec, "2. through the merge, the reply is not kept: R pairs 12 → 15, same_epoch, established by "
+                          "presence, 3 over the owner's stamps' nanoseconds",
+                     [(a, b) for a, b, _ in merged] == [(12, 15)]
+                     and _pair_is(merged[0][2], "same_epoch", "established", "presence")
+                     and merged[0][2].rate == want_rate,
+                     f"{[(a, b, _p(p)) for a, b, p in merged]}, want rate {want_rate}")
+        by_receipt = R.state_pairs(TOTAL, "state/total", merged=False)
+        report.check(sec, "3. paired in the order received, 12 → 10 would read decreased, established by presence; "
+                          "through the merge, R pairs nothing decreased",
+                     bool(by_receipt) and by_receipt[0][:2] == (12, 10)
+                     and _pair_is(by_receipt[0][2], "decreased", "established", "presence")
+                     and _no_finding(merged)[0], f"{[(a, b, _p(p)) for a, b, p in by_receipt]}")
+        report.check(sec, "§2.11 (0.2): each stamp's nanoseconds, as zenoh-python reads them, are NTP64's as_nanos "
+                          "as the text states it, the fraction rounded up",
+                     bool(got) and all(a.stamp is not None and a.stamp_ns == tm.ntp64_ns(a.stamp.time) for a, _ in got),
+                     f"{[(a.stamp_ns, a.stamp and tm.ntp64_ns(a.stamp.time)) for a, _ in got]}")
+    finally:
+        witness.close()
+        witness_session.close()
+        bus.close()
+
+
 def measure_stamps(report: Report) -> None:
-    """F-142's measurement, printed and not counted: §2.11's "a stamp's time
-    in nanoseconds as zenoh reads it", over consecutive HLC stamps of one
-    session: zenoh-python's ``NTP64.as_nanos()`` per stamp against the exact
-    nanoseconds of the NTP64 value (unit 2^-32 s), and ``e`` as the
-    difference of two per-stamp conversions against the raw difference
-    converted once."""
+    """§2.11 (0.2, F-142): over consecutive HLC stamps of one session,
+    zenoh-python's ``NTP64.as_nanos()`` against :func:`tm.ntp64_ns`, the
+    text's conversion; and how often the converted difference of two raw
+    values differs from the difference of two conversions, which the text
+    rules out."""
     import zenoh
 
     conf = zenoh.Config()
@@ -855,34 +1114,32 @@ def measure_stamps(report: Report) -> None:
     conf.insert_json5("timestamping/enabled", "true")
     s = zenoh.open(conf)
     try:
-        from collections import Counter
-
-        n, above, e_differs, prev = 2000, Counter(), 0, None
+        n, agree, e_differs, prev = 2000, 0, 0, None
         for _ in range(n):
             t = s.new_timestamp().get_time_as_ntp64()
             raw = int(repr(t))
-            exact_floor = (raw >> 32) * 10**9 + (((raw & 0xFFFFFFFF) * 10**9) >> 32)
-            above[t.as_nanos() - exact_floor] += 1
+            agree += t.as_nanos() == tm.ntp64_ns(raw)
             if prev is not None:
                 pt, praw = prev
                 e_differs += (t.as_nanos() - pt.as_nanos()) != (((raw - praw) * 10**9) >> 32)
             prev = (t, raw)
-        report.note("§2.11", f"F-142: over {n} HLC stamps, as_nanos() minus the floor of the exact nanoseconds, "
-                             f"ns: count {dict(sorted(above.items()))}; e from two as_nanos() differs from the raw "
-                             f"difference's floor in {e_differs} of {n - 1} consecutive pairs")
+        report.check("§2.11", f"F-142 (0.2): the text's conversion equals zenoh-python's as_nanos() on {n} HLC stamps",
+                     agree == n, f"{agree} of {n}")
+        report.note("§2.11", f"the converted difference's floor differs from the difference of two conversions in "
+                             f"{e_differs} of {n - 1} consecutive pairs")
     finally:
         s.close()
 
 
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
-            "7": section7, "8": section8}
+            "7": section7, "8": section8, "9": section9}
 
 
-def run(report: Report, only: list[str] | None) -> None:
+def run(report: Report, mode: Any, only: list[str] | None) -> None:
     contract = load()
     for name in [n for n in SECTIONS if not only or n in only]:
         try:
-            SECTIONS[name](report, contract)
+            SECTIONS[name](report, mode, contract)
         except Exception as e:  # noqa: BLE001 - a section that cannot run is a failure
             import traceback
 
@@ -894,12 +1151,24 @@ def run(report: Report, only: list[str] | None) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.telemetry_scenarios", description=__doc__.split("\n")[0])
     ap.add_argument("--only", action="append", choices=sorted(SECTIONS, key=int), help="run only these sections")
+    ap.add_argument("--owner", type=Path, default=None,
+                    help="run against the Rust owner example at this path (--telemetry); default $ZK2PY_OWNER")
     args = ap.parse_args(argv)
+    mode: Any = "zk2py"
+    env = os.environ.get("ZK2PY_OWNER") or None
+    owner, source = (args.owner, "--owner") if args.owner is not None else (env, "ZK2PY_OWNER")
+    if owner is not None:
+        exe = Path(owner)
+        if not exe.is_file():
+            print(f"error: {exe} not found (the path came from {source})", file=sys.stderr)
+            return 2
+        mode = exe
     report = Report()
-    run(report, args.only)
+    run(report, mode, args.only)
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"telemetry scenarios (zk2py's owner): {passed} passed, {failed} failed, {len(report.not_run)} not run")
+    who = "zk2py's owner" if mode == "zk2py" else "the owner example"
+    print(f"telemetry scenarios ({who}): {passed} passed, {failed} failed, {len(report.not_run)} not run")
     for sec, name, ok, detail in report.rows:
         if not ok:
             print(f"FAIL [{sec}] {name}: {detail}")

@@ -885,12 +885,30 @@ def _telemetry_declarations(path: Path) -> list[Result]:
 
 
 def _telemetry_sample(s: dict[str, Any]):
+    """A sample as samples.json writes it: decoded (``value``,
+    ``attachment``), or, since 0.2, as its bytes came: ``json_text`` read as
+    strict JSON, ``cbor_hex`` as CBOR, ``attachment_text`` as JSON, an
+    attachment that does not decode being an epoch present and not a
+    string."""
     from . import telemetry as tm
 
     if s.get("undecodable"):
         return tm.Sample(undecodable=True)
-    return tm.Sample(tm.from_fixture(s["value"]),
-                     tm.from_fixture(s["attachment"]) if "attachment" in s else tm.NO_ATTACHMENT)
+    try:
+        if "json_text" in s:
+            value = tm.decode_json(s["json_text"].encode("utf-8", "surrogatepass"))
+        elif "cbor_hex" in s:
+            value = tm.decode_cbor(bytes.fromhex(s["cbor_hex"]))
+        else:
+            value = tm.from_fixture(s["value"])
+    except tm.Undecodable:
+        return tm.Sample(undecodable=True)
+    if "attachment_text" in s:
+        try:
+            return tm.Sample(value, tm.decode_json(s["attachment_text"].encode("utf-8", "surrogatepass")))
+        except tm.Undecodable:
+            return tm.Sample(value, attachment_undecodable=True)
+    return tm.Sample(value, tm.from_fixture(s["attachment"]) if "attachment" in s else tm.NO_ATTACHMENT)
 
 
 def _telemetry_samples(path: Path) -> list[Result]:
@@ -911,8 +929,10 @@ def _telemetry_continuity(path: Path) -> list[Result]:
     from . import telemetry as tm
 
     def read(x: dict[str, Any]):
-        return tm.Read(x["kind"], tm.from_fixture(x["value"]), x["epoch"], x["timestamp_ms"], x["stamp_ns"],
-                       x["arrival_ns"])
+        # 0.2: stamp_ntp64 in stamp_ns's place, the raw value, read as
+        # zenoh's NTP64::as_nanos reads it, each stamp alone (F-142).
+        stamp = tm.ntp64_ns(x["stamp_ntp64"]) if x.get("stamp_ntp64") is not None else x["stamp_ns"]
+        return tm.Read(x["kind"], tm.from_fixture(x["value"]), x["epoch"], x["timestamp_ms"], stamp, x["arrival_ns"])
 
     out = []
     for i, c in enumerate(_load_json(path)["cases"]):
@@ -1481,7 +1501,7 @@ def _telemetry_state_order() -> list[tuple[str, Any, Any]]:
     instance alone throughout. Paired in receipt order, the two read a
     decrease within an established epoch, the finding; through the merge,
     which keeps the newer, the reply is no sample, and nothing pairs
-    (F-148, zk2py's reading)."""
+    (F-148; 0.2's rule, scenarios.md §9)."""
     from . import seed, telemetry as tm
 
     live = tm.Read("counter", 12, None, None, 2_000_000_000, 1)
@@ -1500,7 +1520,7 @@ def _telemetry_state_order() -> list[tuple[str, Any, Any]]:
 
 def _telemetry_nulls() -> list[tuple[str, Any, Any]]:
     """telemetry.v1 §2.6 over a `null` where a Point or its Value holds a
-    member, F-149's reading: a member written `null` is present, and `null`
+    member, F-149's reading and 0.2's rule: a member written `null` is present, and `null`
     is no value of any kind (§2.4). A Point's `value` written `null` is not
     an object, so the payload is not a Point; a Value's own `value` written
     `null` is of no kind's type, so `wrong_type`, for each of the six kinds,
@@ -1529,6 +1549,85 @@ def _telemetry_nulls() -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _telemetry_edges() -> list[tuple[str, Any, Any]]:
+    """zk2py's readings of telemetry.v1 0.2's two open findings.
+    - F-150, "past the double's finite range" at its edge: read as IEEE
+      754's round-to-nearest reads it, so an integer's text one past the
+      largest double, and a float's text above it that rounds to it, are
+      finite; the halfway point's text is +Infinity, undecodable.
+    - F-151, an Epoch attachment's JSON read as strict as a payload's: a
+      lone surrogate escape does not decode, so `epoch_invalid`."""
+    import sys as _sys
+
+    from . import telemetry as tm
+
+    gauge = tm.declare("stream", {tm.KIND: "gauge"}, {"kind": "jsonschema", "name": "Level",
+                                                      "schema": "sha256:" + "a" * 64, "root": {"type": "number"}})
+    counter = tm.declare("stream", {tm.KIND: "counter"},
+                         {"kind": "jsonschema", "name": "Count", "schema": "sha256:" + "a" * 64,
+                          "root": {"type": "integer"}},
+                         {"kind": "jsonschema", "name": tm.EPOCH, "schema": tm.CURRENT, "root": None})
+
+    def text(t: str) -> Any:
+        try:
+            c = tm.conform(gauge, tm.Sample(tm.decode_json(t.encode())))
+        except tm.Undecodable:
+            c = tm.conform(gauge, tm.Sample(undecodable=True))
+        return [c.conformance, list(c.reasons)]
+
+    def attached(t: str) -> Any:
+        try:
+            c = tm.conform(counter, tm.Sample(5, tm.decode_json(t.encode("utf-8", "surrogatepass"))))
+        except tm.Undecodable:
+            c = tm.conform(counter, tm.Sample(5, attachment_undecodable=True))
+        return [c.conformance, list(c.reasons)]
+
+    edge = str(int(_sys.float_info.max) + 1)
+    return [
+        ("telemetry.v1 0.2 §2.6 (F-150): an integer's text one past the largest double rounds to it: finite, a gauge",
+         text(edge), [tm.CONFORMS, []]),
+        ("telemetry.v1 0.2 §2.6 (F-150): 1.7976931348623158e308, above the largest double, rounds to it: a gauge",
+         text("1.7976931348623158e308"), [tm.CONFORMS, []]),
+        ("telemetry.v1 0.2 §2.6 (F-150): the halfway point's text rounds to +Infinity: undecodable",
+         text("1.797693134862315808e308"), [tm.UNOBSERVABLE, ["undecodable"]]),
+        ("telemetry.v1 0.2 §2.6 check 2 (F-151): an Epoch attachment \"\\ud800\", a lone surrogate, does not "
+         "decode as strict JSON: epoch_invalid", attached('"\\ud800"'), [tm.DOES_NOT, ["epoch_invalid"]]),
+    ]
+
+
+def _telemetry_deep() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 §2.6, a sample nested deeper than zk2py's reader goes
+    (review of PR #826): read as undecodable, never a crash. RFC 8259 §9
+    lets a parser limit nesting; zk2py's limit is Python's recursion's. A
+    JSON Point whose `labels` nest 100,000 objects deep, a JSON array as
+    deep in a gauge, and a CBOR array as deep."""
+    from . import telemetry as tm
+
+    point = tm.declare("stream", {}, {"kind": "jsonschema", "name": tm.POINT, "schema": tm.CURRENT, "root": None})
+    gauge = tm.declare("stream", {tm.KIND: "gauge"}, {"kind": "jsonschema", "name": "Level",
+                                                      "schema": "sha256:" + "a" * 64, "root": {"type": "number"}})
+    n = 100_000
+
+    def read(decl: Any, decode: Any, payload: bytes) -> Any:
+        try:
+            c = tm.conform(decl, tm.Sample(decode(payload)))
+        except tm.Undecodable:
+            c = tm.conform(decl, tm.Sample(undecodable=True))
+        return [c.conformance, list(c.reasons)]
+
+    labels = b'{"timestamp": 1, "value": {"type": "gauge", "value": 1}, "labels": ' + b'{"a": ' * n + b'"x"' \
+        + b"}" * n + b"}"
+    want = [tm.UNOBSERVABLE, ["undecodable"]]
+    label = "telemetry.v1 §2.6, nested 100,000 deep (review of PR #826)"
+    return [
+        (f"{label}: a JSON Point's labels: undecodable, no crash", read(point, tm.decode_json, labels), want),
+        (f"{label}: a JSON array in a gauge: undecodable, no crash",
+         read(gauge, tm.decode_json, b"[" * n + b"1" + b"]" * n), want),
+        (f"{label}: a CBOR array in a gauge: undecodable, no crash",
+         read(gauge, tm.decode_cbor, b"\x81" * n + b"\x01"), want),
+    ]
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -1538,7 +1637,7 @@ def family_readings(root: Path) -> list[Result]:
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
-        + _telemetry_state_order() + _telemetry_nulls()
+        + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 

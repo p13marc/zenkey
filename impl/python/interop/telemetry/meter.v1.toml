@@ -36,3 +36,8 @@ annotations = { "telemetry.kind" = "histogram", "telemetry.unit" = "s", "telemet
 kind        = "stream"
 type        = "json:Level"
 annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dBm" }
+
+[resources.total]                        # a bare counter in state (0.2, §9)
+kind        = "state"
+type        = "json:Count"
+annotations = { "telemetry.kind" = "counter" }
