@@ -1135,6 +1135,69 @@ def _reporter_loss() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _first_neither_cases() -> list[tuple[str, Any, Any]]:
+    """alarms.v1 0.7 §2.16, "A key's first answer": every neither reason
+    the first question gives, one reading per reason, each checked on its
+    own (the answer neither yes nor no, the reason the one intended, the
+    list the one 0.7 puts it on); then that the table's reader's-sight
+    reasons are exactly 0.7's nine and that it holds twenty distinct
+    reasons. freshness.v1's `silent` is on no named list at 0.7, so it is
+    "any other reason" here (F-141)."""
+    from . import alarms, freshness as fr
+
+    lists = {"lists": True, "token": True}
+
+    def sub(age: Any = 10, complete: bool = True, listened: int = 1200) -> Any:
+        return fr.Subscription(listened * fr.NS, complete, None if age is None else fr.Delivery("put", age * fr.NS))
+
+    def get(reply: Any = "put", age: Any = 10, trusted: bool = True) -> Any:
+        r = None if reply is None else fr.Reply("put", None if age is None else int(age * fr.NS))
+        return fr.Get(r, trusted, fr.DEFAULT_DELTA_NS)
+
+    R = alarms.Reading
+    std, invalid = alarms.HORIZON, fr.Horizon("invalid")
+    sight, other = "reader_sight", "other"
+    # (reason intended, reading, horizon, the list 0.7 puts it on)
+    table: list[tuple[str, Any, Any, str]] = [
+        ("absent", R("absent"), std, other),
+        ("presence_incomplete", R("incomplete"), std, sight),
+        ("face_closed", R("across_face", face={"reachable": False}), std, other),
+        ("no_descriptor", R("present"), std, sight),
+        ("not_listed", R("present", {"lists": False}), std, other),
+        ("last_known", R("present", lists, observations=[fr.Archive()], latest="firing"), std, other),
+        ("incomplete", R("present", lists, observations=[sub(complete=False)], latest="firing"), std, sight),
+        ("not_read", R("present", lists, observations=[get(None)]), std, sight),
+        ("nothing_crossed", R("across_face", face={"reachable": True}, observations=[get(None)]), std, sight),
+        ("previous_instance", R("present", lists, observations=[sub()], latest="firing", previous_instance=True),
+         std, other),
+        ("undecodable", R("present", lists, observations=[sub()], latest="undecodable"), std, other),
+        ("stale", R("present", lists, observations=[sub(age=1000)], latest="firing"), std, other),
+        ("no_observation", R("present", lists, latest="firing"), std, sight),
+        ("silent", R("present", lists, observations=[get(None)], latest="firing"), std, other),
+        ("no_stamp", R("present", lists, observations=[get(age=None)], latest="firing"), std, other),
+        ("clock_untrusted", R("present", lists, observations=[get(trusted=False)], latest="firing"), std, sight),
+        ("clock_disagrees", R("present", lists, observations=[get(age=-5)], latest="firing"), std, other),
+        ("near_horizon", R("present", lists, observations=[get(age=899.8)], latest="firing"), std, sight),
+        ("listened_too_short", R("present", lists, observations=[sub(age=None, listened=10)], latest="firing"),
+         std, sight),
+        ("not_a_horizon", R("present", lists, observations=[sub()], latest="firing"), invalid, other),
+    ]
+    label = "alarms.v1 0.7 §2.16, a key's first answer"
+    out: list[tuple[str, Any, Any]] = []
+    for want, reading, horizon, want_list in table:
+        a = alarms.judge(reading, alarms.Q_FIRING, horizon)
+        got_list = alarms.first_neither_list(a.reason) if a.answer not in (alarms.YES, alarms.NO) else None
+        out.append((f"{label}: a reading for `{want}` gives neither, `{want}`, on the {want_list} list",
+                    {"answer_neither": a.answer not in (alarms.YES, alarms.NO), "reason": a.reason,
+                     "list": got_list},
+                    {"answer_neither": True, "reason": want, "list": want_list}))
+    reasons = [t[0] for t in table]
+    out.append((f"{label}: the table holds twenty distinct reasons, and its reader's-sight ones are 0.7's nine",
+                {"distinct": len(set(reasons)), "sight": sorted(r for r, _, _, lst in table if lst == sight)},
+                {"distinct": 20, "sight": sorted(alarms.READER_SIGHT)}))
+    return out
+
+
 def _reporter_gone() -> list[tuple[str, Any, Any]]:
     """alarms.v1 0.6 §2.16 and a key gone from the whole scope's readings:
     a key with no report (a first neither of the key's own, not reported)
@@ -1246,7 +1309,7 @@ def family_readings(root: Path) -> list[Result]:
     out = [_check(f"{fid}: {note}", alarms.check_payload(payload), want) for fid, note, payload, want in READINGS]
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
-        + _left_out_cases()
+        + _left_out_cases() + _first_neither_cases()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 

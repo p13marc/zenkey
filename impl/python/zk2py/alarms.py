@@ -767,6 +767,21 @@ class Report:
     change: str | None = None
 
 
+#: §2.16 (0.7), "A key's first answer": neither "splits by its reason, in
+#: two closed lists". The reader's own sight, "which time or the next read
+#: settles", is these nine; "any other reason … MAY be reported". zk2py's
+#: reporter reports no first neither, so it needs neither list; the
+#: readings family checks that every neither reason its judge gives is on
+#: exactly one (SPEC-FINDINGS F-141).
+READER_SIGHT = frozenset({"incomplete", "presence_incomplete", "no_descriptor", "not_read", "nothing_crossed",
+                          "clock_untrusted", "listened_too_short", "near_horizon", "no_observation"})
+
+
+def first_neither_list(reason: str) -> str:
+    """Which of §2.16's two closed lists a first neither's reason is on."""
+    return "reader_sight" if reason in READER_SIGHT else "other"
+
+
 def _side(answer: str) -> str:
     """§2.16: "the answer moving between yes, no and neither"."""
     return answer if answer in (YES, NO) else "neither"
