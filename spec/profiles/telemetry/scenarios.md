@@ -6,8 +6,9 @@ a setup, steps, and expected observations. The reference runtime runs §1
 to §9 as tests of `zenkey` (`zenkey/tests/profile_telemetry.rs`, one test
 per section, named after it: `s1_counter_across_a_restart` to
 `s8_counter_across_a_face`, and `s9_state_counter_seeded`; #819, TB). §8
-is also a tool's, and the reference tool runs it over a real face (#819,
-TC).
+is also a tool's: the reference tool, `zenctl telemetry --across-face`,
+runs it over a real face (`zenctl/tests/live_zk2.rs`,
+`telemetry_s8_a_counter_that_crosses_a_face`; #819, TC).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.10) are v1.md's rules; core
@@ -239,9 +240,9 @@ tagged `histogram` with I1 as its epoch:
 
 **Setup.** R0 stands where a reader across a constrained face stands
 (core §8.5): it receives the data keys and nothing under `@zk`. The
-reference tool stands it behind a face whose access control denies
-`@zk/**` (`link.v1` §2.6, #819 TC); the runtime runs it as R0 alone, which
-the profile reads alike (§2.14).
+reference tool, `zenctl telemetry --across-face`, stands it behind a face
+whose access control denies `@zk/**` (`link.v1` §2.6, #819 TC); the
+runtime runs it as R0 alone, which the profile reads alike (§2.14).
 
 **Steps.**
 1. O starts, as I1. It publishes `drops` at 10 and 20, and `frames` at 10
