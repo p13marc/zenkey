@@ -319,10 +319,12 @@ pub struct StateStamps {
     /// Every key answered with a value, not a `reply_del`: the members
     /// `population-over-bound` counts (§2.7, 0.24).
     pub values: BTreeSet<String>,
-    /// The value replies themselves, at most [`STATE_REPLY_CAP`]: what
-    /// `telemetry-sample` reads (#819, TC).
+    /// The value replies of the interface's metric resources, when
+    /// `telemetry-sample` is asked: what it reads (#819, TC). At most
+    /// [`STATE_REPLY_CAP`] of them and [`STATE_REPLY_BYTES`] of payload and
+    /// attachment; every other reply keeps its stamp alone.
     pub replies: Vec<StateReply>,
-    /// Value replies past the cap, not kept.
+    /// Metric value replies past either cap, not kept.
     pub replies_capped: u64,
     /// Whether every GET ended at the final reply.
     pub complete: bool,
@@ -331,6 +333,84 @@ pub struct StateStamps {
 /// How many value replies of one owner's interface a run keeps for
 /// `telemetry-sample`.
 pub const STATE_REPLY_CAP: usize = 4_096;
+
+/// How many bytes of payload and attachment of one owner's interface a run
+/// keeps for `telemetry-sample`: 8 MiB.
+pub const STATE_REPLY_BYTES: usize = 8 * 1024 * 1024;
+
+/// What `telemetry-sample` keeps of one owner interface's state replies
+/// (#819, TC): the replies on its metric resources' keys alone, by the
+/// revision the owner's descriptors name, within [`STATE_REPLY_CAP`] and
+/// [`STATE_REPLY_BYTES`]; a metric reply past either is counted in
+/// [`StateStamps::replies_capped`], so the check says what it could not
+/// read. No revision in hand, or `telemetry-sample` not asked: nothing.
+#[derive(Debug, Default)]
+struct ReplyKeeper {
+    revision: Option<Arc<Revision>>,
+    bytes: usize,
+}
+
+impl ReplyKeeper {
+    fn offer(
+        &mut self,
+        out: &mut StateStamps,
+        key: &str,
+        size: usize,
+        reply: impl FnOnce() -> StateReply,
+    ) {
+        let Some(rev) = &self.revision else {
+            return;
+        };
+        if metric_of(rev.contract(), key).is_none() {
+            return;
+        }
+        if out.replies.len() < STATE_REPLY_CAP && self.bytes + size <= STATE_REPLY_BYTES {
+            self.bytes += size;
+            out.replies.push(reply());
+        } else {
+            out.replies_capped += 1;
+        }
+    }
+}
+
+/// The metric resource `key` is a member of in `contract` (§2.2: match,
+/// then rank), when it is one (`telemetry.v1` §2.1).
+fn metric_of(contract: &Contract, key: &str) -> Option<crate::model::telemetry::MetricType> {
+    let Ok(ZkKey::Data { kind, resource, .. }) = zenkey_model::grammar::parse(key) else {
+        return None;
+    };
+    let candidates: Vec<&zenkey_model::contract::Resource> = contract
+        .resources
+        .iter()
+        .filter(|r| r.token == kind)
+        .collect();
+    let refs: Vec<&str> = resource.iter().map(String::as_str).collect();
+    let (i, _) = zenkey_model::template::resolve(candidates.iter().map(|r| &r.template), &refs)?;
+    crate::model::telemetry::MetricType::of(contract, candidates[i])
+}
+
+/// The one revision of `iface` `addr`'s served descriptors name, when it is
+/// in hand: what `telemetry-sample` reads its replies by.
+fn metric_revision(
+    observed: &Observed,
+    contracts: &BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
+    addr: &Addr,
+    iface: &IfaceId,
+) -> Option<Arc<Revision>> {
+    let want = iface.to_string();
+    let fps: BTreeSet<&str> = served(observed)
+        .filter(|(a, _, _)| *a == addr)
+        .filter_map(|(_, _, d)| d.interfaces.iter().find(|e| e.iface == want))
+        .map(|e| e.contract.as_str())
+        .collect();
+    let [fp] = fps.into_iter().collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    match contracts.get(&(iface.clone(), Fingerprint::parse(fp).ok()?)) {
+        Some(Ok(ContractState::Held(r))) => Some(Arc::clone(r)),
+        _ => None,
+    }
+}
 
 /// One value reply of an owner's state GET, as it came.
 #[derive(Debug, Clone, Default)]
@@ -527,19 +607,29 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         }
         out
     };
-    let stamps = async {
+    // The owners' state GETs follow the retrieval: `telemetry-sample` keeps
+    // the replies of the metric resources alone, by the revisions retrieved.
+    let contracts_then_stamps = async {
+        let contracts = contracts.await;
+        let mut out = BTreeMap::new();
         if !spec.asks(CheckId::StateStampForeign)
             && !spec.asks(CheckId::PopulationOverBound)
             && !spec.asks(CheckId::TelemetrySample)
         {
-            return BTreeMap::new();
+            return (contracts, out);
         }
-        let mut out = BTreeMap::new();
         for (addr, iface) in owners_in(observed) {
-            let read = state_stamps(s, &addr, &iface, t).await;
+            let keep = ReplyKeeper {
+                revision: spec
+                    .asks(CheckId::TelemetrySample)
+                    .then(|| metric_revision(observed, &contracts, &addr, &iface))
+                    .flatten(),
+                bytes: 0,
+            };
+            let read = state_stamps(s, &addr, &iface, t, keep).await;
             out.insert((addr, iface), read);
         }
-        out
+        (contracts, out)
     };
     let second = async {
         if spec.asks_health() {
@@ -562,8 +652,13 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             None
         }
     };
-    let (contracts, archives, stamps, second, second_config, alarms) =
-        tokio::join!(contracts, archives, stamps, second, second_config, alarms);
+    let ((contracts, stamps), archives, second, second_config, alarms) = tokio::join!(
+        contracts_then_stamps,
+        archives,
+        second,
+        second_config,
+        alarms
+    );
     readings.extend(second);
     config_readings.extend(second_config);
     PresencePhase {
@@ -651,7 +746,7 @@ fn telemetry_declaration(p: &Presence<'_>) -> CheckReport {
 /// read them.
 fn telemetry_sample(p: &Presence<'_>) -> CheckReport {
     const C: CheckId = CheckId::TelemetrySample;
-    use crate::model::telemetry::{MetricType, problem_words};
+    use crate::model::telemetry::problem_words;
     use zenkey_model::telemetry::{Conformance as Tc, Unasked};
     let mut findings = Vec::new();
     let mut undecided = Vec::new();
@@ -703,22 +798,7 @@ fn telemetry_sample(p: &Presence<'_>) -> CheckReport {
         let contract = rev.contract();
         capped += stamps.replies_capped;
         for reply in &stamps.replies {
-            let Ok(ZkKey::Data { kind, resource, .. }) = zenkey_model::grammar::parse(&reply.key)
-            else {
-                continue;
-            };
-            let candidates: Vec<&zenkey_model::contract::Resource> = contract
-                .resources
-                .iter()
-                .filter(|r| r.token == kind)
-                .collect();
-            let refs: Vec<&str> = resource.iter().map(String::as_str).collect();
-            let Some((i, _)) =
-                zenkey_model::template::resolve(candidates.iter().map(|r| &r.template), &refs)
-            else {
-                continue;
-            };
-            let Some(ty) = MetricType::of(contract, candidates[i]) else {
+            let Some(ty) = metric_of(contract, &reply.key) else {
                 continue;
             };
             match ty
@@ -751,7 +831,10 @@ fn telemetry_sample(p: &Presence<'_>) -> CheckReport {
         }
     }
     let capped = if capped > 0 {
-        format!("; {capped} reply(ies) past the run's cap were not read")
+        format!(
+            "; {capped} reply(ies) past the run's caps ({STATE_REPLY_CAP} replies, 8 MiB per owner \
+             interface) were not read"
+        )
     } else {
         String::new()
     };
@@ -941,6 +1024,7 @@ async fn state_stamps(
     addr: &Addr,
     iface: &IfaceId,
     timeout: Duration,
+    mut keep: ReplyKeeper,
 ) -> Result<StateStamps, String> {
     let iface = iface.to_string();
     let mut out = StateStamps {
@@ -976,16 +1060,14 @@ async fn state_stamps(
                 keys.push(sample.key_expr().as_str().to_owned());
             }
             if sample.kind() == SampleKind::Put {
-                out.values.insert(sample.key_expr().as_str().to_owned());
-                if out.replies.len() < STATE_REPLY_CAP {
-                    out.replies.push(StateReply {
-                        key: sample.key_expr().as_str().to_owned(),
-                        payload: sample.payload().to_bytes().into_owned(),
-                        attachment: sample.attachment().map(|a| a.to_bytes().into_owned()),
-                    });
-                } else {
-                    out.replies_capped += 1;
-                }
+                let key = sample.key_expr().as_str();
+                out.values.insert(key.to_owned());
+                let size = sample.payload().len() + sample.attachment().map_or(0, |a| a.len());
+                keep.offer(&mut out, key, size, || StateReply {
+                    key: key.to_owned(),
+                    payload: sample.payload().to_bytes().into_owned(),
+                    attachment: sample.attachment().map(|a| a.to_bytes().into_owned()),
+                });
             }
         }
     }
@@ -5564,5 +5646,40 @@ mod tests {
             !DoctorSpec::new(Duration::from_secs(1)).asks(CheckId::TelemetrySample),
             "deep only"
         );
+    }
+
+    /// Review of PR #827: `telemetry-sample` keeps the replies of the
+    /// interface's metric resources alone, within 4096 replies and 8 MiB of
+    /// payload and attachment per owner interface; a metric reply past either
+    /// is counted, and every other reply keeps its stamp alone.
+    #[test]
+    fn the_doctor_keeps_metric_replies_alone_and_within_its_caps() {
+        let rev = Arc::new(Revision::from_contract(meter(), ContractSource::Bus));
+        let reply = |key: &str| StateReply {
+            key: key.to_owned(),
+            payload: b"12".to_vec(),
+            attachment: None,
+        };
+        let total = "zk2/lab/meter/meter.v1/state/total";
+        let other = "zk2/lab/meter/meter.v1/state/other";
+        let mut out = StateStamps::default();
+        let mut keep = ReplyKeeper {
+            revision: Some(Arc::clone(&rev)),
+            bytes: 0,
+        };
+        keep.offer(&mut out, total, 2, || reply(total));
+        keep.offer(&mut out, other, 2, || {
+            panic!("no metric resource's: never copied")
+        });
+        assert_eq!((out.replies.len(), out.replies_capped), (1, 0));
+        keep.offer(&mut out, total, STATE_REPLY_BYTES, || reply(total));
+        assert_eq!(
+            (out.replies.len(), out.replies_capped),
+            (1, 1),
+            "past 8 MiB: counted"
+        );
+        let mut none = ReplyKeeper::default();
+        none.offer(&mut out, total, 2, || panic!("telemetry-sample not asked"));
+        assert_eq!(out.replies.len(), 1);
     }
 }

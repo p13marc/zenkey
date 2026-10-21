@@ -377,7 +377,8 @@ pub fn judge(obs: &TelemetryObservation) -> TelemetryReport {
         }),
         Some(Err(e)) => {
             skipped.push(format!(
-                "the presence seed could not be read ({e}): no pair has presence"
+                "the last presence seed did not stand ({e}): the pairs since it was owed have \
+                 no presence"
             ));
             None
         }

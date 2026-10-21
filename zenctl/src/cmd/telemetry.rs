@@ -80,7 +80,8 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         "telemetry: listening {}s to the metric members in scope{} (--for)",
         window.as_secs_f64(),
         if across_face {
-            ", with no presence: across a face only an in-band epoch establishes one"
+            "; across a face this reader reads no presence (the session opens as any \
+             other's), so only an in-band epoch establishes one"
         } else {
             " and their owners' tokens"
         }

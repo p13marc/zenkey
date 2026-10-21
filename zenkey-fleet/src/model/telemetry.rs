@@ -49,7 +49,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use zenkey_model::authoring::{Encoding, Kind};
-use zenkey_model::grammar::{Addr, IfaceId, InstanceId};
+use zenkey_model::grammar::{Addr, IfaceId, InstanceId, ZkKey};
 use zenkey_model::schema::TypeId;
 use zenkey_model::seed::Held;
 use zenkey_model::telemetry::{
@@ -666,12 +666,36 @@ impl TelemetryBook {
     /// A presence seed (one liveliness read of the scope), then the token
     /// moves the subscription delivered while it was read, in order: what
     /// [`LivePresence::seed_then`] folds. A complete seed restores presence.
+    /// Every move delivered during the seed is a move of its instance's
+    /// address, or of its member, whatever the seed's net change: a token
+    /// that came and went while the seed was read is never "alone
+    /// throughout" across it.
     pub fn seed<'k>(&mut self, seed: &Observed, then: impl IntoIterator<Item = (&'k str, bool)>) {
         let Some(p) = &mut self.presence else {
             return;
         };
-        p.seed_then(seed, then, std::time::SystemTime::now());
+        let then: Vec<(&str, bool)> = then.into_iter().collect();
+        p.seed_then(seed, then.iter().copied(), std::time::SystemTime::now());
         self.restate();
+        for (key, _) in then {
+            match zenkey_model::grammar::parse(key) {
+                Ok(ZkKey::Instance { addr, .. }) => {
+                    *self.instance_moves.entry(addr).or_default() += 1;
+                }
+                Ok(ZkKey::Member {
+                    addr,
+                    iface,
+                    member,
+                    ..
+                }) => {
+                    *self
+                        .member_moves
+                        .entry((addr, MemberId { iface, member }))
+                        .or_default() += 1;
+                }
+                _ => {}
+            }
+        }
     }
 
     /// One token's move, as the subscription delivered it.
@@ -1298,5 +1322,44 @@ mod tests {
             "by presence again"
         );
         assert_eq!(book.lost(), 2);
+    }
+
+    /// Review of PR #827: a token that came and went while a seed was read
+    /// is a move, though the seed's net change is none, so a pair across it
+    /// is never "alone throughout".
+    #[test]
+    fn a_move_during_a_seed_is_a_move() {
+        let t0 = Instant::now();
+        let m = counter_metric(Kind::Stream);
+        let key = format!("zk2/{SVC}/meter.v1/stream/drops");
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut book = TelemetryBook::new(Some(Scope::all()), t0);
+        let seed = Observed::from_keys("s", &[instance_key("00000000000000aa")], true);
+        book.seed(&seed, std::iter::empty::<(&str, bool)>());
+        book.sample(&m, bare(&key, 5, at(0), None, SampleVia::Subscription));
+        let transient = instance_key("00000000000000bb");
+        book.seed(
+            &seed,
+            [(transient.as_str(), true), (transient.as_str(), false)],
+        );
+        let p = book
+            .sample(&m, bare(&key, 3, at(500), None, SampleVia::Subscription))
+            .unwrap();
+        assert!(
+            matches!(
+                p.presence,
+                PairPresence::Observed {
+                    alone_throughout: false,
+                    ..
+                }
+            ),
+            "{:?}",
+            p.presence
+        );
+        assert_eq!(
+            p.pair.continuity,
+            Continuity::Reset,
+            "assumed, never decreased"
+        );
     }
 }

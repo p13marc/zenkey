@@ -285,10 +285,14 @@ pub async fn observe(
     if obs.resources.is_empty() {
         return obs;
     }
+    let presence_scope_selectors = presence_scope.token_selectors();
     let mut reader = Reader {
-        session: session.clone(),
+        seeder: Seeder::Bus {
+            session: session.clone(),
+            scope: presence_scope,
+            timeout: t,
+        },
         spec,
-        presence_scope,
         catalog,
         store,
         offline,
@@ -325,7 +329,7 @@ pub async fn observe(
     let mut held = Vec::new();
     let listening = Instant::now();
     if !spec.across_face {
-        let [instances, _alive, members] = reader.presence_scope.token_selectors();
+        let [instances, _alive, members] = presence_scope_selectors;
         for sel in [instances, members] {
             let q = queue.clone();
             let declared = crate::bus::teardown::declared(
@@ -364,7 +368,7 @@ pub async fn observe(
             session
                 .declare_subscriber(sel.clone())
                 .callback(move |s: Sample| {
-                    if s.key_expr().as_str().contains('*') {
+                    if s.key_expr().is_wild() {
                         discarded.fetch_add(1, Ordering::Relaxed);
                         return;
                     }
@@ -386,43 +390,35 @@ pub async fn observe(
     }
     drop(queue);
     reader.stall = Some(StallWatch::start(session).await);
+    // The window counts from the subscriptions' declaration, and every read
+    // below keeps to its end: the seed, a state GET, a seed owed by a loss.
+    let deadline = tokio::time::Instant::from_std(listening + spec.window);
     // 3. The seed presence stands on.
     if !spec.across_face {
-        reader.reseed(&mut obs.book, &mut rx).await;
+        reader.reseed(&mut obs.book, &mut rx, deadline).await;
     }
     // 4. S4's GET of each state metric resource, after what the queue holds.
     for m in obs.resources.iter().filter(|m| m.kind == Kind::State) {
         let Some(sel) = scope.subscription(m) else {
             continue;
         };
-        let replies = state_replies(session, &sel, t).await;
+        let replies = tokio::time::timeout_at(deadline, state_replies(session, &sel, t)).await;
         reader.drain(&mut obs.book, &mut rx);
         match replies {
-            Ok(rs) => {
+            Ok(Ok(rs)) => {
                 for s in rs {
                     reader.fold_sample(&mut obs.book, s);
                 }
             }
-            Err(e) => obs.skipped.push(e),
+            Ok(Err(e)) => obs.skipped.push(e),
+            Err(_) => obs.skipped.push(format!(
+                "GET {sel}: the window ended before its replies did, so it seeded nothing"
+            )),
         }
         obs.asked.push(sel);
     }
     // 5. The window.
-    let deadline = tokio::time::Instant::from_std(listening + spec.window);
-    loop {
-        if reader.owed_seed {
-            reader.reseed(&mut obs.book, &mut rx).await;
-        }
-        tokio::select! {
-            () = tokio::time::sleep_until(deadline) => break,
-            d = rx.recv() => match d {
-                Some(d) => reader.fold(&mut obs.book, d),
-                None => break,
-            },
-        }
-    }
-    reader.drain(&mut obs.book, &mut rx);
-    reader.losses(&mut obs.book);
+    reader.window(&mut obs.book, &mut rx, deadline).await;
     obs.listened = listening.elapsed();
     drop(held);
     obs.seed = reader.seed.take();
@@ -448,7 +444,7 @@ async fn state_replies(
         let Ok(sample) = reply.result() else {
             continue;
         };
-        if sample.key_expr().as_str().contains('*') {
+        if sample.key_expr().is_wild() {
             continue;
         }
         out.push(sample_of(sample, SampleVia::Get));
@@ -459,9 +455,8 @@ async fn state_replies(
 /// The reader's state beside the book: what resolves keys, and what it
 /// watches of itself.
 struct Reader<'a> {
-    session: Session,
+    seeder: Seeder,
     spec: TelemetrySpec,
-    presence_scope: crate::bus::presence::Scope,
     catalog: Option<Catalog>,
     store: &'a BundleStore,
     offline: &'a ContractSet,
@@ -549,52 +544,131 @@ impl Reader<'_> {
         }
     }
 
+    /// The window: every delivery folded as it comes, and a seed owed by a
+    /// loss read again, until `deadline`, which a seed's read keeps to too
+    /// ([`Reader::reseed`]): a window ends at its end, however many losses
+    /// it had. What the queue holds then, and its losses, are folded last.
+    async fn window(
+        &mut self,
+        book: &mut TelemetryBook,
+        rx: &mut tokio::sync::mpsc::Receiver<Delivery>,
+        deadline: tokio::time::Instant,
+    ) {
+        loop {
+            if self.owed_seed {
+                self.reseed(book, rx, deadline).await;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::select! {
+                () = tokio::time::sleep_until(deadline) => break,
+                d = rx.recv() => match d {
+                    Some(d) => self.fold(book, d),
+                    None => break,
+                },
+            }
+        }
+        self.drain(book, rx);
+        self.losses(book);
+    }
+
     /// A liveliness read of the owners' tokens, then what the queue
-    /// delivered meanwhile: its token moves folded after the seed, in order
-    /// ([`TelemetryBook::seed`]), its samples folded before it, with no
-    /// presence. A seed that lost deliveries itself is read again, once.
+    /// delivered meanwhile, as [`TelemetryBook::seed`] folds it: the token
+    /// moves after the seed, in order, and the samples before it, with no
+    /// presence. A loss the queue counted during the read is folded before
+    /// those samples, so every pair across it has none. A read that lost
+    /// deliveries itself is made again, once, and the token moves drained
+    /// meanwhile are kept for the seed that stands, never dropped: a move is
+    /// never lost, and a move during a seed is a move (the book's). A seed
+    /// that cannot stand — a read that fails, or loses twice, or that
+    /// `deadline` cuts short — says why in [`Reader::seed`], folds the moves
+    /// it drained as live ones, and leaves presence where the loss left it,
+    /// unobservable; one that lost twice is owed again.
     async fn reseed(
         &mut self,
         book: &mut TelemetryBook,
         rx: &mut tokio::sync::mpsc::Receiver<Delivery>,
+        deadline: tokio::time::Instant,
     ) {
         self.owed_seed = false;
-        for _ in 0..2 {
-            let read = crate::bus::presence::read_tokens(
-                &self.session,
-                &self.presence_scope,
-                self.spec.timeout,
-            )
-            .await;
-            let observed: Observed = match read {
-                Ok(o) => o,
-                Err(e) => {
-                    self.seed = Some(Err(crate::one_line(&e)));
-                    return;
-                }
-            };
-            let mut then = Vec::new();
-            while let Ok(d) = rx.try_recv() {
-                match d {
-                    Delivery::Token { key, held } => then.push((key, held)),
-                    Delivery::Sample(s) => self.fold_sample(book, s),
-                }
-            }
-            let refused = self.refused.swap(0, Ordering::Relaxed);
-            if refused > 0 {
-                book.lose(refused);
-                continue;
-            }
-            book.seed(&observed, then.iter().map(|(k, h)| (k.as_str(), *h)));
-            let c = Catalog::new(&observed);
-            self.seed = Some(Ok(SeedSeen {
-                selector: observed.selector.clone(),
-                complete: observed.complete,
-                services: c.addresses().filter(|a| c.has_instance(a)).count(),
-            }));
+        if !book.reads_presence() {
             return;
         }
-        self.owed_seed = true;
+        let mut then: Vec<(String, bool)> = Vec::new();
+        let failed = 'read: {
+            for _ in 0..2 {
+                let observed: Observed =
+                    match tokio::time::timeout_at(deadline, self.seeder.read()).await {
+                        Ok(Ok(o)) => o,
+                        Ok(Err(e)) => break 'read crate::one_line(&e),
+                        Err(_) => {
+                            break 'read "the window ended before the presence seed was read"
+                                .to_owned();
+                        }
+                    };
+                let mut samples = Vec::new();
+                while let Ok(d) = rx.try_recv() {
+                    match d {
+                        Delivery::Token { key, held } => then.push((key, held)),
+                        Delivery::Sample(s) => samples.push(s),
+                    }
+                }
+                let refused = self.refused.swap(0, Ordering::Relaxed);
+                if refused > 0 {
+                    book.lose(refused);
+                }
+                for s in samples {
+                    self.fold_sample(book, s);
+                }
+                if refused > 0 {
+                    continue;
+                }
+                book.seed(&observed, then.iter().map(|(k, h)| (k.as_str(), *h)));
+                let c = Catalog::new(&observed);
+                self.seed = Some(Ok(SeedSeen {
+                    selector: observed.selector.clone(),
+                    complete: observed.complete,
+                    services: c.addresses().filter(|a| c.has_instance(a)).count(),
+                }));
+                return;
+            }
+            self.owed_seed = true;
+            "the read lost deliveries itself, twice".to_owned()
+        };
+        for (k, h) in &then {
+            book.token(k, *h);
+        }
+        self.seed = Some(Err(failed));
+    }
+}
+
+/// Where a seed's liveliness read is made: the bus, or, in a test, a stand-in.
+enum Seeder {
+    Bus {
+        session: Session,
+        scope: crate::bus::presence::Scope,
+        timeout: Duration,
+    },
+    #[cfg(test)]
+    Fake(std::sync::Arc<dyn Fn() -> FakeRead + Send + Sync>),
+}
+
+#[cfg(test)]
+type FakeRead =
+    std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<Observed>> + Send>>;
+
+impl Seeder {
+    async fn read(&self) -> crate::Result<Observed> {
+        match self {
+            Seeder::Bus {
+                session,
+                scope,
+                timeout,
+            } => crate::bus::presence::read_tokens(session, scope, *timeout).await,
+            #[cfg(test)]
+            Seeder::Fake(f) => f().await,
+        }
     }
 }
 
@@ -636,5 +710,137 @@ mod tests {
         let other = TelemetryScope::parse("zk2/lab/other/**").unwrap();
         assert_eq!(other.subscription(drops), None);
         assert!(TelemetryScope::parse("lab/**").is_err(), "base-relative");
+    }
+
+    const I1: &str = "00000000000000a1";
+    const I2: &str = "00000000000000a2";
+
+    fn instance(i: &str) -> String {
+        format!("zk2/lab/meter/@zk/instance/{i}")
+    }
+
+    fn observed(instances: &[&str]) -> Observed {
+        let keys: Vec<String> = instances.iter().map(|i| instance(i)).collect();
+        Observed::from_keys("zk2/*/*/@zk/**", &keys, true)
+    }
+
+    /// A reader with no session: its seeds read through `seeder`.
+    fn reader<'a>(
+        store: &'a BundleStore,
+        offline: &'a ContractSet,
+        seeder: Seeder,
+        refused: Arc<AtomicU64>,
+    ) -> Reader<'a> {
+        Reader {
+            seeder,
+            spec: TelemetrySpec::new(Duration::from_millis(100), Duration::from_secs(1)),
+            catalog: None,
+            store,
+            offline,
+            by_resource: BTreeMap::new(),
+            resolved: BTreeMap::new(),
+            refused,
+            discarded: Arc::default(),
+            unresolved: 0,
+            stall: None,
+            stall_seen: StallSeen::default(),
+            owed_seed: false,
+            seed: None,
+        }
+    }
+
+    fn held(book: &TelemetryBook) -> Vec<String> {
+        let addr: zenkey_model::grammar::Addr = "lab/meter".parse().unwrap();
+        book.presence()
+            .and_then(|p| p.address(&addr))
+            .map(|a| a.instance_tokens().map(ToString::to_string).collect())
+            .unwrap_or_default()
+    }
+
+    /// Review of PR #827: a seed read again because its first read lost
+    /// deliveries keeps the token moves that read drained. Here O re-mints
+    /// (I2 declared, I1 withdrawn) during the first read, which the queue
+    /// overflowed on, and the second read is answered as stale as the first:
+    /// the moves still land, so presence holds I2 alone, never I1.
+    #[tokio::test]
+    async fn a_token_move_during_a_retried_seed_is_kept() {
+        let (store, offline) = (BundleStore::new(Duration::ZERO), ContractSet::new());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let refused: Arc<AtomicU64> = Arc::default();
+        let calls = Arc::new(AtomicU64::new(0));
+        let seeder = {
+            let (tx, refused, calls) = (tx.clone(), Arc::clone(&refused), Arc::clone(&calls));
+            Seeder::Fake(Arc::new(move || {
+                let (tx, refused, calls) = (tx.clone(), Arc::clone(&refused), Arc::clone(&calls));
+                Box::pin(async move {
+                    if calls.fetch_add(1, Ordering::Relaxed) == 0 {
+                        for (i, up) in [(I2, true), (I1, false)] {
+                            tx.send(Delivery::Token {
+                                key: instance(i),
+                                held: up,
+                            })
+                            .await
+                            .unwrap();
+                        }
+                        refused.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(observed(&[I1]))
+                })
+            }))
+        };
+        let mut r = reader(&store, &offline, seeder, Arc::clone(&refused));
+        let mut book = TelemetryBook::new(Some(crate::bus::presence::Scope::all()), Instant::now());
+        book.seed(&observed(&[I1]), std::iter::empty::<(&str, bool)>());
+        book.lose(1);
+        let far = tokio::time::Instant::now() + Duration::from_secs(30);
+        r.reseed(&mut book, &mut rx, far).await;
+        assert_eq!(calls.load(Ordering::Relaxed), 2, "read again after a loss");
+        assert!(matches!(r.seed, Some(Ok(_))), "{:?}", r.seed);
+        assert_eq!(held(&book), [I2], "the re-mint was not lost");
+        assert_eq!(book.lost(), 2);
+        drop(tx);
+    }
+
+    /// Review of PR #827: a window ends at its deadline however many losses
+    /// it has. Every seed's read here takes a second and loses deliveries,
+    /// so each loss owes another seed; the window of 600 ms still ends at
+    /// 600 ms, and the seed it cut short says so.
+    #[tokio::test]
+    async fn a_window_with_repeated_losses_ends_at_its_deadline() {
+        let (store, offline) = (BundleStore::new(Duration::ZERO), ContractSet::new());
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Delivery>(16);
+        let refused: Arc<AtomicU64> = Arc::default();
+        let seeder = {
+            let refused = Arc::clone(&refused);
+            Seeder::Fake(Arc::new(move || {
+                let refused = Arc::clone(&refused);
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    refused.fetch_add(1, Ordering::Relaxed);
+                    Ok(observed(&[]))
+                })
+            }))
+        };
+        let mut r = reader(&store, &offline, seeder, Arc::clone(&refused));
+        let mut book = TelemetryBook::new(Some(crate::bus::presence::Scope::all()), Instant::now());
+        r.owed_seed = true;
+        let started = tokio::time::Instant::now();
+        r.window(&mut book, &mut rx, started + Duration::from_millis(600))
+            .await;
+        let took = started.elapsed();
+        assert!(
+            took < Duration::from_millis(900),
+            "the window overran: {took:?}"
+        );
+        assert!(
+            matches!(&r.seed, Some(Err(why)) if why.contains("window ended")),
+            "{:?}",
+            r.seed
+        );
+        assert!(
+            book.presence_basis() != Some(crate::model::presence_live::PresenceBasis::Complete),
+            "a seed cut short restores nothing"
+        );
+        drop(tx);
     }
 }
