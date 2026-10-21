@@ -275,14 +275,21 @@ lands at the bus root, where no consumer of the deployment listens.
   `compat`, `zk2 contract check-history`). A move from v1 to zk2 is each
   adopter's own (#614).
 - **Profile-backed checks** stay dark until their profiles exist (#613).
-  These are kinds, blobs and export, and `field-stuck`, which judges against
-  a declared freshness (`freshness.v1`). Configuration came back with
+  These are blobs and export, and `field-stuck`, which judges against a
+  declared freshness (`freshness.v1`). Configuration came back with
   `config.v1` (#768), and alerts with `alarms.v1` (#800): `zenctl alarms`,
   the watchdog's `alert-firing`, the doctor's `alarm-key` and `alarm-stale`,
   and `check conform`'s `alarm-key` and `alarm-document` ask its §5
   questions; zenwatch's `alerts` notifies the first per alarm key, as it
   moves, and its `alert-firing` the second, as the watchdog does (#800,
-  AD).
+  AD). Kinds came back with `telemetry.v1` (#819, TC), in place of v1's
+  `kind-mismatch`: `zenctl telemetry` reads each metric member's kind and
+  unit, its samples' conformance and each pair's continuity, with how its
+  epoch was had; the doctor's `telemetry-declaration` and
+  `telemetry-sample` (`--deep`) and `check conform`'s
+  `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`
+  ask its §5 questions; and a metric sample that does not conform is
+  `invalid` wherever a payload is checked, its reasons named.
   The population budget was among them until core 0.24 (#735) made it core
   (spec §2.7): `check conform`'s `budget`, `budget-window` and `rate` cases and the doctor's
   `population-over-bound` ask it.

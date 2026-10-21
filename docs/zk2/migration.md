@@ -218,7 +218,7 @@ rest of #613 is not written:
 | `redundancy.v1` | exclusivity: O1's at-most-once holds only while one instance serves. ZenSight's catalog and desired singletons |
 | `desired.v1` | durable commands keyed by their target; ZenSight's desired state |
 | `link.v1` | per-resource exposure across a constrained face; zenoh-modem's RF and SBD faces |
-| `telemetry.v1` | Specified (#819, text 0.2): its vocabulary and standard schema, `telemetry.v1.Point`, and the session-free reading of a declaration, a sample's bytes, and a pair's continuity and rate (`zenkey_model::telemetry`); the runtime's writers refuse what a metric's declaration refuses and write the epoch, the instance id (`zenkey::telemetry`, #819's TB). Still waiting: the fleet's continuity reader, `check conform`'s and the doctor's `telemetry-*` in place of `kind-mismatch`, and zengui's units (its TC) |
+| `telemetry.v1` | Specified (#819, text 0.3): its vocabulary and standard schema, `telemetry.v1.Point`, and the session-free reading of a declaration, a sample's bytes, and a pair's continuity and rate (`zenkey_model::telemetry`); the runtime's writers refuse what a metric's declaration refuses and write the epoch, the instance id (`zenkey::telemetry`, #819's TB); the fleet's continuity reader (`zenkey_fleet::model::telemetry`), `zenctl telemetry`, `check conform`'s `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`, and the doctor's `telemetry-declaration` and `telemetry-sample`, in place of `kind-mismatch`, with every payload check reading a metric sample by the profile (#819's TC). Still waiting: zengui's units (its TD) |
 | `views.v1` | ZenSight's GUI's presentation documents |
 | `timing.v1`, `arbitration.v1`, `clock.v1` | deadlines, arbitration between commanders, simulated time |
 | `jobs.v1` | work that outlives a query timeout |
@@ -228,11 +228,13 @@ rest of #613 is not written:
   Appendix D), so tcgui's, zenoh-modem's and ZenSight's contracts load
   today. What the profile itself defines, its rules and its standard
   contract, is not there to rely on.
-- **Dark in the tools until their profiles exist:** `blob`, `export` and
-  the kind checks (`kind-mismatch`). `config` came back with `config.v1`
-  (#768), and the alert rules with `alarms.v1` (#800): the watchdog's
-  `alert-firing`, and zenwatch's `alerts` and `alert-firing` (one
-  notification per alarm, its selector base-relative: `zk2/…`).
+- **Dark in the tools until their profiles exist:** `blob` and `export`.
+  `config` came back with `config.v1` (#768), the alert rules with
+  `alarms.v1` (#800): the watchdog's `alert-firing`, and zenwatch's
+  `alerts` and `alert-firing` (one notification per alarm, its selector
+  base-relative: `zk2/…`), and the kind checks with `telemetry.v1` (#819):
+  `zenctl telemetry`, the `telemetry-*` checks and cases, and a metric
+  sample read by the profile wherever a payload is checked.
   `field-stuck` has its profile in `freshness.v1`, and waits to be ported
   onto it (tooling guide §6).
 - **The population budget is not dark.** It went dark at FJ9 with v1's

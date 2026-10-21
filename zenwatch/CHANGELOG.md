@@ -202,7 +202,7 @@ a rename.
 | `unregistered-traffic` | — | no registry: a key's identity is `zenctl echo`'s lens |
 | `rate-over-declared` | — | `zenctl check conform`'s `rate` |
 | `field-vanished`, `field-stuck`, `field-new` | — | `zenctl field` |
-| `kind-mismatch` | — | dark until its profile exists (#613) |
+| `kind-mismatch` | `telemetry-declaration`, `telemetry-sample` (`deep`) | `telemetry.v1` (#819, TC): an invalid metric declaration, a state metric reply that does not conform; a counter that went backwards is `zenctl telemetry`'s, over a window |
 | — | `split-brain`, `binding-unsatisfied`, `presence-over-budget`, `shm-memlock-low`, `health-failed`, `health-degraded`, `health-stale`, `health-inconsistent`, `hostid-duplicate` | new questions |
 | a finding absent from the next run: `resolved` | `resolved` only when the run established the finding's check | a check unobservable or not asked has not seen the finding go: it stays standing |
 | coverage: producers, introspect, describe, `registry diff` | coverage: namespace, the presence read, routers, `health.v1` and its clock, checks established / unobservable (named) / not asked | |
