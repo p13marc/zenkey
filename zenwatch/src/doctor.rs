@@ -867,7 +867,7 @@ mod tests {
         );
         assert!(
             n.message
-                .contains("checks: 25 established, 0 unobservable, 0 not asked"),
+                .contains("checks: 27 established, 0 unobservable, 0 not asked"),
             "{}",
             n.message
         );
@@ -1002,7 +1002,7 @@ mod tests {
             out[0]
                 .notification
                 .message
-                .contains("checks: 25 established"),
+                .contains("checks: 27 established"),
             "{}",
             out[0].notification.message
         );
@@ -1153,7 +1153,7 @@ mod tests {
         assert!(line.contains("routers: not asked"), "{line}");
         assert!(line.contains("health: not asked"), "{line}");
         assert!(
-            line.contains("checks: 1 established, 0 unobservable, 24 not asked"),
+            line.contains("checks: 1 established, 0 unobservable, 26 not asked"),
             "{line}"
         );
         assert!(line.contains("namespace \"prod\""), "{line}");

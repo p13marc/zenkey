@@ -299,6 +299,22 @@ pub fn doctor_report() -> DoctorReport {
                 }],
                 "unused",
             ),
+            // telemetry.v1 (#819, TC): an invalid declaration, a linter's
+            // warning; the samples not asked without --deep.
+            CheckReport::of(
+                CheckId::TelemetryDeclaration,
+                vec![finding(
+                    CheckId::TelemetryDeclaration,
+                    DoctorSeverity::Warning,
+                    "meter.v1 sha256:5d1c stream/level",
+                    "implemented by lab/meter; its declaration is invalid: the type cannot carry \
+                     the declared kind (not_a_carrier) — no reader reads its members' kind, \
+                     conformance or continuity (telemetry.v1 §2.2)",
+                )],
+                vec![],
+                "unused",
+            ),
+            CheckReport::not_asked(CheckId::TelemetrySample),
         ],
         unobservable: None,
     }
@@ -484,6 +500,280 @@ pub fn health_report() -> HealthReport {
             unobservable: 1,
             not_asked: 1,
         },
+        unobservable: None,
+    }
+}
+
+/// `zenctl telemetry` (#819, TC): §5's answers in every token — a Point
+/// counter whose epoch rides in-band, a bare counter whose epoch is had by
+/// presence and that went backwards within it, a gauge with no continuity
+/// and a sample of the wrong type, and a resource whose declaration is
+/// invalid — the decrease and the non-conforming sample the findings.
+pub fn telemetry_report() -> TelemetryReport {
+    use serde_json::json;
+    use std::collections::BTreeMap;
+    let declared = |carrier: &str,
+                    kind: Option<&str>,
+                    unit: Option<&str>,
+                    epoch_in: Option<&str>,
+                    says: &str| {
+        TelemetryDeclaration {
+            answer: DeclarationToken::Declared,
+            reasons: vec![],
+            carrier: Some(carrier.into()),
+            kind: kind.map(Into::into),
+            unit: unit.map(Into::into),
+            buckets: None,
+            semantic: None,
+            epoch_in: epoch_in.map(Into::into),
+            says: says.into(),
+        }
+    };
+    let resource = |resource: &str, declaration, members| TelemetryResource {
+        address: "lab/meter".into(),
+        iface: "meter.v1".into(),
+        fingerprint: "sha256:cd33b1f7".into(),
+        resource: resource.into(),
+        selector: format!("zk2/lab/meter/meter.v1/{resource}"),
+        declaration,
+        members,
+    };
+    let samples = |received, conforms, does_not: &[(&str, u64)]| TelemetrySamples {
+        received,
+        conforms,
+        does_not: does_not.iter().map(|(_, n)| n).sum(),
+        unobservable: 0,
+        unobservable_reason: None,
+        not_kept: 0,
+        deletes: 0,
+        problems: does_not
+            .iter()
+            .map(|(p, n)| ((*p).to_owned(), *n))
+            .collect::<BTreeMap<_, _>>(),
+        latest_does_not: does_not.iter().map(|(p, _)| (*p).to_owned()).collect(),
+    };
+    let continuity =
+        |same, reset, decreased, not_asked, in_band, by_presence, assumed| TelemetryContinuity {
+            pairs: same + reset + decreased + not_asked,
+            same_epoch: same,
+            reset,
+            decreased,
+            unobservable: 0,
+            not_asked,
+            in_band,
+            by_presence,
+            assumed,
+        };
+    #[allow(clippy::too_many_arguments)]
+    let pair = |a: u64,
+                b: u64,
+                continuity,
+                epoch,
+                via: Option<&str>,
+                rate: Option<f64>,
+                rate_unit: Option<&str>,
+                no_rate: Option<&str>,
+                base: &str| TelemetryPair {
+        earlier: json!(a),
+        later: json!(b),
+        continuity,
+        epoch,
+        via: via.map(Into::into),
+        presence: PairPresenceToken::Observed,
+        rate,
+        rate_unit: rate_unit.map(Into::into),
+        no_rate: no_rate.map(Into::into),
+        base: base.into(),
+        elapsed_s: 1.0,
+    };
+    let member = |resource: &str, kind: &str, unit: Option<&str>| TelemetryMember {
+        key: format!("zk2/lab/meter/meter.v1/{resource}"),
+        address: "lab/meter".into(),
+        iface: "meter.v1".into(),
+        resource: resource.into(),
+        kind: Some(kind.into()),
+        kind_from: Some("declared".into()),
+        unit: unit.map(Into::into),
+        unit_from: unit.map(|_| "declared".into()),
+        samples: samples(0, 0, &[]),
+        latest: None,
+        continuity: continuity(0, 0, 0, 0, 0, 0, 0),
+        pairs: vec![],
+        rate: None,
+    };
+    let mut frames = member("stream/frames", "counter", Some("1"));
+    frames.samples = samples(4, 3, &[("tag_disagrees", 1)]);
+    frames.latest = Some(json!(3));
+    frames.continuity = continuity(1, 1, 0, 0, 2, 0, 0);
+    frames.pairs = vec![
+        pair(
+            10,
+            20,
+            ContinuityToken::SameEpoch,
+            Some(EpochToken::Established),
+            Some("in_band"),
+            Some(10.0),
+            Some("1/s"),
+            None,
+            "timestamp",
+        ),
+        pair(
+            20,
+            3,
+            ContinuityToken::Reset,
+            Some(EpochToken::Established),
+            Some("in_band"),
+            None,
+            None,
+            Some("reset"),
+            "timestamp",
+        ),
+    ];
+    frames.rate = Some(TelemetryRate {
+        per_s: 10.0,
+        unit: Some("1/s".into()),
+    });
+    let mut drops = member("stream/drops", "counter", None);
+    drops.samples = samples(3, 3, &[]);
+    drops.latest = Some(json!(7));
+    drops.continuity = continuity(1, 0, 1, 0, 0, 2, 0);
+    drops.pairs = vec![
+        pair(
+            5,
+            10,
+            ContinuityToken::SameEpoch,
+            Some(EpochToken::Established),
+            Some("presence"),
+            Some(5.0),
+            None,
+            None,
+            "arrival",
+        ),
+        pair(
+            10,
+            7,
+            ContinuityToken::Decreased,
+            Some(EpochToken::Established),
+            Some("presence"),
+            None,
+            None,
+            Some("decreased"),
+            "arrival",
+        ),
+    ];
+    drops.rate = Some(TelemetryRate {
+        per_s: 5.0,
+        unit: None,
+    });
+    let mut level = member("stream/level", "gauge", Some("dBm"));
+    level.samples = samples(3, 2, &[("wrong_type", 1)]);
+    level.latest = Some(json!(-70.5));
+    level.continuity = continuity(0, 0, 0, 1, 0, 0, 0);
+    level.pairs = vec![TelemetryPair {
+        earlier: json!(-71.0),
+        later: json!(-70.5),
+        continuity: ContinuityToken::NotAsked,
+        epoch: None,
+        via: None,
+        presence: PairPresenceToken::Observed,
+        rate: None,
+        rate_unit: None,
+        no_rate: Some("kind".into()),
+        base: "arrival".into(),
+        elapsed_s: 1.0,
+    }];
+    TelemetryReport {
+        namespace: "acme".into(),
+        selector: None,
+        presence: Some(TelemetryPresence {
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            services: 1,
+            basis: "complete".into(),
+        }),
+        across_face: false,
+        window_s: 5.0,
+        asked: vec![
+            "zk2/*/*/@zk/**".into(),
+            "zk2/*/*/@zk/instance/*".into(),
+            "zk2/*/*/@zk/member/**".into(),
+            "zk2/lab/meter/meter.v1/stream/drops".into(),
+            "zk2/lab/meter/meter.v1/stream/frames".into(),
+            "zk2/lab/meter/meter.v1/stream/level".into(),
+        ],
+        totals: TelemetryTotals {
+            resources: 4,
+            invalid: 1,
+            members: 3,
+            samples: 10,
+            conforms: 8,
+            does_not: 2,
+            unobservable: 0,
+            pairs: 5,
+            decreased: 1,
+            established: 4,
+            assumed: 0,
+        },
+        resources: vec![
+            resource(
+                "stream/drops",
+                declared(
+                    "bare",
+                    Some("counter"),
+                    None,
+                    None,
+                    "declared: a bare carrying counter, unit unknown unless a Point says one; \
+                          no in-band epoch: presence is its epoch's evidence",
+                ),
+                1,
+            ),
+            resource(
+                "stream/frames",
+                declared(
+                    "point",
+                    Some("counter"),
+                    Some("1"),
+                    Some("point"),
+                    "declared: a point carrying counter, unit 1; an in-band epoch in the point",
+                ),
+                1,
+            ),
+            resource(
+                "stream/level",
+                declared(
+                    "bare",
+                    Some("gauge"),
+                    Some("dBm"),
+                    None,
+                    "declared: a bare carrying gauge, unit dBm; no in-band epoch: presence \
+                          is its epoch's evidence",
+                ),
+                1,
+            ),
+            resource(
+                "stream/odd",
+                TelemetryDeclaration {
+                    answer: DeclarationToken::Invalid,
+                    reasons: vec!["not_a_carrier".into()],
+                    carrier: None,
+                    kind: None,
+                    unit: None,
+                    buckets: None,
+                    semantic: None,
+                    epoch_in: None,
+                    says: "invalid: the type cannot carry the declared kind (not_a_carrier) — its \
+                           members' kind, conformance and continuity are unobservable \
+                           (telemetry.v1 §2.2)"
+                        .into(),
+                },
+                0,
+            ),
+        ],
+        members: vec![drops, frames, level],
+        lost: 0,
+        refused: 0,
+        unresolved: 0,
+        skipped: vec![],
         unobservable: None,
     }
 }

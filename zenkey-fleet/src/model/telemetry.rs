@@ -162,6 +162,7 @@ pub struct TelemetryScope {
     selector: Option<(String, OwnedKeyExpr)>,
     system: Option<String>,
     service: Option<String>,
+    iface: Option<IfaceId>,
 }
 
 /// A chunk usable as a literal position of a narrower scope.
@@ -182,7 +183,14 @@ impl TelemetryScope {
             selector: None,
             system: Some(addr.system.to_string()),
             service: Some(addr.service.to_string()),
+            iface: None,
         }
+    }
+
+    /// The scope narrowed to one interface's resources (`check conform`).
+    pub fn with_iface(mut self, iface: IfaceId) -> TelemetryScope {
+        self.iface = Some(iface);
+        self
     }
 
     /// A selector, refused when it is not a key expression or not
@@ -204,6 +212,7 @@ impl TelemetryScope {
             selector: Some((selector.to_owned(), ke)),
             system,
             service,
+            iface: None,
         })
     }
 
@@ -246,7 +255,7 @@ impl TelemetryScope {
     /// key expression, or the selector where that is narrower. `None` when
     /// the two do not intersect.
     pub fn subscription(&self, r: &MetricResource) -> Option<String> {
-        if !self.selects_owner(&r.address) {
+        if !self.selects_owner(&r.address) || self.iface.as_ref().is_some_and(|i| *i != r.iface) {
             return None;
         }
         let Some((given, sel)) = &self.selector else {

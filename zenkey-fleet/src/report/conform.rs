@@ -146,11 +146,26 @@ pub enum CaseId {
     /// the violation; the SHOULDs (framed input, label names) are named in
     /// a pass.
     AlarmDocument,
+    /// Every metric resource of the service declares itself validly
+    /// (`telemetry.v1` §2.2, §2.4; #819): an invalid declaration, read from
+    /// the contract, is the violation, its reasons named — no reader reads
+    /// its members.
+    TelemetryDeclaration,
+    /// Every sample of a metric resource heard in the window conforms
+    /// (`telemetry.v1` §2.6; #819): one that does not is the violation, its
+    /// reasons named.
+    TelemetrySample,
+    /// No counter or histogram of the service decreased within an
+    /// established epoch over the window (`telemetry.v1` §2.10; #819): a
+    /// decrease within one, in-band or by presence, is the violation; a
+    /// decrease read as a reset is none. A window whose every pair had its
+    /// epoch assumed answers nothing.
+    TelemetryContinuity,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 21] = [
+    pub const ALL: [CaseId; 24] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -172,6 +187,9 @@ impl CaseId {
         CaseId::ConfigDryRun,
         CaseId::AlarmKey,
         CaseId::AlarmDocument,
+        CaseId::TelemetryDeclaration,
+        CaseId::TelemetrySample,
+        CaseId::TelemetryContinuity,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -198,6 +216,9 @@ impl CaseId {
             CaseId::ConfigDryRun => "config-dry-run",
             CaseId::AlarmKey => "alarm-key",
             CaseId::AlarmDocument => "alarm-document",
+            CaseId::TelemetryDeclaration => "telemetry-declaration",
+            CaseId::TelemetrySample => "telemetry-sample",
+            CaseId::TelemetryContinuity => "telemetry-continuity",
         }
     }
 
@@ -231,6 +252,9 @@ impl CaseId {
             CaseId::ConfigDryRun => "config.v1 §2.9",
             CaseId::AlarmKey => "alarms.v1 §2.2",
             CaseId::AlarmDocument => "alarms.v1 §2.4",
+            CaseId::TelemetryDeclaration => "telemetry.v1 §2.2",
+            CaseId::TelemetrySample => "telemetry.v1 §2.6",
+            CaseId::TelemetryContinuity => "telemetry.v1 §2.10",
         }
     }
 }
@@ -430,6 +454,9 @@ mod tests {
                 "config-dry-run",
                 "alarm-key",
                 "alarm-document",
+                "telemetry-declaration",
+                "telemetry-sample",
+                "telemetry-continuity",
             ]
         );
         for c in CaseId::ALL {
