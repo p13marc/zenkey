@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.34** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.35** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -33,8 +33,10 @@ example made exact, in 0.30 what a south region's declaration grant
 covers, as compiling `link.v1` measured, in 0.31 whether a principal's
 own keys are in its complement, in 0.32 that its complement is taken
 per message and flow, in 0.33 that a principal is bound by one kind
-of name, and in 0.34 what `alarms.v1` needed: its vocabulary
-published empty, without the interim `severity_default`).
+of name, in 0.34 what `alarms.v1` needed: its vocabulary
+published empty, without the interim `severity_default`, and in 0.35
+what `telemetry.v1` needed: a standard schema as a profile's first
+point, and its vocabulary published).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -224,9 +226,11 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
     too (§4.3). That change, and presence, are how a consumer sees the
     discontinuity.
   - A counter that crosses a face where neither is visible SHOULD carry
-    its epoch in-band, in its value or its attachment, as a profile's
-    counter type does. Without one, a reader across the face reads a
-    decrease as a reset ([`link.v1`](profiles/link/v1.md) §2.13, 0.29).
+    its epoch in-band, in its value or its attachment, as
+    [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9,
+    0.35). Without one, a reader across the face reads a decrease as a
+    reset ([`link.v1`](profiles/link/v1.md) §2.13, 0.29;
+    `telemetry.v1` §2.10, §2.14).
 
   `[Sc: presence.md §3]`
 - **Moving a service to another host changes no key.**
@@ -2757,19 +2761,33 @@ A **profile** is an independently versioned specification, such as
 `timing.v1` or `archive.v1`. The core never depends on one. Where a rule
 here names a profile ([`health.v1`](profiles/health/v1.md) for reporting,
 [`link.v1`](profiles/link/v1.md) for face configuration, `archive.v1` for archives,
-[`freshness.v1`](profiles/freshness/v1.md) for a value's age), it names
+[`freshness.v1`](profiles/freshness/v1.md) for a value's age,
+[`telemetry.v1`](profiles/telemetry/v1.md) for a counter's epoch), it names
 the standard way to meet the rule, which the core states in its own
 terms. A profile contributes through these four points, and through no
 other:
-1. **A standard contract**: an interface it defines. It lives in the
-   profile's directory, published in [`profiles/.history/`](profiles/.history/)
-   (§9.7). The first is `health.v1`'s
-   ([`profiles/health/health.v1.toml`](profiles/health/health.v1.toml),
-   0.23); `config.v1`'s and `alarms.v1`'s followed
-   ([`profiles/alarms/alarms.v1.toml`](profiles/alarms/alarms.v1.toml),
-   0.34). An instance implementing it lists the contract's `uses` in its
-   descriptor's `profiles`, as for any contract (§3.3), and the interface
-   in its `interfaces`.
+1. **A standard contract or a standard schema.**
+   - **A standard contract** is an interface the profile defines. It
+     lives in the profile's directory, published in
+     [`profiles/.history/`](profiles/.history/) (§9.7). The first is
+     `health.v1`'s
+     ([`profiles/health/health.v1.toml`](profiles/health/health.v1.toml),
+     0.23); `config.v1`'s and `alarms.v1`'s followed
+     ([`profiles/alarms/alarms.v1.toml`](profiles/alarms/alarms.v1.toml),
+     0.34). An instance implementing it lists the contract's `uses` in its
+     descriptor's `profiles`, as for any contract (§3.3), and the
+     interface in its `interfaces`.
+   - **A standard schema** (0.35) is a schema artifact that contracts
+     list, as they list any file (§9.4). It lives in the profile's
+     directory. Its types are the profile's when the artifact's id (§7.1,
+     §9.4: the hash of its JCS bytes) is one the profile publishes, so a
+     contract listing a copy, byte for byte or JCS-equal, carries the
+     profile's types, and a type of the same name in another artifact
+     does not. The first is `telemetry.v1`'s
+     ([`profiles/telemetry/telemetry.v1.json`](profiles/telemetry/telemetry.v1.json),
+     its §3, 0.35). A standard schema adds no interface, and a
+     contract that lists it is classified and published as any other
+     (§9.7, §9.8).
 2. **An annotation vocabulary.** Keys are `<profile>.<key>`. A contract
    that uses one MUST list the profile in `uses`, which is fingerprinted.
    `[F: contracts/e020-annotation]` Until a profile publishes its
@@ -2779,9 +2797,12 @@ other:
    outside one: no W105. `[F: contracts/ok-profile-without-vocabulary]`
    A published vocabulary replaces its interim table, and W105 reads it
    the same way (0.21). The first is `freshness.v1`'s
-   ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4), and
-   `link.v1`'s followed ([`profiles/link/v1.md`](profiles/link/v1.md) §4,
-   0.29). A profile may publish an empty one, as `alarms.v1` does
+   ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4);
+   `link.v1`'s ([`profiles/link/v1.md`](profiles/link/v1.md) §4, 0.29)
+   and `telemetry.v1`'s
+   ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, 0.35)
+   followed.
+   A profile may publish an empty one, as `alarms.v1` does
    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4, 0.34): it
    defines no key, so W105 warns of every key under its name.
    `[F: contracts/w105-alarms-vocabulary]`
@@ -3238,6 +3259,7 @@ profile's own table replaces its interim one.
 | `freshness` | `ttl_s` | [`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4 |
 | `link` | `exposure` | [`profiles/link/v1.md`](profiles/link/v1.md) §4 (0.29) |
 | `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 (0.34) |
+| `telemetry` | `kind`, `unit`, `buckets`, `semantic` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4 (0.35) |
 
 `link.downsample_ms` left with the interim `link` row (0.29): a face's
 rate is its face policy's `interval_s` (`link.v1` §2.8), a deployment
@@ -3256,7 +3278,6 @@ publishes its own):
 | Profile | Keys |
 |---|---|
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` |
-| `telemetry` | `unit`, `kind`, `buckets`, `semantic` |
 | `arbitration` | `policy` |
 | `desired` | `target_param`, `target` |
 | `media` | `tiers`, `tier_param`, `frame_clock`, `control`, `receiver_report` |

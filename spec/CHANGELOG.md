@@ -3,6 +3,70 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.35 — 2026-10-21: what `telemetry.v1` needed of the core (#819)
+
+`telemetry.v1`'s first text (#819, TA) states what a metric is, moves
+ZenSight's `telemetry.v1.json` under `profiles/telemetry/` as the
+profile's standard schema, and publishes the interim `telemetry` row of
+Appendix D. No fixture case changed, and none is added: the profile's
+fixtures are its own.
+
+**Changed: a profile's first point is a standard contract or a standard
+schema (§10).**
+- **The gap.** §10 gave a profile four points, and none for a type that
+  contracts share. `telemetry.v1.Point` is such a type: four ZenSight
+  contracts list one file so that their Points are one type (core §7.1),
+  and a tool reads a metric's kind from it. The file lived in
+  `examples/zk2/zensight/`, an adopter's directory, which no rule tied to
+  the profile.
+- **The rule.** Point 1 is "a standard contract or a standard schema". A
+  standard schema is a schema artifact that contracts list, as any file
+  (§9.4). Its types are the profile's when the artifact's id (§7.1, §9.4:
+  the hash of its JCS bytes) is one the profile publishes, so a contract
+  listing a copy, byte for byte or JCS-equal, carries the profile's
+  types, and a type of the same name in another artifact does not. The
+  first is `telemetry.v1`'s (its §3).
+- **Why by id, and not by name.** A type's identity is already its kind,
+  its name and its artifact (§7.1), so nothing new is needed to tell the
+  profile's Point from another of the same name: the profile publishes
+  the ids, and a reader compares. Every revision's id stays the
+  profile's, so a reader of an old bundle meets an old id and still reads
+  a Point (`telemetry.v1` §2.3).
+
+**Changed: `telemetry.v1`'s vocabulary published (Appendix D, §10).**
+- **The rule.** `telemetry.v1` §4 publishes `kind`, `unit`, `buckets` and
+  `semantic`, the interim row's four keys. Appendix D's published table
+  gains `telemetry`, and the interim row is gone. W105 reads the published
+  table as it reads the interim one (0.21), so no contract's codes change.
+- **What the values mean** is the profile's (§10): its §2.2 reads each
+  value, and its §2.4 says which types carry which kind.
+
+**Changed: a pointer (§1.5).** A counter that crosses a face carries its
+epoch in-band "as `telemetry.v1`'s counter does" (its §2.9), where 0.29
+said "as a profile's counter type does", and the reset it reads is cited
+to `telemetry.v1` §2.10 and §2.14 beside `link.v1` §2.13. §10's list of
+the profiles the core names gains `telemetry.v1`, for a counter's epoch.
+
+**Deliberately not changed.**
+- **The four points stay four.** A standard schema widens point 1: like
+  a standard contract, it is a file a contract names, and it adds no slot
+  to the descriptor, no key and no kind.
+- **No core lint reads an annotation's value.** `telemetry.unit = "°C"`
+  is still E027 for its non-ASCII text (`[F: contracts/e027-ascii]`), and
+  `telemetry.buckets = [0.5, 1e21, -0.0]` on a raw stream still loads
+  (`[F: contracts/ok-float-integral]`), although `telemetry.v1` reads that
+  declaration as invalid (its §2.2). A linter SHOULD warn, as for
+  `freshness.ttl_s` (0.21).
+- **W105 behaves as before.** It reads `telemetry`'s published keys, which
+  are the interim row's, and warns of any other `telemetry.<key>`.
+- **No profile-type reference form.** ZenSight's G12 proposed
+  `"telemetry.v1:Point"`. A contract lists the standard schema as a file
+  and names its types as any other (§7.1): `json:telemetry.v1.Point`.
+- **No standard schema's history.** Unlike a standard contract, a
+  standard schema has no `.history` of its own (§9.7): its ids are
+  published by its profile's text, and the contracts that list it are
+  published in their own histories.
+
 ## 0.34 — 2026-10-20: what `alarms.v1` needed of the core (#800)
 
 `alarms.v1`'s first text (#800, AA) states the profile whose standard
