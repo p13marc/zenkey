@@ -4555,7 +4555,393 @@
           }
         }
       }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "F-150 (0.3): the largest double's shortest text: finite, a gauge",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "json_text": "1.7976931348623157e308"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "F-150 (0.3): above the largest double, below half an ulp past it: it rounds down to the largest double, finite",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "json_text": "1.7976931348623158e308"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "unobservable",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "undecodable"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "F-150 (0.3): past half an ulp beyond the largest double: it rounds to +Infinity, undecodable",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "json_text": "1.7976931348623159e308"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "F-150 (0.3): the largest double, 2^1024 - 2^971, written out as an integer: finite",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "json_text": "179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "unobservable",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "undecodable"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "F-150 (0.3): 2^1024 - 2^970, the tie between the largest double and 2^1024, written out: to even, 2^1024, +Infinity, undecodable",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "json_text": "179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497792"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "conforms",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "F-150 (0.3): one below the tie: it rounds down to the largest double, finite",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "json_text": "179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497791"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "0.3: arrays nested 256 deep, the top one at depth 1: decoded, and no gauge (wrong_type)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "json_text": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "unobservable",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "undecodable"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "0.3: arrays nested 257 deep: past 256, undecodable, never wrong_type",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "json_text": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "0.3: CBOR arrays nested 256 deep: decoded, and no gauge (wrong_type)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "cbor_hex": "81818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818180"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "unobservable",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "undecodable"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "0.3: CBOR arrays nested 257 deep: undecodable, as in JSON",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "cbor_hex": "8181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818180"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "gauge",
+        "kind_from": "declared",
+        "reasons": [
+          "wrong_type"
+        ],
+        "unit": "dBm",
+        "unit_from": "declared"
+      },
+      "note": "0.3: a tag adds no depth: tag 55799 around arrays nested 256 deep is still 256 deep",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.unit": "dBm"
+        },
+        "attachment": null,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "cbor_hex": "d9d9f781818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818180"
+      }
+    },
+    {
+      "expect": {
+        "conformance": "does_not",
+        "kind": "counter",
+        "kind_from": "declared",
+        "reasons": [
+          "epoch_invalid"
+        ],
+        "unit": null,
+        "unit_from": null
+      },
+      "note": "F-151 (0.3): an Epoch attachment is read as strictly as a sample: a lone surrogate escape is not strict JSON, so the attachment does not decode, an epoch present and not a string",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Epoch",
+          "root": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        },
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      },
+      "sample": {
+        "attachment_text": "\"\\ud800\"",
+        "value": 5
+      }
     }
   ],
-  "description": "telemetry.v1 §2.5, §2.6: a resolved resource, as declarations.json writes it, and one sample -> its conformance, and the member's kind and unit as the sample gives them. sample is {\"undecodable\": true} (bytes the core could not decode), or {value, attachment?}: the decoded data item and the decoded attachment, absent when the sample has none; or, since 0.2, the bytes as they came: json_text, the payload's bytes as UTF-8 text, read as strict JSON (UTF-8, RFC 8259, nothing after the value but whitespace, no duplicate member at any depth, no lone surrogate escape, every number finite: anything else is undecodable), or cbor_hex, the payload's bytes in hex, read as CBOR (an integer is major type 0 or 1, or a bignum, tag 2 or 3 around a byte string of any length, the integer it denotes; every other tag, and a tag 2 or 3 around anything else, its content; map keys text, none twice; undefined is null: anything else is undecodable); and attachment_text, the attachment's bytes as UTF-8 text, read as JSON, an attachment that does not decode being an epoch present and not a string. A data item is written as JSON, read by its text: a number with no fraction and no exponent is an integer, read exactly; any other number is the IEEE double it denotes. Three objects of one member stand for what this file's JSON cannot hold: {\"$int\": \"<decimal>\"} an integer outside -2^63 to 2^64-1, {\"$float\": \"NaN\" | \"Infinity\" | \"-Infinity\"} a float that is not finite (CBOR carries them), {\"$bytes\": \"<base64>\"} a byte string (a raw payload's bytes). An integer as JSON Schema's integer reads one is an integer, or an integral finite float, the integer it equals; an integer's text is read exactly, however long. A member written null is present, and null is no string and no object. expect.conformance is conforms, does_not (reasons, every one that applies, in this order, each check made alone and a check that needs a value an earlier one found wrong skipped: not_a_point, epoch_invalid, unit_invalid, tag_disagrees, unit_disagrees, wrong_type, out_of_range, not_finite, bounds_invalid, bounds_differ, counts_length, count_sum, as v1.md §2.6 defines them), unobservable (declaration_invalid, or undecodable) or not_asked (not_this_profiles, or ignored); reasons is [] when it conforms. A Point is an object with timestamp an integer from -2^63 to 2^63-1, value an object with type one of the six kinds and a member value, labels, if present, an object of strings, and unit, if present, a string; other members are tolerated, and a Point that is not one is checked no further. An in-band epoch (a Point's epoch, or, for a bare counter or histogram whose declaration's epoch is attachment, the attachment) is a string of 1 to 64 Unicode code points. A value's kind is the Point's tag, or the declared kind for a bare value. expect.kind and expect.unit are the member's kind and unit as this sample gives them, and kind_from and unit_from where each came from (declared, or point), null when none: the declared kind and unit always, unless the declaration is invalid or not asked; the Point's tag and its unit only when the sample conforms. A null unit is unknown, never dimensionless."
+  "description": "telemetry.v1 §2.5, §2.6: a resolved resource, as declarations.json writes it, and one sample -> its conformance, and the member's kind and unit as the sample gives them. sample is {\"undecodable\": true} (bytes the core could not decode), or {value, attachment?}: the decoded data item and the decoded attachment, absent when the sample has none; or, since 0.2, the bytes as they came: json_text, the payload's bytes as UTF-8 text, read as strict JSON (UTF-8, RFC 8259, nothing after the value but whitespace, no duplicate member at any depth, no lone surrogate escape, every number finite, its value rounded to the nearest double (ties to even) not an infinity, and no array or object at a depth past 256, the top one at depth 1 (0.3): anything else is undecodable), or cbor_hex, the payload's bytes in hex, read as CBOR (an integer is major type 0 or 1, or a bignum, tag 2 or 3 around a byte string of any length, the integer it denotes; every other tag, and a tag 2 or 3 around anything else, its content; map keys text, none twice; undefined is null; no array or map at a depth past 256, a tag adding none (0.3): anything else is undecodable); and attachment_text, the attachment's bytes as UTF-8 text, read as strict JSON, as a sample is (0.3), an attachment that does not decode being an epoch present and not a string. A data item is written as JSON, read by its text: a number with no fraction and no exponent is an integer, read exactly; any other number is the IEEE double it denotes. Three objects of one member stand for what this file's JSON cannot hold: {\"$int\": \"<decimal>\"} an integer outside -2^63 to 2^64-1, {\"$float\": \"NaN\" | \"Infinity\" | \"-Infinity\"} a float that is not finite (CBOR carries them), {\"$bytes\": \"<base64>\"} a byte string (a raw payload's bytes). An integer as JSON Schema's integer reads one is an integer, or an integral finite float, the integer it equals; an integer's text is read exactly, however long. A member written null is present, and null is no string and no object. expect.conformance is conforms, does_not (reasons, every one that applies, in this order, each check made alone and a check that needs a value an earlier one found wrong skipped: not_a_point, epoch_invalid, unit_invalid, tag_disagrees, unit_disagrees, wrong_type, out_of_range, not_finite, bounds_invalid, bounds_differ, counts_length, count_sum, as v1.md §2.6 defines them), unobservable (declaration_invalid, or undecodable) or not_asked (not_this_profiles, or ignored); reasons is [] when it conforms. A Point is an object with timestamp an integer from -2^63 to 2^63-1, value an object with type one of the six kinds and a member value, labels, if present, an object of strings, and unit, if present, a string; other members are tolerated, and a Point that is not one is checked no further. An in-band epoch (a Point's epoch, or, for a bare counter or histogram whose declaration's epoch is attachment, the attachment) is a string of 1 to 64 Unicode code points. A value's kind is the Point's tag, or the declared kind for a bare value. expect.kind and expect.unit are the member's kind and unit as this sample gives them, and kind_from and unit_from where each came from (declared, or point), null when none: the declared kind and unit always, unless the declaration is invalid or not asked; the Point's tag and its unit only when the sample conforms. A null unit is unknown, never dimensionless."
 }

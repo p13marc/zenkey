@@ -66,7 +66,10 @@
 //! `config.v1` its domain (`config`: a reading of the view and the status
 //! with §5's answers, and one act with its reply union, #768). AC gave
 //! `alarms.v1` its domain (`alarms`: each key's §5 answers, each owner's
-//! verdict and the scope's, and a reader's transitions, #800).
+//! verdict and the scope's, and a reader's transitions, #800). TC gave
+//! `telemetry.v1` its domain (`telemetry`: each metric resource's
+//! declaration, each member's samples and pairs in the fixtures' tokens,
+//! #819).
 
 mod acl;
 mod admin;
@@ -97,6 +100,7 @@ mod snapshot;
 mod state;
 mod storage;
 mod tape;
+mod telemetry;
 mod timeline;
 mod watch;
 mod why;
@@ -130,6 +134,7 @@ pub use snapshot::*;
 pub use state::*;
 pub use storage::*;
 pub use tape::*;
+pub use telemetry::*;
 pub use timeline::*;
 pub use watch::*;
 pub use why::*;

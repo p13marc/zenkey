@@ -4,6 +4,104 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-21: the tools' reading, and two findings of round 46 (#819, TC; #609)
+
+The fleet's continuity reader (`zenkey_fleet::model::telemetry`, #819's
+TC) reads §2.9 to §2.11 over a live bus, behind `zenctl telemetry`,
+`check conform`'s three `telemetry-*` cases and the doctor's two checks,
+and runs `scenarios.md` §8 across a real face. Reading presence as a tool
+reads it found two places the text left to the reader. zk2py read 0.2
+again (round 46) and filed two findings, F-150 and F-151, and the review
+of its code found a third gap, a data item's depth. Each answer is the
+Rust model's and zk2py's reading already, so this is text and fixtures;
+written against core 0.35, unchanged. The standard schema, its ids,
+`declarations.json` (87), `continuity.json` (45) and `schema.json` (9)
+are unchanged; `samples.json` gains twelve cases (137), written by hand,
+which pass as written. No case that existed before changes.
+
+**Answered: round 46's findings.**
+- **F-150, "past the double's finite range" at its edge** (§2.6, Strict
+  JSON). 0.2 made `1e400` and 10^400 undecodable, and left the band
+  between the largest double and the halfway point to the next power to
+  two readings: an integer's text one past the largest double is "past the
+  range" read literally, and the largest double read by rounding.
+  - Now "finite" is by rounding: a number's text, an integer's included,
+    is finite when its exact value rounded to the nearest double (ties to
+    even) is not an infinity. The edge is a magnitude of 2^1024 − 2^970,
+    the largest double and half its last unit, a tie that rounds to even,
+    2^1024: undecodable, and so is any text past it. Text below it
+    decodes. zk2py's reading (Python's `float()`) stands, and so does the
+    model's, `str::parse::<f64>`, correctly rounded.
+  - `samples.json`, six cases in a gauge: `1.7976931348623157e308`
+    (conforms), `1.7976931348623158e308` (rounds down, conforms),
+    `1.7976931348623159e308` (undecodable), the largest double's integer
+    text (conforms), 2^1024 − 2^970's (the tie, undecodable), and one
+    below it (conforms).
+- **F-151, an Epoch attachment's strictness** (§2.6 check 2). 0.2 made a
+  sample's JSON strict and said only that an attachment decodes "as its
+  encoding", so `"\ud800"`, a lone surrogate escape, was an epoch of one
+  code point to one reader and `epoch_invalid` to another.
+  - Now an Epoch attachment is read as §2.6 reads a sample of its
+    encoding, strict JSON or CBOR, depth included; one that does not
+    decode so is `epoch_invalid` (F-147). zk2py's reading stands; the
+    model's `Datum::attachment` was strict already, and the runtime's
+    writer, which reads an attachment through it, refuses one so.
+  - `samples.json`: an `attachment_text` case, the lone surrogate.
+
+**Answered: a data item's depth** (§2.6, from the review of round 46's
+code, not a finding). The model's decoders stopped at 256 levels and
+0.2 said nothing of depth, so a reader with no limit read a deeper sample
+as decoded, `does_not`, a finding, where the model read it `undecodable`,
+unobservable.
+- Now a data item nests at most 256 arrays and maps deep: an array or a
+  map at the top is at depth 1, one inside another one deeper; a scalar
+  adds no depth, nor does a CBOR tag, read as its content. An array or a
+  map at depth 257 is undecodable, in JSON as in CBOR.
+- The model's JSON reader counted so already. Its CBOR reader counted
+  every item from 0, tags and scalars included, so it read 257 nested
+  arrays and stopped short of 256 under a tag; it now counts arrays and
+  maps alone, as the JSON reader does, and reads a chain of tags without
+  recursion (`telemetry::decode`, `both_readers_count_depth_alike`).
+- `samples.json`: arrays nested 256 deep and 257 deep, as `json_text`
+  and as `cbor_hex`, and a tag around 256 (still 256 deep).
+- The bound is the profile's reading of a sample alone: core D000, which
+  reads a descriptor, is not changed.
+
+**Answered: what a tool's reading of presence found** (§2.9).
+- **A loss between two arrivals establishes nothing.** 0.2 said a loss on
+  the presence view establishes nothing, and required "without a loss"
+  only of the same epoch; read literally, the only instance seen at each
+  arrival, with a loss between, still established another epoch. A
+  reader that lost deliveries between the two arrivals may have lost the
+  very token moves that would place the pair, so now neither the same
+  epoch nor a different one is established across a loss, whatever the
+  view showed at each arrival. `continuity.json`'s `presence` is what a
+  reader saw: across a loss a reader gives none, as the fleet's reader
+  does. The case "the same instance at both arrivals, with a loss
+  between" (unchanged) reads the same either way.
+- **What the view stands on.** A reader's view of the tokens stands on a
+  complete read of them (core §8.1), never on a subscription's history
+  alone, which has no end mark, and on nothing lost since; it folds the
+  tokens' moves and the samples in the one order it received them. The
+  fleet's reader seeds presence after subscribing, reads it again after a
+  loss, and gives no presence to a sample before a complete seed.
+
+**Also stated: a tool over many pairs** (§5). A pair whose epoch was
+assumed answers `same_epoch` or `reset`, never `decreased`: a no without
+the evidence for a yes. A tool asked "did anything go backwards?" over
+pairs whose every epoch was assumed SHOULD say it could not tell, never
+that nothing went backwards; `zenctl telemetry` exits 2 there.
+
+**Deliberately not changed.**
+- **The per-pair answers of §2.10 and §5's table:** assumed stays a no,
+  and a decrease without an established epoch stays a reset.
+- **No clock is trusted** by §2.11: two timestamps of the owner's, two
+  stamps of the owner's, or two receipts of the reader's, never one clock
+  against another. The tools take no word of the deployment's for one.
+- **Core D000** and every other profile's reading of JSON.
+- **The fixtures' presence input** stays a triple: what a reader saw,
+  which a loss leaves it without.
+
 ## 0.2 — 2026-10-21: the cold reader's findings (#819, TB; #609)
 
 The spec-only implementation read 0.1 cold (zk2py round 45, PR #821):
@@ -36,8 +134,8 @@ sections; `declarations.json` (87) and `schema.json` (9) are unchanged.
     reading stands.
   - `zenkey_model::telemetry::stamp_ns` states it, and
     `zenkey::telemetry::stamp_ns` reads a zenoh `Timestamp` through
-    `as_nanos`, tested equal. Nothing in the fleet times a pair yet: its
-    continuity reader is TC's.
+    `as_nanos`, tested equal. Nothing in the fleet timed a pair then: its
+    continuity reader came with TC, at 0.3.
   - `continuity.json`: two cases by raw NTP64 values, one whose per-stamp
     `e` is 1000000001 ns where the converted difference's floor is
     1000000000, one whose two stamps are 0 ns apart (`elapsed`).
@@ -272,6 +370,6 @@ reopened here).
   revision is the adopter's (Appendix B).
 - **No runtime and no tool here.** `zenkey::telemetry` (an owner's
   Points carrying the instance as their epoch, a writer refusing what its
-  declaration refuses) and the scenarios as tests are #819's TB; the
-  fleet's continuity reader, `check conform`'s and the doctor's
-  `telemetry-*` checks and zengui's units are its TC.
+  declaration refuses) and the scenarios as tests were #819's TB (0.2);
+  the fleet's continuity reader, `check conform`'s and the doctor's
+  `telemetry-*` checks were its TC (0.3), and zengui's units its TD.

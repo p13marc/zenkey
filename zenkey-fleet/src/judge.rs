@@ -43,4 +43,5 @@ pub mod expect;
 pub mod field;
 pub mod health;
 pub mod probe;
+pub mod telemetry;
 pub mod why;

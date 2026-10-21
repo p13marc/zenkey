@@ -6665,3 +6665,245 @@ async fn alarms_s10_anything_firing_for_a_tool_at_900_s() {
     exits(&run, 1);
     bus.keep(alarms_b);
 }
+
+// ─── telemetry.v1: scenarios.md §8, the tool's section (#819, TC) ──────────
+//
+// Common setup, the text's: R1 a router with timestamping on, the owner O
+// and the tool T its clients. O is `lab/meter` over `meter.v1`
+// (`zenkey/tests/contracts/meter.v1.toml`) through the runtime's checked
+// writers, which write each counter Point's epoch as O's instance id. T is
+// `zenctl telemetry`, every verdict the fleet's continuity reader's.
+
+fn meter_contract_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts/meter.v1.toml")
+}
+
+/// O: its service, and the writers of `frames` (a Point declared a counter)
+/// and `drops` (a bare counter with no epoch).
+struct Meter {
+    svc: Service,
+    frames: zenkey::writer::Writer,
+    drops: zenkey::writer::Writer,
+}
+
+/// O started on `session`, every resource exposed, once a subscriber
+/// matches both writers.
+async fn meter_owner(session: &zenoh::Session) -> Meter {
+    let l = load_path(&meter_contract_path());
+    let c = l
+        .contract
+        .unwrap_or_else(|| panic!("meter.v1 does not load:\n{}", l.report));
+    let id = c.iface.clone();
+    let names: Vec<String> = c
+        .resources
+        .iter()
+        .map(zenkey::implementation::resource_name)
+        .collect();
+    let mut b = ServiceBuilder::new(session, ServiceConfig::new("lab/meter".parse().unwrap()));
+    b.implement(Implementation::new(c)).expect("implement");
+    for n in names {
+        let _ = b.expose(&id, &n);
+    }
+    let frames = b
+        .declare_writer(&id, "stream/frames", &Bindings::new())
+        .await
+        .expect("frames");
+    let drops = b
+        .declare_writer(&id, "stream/drops", &Bindings::new())
+        .await
+        .expect("drops");
+    let svc = b.start().await.expect("start");
+    let deadline = Instant::now() + SETTLE;
+    for w in [&frames, &drops] {
+        while !w.matching().await.expect("matching") {
+            assert!(
+                Instant::now() < deadline,
+                "T's subscription never reached O"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    Meter { svc, frames, drops }
+}
+
+impl Meter {
+    /// `frames` and `drops` at `n`, the frames Point taken now.
+    async fn put(&self, n: u64) {
+        self.frames
+            .put_value(&zenkey::telemetry::point(n))
+            .await
+            .expect("frames");
+        self.drops.put_value(&n).await.expect("drops");
+    }
+}
+
+/// A session of the vehicle's, authenticated as `vehicle`, whom the face
+/// denies nothing: one process of O's.
+async fn vehicle(endpoint: &str) -> zenoh::Session {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"client\"").expect("config");
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .expect("config");
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        "{ user: \"vehicle\", password: \"vehicle-pw\" }",
+    )
+    .expect("config");
+    zenoh::open(c).await.expect("the vehicle's session")
+}
+
+/// A member row's pairs, as `(earlier, later, continuity, epoch, via,
+/// rated)`.
+fn telemetry_pairs(doc: &Value, key: &str) -> Vec<(u64, u64, String, String, String, bool)> {
+    let m = rows_of(doc, "member")
+        .into_iter()
+        .find(|r| r["key"] == key)
+        .unwrap_or_else(|| panic!("{key} has a member row: {doc}"));
+    let s = |v: &Value| v.as_str().unwrap_or("").to_owned();
+    m["pairs"]
+        .as_array()
+        .expect("pairs")
+        .iter()
+        .map(|p| {
+            if let Some(r) = p["rate"].as_f64() {
+                assert!(r >= 0.0, "never a negative rate: {p}");
+            }
+            (
+                p["earlier"].as_u64().expect("a counter"),
+                p["later"].as_u64().expect("a counter"),
+                s(&p["continuity"]),
+                s(&p["epoch"]),
+                s(&p["via"]),
+                p["rate"].is_number(),
+            )
+        })
+        .collect()
+}
+
+/// telemetry.v1 `scenarios.md` §8 (§2.10, §2.14), the tool's run behind a
+/// real face: T stands where a reader across a constrained face stands, on
+/// the vehicle router whose access control denies the ground `@zk/**`, and
+/// takes the deployment's word for O (`--across-face`, `meter.v1` in hand).
+/// O publishes `drops` and `frames` at 10 and 20, its process ends, and it
+/// starts again as I2 and publishes 3 and 8. T reads the pairs R0 reads:
+/// `drops` 10 → 20 same_epoch, assumed, with a rate; 20 → 3 a reset,
+/// assumed, with none; 3 → 8 same_epoch, assumed — and `frames` 20 → 3 a
+/// reset established in-band, the Point's epoch having crossed with it.
+/// Nothing decreased, no rate is negative, and an established pair answers
+/// the run: exit 0.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_s8_a_counter_that_crosses_a_face() {
+    let (bus, ground) = face_bus(false).await;
+    let contracts = meter_contract_path();
+    let t = bus.spawn(&[
+        "telemetry",
+        "zk2/lab/meter/**",
+        "--across-face",
+        "--contracts",
+        contracts.to_str().expect("a UTF-8 path"),
+        "--for",
+        "12",
+        "--zenoh-config",
+        ground.to_str().expect("a UTF-8 path"),
+        "--format",
+        "json",
+    ]);
+    // Step 1: O, as I1.
+    let o1 = vehicle(&bus.endpoint).await;
+    let i1 = meter_owner(&o1).await;
+    let first = i1.svc.instance().to_string();
+    for n in [10, 20] {
+        i1.put(n).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    // Step 2: O's process ends; it starts again, as I2.
+    drop(i1);
+    o1.close().await.expect("O's process ends");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let o2 = vehicle(&bus.endpoint).await;
+    let i2 = meter_owner(&o2).await;
+    assert_ne!(i2.svc.instance().to_string(), first, "a new instance");
+    for n in [3, 8] {
+        i2.put(n).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    let run = t.await.expect("the telemetry run");
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["across_face"], true, "{run}");
+    assert!(doc.get("presence").is_none(), "no presence crosses: {run}");
+    assert_eq!(doc["totals"]["decreased"], 0, "{run}");
+    assert_eq!(doc["totals"]["does_not"], 0, "{run}");
+    let row = |a: u64, b: u64, c: &str, e: &str, v: &str, rated: bool| {
+        (a, b, c.to_owned(), e.to_owned(), v.to_owned(), rated)
+    };
+    assert_eq!(
+        telemetry_pairs(&doc, "zk2/lab/meter/meter.v1/stream/drops"),
+        [
+            row(10, 20, "same_epoch", "assumed", "", true),
+            row(20, 3, "reset", "assumed", "", false),
+            row(3, 8, "same_epoch", "assumed", "", true),
+        ],
+        "R0's pairs: no epoch, no presence: {run}"
+    );
+    assert_eq!(
+        telemetry_pairs(&doc, "zk2/lab/meter/meter.v1/stream/frames"),
+        [
+            row(10, 20, "same_epoch", "established", "in_band", true),
+            row(20, 3, "reset", "established", "in_band", false),
+            row(3, 8, "same_epoch", "established", "in_band", true),
+        ],
+        "the Point's epoch crossed with it: {run}"
+    );
+    drop(i2);
+    o2.close().await.expect("closes");
+}
+
+/// #825, and a tool's reading of a mock owner's metrics: `gen` brings up an
+/// owner of `zs.snmp.v1`, whose state resources keep history, on a session
+/// with timestamping on, as a real owner's is (it failed at the first such
+/// resource while its session had it off). T reads its Points near it, with
+/// presence: every sample conforms, its kind its tag.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_brings_up_an_owner_of_history_resources_and_telemetry_reads_it() {
+    let bus = Bus::bare(None).await;
+    let zensight = examples().join("zensight");
+    let zensight = zensight.to_str().expect("a UTF-8 path").to_owned();
+    let mock = bus.spawn(&[
+        "gen",
+        "lab/snmp",
+        "zs.snmp.v1",
+        "--contracts",
+        &zensight,
+        "--duration",
+        "30",
+        "--format",
+        "json",
+    ]);
+    let run = bus
+        .until(
+            &[
+                "telemetry",
+                "zk2/lab/snmp/**",
+                "--contracts",
+                &zensight,
+                "--for",
+                "3",
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0,
+        )
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert!(doc["totals"]["conforms"].as_u64() > Some(0), "{run}");
+    assert_eq!(doc["totals"]["does_not"], 0, "{run}");
+    assert_eq!(doc["presence"]["complete"], true, "{run}");
+    let generated = mock.await.expect("the gen runner");
+    exits(&generated, 0);
+    let docs = documents(&generated.stdout);
+    assert_eq!(docs[1]["report"], "gen", "{generated}");
+    assert_eq!(docs[1]["failed"], 0, "{generated}");
+    assert!(docs[1]["sent"].as_u64() > Some(10), "{generated}");
+}

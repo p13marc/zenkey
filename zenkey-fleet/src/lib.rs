@@ -58,7 +58,10 @@
 //!   `health` (a `health.v1` reading, #721), `config` (a `config.v1`
 //!   reading, and one act through the runtime's client, #768) and `alarms`
 //!   (an `alarms.v1` reader: subscribed, seeded by S4's GET, its own
-//!   receive path watched, live or one-shot, #800). The
+//!   receive path watched, live or one-shot, #800) and `telemetry` (a
+//!   `telemetry.v1` continuity reader: the metric resources the
+//!   descriptors declare, their members and the owners' tokens in one
+//!   queue, presence seeded, state seeded by S4's GET, #819). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -97,7 +100,11 @@
 //!   redacted before it is sent, #768), `alarms` (one reader's book of a
 //!   scope's alarms: each key merged by stamp and read as §2.6 says, each
 //!   owner's seed and window, the owners in scope, and the transitions a
-//!   notifier routes, #800), `timeline`, `snapshot` and
+//!   notifier routes, #800), `telemetry` (one reader's book of metric
+//!   members: each sample read as §2.6 says, each pair of consecutive
+//!   conforming ones judged with the presence the reader saw between them,
+//!   in one order, a state member's in the late joiner's merge order,
+//!   #819), `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
 //!   schema reaches fall to, `stats`, `tree` and `diff`, plus the two
@@ -110,8 +117,9 @@
 //!   `doctor_delta`, `expect`, `probe`, `condition`, `field`, `why` (a
 //!   silence explained rung by rung, #702), `conform` (a service against
 //!   the revision it claims, #703), `health` (`health.v1`'s verdicts,
-//!   #721), `config` (`config.v1`'s §5 answers, #768) and `alarms`
-//!   (`alarms.v1`'s §5 answers, #800), and
+//!   #721), `config` (`config.v1`'s §5 answers, #768), `alarms`
+//!   (`alarms.v1`'s §5 answers, #800) and `telemetry` (`telemetry.v1`'s,
+//!   #819), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -211,8 +219,8 @@ pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
-    OPEN_TIMEOUT, OpenFailure, check_namespace, open, open_in_namespace, open_reporting,
-    open_reporting_within, open_with_config,
+    OPEN_TIMEOUT, OpenFailure, check_namespace, open, open_in_namespace, open_owner_in_namespace,
+    open_reporting, open_reporting_within, open_with_config,
 };
 pub use bus::write::{
     MatchingEvents, Publication, WireQos, WriteAct, check_concrete, check_retire,
@@ -267,7 +275,19 @@ pub use model::alarms::{
     AlarmBook, AlarmSample, AlarmScope, ArchivedAlarm, BookSpec as AlarmBookSpec, KeyReading,
     SeedEnd as AlarmSeedEnd, SeedRead as AlarmSeedRead,
 };
+// `telemetry.v1` (#819, TC): a scope's metric members read as the
+// profile's reader reads them — the reads, the session-free book they fold
+// into, and the judge.
+pub use bus::telemetry::{
+    SeedSeen as TelemetrySeedSeen, TelemetryObservation, TelemetrySpec, metric_resources,
+    observe as observe_telemetry, run_telemetry,
+};
+pub use judge::telemetry::judge as judge_telemetry;
 pub use model::config::{Assignment, Given, TypedValues};
+pub use model::telemetry::{
+    MemberBook, MetricResource, MetricSample, MetricType, PairPresence, PairSeen, PairTally,
+    SampleVia as MetricVia, TelemetryBook, TelemetryScope,
+};
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};
@@ -316,7 +336,7 @@ pub use model::namespace::{join as with_namespace, strip as strip_namespace};
 pub use bus::lens::{LensFeed, REFRESH_MIN as LENS_REFRESH_MIN, read as read_lens};
 pub use model::lens::{
     Checked, Lens, Resolution, Resolved, check_payload, conformance, declared_qos, observed_qos,
-    qos_mismatch,
+    qos_mismatch, sample_conformance,
 };
 // A tree's model (#614, FL4): the declared keyspace from the lens, merged
 // with the observed snapshot and the watch set; and each key's identity,
@@ -506,6 +526,18 @@ const _: () = {
             crate::AlarmScope::all(),
             crate::AlarmSpec::new(std::time::Duration::ZERO),
             zenkey_model::alarms::Severity::Warning,
+        ));
+        // A telemetry reading holds its subscriptions, its queue and its
+        // receive path's watch across awaits (#819, TC).
+        let store = crate::BundleStore::new(std::time::Duration::ZERO);
+        let offline = crate::ContractSet::new();
+        is_send(&crate::run_telemetry(
+            session,
+            "",
+            crate::TelemetryScope::all(),
+            &store,
+            &offline,
+            crate::TelemetrySpec::new(std::time::Duration::ZERO, std::time::Duration::ZERO),
         ));
     }
 

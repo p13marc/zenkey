@@ -11,14 +11,16 @@
 //! | a CBOR map is read as core §5.2 reads the envelope's: text keys, no duplicate; `undefined` is `null` | [`cbor`]: anything else is `None` |
 //! | a CBOR float keeps NaN and the infinities | `Datum::Float`, which reads `not_finite` |
 //!
-//! Both readers stop at a depth of [`MAX_DEPTH`]: deeper is `None`. No
-//! Point is anywhere near it.
+//! | a data item nests at most 256 arrays and maps deep (0.3): an array or a map at the top is at depth 1, one inside another one deeper; a tag or a scalar adds none | both readers count the same: an array or a map at depth [`MAX_DEPTH`] + 1 is `None`, the sample `undecodable`. A chain of tags is read without recursion |
+//!
+//! No Point is anywhere near the depth.
 
 use std::collections::BTreeMap;
 
 use super::Datum;
 
-/// How deep an array or an object (a map) may nest.
+/// How deep an array or an object (a map) may nest (§2.6, 0.3): the top
+/// one at depth 1, one inside another one deeper.
 pub const MAX_DEPTH: usize = 256;
 
 /// One JSON text as a strict JSON data item, or `None` when the bytes are
@@ -340,11 +342,10 @@ fn segments_text(d: &mut ciborium_ll::Decoder<&[u8]>, len: Option<usize>) -> Opt
     Some(out)
 }
 
+/// One item, `depth` the arrays and maps around it (§2.6, 0.3): an array or
+/// a map is one deeper, a tag none.
 fn cbor_item(d: &mut ciborium_ll::Decoder<&[u8]>, depth: usize) -> Option<Datum> {
     use ciborium_ll::{Header, simple};
-    if depth > MAX_DEPTH {
-        return None;
-    }
     Some(match d.pull().ok()? {
         Header::Positive(n) => Datum::Int(i128::from(n)),
         Header::Negative(n) => Datum::Int(-1 - i128::from(n)),
@@ -355,22 +356,34 @@ fn cbor_item(d: &mut ciborium_ll::Decoder<&[u8]>, depth: usize) -> Option<Datum>
         Header::Simple(_) | Header::Break => return None,
         Header::Bytes(len) => Datum::Bytes(segments_bytes(d, len)?),
         Header::Text(len) => Datum::Text(segments_text(d, len)?),
-        Header::Tag(tag) => {
-            let next = d.pull().ok()?;
-            match (tag, next) {
-                (2 | 3, Header::Bytes(len)) => bignum_of(tag == 3, &segments_bytes(d, len)?),
-                (_, h) => {
-                    d.push(h);
-                    cbor_item(d, depth + 1)?
+        Header::Tag(first) => {
+            // A tag is read as its content, at its depth; a chain of tags,
+            // one after another, without recursion. The innermost decides
+            // a bignum: a tag 2 or 3 right around a byte string.
+            let mut tag = first;
+            loop {
+                match d.pull().ok()? {
+                    Header::Tag(t) => tag = t,
+                    Header::Bytes(len) if tag == 2 || tag == 3 => {
+                        break bignum_of(tag == 3, &segments_bytes(d, len)?);
+                    }
+                    h => {
+                        d.push(h);
+                        break cbor_item(d, depth)?;
+                    }
                 }
             }
         }
         Header::Array(len) => {
+            let depth = depth + 1;
+            if depth > MAX_DEPTH {
+                return None;
+            }
             let mut a = Vec::new();
             match len {
                 Some(n) => {
                     for _ in 0..n {
-                        a.push(cbor_item(d, depth + 1)?);
+                        a.push(cbor_item(d, depth)?);
                     }
                 }
                 None => loop {
@@ -378,7 +391,7 @@ fn cbor_item(d: &mut ciborium_ll::Decoder<&[u8]>, depth: usize) -> Option<Datum>
                         Header::Break => break,
                         h => {
                             d.push(h);
-                            a.push(cbor_item(d, depth + 1)?);
+                            a.push(cbor_item(d, depth)?);
                         }
                     }
                 },
@@ -386,12 +399,16 @@ fn cbor_item(d: &mut ciborium_ll::Decoder<&[u8]>, depth: usize) -> Option<Datum>
             Datum::Array(a)
         }
         Header::Map(len) => {
+            let depth = depth + 1;
+            if depth > MAX_DEPTH {
+                return None;
+            }
             let mut m = BTreeMap::new();
             let mut entry = |d: &mut ciborium_ll::Decoder<&[u8]>| -> Option<()> {
-                let Datum::Text(k) = cbor_item(d, depth + 1)? else {
+                let Datum::Text(k) = cbor_item(d, depth)? else {
                     return None;
                 };
-                let v = cbor_item(d, depth + 1)?;
+                let v = cbor_item(d, depth)?;
                 m.insert(k, v).is_none().then_some(())
             };
             match len {
@@ -471,6 +488,35 @@ mod tests {
         assert_eq!(json(e.as_bytes()), Some(Datum::BigInt(1e40)));
         let deep = format!("{}{}", "[".repeat(MAX_DEPTH + 1), "]".repeat(MAX_DEPTH + 1));
         assert_eq!(json(deep.as_bytes()), None);
+    }
+
+    /// Depth (0.3): an array or a map at the top is at depth 1, one inside
+    /// another one deeper, a tag or a scalar none — in JSON as in CBOR. A
+    /// chain of tags is read without recursion.
+    #[test]
+    fn both_readers_count_depth_alike() {
+        for n in [MAX_DEPTH, MAX_DEPTH + 1] {
+            let j = format!("{}{}", "[".repeat(n), "]".repeat(n));
+            let mut c = vec![0x81_u8; n - 1];
+            c.push(0x80);
+            let decodes = n <= MAX_DEPTH;
+            assert_eq!(json(j.as_bytes()).is_some(), decodes, "JSON, {n} deep");
+            assert_eq!(cbor(&c).is_some(), decodes, "CBOR, {n} deep");
+            let m = format!("{}1{}", r#"{"a":"#.repeat(n), "}".repeat(n));
+            assert_eq!(json(m.as_bytes()).is_some(), decodes, "JSON maps, {n} deep");
+        }
+        let mut scalar = vec![0x81_u8; MAX_DEPTH];
+        scalar.push(0x01);
+        assert!(cbor(&scalar).is_some(), "a scalar adds no depth");
+        let mut tagged = vec![0xd9, 0xd9, 0xf7];
+        tagged.extend(vec![0x81_u8; MAX_DEPTH - 1]);
+        tagged.push(0x80);
+        assert!(cbor(&tagged).is_some(), "a tag adds no depth");
+        let mut chain: Vec<u8> = std::iter::repeat_n([0xd8_u8, 0x20], 100_000)
+            .flatten()
+            .collect();
+        chain.push(0x05);
+        assert_eq!(cbor(&chain), Some(Datum::Int(5)), "no recursion");
     }
 
     #[test]

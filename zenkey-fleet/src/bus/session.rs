@@ -171,7 +171,43 @@ pub async fn open_in_namespace(
     listen: &[String],
     scouting: Option<bool>,
 ) -> Result<Session, OpenFailure> {
-    let mut config = config_off_runtime(file, connect, listen, scouting, Posture::Namespaced)
+    open_namespaced(
+        namespace,
+        file,
+        connect,
+        listen,
+        scouting,
+        Posture::Namespaced,
+    )
+    .await
+}
+
+/// [`open_in_namespace`] for a session that **owns** keys: a mock owner's
+/// (`zenctl gen`, `zenctl serve`; #825). An owner's session timestamps
+/// what it puts, as a real owner's does: a resource that declares
+/// `history` is written through zenoh's advanced publisher, which zenoh
+/// refuses on a session without `timestamping`, and a state's stamp is the
+/// owner's (core §4.1, S1). So timestamping is on, unless the config file
+/// states it; everything else is [`open_in_namespace`]'s.
+pub async fn open_owner_in_namespace(
+    namespace: &str,
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<Session, OpenFailure> {
+    open_namespaced(namespace, file, connect, listen, scouting, Posture::Owner).await
+}
+
+async fn open_namespaced(
+    namespace: &str,
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+    posture: Posture,
+) -> Result<Session, OpenFailure> {
+    let mut config = config_off_runtime(file, connect, listen, scouting, posture)
         .await
         .map_err(OpenFailure::Config)?;
     if !namespace.is_empty() {
@@ -437,6 +473,9 @@ enum Posture {
     /// A zk2 resolved verb (FJ4): it does run in a namespace, but the
     /// caller sets it, so a file that sets one too is a second source.
     Namespaced,
+    /// A mock owner in a namespace (#825): [`Posture::Namespaced`], with
+    /// timestamping on unless the file states it.
+    Owner,
 }
 
 fn build_config(
@@ -474,7 +513,7 @@ fn build_config_as(
                          (RFC 09 §5); remove the namespace from the file, or \
                          use --base to name the deployment"
                     ),
-                    Posture::Namespaced => format!(
+                    Posture::Namespaced | Posture::Owner => format!(
                         "sets a session namespace ({ns}) — the namespace has \
                          one source, the caller's (--namespace, alias --base); \
                          remove it from the file"
@@ -525,6 +564,11 @@ fn build_config_as(
         // warning). zenoh's own default is on, and a file that merely did not
         // say so used to inherit it (#502).
         None => set(&mut config, "scouting/multicast/enabled", "false")?,
+    }
+    // An owner's session stamps what it puts (#825): a stated choice
+    // stands, as every stated key does.
+    if posture == Posture::Owner && !stated.states("timestamping/enabled") {
+        set(&mut config, "timestamping/enabled", "true")?;
     }
     Ok(config)
 }
@@ -872,5 +916,31 @@ mod tests {
             Ok(_) => panic!("opened"),
         }
         std::fs::remove_file(path).ok();
+    }
+
+    /// A mock owner's session timestamps what it puts (#825): a resource
+    /// with `history` needs it, and a real owner's has it. A file that
+    /// states the setting is obeyed; an explorer's and a resolved verb's
+    /// sessions are left as zenoh has them.
+    #[test]
+    fn an_owner_posture_turns_timestamping_on() {
+        let ts = |posture, file: Option<&Path>| {
+            build_config_as(file, &[], &[], None, posture)
+                .unwrap()
+                .get_json("timestamping/enabled")
+                .unwrap()
+        };
+        assert_eq!(ts(Posture::Owner, None), "true");
+        assert_ne!(ts(Posture::Namespaced, None), "true");
+        assert_ne!(ts(Posture::Explorer, None), "true");
+        let off = temp_config(
+            "owner-timestamping-off.json5",
+            "{ timestamping: { enabled: false } }",
+        );
+        assert_eq!(
+            ts(Posture::Owner, Some(&off)),
+            "false",
+            "the file's word stands"
+        );
     }
 }

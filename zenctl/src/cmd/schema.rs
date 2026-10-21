@@ -81,11 +81,17 @@ pub async fn check(cli: crate::cli::CheckSchemaArgs) -> Result<()> {
         Err(e) => not_checked(&e),
     };
     let member = member.into();
-    let report =
-        match zenkey_fleet::check_payload(&revision, r, member, encoding.as_deref(), &bytes) {
-            Ok(report) => report,
-            Err(why) => not_checked(&why),
-        };
+    let report = match zenkey_fleet::check_payload(
+        &revision,
+        r,
+        member,
+        encoding.as_deref(),
+        &bytes,
+        None,
+    ) {
+        Ok(report) => report,
+        Err(why) => not_checked(&why),
+    };
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     // Off a `match` on the conformance, never a string (#356).
     match report.conformance {

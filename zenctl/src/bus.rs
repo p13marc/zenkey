@@ -211,6 +211,23 @@ impl Deployment {
         .await
         .map_err(open_error)
     }
+
+    /// A session **in** the namespace that owns keys (#825): a mock
+    /// owner's, `gen`'s and `serve`'s. It timestamps what it puts, as a real
+    /// owner's session does — a resource that declares `history` needs it —
+    /// unless `--zenoh-config` states the setting.
+    pub(crate) async fn owner_session(&self) -> Result<zenoh::Session> {
+        let t = &self.link.transport;
+        zenkey_fleet::open_owner_in_namespace(
+            &self.namespace,
+            t.file.as_deref(),
+            &t.connect,
+            &t.listen,
+            t.scouting,
+        )
+        .await
+        .map_err(open_error)
+    }
 }
 
 /// An [`OpenFailure`](zenkey_fleet::OpenFailure), as an error with an exit

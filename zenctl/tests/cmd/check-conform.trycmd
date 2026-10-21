@@ -93,6 +93,18 @@ on one resource:
                    JSON of the schema, its times in range,
                    observed_at_ms not before timestamp nor on a
                    resolved document (alarms.v1 §2.4)
+  telemetry-declaration
+                   every metric resource of the interface declares
+                   itself validly: an invalid declaration, read from
+                   the contract, is the violation (telemetry.v1 §2.2)
+  telemetry-sample every sample of a metric resource the window hears
+                   conforms, its reasons named when one does not
+                   (telemetry.v1 §2.6)
+  telemetry-continuity
+                   no counter or histogram decreased within an
+                   established epoch, in-band or by presence watched
+                   over the window; a window whose every pair had its
+                   epoch assumed answers nothing (telemetry.v1 §2.10)
 
 "Lost no delivery" is established, never assumed (§2.7, 0.25): this
 run lost nothing, and the resource is reliable with block, which no
@@ -262,7 +274,7 @@ is clap's refusal, which lists them.
 ```console
 $ zenctl check conform host-a/tc tc.netif.v1 --skip budgets
 ? 2
-error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate, budget-window, config-projection, config-fresh, config-view, config-refusal, config-dry-run, alarm-key, alarm-document
+error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate, budget-window, config-projection, config-fresh, config-view, config-refusal, config-dry-run, alarm-key, alarm-document, telemetry-declaration, telemetry-sample, telemetry-continuity
 
 For more information, try '--help'.
 

@@ -82,5 +82,6 @@ pub mod stats;
 pub mod storage;
 pub mod structural;
 pub mod target;
+pub mod telemetry;
 pub mod timeline;
 pub mod tree;

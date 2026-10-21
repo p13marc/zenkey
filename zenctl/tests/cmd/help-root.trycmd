@@ -60,6 +60,7 @@ Commands:
   doctor       Judge a zk2 deployment against the core: one verdict per check
   health       Read every service's health.v1, or one's: healthy, unhealthy, stale
   alarms       Read the alarms.v1 alarms a selector reaches: is anything firing?
+  telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
   cache        Inspect, refresh or clear the name cache that feeds shell completion
@@ -130,6 +131,7 @@ Commands:
   doctor       Judge a zk2 deployment against the core: one verdict per check
   health       Read every service's health.v1, or one's: healthy, unhealthy, stale
   alarms       Read the alarms.v1 alarms a selector reaches: is anything firing?
+  telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
   cache        Inspect, refresh or clear the name cache that feeds shell completion

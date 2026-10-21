@@ -32,7 +32,7 @@ use zenoh::Session;
 use zenoh::sample::{Sample, SampleKind};
 
 use crate::model::catalog::Revision;
-use crate::model::lens::{Resolved, conformance, declared_qos, observed_qos, qos_mismatch};
+use crate::model::lens::{Resolved, declared_qos, observed_qos, qos_mismatch, sample_conformance};
 use crate::model::render::{Member, render_with};
 use crate::model::target::Target;
 use crate::report::{
@@ -416,8 +416,14 @@ pub async fn watch(
                 SampleKind::Delete => WatchEvent::Delete,
                 SampleKind::Put => {
                     let rendered = payload(&rev, &key, &d.sample, Member::Type);
+                    let attachment = d.sample.attachment().map(|a| a.to_bytes());
                     WatchEvent::Put {
-                        conformance: conformance(&rev, &rendered),
+                        conformance: sample_conformance(
+                            &rev,
+                            &rendered,
+                            &d.sample.payload().to_bytes(),
+                            attachment.as_deref(),
+                        ),
                         payload: Box::new(rendered),
                         attachment: d.sample.attachment().map(|a| {
                             Box::new(render_with(

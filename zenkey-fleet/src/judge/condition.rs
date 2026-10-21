@@ -1649,7 +1649,14 @@ fn check(s: &SampleView, lens: &Lens<'_>) -> Option<(Conformance, String)> {
         return None;
     }
     let encoding = (!s.encoding.is_empty()).then_some(s.encoding.as_str());
-    let c = lens.check(&s.key, Member::Type, encoding, &s.payload.to_bytes());
+    let attachment = s.attachment.as_ref().map(|a| a.to_bytes());
+    let c = lens.check_sample(
+        &s.key,
+        Member::Type,
+        encoding,
+        &s.payload.to_bytes(),
+        attachment.as_deref(),
+    );
     let line = match &c.conformance {
         Conformance::Invalid { violations } => {
             format!("{}: {}", s.key, violations.join("; "))

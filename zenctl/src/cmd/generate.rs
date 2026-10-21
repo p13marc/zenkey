@@ -103,10 +103,12 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         return Ok(());
     }
 
-    let session = match session {
-        Some(s) => s,
-        None => dep.session().await?,
-    };
+    // An owner's session, timestamping on as a real owner's is (#825): a
+    // session a retrieval opened above is a reader's, and is not reused.
+    if let Some(reader) = session.take() {
+        let _ = reader.close().await;
+    }
+    let session = dep.owner_session().await?;
     super::serve::guard_address(&session, &spec.address, &dep, i_know).await?;
     let report = zenkey_fleet::run_gen(&session, &spec, &plan, |instance| {
         eprintln!(

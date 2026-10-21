@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `telemetry.v1` in the tools: `telemetry`, two doctor checks, three conform cases (#819, TC)
+
+`telemetry.v1` (`spec/profiles/telemetry/v1.md`) says what a metric is, so
+v1's `kind-mismatch` (RFC 13 §3), dark since FJ, comes back as the profile's
+§5: a verdict verb at the root beside `health` and `alarms`, two doctor
+checks, three `check conform` cases, and the profile's reading of every
+metric sample wherever a payload is checked.
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `zenctl telemetry [SELECTOR] [--for SECS] [--across-face] [--contracts PATH]`: every metric resource in scope with its declaration, each member's kind and unit, its samples counted by conformance with their reasons, each pair's continuity with how its epoch was had, and a counter's latest rate | exit 1 a sample that does not conform or a decrease within an established epoch, 0 every question asked answered without one, 2 no verdict: no metric resource in scope, no sample, every counter's pair assumed. `--for` defaults to 10 s. No `--clocks-synced`: no time base compares two clocks |
+| `doctor`: twenty-five checks | twenty-seven: `telemetry-declaration` (warning: a metric resource whose declaration is invalid) and `telemetry-sample` (error, `--deep`: a state metric member's GET reply that does not conform) | `telemetry-sample` reads the replies `state-stamp-foreign` already GETs; streams are `telemetry`'s and `check conform`'s |
+| `check conform`: twenty-one cases | twenty-four: `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`, per metric resource of the interface | the last two read by the same reader as `telemetry`, over the suite's window; `--skip` takes each |
+| a Point whose tag or unit disagrees with its declaration, a counter out of range, a histogram over other bounds: `valid` when the JSON Schema admits it | `invalid`, each reason named after the schema's (`telemetry.v1 §2.6 tag_disagrees: …`) | in `watch`, `echo`, `check expect --valid-payload`, `check schema`, `check conform`'s `payload-type`, the `invalid-payload` rule. A bare counter's Epoch attachment is read where the sample carries one |
+| `gen`, `serve`: a session with timestamping off, so a resource declaring `history` could not start (#825) | the owner posture: timestamping on, as a real owner's | see the fleet's session postures |
+
 ## Unreleased (`main`, zk2) — `alarms.v1` in the tools: `alarms`, `alert-firing`, two doctor checks (#800, AC)
 
 `alarms.v1` (`spec/profiles/alarms/v1.md`) gives zk2 the alert plane v1's

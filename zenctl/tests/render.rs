@@ -87,43 +87,46 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
     assert_data_eq!(
         table(&report),
         str![[r#"
-✗  split-brain (§6)                      finding — 1 subject(s)
+✗  split-brain (§6)                           finding — 1 subject(s)
     ✗ error: host-a/tc tc.netif.v1 — 2 instances hold its interface token in two presence reads 2.0s apart (3fa9c2d41b7e0012, 3fa9c2d41b7e0013), and at least two expose an exclusive resource
-⚠  binding-unsatisfied (§3.2 R5)         finding — 1 subject(s)
+⚠  binding-unsatisfied (§3.2 R5)              finding — 1 subject(s)
     ⚠ warning: ws-01/tcgui-frontend scenario — its bindings (*/tc) select no provider of tc.scenario.v1 visible to this reader
-?  contract-drift (§9.8)                 unobservable — 1 subject(s) unjudged
+?  contract-drift (§9.8)                      unobservable — 1 subject(s) unjudged
     ? unjudged tc.netem.v1 eeeeeeeeeeeeeeee 5d1c0a9b2e3f4a6b: not classified: tc.netem.v1 sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee is unavailable
-✗  contract-unavailable (§8.4)           finding — 1 subject(s)
+✗  contract-unavailable (§8.4)                finding — 1 subject(s)
     ✗ error: tc.netem.v1 sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee — named by host-b/tc@3fa9c2d41b7e0014; no holder served a bundle that verified (no reply)
-✓  descriptor-invalid (§3.3)             clean — 3 descriptor(s) pass the descriptor check against the contracts they name
-✓  token-missing (§8.1)                  clean — 3 instance(s): every token agrees with its descriptor
-✓  presence-over-budget (§8.3)           clean — 9 token(s) visible to this reader in the presence domain; within the budget 10000
-✓  storage-on-state (§4.2 S4)            clean — 1 storage(s) on 2 router(s), none answering on an owner's state keys
-✓  archive-unaligned (§4.4)              clean — no archive.v1 provider visible to this reader: nothing to align
-—  state-stamp-foreign (§4.2 S1–S2)      not asked
-·  shm-memlock-low (§7.4)                finding — 1 subject(s)
+✓  descriptor-invalid (§3.3)                  clean — 3 descriptor(s) pass the descriptor check against the contracts they name
+✓  token-missing (§8.1)                       clean — 3 instance(s): every token agrees with its descriptor
+✓  presence-over-budget (§8.3)                clean — 9 token(s) visible to this reader in the presence domain; within the budget 10000
+✓  storage-on-state (§4.2 S4)                 clean — 1 storage(s) on 2 router(s), none answering on an owner's state keys
+✓  archive-unaligned (§4.4)                   clean — no archive.v1 provider visible to this reader: nothing to align
+—  state-stamp-foreign (§4.2 S1–S2)           not asked
+·  shm-memlock-low (§7.4)                     finding — 1 subject(s)
     · info: this host — RLIMIT_MEMLOCK is 64 KiB, below the 8 MiB floor
-✓  admin-unreachable (§4.2)              clean — 2 router(s) answered `@/*/router`
-✓  router-version-skew (App. B)          clean — 2 router(s), all at 1.10.1
-✗  health-failed (health.v1 §2.1)        finding — 1 subject(s)
+✓  admin-unreachable (§4.2)                   clean — 2 router(s) answered `@/*/router`
+✓  router-version-skew (App. B)               clean — 2 router(s), all at 1.10.1
+✗  health-failed (health.v1 §2.1)             finding — 1 subject(s)
     ✗ error: host-b/tc — its status is FAILED, fresh: present, and unable to do its primary job, as its owner says (health.v1 §2.1) — its reason: "netns gone"
-✓  health-degraded (health.v1 §2.1)      clean — 1 service(s) implementing health.v1, none at DEGRADED: each fresh status, and the checks it vouches for, read better
-?  health-stale (health.v1 §2.4)         unobservable — 1 subject(s) unjudged
+✓  health-degraded (health.v1 §2.1)           clean — 1 service(s) implementing health.v1, none at DEGRADED: each fresh status, and the checks it vouches for, read better
+?  health-stale (health.v1 §2.4)              unobservable — 1 subject(s) unjudged
     ? unjudged host-a/tc: its status's freshness could not be read: this reader's clock is not trusted to the HLC delta against the stamping clock (clock_untrusted)
-✓  health-inconsistent (health.v1 §2.2)  clean — 1 service(s) implementing health.v1, each fresh status no better than its current checks
-⚠  hostid-duplicate (hostid.v1 §2.12)    finding — 1 subject(s)
+✓  health-inconsistent (health.v1 §2.2)       clean — 1 service(s) implementing health.v1, each fresh status no better than its current checks
+⚠  hostid-duplicate (hostid.v1 §2.12)         finding — 1 subject(s)
     ⚠ warning: h-bbd1aa1db10b/sysinfo — in both presence reads 2.0s apart, instances of h-bbd1aa1db10b/sysinfo on a system their descriptors declare minted state 2 session zids: the cause is undecided
-—  population-over-bound (§2.7)          not asked
-✗  config-projection (config.v1 §2.19)   finding — 1 subject(s)
+—  population-over-bound (§2.7)               not asked
+✗  config-projection (config.v1 §2.19)        finding — 1 subject(s)
     ✗ error: lab/rf0 — in both of two readings 2.0s apart, its status is not its view's projection: an owner keeps the status equal to the view's projection (config.v1 §2.19)
-✓  config-overdue (config.v1 §2.11)      clean — 1 service(s) implementing config.v1, none listing a change pending past its deadline by its own clock; 3 present service(s) do not list config.v1, and are not asked
-?  config-unpersisted (config.v1 §5)     unobservable — 1 subject(s) unjudged
+✓  config-overdue (config.v1 §2.11)           clean — 1 service(s) implementing config.v1, none listing a change pending past its deadline by its own clock; 3 present service(s) do not list config.v1, and are not asked
+?  config-unpersisted (config.v1 §5)          unobservable — 1 subject(s) unjudged
     ? unjudged lab/rf0: no fresh view: the status carries no class, no writable and no startup value — the view this reader's clock is not trusted to the HLC delta against the stamping clock (unobservable) — the doctor measures no clock: pass --clocks-synced on the deployment's word that this host's clock and the owners' agree (freshness.v1 §2.6)
-—  config-desired (config.v1 §2.18)      not asked
-✗  alarm-key (alarms.v1 §2.2)            finding — 1 subject(s)
+—  config-desired (config.v1 §2.18)           not asked
+✗  alarm-key (alarms.v1 §2.2)                 finding — 1 subject(s)
     ✗ error: zk2/lab/liar/alarms.v1/state/alarms/0000000000000001 — the key is not its document's: the document derives a659f813308ad1da — a phantom of another derivation, of a renamed rule, or an owner that hashed a host-scoped label (alarms.v1 §2.2, §2.9)
-?  alarm-stale (alarms.v1 §2.7)          unobservable — 1 subject(s) unjudged
+?  alarm-stale (alarms.v1 §2.7)               unobservable — 1 subject(s) unjudged
     ? unjudged zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da: this reader's clock is not trusted to the HLC delta against the stamping clock (clock_untrusted); a reply is aged only on the operator's word that the clocks agree (--clocks-synced, freshness.v1 §2.6)
+⚠  telemetry-declaration (telemetry.v1 §2.2)  finding — 1 subject(s)
+    ⚠ warning: meter.v1 sha256:5d1c stream/level — implemented by lab/meter; its declaration is invalid: the type cannot carry the declared kind (not_a_carrier) — no reader reads its members' kind, conformance or continuity (telemetry.v1 §2.2)
+—  telemetry-sample (telemetry.v1 §2.6)       not asked
 
 "#]]
     );
@@ -175,7 +178,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
         "{said}"
     );
     assert!(
-        said.contains("8 finding(s): 5 error(s), 2 warning(s), 1 info"),
+        said.contains("9 finding(s): 5 error(s), 3 warning(s), 1 info"),
         "{said}"
     );
     // The config.v1 checks' scope (#768, CC): what they read, and the cure
@@ -423,6 +426,68 @@ health in namespace "acme" — worst FAILED: 1 healthy, 1 unhealthy, 1 stale, 1 
         said.contains("5 service(s): 1 healthy, 1 unhealthy, 1 stale, 1 unobservable, 1 not asked"),
         "{said}"
     );
+}
+
+/// `zenctl telemetry` (#819, TC): one row per metric resource and per
+/// member, §5's answers spelled apart in every medium — a mark and words in
+/// the table, the fixtures' tokens in `resource` and `member` rows — each
+/// pair's epoch said as established in-band, by presence, or assumed, a
+/// unit unknown never shown as `1`, and the run's judgement leading the
+/// envelope.
+#[test]
+fn a_telemetry_reading_spells_every_answer_apart_in_every_medium() {
+    let report = fx::telemetry_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+telemetry under every metric resource in namespace "acme" — 4 metric resource(s), 3 member(s): 10 sample(s), 8 conform, 2 do not; 5 pair(s), 1 decreased (4 established, 0 assumed)
+✓  lab/meter meter.v1 stream/drops   declared: a bare counter, unit unknown; no in-band epoch: presence is its epoch's evidence; 1 member(s) heard
+✓  lab/meter meter.v1 stream/frames  declared: a Point declared counter, unit 1; its epoch in-band, in the Point; 1 member(s) heard
+✓  lab/meter meter.v1 stream/level   declared: a bare gauge, unit dBm; no epoch: a gauge, text, boolean or binary has none; 1 member(s) heard
+!  lab/meter meter.v1 stream/odd     invalid: the type cannot carry the declared kind (not_a_carrier) — its members' kind, conformance and continuity are unobservable (telemetry.v1 §2.2); 0 member(s) heard
+✗  zk2/lab/meter/meter.v1/stream/drops   counter, unit unknown; 3 sample(s), 3 conform; latest 7; rate 5 /s (unit unknown)
+    2 pair(s): 1 same_epoch, 0 reset, 1 decreased, 0 incomparable, 0 not asked — epochs 0 in-band, 2 by presence, 0 assumed
+    5 → 10  same_epoch, established by presence; 5 /s (unit unknown) by arrival over 1.000s
+    10 → 7  decreased, established by presence; no rate (decreased)
+✗  zk2/lab/meter/meter.v1/stream/frames  counter, unit 1; 4 sample(s), 3 conform, 1 do not (tag_disagrees ×1); latest 3; rate 10 1/s
+    2 pair(s): 1 same_epoch, 1 reset, 0 decreased, 0 incomparable, 0 not asked — epochs 2 in-band, 0 by presence, 0 assumed
+    10 → 20  same_epoch, established in-band; 10 1/s by timestamp over 1.000s
+    20 → 3  reset, established in-band; no rate (reset)
+    the latest that did not conform: tag_disagrees
+✗  zk2/lab/meter/meter.v1/stream/level   gauge, unit dBm; 3 sample(s), 2 conform, 1 do not (wrong_type ×1); latest -70.5
+    1 pair(s): 0 same_epoch, 0 reset, 0 decreased, 0 incomparable, 1 not asked — epochs 0 in-band, 0 by presence, 0 assumed
+    -71.0 → -70.5  not asked
+    the latest that did not conform: wrong_type
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "telemetry");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert!(envelope.get("members").is_none(), "members are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.resources.len() + report.members.len());
+    let continuity: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r["row"] == "member")
+        .flat_map(|r| r["pairs"].as_array().expect("pairs").iter())
+        .map(|p| p["continuity"].as_str().expect("a token"))
+        .collect();
+    assert_eq!(
+        continuity,
+        ["decreased", "not_asked", "reset", "same_epoch"].into()
+    );
+    let drops = rows
+        .iter()
+        .find(|r| r["key"] == "zk2/lab/meter/meter.v1/stream/drops")
+        .expect("drops");
+    assert!(drops.get("unit").is_none(), "unknown, never dimensionless");
+    let said = notes(&report);
+    assert!(said.contains("a decrease judged by presence"), "{said}");
 }
 
 /// `zenctl alarms` (#800, AC): one row per owner and per alarm key, every
@@ -1950,6 +2015,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-explain",
         "storage-list",
         "storage-plan",
+        "telemetry",
         "timeline",
         "why",
     ];

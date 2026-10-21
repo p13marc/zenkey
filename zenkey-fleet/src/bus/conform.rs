@@ -301,6 +301,11 @@ pub struct ConformObservation {
     /// `alarms.v1/state/alarms/*`, when a descriptor of it lists
     /// `alarms.v1` (§2.13); `None` otherwise.
     pub alarms: Option<std::result::Result<crate::model::alarms::SeedRead, String>>,
+    /// The service's metric members of the interface (#819, TC), read over
+    /// the same window by `telemetry.v1`'s reader: each sample's
+    /// conformance, and each pair's continuity with presence. `None` when
+    /// the presence read failed.
+    pub telemetry: Option<crate::bus::telemetry::TelemetryObservation>,
 }
 
 impl ConformObservation {
@@ -453,20 +458,37 @@ pub async fn observe(
         let scope = crate::model::alarms::AlarmScope::of(&address);
         Some(crate::bus::alarms::get(session, scope.alarms_selector(), t).await)
     };
+    let telemetry = async {
+        if presence.is_err() {
+            return None;
+        }
+        let store = BundleStore::new(t);
+        store.seed(offline);
+        let mut tspec = crate::bus::telemetry::TelemetrySpec::new(t, spec.window);
+        tspec.lease = spec.lease;
+        tspec.wait_before_close = spec.wait_before_close;
+        let scope = crate::model::telemetry::TelemetryScope::of(&address).with_iface(iface.clone());
+        Some(
+            crate::bus::telemetry::observe(session, &bus.namespace, scope, &store, offline, tspec)
+                .await,
+        )
+    };
     let suite = suite(
         bus,
         offline,
         address.clone(),
-        iface,
+        iface.clone(),
         asked_fp,
         spec,
         presence.clone(),
         admin,
     );
-    let (mut obs, health, config, alarms) = tokio::join!(suite, health, config, alarms);
+    let (mut obs, health, config, alarms, telemetry) =
+        tokio::join!(suite, health, config, alarms, telemetry);
     obs.health = health;
     obs.config = config;
     obs.alarms = alarms;
+    obs.telemetry = telemetry;
     obs
 }
 
@@ -504,6 +526,7 @@ async fn suite(
         health: None,
         config: None,
         alarms: None,
+        telemetry: None,
     };
     let Ok(fp) = obs.claimed() else {
         return obs;

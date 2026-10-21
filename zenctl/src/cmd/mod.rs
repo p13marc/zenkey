@@ -49,6 +49,7 @@ pub mod service;
 pub mod snapshot;
 pub mod storage;
 pub mod subscribe;
+pub mod telemetry;
 pub mod timeline;
 pub mod watch;
 pub mod watchdog;

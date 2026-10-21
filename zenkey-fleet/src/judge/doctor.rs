@@ -319,8 +319,106 @@ pub struct StateStamps {
     /// Every key answered with a value, not a `reply_del`: the members
     /// `population-over-bound` counts (§2.7, 0.24).
     pub values: BTreeSet<String>,
+    /// The value replies of the interface's metric resources, when
+    /// `telemetry-sample` is asked: what it reads (#819, TC). At most
+    /// [`STATE_REPLY_CAP`] of them and [`STATE_REPLY_BYTES`] of payload and
+    /// attachment; every other reply keeps its stamp alone.
+    pub replies: Vec<StateReply>,
+    /// Metric value replies past either cap, not kept.
+    pub replies_capped: u64,
     /// Whether every GET ended at the final reply.
     pub complete: bool,
+}
+
+/// How many value replies of one owner's interface a run keeps for
+/// `telemetry-sample`.
+pub const STATE_REPLY_CAP: usize = 4_096;
+
+/// How many bytes of payload and attachment of one owner's interface a run
+/// keeps for `telemetry-sample`: 8 MiB.
+pub const STATE_REPLY_BYTES: usize = 8 * 1024 * 1024;
+
+/// What `telemetry-sample` keeps of one owner interface's state replies
+/// (#819, TC): the replies on its metric resources' keys alone, by the
+/// revision the owner's descriptors name, within [`STATE_REPLY_CAP`] and
+/// [`STATE_REPLY_BYTES`]; a metric reply past either is counted in
+/// [`StateStamps::replies_capped`], so the check says what it could not
+/// read. No revision in hand, or `telemetry-sample` not asked: nothing.
+#[derive(Debug, Default)]
+struct ReplyKeeper {
+    revision: Option<Arc<Revision>>,
+    bytes: usize,
+}
+
+impl ReplyKeeper {
+    fn offer(
+        &mut self,
+        out: &mut StateStamps,
+        key: &str,
+        size: usize,
+        reply: impl FnOnce() -> StateReply,
+    ) {
+        let Some(rev) = &self.revision else {
+            return;
+        };
+        if metric_of(rev.contract(), key).is_none() {
+            return;
+        }
+        if out.replies.len() < STATE_REPLY_CAP && self.bytes + size <= STATE_REPLY_BYTES {
+            self.bytes += size;
+            out.replies.push(reply());
+        } else {
+            out.replies_capped += 1;
+        }
+    }
+}
+
+/// The metric resource `key` is a member of in `contract` (§2.2: match,
+/// then rank), when it is one (`telemetry.v1` §2.1).
+fn metric_of(contract: &Contract, key: &str) -> Option<crate::model::telemetry::MetricType> {
+    let Ok(ZkKey::Data { kind, resource, .. }) = zenkey_model::grammar::parse(key) else {
+        return None;
+    };
+    let candidates: Vec<&zenkey_model::contract::Resource> = contract
+        .resources
+        .iter()
+        .filter(|r| r.token == kind)
+        .collect();
+    let refs: Vec<&str> = resource.iter().map(String::as_str).collect();
+    let (i, _) = zenkey_model::template::resolve(candidates.iter().map(|r| &r.template), &refs)?;
+    crate::model::telemetry::MetricType::of(contract, candidates[i])
+}
+
+/// The one revision of `iface` `addr`'s served descriptors name, when it is
+/// in hand: what `telemetry-sample` reads its replies by.
+fn metric_revision(
+    observed: &Observed,
+    contracts: &BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
+    addr: &Addr,
+    iface: &IfaceId,
+) -> Option<Arc<Revision>> {
+    let want = iface.to_string();
+    let fps: BTreeSet<&str> = served(observed)
+        .filter(|(a, _, _)| *a == addr)
+        .filter_map(|(_, _, d)| d.interfaces.iter().find(|e| e.iface == want))
+        .map(|e| e.contract.as_str())
+        .collect();
+    let [fp] = fps.into_iter().collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    match contracts.get(&(iface.clone(), Fingerprint::parse(fp).ok()?)) {
+        Some(Ok(ContractState::Held(r))) => Some(Arc::clone(r)),
+        _ => None,
+    }
+}
+
+/// One value reply of an owner's state GET, as it came.
+#[derive(Debug, Clone, Default)]
+pub struct StateReply {
+    /// The key, base-relative.
+    pub key: String,
+    pub payload: Vec<u8>,
+    pub attachment: Option<Vec<u8>>,
 }
 
 /// `RLIMIT_MEMLOCK`, as `zenkey::shm` reads it.
@@ -509,16 +607,29 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         }
         out
     };
-    let stamps = async {
-        if !spec.asks(CheckId::StateStampForeign) && !spec.asks(CheckId::PopulationOverBound) {
-            return BTreeMap::new();
-        }
+    // The owners' state GETs follow the retrieval: `telemetry-sample` keeps
+    // the replies of the metric resources alone, by the revisions retrieved.
+    let contracts_then_stamps = async {
+        let contracts = contracts.await;
         let mut out = BTreeMap::new();
+        if !spec.asks(CheckId::StateStampForeign)
+            && !spec.asks(CheckId::PopulationOverBound)
+            && !spec.asks(CheckId::TelemetrySample)
+        {
+            return (contracts, out);
+        }
         for (addr, iface) in owners_in(observed) {
-            let read = state_stamps(s, &addr, &iface, t).await;
+            let keep = ReplyKeeper {
+                revision: spec
+                    .asks(CheckId::TelemetrySample)
+                    .then(|| metric_revision(observed, &contracts, &addr, &iface))
+                    .flatten(),
+                bytes: 0,
+            };
+            let read = state_stamps(s, &addr, &iface, t, keep).await;
             out.insert((addr, iface), read);
         }
-        out
+        (contracts, out)
     };
     let second = async {
         if spec.asks_health() {
@@ -541,8 +652,13 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             None
         }
     };
-    let (contracts, archives, stamps, second, second_config, alarms) =
-        tokio::join!(contracts, archives, stamps, second, second_config, alarms);
+    let ((contracts, stamps), archives, second, second_config, alarms) = tokio::join!(
+        contracts_then_stamps,
+        archives,
+        second,
+        second_config,
+        alarms
+    );
     readings.extend(second);
     config_readings.extend(second_config);
     PresencePhase {
@@ -555,6 +671,182 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         config: config_readings,
         alarms,
     }
+}
+
+/// `telemetry.v1` §2.2 (#819, TC): every metric resource of every revision
+/// the descriptors name, its declaration read from the contract
+/// (`zenkey_model::telemetry::declaration_of`). An invalid one is the
+/// warning a contract linter gives: no reader reads its members' kind,
+/// conformance or continuity. A revision not in hand is unjudged.
+fn telemetry_declaration(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::TelemetryDeclaration;
+    use crate::model::telemetry::{MetricType, invalid_words};
+    use zenkey_model::telemetry::Declaration;
+    let mut named: BTreeMap<(IfaceId, Fingerprint), BTreeSet<String>> = BTreeMap::new();
+    for (a, _, d) in p.served() {
+        for e in &d.interfaces {
+            if let (Ok(iface), Ok(fp)) =
+                (IfaceId::from_str(&e.iface), Fingerprint::parse(&e.contract))
+            {
+                named.entry((iface, fp)).or_default().insert(a.to_string());
+            }
+        }
+    }
+    let mut findings = Vec::new();
+    let mut undecided = p.undescribed("the revisions it implements are unknown");
+    let mut metrics = 0usize;
+    for ((iface, fp), by) in &named {
+        let rev = match p.revision(iface, fp) {
+            Ok(r) => r,
+            Err(why) => {
+                undecided.push(unjudged(format!("{iface} {fp}"), why));
+                continue;
+            }
+        };
+        let c = rev.contract();
+        for r in &c.resources {
+            let Some(ty) = MetricType::of(c, r) else {
+                continue;
+            };
+            metrics += 1;
+            if let Declaration::Invalid(why) = &ty.declaration {
+                findings.push(finding(
+                    C,
+                    DoctorSeverity::Warning,
+                    format!("{iface} {fp} {}", zenkey::implementation::resource_name(r)),
+                    format!(
+                        "implemented by {}; its declaration is invalid: {} — no reader reads its \
+                         members' kind, conformance or continuity (telemetry.v1 §2.2)",
+                        by.iter().cloned().collect::<Vec<_>>().join(", "),
+                        invalid_words(why)
+                    ),
+                ));
+            }
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{metrics} metric resource(s) in {} revision(s) named by descriptors, each \
+             declaration valid",
+            named.len()
+        ),
+    )
+}
+
+/// `telemetry.v1` §2.6 (#819, TC), with `--deep`: every value reply of the
+/// owners' state GETs (the ones `state-stamp-foreign` makes) that is a
+/// sample of a state metric member, read by `zenkey_model::telemetry::check`.
+/// One that does not conform is the finding; one that does not decode is
+/// unjudged (the core's verdict, `payload-type`'s); a member of an invalid
+/// declaration is `telemetry-declaration`'s. Streams are not read here: the
+/// doctor listens to no window, and `zenctl telemetry` and `check conform`
+/// read them.
+fn telemetry_sample(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::TelemetrySample;
+    use crate::model::telemetry::problem_words;
+    use zenkey_model::telemetry::{Conformance as Tc, Unasked};
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let (mut judged, mut capped) = (0usize, 0u64);
+    for ((addr, iface), read) in &p.obs.stamps {
+        let subject = format!("{addr} {iface}");
+        let stamps = match read {
+            Ok(s) => s,
+            Err(e) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!("its state could not be read: {e}"),
+                ));
+                continue;
+            }
+        };
+        let want = iface.to_string();
+        let fps: BTreeSet<&str> = p
+            .served()
+            .filter(|(a, _, _)| *a == addr)
+            .filter_map(|(_, _, d)| d.interfaces.iter().find(|e| e.iface == want))
+            .map(|e| e.contract.as_str())
+            .collect();
+        let entry = p
+            .served()
+            .filter(|(a, _, _)| *a == addr)
+            .find_map(|(_, _, d)| d.interfaces.iter().find(|e| e.iface == want));
+        let Some(entry) = entry else {
+            continue;
+        };
+        if fps.len() > 1 {
+            undecided.push(unjudged(
+                subject,
+                format!(
+                    "its instances claim {} revisions of {iface}: which declaration its samples \
+                     are read by cannot be told",
+                    fps.len()
+                ),
+            ));
+            continue;
+        }
+        let rev = match p.entry_revision(entry) {
+            Ok(r) => r,
+            Err(why) => {
+                undecided.push(unjudged(subject, why));
+                continue;
+            }
+        };
+        let contract = rev.contract();
+        capped += stamps.replies_capped;
+        for reply in &stamps.replies {
+            let Some(ty) = metric_of(contract, &reply.key) else {
+                continue;
+            };
+            match ty
+                .check(&reply.payload, reply.attachment.as_deref())
+                .conformance
+            {
+                Tc::Conforms => judged += 1,
+                Tc::DoesNot(ps) => {
+                    judged += 1;
+                    findings.push(finding(
+                        C,
+                        DoctorSeverity::Error,
+                        reply.key.clone(),
+                        format!(
+                            "its owner's reply does not conform: {}",
+                            ps.into_iter()
+                                .map(problem_words)
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        ),
+                    ));
+                }
+                Tc::Unobservable(Unasked::Undecodable) => undecided.push(unjudged(
+                    reply.key.clone(),
+                    "its owner's reply does not decode as §2.6 reads bytes (strict JSON, or \
+                     CBOR): unobservable here, the core's verdict standing (undecodable)",
+                )),
+                Tc::Unobservable(_) | Tc::NotAsked(_) => {}
+            }
+        }
+    }
+    let capped = if capped > 0 {
+        format!(
+            "; {capped} reply(ies) past the run's caps ({STATE_REPLY_CAP} replies, 8 MiB per owner \
+             interface) were not read"
+        )
+    } else {
+        String::new()
+    };
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{judged} state metric sample(s) in the owners' GET replies, each conforming{capped}; \
+             streams are read over a window, by zenctl telemetry and check conform"
+        ),
+    )
 }
 
 /// Every address presence shows providing `archive.v1`, by token or by
@@ -732,6 +1024,7 @@ async fn state_stamps(
     addr: &Addr,
     iface: &IfaceId,
     timeout: Duration,
+    mut keep: ReplyKeeper,
 ) -> Result<StateStamps, String> {
     let iface = iface.to_string();
     let mut out = StateStamps {
@@ -767,7 +1060,14 @@ async fn state_stamps(
                 keys.push(sample.key_expr().as_str().to_owned());
             }
             if sample.kind() == SampleKind::Put {
-                out.values.insert(sample.key_expr().as_str().to_owned());
+                let key = sample.key_expr().as_str();
+                out.values.insert(key.to_owned());
+                let size = sample.payload().len() + sample.attachment().map_or(0, |a| a.len());
+                keep.offer(&mut out, key, size, || StateReply {
+                    key: key.to_owned(),
+                    payload: sample.payload().to_bytes().into_owned(),
+                    attachment: sample.attachment().map(|a| a.to_bytes().into_owned()),
+                });
             }
         }
     }
@@ -826,6 +1126,8 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::ConfigDesired => config_desired(p, spec),
                 CheckId::AlarmKey => alarm_key(p, spec),
                 CheckId::AlarmStale => alarm_stale(p, spec),
+                CheckId::TelemetryDeclaration => telemetry_declaration(p),
+                CheckId::TelemetrySample => telemetry_sample(p),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -5238,5 +5540,146 @@ mod tests {
         let mut none = alarms_obs(&[]);
         none.alarms = None;
         assert!(check(&none, CheckId::AlarmStale).verdict.is_unobservable());
+    }
+
+    /// `meter.v1`, the telemetry scenarios' contract, as the runtime's tests
+    /// keep it.
+    fn meter() -> Contract {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/meter.v1.toml");
+        let text = std::fs::read_to_string(&path).expect("meter.v1");
+        let l = zenkey_model::contract::load_str(&text, path.parent().unwrap(), None);
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
+    }
+
+    /// `telemetry-declaration` (#819, TC): an invalid declaration is a
+    /// warning, read from the contract a descriptor names; valid ones are
+    /// clean, and a revision not in hand unjudged.
+    #[test]
+    fn an_invalid_metric_declaration_is_a_warning() {
+        let bad = load(
+            "[interface]\nname = \"odd\"\nmajor = 1\nuses = [\"telemetry.v1\"]\n\
+             [resources.blob]\nkind = \"stream\"\ntype = { raw = \"application/octet-stream\" }\n\
+             annotations = { \"telemetry.kind\" = \"counter\" }\n",
+        );
+        let good = meter();
+        let after = observed(
+            &[inst("lab/meter", A)],
+            vec![(
+                ("lab/meter", A),
+                descriptor("lab/meter", A, &[entry(&bad), entry(&good)], &[]),
+            )],
+        );
+        let r = check(
+            &obs(after.clone(), &[&bad, &good], &[]),
+            CheckId::TelemetryDeclaration,
+        );
+        let f = found(&r);
+        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert!(f.subject.ends_with("stream/blob"), "{f:?}");
+        assert!(f.evidence.contains("not_a_carrier"), "{f:?}");
+        assert_eq!(r.findings.len(), 1, "meter.v1's six are valid");
+        let only_good = observed(
+            &[inst("lab/meter", A)],
+            vec![(
+                ("lab/meter", A),
+                descriptor("lab/meter", A, &[entry(&good)], &[]),
+            )],
+        );
+        assert!(
+            clean(&check(
+                &obs(only_good.clone(), &[&good], &[]),
+                CheckId::TelemetryDeclaration
+            ))
+            .contains("6 metric resource(s)")
+        );
+        assert!(
+            unseen(&check(
+                &obs(only_good, &[], &[&good]),
+                CheckId::TelemetryDeclaration
+            ))
+            .contains("unavailable")
+        );
+    }
+
+    /// `telemetry-sample` (#819, TC), with `--deep`: a state metric member's
+    /// reply that does not conform is the finding; a reply on a resource
+    /// that is no metric's is not read.
+    #[test]
+    fn a_state_metric_reply_that_does_not_conform_is_the_finding() {
+        let c = meter();
+        let mut o = obs(
+            observed(
+                &[inst("lab/meter", A)],
+                vec![(
+                    ("lab/meter", A),
+                    descriptor("lab/meter", A, &[entry(&c)], &[]),
+                )],
+            ),
+            &[&c],
+            &[],
+        );
+        let at: (Addr, IfaceId) = ("lab/meter".parse().unwrap(), "meter.v1".parse().unwrap());
+        let read = |o: &mut DoctorObservation, payload: &str| {
+            let s = StateStamps {
+                complete: true,
+                replies: vec![StateReply {
+                    key: "zk2/lab/meter/meter.v1/state/total".into(),
+                    payload: payload.as_bytes().to_vec(),
+                    attachment: None,
+                }],
+                ..Default::default()
+            };
+            o.stamps = [(at.clone(), Ok(s))].into();
+            check(o, CheckId::TelemetrySample)
+        };
+        assert!(clean(&read(&mut o, "12")).contains("1 state metric sample(s)"));
+        let r = read(&mut o, "\"twelve\"");
+        let f = found(&r);
+        assert_eq!(f.severity, DoctorSeverity::Error);
+        assert!(f.evidence.contains("wrong_type"), "{f:?}");
+        assert!(
+            read(&mut o, "1e400").verdict.is_unobservable(),
+            "undecodable"
+        );
+        assert!(
+            !DoctorSpec::new(Duration::from_secs(1)).asks(CheckId::TelemetrySample),
+            "deep only"
+        );
+    }
+
+    /// Review of PR #827: `telemetry-sample` keeps the replies of the
+    /// interface's metric resources alone, within 4096 replies and 8 MiB of
+    /// payload and attachment per owner interface; a metric reply past either
+    /// is counted, and every other reply keeps its stamp alone.
+    #[test]
+    fn the_doctor_keeps_metric_replies_alone_and_within_its_caps() {
+        let rev = Arc::new(Revision::from_contract(meter(), ContractSource::Bus));
+        let reply = |key: &str| StateReply {
+            key: key.to_owned(),
+            payload: b"12".to_vec(),
+            attachment: None,
+        };
+        let total = "zk2/lab/meter/meter.v1/state/total";
+        let other = "zk2/lab/meter/meter.v1/state/other";
+        let mut out = StateStamps::default();
+        let mut keep = ReplyKeeper {
+            revision: Some(Arc::clone(&rev)),
+            bytes: 0,
+        };
+        keep.offer(&mut out, total, 2, || reply(total));
+        keep.offer(&mut out, other, 2, || {
+            panic!("no metric resource's: never copied")
+        });
+        assert_eq!((out.replies.len(), out.replies_capped), (1, 0));
+        keep.offer(&mut out, total, STATE_REPLY_BYTES, || reply(total));
+        assert_eq!(
+            (out.replies.len(), out.replies_capped),
+            (1, 1),
+            "past 8 MiB: counted"
+        );
+        let mut none = ReplyKeeper::default();
+        none.offer(&mut out, total, 2, || panic!("telemetry-sample not asked"));
+        assert_eq!(out.replies.len(), 1);
     }
 }

@@ -123,11 +123,21 @@ pub enum CheckId {
     /// (`alarms.v1` §2.7, §2.14; #800), about the owner, which broke §2.7's
     /// confirmation or whose clock is ahead.
     AlarmStale,
+    /// A metric resource whose declaration is invalid: §5's *no* to "is
+    /// this resource's declaration valid?" (`telemetry.v1` §2.2, §2.4;
+    /// #819), read from the contracts the descriptors name. A warning, as a
+    /// contract linter's: no reader reads its members.
+    TelemetryDeclaration,
+    /// A state metric member whose owner's reply does not conform: §5's
+    /// *no* to "does this sample conform?" (`telemetry.v1` §2.6; #819), read
+    /// with `--deep` from the GETs `state-stamp-foreign` makes. A stream's
+    /// samples are `zenctl telemetry`'s and `check conform`'s.
+    TelemetrySample,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 25] = [
+    pub const ALL: [CheckId; 27] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -153,6 +163,8 @@ impl CheckId {
         CheckId::ConfigDesired,
         CheckId::AlarmKey,
         CheckId::AlarmStale,
+        CheckId::TelemetryDeclaration,
+        CheckId::TelemetrySample,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -183,6 +195,8 @@ impl CheckId {
             CheckId::ConfigDesired => "config-desired",
             CheckId::AlarmKey => "alarm-key",
             CheckId::AlarmStale => "alarm-stale",
+            CheckId::TelemetryDeclaration => "telemetry-declaration",
+            CheckId::TelemetrySample => "telemetry-sample",
         }
     }
 
@@ -220,6 +234,8 @@ impl CheckId {
             CheckId::ConfigDesired => "config.v1 §2.18",
             CheckId::AlarmKey => "alarms.v1 §2.2",
             CheckId::AlarmStale => "alarms.v1 §2.7",
+            CheckId::TelemetryDeclaration => "telemetry.v1 §2.2",
+            CheckId::TelemetrySample => "telemetry.v1 §2.6",
         }
     }
 
@@ -309,6 +325,14 @@ impl CheckId {
                 "does a present owner hold a firing alarm it has not confirmed within its 900 s \
                  horizon?"
             }
+            CheckId::TelemetryDeclaration => {
+                "does a contract an owner implements declare a metric resource whose declaration \
+                 is invalid, so that no reader reads its members?"
+            }
+            CheckId::TelemetrySample => {
+                "does an owner answer a GET of a state metric member with a sample that does not \
+                 conform?"
+            }
         }
     }
 
@@ -318,7 +342,7 @@ impl CheckId {
     pub fn reads_data(self) -> bool {
         matches!(
             self,
-            CheckId::StateStampForeign | CheckId::PopulationOverBound
+            CheckId::StateStampForeign | CheckId::PopulationOverBound | CheckId::TelemetrySample
         )
     }
 
@@ -1001,6 +1025,8 @@ mod check_id_tests {
                 "config-desired",
                 "alarm-key",
                 "alarm-stale",
+                "telemetry-declaration",
+                "telemetry-sample",
             ]
         );
     }

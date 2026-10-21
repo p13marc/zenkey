@@ -222,6 +222,66 @@ fn doctor_severities_findings_and_verdicts_are_the_stable_vocabulary() {
     );
 }
 
+/// `telemetry.v1` (#819, TC): §5's answers in the fixtures' tokens — a
+/// declaration `declared` or `invalid`, a pair's continuity and how its
+/// epoch was had, a unit absent when unknown — pinned whole for one member,
+/// and the run's finding a decrease within an established epoch.
+#[test]
+fn a_telemetry_report_keeps_every_answer_apart() {
+    let r = fx::telemetry_report();
+    let v = serde_json::to_value(&r).unwrap();
+    let drops = &v["members"][0];
+    assert_eq!(
+        drops,
+        &json!({
+            "key": "zk2/lab/meter/meter.v1/stream/drops",
+            "address": "lab/meter",
+            "iface": "meter.v1",
+            "resource": "stream/drops",
+            "kind": "counter",
+            "kind_from": "declared",
+            "samples": {"received": 3, "conforms": 3, "does_not": 0, "unobservable": 0},
+            "latest": 7,
+            "continuity": {"pairs": 2, "same_epoch": 1, "reset": 0, "decreased": 1,
+                           "unobservable": 0, "not_asked": 0, "in_band": 0,
+                           "by_presence": 2, "assumed": 0},
+            "pairs": [
+                {"earlier": 5, "later": 10, "continuity": "same_epoch",
+                 "epoch": "established", "via": "presence", "presence": "observed",
+                 "rate": 5.0, "base": "arrival", "elapsed_s": 1.0},
+                {"earlier": 10, "later": 7, "continuity": "decreased",
+                 "epoch": "established", "via": "presence", "presence": "observed",
+                 "no_rate": "decreased", "base": "arrival", "elapsed_s": 1.0},
+            ],
+            "rate": {"per_s": 5.0},
+        }),
+        "a unit unknown is absent, never `1`"
+    );
+    let declarations: std::collections::BTreeSet<&str> = v["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["declaration"]["answer"].as_str().unwrap())
+        .collect();
+    assert_eq!(declarations, ["declared", "invalid"].into());
+    assert_eq!(
+        v["resources"][3]["declaration"]["reasons"],
+        json!(["not_a_carrier"])
+    );
+    assert_eq!(
+        v["members"][1]["samples"]["problems"],
+        json!({"tag_disagrees": 1})
+    );
+    assert_eq!(v["totals"]["decreased"], 1);
+    assert_eq!(
+        serde_json::to_value(r.judgement()).unwrap()["answer"],
+        "established"
+    );
+    for absent in ["selector", "across_face", "lost", "unobservable"] {
+        assert!(v.get(absent).is_none(), "{absent}");
+    }
+}
+
 /// `alarms.v1` (#800, AC): §5's answers in the fixtures' tokens, every
 /// answer spelled apart, the scope's answer the finding, and an absent
 /// owner's alarm carried last-known and never as current.

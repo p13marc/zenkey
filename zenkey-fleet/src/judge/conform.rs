@@ -92,6 +92,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.extend(health_cases(obs));
         report.cases.extend(config_cases(obs));
         report.cases.extend(alarm_cases(obs));
+        report.cases.extend(telemetry_cases(obs));
         report.unobservable = Some(why);
         report
     };
@@ -151,6 +152,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.extend(health_cases(obs));
         report.cases.extend(config_cases(obs));
         report.cases.extend(alarm_cases(obs));
+        report.cases.extend(telemetry_cases(obs));
         return report;
     };
     let owners: BTreeSet<String> = match &obs.presence {
@@ -237,6 +239,10 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
     report.cases.extend(health_cases(obs));
     report.cases.extend(config_cases(obs));
     report.cases.extend(alarm_cases(obs));
+    report.cases.extend(telemetry_cases(obs));
+    if let Some(t) = &obs.telemetry {
+        report.asked.extend(t.asked.iter().cloned());
+    }
     let mut seen = BTreeSet::new();
     report.asked.retain(|s| seen.insert(s.clone()));
     report
@@ -967,6 +973,291 @@ fn health_cases(obs: &ConformObservation) -> [ConformCase; 2] {
         ),
     };
     [health, aggregation]
+}
+
+/// `telemetry.v1`'s cases (#819, TC), per metric resource of the interface
+/// the service exposes (§2.1): its declaration read from the contract
+/// (§2.2), its samples heard in the window by the profile's reader (§2.6),
+/// and its pairs' continuity over the window, presence watched throughout
+/// (§2.9, §2.10). Every answer is `zenkey_model::telemetry`'s, through the
+/// fleet's book.
+fn telemetry_cases(obs: &ConformObservation) -> Vec<ConformCase> {
+    use crate::judge::telemetry::declaration_says;
+    use crate::model::telemetry::{MetricType, invalid_words};
+    use zenkey_model::telemetry::Declaration;
+    let Some(rev) = &obs.revision else {
+        return Vec::new();
+    };
+    let contract = rev.contract();
+    let mut exposed = obs.exposed();
+    exposed.sort_by_key(|r| zenkey::implementation::resource_name(r));
+    let mut out = Vec::new();
+    for r in exposed {
+        let Some(ty) = MetricType::of(contract, r) else {
+            continue;
+        };
+        let name = zenkey::implementation::resource_name(r);
+        let declared = match &ty.declaration {
+            Declaration::Invalid(why) => {
+                out.push(ConformCase::failed(
+                    CaseId::TelemetryDeclaration,
+                    &name,
+                    format!(
+                        "its declaration is invalid: {} — no reader reads its members' kind, \
+                         conformance or continuity (telemetry.v1 §2.2)",
+                        invalid_words(why)
+                    ),
+                ));
+                let why = "its declaration is invalid, so its samples' conformance and its \
+                           continuity are unobservable (declaration_invalid)";
+                out.push(ConformCase::unobservable(
+                    CaseId::TelemetrySample,
+                    &name,
+                    why,
+                ));
+                out.push(ConformCase::unobservable(
+                    CaseId::TelemetryContinuity,
+                    &name,
+                    why,
+                ));
+                continue;
+            }
+            Declaration::Declared(d) => {
+                out.push(ConformCase::passed(
+                    CaseId::TelemetryDeclaration,
+                    &name,
+                    declaration_says(&ty.declaration),
+                ));
+                d.clone()
+            }
+            Declaration::Ignored | Declaration::NotThisProfiles => continue,
+        };
+        let t = match &obs.telemetry {
+            None => {
+                let why = "the telemetry reader did not run: the presence read could not be made";
+                out.push(ConformCase::unobservable(
+                    CaseId::TelemetrySample,
+                    &name,
+                    why,
+                ));
+                out.push(ConformCase::unobservable(
+                    CaseId::TelemetryContinuity,
+                    &name,
+                    why,
+                ));
+                continue;
+            }
+            Some(t) => t,
+        };
+        if let Some(why) = &t.unobservable {
+            out.push(ConformCase::unobservable(
+                CaseId::TelemetrySample,
+                &name,
+                why,
+            ));
+            out.push(ConformCase::unobservable(
+                CaseId::TelemetryContinuity,
+                &name,
+                why,
+            ));
+            continue;
+        }
+        let members: Vec<(&String, &crate::model::telemetry::MemberBook)> = t
+            .book
+            .members()
+            .filter(|(_, m)| {
+                m.metric.resource == name
+                    && m.metric.address == obs.address
+                    && m.metric.iface == obs.iface
+            })
+            .collect();
+        out.push(telemetry_sample_case(&name, &members, t.listened));
+        out.push(telemetry_continuity_case(
+            &name,
+            declared.kind,
+            &members,
+            t.book.reads_presence(),
+        ));
+    }
+    out
+}
+
+/// §2.6 over every sample of one metric resource the window heard.
+fn telemetry_sample_case(
+    name: &str,
+    members: &[(&String, &crate::model::telemetry::MemberBook)],
+    listened: std::time::Duration,
+) -> ConformCase {
+    const C: CaseId = CaseId::TelemetrySample;
+    let received: u64 = members.iter().map(|(_, m)| m.samples).sum();
+    let does_not: u64 = members.iter().map(|(_, m)| m.does_not).sum();
+    let conforms: u64 = members.iter().map(|(_, m)| m.conforming).sum();
+    if let Some((key, m)) = members.iter().find(|(_, m)| m.does_not > 0) {
+        let reasons: Vec<String> = m
+            .last_does_not
+            .iter()
+            .flatten()
+            .map(|p| crate::model::telemetry::problem_words(*p))
+            .collect();
+        return ConformCase::failed(
+            C,
+            name,
+            format!(
+                "{does_not} of {received} sample(s) do not conform; the latest of {key}: {}",
+                reasons.join("; ")
+            ),
+        );
+    }
+    if received == 0 {
+        return ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "no sample of it arrived in the {:.1}s window: silence is never a verdict",
+                listened.as_secs_f64()
+            ),
+        );
+    }
+    if conforms == 0 {
+        let why = members
+            .iter()
+            .find_map(|(_, m)| m.unobservable_why)
+            .map_or("unobservable", |w| w.as_str());
+        return ConformCase::unobservable(
+            C,
+            name,
+            format!("none of its {received} sample(s) could be read ({why})"),
+        );
+    }
+    ConformCase::passed(
+        C,
+        name,
+        format!(
+            "{conforms} sample(s) of {} member(s) conform{}",
+            members.len(),
+            match received - conforms {
+                0 => String::new(),
+                n => format!("; {n} could not be read"),
+            }
+        ),
+    )
+}
+
+/// §2.10 over every pair of one metric resource the window heard.
+fn telemetry_continuity_case(
+    name: &str,
+    declared: Option<zenkey_model::telemetry::MetricKind>,
+    members: &[(&String, &crate::model::telemetry::MemberBook)],
+    presence: bool,
+) -> ConformCase {
+    const C: CaseId = CaseId::TelemetryContinuity;
+    if let Some(k) = declared.filter(|k| !k.is_cumulative()) {
+        return ConformCase::not_asked(
+            C,
+            name,
+            format!("a {k} has no continuity: only a counter or a histogram has an epoch"),
+        );
+    }
+    let mut t = crate::model::telemetry::PairTally::default();
+    for (_, m) in members {
+        let x = m.tally;
+        t.same_epoch += x.same_epoch;
+        t.reset += x.reset;
+        t.decreased += x.decreased;
+        t.unobservable += x.unobservable;
+        t.not_asked += x.not_asked;
+        t.in_band += x.in_band;
+        t.by_presence += x.by_presence;
+        t.assumed += x.assumed;
+    }
+    let first_decrease = members.iter().find_map(|(k, m)| {
+        m.pairs
+            .iter()
+            .find(|p| p.pair.continuity == zenkey_model::telemetry::Continuity::Decreased)
+            .map(|p| (k, p))
+    });
+    if t.decreased > 0 {
+        let first = first_decrease.map_or(String::new(), |(k, p)| {
+            let via = match p.pair.basis {
+                Some(zenkey_model::telemetry::Basis::Established(v)) => v.as_str(),
+                _ => "",
+            };
+            format!(
+                "; the latest kept, {k}: {} → {}, the epoch established {}{}",
+                crate::judge::telemetry::measure_json(&p.earlier),
+                crate::judge::telemetry::measure_json(&p.later),
+                via.replace('_', "-"),
+                if via == "presence" {
+                    " (a sample in transit across a re-mint reads so too: telemetry.v1 §2.9)"
+                } else {
+                    ""
+                }
+            )
+        });
+        return ConformCase::failed(
+            C,
+            name,
+            format!(
+                "{} pair(s) decreased within an established epoch{first}",
+                t.decreased
+            ),
+        );
+    }
+    if t.total() == 0 {
+        return ConformCase::unobservable(
+            C,
+            name,
+            "no pair: fewer than two conforming samples of one member arrived in the window",
+        );
+    }
+    if t.asked() == 0 {
+        return if t.unobservable == 0 {
+            ConformCase::not_asked(
+                C,
+                name,
+                "no pair of two counters or histograms (its Points' kinds)",
+            )
+        } else {
+            ConformCase::unobservable(
+                C,
+                name,
+                format!(
+                    "{} pair(s) incomparable: the kinds, or a histogram's bounds or length, \
+                     differ",
+                    t.unobservable
+                ),
+            )
+        };
+    }
+    if t.in_band + t.by_presence == 0 {
+        return ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "every one of its {} pair(s) had its epoch assumed — no in-band epoch, and {} — \
+                 so a decrease within one epoch could not have been found (telemetry.v1 §2.9)",
+                t.assumed,
+                if presence {
+                    "presence established none"
+                } else {
+                    "no presence read"
+                }
+            ),
+        );
+    }
+    ConformCase::passed(
+        C,
+        name,
+        format!(
+            "{} pair(s), none decreased within an established epoch: {} in-band, {} by presence, \
+             {} assumed; {} reset",
+            t.asked(),
+            t.in_band,
+            t.by_presence,
+            t.assumed,
+            t.reset
+        ),
+    )
 }
 
 /// The `alarms.v1` cases (#800, AC): `alarm-key` (§2.2, §2.3) and
@@ -2922,6 +3213,7 @@ mod tests {
             health: None,
             config: None,
             alarms: None,
+            telemetry: None,
         };
         o.heard.insert(
             "stream/bandwidth/{dev}".into(),
@@ -4346,6 +4638,132 @@ mod tests {
                 .verdict
                 .is_unobservable(),
             "an empty GET is no verdict"
+        );
+    }
+
+    /// `telemetry.v1`'s cases (#819, TC), through the fleet's book over
+    /// `meter.v1`: a bare counter that decreased within an epoch presence
+    /// established is the continuity case's violation, a gauge's string the
+    /// sample case's, a gauge has no continuity, and a resource nothing was
+    /// heard of answers nothing.
+    #[test]
+    fn telemetry_cases_read_the_profiles_reader() {
+        use crate::bus::telemetry::{TelemetryObservation, TelemetrySpec};
+        use crate::model::telemetry::{
+            MetricResource, MetricSample, SampleVia, TelemetryBook, TelemetryScope,
+        };
+        use std::time::Instant;
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/meter.v1.toml");
+        let (set, _) = crate::model::catalog::ContractSet::load_path(&path);
+        let rev = Arc::clone(set.iter().next().expect("meter.v1"));
+        let addr: zenkey_model::grammar::Addr = "lab/meter".parse().unwrap();
+        let mut o = conforming();
+        o.address = addr.clone();
+        o.iface = "meter.v1".parse().unwrap();
+        o.served = Some(Ok(ContractState::Held(Arc::clone(&rev))));
+        o.revision = Some(Arc::clone(&rev));
+        let instance = format!("zk2/lab/meter/@zk/instance/{INST}");
+        let mut p = Observed::from_keys(
+            "zk2/lab/meter/@zk/**",
+            std::slice::from_ref(&instance),
+            true,
+        );
+        p.descriptors = Some(BTreeMap::from([(
+            (addr.clone(), INST.parse().unwrap()),
+            DescriptorRead::Served(Box::new(
+                serde_json::from_value(json!({
+                    "format": "zk2-descriptor/0.1",
+                    "service": "lab/meter",
+                    "instance": INST,
+                    "interfaces": [{"iface": "meter.v1",
+                                    "contract": rev.fingerprint().to_string(), "minor": 0}],
+                }))
+                .unwrap(),
+            )),
+        )]));
+        o.presence = Ok(p);
+        let resources: Vec<Arc<MetricResource>> = (0..rev.contract().resources.len())
+            .filter_map(|i| MetricResource::of(&addr, &rev, i))
+            .map(Arc::new)
+            .collect();
+        let t0 = Instant::now();
+        let mut book = TelemetryBook::new(Some(crate::bus::presence::Scope::service(&addr)), t0);
+        book.seed(
+            &Observed::from_keys("s", &[instance], true),
+            std::iter::empty::<(&str, bool)>(),
+        );
+        let of = |r: &str| {
+            Arc::clone(
+                resources
+                    .iter()
+                    .find(|m| m.resource == r)
+                    .expect("a resource"),
+            )
+        };
+        let put = |key: &str, payload: &str, ms: u64| MetricSample {
+            key: format!("zk2/lab/meter/meter.v1/{key}"),
+            delete: false,
+            payload: payload.as_bytes().to_vec(),
+            attachment: None,
+            stamp: None,
+            at: t0 + Duration::from_millis(ms),
+            via: SampleVia::Subscription,
+        };
+        book.sample(&of("stream/drops"), put("stream/drops", "10", 0));
+        book.sample(&of("stream/drops"), put("stream/drops", "7", 300));
+        book.sample(&of("stream/level"), put("stream/level", "-70.5", 0));
+        book.sample(&of("stream/level"), put("stream/level", "\"x\"", 300));
+        book.sample(&of("stream/level"), put("stream/level", "-70.0", 600));
+        o.telemetry = Some(TelemetryObservation {
+            namespace: "acme".into(),
+            spec: TelemetrySpec::new(Duration::from_secs(1), Duration::from_secs(2)),
+            scope: TelemetryScope::of(&addr),
+            resources,
+            seed: None,
+            book,
+            asked: vec![],
+            listened: Duration::from_secs(2),
+            unresolved: 0,
+            skipped: vec![],
+            unobservable: None,
+        });
+        let cases = telemetry_cases(&o);
+        let verdict = |case: CaseId, subject: &str| {
+            cases
+                .iter()
+                .find(|c| c.case == case && c.subject == subject)
+                .unwrap_or_else(|| panic!("{case} {subject}: {cases:#?}"))
+                .clone()
+        };
+        let code = |c: &ConformCase| judgement_exit_code(&c.verdict);
+        assert_eq!(cases.len(), 18, "three cases for each of meter.v1's six");
+        for r in ["stream/frames", "stream/drops", "state/total"] {
+            assert_eq!(code(&verdict(CaseId::TelemetryDeclaration, r)), 0, "{r}");
+        }
+        let decreased = verdict(CaseId::TelemetryContinuity, "stream/drops");
+        assert_eq!(code(&decreased), 1, "{decreased:?}");
+        assert!(decreased.detail.as_deref().unwrap().contains("re-mint"));
+        assert_eq!(code(&verdict(CaseId::TelemetrySample, "stream/drops")), 0);
+        let wrong = verdict(CaseId::TelemetrySample, "stream/level");
+        assert!(
+            wrong.detail.as_deref().unwrap().contains("wrong_type"),
+            "{wrong:?}"
+        );
+        assert!(
+            verdict(CaseId::TelemetryContinuity, "stream/level")
+                .verdict
+                .is_not_asked()
+        );
+        assert!(
+            verdict(CaseId::TelemetrySample, "stream/frames")
+                .verdict
+                .is_unobservable()
+        );
+        assert!(
+            verdict(CaseId::TelemetryContinuity, "stream/frames")
+                .verdict
+                .is_unobservable()
         );
     }
 }
