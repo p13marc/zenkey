@@ -1429,6 +1429,8 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
     (``pairs_listed``)."""
     sec = "§5 over many pairs and samples"
     bus = Bus("zk2py", contract, tool=tool, report=report, sec=sec)
+    xsession: Any = None
+    X: Reader | None = None
     try:
         from . import live
         from .contract import load_contract
@@ -1490,8 +1492,6 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
         o.owner.publish(f"{xbase}/stream/good", b"3.5")
         compare_tool(report, sec, run, X,
                      label="the tool, the invalid resource in scope and unheard, a valid gauge heard (0.5)")
-        X.close()
-        xsession.close()
         # F-154's answer: a sample put the moment the line appears is inside
         # the window, three tries
         caught = []
@@ -1530,6 +1530,14 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
                      and m[0]["pairs"][-1]["later"] == 54, f"{ {k: c.get(k) for k in ('pairs', 'pairs_listed')} }, "
                      f"{len(m[0].get('pairs', [])) if m else None} listed")
     finally:
+        # the meterx reader and its session are closed however the probes end
+        if X is not None:
+            X.close()
+        if xsession is not None:
+            try:
+                xsession.close()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
         bus.close()
 
 

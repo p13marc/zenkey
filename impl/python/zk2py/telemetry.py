@@ -866,7 +866,7 @@ def member_answer(conformances: Iterable[Conformance], pairs: Iterable[Pair]) ->
       could not tell, whatever another formed";
     - ``not_established``: a pair of it established, and none decreased."""
     cs, ps = list(conformances), list(pairs)
-    if any(c.reasons == ("declaration_invalid",) for c in cs):
+    if any("declaration_invalid" in c.reasons for c in cs):
         return UNOBSERVABLE
     if not any(c.kind in ("counter", "histogram") for c in cs):
         return NOT_ASKED
