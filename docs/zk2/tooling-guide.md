@@ -289,7 +289,11 @@ lands at the bus root, where no consumer of the deployment listens.
   `telemetry-sample` (`--deep`) and `check conform`'s
   `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`
   ask its §5 questions; and a metric sample that does not conform is
-  `invalid` wherever a payload is checked, its reasons named.
+  `invalid` wherever a payload is checked, its reasons named. zengui's
+  Inspector reads a metric member through the same book (#819, TD): its
+  kind and unit beside its type, its value plotted in that unit, a
+  counter's §2.11 rate with a gap at each reset, and a decrease within an
+  in-band epoch as the finding.
   The population budget was among them until core 0.24 (#735) made it core
   (spec §2.7): `check conform`'s `budget`, `budget-window` and `rate` cases and the doctor's
   `population-over-bound` ask it.

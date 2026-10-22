@@ -135,10 +135,32 @@ built on the engine's reading, acts and §5 judgement
 | live window | an **event**: replayed on a button press only, bounded by its retention (§2.6). A **foreign** or control key: a raw `fleet_get`, labelled `raw GET`; a tombstone in its answer reads as one, with a `DELETE (tombstone)` chip where `0 B` would be (#765) | Under `@op`, on a symbolic path, or a zk2 key the lens stopped short of: nothing is read, and the pane says why |
 | a fetch on select during a replay, through the live bus | no fetch during a replay: each slot shows the capture's latest row at the playhead, checked through the replay's offline lens | Leaving the replay re-reads every slot live |
 | declared QoS: the registry's v1 profile (`qos_verdict`) | the resource's declared axes (`declared_qos`) against the newest sample's (`observed_qos`), compared by `qos_mismatch`, each differing axis named with both sides | Reliability is the link's: shown, not compared. A v1 or v2 row reads "QoS not recorded" and draws no verdict |
-| the facts ladder: key shape, registration, origin kind, producer | the identity section: rung, and where resolution stopped; ADDRESS, IFACE, KIND, RESOURCE, TYPE, REVISION and the template values; the type section from `type_view` | The series says it has no unit: zk2 contracts carry none |
+| the facts ladder: key shape, registration, origin kind, producer | the identity section: rung, and where resolution stopped; ADDRESS, IFACE, KIND, RESOURCE, TYPE, REVISION and the template values; the type section from `type_view` | A metric adds METRIC KIND and UNIT (see Metrics below) |
 | why: v1's `run_why` rungs | zk2's `run_why` on a key (`WhyTarget::Key`) or an address (`WhyTarget::Service`): the namespace and key rungs judged offline, a stream key listened to for 3 s; `not_asked`, never "no" | Never under `@op` |
 | fields: `run_field` through v1 slices and schemas | `run_field(raw, &Lens, &FieldSpec)`, its window and bounds stated | |
 | consumers: an admin-space join | R3 edges from descriptors (`Catalog::graph()`), for a key's interface or an address, with no bus | "R3: from descriptors"; never a matching status (D13) |
+
+### Metrics (`telemetry.v1`, #819 TD)
+
+A key that resolves to a `telemetry.v1` metric resource (a stream or a
+state whose annotations hold the profile's vocabulary, or whose type is
+its Point) is read through `zenkey_fleet::TelemetryBook` over the slot's
+history ring (`zengui::metric`): every kind, unit, conformance, continuity
+and rate is the engine's. Presence is not read for an epoch, since the
+window's presence and its samples arrive on two monitors (§2.9).
+
+| Before | Now | Notes |
+|---|---|---|
+| v1: the leaf's unit from the registry; zk2 (FL7–FL12): "no unit — a zk2 contract declares none" | METRIC KIND and UNIT beside TYPE in the identity section, each with where it came from (`declared`, `from the Point`); a unit absent reads `unknown (§2.5)`, never blank and never dimensionless | A resource that is no metric says why its axis has no unit: no metric (§2.1), no contract resolves the key, or an invalid declaration (§2.2), whose reasons are listed |
+| the series plots the first numeric leaf: a Point's `timestamp` | a metric plots the profile's value: a Point's `value.value` or the bare value, a boolean as 1/0, a histogram's mean (`sum / count`, a gap while the count is 0) | Text and bytes are not plotted. A metric offers no leaf picker; an invalid declaration plots its structural leaves, its reasons said |
+| a bare number offered the empty path, which plotted only gaps | the root leaf `$`, which plots | As the field observation names it |
+| `rate`: the engine's EWMA | `message rate (samples/s)`, unchanged; beside it, for a counter, `rate (§2.11)` in the counter's unit and `/s` | Gaps at a reset or a decrease, never a rate restarted from zero. Its time base is said: the Points' timestamps, the owner's stamps, or arrival |
+| — | each decrease within an established epoch as a `decreased` finding, with its epoch's evidence (in-band here); the pairs tallied (same epoch, reset, decreased; in-band, assumed); "no decrease could be found" where every epoch was assumed (§5) | |
+| — | a sample that does not conform: not plotted, its reasons listed in the profile's words | Echo names each drawn invalid row's first violation under its strips, at most three keys |
+| a caption's unit glued to each number (`42percent`) | named once, in brackets after the label (`counter [By]: 4096 now`) | A fraction drops its trailing zeros; one below a thousandth keeps its digits (`4.000e-5`) |
+| Fields sparks unitless | a metric's value path in its member's unit (a Point's `value.value`, a bare value's `$`, a histogram's `sum`) | Every other path carries none of the member's |
+| the verdict batch and the Inspector's decode checked the payload alone (`Lens::check`) | with the sample's attachment (`Lens::check_sample`) | A bare counter's Epoch attachment is read there (§2.4) |
+| the test world: walkthrough and tcgui | `World::metered()` beside it: `lab/meter` (meter.v1) and `site-a/rf0` (modem.v3); scenes `inspector-metric-counter`, `-decreased`, `-unit-unknown`, `-histogram`, `-tag-disagrees`, `watch-metric-invalid`, `inspector-modem-units` | The spray runs `lab/meter` (`--meter`) |
 
 ### Files
 
@@ -154,6 +176,8 @@ built on the engine's reading, acts and §5 judgement
 |---|---|---|
 | a replay merged against the live skeleton and checked through the live verdicts | resolved through an offline lens (`ReplayLens`): no catalog, the offline contracts, and the capture's namespace (the header's `base` for a file, the live namespace for the retained window) | Its skeleton is the tree's declared half while it runs. The live verdict cache is cleared on entry and exit, replayed ticks are checked offline, a live batch landing during a replay is dropped, and identities come from a replay-scoped cache. Revisions retrieved live are not used: they describe the live world |
 | — | the banner's second line: the header's `excluded` (or "not stated" for v1 and v2 files), "QoS not recorded" counted by row, and "resolved offline: n revisions held, no presence read" | |
+| a rewind (a scrub backwards, play from the end) cleared the scrollback and kept each slot's history, the rows from the top appended after the later ones | each slot's history is cleared with the scrollback (review of #829) | A timeline kept across a rewind read time going backwards, and a counter's pair across it read as a decrease within its epoch |
+| a file's rows all arrived at the load instant | each row arrives at the load instant plus its `t`, the capture's receipt (#819, TD), or at the load where this host's clock cannot add it | A bare counter's §2.11 rate is timed by it. A row's stamp is the file's text, never resurrected, so a state counter is timed by `t` too; a row with no attachment gives a bare counter no in-band epoch, and its decrease reads as a reset, assumed |
 | recording refused during a replay; publish still possible | publish, retire, call and recording refused during a replay in every window, their controls disabled; why, fields and consumers refused too (O4) | Entering a replay stops an armed repeat publication |
 
 ### Removed

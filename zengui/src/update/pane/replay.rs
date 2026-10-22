@@ -171,6 +171,7 @@ pub(crate) fn update(
             });
             if let Some(Some(tick)) = tick {
                 work.echo.echo.clear();
+                rewind_recorders(sub);
                 bus::apply_tick(dep, obs, sub, tree, work, &tick);
                 return after_tick(sub, work, &tick);
             }
@@ -194,6 +195,7 @@ pub(crate) fn update(
                     // Backwards is a rebuild (LWW does not invert), and
                     // the scrollback rebuilds with it.
                     work.echo.echo.clear();
+                    rewind_recorders(sub);
                 }
                 bus::apply_tick(dep, obs, sub, tree, work, &tick);
                 return after_tick(sub, work, &tick);
@@ -360,6 +362,21 @@ enum Edge {
     End,
 }
 
+/// A rewound replay's recorders start over (#819, TD; review of PR #829):
+/// the capture's rows come again from the top, and a timeline that kept
+/// the later ones before them would read time going backwards — a metric's
+/// pair across the rewind a decrease within its epoch, a false finding.
+/// Each ring is cleared, as the scrollback is, which is a new generation:
+/// the slot's metric fold rebuilds over what comes next.
+fn rewind_recorders(sub: &mut SubjectState) {
+    for slot in sub.all_mut() {
+        if let Some(rec) = slot.history.as_mut() {
+            rec.ring.clear();
+            rec.selected = None;
+        }
+    }
+}
+
 /// Open a replay: the panes show it from `edge`, resolved offline (#614,
 /// FL10b), and the task returned checks the first tick's payloads through
 /// the replay's own lens.
@@ -381,7 +398,7 @@ fn open(
     work.echo.echo.clear();
     for slot in sub.all_mut() {
         slot.history = None;
-        slot.refresh_series(dep);
+        slot.refresh_series(&dep.identity);
     }
     state.resolve_offline(
         dep.namespace(),

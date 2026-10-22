@@ -503,6 +503,7 @@ fn a_qos_mismatch_is_named_per_axis() {
         seq: 0,
         received: Instant::now(),
         timestamp: None,
+        stamp: None,
         is_delete: false,
         len: 2,
         encoding: "application/json".into(),
@@ -513,6 +514,7 @@ fn a_qos_mismatch_is_named_per_axis() {
         express: false,
         qos_recorded,
         source: None,
+        attachment: None,
         value: None,
         preview: "{}".into(),
     };
@@ -668,7 +670,8 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         leaf: None,
         value: Series::new(),
         rate: RateSampler::new().series().clone(),
-        unit: None,
+        unit: zengui::metric::Unit::Unresolved,
+        metric: None,
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
@@ -706,7 +709,11 @@ fn the_detail_pane_labels_the_series_it_plots() {
         leaf: Some("value".to_string()),
         value,
         rate,
-        unit: Some("percent".to_string()),
+        unit: zengui::metric::Unit::Known(
+            "percent".to_string(),
+            zenkey_model::telemetry::Source::Declared,
+        ),
+        metric: None,
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
@@ -717,16 +724,16 @@ fn the_detail_pane_labels_the_series_it_plots() {
     assert!(ui.find("Series").is_ok());
     assert!(
         ui.find(
-            "value: 42percent now · 41percent min · 42percent max · 3 points · \
-             1 drawn as gaps, not interpolated"
+            "value [percent]: 42 now · 41 min · 42 max · 3 points · 1 drawn as gaps, \
+             not interpolated"
         )
         .is_ok(),
         "the caption carries the numbers, the unit and the gap count"
     );
     assert!(
-        ui.find("rate: 5.0/s now · 5.0/s min · 5.0/s max · 1 point")
+        ui.find("message rate (samples/s): 5.0/s now · 5.0/s min · 5.0/s max · 1 point")
             .is_ok(),
-        "the rate series uses the shared rate wording"
+        "the message rate is named as such, in the shared rate wording"
     );
     assert!(
         ui.find(
@@ -738,11 +745,12 @@ fn the_detail_pane_labels_the_series_it_plots() {
         "the boundary of what can be plotted is stated, not left to be discovered"
     );
 
-    // Without a declared unit — every zk2 contract — the axis says it has
-    // none rather than guess one (#614, FL8a).
+    // A resource that is no telemetry.v1 metric declares no unit, and the
+    // axis says why rather than guess one (#819, TD; it read "a zk2
+    // contract declares none" until telemetry.v1 declared units).
     drop(ui);
     let unitless = SeriesData {
-        unit: None,
+        unit: zengui::metric::Unit::NotAMetric,
         ..series
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
@@ -751,7 +759,8 @@ fn the_detail_pane_labels_the_series_it_plots() {
     }));
     assert!(
         ui.find(
-            "no unit — a zk2 contract declares none, so the axis is unitless rather than guessed"
+            "no unit — this resource is no telemetry.v1 metric (§2.1), so nothing declares one \
+             for its leaves, and the axis is not guessed"
         )
         .is_ok()
     );

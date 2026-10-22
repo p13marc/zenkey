@@ -38,9 +38,12 @@ const STROKE: f32 = 2.0;
 
 /// A labelled sparkline: caption, then the plot.
 ///
-/// `unit` is appended to the caption's numbers when the registry declared one;
-/// `rate` switches the caption to `kit::human_rate`, whose "—" for zero already
-/// means "no measured rate" rather than "measured zero".
+/// `unit` is named once, in brackets after the label, when there is one —
+/// a metric's (`telemetry.v1` §2.5, #819 TD): `counter [By]: 4096 now`,
+/// `gauge [dBm]: -67.5 now`, `rate (§2.11) [By/s]: 120 now`. [`SeriesTone::Rate`] is the observer's message rate and
+/// reads through `kit::human_rate`, whose "—" for zero already means "no
+/// measured rate" rather than "measured zero"; a counter's §2.11 rate is
+/// the owner's data, drawn as a value, where a measured 0 reads `0`.
 pub fn chart<'a>(
     label: &str,
     series: &'a Series,
@@ -73,10 +76,14 @@ pub fn chart<'a>(
 fn caption(label: &str, series: &Series, tone: SeriesTone, unit: Option<&str>) -> String {
     let fmt = |v: f64| match tone {
         SeriesTone::Rate => kit::human_rate(v),
-        SeriesTone::Value => match unit {
-            Some(u) => format!("{}{u}", trim(v)),
-            None => trim(v),
-        },
+        SeriesTone::Value => trim(v),
+    };
+    // The unit once, beside the label it qualifies, rather than after each
+    // number: `530 1` reads as two numbers where `counter [1]: 530` reads
+    // as one count of unit `1` (UCUM's unity, telemetry.v1 §2.2).
+    let label = match (tone, unit) {
+        (SeriesTone::Value, Some(u)) => format!("{label} [{u}]"),
+        _ => label.to_string(),
     };
     let Some((lo, hi)) = series.bounds() else {
         return format!(
@@ -106,12 +113,18 @@ fn caption(label: &str, series: &Series, tone: SeriesTone, unit: Option<&str>) -
     out
 }
 
-/// Compact number rendering: integers stay integers.
+/// Compact number rendering: integers stay integers, a fraction keeps at
+/// most three places with its trailing zeros dropped (`-67.5`, not
+/// `-67.500`), and a magnitude below a thousandth keeps its digits in
+/// scientific form rather than reading as a measured zero.
 fn trim(v: f64) -> String {
     if v.fract() == 0.0 && v.abs() < 1e15 {
         format!("{v:.0}")
+    } else if v.abs() < 1e-3 {
+        format!("{v:.3e}")
     } else {
-        format!("{v:.3}")
+        let s = format!("{v:.3}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
     }
 }
 
@@ -266,7 +279,7 @@ mod tests {
         let s = series_of(&[Some(1.0), None, Some(3.0)]);
         assert_eq!(
             caption_text("value", &s, SeriesTone::Value, Some("%")),
-            "value: 3% now · 1% min · 3% max · 3 points · 1 drawn as gaps, not interpolated"
+            "value [%]: 3 now · 1 min · 3 max · 3 points · 1 drawn as gaps, not interpolated"
                 .to_string()
         );
     }
@@ -280,6 +293,16 @@ mod tests {
             caption_text("rate", &s, SeriesTone::Rate, None),
             "rate: no measurement in the window — 2 sampled, all gaps"
         );
+    }
+
+    /// A fraction drops its trailing zeros, and a tiny one keeps its
+    /// digits rather than reading as zero (#819, TD).
+    #[test]
+    fn a_value_is_compact_and_never_a_false_zero() {
+        assert_eq!(trim(-67.5), "-67.5");
+        assert_eq!(trim(0.0125), "0.013");
+        assert_eq!(trim(42.0), "42");
+        assert_eq!(trim(0.00004), "4.000e-5");
     }
 
     #[test]

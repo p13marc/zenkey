@@ -54,6 +54,11 @@ pub enum FieldsMsg {
 pub struct PathSpark {
     pub path: String,
     pub series: Series,
+    /// The member's unit when the path is a `telemetry.v1` metric's value
+    /// (#819, TD; §2.5): a Point's `value.value`, a bare value's root, a
+    /// histogram's `sum`. `None` for every other path, which carries none
+    /// of the member's.
+    pub unit: Option<crate::metric::Unit>,
     pub cache: iced::widget::canvas::Cache,
 }
 
@@ -281,11 +286,16 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
              the observation's)",
         ));
         for s in &state.sparks {
+            // A metric's value path in its member's unit (§2.5), or said
+            // unknown — never left blank to read as dimensionless.
+            if let Some(why) = s.unit.as_ref().and_then(crate::metric::Unit::why_none) {
+                col = col.push(kit::muted(format!("{}: {why}", s.path)));
+            }
             col = col.push(crate::view::spark::chart(
                 &s.path,
                 &s.series,
                 SeriesTone::Value,
-                None,
+                s.unit.as_ref().and_then(crate::metric::Unit::unit),
                 &s.cache,
                 sp,
             ));
@@ -295,10 +305,12 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
 }
 
 /// Build the landing's sparklines: numeric report paths the subject's
-/// recorded history can actually plot, bounded at `SPARK_ROWS`.
+/// recorded history can actually plot, bounded at `SPARK_ROWS`, each a
+/// `telemetry.v1` metric's value path in its member's unit (#819, TD).
 pub fn sparks_for(
     report: &FieldReport,
     history: Option<&crate::history::HistoryRecorder>,
+    metric: Option<&crate::metric::MetricRead>,
 ) -> Vec<PathSpark> {
     let Some(rec) = history else {
         return Vec::new();
@@ -314,6 +326,7 @@ pub fn sparks_for(
         let series = crate::series::value_series(&rec.ring, &row.path);
         if series.has_data() {
             out.push(PathSpark {
+                unit: metric.and_then(|m| m.path_unit(&row.path)),
                 path: row.path.clone(),
                 series,
                 cache: iced::widget::canvas::Cache::default(),

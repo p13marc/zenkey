@@ -16,10 +16,13 @@
 //!   FL6a), and the honest ladder otherwise — tagged with *how* it was
 //!   produced, because schema-decoded and sniffed must never look alike.
 //! - **Series** (issue #64) — sparklines for a numeric leaf and for the
-//!   observed rate, drawn from the same history the timeline reads, with gaps
-//!   drawn as gaps. Absent entirely when there is nothing numeric to plot: an
-//!   explorer that renders an empty chart for a string payload has invented an
-//!   error state out of an ordinary fact.
+//!   observed message rate, drawn from the same history the timeline reads,
+//!   with gaps drawn as gaps. Absent entirely when there is nothing numeric
+//!   to plot: an explorer that renders an empty chart for a string payload
+//!   has invented an error state out of an ordinary fact. A `telemetry.v1`
+//!   metric (#819, TD) plots what the profile reads instead: its value in
+//!   its unit (§2.5), a counter's §2.11 rate with a gap at every reset, and
+//!   each decrease within one epoch as the finding it is (§2.10).
 
 use iced::widget::{Column, row};
 use iced::{Element, Length};
@@ -28,6 +31,7 @@ use zenkey_fleet::report::{Provenance, QosAxes, Stamp, StateValue};
 
 use crate::keyfacts::{KeyGroup, Resolution, Rung, Unresolved};
 use crate::message::{Message, PaneMsg, SlotId};
+use crate::metric::{MetricRead, Unit};
 use crate::series::{NumericLeaves, Series};
 use crate::value::{
     DecodedValue, NotRead, ReadKind, ReadPlan, Replies, Reply, StateAnswer, ValueRead,
@@ -406,18 +410,26 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
 /// Everything the series section plots, computed by the app from the history
 /// ring the timeline reads.
 pub struct SeriesData {
-    /// The numeric leaves the newest payload offers.
+    /// The numeric leaves the newest payload offers — none for a
+    /// `telemetry.v1` metric, which plots the profile's value instead.
     pub leaves: NumericLeaves,
     /// Which one is plotted.
     pub leaf: Option<String>,
     /// That leaf's value over the retained history.
     pub value: Series,
-    /// The observed rate, one point per stats tick.
+    /// The observed message rate — samples per second, the engine's EWMA —
+    /// one point per stats tick. Never a counter's rate (§2.11).
     pub rate: Series,
-    /// The declared unit, when a contract declares one. A zk2 contract
-    /// declares none (#614, FL7, FL8a), so the axis is unitless and the
-    /// section says so rather than guess.
-    pub unit: Option<String>,
+    /// The plotted value's unit, or why it has none (#819, TD): a metric's
+    /// declared unit, else its Point's, else unknown — never dimensionless
+    /// (`telemetry.v1` §2.5); and for any other key, why nothing declares
+    /// one.
+    pub unit: Unit,
+    /// The key's `telemetry.v1` metric member, when it resolves to a metric
+    /// resource (#819, TD): its kind, its unit, its plotted value, a
+    /// counter's rate, and every pair's continuity — each the fleet's
+    /// reading (`crate::metric`).
+    pub metric: Option<std::sync::Arc<MetricRead>>,
     /// Retained geometry for the two charts (#178).
     ///
     /// A `canvas::Cache` has to outlive the frame to be worth anything, and
@@ -437,6 +449,8 @@ pub struct SeriesData {
 pub struct SeriesCaches {
     pub value: iced::widget::canvas::Cache,
     pub rate: iced::widget::canvas::Cache,
+    /// A counter's §2.11 rate (#819, TD).
+    pub counter_rate: iced::widget::canvas::Cache,
 }
 
 /// Wrap one of this pane's messages for the app (#176).
@@ -471,7 +485,11 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
             ));
         }
         Some(r) => {
-            col = col.push(identity_section(r, sp));
+            col = col.push(identity_section(
+                r,
+                data.series.and_then(|s| s.metric.as_deref()),
+                sp,
+            ));
         }
     }
     if let Some(qos) = qos_section(&data) {
@@ -530,14 +548,19 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
 ///
 /// Returning `None` is the point: a payload that carries no number is an
 /// ordinary fact, and rendering an empty chart or an error for it would invent
-/// a problem (#64's second acceptance line).
+/// a problem (#64's second acceptance line). A `telemetry.v1` metric always
+/// has a section (#819, TD): what the profile read of it is said even when
+/// nothing plots.
 fn series_section<'a>(
     data: &'a SeriesData,
     slot: SlotId,
     sp: Spacing,
 ) -> Option<Element<'a, Message>> {
+    if let Some(m) = data.metric.as_deref().filter(|m| m.declared()) {
+        return Some(metric_section(m, data, sp));
+    }
     let plottable = !data.leaves.leaves.is_empty();
-    if !plottable && !data.rate.has_data() {
+    if !plottable && !data.rate.has_data() && data.metric.is_none() {
         return None;
     }
     let mut col = Column::new().spacing(sp.xs);
@@ -547,6 +570,14 @@ fn series_section<'a>(
          per sample would hit the bus on a render path, so a protobuf or CDR leaf \
          offers no chart",
     ));
+    // A metric resource whose declaration is invalid (§2.2): its members
+    // are not read, so its leaves plot structurally, with the reasons said.
+    if let Some(why) = data.metric.as_deref().and_then(MetricRead::invalid) {
+        col = col.push(kit::muted(format!(
+            "telemetry.v1: the declaration is invalid — {why}: the member's kind, unit, \
+             conformance and continuity are unobservable (§2.2)"
+        )));
+    }
 
     if plottable {
         // The leaf picker. Small buttons rather than a dropdown: the list is
@@ -574,31 +605,243 @@ fn series_section<'a>(
             )));
         }
         let label = data.leaf.as_deref().unwrap_or("value");
-        if data.unit.is_none() {
-            col = col.push(kit::muted(
-                "no unit — a zk2 contract declares none, so the axis is unitless \
-                 rather than guessed",
-            ));
+        if let Some(why) = data.unit.why_none() {
+            col = col.push(kit::muted(why));
         }
         col = col.push(spark::chart(
             label,
             &data.value,
             SeriesTone::Value,
-            data.unit.as_deref(),
+            data.unit.unit(),
             &data.caches.value,
             sp,
         ));
     }
 
-    col = col.push(spark::chart(
-        "rate",
+    col = col.push(message_rate(data, sp));
+    Some(col.into())
+}
+
+/// The engine's message rate, named as such: samples per second on the key,
+/// the observer's measurement — never a counter's rate (§2.11).
+fn message_rate<'a>(data: &'a SeriesData, sp: Spacing) -> Element<'a, Message> {
+    spark::chart(
+        "message rate (samples/s)",
         &data.rate,
         SeriesTone::Rate,
         None,
         &data.caches.rate,
         sp,
+    )
+}
+
+/// A `telemetry.v1` metric's series (#819, TD): what the profile read of the
+/// recorded history — the plotted value in the member's unit, a counter's
+/// §2.11 rate, and every pair's continuity — each the fleet's reading
+/// (`crate::metric`), and beside them the engine's message rate.
+fn metric_section<'a>(
+    m: &'a MetricRead,
+    data: &'a SeriesData,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::section_header("Series", None));
+    col = col.push(kit::muted(format!(
+        "read by telemetry.v1 over the recorded history: {} (§2.5, §2.6)",
+        m.plotted_from()
+    )));
+    if m.samples > 0 {
+        let mut line = format!(
+            "{} of {} conform (§2.6)",
+            m.conforming,
+            kit::plural(m.samples as usize, "sample")
+        );
+        if m.does_not > 0 {
+            line.push_str(&format!(" · {} do not", m.does_not));
+        }
+        if m.unobservable > 0 {
+            line.push_str(&format!(" · {} undecodable", m.unobservable));
+        }
+        col = col.push(kit::muted(line));
+    }
+    let reasons = m.reasons();
+    if !reasons.is_empty() {
+        col = col.push(kit::badge_verdict(
+            crate::view::theme::VerdictTone::Invalid,
+            if m.newest_conforms {
+                "an earlier sample did not conform — its reasons, the latest such"
+            } else {
+                "the newest sample does not conform — not plotted, and no value of any pair"
+            },
+        ));
+        for r in reasons {
+            col = col.push(kit::muted(r));
+        }
+    }
+    match m.plotted_label() {
+        Some(label) => {
+            if let Some(why) = data.unit.why_none() {
+                col = col.push(kit::muted(why));
+            }
+            col = col.push(spark::chart(
+                label,
+                &m.value,
+                SeriesTone::Value,
+                data.unit.unit(),
+                &data.caches.value,
+                sp,
+            ));
+        }
+        None => {
+            col = col.push(kit::muted(match m.kind {
+                Some((k, _)) => {
+                    format!("a {k} metric is not plotted — its values are the timeline's, below")
+                }
+                None => "nothing plotted — no conforming sample has said the member's kind \
+                         (§2.5)"
+                    .to_string(),
+            }));
+        }
+    }
+    if let Some(rate) = &m.rate {
+        col = col.push(spark::chart(
+            "rate (§2.11)",
+            rate,
+            SeriesTone::Value,
+            m.rate_unit.as_deref(),
+            &data.caches.counter_rate,
+            sp,
+        ));
+    }
+    let cumulative = m.kind.is_some_and(|(k, _)| k.is_cumulative());
+    // The finding first, under the charts it explains; the words on how
+    // the rate was had and how each pair answered after it.
+    if cumulative {
+        col = col.push(decreases(m, sp));
+    }
+    if m.rate.is_some() {
+        col = col.push(rate_notes(m, data, sp));
+    }
+    if cumulative {
+        col = col.push(pairs(m, sp));
+    }
+    col = col.push(message_rate(data, sp));
+    col.into()
+}
+
+/// How a counter's rate was had (§2.11): its time base, its unit when the
+/// counter's is unknown, and the pairs that have none.
+fn rate_notes<'a>(m: &'a MetricRead, data: &'a SeriesData, sp: Spacing) -> Element<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
+    if let Some(base) = m.rate_base {
+        col = col.push(kit::muted(match base {
+            "timestamp" => "timed by the Points' timestamps, the measurement times (§2.11)",
+            "stamp" => "timed by the owner's stamps (§2.11)",
+            _ => {
+                "timed by arrival on this reader's clock — no Point timestamp or owner \
+                 stamp rides these samples (§2.11)"
+            }
+        }));
+    }
+    if matches!(data.unit, Unit::Unknown) {
+        col = col.push(kit::muted(
+            "the counter's unit is unknown, so its rate's is too (§2.11)",
+        ));
+    }
+    if m.no_rate.reset + m.no_rate.decreased > 0 {
+        col = col.push(kit::muted(format!(
+            "no rate across a reset or a decrease: {} drawn as gaps, never \
+             restarted from zero (§2.11)",
+            kit::plural((m.no_rate.reset + m.no_rate.decreased) as usize, "pair"),
+        )));
+    }
+    if m.no_rate.elapsed > 0 {
+        col = col.push(kit::muted(format!(
+            "{} with no elapsed time between its samples, so no rate (§2.11)",
+            kit::plural(m.no_rate.elapsed as usize, "pair"),
+        )));
+    }
+    col.into()
+}
+
+/// Each decrease within an established epoch, as the finding it is
+/// (§2.10), with how its epoch was had (§2.9's residual risk).
+fn decreases<'a>(m: &'a MetricRead, sp: Spacing) -> Element<'a, Message> {
+    use crate::view::theme::SeverityTone;
+    use zenkey_model::telemetry::Via;
+    let t = &m.tally;
+    let mut col = Column::new().spacing(sp.xs);
+    for d in &m.decreases {
+        col = col.push(kit::finding(
+            SeverityTone::Error,
+            "decreased",
+            format!(
+                "{} → {}",
+                crate::metric::measure_words(&d.earlier),
+                crate::metric::measure_words(&d.later)
+            ),
+            match d.via {
+                Via::InBand => {
+                    "a decrease within one epoch, established in-band: both samples carry \
+                     the same epoch, so the owner went backwards (§2.7) — the finding, \
+                     never a reset"
+                }
+                Via::Presence => {
+                    "a decrease within one epoch, established by presence — §2.9's residual \
+                     risk: a sample in transit across a re-mint can read as the new \
+                     instance's"
+                }
+            },
+        ));
+    }
+    if t.decreased > m.decreases.len() as u64 {
+        col = col.push(kit::muted(format!(
+            "+{} earlier not shown",
+            kit::plural(
+                (t.decreased - m.decreases.len() as u64) as usize,
+                "decrease"
+            )
+        )));
+    }
+    col.into()
+}
+
+/// A counter's or a histogram's pairs (§2.10): how each answered and how
+/// its epoch was had — and, where no epoch was ever established, that no
+/// decrease could have been found (§5, "over many pairs").
+fn pairs<'a>(m: &'a MetricRead, sp: Spacing) -> Element<'a, Message> {
+    let t = &m.tally;
+    let mut col = Column::new().spacing(sp.xs);
+    let mut line = format!(
+        "pairs (§2.10): {} same epoch · {} reset · {} decreased",
+        t.same_epoch, t.reset, t.decreased
+    );
+    if t.unobservable > 0 {
+        line.push_str(&format!(" · {} incomparable", t.unobservable));
+    }
+    line.push_str(&format!(
+        " — epoch in-band in {}, assumed in {}; presence is not read for an epoch here \
+         (its tokens and these samples arrive on two monitors, §2.9)",
+        t.in_band, t.assumed
     ));
-    Some(col.into())
+    col = col.push(kit::muted(line));
+    if t.asked() > 0 && t.in_band + t.by_presence == 0 {
+        col = col.push(kit::muted(
+            "no decrease could be found: every pair's epoch was assumed — no in-band \
+             epoch rides these samples — so a decrease reads as a reset, never a finding \
+             (§2.10, §5)",
+        ));
+    }
+    let r = &m.resets;
+    if r.total() > 0 {
+        col = col.push(kit::muted(format!(
+            "{}: {} in-band (another epoch), {} assumed (a decrease no epoch places)",
+            kit::plural(r.total() as usize, "reset"),
+            r.in_band + r.by_presence,
+            r.assumed,
+        )));
+    }
+    col.into()
 }
 
 /// The value section (#614, FL8a): what was asked of the key's value and
@@ -1033,7 +1276,11 @@ fn last_known_section<'a>(data: &DetailData<'a>) -> Element<'a, Message> {
 /// gave it. A field appears only when its fact exists, so absent stays
 /// absent rather than becoming a blank box. v1's facts ladder stood here;
 /// a v1 key is foreign now, and reads "not zk2" like any other.
-pub(crate) fn identity_section(resolution: &Resolution, sp: Spacing) -> Element<'_, Message> {
+pub(crate) fn identity_section<'a>(
+    resolution: &'a Resolution,
+    metric: Option<&'a MetricRead>,
+    sp: Spacing,
+) -> Element<'a, Message> {
     let identity = &resolution.identity;
     let rung = Rung::of(identity);
     let mut col = Column::new().spacing(sp.sm);
@@ -1066,6 +1313,12 @@ pub(crate) fn identity_section(resolution: &Resolution, sp: Spacing) -> Element<
     }
     if let Some(r) = &resolution.resolved {
         grid.push(kit::field("TYPE", kit::mono(crate::keyfacts::type_name(r))));
+        // The metric's kind and unit (#819, TD; telemetry.v1 §2.5), beside
+        // the type that carries them, each with where it came from.
+        if let Some(m) = metric {
+            grid.push(kit::field("METRIC KIND", kit::mono(m.kind_words())));
+            grid.push(kit::field("UNIT", kit::mono(m.unit().words())));
+        }
         grid.push(kit::field(
             "REVISION",
             kit::mono(short_fingerprint(&r.revision.fingerprint().to_string())),
@@ -1073,6 +1326,11 @@ pub(crate) fn identity_section(resolution: &Resolution, sp: Spacing) -> Element<
     }
     if !grid.is_empty() {
         col = col.push(kit::fields(grid));
+    }
+    if let Some(why) = metric.and_then(MetricRead::invalid) {
+        col = col.push(kit::muted(format!(
+            "telemetry.v1 declaration invalid (§2.2): {why}"
+        )));
     }
     if !identity.values.is_empty() {
         col = col.push(kit::muted(
@@ -1334,6 +1592,7 @@ mod tests {
             seq: 0,
             received: Instant::now(),
             timestamp: None,
+            stamp: None,
             is_delete: false,
             len: 2,
             encoding: "application/json".into(),
@@ -1344,6 +1603,7 @@ mod tests {
             express,
             qos_recorded: true,
             source: None,
+            attachment: None,
             value: None,
             preview: "{}".into(),
         }

@@ -15,7 +15,9 @@ use zengui::message::{
 use zengui::prefs::{Density, LayoutPreset, Prefs, ThemeChoice};
 use zengui::view::palette::{Overlay, PaletteMsg};
 
-use super::{ETH0, HEALTH, POSITION, USED, World, send, window};
+use super::{
+    BYTES, DROPS, ETH0, FRAMES, HEALTH, LATENCY, POSITION, TX_BYTES, USED, World, send, window,
+};
 
 pub struct Scene {
     pub name: &'static str,
@@ -218,6 +220,68 @@ pub const ALL: &[Scene] = &[
         // The axis named with both sides (#614, FL12): the one scene whose
         // newest sample rode other axes than its contract declares.
         landmark: "congestion: declared block, observed drop",
+    },
+    // telemetry.v1 in the Inspector (#819, TD). A Point counter, unit `1`,
+    // its epoch in the Point: the plotted leaf is `value.value`, its §2.11
+    // rate in `1/s`, and the owner's restart — a new epoch — a reset with a
+    // gap and no rate across it.
+    Scene {
+        name: "inspector-metric-counter",
+        size: DESKTOP,
+        build: metric_counter,
+        landmark: "1 reset: 1 in-band (another epoch), 0 assumed (a decrease no epoch places)",
+    },
+    // A bare counter in `By` going backwards within its in-band epoch (the
+    // Epoch attachment): `decreased`, the finding, never a reset.
+    Scene {
+        name: "inspector-metric-decreased",
+        size: DESKTOP,
+        build: metric_decreased,
+        landmark: "31500 → 9000",
+    },
+    // A bare counter with no unit and no epoch: its unit unknown, never
+    // dimensionless, and its drop a reset assumed — so no decrease could
+    // have been found, which is said.
+    Scene {
+        name: "inspector-metric-unit-unknown",
+        size: DESKTOP,
+        build: metric_unit_unknown,
+        landmark: "unknown (§2.5)",
+    },
+    // A Point histogram in `s`: its mean plotted, the one number of a
+    // histogram in its member's unit; no rate of a histogram.
+    Scene {
+        name: "inspector-metric-histogram",
+        size: DESKTOP,
+        build: metric_histogram,
+        landmark: "read by telemetry.v1 over the recorded history: the Point's value.value: its \
+                   sum over its count, the one number of a histogram in its member's unit \
+                   (§2.5, §2.6)",
+    },
+    // The histogram's newest Point tagged a gauge: it does not conform, and
+    // the Inspector says why in the profile's words.
+    Scene {
+        name: "inspector-metric-tag-disagrees",
+        size: DESKTOP,
+        build: metric_tag_disagrees,
+        landmark: "telemetry.v1 §2.6 tag_disagrees: the Point's tag differs from the declared kind",
+    },
+    // The same verdict in the Activity dock: echo pinned to the key, its
+    // badge counting the violation and its strip naming it.
+    Scene {
+        name: "watch-metric-invalid",
+        size: DESKTOP,
+        build: watch_metric_invalid,
+        landmark: "invalid · zk2/lab/meter/meter.v1/stream/latency: telemetry.v1 §2.6 \
+                   tag_disagrees: the Point's tag differs from the declared kind",
+    },
+    // zenoh-modem's units (#819's "done when"): a bare JSON integer that is
+    // a counter in `By` by its declaration alone, its rate in `By/s`.
+    Scene {
+        name: "inspector-modem-units",
+        size: DESKTOP,
+        build: modem_units,
+        landmark: "By · declared",
     },
 ];
 
@@ -1075,4 +1139,84 @@ fn inspector_qos_mismatch(theme: ThemeChoice) -> Zengui {
     preset(&mut app, LayoutPreset::Explore);
     world.tick_with_stranger(&mut app, ETH0);
     app
+}
+
+/// A window on the metered world (#819, TD): `lab/meter` and `site-a/rf0`
+/// beside the rest, `key` revealed and selected before its traffic so its
+/// history holds `ticks` of it, every newest payload checked, and the
+/// Explore layout, which gives the Inspector the height its Series wants.
+fn metered(prefs: Prefs, key: &str, ticks: u32) -> (Zengui, World) {
+    let mut app = window(prefs);
+    let mut world = World::metered();
+    world.connect(&mut app);
+    world.tick(&mut app);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(key.into())),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(key.into()))),
+    );
+    world.ticks(&mut app, ticks);
+    world.verdicts(&mut app);
+    preset(&mut app, LayoutPreset::Explore);
+    (app, world)
+}
+
+fn metric_counter(theme: ThemeChoice) -> Zengui {
+    metered(prefs(theme), FRAMES, 29).0
+}
+
+fn metric_decreased(theme: ThemeChoice) -> Zengui {
+    metered(prefs(theme), BYTES, 29).0
+}
+
+fn metric_unit_unknown(theme: ThemeChoice) -> Zengui {
+    metered(prefs(theme), DROPS, 29).0
+}
+
+fn metric_histogram(theme: ThemeChoice) -> Zengui {
+    metered(prefs(theme), LATENCY, 29).0
+}
+
+/// One more tick in which `latency` publishes a Point tagged a gauge — the
+/// schema admits it, and telemetry.v1 does not (§2.6, check 4) — then the
+/// newest payloads checked again, so the tree's badge carries the verdict
+/// the Inspector explains.
+fn tag_disagrees(prefs: Prefs) -> Zengui {
+    let (mut app, mut world) = metered(prefs, LATENCY, 28);
+    world.tick_with(
+        &mut app,
+        LATENCY,
+        super::metric_point(
+            29,
+            "gauge",
+            serde_json::json!(0.0125),
+            Some("s"),
+            Some("00000000000000a1"),
+        ),
+    );
+    world.verdicts(&mut app);
+    app
+}
+
+fn metric_tag_disagrees(theme: ThemeChoice) -> Zengui {
+    tag_disagrees(prefs(theme))
+}
+
+/// [`tag_disagrees`] in the Watch layout, echo pinned to the key (its
+/// default): the Activity dock's account of the verdict.
+fn watch_metric_invalid(theme: ThemeChoice) -> Zengui {
+    let mut app = tag_disagrees(prefs(theme));
+    preset(&mut app, LayoutPreset::Watch);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::ActivityTab(ActivityTab::Echo)),
+    );
+    app
+}
+
+fn modem_units(theme: ThemeChoice) -> Zengui {
+    metered(prefs(theme), TX_BYTES, 29).0
 }

@@ -168,6 +168,23 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   provider, the owner's `@adv` cache for a stream with history, an event
   replay on demand, a raw `fleet_get` for a foreign key; declared vs
   observed QoS by `qos_mismatch`; zk2's why, fields and R3 consumers.
+  **Metrics (#819, TD)**: a key resolving to a `telemetry.v1` metric
+  resource is read by `zengui::metric` through the fleet's `TelemetryBook`
+  over the slot's history ring, rebuilt per window and reused while the
+  window and the resolution stand still; it reads no presence, since the
+  window's presence rides its own monitor and tokens and samples arrive in
+  no one order (§2.9), so an epoch is in-band or assumed. The identity
+  shows METRIC KIND and UNIT beside TYPE with their source (a unit absent
+  is `unknown (§2.5)`); the Series plots a Point's `value.value`, the bare
+  value (`$`), a boolean as 1/0 or a histogram's mean `sum / count`; a
+  counter gets a `rate (§2.11)` in its unit and `/s`, a gap at every
+  reset, each in-band decrease a `decreased` finding, and the EWMA is
+  named `message rate (samples/s)`. History entries keep the typed stamp
+  and the attachment, lens checks are `check_sample`, and echo names a
+  drawn invalid row's first violation; a replayed file's rows arrive at
+  load plus `t`. `World::metered` (`lab/meter` on
+  `zenkey/tests/contracts/meter.v1.toml`, `site-a/rf0` on modem.v3) feeds
+  seven scenes, and the spray runs `lab/meter` (`--meter`).
   **The Workbench**: nodes per address from presence (health read once per
   selection, a "clocks synced" toggle), zk2's doctor, the admin pane's S4
   rows (`on_owner_state`), the mesh; Send publishes a foreign key only, on

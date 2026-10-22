@@ -66,6 +66,10 @@ impl Bus {
             keys: 0,
             seed: 42,
             contracts: PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/zk2")),
+            meter: PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../zenkey/tests/contracts/meter.v1.toml"
+            )),
         };
         let up = spray::Spray::start(&args)
             .await

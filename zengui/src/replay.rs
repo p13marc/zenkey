@@ -321,9 +321,10 @@ impl ReplayState {
             // A row without `t` (hand-piped ndjson) sits at the
             // previous row's instant: no pacing claim invented.
             let t_prev = rows.last().map_or(0, |r: &ReplayRow| r.t_us);
+            let t_us = t_us.unwrap_or(t_prev);
             rows.push(ReplayRow {
                 qos_recorded,
-                t_us: t_us.unwrap_or(t_prev),
+                t_us,
                 view: Arc::new(SampleView {
                     key: row.key,
                     payload: zenoh::bytes::ZBytes::from(row.payload),
@@ -345,7 +346,15 @@ impl ReplayState {
                     reliability: q.reliability,
                     express: q.express,
                     source: None,
-                    received: loaded_at,
+                    // The capture's receipt, on the capture clock (#819,
+                    // TD): what `telemetry.v1` times a bare counter's rate
+                    // by when no Point timestamp rides it (§2.11) — the
+                    // recording reader's arrival, never the load's. A file
+                    // is a stranger's: a `t` past what this host's clock
+                    // can add arrives at the load (review of PR #829).
+                    received: loaded_at
+                        .checked_add(std::time::Duration::from_micros(t_us))
+                        .unwrap_or(loaded_at),
                 }),
             });
         }
@@ -691,6 +700,24 @@ mod tests {
         // A view the replay never loaded is not one of its rows.
         let stranger = Arc::new((*a.view).clone());
         assert!(state.qos_recorded(&stranger));
+    }
+
+    /// A capture is a stranger's file (review of PR #829): a row's `t` as
+    /// large as the format holds loads, its arrival the capture's receipt
+    /// where this host's clock can add it and the load's where it cannot —
+    /// never a panic, and never before the load.
+    #[test]
+    fn a_huge_t_arrives_without_overflowing_the_clock() {
+        let f = [
+            r#"{"zrec":3,"selectors":["**"],"base":"","captured_at":"x","excluded":[]}"#,
+            r#"{"key":"demo/a","t":0,"bytes":"MQ=="}"#,
+            r#"{"key":"demo/a","t":18446744073709551615,"bytes":"Mg=="}"#,
+        ]
+        .join("\n");
+        let state = ReplayState::load("t.zrec", f.as_bytes()).expect("a capture loads");
+        assert_eq!(state.rows.len(), 2);
+        assert_eq!(state.rows[1].t_us, u64::MAX);
+        assert!(state.rows[1].view.received >= state.rows[0].view.received);
     }
 
     /// A replay resolves offline (#614, FL10b): no presence read behind its

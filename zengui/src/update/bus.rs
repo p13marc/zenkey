@@ -160,8 +160,9 @@ pub(crate) fn apply_tick(
     // The chart's inputs all advanced above — the history ring, the rate
     // sampler, the facts behind the unit. Rebuilt once per slot here rather
     // than once per frame (#178, #257).
+    let identities = work.replay.identity_cache(&dep.identity);
     for slot in sub.all_mut() {
-        slot.refresh_series(dep);
+        slot.refresh_series(identities);
     }
     // The tree's shape survived, so point it at this tick's numbers
     // instead of walking 50,000 nodes to move eight of them (#177).
@@ -418,7 +419,7 @@ pub(crate) fn update(
 pub(crate) fn validation_batch(
     samples: &[Arc<zenkey_fleet::SampleView>],
     cache: &crate::verdict::VerdictCache,
-) -> Vec<(String, String, zenoh::bytes::ZBytes)> {
+) -> Vec<crate::services::value::ToCheck> {
     // Newest per key, in first-arrival key order: `newest` supersedes,
     // `order` remembers when the key first showed up.
     let mut newest: std::collections::HashMap<&str, &Arc<zenkey_fleet::SampleView>> =
@@ -439,7 +440,14 @@ pub(crate) fn validation_batch(
         .filter_map(|key| newest.get(key))
         .filter(|s| cache.should_check(&s.key))
         .take(crate::verdict::VALIDATE_PER_TICK)
-        .map(|s| (s.key.clone(), s.encoding.clone(), s.payload.clone()))
+        .map(|s| {
+            (
+                s.key.clone(),
+                s.encoding.clone(),
+                s.payload.clone(),
+                s.attachment.clone(),
+            )
+        })
         .collect()
 }
 
@@ -710,7 +718,7 @@ mod tests {
         let mut cache = VerdictCache::new(4096);
         let first = validation_batch(&samples, &cache);
         assert_eq!(
-            first.iter().map(|(k, _, _)| k.as_str()).collect::<Vec<_>>(),
+            first.iter().map(|(k, ..)| k.as_str()).collect::<Vec<_>>(),
             keys[..per_tick]
                 .iter()
                 .map(String::as_str)
@@ -718,15 +726,12 @@ mod tests {
             "the first tick takes the first {per_tick} keys the bus delivered"
         );
 
-        for (key, _, _) in &first {
+        for (key, ..) in &first {
             cache.record(key, zenkey_fleet::report::Conformance::Valid);
         }
         let second = validation_batch(&samples, &cache);
         assert_eq!(
-            second
-                .iter()
-                .map(|(k, _, _)| k.as_str())
-                .collect::<Vec<_>>(),
+            second.iter().map(|(k, ..)| k.as_str()).collect::<Vec<_>>(),
             keys[per_tick..per_tick * 2]
                 .iter()
                 .map(String::as_str)
@@ -759,7 +764,7 @@ mod tests {
 
         let batch = validation_batch(&samples, &VerdictCache::new(4096));
         assert_eq!(
-            batch.iter().map(|(k, _, _)| k.as_str()).collect::<Vec<_>>(),
+            batch.iter().map(|(k, ..)| k.as_str()).collect::<Vec<_>>(),
             ["v1/h-0123456789ab/state/p/a", "v1/h-0123456789ab/state/p/b"],
             "a tombstone and an oversized payload are skipped, not slotted"
         );

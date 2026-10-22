@@ -14,8 +14,9 @@
 //! keep core §2.7: a templated resource stays within its cardinality and an
 //! event within its rate. Payloads are synthesized per (seed, tick); every
 //! operation is served. All on one session, in the deployment namespace
-//! (`--namespace`, `spray` by default), over `examples/zk2/walkthrough` and
-//! `examples/zk2/tcgui`:
+//! (`--namespace`, `spray` by default), over `examples/zk2/walkthrough`,
+//! `examples/zk2/tcgui` and the runtime's `telemetry.v1` scenario contract
+//! (`zenkey/tests/contracts/meter.v1.toml`, `--meter`):
 //!
 //! | address | implements | what it shows |
 //! |---|---|---|
@@ -27,6 +28,7 @@
 //! | `fleet/planner` | `mission_plan.v1` | `plans/{vehicle}`, two members of a bound of 1000 |
 //! | `host-a/tc` | `tc.netif.v1`, `tc.netem.v1` | JSON Schema, templated `{ns}/{iface}`, an event at rate `low` |
 //! | `host-a/sysmon` | `health.v1` only | a status cycling OK → DEGRADED → OK |
+//! | `lab/meter` | `meter.v1` | `telemetry.v1` (#819, TD): a Point counter and a Point histogram, their epoch in the Point; a bare counter in `By`, its epoch in the Epoch attachment; a bare counter with no unit and no epoch; a bare gauge in `dBm`; a state counter — every epoch the instance, so a new term is a reset |
 //!
 //! An event's rate caps it per run, so each owner runs in **terms** of an
 //! hour (`TERM`): at the end of one its service is closed and brought up
@@ -113,6 +115,14 @@ pub struct Args {
     /// contracts.
     #[arg(long, default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/zk2"))]
     pub contracts: PathBuf,
+    /// The `telemetry.v1` scenario contract `lab/meter` implements: a Point
+    /// counter, a bare counter with its epoch in the attachment, one with
+    /// neither, a Point histogram, a bare gauge, a state counter (#819, TD).
+    #[arg(
+        long,
+        default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../zenkey/tests/contracts/meter.v1.toml")
+    )]
+    pub meter: PathBuf,
 }
 
 /// One owner: an address, the interfaces it implements, its role bindings,
@@ -181,7 +191,18 @@ const OWNERS: &[Owner] = &[
             "plug/{ns}/{iface}=default/eth0,default/wlan0",
         ],
     },
+    Owner {
+        address: METER,
+        interfaces: &["meter.v1"],
+        bindings: &[],
+        members: &[],
+    },
 ];
+
+/// The owner of `meter.v1`'s metrics (#819, TD): what zengui's Inspector
+/// reads by `telemetry.v1` — kinds and units, a counter's rate, a reset at
+/// each new term.
+pub const METER: &str = "lab/meter";
 
 /// The service implementing only `health.v1`, its status cycling.
 pub const SYSMON: &str = "host-a/sysmon";
@@ -275,10 +296,11 @@ const CONTRACTS: &[&str] = &[
     "tcgui/tc.netem.v1.toml",
 ];
 
-/// Every file of [`CONTRACTS`] under `root`, loaded; a file that does not
-/// load stops the demo, with what was wrong.
-fn load(root: &Path) -> anyhow::Result<ContractSet> {
-    let files: Vec<PathBuf> = CONTRACTS.iter().map(|f| root.join(f)).collect();
+/// Every file of [`CONTRACTS`] under `root`, and `meter`, loaded; a file
+/// that does not load stops the demo, with what was wrong.
+fn load(root: &Path, meter: &Path) -> anyhow::Result<ContractSet> {
+    let mut files: Vec<PathBuf> = CONTRACTS.iter().map(|f| root.join(f)).collect();
+    files.push(meter.to_path_buf());
     let (set, problems) = ContractSet::load_files(&files);
     if !problems.is_empty() {
         let said: Vec<String> = problems
@@ -286,7 +308,8 @@ fn load(root: &Path) -> anyhow::Result<ContractSet> {
             .map(|p| format!("{}: {}", p.at, p.message))
             .collect();
         anyhow::bail!(
-            "the example contracts did not load (pass --contracts <examples/zk2>):\n{}",
+            "the example contracts did not load (pass --contracts <examples/zk2> and \
+             --meter <meter.v1.toml>):\n{}",
             said.join("\n")
         );
     }
@@ -428,7 +451,7 @@ impl Spray {
     /// Brings every owner up and starts the raw traffic. Returns once every
     /// owner's first term is up, or the first that could not come up.
     pub async fn start(args: &Args) -> anyhow::Result<Spray> {
-        let contracts = load(&args.contracts)?;
+        let contracts = load(&args.contracts, &args.meter)?;
 
         // Every plan before anything is brought up: a contract that will
         // not plan stops the demo with nothing declared.

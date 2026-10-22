@@ -218,6 +218,9 @@ mod tests {
                     "rate_series",
                     "series_leaf",
                     "series",
+                    // telemetry.v1's fold of the slot key's history (#819,
+                    // TD): derived from the recorder, dropped with it.
+                    "metric",
                     // The field-observation window (#223) and the why
                     // ladder (#214): both are evidence about one key, both
                     // dropped when the slot's subject moves.
@@ -398,6 +401,7 @@ mod tests {
         // archive's last-known answer — 94. Then FL8b: v1's schema store
         // went with the last v1 pane that read it, fields — 93. Then #768
         // (CD): the Config tool came back on config.v1, as a verdict — 94.
-        assert_eq!(leaves, 94, "the split must place every field exactly once");
+        // Then #819 (TD): a slot's telemetry.v1 fold of its history — 95.
+        assert_eq!(leaves, 95, "the split must place every field exactly once");
     }
 }

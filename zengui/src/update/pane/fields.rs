@@ -75,7 +75,11 @@ pub(crate) fn update(
                 return Task::none();
             }
             if let Ok(report) = &outcome {
-                slot.fields.sparks = crate::view::fields::sparks_for(report, slot.history.as_ref());
+                slot.fields.sparks = crate::view::fields::sparks_for(
+                    report,
+                    slot.history.as_ref(),
+                    slot.series.as_ref().and_then(|s| s.metric.as_deref()),
+                );
             }
             slot.fields.report = Some(outcome);
             Task::none()
