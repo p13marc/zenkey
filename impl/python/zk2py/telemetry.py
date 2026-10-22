@@ -1,4 +1,4 @@
-"""``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.3, core 0.35):
+"""``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.4, core 0.35):
 what a metric resource carries, and what a reader may conclude from it.
 
 From the text alone:
@@ -42,7 +42,8 @@ The owner's half (:class:`MeterOwner`) and the reader on a bus
 (F-150), and an Epoch attachment is read as a sample of its encoding is,
 strict JSON or CBOR, depth included (F-151). It adds a data item's depth,
 at most 256 arrays and maps (:data:`MAX_DEPTH`), and §5's "over many pairs"
-(:func:`verdict`).
+(:func:`verdict`). 0.4 answered F-152 as zk2py read it, and asks it of each
+counter or histogram read (:func:`member_answer`).
 """
 
 from __future__ import annotations
@@ -843,27 +844,47 @@ def continuity(a: Read, b: Read, presence: Presence | None, unit: str | None) ->
 
 
 FINDING, NO, COULD_NOT_TELL = "finding", "no", "could_not_tell"
+#: a member's continuity answer, in the judgement's tokens (§5, 0.4)
+DECREASED_ESTABLISHED, NOT_ESTABLISHED = "established", "not_established"
 
 
-def verdict(conformances: Iterable[Conformance], pairs: Iterable[Pair]) -> str:
-    """A tool's answer over a window's samples and pairs (§5, with "Over many
-    pairs", 0.3):
-    - ``finding``: a sample that does not conform, or a pair ``decreased``;
-    - ``could_not_tell``: nothing conforms (silence is no verdict), or
-      counters or histograms were read and no pair of theirs had its epoch
-      established: "over pairs of counters or histograms whose every epoch
-      was assumed SHOULD say it could not tell … no decrease could have been
-      found". zk2py reads "every" as holding of no pair too, so a counter
-      read with no pair at all is here as well (F-152);
+def member_answer(conformances: Iterable[Conformance], pairs: Iterable[Pair]) -> str:
+    """§5 "Over many pairs" (0.4): "Each counter or histogram read is
+    asked", one member's samples and pairs alone:
+    - ``not_asked``: neither a counter nor a histogram. A member's kind is
+      the declared one or a conforming Point's tag (§2.5), so one whose kind
+      is unobservable is not asked of continuity;
+    - ``established``: a pair ``decreased``, within an established epoch;
+    - ``unobservable``: "One that formed no pair (one sample of it in the
+      window, or none that conforms), or only pairs whose epoch was assumed,
+      could not tell, whatever another formed";
+    - ``not_established``: a pair of it established, and none decreased."""
+    cs, ps = list(conformances), list(pairs)
+    if not any(c.kind in ("counter", "histogram") for c in cs):
+        return NOT_ASKED
+    if any(p.continuity == "decreased" for p in ps):
+        return DECREASED_ESTABLISHED
+    if not any(p.epoch == "established" for p in ps if p.continuity != NOT_ASKED):
+        return UNOBSERVABLE
+    return NOT_ESTABLISHED
+
+
+def verdict(members: Iterable[tuple[Iterable[Conformance], Iterable[Pair]]]) -> str:
+    """A tool's answer over a window, its members' samples and pairs (§5,
+    "Over many pairs", 0.3 and 0.4):
+    - ``finding``: a sample that does not conform, or a pair ``decreased``:
+      "A finding still stands … whatever could not be told";
+    - ``could_not_tell``: nothing conforms (silence is no verdict), or any
+      counter or histogram read could not tell (:func:`member_answer`);
     - ``no`` otherwise, a window of gauges, text, booleans or bytes alone
       included (the continuity question not asked)."""
-    cs, ps = list(conformances), list(pairs)
-    if any(c.conformance == DOES_NOT for c in cs) or any(p.continuity == "decreased" for p in ps):
+    ms = [(list(cs), list(ps)) for cs, ps in members]
+    if any(c.conformance == DOES_NOT for cs, _ in ms for c in cs) or \
+            any(member_answer(cs, ps) == DECREASED_ESTABLISHED for cs, ps in ms):
         return FINDING
-    if not any(c.conformance == CONFORMS for c in cs):
+    if not any(c.conformance == CONFORMS for cs, _ in ms for c in cs):
         return COULD_NOT_TELL
-    pairing = [c for c in cs if c.conformance == CONFORMS and c.kind in ("counter", "histogram")]
-    if pairing and not any(p.epoch == "established" for p in ps if p.continuity != NOT_ASKED):
+    if any(member_answer(cs, ps) == UNOBSERVABLE for cs, ps in ms):
         return COULD_NOT_TELL
     return NO
 

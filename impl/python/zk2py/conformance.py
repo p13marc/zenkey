@@ -1630,12 +1630,11 @@ def _telemetry_deep() -> list[tuple[str, Any, Any]]:
 
 
 def _telemetry_verdicts() -> list[tuple[str, Any, Any]]:
-    """telemetry.v1 0.3 §5 "Over many pairs", zk2py's tool answer over a
-    window (`telemetry.verdict`): a finding; "could not tell" over pairs of
-    counters or histograms whose every epoch was assumed, and, zk2py's
-    reading of F-152, over a counter read with no pair at all; no
-    otherwise, a mix with an established pair and a window of gauges alone
-    included."""
+    """telemetry.v1 0.4 §5 "Over many pairs", zk2py's tool answer over a
+    window of members (`telemetry.verdict`, `member_answer`): a finding;
+    "could not tell" of any counter or histogram read that formed no pair
+    (F-152, resolved by 0.4 as zk2py read it) or only assumed ones, whatever
+    another formed; no otherwise, a window of gauges alone included."""
     from . import telemetry as tm
 
     def conf(kind: str, ok: bool = True) -> Any:
@@ -1645,24 +1644,38 @@ def _telemetry_verdicts() -> list[tuple[str, Any, Any]]:
     def pair(cont: str, epoch: str) -> Any:
         return tm.Pair(cont, epoch, "presence" if epoch == "established" else None, None, None, "kind")
 
-    label = "telemetry.v1 0.3 §5, over many pairs"
+    label = "telemetry.v1 0.4 §5, over many pairs"
+    est = ([conf("counter")] * 2, [pair("same_epoch", "established")])
     return [
-        (f"{label}: a sample that does not conform is a finding", tm.verdict([conf("counter", False)], []),
+        (f"{label}: a sample that does not conform is a finding", tm.verdict([([conf("counter", False)], [])]),
          tm.FINDING),
         (f"{label}: a decrease within an established epoch is a finding",
-         tm.verdict([conf("counter")] * 2, [pair("decreased", "established")]), tm.FINDING),
-        (f"{label}: every counter's pair assumed: could not tell",
-         tm.verdict([conf("counter")] * 3, [pair("same_epoch", "assumed"), pair("reset", "assumed")]),
+         tm.verdict([([conf("counter")] * 2, [pair("decreased", "established")])]), tm.FINDING),
+        (f"{label}: every pair of a counter assumed: could not tell",
+         tm.verdict([([conf("counter")] * 3, [pair("same_epoch", "assumed"), pair("reset", "assumed")])]),
          tm.COULD_NOT_TELL),
-        (f"{label}: one pair established beside assumed ones: no",
-         tm.verdict([conf("counter")] * 3, [pair("same_epoch", "assumed"), pair("same_epoch", "established")]),
+        (f"{label}: one member, an established pair beside an assumed one: no",
+         tm.verdict([([conf("counter")] * 3, [pair("same_epoch", "assumed"), pair("same_epoch", "established")])]),
          tm.NO),
-        (f"{label} (F-152, zk2py's reading): a counter's one sample, no pair at all: could not tell",
-         tm.verdict([conf("counter")], []), tm.COULD_NOT_TELL),
+        (f"{label} (F-152, as 0.4 resolved it): a counter's one sample, no pair at all: could not tell",
+         tm.verdict([([conf("counter")], [])]), tm.COULD_NOT_TELL),
+        (f"{label} (0.4): one counter established, another with no pair: could not tell of the second",
+         tm.verdict([est, ([conf("counter")], [])]), tm.COULD_NOT_TELL),
+        (f"{label} (0.4): one counter established, another only assumed: could not tell",
+         tm.verdict([est, ([conf("counter")] * 2, [pair("same_epoch", "assumed")])]), tm.COULD_NOT_TELL),
+        (f"{label} (0.4): a finding stands beside a counter that could not tell",
+         tm.verdict([([conf("counter")], []), ([conf("counter")] * 2, [pair("decreased", "established")])]),
+         tm.FINDING),
         (f"{label}: a gauge's samples alone, the continuity question not asked: no",
-         tm.verdict([conf("gauge")] * 2, [pair("not_asked", None)]), tm.NO),
-        (f"{label}: no sample at all: could not tell (silence is never a verdict)", tm.verdict([], []),
+         tm.verdict([([conf("gauge")] * 2, [pair("not_asked", None)])]), tm.NO),
+        (f"{label}: two counters established, a gauge with one sample: no",
+         tm.verdict([est, est, ([conf("gauge")], [])]), tm.NO),
+        (f"{label}: no sample at all: could not tell (silence is never a verdict)", tm.verdict([]),
          tm.COULD_NOT_TELL),
+        (f"{label} (F-157, zk2py's reading, the tool's too): a gauge's conforming sample beside an undecodable "
+         "one: no, the undecodable sample read nothing of (§2.6)",
+         tm.verdict([([conf("gauge"), tm.Conformance(tm.UNOBSERVABLE, ("undecodable",), "gauge", "declared", None,
+                                                     None)], [])]), tm.NO),
     ]
 
 
