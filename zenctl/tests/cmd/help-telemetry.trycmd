@@ -24,7 +24,7 @@ Arguments:
 
 Options:
       --for <SECS>
-          The reading's window, seconds. It opens once the subscriptions are declared and presence is seeded, when stderr says "listening": a sample put from then on is inside it. Across a face, where no presence is read, it opens once S4's GET of a state metric resource in scope was answered after the subscriptions; with none in scope, after --settle, a margin and never proof, as the line says. A pair needs two conforming samples of one member within it
+          The reading's window, seconds. It opens once the subscriptions are declared, presence is seeded, and each owner instance in scope answered its descriptor GET, when stderr says "listening": a sample put from then on is inside it (an owner that did not answer, the line names). Across a face, where no presence is read, it opens once S4's GET of a state metric resource in scope was answered after the subscriptions; with none in scope, after --settle, a margin and never proof, as the line says. A pair needs two conforming samples of one member within it
           
           [default: 10]
 

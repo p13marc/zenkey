@@ -18,6 +18,7 @@ of 15 tries in its runs; 47 of 48 in this repository's loopback face).
 | `telemetry --across-face`: the line printed once the subscriptions were declared, then S4's GET | S4's GET of the state metric resources in scope first, answered by the owner after the subscriptions, then the line | the GET is the round trip that proves the far side holds them; 0 of 192 samples put on the line lost |
 | — | `telemetry --settle SECS` (default 0.25): across a face with no state metric resource in scope, the wait before the window opens | a margin, never proof, and the line says so; set it to the link's round trip, 0 to open at once. A stream has no queryable, and presence and descriptors do not cross, so nothing else could answer |
 | `health --across-face`: the line printed once the subscription was declared | once the first reading's GET was answered after it | `alarms --across-face` already made its GET before the line |
+| `telemetry` with no face: the line once presence was seeded | once each owner instance in scope has also answered its descriptor GET, made after the seed | the seed proves the router holds the subscriptions, not the owner: under load 11 of 400 samples put on the line were lost, each with the owner's writer unmatched; now 0 of 800. An owner that does not answer within `--timeout` is named in the line. `alarms` and `health` already read descriptors after their subscriptions |
 
 ## Unreleased (`main`, zk2) — `telemetry` after zk2py round 48: a sample that could not be read (#819, TF)
 

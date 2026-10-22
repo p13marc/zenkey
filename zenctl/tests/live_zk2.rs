@@ -7145,6 +7145,66 @@ async fn telemetry_could_not_tell_of_a_member_under_an_invalid_declaration() {
     );
 }
 
+/// T with no face, `tries` times over `drops`, O up and listed before it;
+/// the moment T's "listening" line is read, O puts `drops` through its
+/// writer. The tries whose sample T did not hear or whose writer did not
+/// yet match T's subscription, with the first one's run.
+async fn no_face_on_the_line(tries: usize) -> (Vec<usize>, Option<String>) {
+    let bus = Bus::bare(None).await;
+    let o = meter_owner_with(&bus.owners, false).await;
+    wait_for(&bus, &["lab/meter"]).await;
+    let contracts = meter_contract_path();
+    let (mut lost, mut first) = (Vec::new(), None);
+    for i in 0..tries {
+        let (listening, t) = bus.spawn_on_line(
+            &[
+                "telemetry",
+                DROPS,
+                "--contracts",
+                contracts.to_str().expect("a UTF-8 path"),
+                "--for",
+                "1",
+                "--format",
+                "json",
+            ],
+            "telemetry: listening",
+        );
+        listening.await.expect("T says it listens");
+        let matched = o.drops.matching().await.expect("matching");
+        o.drops.put_value(&(i as u64)).await.expect("drops");
+        let run = t.await.expect("the telemetry run");
+        let heard = rows_of(&run.json(), "member")
+            .into_iter()
+            .find(|r| r["key"] == DROPS)
+            .and_then(|r| r["samples"]["received"].as_u64());
+        if heard != Some(1) || !matched {
+            lost.push(i);
+            first.get_or_insert_with(|| run.to_string());
+        }
+    }
+    drop(o);
+    (lost, first)
+}
+
+/// #819 TG's gate: with no face, the presence seed proves the router holds
+/// T's subscriptions, and not that O's session does, and zenoh drops a put
+/// at its source until it does: under load, 11 of 400 samples put on the
+/// line were lost, each with O's writer unmatched. Now each owner
+/// instance's descriptor GET, answered by O's session after the
+/// declarations reach it, comes before the line: O's writer matches when
+/// the line is read, and T hears every sample (800 of 800 under load).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_hears_a_sample_put_on_its_listening_line() {
+    let (lost, first) = no_face_on_the_line(ON_THE_LINE).await;
+    assert!(
+        lost.is_empty(),
+        "{} of {ON_THE_LINE} samples put on the line were lost or unmatched: {lost:?}; the \
+         first:\n{}",
+        lost.len(),
+        first.unwrap_or_default()
+    );
+}
+
 /// T across the face, 24 times over `selector`, O on the vehicle before
 /// it; the moment T's "listening" line is read, O puts `drops`, raw. The
 /// tries whose sample T did not hear, with the first one's run, and the

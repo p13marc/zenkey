@@ -84,10 +84,12 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     let session = ASKING.ask(dep.session().await);
     let store = zk2::store(&dep, &offline);
     // The line comes once the window opens (zk2py round 47's F-154): the
-    // subscriptions declared and a round trip made after them — presence
-    // seeded, or across a face S4's GET of a state metric resource (round
-    // 49's F-159) — so a sample put once it is read is inside the window.
-    // Across a face with no such GET, the line says nothing proved it.
+    // subscriptions declared and a round trip made after them that reaches
+    // each owner — its descriptor GET after the presence seed, or across a
+    // face S4's GET of a state metric resource (round 49's F-159; #819 TG)
+    // — so a sample put once it is read is inside the window. When an
+    // owner did not answer, or across a face nothing could, the line says
+    // so.
     let listening = move |opening: zenkey_fleet::TelemetryOpening| {
         use zenkey_fleet::TelemetryOpening as O;
         eprintln!(
@@ -100,7 +102,12 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
                 " and their owners' tokens"
             },
             match opening {
-                O::Seeded | O::StateGet => String::new(),
+                O::Answered { .. } => String::new(),
+                O::Unanswered { silent, asked } => format!(
+                    "; {silent} of the {asked} owner instance(s) in scope answered no GET \
+                     after the subscriptions within --timeout, so they may not hold them yet: \
+                     a sample one puts at once may be dropped before it leaves"
+                ),
                 O::Margin(m) => format!(
                     "; across the face no state metric resource in scope answered a GET, so \
                      nothing proved the far side subscribed: this line comes after a {}s \

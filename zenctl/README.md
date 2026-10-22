@@ -911,10 +911,13 @@ base-relative selector reaches. One queue fed by the owners' instance and
 member tokens and each resource's members, so samples and token moves are
 folded in the one order received; a presence seed, read again after a loss;
 and S4's GET of each state metric resource, merged with the live puts by
-the owner's stamp. The window opens once the subscriptions are declared and
-presence is seeded, when stderr says `telemetry: listening …`, and `--for`
+the owner's stamp. The window opens once the subscriptions are declared,
+presence is seeded, and each owner instance in scope has answered its
+descriptor GET, when stderr says `telemetry: listening …`, and `--for`
 counts from then: a sample put once that line is read is inside it (`alarms`
-and `health` print theirs the same way). Across a face, where no presence is
+and `health` print theirs the same way). The seed alone proves only that the
+router holds the subscriptions; an owner's put is dropped at its source until
+its own session does, which its answer proves. Across a face, where no presence is
 read, S4's GET of a state metric resource in scope, answered by its owner
 after the subscriptions, is the round trip the line waits for; with none in
 scope nothing can answer across the face, so the window opens after
