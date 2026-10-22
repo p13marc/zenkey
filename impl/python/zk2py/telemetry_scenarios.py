@@ -1526,19 +1526,55 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
         bus.close()
 
 
+#: the "listening" line's words for each opening, as zenctl-th's --help and
+#: line give them (F-160's answer), anchored on the line's start. The tool's
+#: `telemetry --help` and its stderr line are the source: a later rewording
+#: of either is updated here, in this one place.
+LISTENING = "telemetry: listening"
+OPENING_WORDS = {
+    "get": re.compile(r"; across the face the owner answered (\d+) of (\d+) S4 GET\(s\) of a state metric resource "
+                      r"in scope after the subscriptions, so it holds them"),
+    "settle": re.compile(r"this line comes after a [0-9.]+s margin \(--settle\), never proof"),
+    "descriptor": re.compile(r"; each of the (\d+) owner instance\(s\) in scope answered its descriptor GET after the "
+                             r"subscriptions, so they hold them"),
+}
+
+
+def _worded(line: str, opening: str) -> bool:
+    """Whether a "listening" line says it stood on ``opening``: the line
+    starts with "telemetry: listening", holds that opening's words, with
+    every GET it names answered (A of N, A = N >= 1), and none of another's."""
+    if not line.startswith(LISTENING):
+        return False
+    m = OPENING_WORDS[opening].search(line)
+    if m is None or any(OPENING_WORDS[o].search(line) for o in OPENING_WORDS if o != opening):
+        return False
+    if opening == "get":
+        return int(m.group(1)) == int(m.group(2)) >= 1
+    if opening == "descriptor":
+        return int(m.group(1)) >= 1
+    return True
+
+
 def tool_opening(report: Report, contract: Any, tool: Path, tries: int = 20) -> None:
-    """F-159's answer (zenctl-tg): the "listening" line comes after a round
-    trip that reaches the owner's own session, and a sample put the moment
-    it appears is inside the window. Asserted three ways, ``tries`` times
-    each, with no margin:
+    """F-159's answer (zenctl-tg) and F-160's (zenctl-th): the "listening"
+    line comes after a round trip that reaches the owner's own session, and
+    says which one it stood on; a sample put the moment it appears is inside
+    the window. Asserted three ways, ``tries`` times each, with no margin,
+    each window's exit against zk2py's verdict over the same reading:
     - across the real face, a state metric resource in scope holding a value
-      (``total``): the opening stands on S4's GET of it, and the line names
-      no ``--settle``;
-    - across the real face, streams alone in scope: the opening stands on
-      ``--settle`` (0.25 s), and the line says so, "never proof";
-    - with no face: the opening stands on the owner's descriptor GET, and
-      the line names no owner that did not answer."""
-    sec = "the tool's opening (F-159)"
+      (``total``, checked held first by an S4 GET): on S4's GET of it, "the
+      owner answered 1 of 1 S4 GET(s) … so it holds them";
+    - across the real face, streams alone in scope: on ``--settle`` (0.25
+      s), "a … margin (--settle), never proof";
+    - with no face: on the owner's descriptor GET, "each of the 1 owner
+      instance(s) in scope answered its descriptor GET … so they hold
+      them".
+
+    ``--only opening`` runs it alone."""
+    import zenoh
+
+    sec = "the tool's opening (F-159, F-160)"
     bus = Bus("zk2py", contract, face=True, tool=tool, report=report, sec=sec)
     try:
         assert bus.face is not None
@@ -1546,34 +1582,50 @@ def tool_opening(report: Report, contract: Any, tool: Path, tries: int = 20) -> 
         bus.appeared(o.instance)
         o.put("total", 1)
         time.sleep(0.5)
+        held = [json.loads(r.ok.payload.to_bytes()) for r in bus.r_session.get(
+            TOTAL, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST, timeout=2.0)
+            if r.ok is not None]
+        report.check(sec, "before the first case: the owner holds total's value, which its S4 GET answers (core S2)",
+                     held == [1], f"the GET's replies {held}")
         v = 1000
         cases = [
-            ("across the real face, total in scope: on S4's GET",
-             {"across_face": True, "endpoint": bus.face.endpoint, "selector": f"zk2/{ADDRESS}/**"},
-             lambda line: "--settle" not in line and "answered none" not in line),
-            ("across the real face, streams alone in scope: on --settle",
-             {"across_face": True, "endpoint": bus.face.endpoint, "selector": f"{PREFIX}/**"},
-             lambda line: "--settle" in line and "never proof" in line),
-            ("with no face: on the owner's descriptor GET",
-             {"selector": f"{PREFIX}/drops"},
-             lambda line: "--settle" not in line and "did not answer" not in line),
+            ("across the real face, total in scope: on S4's GET", "get", bus.face.R0F,
+             {"across_face": True, "endpoint": bus.face.endpoint, "selector": f"zk2/{ADDRESS}/**"}),
+            ("across the real face, streams alone in scope: on --settle", "settle", bus.face.R0F,
+             {"across_face": True, "endpoint": bus.face.endpoint, "selector": f"{PREFIX}/**"}),
+            ("with no face: on the owner's descriptor GET", "descriptor", bus.R,
+             {"selector": f"{PREFIX}/drops"}),
         ]
-        for note, kw, worded in cases:
-            got, lines = [], set()
+        drops = f"{PREFIX}/drops"
+        for note, opening, reader, kw in cases:
+            got, lines, exits, seen = [], [], [], []
             for _ in range(tries):
                 run = bus.tool_start(0.6, **kw)
                 assert run is not None
                 v += 1
                 o.put("drops", v)
                 code, doc = run.finish()
-                rows = [r for r in doc["rows"] if r.get("row") == "member" and r["key"] == f"{PREFIX}/drops"]
+                rows = [r for r in doc["rows"] if r.get("row") == "member" and r["key"] == drops]
                 got.append(rows[0]["samples"]["received"] if rows else 0)
-                lines |= {x for x in run.err if x.startswith("telemetry: listening")}
+                lines += [x for x in run.err if x.startswith(LISTENING)]
+                # zk2py's verdict over the same drops sample: a counter read
+                # with no pair could not tell (§5, 0.4)
+                zk = zk2py_view(reader, run.ready_ns, [drops])
+                seen.append(sum(x["samples"]["received"] for x in zk.values()))
+                want = EXIT[tm.verdict([(x["conformances"], x["pair_objects"]) for x in zk.values()])]
+                exits.append((code, want))
             report.check(sec, f"{note}: a sample put the moment \"listening\" appears is inside the window, "
                               f"{tries} tries of {tries}", got == [1] * tries,
                          f"read {sum(got)} of {tries}: {got}")
-            report.check(sec, f"{note}: the line says what it stood on, as --help gives it",
-                         bool(lines) and all(worded(x) for x in lines), f"{sorted(lines)}")
+            report.check(sec, f"{note}: each line, \"{LISTENING} …\", says it stood on this opening, in the words "
+                              "--help gives", len(lines) == tries and all(_worded(x, opening) for x in lines),
+                         f"{len(lines)} lines; {sorted(set(lines))[:2]}")
+            # so that the exit check cannot pass over an empty view
+            report.check(sec, f"{note}: zk2py's reader read the sample in each window, {tries} of {tries}",
+                         seen == [1] * tries, f"read {sum(seen)} of {tries}: {seen}")
+            report.check(sec, f"{note}: each exit is zk2py's verdict over the window (a counter's one sample: 2)",
+                         all(c == w for c, w in exits) and seen == [1] * tries,
+                         f"(exit, zk2py's) {sorted(set(exits))}")
     finally:
         bus.close()
 
@@ -1615,7 +1667,7 @@ SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": sec
 
 def run(report: Report, mode: Any, only: list[str] | None, tool: Path | None = None) -> None:
     contract = load()
-    for name in [n for n in SECTIONS if not only or n in only]:
+    for name in [n for n in SECTIONS if not only or n in only]:  # "opening" names no section
         try:
             SECTIONS[name](report, mode, contract, tool)
         except Exception as e:  # noqa: BLE001 - a section that cannot run is a failure
@@ -1623,14 +1675,14 @@ def run(report: Report, mode: Any, only: list[str] | None, tool: Path | None = N
 
             traceback.print_exc()
             report.check(f"§{name}", "the section ran", False, f"{type(e).__name__}: {e}")
-    if tool is not None and (not only or "8" in only):
+    if tool is not None and (not only or "opening" in only):
         try:
             tool_opening(report, contract, tool)
         except Exception as e:  # noqa: BLE001
             import traceback
 
             traceback.print_exc()
-            report.check("the tool's opening (F-159)", "the tries ran", False, f"{type(e).__name__}: {e}")
+            report.check("the tool's opening (F-159, F-160)", "the tries ran", False, f"{type(e).__name__}: {e}")
     if tool is not None and (not only or "5" in only):
         try:
             tool_probes(report, contract, tool)
@@ -1644,7 +1696,8 @@ def run(report: Report, mode: Any, only: list[str] | None, tool: Path | None = N
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.telemetry_scenarios", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=sorted(SECTIONS, key=int), help="run only these sections")
+    ap.add_argument("--only", action="append", choices=[*sorted(SECTIONS, key=int), "opening"],
+                    help="run only these sections; \"opening\" is the tool's opening (with --tool)")
     ap.add_argument("--owner", type=Path, default=None,
                     help="run against the Rust owner example at this path (--telemetry); default $ZK2PY_OWNER")
     ap.add_argument("--tool", type=Path, default=None,
@@ -1668,6 +1721,10 @@ def main(argv: list[str] | None = None) -> int:
         if not tool.is_file():
             print(f"error: {tool} not found (the path came from {zsource})", file=sys.stderr)
             return 2
+    if args.only and "opening" in args.only and tool is None:
+        print("error: --only opening is the tool's window opening, and needs --tool <zenctl> (or ZK2PY_ZENCTL)",
+              file=sys.stderr)
+        return 2
     report = Report()
     if tool is not None:
         try:
