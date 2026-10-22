@@ -8374,14 +8374,15 @@ checks the three openings, 20 tries each:
 - **`total`'s value** is checked held, by an S4 GET, before the first
   case.
 - **Each exit** is zk2py's verdict over the same sample: a counter's one
-  sample could not tell, 2.
+  sample could not tell, 2. zk2py's reader is first checked to have read
+  the sample, so the comparison cannot pass over an empty view.
 
 **`just py-conformance`: 2235 of 2235.**
 
 **`just py-telemetry`, three runs, each exiting 0:**
 - zk2py's owner, 57 of 57;
 - `owner-tb`, 56 of 56;
-- `zenctl-th` judging beside zk2py's reader, 161 of 161.
+- `zenctl-th` judging beside zk2py's reader, 164 of 164.
 
 **None open.**
 

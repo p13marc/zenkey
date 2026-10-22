@@ -1241,7 +1241,8 @@ confirmed the tool after TG and TH.
     real face on S4's GET (`total`'s value checked held first), across it
     on `--settle`, and with no face. Each sample put the moment "listening"
     appears is read. Each line says positively which opening it stood on,
-    in the help's words. Each exit is zk2py's verdict. Each window
+    in the help's words. Each exit is zk2py's verdict over a view that
+    read the sample. `--only opening` without `--tool` exits 2. Each window
     also checks that zk2py's reader read samples in it and that the tool
     read every one of them, so the mode cannot pass testing nothing. A run
     logs the tool's `--version`; here `zenctl 0.12.0
@@ -1260,9 +1261,9 @@ confirmed the tool after TG and TH.
   | 8 A counter that crosses a face (R0, and R0F across a real face) | 8 of 8 | 8 of 8 | 14 of 14 |
   | 9 A state counter seeded (0.2) | 5 of 5 | 5 of 5 | 10 of 10 |
   | §5 over many pairs and samples (0.3 to 0.5): ten windows built for the tool, and F-154's and F-155's probes | | | 42 of 42 |
-  | The tool's opening (F-159's and F-160's answers, TG and TH): three openings, 20 tries each | | | 10 of 10 |
+  | The tool's opening (F-159's and F-160's answers, TG and TH): three openings, 20 tries each | | | 13 of 13 |
   | §2.11's conversion against zenoh-python's `as_nanos` | 1 of 1 | 1 of 1 | 1 of 1 |
-  | **Total** | **57 of 57** | **56 of 56** | **161 of 161** |
+  | **Total** | **57 of 57** | **56 of 56** | **164 of 164** |
 
   - **The tool agrees with zk2py's reader on every member of every
     section,** its exit and each member's answer included. §8 across the

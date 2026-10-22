@@ -1527,7 +1527,9 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
 
 
 #: the "listening" line's words for each opening, as zenctl-th's --help and
-#: line give them (F-160's answer), anchored on the line's start
+#: line give them (F-160's answer), anchored on the line's start. The tool's
+#: `telemetry --help` and its stderr line are the source: a later rewording
+#: of either is updated here, in this one place.
 LISTENING = "telemetry: listening"
 OPENING_WORDS = {
     "get": re.compile(r"; across the face the owner answered (\d+) of (\d+) S4 GET\(s\) of a state metric resource "
@@ -1596,7 +1598,7 @@ def tool_opening(report: Report, contract: Any, tool: Path, tries: int = 20) -> 
         ]
         drops = f"{PREFIX}/drops"
         for note, opening, reader, kw in cases:
-            got, lines, exits = [], [], []
+            got, lines, exits, seen = [], [], [], []
             for _ in range(tries):
                 run = bus.tool_start(0.6, **kw)
                 assert run is not None
@@ -1609,6 +1611,7 @@ def tool_opening(report: Report, contract: Any, tool: Path, tries: int = 20) -> 
                 # zk2py's verdict over the same drops sample: a counter read
                 # with no pair could not tell (§5, 0.4)
                 zk = zk2py_view(reader, run.ready_ns, [drops])
+                seen.append(sum(x["samples"]["received"] for x in zk.values()))
                 want = EXIT[tm.verdict([(x["conformances"], x["pair_objects"]) for x in zk.values()])]
                 exits.append((code, want))
             report.check(sec, f"{note}: a sample put the moment \"listening\" appears is inside the window, "
@@ -1617,8 +1620,12 @@ def tool_opening(report: Report, contract: Any, tool: Path, tries: int = 20) -> 
             report.check(sec, f"{note}: each line, \"{LISTENING} …\", says it stood on this opening, in the words "
                               "--help gives", len(lines) == tries and all(_worded(x, opening) for x in lines),
                          f"{len(lines)} lines; {sorted(set(lines))[:2]}")
+            # so that the exit check cannot pass over an empty view
+            report.check(sec, f"{note}: zk2py's reader read the sample in each window, {tries} of {tries}",
+                         seen == [1] * tries, f"read {sum(seen)} of {tries}: {seen}")
             report.check(sec, f"{note}: each exit is zk2py's verdict over the window (a counter's one sample: 2)",
-                         all(c == w for c, w in exits), f"(exit, zk2py's) {sorted(set(exits))}")
+                         all(c == w for c, w in exits) and seen == [1] * tries,
+                         f"(exit, zk2py's) {sorted(set(exits))}")
     finally:
         bus.close()
 
@@ -1714,6 +1721,10 @@ def main(argv: list[str] | None = None) -> int:
         if not tool.is_file():
             print(f"error: {tool} not found (the path came from {zsource})", file=sys.stderr)
             return 2
+    if args.only and "opening" in args.only and tool is None:
+        print("error: --only opening is the tool's window opening, and needs --tool <zenctl> (or ZK2PY_ZENCTL)",
+              file=sys.stderr)
+        return 2
     report = Report()
     if tool is not None:
         try:
