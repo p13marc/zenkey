@@ -1550,13 +1550,14 @@ def _telemetry_nulls() -> list[tuple[str, Any, Any]]:
 
 
 def _telemetry_edges() -> list[tuple[str, Any, Any]]:
-    """zk2py's readings of telemetry.v1 0.2's two open findings.
-    - F-150, "past the double's finite range" at its edge: read as IEEE
-      754's round-to-nearest reads it, so an integer's text one past the
-      largest double, and a float's text above it that rounds to it, are
-      finite; the halfway point's text is +Infinity, undecodable.
-    - F-151, an Epoch attachment's JSON read as strict as a payload's: a
-      lone surrogate escape does not decode, so `epoch_invalid`."""
+    """zk2py's readings of telemetry.v1 0.2's F-150 and F-151, which 0.3
+    resolved as zk2py read them (samples.json cases 125 to 130 and 136 now
+    pin both).
+    - F-150, "finite" by rounding: an integer's text one past the largest
+      double, and a float's text above it that rounds to it, are finite;
+      the halfway point's text is +Infinity, undecodable.
+    - F-151, an Epoch attachment read as strictly as a sample: a lone
+      surrogate escape does not decode, so `epoch_invalid`."""
     import sys as _sys
 
     from . import telemetry as tm
@@ -1628,6 +1629,104 @@ def _telemetry_deep() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _telemetry_verdicts() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 0.3 §5 "Over many pairs", zk2py's tool answer over a
+    window (`telemetry.verdict`): a finding; "could not tell" over pairs of
+    counters or histograms whose every epoch was assumed, and, zk2py's
+    reading of F-152, over a counter read with no pair at all; no
+    otherwise, a mix with an established pair and a window of gauges alone
+    included."""
+    from . import telemetry as tm
+
+    def conf(kind: str, ok: bool = True) -> Any:
+        return tm.Conformance(tm.CONFORMS if ok else tm.DOES_NOT, () if ok else ("wrong_type",), kind, "declared",
+                              None, None)
+
+    def pair(cont: str, epoch: str) -> Any:
+        return tm.Pair(cont, epoch, "presence" if epoch == "established" else None, None, None, "kind")
+
+    label = "telemetry.v1 0.3 §5, over many pairs"
+    return [
+        (f"{label}: a sample that does not conform is a finding", tm.verdict([conf("counter", False)], []),
+         tm.FINDING),
+        (f"{label}: a decrease within an established epoch is a finding",
+         tm.verdict([conf("counter")] * 2, [pair("decreased", "established")]), tm.FINDING),
+        (f"{label}: every counter's pair assumed: could not tell",
+         tm.verdict([conf("counter")] * 3, [pair("same_epoch", "assumed"), pair("reset", "assumed")]),
+         tm.COULD_NOT_TELL),
+        (f"{label}: one pair established beside assumed ones: no",
+         tm.verdict([conf("counter")] * 3, [pair("same_epoch", "assumed"), pair("same_epoch", "established")]),
+         tm.NO),
+        (f"{label} (F-152, zk2py's reading): a counter's one sample, no pair at all: could not tell",
+         tm.verdict([conf("counter")], []), tm.COULD_NOT_TELL),
+        (f"{label}: a gauge's samples alone, the continuity question not asked: no",
+         tm.verdict([conf("gauge")] * 2, [pair("not_asked", None)]), tm.NO),
+        (f"{label}: no sample at all: could not tell (silence is never a verdict)", tm.verdict([], []),
+         tm.COULD_NOT_TELL),
+    ]
+
+
+def _telemetry_tag_chains() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 0.3 §2.6 "CBOR" over chains of tags (review of PR #828),
+    read as ``zk2py.cbor`` reads them, innermost first and without
+    recursion: an outer tag 2 or 3 around what an inner bignum already made
+    an integer is "a tag 2 or 3 around anything but a byte string, … read as
+    its content"; a chain of 100,000 tags adds no depth, so the integer it
+    wraps is a counter."""
+    from . import telemetry as tm
+
+    counter = tm.declare("stream", {tm.KIND: "counter"}, {"kind": "jsonschema", "name": "Count",
+                                                          "schema": "sha256:" + "a" * 64,
+                                                          "root": {"type": "integer"}})
+
+    def read(payload: bytes) -> Any:
+        try:
+            c = tm.conform(counter, tm.Sample(tm.decode_cbor(payload)))
+            return [c.conformance, list(c.reasons), c.value]
+        except tm.Undecodable as e:
+            return ["undecodable", str(e)]
+
+    label = "telemetry.v1 0.3 §2.6, a chain of CBOR tags (review of PR #828)"
+    return [
+        (f"{label}: tag 2 around tag 2 around 0x05: the inner bignum is 5, the outer tag its content",
+         read(bytes.fromhex("c2c24105")), [tm.CONFORMS, [], 5]),
+        (f"{label}: tag 3 around tag 2 around 0x05: still 5, the outer tag 3 around an integer its content",
+         read(bytes.fromhex("c3c24105")), [tm.CONFORMS, [], 5]),
+        (f"{label}: tag 2 around tag 3 around 0x05: -6, and a counter below 0 is out of range",
+         read(bytes.fromhex("c2c34105")), [tm.DOES_NOT, ["out_of_range"], None]),
+        (f"{label}: 100,000 tags 55799 around the integer 7: no depth, a counter, never a crash",
+         read(bytes.fromhex("d9d9f7") * 100_000 + b"\x07"), [tm.CONFORMS, [], 7]),
+        (f"{label}: 100,000 tags around a bignum of 2^64: out of range, as without them",
+         read(bytes.fromhex("d9d9f7") * 100_000 + bytes.fromhex("c249010000000000000000")),
+         [tm.DOES_NOT, ["out_of_range"], None]),
+    ]
+
+
+def _presence_fold() -> list[tuple[str, Any, Any]]:
+    """telemetry.v1 0.3 §2.9, a presence view seeded by a complete read
+    (review of PR #828): the read's instances folded into the subscription's
+    moves as of the read's end, the subscription's word winning
+    (``telemetry_scenarios.fold_seed``)."""
+    from .telemetry_scenarios import fold_seed
+
+    def held(tokens: list[tuple[int, str, str]]) -> list[str]:
+        h: set[str] = set()
+        for _, kind, inst in sorted(tokens):
+            (h.add if kind == "put" else h.discard)(inst)
+        return sorted(h)
+
+    label = "telemetry.v1 0.3 §2.9, a complete read folded into the subscription's moves (review of PR #828)"
+    withdrawn = [(10, "put", "a"), (20, "delete", "a")]
+    return [
+        (f"{label}: a withdrawal the subscription saw before the read ended stands; the read's stale reply "
+         "brings nothing back", held(fold_seed(withdrawn, ["a"], 30)), []),
+        (f"{label}: an instance the subscription never mentioned is held from the read's end",
+         fold_seed([], ["b"], 30), [(30, "put", "b")]),
+        (f"{label}: one the subscription saw appear is not added twice",
+         fold_seed([(10, "put", "a")], ["a"], 30), [(10, "put", "a")]),
+    ]
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -1637,7 +1736,8 @@ def family_readings(root: Path) -> list[Result]:
     computed = _window_cases() + _scope_cases() + _reporter_transitions(root) + _reporter_conclusions(root) \
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
-        + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep()
+        + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
+        + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
