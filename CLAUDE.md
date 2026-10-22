@@ -102,8 +102,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   seed each owner instance in scope answers its descriptor GET, since the
   seed proves only that the router holds the subscriptions and a put is
   dropped at its source until the owner's session does too
-  (`Opening::Answered`; an owner silent within `--timeout` is
-  `Unanswered`, the line naming it; #819 TG). The window opens then, the
+  (`Opening::Answered`, its `RoundTrips` counted, a GET that ends with no
+  reply proving nothing; an owner silent within `--timeout` is
+  `Unanswered`, the line naming it; no owner in scope, or a seed that did
+  not stand, is `NoOwner`; #819 TG). The window opens then, the
   caller's `listening` hook run and `--for` counted from it (#819 TE,
   F-154; `zenctl alarms` and `health` alike, their descriptor reads the
   same round trip). Across a face (`--across-face`) the deployment's word
