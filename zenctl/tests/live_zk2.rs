@@ -6945,13 +6945,24 @@ async fn telemetry_of_drops(
     tokio::sync::oneshot::Receiver<()>,
     tokio::task::JoinHandle<Run>,
 ) {
+    telemetry_of(bus, DROPS).await
+}
+
+/// [`telemetry_of_drops`], of the members `selector` reaches.
+async fn telemetry_of(
+    bus: &Bus,
+    selector: &str,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::task::JoinHandle<Run>,
+) {
     wait_for(bus, &["lab/meter"]).await;
     let contracts = meter_contract_path();
     let contracts = contracts.to_str().expect("a UTF-8 path").to_owned();
     bus.spawn_on_line(
         &[
             "telemetry",
-            DROPS,
+            selector,
             "--contracts",
             &contracts,
             "--for",
@@ -7034,6 +7045,103 @@ async fn telemetry_could_not_tell_of_a_counter_heard_once() {
     assert!(
         run.stderr.contains("could not tell"),
         "the exit's reason names it: {run}"
+    );
+}
+
+/// zk2py round 48's F-157 (telemetry.v1 0.5 §5, #819 TF): a gauge's
+/// conforming sample beside one that does not decode could not tell
+/// whether every sample conformed: exit 2, its reason naming the member,
+/// where 0.4's tool exited 0. The undecodable one is raw: O's writer
+/// refuses it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_could_not_tell_beside_an_undecodable_sample() {
+    const LEVEL: &str = "zk2/lab/meter/meter.v1/stream/level";
+    let bus = Bus::bare(None).await;
+    let o = meter_owner_with(&bus.owners, false).await;
+    let (listening, t) = telemetry_of(&bus, LEVEL).await;
+    listening.await.expect("T says it listens");
+    for v in ["-70.5", "1e400"] {
+        bus.owners.put(LEVEL, v).await.expect("a put");
+    }
+    let run = t.await.expect("the telemetry run");
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["totals"]["conforms"], 1, "{run}");
+    assert_eq!(doc["totals"]["unobservable"], 1, "{run}");
+    assert_eq!(doc["judgement"]["answer"], "unobservable", "{run}");
+    assert!(
+        doc["judgement"]["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains(&format!("{LEVEL}: 1 sample(s) undecodable"))),
+        "{run}"
+    );
+    drop(o);
+}
+
+/// F-157's other half: a member under an invalid declaration answers no
+/// question, so T could not tell, whatever conformed beside it (exit 2),
+/// naming the resource and its declaration's reasons. T takes the
+/// deployment's word across a face for `lab/meter` implementing `meter.v1`
+/// and an `odd.v1` whose `blob` declares a counter its type cannot carry;
+/// no owner runs, and every sample is raw.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_could_not_tell_of_a_member_under_an_invalid_declaration() {
+    let bus = Bus::bare(None).await;
+    let odd = bus.home.join("odd.v1.toml");
+    std::fs::write(
+        &odd,
+        "[interface]\nname = \"odd\"\nmajor = 1\nminor = 0\nuses = [\"telemetry.v1\"]\n\n\
+         [resources.blob]\nkind = \"stream\"\ntype = { raw = \"application/octet-stream\" }\n\
+         annotations = { \"telemetry.kind\" = \"counter\" }\n",
+    )
+    .expect("odd.v1");
+    let meter = meter_contract_path();
+    let (listening, t) = bus.spawn_on_line(
+        &[
+            "telemetry",
+            "zk2/lab/meter/**",
+            "--across-face",
+            "--contracts",
+            meter.to_str().expect("a UTF-8 path"),
+            "--contracts",
+            odd.to_str().expect("a UTF-8 path"),
+            "--for",
+            "3",
+            "--format",
+            "json",
+        ],
+        "telemetry: listening",
+    );
+    listening.await.expect("T says it listens");
+    // Across a face the window opens on the subscriptions' declaration, with
+    // no read after them: give the router a moment to hold them.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    bus.owners
+        .put("zk2/lab/meter/meter.v1/stream/level", "-70.5")
+        .await
+        .expect("a put");
+    bus.owners
+        .put("zk2/lab/meter/odd.v1/stream/blob", "12")
+        .await
+        .expect("a put");
+    let run = t.await.expect("the telemetry run");
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["totals"]["conforms"], 1, "{run}");
+    assert_eq!(doc["totals"]["invalid"], 1, "{run}");
+    assert!(
+        doc["judgement"]["reason"].as_str().is_some_and(|r| r
+            .contains("lab/meter odd.v1 stream/blob: its declaration is invalid (not_a_carrier)")),
+        "{run}"
+    );
+    let blob = rows_of(&doc, "member")
+        .into_iter()
+        .find(|r| r["resource"] == "stream/blob")
+        .unwrap_or_else(|| panic!("a member row: {run}"));
+    assert_eq!(blob["continuity"]["answer"], "unobservable", "{run}");
+    assert_eq!(
+        blob["samples"]["unobservable_reason"], "declaration_invalid",
+        "{run}"
     );
 }
 

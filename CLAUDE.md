@@ -110,7 +110,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `Held` per key). `judge::telemetry::member_decreased` asks each counter
   or histogram read on its own: no pair, or only assumed ones, could not
   tell (text 0.4, #819 TE, F-152), and a member row's `continuity` carries
-  that `answer` and `pairs_listed` (F-155). `judge::telemetry` and
+  that `answer` and `pairs_listed` (F-155). A sample that could not be
+  read (undecodable, or of a member whose declaration is invalid, whose
+  every question is then unanswered) leaves the run without a verdict, its
+  reason naming the first (text 0.5, #819 TF, F-157). `judge::telemetry` and
   `report::telemetry` complete it.
   `Lens::check_sample` and `sample_conformance` run the profile's `check`
   after the JSON Schema's, so a Point whose tag, unit, range or bounds
@@ -425,7 +428,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   over `telemetry.v1` (exit 1 a sample that does not conform or a decrease
   within an established epoch, 0 everything asked answered clean, 2
   otherwise, a counter or histogram that formed no pair, or only assumed
-  ones, included, text 0.4; no
+  ones, text 0.4, and a sample that could not be read, text 0.5,
+  included; no
   `--clocks-synced`, since every time base subtracts two readings of one
   clock), the doctor's `telemetry-declaration` (a warning, from contracts)
   and `telemetry-sample` (`--deep`), and `check conform`'s
@@ -693,7 +697,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   text 0.3, F-150 and F-151, #819 TC: a number finite by IEEE rounding,
   the Epoch attachment read strictly, a depth limit of 256 counted alike in
   JSON and CBOR, and §2.9's presence only from a complete seed; text 0.4,
-  F-152, #819 TE: a counter or histogram read with no pair could not tell).
+  F-152, #819 TE: a counter or histogram read with no pair could not tell;
+  text 0.5, F-156 to F-158, #819 TF: a bignum read exactly, an unreadable
+  sample could not tell, the scenarios' R on a complete liveliness read).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2

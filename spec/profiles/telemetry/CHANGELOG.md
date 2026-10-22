@@ -4,6 +4,71 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-22: an unreadable sample, a bignum's exactness, R's presence (#819, TF; #609)
+
+zk2py read 0.4 cold and through as a whole (round 48, PR #832), with
+`zenctl telemetry` judging beside its reader, and the two agreed on every
+member, each member's continuity answer and every exit code included. The
+whole-text pass found three places left to a guess, F-156 to F-158. Each
+answer is a reading the fixtures or §2.2 already took, so this is text,
+the tool and the reference scenarios' R. Written against core 0.35,
+unchanged; the standard schema, its ids and every fixture are unchanged:
+`declarations.json` (87), `samples.json` (137), `continuity.json` (45) and
+`schema.json` (9).
+
+**Answered: F-156, a bignum read exactly** (§2.6). 0.2 made a CBOR bignum
+an integer (F-144), and left the bullet "An integer is read exactly" at
+0.1's words, CBOR's major types 0 and 1 alone. Read alone, that bullet
+made 2^64 as a bignum `wrong_type` in a counter; read with the CBOR
+reading, `out_of_range`, which `samples.json` cases 109 to 113 pin.
+- Now the bullet names CBOR's bignums (tags 2 and 3) beside the major
+  types 0 and 1. No case changes.
+
+**Answered: F-157, an unreadable sample beside answered questions** (§5).
+0.4 said the reference tool exits 0 "only when every question it asked was
+answered", and left open whether an undecodable sample was a question
+asked. Read with §5's own definition of unobservable, it was, and a window
+holding one is not answered; read with §2.6's "this profile reads nothing
+of it", it was not. 0.4's tool read the second way: a gauge's conforming
+sample beside an undecodable one exited 0. An invalid declaration
+(`declaration_invalid`) raised the same question.
+- Now the strict reading, which §5's table and §2.2 already support. A
+  tool asked "did every sample conform?" over a window SHOULD say it could
+  not tell when any sample in it was undecodable, or any member it read had
+  an invalid declaration (**Over many samples**, §5).
+- **Every question of such a member** is unanswered, since §2.2's reader
+  MUST NOT read it: its kind, its samples' conformance and its continuity.
+  The declaration's own answer, `invalid`, stays a linter's warning.
+- **A finding still stands** beside it.
+- **The reference tool** exits 2 then, unless a finding gives 1, its reason
+  naming the first such member (the undecodable sample's key, or the
+  resource and its declaration's reasons). A narrower selector asks the
+  rest. `check conform`'s `telemetry-sample` is unobservable over a window
+  with an undecodable sample, never a pass; the doctor's `telemetry-sample`
+  reads a reply under an invalid declaration as unobservable, as it
+  already read an undecodable one, where it used to skip it.
+
+**Answered: F-158, R's presence** (`scenarios.md`, Conventions). The
+conventions described R on a liveliness subscription with history alone,
+which 0.3's §2.9 says no view of presence stands on. A runner built from
+the scenarios alone established nothing by presence in §1, §2, §3 and §9.
+- Now R makes a complete liveliness read of the instance tokens after
+  subscribing (core §8.1), its view standing on it, the subscription's
+  moves folded after the read. The sections' expectations are unchanged.
+- The reference runtime's R (`zenkey/tests/profile_telemetry.rs`) read the
+  subscription's history alone, so it now makes the read too, retried
+  until one runs to its final reply, and gives no presence to an arrival
+  before it. Every section passes as before.
+
+**Deliberately not changed.**
+- **A resource heard of nothing.** Its declaration's answer is the only one
+  given of it, invalid or not; no question of a sample is left
+  unanswered by a member nobody read.
+- **A member whose kind is unobservable** (an undeclared Point that never
+  decoded) is still not asked of continuity (0.4): its undecodable samples
+  already leave the window without an answer.
+- **§2.6's reading of bytes** and every fixture.
+
 ## 0.4 — 2026-10-22: a counter read with no pair, and the tool's words (#819, TE; #609)
 
 zk2py read 0.3 cold (round 47, PR #828), with `zenctl telemetry` judging

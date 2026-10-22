@@ -503,7 +503,7 @@ telemetry under every metric resource in namespace "acme" — 4 metric resource(
     };
     let drawn = table(&cut);
     for line in [
-        "(4 established, 0 assumed); 1 counter or histogram member(s) could not tell\n",
+        "(4 established, 0 assumed); 1 member(s) could not tell whether they went backwards\n",
         "?  zk2/lab/meter/meter.v1/stream/drops ",
         "    could not tell whether it went backwards within one epoch: every one of its 24 \
          pair(s) had its epoch assumed: no in-band epoch, and presence established none\n",

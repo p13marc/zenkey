@@ -13,7 +13,11 @@
 //! is taken, and the writer writes its `epoch`. R subscribes to
 //! `zk2/lab/meter/meter.v1/stream/*` and holds a liveliness subscription,
 //! with history, to `zk2/lab/meter/@zk/instance/*`, both declared before O
-//! starts, recording each arrival on this host's monotonic clock. "R reads"
+//! starts, recording each arrival on this host's monotonic clock; then it
+//! makes a complete liveliness read of the instance tokens (core §8.1), on
+//! which its view of presence stands (§2.9, 0.3; text 0.5's conventions,
+//! zk2py round 48's F-158): a subscription's history alone is no complete
+//! read, and an arrival before the read has no presence. "R reads"
 //! is `zenkey_model::telemetry::check` against the resource's declaration;
 //! "R pairs" is `zenkey_model::telemetry::pair` over consecutive conforming
 //! samples of a member, with the presence R saw. R0 pairs the same samples
@@ -196,12 +200,15 @@ struct Log {
     tokens: Vec<Token>,
 }
 
-/// R: its subscriptions, declared before O starts, and what they saw.
+/// R: its subscriptions, declared before O starts, what they saw, and when
+/// its complete liveliness read ended.
 struct Reader {
     _data: zenoh::pubsub::Subscriber<()>,
     _tokens: zenoh::pubsub::Subscriber<()>,
     log: Arc<Mutex<Log>>,
     t0: Instant,
+    /// When the complete read R's presence stands on ended (§2.9).
+    seeded: i128,
     contract: Contract,
 }
 
@@ -239,11 +246,42 @@ async fn reader(s: &zenoh::Session) -> Reader {
         })
         .await
         .unwrap();
+    // The complete read presence stands on (core §8.1, §2.9): after the
+    // subscription, made again until one runs to its final reply. A token
+    // it finds that the subscription has said nothing of is held from the
+    // read's end; the subscription's word wins over the read's.
+    let selector = format!("zk2/{SVC}/@zk/instance/*");
+    let mut read = None;
+    for _ in 0..3 {
+        let r = zenkey::presence::liveliness_read(s, &selector, common::T)
+            .await
+            .expect("R's liveliness read");
+        if r.complete {
+            read = Some(r);
+            break;
+        }
+    }
+    let read = read.expect("R's liveliness read ran to its final reply");
+    let seeded = since();
+    {
+        let mut l = log.lock().unwrap();
+        for key in &read.keys {
+            let instance = key.rsplit('/').next().unwrap().to_owned();
+            if !l.tokens.iter().any(|t| t.instance == instance) {
+                l.tokens.push(Token {
+                    at: seeded,
+                    instance,
+                    up: true,
+                });
+            }
+        }
+    }
     Reader {
         _data: data,
         _tokens: tokens,
         log,
         t0,
+        seeded,
         contract: contract("meter.v1"),
     }
 }
@@ -394,8 +432,11 @@ impl Reader {
 
     /// What R saw of presence over two arrivals (§2.9, scenarios.md's
     /// conventions): one token alone throughout, and the only one held at
-    /// each arrival.
+    /// each arrival. An arrival before R's complete read has none.
     fn presence(&self, a: i128, b: i128) -> (bool, Option<String>, Option<String>) {
+        if a < self.seeded {
+            return (false, None, None);
+        }
         let tokens = self.tokens();
         let held = |t: i128| {
             let mut held = std::collections::BTreeSet::new();

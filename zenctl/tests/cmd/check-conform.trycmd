@@ -98,8 +98,9 @@ on one resource:
                    itself validly: an invalid declaration, read from
                    the contract, is the violation (telemetry.v1 §2.2)
   telemetry-sample every sample of a metric resource the window hears
-                   conforms, its reasons named when one does not
-                   (telemetry.v1 §2.6)
+                   conforms, its reasons named when one does not; one
+                   that does not decode leaves the case unobservable,
+                   never a pass (telemetry.v1 §2.6, §5)
   telemetry-continuity
                    no counter or histogram decreased within an
                    established epoch, in-band or by presence watched
