@@ -554,7 +554,9 @@ pub fn telemetry_report() -> TelemetryReport {
     };
     let continuity =
         |same, reset, decreased, not_asked, in_band, by_presence, assumed| TelemetryContinuity {
+            answer: Judgement::NotAsked,
             pairs: same + reset + decreased + not_asked,
+            pairs_listed: 0,
             same_epoch: same,
             reset,
             decreased,
@@ -629,6 +631,12 @@ pub fn telemetry_report() -> TelemetryReport {
             "timestamp",
         ),
     ];
+    frames.continuity.pairs_listed = frames.pairs.len() as u64;
+    frames.continuity.answer = Judgement::NotEstablished {
+        reason: "2 pair(s) whose epoch was established (2 in-band, 0 by presence), none \
+                 decreased; 0 assumed, 1 reset"
+            .into(),
+    };
     frames.rate = Some(TelemetryRate {
         per_s: 10.0,
         unit: Some("1/s".into()),
@@ -661,6 +669,8 @@ pub fn telemetry_report() -> TelemetryReport {
             "arrival",
         ),
     ];
+    drops.continuity.pairs_listed = drops.pairs.len() as u64;
+    drops.continuity.answer = Judgement::Established;
     drops.rate = Some(TelemetryRate {
         per_s: 5.0,
         unit: None,
@@ -682,6 +692,7 @@ pub fn telemetry_report() -> TelemetryReport {
         base: "arrival".into(),
         elapsed_s: 1.0,
     }];
+    level.continuity.pairs_listed = 1;
     TelemetryReport {
         namespace: "acme".into(),
         selector: None,
@@ -713,6 +724,7 @@ pub fn telemetry_report() -> TelemetryReport {
             decreased: 1,
             established: 4,
             assumed: 0,
+            unanswered: 0,
         },
         resources: vec![
             resource(

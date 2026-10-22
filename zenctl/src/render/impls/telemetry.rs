@@ -70,9 +70,11 @@ fn pair_words(p: &TelemetryPair) -> String {
 /// (`member`, with its kind and unit, its samples counted by conformance,
 /// its pairs and its latest rate); each its own mark in the table — `✗` a
 /// finding (a sample that does not conform, a decrease within an
-/// established epoch), `·` answered clean, `?` unobservable — and every
-/// pair's epoch said as established in-band, by presence, or assumed. The
-/// run's judgement leads the envelope.
+/// established epoch), `·` answered clean, `?` unobservable, a counter or
+/// histogram that could not tell whether it went backwards included (TE,
+/// F-152) — and every pair's epoch said as established in-band, by
+/// presence, or assumed, the listed pairs said to be the latest when they
+/// are a tail (F-155). The run's judgement leads the envelope.
 impl Render for TelemetryReport {
     const FAMILY: &'static str = "telemetry";
 
@@ -99,7 +101,7 @@ impl Render for TelemetryReport {
         let x = &self.totals;
         t.line(format!(
             "telemetry under {} in {} — {} metric resource(s), {} member(s): {} sample(s), {} \
-             conform, {} do not; {} pair(s), {} decreased ({} established, {} assumed)",
+             conform, {} do not; {} pair(s), {} decreased ({} established, {} assumed){}",
             self.selector.as_deref().unwrap_or("every metric resource"),
             namespace_words(&self.namespace),
             x.resources,
@@ -110,7 +112,11 @@ impl Render for TelemetryReport {
             x.pairs,
             x.decreased,
             x.established,
-            x.assumed
+            x.assumed,
+            match x.unanswered {
+                0 => String::new(),
+                n => format!("; {n} counter or histogram member(s) could not tell"),
+            }
         ));
         let mut resources = Grid::unheaded(3);
         for r in &self.resources {
@@ -134,7 +140,7 @@ impl Render for TelemetryReport {
             let c = &m.continuity;
             let (mark, st) = if s.does_not > 0 || c.decreased > 0 {
                 ("✗", style::severity(DoctorSeverity::Error))
-            } else if s.conforms == 0 {
+            } else if s.conforms == 0 || c.answer.is_unobservable() {
                 ("?", style::UNPROVEN)
             } else {
                 ("·", style::PASS)
@@ -194,6 +200,17 @@ impl Render for TelemetryReport {
                     c.in_band,
                     c.by_presence,
                     c.assumed
+                ));
+            }
+            if let zenkey_fleet::Judgement::Unobservable { reason } = &c.answer {
+                detail.push(format!(
+                    "    could not tell whether it went backwards within one epoch: {reason}"
+                ));
+            }
+            if c.pairs_listed < c.pairs {
+                detail.push(format!(
+                    "    the latest {} of its {} pair(s):",
+                    c.pairs_listed, c.pairs
                 ));
             }
             for p in &m.pairs {

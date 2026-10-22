@@ -1143,7 +1143,11 @@ fn telemetry_sample_case(
     )
 }
 
-/// §2.10 over every pair of one metric resource the window heard.
+/// §2.10 over every pair of one metric resource the window heard, and §5
+/// over each member (0.4, zk2py round 47's F-152): it passes only when
+/// every counter or histogram member heard formed a pair whose epoch was
+/// established, and none decreased. A member that formed no pair, or only
+/// pairs whose epoch was assumed, could not tell, and neither can the case.
 fn telemetry_continuity_case(
     name: &str,
     declared: Option<zenkey_model::telemetry::MetricKind>,
@@ -1203,45 +1207,41 @@ fn telemetry_continuity_case(
             ),
         );
     }
-    if t.total() == 0 {
-        return ConformCase::unobservable(
-            C,
-            name,
-            "no pair: fewer than two conforming samples of one member arrived in the window",
-        );
-    }
-    if t.asked() == 0 {
-        return if t.unobservable == 0 {
+    use crate::report::Judgement;
+    let answers: Vec<(&String, Judgement)> = members
+        .iter()
+        .map(|(k, m)| (*k, crate::judge::telemetry::member_decreased(m, presence)))
+        .filter(|(_, j)| !j.is_not_asked())
+        .collect();
+    if answers.is_empty() {
+        return if t.total() == 0 {
+            ConformCase::unobservable(
+                C,
+                name,
+                "no pair: fewer than two conforming samples of one member arrived in the window",
+            )
+        } else {
             ConformCase::not_asked(
                 C,
                 name,
                 "no pair of two counters or histograms (its Points' kinds)",
             )
-        } else {
-            ConformCase::unobservable(
-                C,
-                name,
-                format!(
-                    "{} pair(s) incomparable: the kinds, or a histogram's bounds or length, \
-                     differ",
-                    t.unobservable
-                ),
-            )
         };
     }
-    if t.in_band + t.by_presence == 0 {
+    let unanswered: Vec<&(&String, Judgement)> = answers
+        .iter()
+        .filter(|(_, j)| j.is_unobservable())
+        .collect();
+    if let Some((key, Judgement::Unobservable { reason })) = unanswered.first() {
         return ConformCase::unobservable(
             C,
             name,
             format!(
-                "every one of its {} pair(s) had its epoch assumed — no in-band epoch, and {} — \
-                 so a decrease within one epoch could not have been found (telemetry.v1 §2.9)",
-                t.assumed,
-                if presence {
-                    "presence established none"
-                } else {
-                    "no presence read"
-                }
+                "{} of its {} counter or histogram member(s) could not tell whether they went \
+                 backwards within one epoch, so a decrease could not have been found \
+                 (telemetry.v1 §5); {key}: {reason}",
+                unanswered.len(),
+                answers.len()
             ),
         );
     }
@@ -4715,6 +4715,8 @@ mod tests {
         book.sample(&of("stream/level"), put("stream/level", "-70.5", 0));
         book.sample(&of("stream/level"), put("stream/level", "\"x\"", 300));
         book.sample(&of("stream/level"), put("stream/level", "-70.0", 600));
+        // F-152 (zk2py round 47): one sample of a counter forms no pair.
+        book.sample(&of("stream/bytes"), put("stream/bytes", "1", 0));
         o.telemetry = Some(TelemetryObservation {
             namespace: "acme".into(),
             spec: TelemetrySpec::new(Duration::from_secs(1), Duration::from_secs(2)),
@@ -4764,6 +4766,13 @@ mod tests {
             verdict(CaseId::TelemetryContinuity, "stream/frames")
                 .verdict
                 .is_unobservable()
+        );
+        // Zero pairs never pass: `bytes`, heard once, could not tell.
+        let once = verdict(CaseId::TelemetryContinuity, "stream/bytes");
+        assert!(
+            matches!(&once.verdict, Judgement::Unobservable { reason }
+                if reason.contains("1 of its 1 counter") && reason.contains("no pair formed")),
+            "{once:?}"
         );
     }
 }

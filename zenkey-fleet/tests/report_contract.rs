@@ -225,7 +225,10 @@ fn doctor_severities_findings_and_verdicts_are_the_stable_vocabulary() {
 /// `telemetry.v1` (#819, TC): §5's answers in the fixtures' tokens — a
 /// declaration `declared` or `invalid`, a pair's continuity and how its
 /// epoch was had, a unit absent when unknown — pinned whole for one member,
-/// and the run's finding a decrease within an established epoch.
+/// and the run's finding a decrease within an established epoch. Since TE
+/// (zk2py round 47's F-152, F-155), a member's continuity carries its own
+/// answer in the judgement's tokens, and `pairs_listed` beside `pairs`, so
+/// a list cut to its tail says so.
 #[test]
 fn a_telemetry_report_keeps_every_answer_apart() {
     let r = fx::telemetry_report();
@@ -242,7 +245,8 @@ fn a_telemetry_report_keeps_every_answer_apart() {
             "kind_from": "declared",
             "samples": {"received": 3, "conforms": 3, "does_not": 0, "unobservable": 0},
             "latest": 7,
-            "continuity": {"pairs": 2, "same_epoch": 1, "reset": 0, "decreased": 1,
+            "continuity": {"answer": "established", "pairs": 2, "pairs_listed": 2,
+                           "same_epoch": 1, "reset": 0, "decreased": 1,
                            "unobservable": 0, "not_asked": 0, "in_band": 0,
                            "by_presence": 2, "assumed": 0},
             "pairs": [
@@ -272,7 +276,15 @@ fn a_telemetry_report_keeps_every_answer_apart() {
         v["members"][1]["samples"]["problems"],
         json!({"tag_disagrees": 1})
     );
+    let answers: Vec<&str> = v["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["continuity"]["answer"].as_str().unwrap())
+        .collect();
+    assert_eq!(answers, ["established", "not_established", "not_asked"]);
     assert_eq!(v["totals"]["decreased"], 1);
+    assert_eq!(v["totals"]["unanswered"], 0);
     assert_eq!(
         serde_json::to_value(r.judgement()).unwrap()["answer"],
         "established"

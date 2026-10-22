@@ -488,6 +488,29 @@ telemetry under every metric resource in namespace "acme" — 4 metric resource(
     assert!(drops.get("unit").is_none(), "unknown, never dimensionless");
     let said = notes(&report);
     assert!(said.contains("a decrease judged by presence"), "{said}");
+    // TE (zk2py round 47's F-152, F-155): a counter that could not tell is
+    // `?`, with why, the header counts it, and a list cut to its tail says
+    // so.
+    let mut cut = report.clone();
+    cut.totals.unanswered = 1;
+    let drops = &mut cut.members[0];
+    drops.continuity.decreased = 0;
+    drops.continuity.pairs = 24;
+    drops.continuity.answer = zenkey_fleet::Judgement::Unobservable {
+        reason: "every one of its 24 pair(s) had its epoch assumed: no in-band epoch, and \
+                 presence established none"
+            .into(),
+    };
+    let drawn = table(&cut);
+    for line in [
+        "(4 established, 0 assumed); 1 counter or histogram member(s) could not tell\n",
+        "?  zk2/lab/meter/meter.v1/stream/drops ",
+        "    could not tell whether it went backwards within one epoch: every one of its 24 \
+         pair(s) had its epoch assumed: no in-band epoch, and presence established none\n",
+        "    the latest 2 of its 24 pair(s):\n",
+    ] {
+        assert!(drawn.contains(line), "{line:?} in:\n{drawn}");
+    }
 }
 
 /// `zenctl alarms` (#800, AC): one row per owner and per alarm key, every
