@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `telemetry`'s line says what proved its window (#819, TH)
+
+zk2py round 50 confirmed TG's fix (20 of 20 samples put on the line
+heard at each opening), and found the line silent when a round trip did
+prove the window (F-160): a proven opening showed only by the absence of
+`--settle`.
+
+| Before | Now | Notes |
+|---|---|---|
+| a proven opening added nothing to the "listening" line | "; each of the N owner instance(s) in scope answered its descriptor GET after the subscriptions, so they hold them", or across a face "; across the face the owner answered A of N S4 GET(s) of a state metric resource in scope after the subscriptions, so it holds them" | the other openings' words are unchanged |
+
 ## Unreleased (`main`, zk2) — `telemetry` across a face: the window opens on a round trip (#819, TG)
 
 zk2py round 49 found the "listening" line no signal across a face
