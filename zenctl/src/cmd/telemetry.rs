@@ -45,6 +45,7 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         lease,
         wait_before_close,
         across_face,
+        settle,
         contracts,
         ns,
     } = cli;
@@ -74,20 +75,38 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         wait_before_close,
     ));
     spec.across_face = across_face;
+    if !settle.is_finite() || settle < 0.0 {
+        ASKING.ask::<(), _>(Err(unaskable!(
+            "--settle must be zero or a positive number of seconds, got {settle}"
+        )));
+    }
+    spec.settle = std::time::Duration::from_secs_f64(settle);
     let session = ASKING.ask(dep.session().await);
     let store = zk2::store(&dep, &offline);
     // The line comes once the window opens (zk2py round 47's F-154): the
-    // subscriptions declared and presence seeded after them, so a sample put
-    // once it is read is inside the window.
-    let listening = move || {
+    // subscriptions declared and a round trip made after them — presence
+    // seeded, or across a face S4's GET of a state metric resource (round
+    // 49's F-159) — so a sample put once it is read is inside the window.
+    // Across a face with no such GET, the line says nothing proved it.
+    let listening = move |opening: zenkey_fleet::TelemetryOpening| {
+        use zenkey_fleet::TelemetryOpening as O;
         eprintln!(
-            "telemetry: listening {}s to the metric members in scope{} (--for)",
+            "telemetry: listening {}s to the metric members in scope{} (--for){}",
             window.as_secs_f64(),
             if across_face {
                 "; across a face this reader reads no presence (the session opens as any \
                  other's), so only an in-band epoch establishes one"
             } else {
                 " and their owners' tokens"
+            },
+            match opening {
+                O::Seeded | O::StateGet => String::new(),
+                O::Margin(m) => format!(
+                    "; across the face no state metric resource in scope answered a GET, so \
+                     nothing proved the far side subscribed: this line comes after a {}s \
+                     margin (--settle), never proof",
+                    m.as_secs_f64()
+                ),
             }
         );
     };

@@ -7145,6 +7145,97 @@ async fn telemetry_could_not_tell_of_a_member_under_an_invalid_declaration() {
     );
 }
 
+/// T across the face, 24 times over `selector`, O on the vehicle before
+/// it; the moment T's "listening" line is read, O puts `drops`, raw. The
+/// tries whose sample T did not hear, with the first one's run, and the
+/// first run's stderr.
+async fn across_a_face_on_the_line(selector: &str) -> (Vec<usize>, Option<String>, String) {
+    let (bus, ground) = face_bus(false).await;
+    let contracts = meter_contract_path();
+    let vehicle_session = vehicle(&bus.endpoint).await;
+    let o = meter_owner_with(&vehicle_session, false).await;
+    let (mut lost, mut first, mut said) = (Vec::new(), None, String::new());
+    for i in 0..ON_THE_LINE {
+        let (listening, t) = bus.spawn_on_line(
+            &[
+                "telemetry",
+                selector,
+                "--across-face",
+                "--contracts",
+                contracts.to_str().expect("a UTF-8 path"),
+                "--for",
+                "1",
+                "--zenoh-config",
+                ground.to_str().expect("a UTF-8 path"),
+                "--format",
+                "json",
+            ],
+            "telemetry: listening",
+        );
+        listening.await.expect("T says it listens");
+        vehicle_session
+            .put(DROPS, i.to_string())
+            .await
+            .expect("a put");
+        let run = t.await.expect("the telemetry run");
+        if i == 0 {
+            said.clone_from(&run.stderr);
+        }
+        let heard = rows_of(&run.json(), "member")
+            .into_iter()
+            .find(|r| r["key"] == DROPS)
+            .and_then(|r| r["samples"]["received"].as_u64());
+        if heard != Some(1) {
+            lost.push(i);
+            first.get_or_insert_with(|| run.to_string());
+        }
+    }
+    drop(o);
+    vehicle_session.close().await.expect("closes");
+    (lost, first, said)
+}
+
+/// How many times the across-face tests put a sample on the line.
+const ON_THE_LINE: usize = 24;
+
+/// zk2py round 49's F-159 (#819 TG): across a face no presence is seeded,
+/// so before TG nothing made a round trip after T's subscriptions, and a
+/// sample put the moment its "listening" line appeared was lost (here 47
+/// of 48 tries). Now T's S4 GET of the state metric resource in scope
+/// (`total`), answered by O after the subscriptions, comes before the line,
+/// and T hears every one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_across_a_face_hears_a_sample_put_on_its_listening_line() {
+    let (lost, first, said) = across_a_face_on_the_line("zk2/lab/meter/**").await;
+    assert!(!said.contains("never proof"), "the GET proved it: {said}");
+    assert!(
+        lost.is_empty(),
+        "{} of {ON_THE_LINE} samples put on the line were lost; the first:\n{}",
+        lost.len(),
+        first.unwrap_or_default()
+    );
+}
+
+/// F-159's other half: over `drops` alone there is no state metric resource
+/// to GET, and nothing else crosses the face to answer, so the window opens
+/// after `--settle` (0.25 s by default), a margin and never proof, and the
+/// line says so. Here it is enough: before TG every sample was lost, and
+/// 50 ms was measured enough.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_across_a_face_with_no_state_opens_after_its_margin() {
+    let (lost, first, said) = across_a_face_on_the_line(DROPS).await;
+    assert!(
+        said.contains("this line comes after a 0.25s margin (--settle), never proof"),
+        "{said}"
+    );
+    assert!(
+        lost.is_empty(),
+        "{} of {ON_THE_LINE} samples put on the line were lost; the first:\n{}",
+        lost.len(),
+        first.unwrap_or_default()
+    );
+}
+
 /// #825, and a tool's reading of a mock owner's metrics: `gen` brings up an
 /// owner of `zs.snmp.v1`, whose state resources keep history, on a session
 /// with timestamping on, as a real owner's is (it failed at the first such

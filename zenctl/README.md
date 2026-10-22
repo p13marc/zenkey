@@ -914,7 +914,12 @@ and S4's GET of each state metric resource, merged with the live puts by
 the owner's stamp. The window opens once the subscriptions are declared and
 presence is seeded, when stderr says `telemetry: listening …`, and `--for`
 counts from then: a sample put once that line is read is inside it (`alarms`
-and `health` print theirs the same way). §5's questions:
+and `health` print theirs the same way). Across a face, where no presence is
+read, S4's GET of a state metric resource in scope, answered by its owner
+after the subscriptions, is the round trip the line waits for; with none in
+scope nothing can answer across the face, so the window opens after
+`--settle` (0.25 s), a margin and never proof, and the line says so. §5's
+questions:
 
 | question | answered | the finding |
 |---|---|---|

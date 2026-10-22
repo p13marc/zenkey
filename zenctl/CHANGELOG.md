@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `telemetry` across a face: the window opens on a round trip (#819, TG)
+
+zk2py round 49 found the "listening" line no signal across a face
+(F-159): with no presence seed, nothing made a round trip after the
+subscriptions, and a sample put the moment the line appeared was lost (2
+of 15 tries in its runs; 47 of 48 in this repository's loopback face).
+
+| Before | Now | Notes |
+|---|---|---|
+| `telemetry --across-face`: the line printed once the subscriptions were declared, then S4's GET | S4's GET of the state metric resources in scope first, answered by the owner after the subscriptions, then the line | the GET is the round trip that proves the far side holds them; 0 of 192 samples put on the line lost |
+| — | `telemetry --settle SECS` (default 0.25): across a face with no state metric resource in scope, the wait before the window opens | a margin, never proof, and the line says so; set it to the link's round trip, 0 to open at once. A stream has no queryable, and presence and descriptors do not cross, so nothing else could answer |
+| `health --across-face`: the line printed once the subscription was declared | once the first reading's GET was answered after it | `alarms --across-face` already made its GET before the line |
+
 ## Unreleased (`main`, zk2) — `telemetry` after zk2py round 48: a sample that could not be read (#819, TF)
 
 zk2py read `telemetry.v1` 0.4 cold and through as a whole (round 48),

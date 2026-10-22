@@ -24,7 +24,7 @@ Arguments:
 
 Options:
       --for <SECS>
-          The reading's window, seconds. It opens once the subscriptions are declared and presence is seeded, when stderr says "listening": a sample put from then on is inside it. A pair needs two conforming samples of one member within it
+          The reading's window, seconds. It opens once the subscriptions are declared and presence is seeded, when stderr says "listening": a sample put from then on is inside it. Across a face, where no presence is read, it opens once S4's GET of a state metric resource in scope was answered after the subscriptions; with none in scope, after --settle, a margin and never proof, as the line says. A pair needs two conforming samples of one member within it
           
           [default: 10]
 
@@ -40,6 +40,11 @@ Options:
 
       --across-face
           The one owner the selector names sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements the contracts --contracts holds. No presence is read, so only an in-band epoch establishes one (telemetry.v1 §2.14), and a decrease without one reads as a reset
+
+      --settle <SECS>
+          Across a face with no state metric resource in scope, seconds to wait after the subscriptions are declared before the window opens: a margin for the declarations to cross the face, never proof that they did. With a state metric resource in scope, S4's GET of it is the proof and this is not used. Set it to the link's round trip; 0 opens at once. Default 0.25, five times what a loopback face needed
+          
+          [default: 0.25]
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
@@ -137,6 +142,17 @@ A window is a positive number of seconds.
 $ zenctl telemetry --for 0 --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: --for must be a positive number of seconds, got 0
+telemetry: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A settle across a face is zero or more seconds: a margin, never proof
+(#819, TG).
+
+```console
+$ zenctl telemetry --settle=-1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: --settle must be zero or a positive number of seconds, got -1
 telemetry: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
