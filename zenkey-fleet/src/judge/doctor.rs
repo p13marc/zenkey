@@ -739,9 +739,11 @@ fn telemetry_declaration(p: &Presence<'_>) -> CheckReport {
 /// `telemetry.v1` §2.6 (#819, TC), with `--deep`: every value reply of the
 /// owners' state GETs (the ones `state-stamp-foreign` makes) that is a
 /// sample of a state metric member, read by `zenkey_model::telemetry::check`.
-/// One that does not conform is the finding; one that does not decode is
-/// unjudged (the core's verdict, `payload-type`'s); a member of an invalid
-/// declaration is `telemetry-declaration`'s. Streams are not read here: the
+/// One that does not conform is the finding. One that does not decode, or
+/// of a member whose declaration is invalid, is unjudged: its conformance is
+/// unobservable, never skipped (§5, 0.5; zk2py round 48's F-157), and the
+/// declaration's warning stays `telemetry-declaration`'s. Streams are not
+/// read here: the
 /// doctor listens to no window, and `zenctl telemetry` and `check conform`
 /// read them.
 fn telemetry_sample(p: &Presence<'_>) -> CheckReport {
@@ -825,6 +827,12 @@ fn telemetry_sample(p: &Presence<'_>) -> CheckReport {
                     reply.key.clone(),
                     "its owner's reply does not decode as §2.6 reads bytes (strict JSON, or \
                      CBOR): unobservable here, the core's verdict standing (undecodable)",
+                )),
+                Tc::Unobservable(Unasked::DeclarationInvalid) => undecided.push(unjudged(
+                    reply.key.clone(),
+                    "its resource's declaration is invalid, so no reader reads its samples: \
+                     unobservable here, the warning telemetry-declaration's \
+                     (declaration_invalid, telemetry.v1 §2.2)",
                 )),
                 Tc::Unobservable(_) | Tc::NotAsked(_) => {}
             }
@@ -5645,6 +5653,53 @@ mod tests {
         assert!(
             !DoctorSpec::new(Duration::from_secs(1)).asks(CheckId::TelemetrySample),
             "deep only"
+        );
+    }
+
+    /// `telemetry-sample` (#819, TF; zk2py round 48's F-157): a state metric
+    /// member's reply under an invalid declaration is read as unobservable,
+    /// never skipped, as an undecodable one is; the declaration's warning
+    /// stays `telemetry-declaration`'s.
+    #[test]
+    fn a_reply_under_an_invalid_declaration_is_unobservable() {
+        let odd = load(
+            "[interface]\nname = \"odd\"\nmajor = 1\nuses = [\"telemetry.v1\"]\n\
+             [resources.total]\nkind = \"state\"\ntype = { raw = \"application/octet-stream\" }\n\
+             annotations = { \"telemetry.kind\" = \"counter\" }\n",
+        );
+        let mut o = obs(
+            observed(
+                &[inst("lab/odd", A)],
+                vec![(
+                    ("lab/odd", A),
+                    descriptor("lab/odd", A, &[entry(&odd)], &[]),
+                )],
+            ),
+            &[&odd],
+            &[],
+        );
+        let at: (Addr, IfaceId) = ("lab/odd".parse().unwrap(), "odd.v1".parse().unwrap());
+        o.stamps = [(
+            at,
+            Ok(StateStamps {
+                complete: true,
+                replies: vec![StateReply {
+                    key: "zk2/lab/odd/odd.v1/state/total".into(),
+                    payload: b"12".to_vec(),
+                    attachment: None,
+                }],
+                ..Default::default()
+            }),
+        )]
+        .into();
+        let why = unseen(&check(&o, CheckId::TelemetrySample));
+        assert!(
+            why.contains("zk2/lab/odd/odd.v1/state/total") && why.contains("declaration_invalid"),
+            "{why}"
+        );
+        assert_eq!(
+            found(&check(&o, CheckId::TelemetryDeclaration)).severity,
+            DoctorSeverity::Warning
         );
     }
 

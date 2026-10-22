@@ -27,8 +27,10 @@
 //!
 //! The two unestablished kinds stay apart in every one (core O5). Of the
 //! five, only a sample that does not conform and a decrease are the run's
-//! findings, and a member whose continuity could not be told leaves the run
-//! without a verdict ([`TelemetryReport::judgement`]).
+//! findings, and a member whose continuity could not be told, or a sample
+//! whose conformance could not (undecodable, or under an invalid
+//! declaration, 0.5), leaves the run without a verdict
+//! ([`TelemetryReport::judgement`]).
 
 use zenkey_model::telemetry::{
     Basis, Checked, Conformance, Continuity, Declaration, Measure, NoRate, Pair, Via,
@@ -123,12 +125,23 @@ pub fn decreased(p: &Pair) -> Judgement {
 /// no pair, or only pairs whose epoch was assumed or that were
 /// incomparable, could not tell: no decrease could have been found.
 /// Neither a counter nor a histogram, by the member's kind and its pairs,
-/// is not asked. `reads_presence` says why an assumed epoch was: no
-/// presence read (across a face), or none established.
+/// is not asked. A member whose declaration is invalid could not tell
+/// either (§2.2, 0.5; zk2py round 48's F-157): no question of its members
+/// is answered. `reads_presence` says why an assumed epoch was: no presence
+/// read (across a face), or none established.
 pub fn member_decreased(m: &MemberBook, reads_presence: bool) -> Judgement {
     let t = &m.tally;
     if t.decreased > 0 {
         return Judgement::Established;
+    }
+    if let Declaration::Invalid(why) = &m.metric.ty.declaration {
+        return Judgement::Unobservable {
+            reason: format!(
+                "its declaration is invalid ({}): no question of its members is answered \
+                 (telemetry.v1 §2.2)",
+                invalid_words(why)
+            ),
+        };
     }
     let cumulative =
         m.kind.is_some_and(|(k, _)| k.is_cumulative()) || t.asked() + t.unobservable > 0;
@@ -690,5 +703,125 @@ mod tests {
         let r = judged(b, true);
         assert_eq!(answer(&r, "bytes"), Judgement::Established);
         assert_eq!(code(&r), 1);
+    }
+    /// zk2py round 48's F-157 (§5, 0.5): a sample that could not be read
+    /// leaves "did every sample conform?" unanswered. An undecodable sample
+    /// of `level` beside its conforming ones, or a member under an invalid
+    /// declaration, makes the run say it could not tell (exit 2), naming the
+    /// member, or the resource with its declaration's reasons; a sample that
+    /// does not conform still wins (exit 1).
+    #[test]
+    fn an_unreadable_sample_could_not_tell() {
+        use crate::bus::telemetry::{TelemetryObservation, TelemetrySpec};
+        use crate::model::catalog::{ContractSet, Revision};
+        use crate::model::telemetry::{
+            MetricResource, MetricSample, SampleVia, TelemetryBook, TelemetryScope,
+        };
+        use crate::report::ContractSource;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/meter.v1.toml");
+        let (set, _) = ContractSet::load_path(&path);
+        let meter = Arc::clone(set.iter().next().expect("meter.v1"));
+        let odd = zenkey_model::contract::load_str(
+            "[interface]\nname = \"odd\"\nmajor = 1\nuses = [\"telemetry.v1\"]\n\
+             [resources.blob]\nkind = \"stream\"\ntype = { raw = \"application/octet-stream\" }\n\
+             annotations = { \"telemetry.kind\" = \"counter\" }\n",
+            std::path::Path::new("."),
+            None,
+        );
+        let odd = Arc::new(Revision::from_contract(
+            odd.contract.expect("odd.v1 loads"),
+            ContractSource::File,
+        ));
+        let addr: zenkey_model::grammar::Addr = "lab/meter".parse().unwrap();
+        let resources: Vec<Arc<MetricResource>> = [&meter, &odd]
+            .into_iter()
+            .flat_map(|rev| {
+                (0..rev.contract().resources.len())
+                    .filter_map(|i| MetricResource::of(&addr, rev, i))
+                    .collect::<Vec<_>>()
+            })
+            .map(Arc::new)
+            .collect();
+        let of = |r: &str| Arc::clone(resources.iter().find(|m| m.resource == r).unwrap());
+        let t0 = Instant::now();
+        let put = |iface: &str, r: &str, payload: &str, ms: u64| MetricSample {
+            key: format!("zk2/lab/meter/{iface}/{r}"),
+            delete: false,
+            payload: payload.as_bytes().to_vec(),
+            attachment: None,
+            stamp: None,
+            at: t0 + Duration::from_millis(ms),
+            via: SampleVia::Subscription,
+        };
+        let judged = |book: TelemetryBook| {
+            let mut spec = TelemetrySpec::new(Duration::from_secs(1), Duration::from_secs(2));
+            spec.across_face = true;
+            judge(&TelemetryObservation {
+                namespace: "acme".into(),
+                spec,
+                scope: TelemetryScope::of(&addr),
+                resources: resources.clone(),
+                seed: None,
+                book,
+                asked: vec![],
+                listened: Duration::from_secs(2),
+                unresolved: 0,
+                skipped: vec![],
+                unobservable: None,
+            })
+        };
+        let reason = |r: &TelemetryReport| match r.judgement() {
+            Judgement::Unobservable { reason } => reason,
+            j => panic!("not unobservable: {j:?}"),
+        };
+
+        // A gauge's conforming samples alone answer every question asked.
+        let mut b = TelemetryBook::new(None, t0);
+        for (n, ms) in [("-70.5", 0), ("-70.0", 300)] {
+            b.sample(&of("stream/level"), put("meter.v1", "stream/level", n, ms));
+        }
+        assert_eq!(judgement_exit_code(&judged(b.clone()).judgement()), 0);
+
+        // An undecodable one beside them could not tell.
+        b.sample(
+            &of("stream/level"),
+            put("meter.v1", "stream/level", "1e400", 600),
+        );
+        let r = judged(b.clone());
+        assert_eq!(r.totals.unobservable, 1);
+        assert!(
+            reason(&r).contains("zk2/lab/meter/meter.v1/stream/level: 1 sample(s) undecodable"),
+            "{r:#?}"
+        );
+
+        // A member under an invalid declaration could not tell either: its
+        // samples and its continuity are unobservable.
+        let mut b = TelemetryBook::new(None, t0);
+        b.sample(
+            &of("stream/level"),
+            put("meter.v1", "stream/level", "-70.5", 0),
+        );
+        b.sample(&of("stream/blob"), put("odd.v1", "stream/blob", "x", 0));
+        let r = judged(b.clone());
+        let blob = r
+            .members
+            .iter()
+            .find(|m| m.resource == "stream/blob")
+            .unwrap();
+        assert!(blob.continuity.answer.is_unobservable(), "{blob:#?}");
+        assert!(
+            reason(&r).contains("lab/meter odd.v1 stream/blob: its declaration is invalid"),
+            "{r:#?}"
+        );
+
+        // A sample that does not conform is still the finding.
+        b.sample(
+            &of("stream/level"),
+            put("meter.v1", "stream/level", "\"x\"", 300),
+        );
+        assert_eq!(judgement_exit_code(&judged(b).judgement()), 1);
     }
 }

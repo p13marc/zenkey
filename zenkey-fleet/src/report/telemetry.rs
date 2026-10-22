@@ -134,9 +134,10 @@ pub struct TelemetryContinuity {
     /// every pair of the member in the window, as `answer` (and `reason`):
     /// `established`, a decrease within an established epoch (the
     /// finding); `not_established`, an established pair and none
-    /// decreased; `unobservable`, could not tell — no pair formed, or every
-    /// pair's epoch assumed or the pair incomparable; `not_asked`, neither
-    /// a counter nor a histogram.
+    /// decreased; `unobservable`, could not tell — no pair formed, every
+    /// pair's epoch assumed or the pair incomparable, or the member's
+    /// declaration invalid (0.5); `not_asked`, neither a counter nor a
+    /// histogram.
     #[serde(flatten)]
     pub answer: Judgement,
     /// Every pair formed in the window.
@@ -288,6 +289,9 @@ pub struct TelemetryTotals {
     pub samples: u64,
     pub conforms: u64,
     pub does_not: u64,
+    /// Samples that could not be read: undecodable, or of a member whose
+    /// declaration is invalid. Any leaves the run without a verdict (§5,
+    /// 0.5).
     pub unobservable: u64,
     pub pairs: u64,
     pub decreased: u64,
@@ -298,7 +302,8 @@ pub struct TelemetryTotals {
     pub assumed: u64,
     /// Counter or histogram members whose continuity could not be told: no
     /// pair formed, or only pairs whose epoch was assumed or that were
-    /// incomparable (§5, 0.4).
+    /// incomparable (§5, 0.4); and members whose declaration is invalid
+    /// (§2.2, 0.5).
     pub unanswered: u64,
 }
 
@@ -348,15 +353,40 @@ pub struct TelemetryReport {
 }
 
 impl TelemetryReport {
+    /// Why `m`'s unreadable samples were, in words: its resource's invalid
+    /// declaration with its reasons, or bytes that do not decode.
+    fn unread(&self, m: &TelemetryMember) -> String {
+        if m.samples.unobservable_reason.as_deref() == Some("declaration_invalid") {
+            let reasons = self
+                .resources
+                .iter()
+                .find(|r| r.address == m.address && r.iface == m.iface && r.resource == m.resource)
+                .map(|r| r.declaration.reasons.join(", "))
+                .unwrap_or_default();
+            format!(
+                "; {} {} {}: its declaration is invalid ({reasons}), so no question of its \
+                 members is answered (telemetry.v1 §2.2)",
+                m.address, m.iface, m.resource
+            )
+        } else {
+            format!(
+                "; {}: {} sample(s) undecodable, of which this profile reads nothing (telemetry.v1 \
+                 §2.6)",
+                m.key, m.samples.unobservable
+            )
+        }
+    }
+
     /// The run as one [`Judgement`]: a sample that does not conform, or a
     /// decrease within an established epoch, is the finding (exit 1),
     /// whatever else is known. Otherwise no verdict (exit 2) when a question
     /// asked went unanswered — the reading could not be made, no metric
-    /// resource is in scope, no sample of one arrived, none could be read,
-    /// or a counter or histogram read formed no pair, or only pairs whose
-    /// epoch was assumed, so no decrease of it could have been found (§5,
-    /// 0.4); and clean (exit 0) when every question asked was answered
-    /// without one.
+    /// resource is in scope, no sample of one arrived, a sample could not be
+    /// read (undecodable, or of a member whose declaration is invalid: §5,
+    /// 0.5), or a counter or histogram read formed no pair, or only pairs
+    /// whose epoch was assumed, so no decrease of it could have been found
+    /// (§5, 0.4); and clean (exit 0) when every question asked was answered
+    /// without one. The reason names the first member that could not tell.
     pub fn judgement(&self) -> Judgement {
         let t = &self.totals;
         if t.does_not > 0 || t.decreased > 0 {
@@ -398,6 +428,21 @@ impl TelemetryReport {
                 ),
             };
         }
+        if t.unobservable > 0 {
+            let first = self
+                .members
+                .iter()
+                .find(|m| m.samples.unobservable > 0)
+                .map(|m| self.unread(m))
+                .unwrap_or_default();
+            return Judgement::Unobservable {
+                reason: format!(
+                    "{} sample(s) could not be read, so whether every sample conformed could not \
+                     be told (telemetry.v1 §5){first}",
+                    t.unobservable
+                ),
+            };
+        }
         if t.unanswered > 0 {
             let first = self
                 .members
@@ -418,7 +463,8 @@ impl TelemetryReport {
         }
         Judgement::NotEstablished {
             reason: format!(
-                "{} sample(s) of {} member(s) conform; {} pair(s), none decreased within an \
+                "every one of the {} sample(s) of {} member(s) conforms; {} pair(s), none \
+                 decreased within an \
                  established epoch ({} established, {} assumed){}",
                 t.conforms,
                 t.members,
@@ -716,6 +762,51 @@ mod tests {
             "{j:?}"
         );
         r.totals.does_not = 1;
+        assert_eq!(exit(&r), 1, "a finding still wins");
+        // F-157 (0.5): an undecodable sample beside conforming ones could
+        // not tell whether every sample conformed, and names its member.
+        let mut r = report();
+        r.totals.unobservable = 1;
+        let mut m = member(Judgement::NotEstablished { reason: "r".into() });
+        m.samples.unobservable = 1;
+        m.samples.unobservable_reason = Some("undecodable".into());
+        r.members = vec![m];
+        let j = r.judgement();
+        assert!(
+            matches!(&j, Judgement::Unobservable { reason }
+                if reason.contains("zk2/lab/meter/meter.v1/stream/drops: 1 sample(s) undecodable")),
+            "{j:?}"
+        );
+        // …and one under an invalid declaration names its resource and the
+        // declaration's reasons.
+        r.members[0].samples.unobservable_reason = Some("declaration_invalid".into());
+        r.resources = vec![TelemetryResource {
+            address: "lab/meter".into(),
+            iface: "meter.v1".into(),
+            fingerprint: String::new(),
+            resource: "stream/drops".into(),
+            selector: "zk2/lab/meter/meter.v1/stream/drops".into(),
+            declaration: TelemetryDeclaration {
+                answer: DeclarationToken::Invalid,
+                reasons: vec!["not_a_carrier".into()],
+                carrier: None,
+                kind: None,
+                unit: None,
+                buckets: None,
+                semantic: None,
+                epoch_in: None,
+                says: "s".into(),
+            },
+            members: 1,
+        }];
+        let j = r.judgement();
+        assert!(
+            matches!(&j, Judgement::Unobservable { reason }
+                if reason.contains("lab/meter meter.v1 stream/drops: its declaration is invalid \
+                                    (not_a_carrier)")),
+            "{j:?}"
+        );
+        r.totals.decreased = 1;
         assert_eq!(exit(&r), 1, "a finding still wins");
     }
 }

@@ -1082,7 +1082,10 @@ fn telemetry_cases(obs: &ConformObservation) -> Vec<ConformCase> {
     out
 }
 
-/// §2.6 over every sample of one metric resource the window heard.
+/// §2.6 over every sample of one metric resource the window heard. A
+/// sample that could not be read (undecodable) leaves "does every sample
+/// conform?" unanswered: unobservable, never a pass (§5, 0.5; zk2py round
+/// 48's F-157). One that does not conform is still the violation.
 fn telemetry_sample_case(
     name: &str,
     members: &[(&String, &crate::model::telemetry::MemberBook)],
@@ -1118,27 +1121,32 @@ fn telemetry_sample_case(
             ),
         );
     }
-    if conforms == 0 {
-        let why = members
+    let unread: u64 = members.iter().map(|(_, m)| m.unobservable).sum();
+    if unread > 0 {
+        let (key, why) = members
             .iter()
-            .find_map(|(_, m)| m.unobservable_why)
-            .map_or("unobservable", |w| w.as_str());
+            .find_map(|(k, m)| m.unobservable_why.map(|w| (*k, w.as_str())))
+            .map_or((String::new(), "unobservable"), |(k, w)| (k.clone(), w));
         return ConformCase::unobservable(
             C,
             name,
-            format!("none of its {received} sample(s) could be read ({why})"),
+            if conforms == 0 {
+                format!("none of its {received} sample(s) could be read ({why})")
+            } else {
+                format!(
+                    "{unread} of its {received} sample(s) could not be read, the first of {key} \
+                     ({why}), so whether every sample conforms could not be told (telemetry.v1 \
+                     §5); {conforms} conform"
+                )
+            },
         );
     }
     ConformCase::passed(
         C,
         name,
         format!(
-            "{conforms} sample(s) of {} member(s) conform{}",
-            members.len(),
-            match received - conforms {
-                0 => String::new(),
-                n => format!("; {n} could not be read"),
-            }
+            "{conforms} sample(s) of {} member(s), every one conforming",
+            members.len()
         ),
     )
 }
@@ -4712,6 +4720,8 @@ mod tests {
         };
         book.sample(&of("stream/drops"), put("stream/drops", "10", 0));
         book.sample(&of("stream/drops"), put("stream/drops", "7", 300));
+        // F-157 (zk2py round 48): one sample that does not decode.
+        book.sample(&of("stream/drops"), put("stream/drops", "1e400", 450));
         book.sample(&of("stream/level"), put("stream/level", "-70.5", 0));
         book.sample(&of("stream/level"), put("stream/level", "\"x\"", 300));
         book.sample(&of("stream/level"), put("stream/level", "-70.0", 600));
@@ -4746,7 +4756,15 @@ mod tests {
         let decreased = verdict(CaseId::TelemetryContinuity, "stream/drops");
         assert_eq!(code(&decreased), 1, "{decreased:?}");
         assert!(decreased.detail.as_deref().unwrap().contains("re-mint"));
-        assert_eq!(code(&verdict(CaseId::TelemetrySample, "stream/drops")), 0);
+        // Beside two conforming samples, the one that does not decode leaves
+        // "does every sample conform?" unanswered, never a pass.
+        let unread = verdict(CaseId::TelemetrySample, "stream/drops");
+        assert!(
+            matches!(&unread.verdict, Judgement::Unobservable { reason }
+                if reason.starts_with("1 of its 3 sample(s) could not be read")
+                    && reason.contains("(undecodable)")),
+            "{unread:?}"
+        );
         let wrong = verdict(CaseId::TelemetrySample, "stream/level");
         assert!(
             wrong.detail.as_deref().unwrap().contains("wrong_type"),
