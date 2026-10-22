@@ -1644,8 +1644,9 @@ def _telemetry_verdicts() -> list[tuple[str, Any, Any]]:
     def pair(cont: str, epoch: str) -> Any:
         return tm.Pair(cont, epoch, "presence" if epoch == "established" else None, None, None, "kind")
 
-    label = "telemetry.v1 0.4 §5, over many pairs"
+    label = "telemetry.v1 0.4 and 0.5 §5, over many pairs and many samples"
     est = ([conf("counter")] * 2, [pair("same_epoch", "established")])
+    invalid = tm.Conformance(tm.UNOBSERVABLE, ("declaration_invalid",), None, None, None, None)
     return [
         (f"{label}: a sample that does not conform is a finding", tm.verdict([([conf("counter", False)], [])]),
          tm.FINDING),
@@ -1672,10 +1673,19 @@ def _telemetry_verdicts() -> list[tuple[str, Any, Any]]:
          tm.verdict([est, est, ([conf("gauge")], [])]), tm.NO),
         (f"{label}: no sample at all: could not tell (silence is never a verdict)", tm.verdict([]),
          tm.COULD_NOT_TELL),
-        (f"{label} (F-157, zk2py's reading, the tool's too): a gauge's conforming sample beside an undecodable "
-         "one: no, the undecodable sample read nothing of (§2.6)",
+        (f"{label} (F-157, as 0.5 resolved it): a gauge's conforming sample beside an undecodable one: could "
+         "not tell (§5, over many samples)",
          tm.verdict([([conf("gauge"), tm.Conformance(tm.UNOBSERVABLE, ("undecodable",), "gauge", "declared", None,
-                                                     None)], [])]), tm.NO),
+                                                     None)], [])]), tm.COULD_NOT_TELL),
+        (f"{label} (0.5): a member read under an invalid declaration, beside a conforming gauge: could not tell",
+         tm.verdict([([conf("gauge")], []), ([invalid], [])]), tm.COULD_NOT_TELL),
+        (f"{label} (0.5): every question of such a member is unanswered, its continuity included",
+         tm.member_answer([invalid], []), tm.UNOBSERVABLE),
+        (f"{label} (0.5): a finding stands beside a member under an invalid declaration",
+         tm.verdict([([conf("counter", False)], []), ([invalid], [])]), tm.FINDING),
+        (f"{label} (0.5): an undeclared Point never decoded is still not asked of continuity",
+         tm.member_answer([tm.Conformance(tm.UNOBSERVABLE, ("undecodable",), None, None, None, None)], []),
+         tm.NOT_ASKED),
     ]
 
 
