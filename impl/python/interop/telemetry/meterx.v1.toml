@@ -1,0 +1,22 @@
+# A companion of meter.v1 for telemetry.v1 0.5's "Over many samples" (§5):
+# one resource whose declaration is invalid (§2.2, kind_value: v1's bool is
+# no kind), beside one that is valid. zk2py's own, not the scenarios'.
+
+[interface]
+name  = "meterx"
+major = 1
+minor = 0
+uses  = ["telemetry.v1"]
+
+[schemas]
+jsonschema = ["meter.json"]
+
+[resources.odd]                          # invalid: kind_value
+kind        = "stream"
+type        = "json:Level"
+annotations = { "telemetry.kind" = "bool" }
+
+[resources.good]                         # a bare gauge
+kind        = "stream"
+type        = "json:Level"
+annotations = { "telemetry.kind" = "gauge" }
