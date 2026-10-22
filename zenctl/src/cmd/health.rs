@@ -65,12 +65,19 @@ pub async fn run(cli: HealthArgs) -> Result<()> {
     // The line comes once the window opens (#819 TE, as zk2py round 47's
     // F-154 found of `telemetry`): the subscriptions declared and presence
     // read after them, so a status or a fault put once it is read is heard.
-    let listening = move || {
+    let listening = move |opening: zenkey_fleet::HealthOpening| {
         if let Some(w) = window {
             eprintln!(
                 "health: listening {}s to every status and to the faults before judging (--for; \
-                 --clocks-synced takes the deployment's word for this host's clock instead)",
-                w.as_secs_f64()
+                 --clocks-synced takes the deployment's word for this host's clock instead){}",
+                w.as_secs_f64(),
+                match opening {
+                    zenkey_fleet::HealthOpening::Answered => String::new(),
+                    zenkey_fleet::HealthOpening::Unanswered(why) => format!(
+                        "; {why}, so nothing proved the owners hold the subscription: a status \
+                         or a fault put at once may be missed"
+                    ),
+                }
             );
         }
     };

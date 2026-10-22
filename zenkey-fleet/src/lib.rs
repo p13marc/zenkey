@@ -257,7 +257,8 @@ pub use bus::config::{
     call as call_config, get as get_config, observe as observe_config, run_config,
 };
 pub use bus::health::{
-    AcrossFace, HealthObservation, HealthSpec, HealthTarget, observe as observe_health, run_health,
+    AcrossFace, HealthObservation, HealthOpening, HealthSpec, HealthTarget,
+    observe as observe_health, run_health,
 };
 pub use judge::config::judge as judge_config;
 pub use judge::health::judge as judge_health;
@@ -279,8 +280,9 @@ pub use model::alarms::{
 // profile's reader reads them — the reads, the session-free book they fold
 // into, and the judge.
 pub use bus::telemetry::{
-    SeedSeen as TelemetrySeedSeen, TelemetryObservation, TelemetrySpec, metric_resources,
-    observe as observe_telemetry, run_telemetry,
+    DEFAULT_SETTLE as TELEMETRY_DEFAULT_SETTLE, Opening as TelemetryOpening,
+    RoundTrips as TelemetryRoundTrips, SeedSeen as TelemetrySeedSeen, TelemetryObservation,
+    TelemetrySpec, metric_resources, observe as observe_telemetry, run_telemetry,
 };
 pub use judge::telemetry::judge as judge_telemetry;
 pub use model::config::{Assignment, Given, TypedValues};
@@ -517,7 +519,7 @@ const _: () = {
                 clocks_synced: false,
                 face: None,
             },
-            || {},
+            |_| {},
         ));
         // An alarms reading holds its subscriptions, its queue and its
         // receive path's watch across awaits (#800, AC).
@@ -540,7 +542,7 @@ const _: () = {
             &store,
             &offline,
             crate::TelemetrySpec::new(std::time::Duration::ZERO, std::time::Duration::ZERO),
-            || {},
+            |_| {},
         ));
     }
 

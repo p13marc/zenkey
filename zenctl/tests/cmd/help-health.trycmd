@@ -22,7 +22,7 @@ Options:
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a status reply's stamp is then aged against this clock (freshness.v1 §2.6), and no window is needed
 
       --for <SECS>
-          The reading's window, seconds: a subscription to every status and to the faults, which measures this host's clock on the owners' live puts, confirms each status, and answers "is its clock ahead?". It opens once the subscription is declared and presence was read after it, when stderr says "listening". Default 31, just over the 30 s an owner re-puts its status within; with --clocks-synced, no window unless given
+          The reading's window, seconds: a subscription to every status and to the faults, which measures this host's clock on the owners' live puts, confirms each status, and answers "is its clock ahead?". It opens once the subscription is declared and presence was read after it, when stderr says "listening"; across a face, where no presence is read, once the first reading's GET was answered after it. Default 31, just over the 30 s an owner re-puts its status within; with --clocks-synced, no window unless given
 
       --grace <SECS>
           Seconds between the two readings when no window separates them: a status better than a check is reported from two readings a grace apart (health.v1 §2.2)

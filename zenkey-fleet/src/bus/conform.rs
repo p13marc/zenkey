@@ -430,7 +430,7 @@ pub async fn observe(
                 target,
                 spec,
                 Some(o.clone()),
-                || {},
+                |_| {},
             )
             .await,
         )
@@ -483,7 +483,7 @@ pub async fn observe(
                 &store,
                 offline,
                 tspec,
-                || {},
+                |_| {},
             )
             .await,
         )

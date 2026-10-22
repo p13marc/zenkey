@@ -3046,7 +3046,8 @@ pub(crate) struct HealthArgs {
     /// the faults, which measures this host's clock on the owners' live puts,
     /// confirms each status, and answers "is its clock ahead?". It opens
     /// once the subscription is declared and presence was read after it,
-    /// when stderr says "listening". Default 31, just over the 30 s an owner
+    /// when stderr says "listening"; across a face, where no presence is
+    /// read, once the first reading's GET was answered after it. Default 31, just over the 30 s an owner
     /// re-puts its status within; with --clocks-synced, no window unless
     /// given.
     #[arg(long = "for", value_name = "SECS")]
@@ -3135,9 +3136,14 @@ pub(crate) struct TelemetryArgs {
     #[arg(value_name = "SELECTOR")]
     pub(crate) selector: Option<String>,
     /// The reading's window, seconds. It opens once the subscriptions are
-    /// declared and presence is seeded, when stderr says "listening": a
-    /// sample put from then on is inside it. A pair needs two conforming
-    /// samples of one member within it.
+    /// declared, presence is seeded, and each owner instance in scope
+    /// answered its descriptor GET, when stderr says "listening": a sample
+    /// put from then on is inside it (an owner that did not answer, the
+    /// line names). Across a face, where no
+    /// presence is read, it opens once S4's GET of a state metric resource
+    /// in scope was answered after the subscriptions; with none in scope,
+    /// after --settle, a margin and never proof, as the line says. A pair
+    /// needs two conforming samples of one member within it.
     #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
     pub(crate) for_secs: f64,
     /// The deployment's link lease, seconds: with --wait-before-close, the
@@ -3157,6 +3163,15 @@ pub(crate) struct TelemetryArgs {
     /// (telemetry.v1 §2.14), and a decrease without one reads as a reset.
     #[arg(long)]
     pub(crate) across_face: bool,
+    /// Across a face with no state metric resource in scope, seconds to
+    /// wait after the subscriptions are declared before the window opens:
+    /// a margin for the declarations to cross the face, never proof that
+    /// they did. With a state metric resource in scope, S4's GET of it is
+    /// the proof and this is not used. Set it to the link's round trip; 0
+    /// opens at once. Default 0.25, five times what a loopback face needed.
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_fleet::TELEMETRY_DEFAULT_SETTLE.as_secs_f64())]
+    pub(crate) settle: f64,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

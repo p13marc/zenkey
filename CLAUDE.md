@@ -98,11 +98,22 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   resources their revisions declare; one bounded queue carries the instance
   and member token subscriptions and each resource's members, so samples
   and token moves fold in one order; presence is seeded, and seeded again
-  after a loss, and each state metric resource gets S4's GET; the window
-  opens then, the caller's `listening` hook run and `--for` counted from
-  it (#819 TE, F-154; `zenctl alarms` and `health` alike). Across a face
-  (`--across-face`) the deployment's word stands in: one named owner and
-  `--contracts`, no presence. `model::telemetry`'s `TelemetryBook` is
+  after a loss, and each state metric resource gets S4's GET; after the
+  seed each owner instance in scope answers its descriptor GET, since the
+  seed proves only that the router holds the subscriptions and a put is
+  dropped at its source until the owner's session does too
+  (`Opening::Answered`, its `RoundTrips` counted, a GET that ends with no
+  reply proving nothing; an owner silent within `--timeout` is
+  `Unanswered`, the line naming it; no owner in scope, or a seed that did
+  not stand, is `NoOwner`; #819 TG). The window opens then, the
+  caller's `listening` hook run and `--for` counted from it (#819 TE,
+  F-154; `zenctl alarms` and `health` alike, their descriptor reads the
+  same round trip). Across a face (`--across-face`) the deployment's word
+  stands in: one named owner and `--contracts`, no presence; S4's GET of a
+  state metric resource in scope is the owner's round trip
+  (`Opening::Answered`), and with none in scope the window opens after
+  `--settle` (0.25 s), a margin and never proof (`Opening::Margin`), the
+  line saying so (#819 TG, F-159). `model::telemetry`'s `TelemetryBook` is
   session-free: each sample through `MetricType::check` (`Datum::decode`
   and `attachment`, then the model's `check`), consecutive conforming
   samples through `pair` with the presence seen between them (a loss
@@ -424,7 +435,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   0 none with every owner asked known whole and the presence read that
   found them complete, 2 otherwise), and `check
   conform`'s `alarm-key` and `alarm-document` (21 cases). #819's TC added
-  `telemetry [SELECTOR] [--for SECS] [--across-face]`, a root judgement
+  `telemetry [SELECTOR] [--for SECS] [--across-face] [--settle SECS]`, a root judgement
   over `telemetry.v1` (exit 1 a sample that does not conform or a decrease
   within an established epoch, 0 everything asked answered clean, 2
   otherwise, a counter or histogram that formed no pair, or only assumed

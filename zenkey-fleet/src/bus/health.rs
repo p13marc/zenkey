@@ -14,7 +14,8 @@
 //!    (§2.7). Across a constrained face neither crosses, and the
 //!    deployment's word stands for them (§2.8, R7). The window opens after
 //!    this read, which was answered after the subscriptions were declared
-//!    (#819 TE, F-154); across a face, once they are declared;
+//!    (#819 TE, F-154); across a face, after the first reading's GET, the
+//!    round trip there (#819 TG, F-159);
 //! 3. two readings, a grace apart (or the window apart): each one GET of the
 //!    owners' `health.v1/state/**`, target `All`, consolidation `Latest`
 //!    (core S4), which answers a status and its checks together (§2.4, core
@@ -366,18 +367,98 @@ pub async fn run_health(
     namespace: &str,
     target: HealthTarget,
     spec: HealthSpec,
-    listening: impl FnOnce() + Send,
+    listening: impl FnOnce(HealthOpening) + Send,
 ) -> crate::report::HealthReport {
     let obs = observe(session, namespace, target, spec, None, listening).await;
     crate::judge::health::judge(&obs)
+}
+
+/// What a health window opened on (#819 TG): the round trip made after the
+/// subscription that reaches the owners, or why none proved it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HealthOpening {
+    /// With no face, every instance the presence read found answered its
+    /// descriptor GET, made after the subscription. Across a face, where no
+    /// presence is read, an owner replied to the first reading's GET and its
+    /// final reply came.
+    Answered,
+    /// Nothing proved the owners hold the subscription, with why: a status
+    /// or a fault put at once may be missed.
+    Unanswered(String),
+}
+
+/// [`HealthOpening`] from what was read before the window opened: with no
+/// face, the presence read (`fresh` when made after the subscription, not
+/// the caller's); across a face, the first reading's GET.
+fn opening_of(
+    face: bool,
+    fresh: bool,
+    presence: Option<&Result<Observed, String>>,
+    first: Option<&Result<HealthGet, String>>,
+) -> HealthOpening {
+    use crate::model::catalog::DescriptorRead;
+    let no = |why: String| HealthOpening::Unanswered(why);
+    if face {
+        return match first {
+            Some(Ok(g)) if !g.complete => no(
+                "across the face the first reading's GET ran to its timeout, or drew an error \
+                 reply"
+                    .to_owned(),
+            ),
+            Some(Ok(g)) if g.services.is_empty() => no(
+                "across the face the first reading's GET drew no reply, so nothing shows it \
+                 reached the owner"
+                    .to_owned(),
+            ),
+            Some(Ok(_)) => HealthOpening::Answered,
+            Some(Err(e)) => no(format!(
+                "across the face the first reading's GET could not be made: {e}"
+            )),
+            None => no("across the face no GET was made".to_owned()),
+        };
+    }
+    match presence {
+        Some(Ok(_)) if !fresh => no("presence was read before the subscription".to_owned()),
+        Some(Ok(o)) => {
+            let instances = o.instances();
+            if instances.is_empty() {
+                return no(
+                    "presence found no instance in scope to answer a GET after the subscription"
+                        .to_owned(),
+                );
+            }
+            let answered = instances
+                .iter()
+                .filter(|k| {
+                    matches!(
+                        o.descriptors.as_ref().and_then(|d| d.get(*k)),
+                        Some(DescriptorRead::Served(_) | DescriptorRead::Invalid(_))
+                    )
+                })
+                .count();
+            if answered == instances.len() {
+                HealthOpening::Answered
+            } else {
+                no(format!(
+                    "{} of the {} instance(s) presence found answered no descriptor GET after the \
+                     subscription",
+                    instances.len() - answered,
+                    instances.len()
+                ))
+            }
+        }
+        Some(Err(e)) => no(format!("the presence read could not be made: {e}")),
+        None => no("no presence was read".to_owned()),
+    }
 }
 
 /// The two readings, the window and the archive, as the module doc says.
 /// `presence`, when given, is the read a caller already made (`check
 /// conform`), and is not made again. `listening` runs once the window
 /// opens, its subscriptions declared and presence read after them (zk2py
-/// round 47's F-154, #819 TE): the router holds them then, and a status or a
-/// fault put from then on is heard. The window counts from that moment; with
+/// round 47's F-154, #819 TE) or, across a face, the first reading's GET
+/// answered after them (#819 TG, F-159): the far side holds them then, and
+/// a status or a fault put from then on is heard. The window counts from that moment; with
 /// no window, or one whose subscriptions could not be declared, `listening`
 /// never runs.
 pub async fn observe(
@@ -386,9 +467,10 @@ pub async fn observe(
     target: HealthTarget,
     spec: HealthSpec,
     presence: Option<Observed>,
-    listening: impl FnOnce() + Send,
+    listening: impl FnOnce(HealthOpening) + Send,
 ) -> HealthObservation {
     let t = spec.timeout;
+    let fresh = presence.is_none();
     let window = match spec.window {
         Some(_) => Some(Window::open(session, &target).await),
         None => None,
@@ -402,12 +484,29 @@ pub async fn observe(
                 .map_err(|e| crate::one_line(&e)),
         ),
     };
+    let selector = target.state_selector();
+    // Across a face no presence is read, so the first reading's GET,
+    // answered by the owner after the subscription, is the round trip the
+    // window opens on (#819 TG, as zk2py round 49's F-159 found of
+    // `telemetry`); without a face, the presence read above was.
+    let across = if spec.face.is_some() {
+        Some(get(session, &selector, t).await)
+    } else {
+        None
+    };
     if matches!(window, Some(Ok(_))) {
-        listening();
+        listening(opening_of(
+            spec.face.is_some(),
+            fresh,
+            presence.as_ref(),
+            across.as_ref(),
+        ));
     }
     let opened = Instant::now();
-    let selector = target.state_selector();
-    let first = get(session, &selector, t).await;
+    let first = match across {
+        Some(first) => first,
+        None => get(session, &selector, t).await,
+    };
     let wait = match spec.window {
         Some(w) => (opened + w).saturating_duration_since(Instant::now()),
         None => spec.grace,
@@ -662,6 +761,73 @@ async fn archived(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #819 TG (review of PR #835): a health window opens on proof only.
+    /// Across a face, the first GET proves the owner holds the subscription
+    /// when the owner replied and its final came, never when it ran to its
+    /// timeout, drew no reply or could not be made. With no face, every
+    /// instance presence found must have answered its descriptor GET, made
+    /// after the subscription.
+    #[test]
+    fn a_window_opens_on_proof_only() {
+        use crate::model::catalog::DescriptorRead;
+        let a: Addr = "lab/nav".parse().unwrap();
+        let got = |complete: bool, replied: bool| {
+            Ok(HealthGet {
+                selector: "zk2/lab/nav/health.v1/state/**".into(),
+                read_at: SystemTime::now(),
+                complete,
+                services: if replied {
+                    BTreeMap::from([(a.clone(), ServiceGot::default())])
+                } else {
+                    BTreeMap::new()
+                },
+            })
+        };
+        let says = |o: HealthOpening| match o {
+            HealthOpening::Answered => "answered".to_owned(),
+            HealthOpening::Unanswered(why) => why,
+        };
+        assert_eq!(
+            opening_of(true, true, None, Some(&got(true, true))),
+            HealthOpening::Answered
+        );
+        assert!(says(opening_of(true, true, None, Some(&got(false, true)))).contains("timeout"));
+        assert!(says(opening_of(true, true, None, Some(&got(true, false)))).contains("no reply"));
+        assert!(
+            says(opening_of(true, true, None, Some(&Err("closed".into()))))
+                .contains("could not be made: closed")
+        );
+        let instances = ["0000000000000001", "0000000000000002"];
+        let observed = |reads: &[DescriptorRead]| {
+            let keys: Vec<String> = instances
+                .iter()
+                .map(|i| format!("zk2/lab/nav/@zk/instance/{i}"))
+                .collect();
+            let mut o = Observed::from_keys("zk2/lab/nav/@zk/**", &keys, true);
+            o.descriptors = Some(
+                instances
+                    .iter()
+                    .zip(reads)
+                    .map(|(i, r)| ((a.clone(), i.parse().unwrap()), r.clone()))
+                    .collect(),
+            );
+            Ok(o)
+        };
+        let answered = DescriptorRead::Invalid("a reply all the same".into());
+        let both = observed(&[answered.clone(), answered.clone()]);
+        assert_eq!(
+            opening_of(false, true, Some(&both), None),
+            HealthOpening::Answered
+        );
+        assert!(
+            says(opening_of(false, false, Some(&both), None)).contains("before the subscription")
+        );
+        let one = observed(&[answered, DescriptorRead::Silent]);
+        assert!(says(opening_of(false, true, Some(&one), None)).contains("1 of the 2 instance(s)"));
+        let none = Ok(Observed::from_keys("zk2/lab/nav/@zk/**", &[], true));
+        assert!(says(opening_of(false, true, Some(&none), None)).contains("no instance"));
+    }
 
     #[test]
     fn a_target_spells_its_selectors() {

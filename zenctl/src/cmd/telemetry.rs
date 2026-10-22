@@ -35,6 +35,52 @@ use crate::cli::TelemetryArgs;
 use crate::cmd::zk2;
 use crate::exit::unaskable;
 
+/// What the "listening" line adds of what the window opened on (#819 TG):
+/// nothing when every owner in scope answered after the subscriptions,
+/// else what was not proved, the first round trip that did not answer
+/// named.
+fn opening_words(opening: &zenkey_fleet::TelemetryOpening) -> String {
+    use zenkey_fleet::TelemetryOpening as O;
+    let first = |t: &zenkey_fleet::TelemetryRoundTrips| {
+        t.unanswered
+            .first()
+            .map_or(String::new(), |w| format!(" (the first, {w})"))
+    };
+    match opening {
+        O::Answered(_) => String::new(),
+        O::Unanswered(t) => format!(
+            "; {} of the {} owner instance(s) in scope answered no GET after the subscriptions{}, \
+             so they may not hold them yet: a sample one puts at once may be dropped before it \
+             leaves",
+            t.asked - t.answered,
+            t.asked,
+            first(t)
+        ),
+        O::NoOwner { seeded: true } => "; the presence seed found no owner instance in scope \
+                                        to answer a GET after the subscriptions, so nothing \
+                                        proved one holds them"
+            .to_owned(),
+        O::NoOwner { seeded: false } => "; the presence seed did not stand, so no owner \
+                                         instance was asked to answer a GET after the \
+                                         subscriptions, and nothing proved one holds them"
+            .to_owned(),
+        O::Margin { settle, trips } => format!(
+            "; across the face {}, so nothing proved the far side subscribed: this line comes \
+             after a {}s margin (--settle), never proof",
+            if trips.asked == 0 {
+                "no state metric resource in scope answered a GET".to_owned()
+            } else {
+                format!(
+                    "the owner answered none of {} GET(s){}",
+                    trips.asked,
+                    first(trips)
+                )
+            },
+            settle.as_secs_f64()
+        ),
+    }
+}
+
 /// The verdict verb's name, spelled once (#355).
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("telemetry");
 
@@ -45,6 +91,7 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         lease,
         wait_before_close,
         across_face,
+        settle,
         contracts,
         ns,
     } = cli;
@@ -74,21 +121,33 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         wait_before_close,
     ));
     spec.across_face = across_face;
+    spec.settle = ASKING.ask(std::time::Duration::try_from_secs_f64(settle).map_err(|_| {
+        if settle.is_finite() && settle > 0.0 {
+            unaskable!("--settle is longer than a wait can be: {settle:e} seconds")
+        } else {
+            unaskable!("--settle must be zero or a positive number of seconds, got {settle}")
+        }
+    }));
     let session = ASKING.ask(dep.session().await);
     let store = zk2::store(&dep, &offline);
     // The line comes once the window opens (zk2py round 47's F-154): the
-    // subscriptions declared and presence seeded after them, so a sample put
-    // once it is read is inside the window.
-    let listening = move || {
+    // subscriptions declared and a round trip made after them that reaches
+    // each owner — its descriptor GET after the presence seed, or across a
+    // face S4's GET of a state metric resource (round 49's F-159; #819 TG)
+    // — so a sample put once it is read is inside the window. When an
+    // owner did not answer, or across a face nothing could, the line says
+    // so.
+    let listening = move |opening: zenkey_fleet::TelemetryOpening| {
         eprintln!(
-            "telemetry: listening {}s to the metric members in scope{} (--for)",
+            "telemetry: listening {}s to the metric members in scope{} (--for){}",
             window.as_secs_f64(),
             if across_face {
                 "; across a face this reader reads no presence (the session opens as any \
                  other's), so only an in-band epoch establishes one"
             } else {
                 " and their owners' tokens"
-            }
+            },
+            opening_words(&opening)
         );
     };
     let report = zenkey_fleet::run_telemetry(

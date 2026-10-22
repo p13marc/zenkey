@@ -44,7 +44,7 @@ pub fn health(
                 &namespace,
                 zenkey_fleet::HealthTarget::One(addr.clone()),
                 spec,
-                || {},
+                |_| {},
             )
             .await;
             (addr, namespace, Arc::new(report))
