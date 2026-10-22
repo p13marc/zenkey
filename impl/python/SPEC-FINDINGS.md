@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Fifty rounds.**
+**Fifty-one rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -122,8 +122,10 @@ where that was not enough, or where the spec said two things.
   `telemetry.v1` 0.5. Nothing was found in the text, which is closed (see
   "At telemetry.v1 0.5"). The tool resolved F-159 in TG.
 - F-160 was found against `zenctl-tg`'s "listening" line (see "At
-  telemetry.v1 0.5, the tool after TG" at the end). It is open, a gap in
-  the tool's words, and nothing in the text.
+  telemetry.v1 0.5, the tool after TG"). The tool resolved it in TH.
+- Nothing new was found against `zenctl-th` (see "At telemetry.v1 0.5,
+  the tool after TH" at the end). None is open, and telemetry.v1's barrier
+  work, rounds 45 to 51, is closed.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -8338,4 +8340,75 @@ and "never proof" for the margin, and their absence for a proof.
 **Wording, in the tool:** name the round trip, for instance "after N
 owner(s)' descriptor GETs" or "after S4's GET of zk2/…/state/total".
 
+**Status after TH: resolved in the tool (`zenctl-th`).** When a round
+trip proved the window, the line now says so:
+- with no face, "; each of the N owner instance(s) in scope answered its
+  descriptor GET after the subscriptions, so they hold them";
+- across a face, "; across the face the owner answered A of N S4 GET(s) of
+  a state metric resource in scope after the subscriptions, so it holds
+  them".
+
+`tool_opening` now checks each opening's words positively, anchored on
+"telemetry: listening", 20 lines of 20 each. Round 50's words for a proven
+opening no longer pass.
+
 **None open against the text.**
+
+## At telemetry.v1 0.5, the tool after TH (#609)
+
+Only the tool changed: `zenctl-th`, `zenctl 0.12.0
+(0.14.0-794-g905b3684-dirty)`, with TH's code. Its "listening" line now
+says what proved the window. The text and every fixture are 0.5's,
+unchanged.
+
+**F-160: resolved.** `tool_opening` (`--only opening`, its own selector)
+checks the three openings, 20 tries each:
+- **Each sample** put the moment the line appears is read, 20 of 20.
+- **Each line** starts "telemetry: listening" and says the opening it
+  stood on, positively. Across the face with `total` in scope, "the owner
+  answered 1 of 1 S4 GET(s) of a state metric resource in scope after the
+  subscriptions, so it holds them". Across it with streams alone, "a 0.25s
+  margin (--settle), never proof". With no face, "each of the 1 owner
+  instance(s) in scope answered its descriptor GET after the
+  subscriptions, so they hold them". Every GET named is answered.
+- **`total`'s value** is checked held, by an S4 GET, before the first
+  case.
+- **Each exit** is zk2py's verdict over the same sample: a counter's one
+  sample could not tell, 2.
+
+**`just py-conformance`: 2235 of 2235.**
+
+**`just py-telemetry`, three runs, each exiting 0:**
+- zk2py's owner, 57 of 57;
+- `owner-tb`, 56 of 56;
+- `zenctl-th` judging beside zk2py's reader, 161 of 161.
+
+**None open.**
+
+**The close of telemetry.v1's rounds, 45 to 51.** zk2py read
+telemetry.v1 from its first text, 0.1, to 0.5, and judged the Rust
+runtime's owner and then `zenctl telemetry` beside its own reader. It
+filed nineteen findings, F-142 to F-160, and every one is resolved:
+- **Fourteen against the text,** F-142 to F-152 and F-156 to F-158, were
+  each answered by a later text. F-143, F-144 and F-157 went against
+  zk2py's first reading.
+- **Five against the tool,** F-153 to F-155, F-159 and F-160, were
+  answered in the tool.
+
+The implementations now agree on the following, measured against zk2py's
+owner and `owner-tb`, and with the tool judging every section of
+`scenarios.md`:
+- **How a sample's bytes are read:** strict JSON finite by rounding, CBOR
+  bignums as integers, a depth of 256, an attachment by its own encoding,
+  `null` present.
+- **A member's kind and unit**, and a sample's conformance and its
+  reasons.
+- **A pair's epoch:** in-band, then presence standing on a complete read,
+  else assumed. Its continuity, and a state member's pairs through the
+  late joiner's merge.
+- **The rate,** bit for bit, a stamp's nanoseconds as uhlc reads them.
+- **A window's answer, member by member:** a finding stands; could not
+  tell over a counter or histogram with no established pair, an
+  undecodable sample, or a member under an invalid declaration; and no
+  only when every question asked was answered.
+- **When a tool's window opens,** and the words that say so.
