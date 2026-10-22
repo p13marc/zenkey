@@ -6,9 +6,18 @@
 //! One router and client sessions, as the zk2 suites do it. The first test
 //! runs the realistic two-session shape: the owners and the seed's session
 //! in a namespace, the monitor on a session in none, so every live key
-//! arrives prefixed and the projection strips it. The others run on one
-//! session at the bus root, the liveliness GET beside the monitor's
+//! arrives prefixed and the projection strips it. The others run at the
+//! bus root, most on one session, the liveliness GET beside the monitor's
 //! liveliness subscribers (spec §8.1).
+//!
+//! The two that force a loss read the address up right after `open`, so
+//! their monitor has a session of its own (#823). On a session that also
+//! holds history liveliness subscribers to the same tokens, zenoh 1.10.1's
+//! liveliness GET was seen to come back complete without a token the
+//! router held: 5 of 720 fresh processes under load, against none of 720
+//! with the subscribers on another session and none of 720 with none. The
+//! seed then reads a live address down, which is the bus's doing, and not
+//! what these two test.
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -332,6 +341,7 @@ async fn a_loss_is_unobservable_until_the_reseed_finds_what_it_hid() {
     let (_router, ep) = router(None).await;
     let owner = client(&ep).await;
     let tool = client(&ep).await;
+    let watcher = client(&ep).await;
     let h1 = addr("h1/tc");
     let scope = PresenceScope::all();
     let spec = MonitorSpec {
@@ -339,7 +349,8 @@ async fn a_loss_is_unobservable_until_the_reseed_finds_what_it_hid() {
         stats_tick: Duration::from_secs(3600),
         ..MonitorSpec::default()
     };
-    let monitor = Monitor::start(&tool, spec.with_presence("", &scope))
+    // A session of its own (#823, the module doc).
+    let monitor = Monitor::start(&watcher, spec.with_presence("", &scope))
         .await
         .expect("monitor");
     let a = bring_up(&owner, config("h1/tc"), &scenario("ping.v1")).await;
@@ -363,6 +374,10 @@ async fn a_loss_is_unobservable_until_the_reseed_finds_what_it_hid() {
             .is_ok_and(|r| r.keys.is_empty() && r.complete)
     })
     .await;
+    // The router sent the monitor's session the delete before it answers
+    // this read, on the same link, so the delete is in the broadcast before
+    // the flood. What the read says is not used (#823, the module doc).
+    let _ = zenkey_fleet::liveliness_read(&watcher, "zk2/h1/tc/@zk/instance/*", T).await;
     for i in 0..16 {
         monitor.core().node_event(format!("demo/flood/{i}"), true);
     }
@@ -427,6 +442,7 @@ async fn a_reseed_cut_short_by_a_select_is_read_again() {
     let (_router, ep) = router(None).await;
     let owner = client(&ep).await;
     let tool = client(&ep).await;
+    let watcher = client(&ep).await;
     let h1 = addr("h1/tc");
     let scope = PresenceScope::all();
     let spec = MonitorSpec {
@@ -434,7 +450,8 @@ async fn a_reseed_cut_short_by_a_select_is_read_again() {
         stats_tick: Duration::from_secs(3600),
         ..MonitorSpec::default()
     };
-    let monitor = Monitor::start(&tool, spec.with_presence("", &scope))
+    // A session of its own (#823, the module doc).
+    let monitor = Monitor::start(&watcher, spec.with_presence("", &scope))
         .await
         .expect("monitor");
     let a = bring_up(&owner, config("h1/tc"), &scenario("ping.v1")).await;
@@ -456,6 +473,10 @@ async fn a_reseed_cut_short_by_a_select_is_read_again() {
             .is_ok_and(|r| r.keys.is_empty() && r.complete)
     })
     .await;
+    // The router sent the monitor's session the delete before it answers
+    // this read, on the same link, so the delete is in the broadcast before
+    // the flood. What the read says is not used (#823, the module doc).
+    let _ = zenkey_fleet::liveliness_read(&watcher, "zk2/h1/tc/@zk/instance/*", T).await;
     for i in 0..16 {
         monitor.core().node_event(format!("demo/flood/{i}"), true);
     }
