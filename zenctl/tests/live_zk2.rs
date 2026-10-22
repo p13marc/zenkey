@@ -6729,12 +6729,14 @@ fn meter_contract_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts/meter.v1.toml")
 }
 
-/// O: its service, and the writers of `frames` (a Point declared a counter)
-/// and `drops` (a bare counter with no epoch).
+/// O: its service, and the writers of `frames` (a Point declared a counter),
+/// `drops` (a bare counter with no epoch) and `total` (a bare counter in
+/// state).
 struct Meter {
     svc: Service,
     frames: zenkey::writer::Writer,
     drops: zenkey::writer::Writer,
+    total: zenkey::state::StateWriter,
 }
 
 /// O started on `session`, every resource exposed, once a subscriber
@@ -6770,6 +6772,10 @@ async fn meter_owner_with(session: &zenoh::Session, matched: bool) -> Meter {
         .declare_writer(&id, "stream/drops", &Bindings::new())
         .await
         .expect("drops");
+    let total = b
+        .declare_state_writer(&id, "state/total", &Bindings::new())
+        .await
+        .expect("total");
     let svc = b.start().await.expect("start");
     let deadline = Instant::now() + SETTLE;
     for w in [&frames, &drops].into_iter().filter(|_| matched) {
@@ -6781,7 +6787,12 @@ async fn meter_owner_with(session: &zenoh::Session, matched: bool) -> Meter {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
-    Meter { svc, frames, drops }
+    Meter {
+        svc,
+        frames,
+        drops,
+        total,
+    }
 }
 
 impl Meter {
@@ -7214,6 +7225,9 @@ async fn across_a_face_on_the_line(selector: &str) -> (Vec<usize>, Option<String
     let contracts = meter_contract_path();
     let vehicle_session = vehicle(&bus.endpoint).await;
     let o = meter_owner_with(&vehicle_session, false).await;
+    // O holds a member of `total`, so its S4 queryable answers with it: a
+    // GET whose final comes with no reply proves nothing.
+    o.total.put_value(&1u64).await.expect("total");
     let (mut lost, mut first, mut said) = (Vec::new(), None, String::new());
     for i in 0..ON_THE_LINE {
         let (listening, t) = bus.spawn_on_line(

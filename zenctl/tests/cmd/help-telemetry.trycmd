@@ -156,3 +156,13 @@ Error: --settle must be zero or a positive number of seconds, got -1
 telemetry: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
+
+…and one a wait can hold.
+
+```console
+$ zenctl telemetry --settle=1e300 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: --settle is longer than a wait can be: 1e300 seconds
+telemetry: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
