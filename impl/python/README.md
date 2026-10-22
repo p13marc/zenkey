@@ -226,9 +226,10 @@ fixtures:
   against zk2py's reading (an undecodable sample or an invalid
   declaration's member now leaves a window unable to tell).
 - Against the text, none open: 0.5's changes were read with full care, and
-  round 48's whole-text pass reached the rest. F-159 is open against the
-  tool, `zenctl telemetry --across-face` (`SPEC-FINDINGS.md`, "At
-  telemetry.v1 0.5").
+  round 48's whole-text pass reached the rest. F-159, against the tool's
+  across-face "listening", is resolved in TG (`zenctl-tg`). F-160 is open
+  against the tool: its line names a proven opening only by silence
+  (`SPEC-FINDINGS.md`, "At telemetry.v1 0.5, the tool after TG").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -1148,7 +1149,8 @@ contract. zk2py read its 0.1 cold in round 45, its 0.2 cold and live
 against the Rust owner example in round 46, its 0.3 cold, with the Rust
 tool `zenctl telemetry` judging beside zk2py's reader, in round 47, and its
 0.4 cold, with the fixed tool, and through once more as a whole, in round
-48, and its 0.5, the closing round, in round 49.
+48, and its 0.5, the closing round, in round 49. Round 50 confirmed the
+tool after TG.
 - **`zk2py.telemetry`**, the reader's and the tool's half, from the text
   alone:
   - **the standard schema** (§2.3, §3): the two published ids, oldest
@@ -1222,8 +1224,8 @@ tool `zenctl telemetry` judging beside zk2py's reader, in round 47, and its
     judges each section beside zk2py's reader, a black box read from its
     `--help`. It starts after the owner is up, and the steps start the
     moment its "listening" line appears (F-154's answer; round 47 needed
-    1 s with `zenctl-tc`), or 0.2 s after it across a face (F-159). In §8
-    it stands across the real face with
+    1 s with `zenctl-tc`), across a face too since TG (F-159's answer). In
+    §8 it stands across the real face with
     `--across-face`, and in §9 its own GET seeds 10. Member by member, it
     is compared with R, with R0F in §8, and with §9's witness: kind and
     unit, the samples' counts and problems, each pair's continuity,
@@ -1232,14 +1234,17 @@ tool `zenctl telemetry` judging beside zk2py's reader, in round 47, and its
     exit against `verdict`. Ten windows are built for §5's SHOULDs, three of
     them for 0.5's over many samples with `meterx.v1`, zk2py's own
     interface whose `stream/odd` is declared invalid, and two probes check
-    the tool's answers to F-154 and F-155. Each window
+    the tool's answers to F-154 and F-155. `tool_opening` asserts F-159's:
+    20 tries each across the real face on S4's GET, across it on
+    `--settle`, and with no face, each sample put the moment "listening"
+    appears read, and the line's words the help's. Each window
     also checks that zk2py's reader read samples in it and that the tool
     read every one of them, so the mode cannot pass testing nothing. A run
     logs the tool's `--version`; here `zenctl 0.12.0
-    (0.14.0-778-g12659a0c)`, the `zenctl-tf` build.
+    (0.14.0-793-gb7aad71d)`, the `zenctl-tg` build.
   - The exit is 0 when every check passes, 1 when one fails.
 
-  | § | zk2py's owner | The Rust owner example (`owner-tb`) | zk2py's owner, the tool judging too (`zenctl-tf`) |
+  | § | zk2py's owner | The Rust owner example (`owner-tb`) | zk2py's owner, the tool judging too (`zenctl-tg`) |
   |---|---|---|---|
   | 1 A counter across a restart (+ the fingerprint, a new session's stamps) | 12 of 12 | 12 of 12 | 18 of 18 |
   | 2 A counter across `new_epoch` in one process | 6 of 6 | 6 of 6 | 12 of 12 |
@@ -1251,8 +1256,9 @@ tool `zenctl telemetry` judging beside zk2py's reader, in round 47, and its
   | 8 A counter that crosses a face (R0, and R0F across a real face) | 8 of 8 | 8 of 8 | 14 of 14 |
   | 9 A state counter seeded (0.2) | 5 of 5 | 5 of 5 | 10 of 10 |
   | §5 over many pairs and samples (0.3 to 0.5): ten windows built for the tool, and F-154's and F-155's probes | | | 42 of 42 |
+  | The tool's opening (F-159's answer, TG): three openings, 20 tries each | | | 6 of 6 |
   | §2.11's conversion against zenoh-python's `as_nanos` | 1 of 1 | 1 of 1 | 1 of 1 |
-  | **Total** | **57 of 57** | **56 of 56** | **151 of 151** |
+  | **Total** | **57 of 57** | **56 of 56** | **157 of 157** |
 
   - **The tool agrees with zk2py's reader on every member of every
     section,** its exit and each member's answer included. §8 across the

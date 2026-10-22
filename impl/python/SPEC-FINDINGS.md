@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty-nine rounds.**
+**Fifty rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -120,7 +120,10 @@ where that was not enough, or where the spec said two things.
   against zk2py's reading.
 - F-159 was found against `zenctl telemetry` (`zenctl-tf`), judging
   `telemetry.v1` 0.5. Nothing was found in the text, which is closed (see
-  "At telemetry.v1 0.5" at the end). F-159 is open, against the tool.
+  "At telemetry.v1 0.5"). The tool resolved F-159 in TG.
+- F-160 was found against `zenctl-tg`'s "listening" line (see "At
+  telemetry.v1 0.5, the tool after TG" at the end). It is open, a gap in
+  the tool's words, and nothing in the text.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -8261,3 +8264,78 @@ margin-free case five times and notes it. Every check passes.
 
 **Wording, or a fix:** in the tool, print "listening" across a face only
 once the subscriptions reach the router, or state the case in `--help`.
+
+**Status after TG: resolved in the tool (`zenctl-tg`).** The "listening"
+line now comes after a round trip that reaches the owner's own session:
+- with no face, each owner instance's descriptor GET;
+- across a face, S4's GET of a state metric resource in scope;
+- with neither, `--settle`, 0.25 s by default, "a margin and never proof".
+
+zk2py dropped `ACROSS_FACE_MARGIN_S` and asserts each opening, 20 tries
+of 20, with a sample put the moment the line appears. None was lost, and
+each line's wording is the help's (`tool_opening`). The line names which
+opening it stood on only when it fell back on `--settle`: F-160.
+
+## At telemetry.v1 0.5, the tool after TG (#609)
+
+Only the tool changed: `zenctl-tg`, `zenctl 0.12.0
+(0.14.0-793-gb7aad71d)`. Its "listening" line now comes after a round
+trip that reaches the owner's own session. The text and every fixture are
+0.5's, unchanged.
+
+**F-159: resolved.** `tool_opening` asserts each of the three openings,
+20 tries each, with a sample put the moment the line appears. There is no
+margin any more.
+- **Across the real face, `total` in scope and holding a value:** 20 of
+  20 read. The line names no `--settle`, so the opening stood on S4's GET.
+- **Across the real face, streams alone in scope:** 20 of 20 read. The
+  line says "this line comes after a 0.25s margin (--settle), never
+  proof".
+- **With no face:** 20 of 20 read. The line names no owner that did not
+  answer.
+
+One more case, met while reading the help: across a face, with a state
+metric resource in scope that holds no value, the owner's S4 GET answers
+with no reply. Nothing then shows it reached an owner, and the line says
+so: "the owner answered none of 1 GET(s) … this line comes after a 0.25s
+margin (--settle), never proof". That is right by core S2, where a GET of
+a key with no value answers nothing.
+
+**`just py-conformance`: 2235 of 2235**, unchanged.
+
+**`just py-telemetry`, three runs, each exiting 0:**
+- **zk2py's owner:** 57 of 57;
+- **`owner-tb`:** 56 of 56;
+- **`zenctl-tg` judging beside zk2py's reader:** 157 of 157, the six
+  checks of `tool_opening` added. The tool agrees with zk2py on every
+  member, answer and exit, as before.
+
+### F-160 · gap · `zenctl-tg`'s "listening" line: a proven opening is named by silence
+
+> `--help`, `--for`: "It opens once … each owner instance in scope answered
+> its descriptor GET, when stderr says "listening" … (an owner that did not
+> answer, the line names). Across a face … it opens once S4's GET of a
+> state metric resource in scope was answered after the subscriptions;
+> with none in scope, after --settle, a margin and never proof, as the
+> line says."
+
+The line names its opening only when it fell back on `--settle`, and
+names any owner that did not answer. When a round trip proved the
+opening, the line says nothing of it:
+- **With no face:** "telemetry: listening 0.6s to the metric members in
+  scope and their owners' tokens (--for)", with no word of the descriptor
+  GETs.
+- **Across a face, on S4's GET:** the line is the face's sentence alone,
+  with no word of which GET was answered.
+
+A caller can tell which opening the tool stood on only by the absence of
+`--settle`, read with the help. Nothing is lost by it, since the tries
+above found every sample, but the line does not say which one it stood on.
+
+**zk2py:** reads the opening from the words the help defines: `--settle`
+and "never proof" for the margin, and their absence for a proof.
+
+**Wording, in the tool:** name the round trip, for instance "after N
+owner(s)' descriptor GETs" or "after S4's GET of zk2/…/state/total".
+
+**None open against the text.**
