@@ -18,11 +18,14 @@
 //! 3. a liveliness read of the owners' tokens, the seed presence stands on
 //!    ([`TelemetryBook::seed`]), read again after every loss;
 //! 4. **the window opens** (zk2py round 47's F-154): the caller's
-//!    `listening` runs, and `spec.window` counts from that moment. The
-//!    subscriptions are declared and the seed's read was answered after
-//!    them, so the router holds them, and a sample put from then on is the
-//!    window's. Across a face, where no presence is read, the window opens
-//!    once the subscriptions are declared;
+//!    `listening` runs with what it opened on ([`Opening`]), and
+//!    `spec.window` counts from that moment. The subscriptions are declared
+//!    and the seed's read was answered after them, so the router holds
+//!    them, and a sample put from then on is the window's. Across a face,
+//!    where no presence is read, step 5 comes first: S4's GET, answered by
+//!    the owner after the subscriptions, is the round trip (round 49's
+//!    F-159). With no state metric resource in scope, nothing can answer:
+//!    the window opens after `spec.settle`, a margin, never proof;
 //! 5. S4's GET of each state metric resource (core §4.2), its replies merged
 //!    with the live puts by the owner's stamp in the book (§2.10, 0.2);
 //! 6. the window, every delivery folded as it comes.
@@ -69,7 +72,17 @@ pub struct TelemetrySpec {
     /// presence is read, and the metric resources are the contracts' in
     /// hand, of the one owner the scope names.
     pub across_face: bool,
+    /// Across a face with no state metric resource in scope to GET, how
+    /// long the window waits after the subscriptions are declared before it
+    /// opens: a margin for the declarations to cross, never proof that they
+    /// did ([`Opening::Margin`], zk2py round 49's F-159).
+    pub settle: Duration,
 }
+
+/// [`TelemetrySpec::settle`]'s default: five times what a loopback face
+/// was measured to need (#819 TG: 24 of 24 samples put on the line lost
+/// with none, 0 of 24 at 50 ms).
+pub const DEFAULT_SETTLE: Duration = Duration::from_millis(250);
 
 impl TelemetrySpec {
     /// A window, zenoh's lease and `wait_before_close`, no face.
@@ -80,6 +93,7 @@ impl TelemetrySpec {
             lease: zenkey_model::budget::DEFAULT_LEASE,
             wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
             across_face: false,
+            settle: DEFAULT_SETTLE,
         }
     }
 
@@ -127,6 +141,8 @@ pub struct TelemetryObservation {
     pub skipped: Vec<String>,
     /// Set when the reading could not be made at all, with why.
     pub unobservable: Option<String>,
+    /// What the window opened on; `None` when it never opened.
+    pub opening: Option<Opening>,
 }
 
 /// What a subscription called back with.
@@ -226,7 +242,7 @@ pub async fn run_telemetry(
     store: &BundleStore,
     offline: &ContractSet,
     spec: TelemetrySpec,
-    listening: impl FnOnce() + Send,
+    listening: impl FnOnce(Opening) + Send,
 ) -> crate::report::TelemetryReport {
     let obs = observe(session, namespace, scope, store, offline, spec, listening).await;
     crate::judge::telemetry::judge(&obs)
@@ -243,7 +259,7 @@ pub async fn observe(
     store: &BundleStore,
     offline: &ContractSet,
     spec: TelemetrySpec,
-    listening: impl FnOnce() + Send,
+    listening: impl FnOnce(Opening) + Send,
 ) -> TelemetryObservation {
     let t = spec.timeout;
     let presence_scope = scope.presence_scope();
@@ -262,6 +278,7 @@ pub async fn observe(
         unresolved: 0,
         skipped: Vec::new(),
         unobservable: None,
+        opening: None,
     };
     if spec.across_face && scope.one_owner().is_none() {
         obs.unobservable = Some(
@@ -401,34 +418,42 @@ pub async fn observe(
     }
     drop(queue);
     reader.stall = Some(StallWatch::start(session).await);
-    // 3. The seed presence stands on, bounded by its reads' own timeouts.
-    if !spec.across_face {
+    // 3. The seed presence stands on, bounded by its reads' own timeouts:
+    // the round trip the window opens on (F-154).
+    let opening = if spec.across_face {
+        // Across a face there is no seed, so S4's GETs come first: the
+        // owner's answer, made after the subscriptions, is the round trip
+        // (zk2py round 49's F-159). With no state metric resource in scope
+        // there is none to make.
+        if state_gets(session, &scope, &mut obs, &mut reader, &mut rx, t, None).await {
+            Opening::StateGet
+        } else {
+            tokio::time::sleep(spec.settle).await;
+            Opening::Margin(spec.settle)
+        }
+    } else {
         reader.reseed(&mut obs.book, &mut rx, None).await;
-    }
+        Opening::Seeded
+    };
+    obs.opening = Some(opening);
     // 4. The window opens (F-154), and every read below keeps to its end: a
     // state GET, a seed owed by a loss.
-    listening();
+    listening(opening);
     let opened = Instant::now();
     let deadline = tokio::time::Instant::from_std(opened + spec.window);
-    // 5. S4's GET of each state metric resource, after what the queue holds.
-    for m in obs.resources.iter().filter(|m| m.kind == Kind::State) {
-        let Some(sel) = scope.subscription(m) else {
-            continue;
-        };
-        let replies = tokio::time::timeout_at(deadline, state_replies(session, &sel, t)).await;
-        reader.drain(&mut obs.book, &mut rx);
-        match replies {
-            Ok(Ok(rs)) => {
-                for s in rs {
-                    reader.fold_sample(&mut obs.book, s);
-                }
-            }
-            Ok(Err(e)) => obs.skipped.push(e),
-            Err(_) => obs.skipped.push(format!(
-                "GET {sel}: the window ended before its replies did, so it seeded nothing"
-            )),
-        }
-        obs.asked.push(sel);
+    // 5. S4's GET of each state metric resource, after what the queue holds
+    // (made already across a face).
+    if !spec.across_face {
+        state_gets(
+            session,
+            &scope,
+            &mut obs,
+            &mut reader,
+            &mut rx,
+            t,
+            Some(deadline),
+        )
+        .await;
     }
     // 6. The window.
     reader.window(&mut obs.book, &mut rx, deadline).await;
@@ -441,20 +466,91 @@ pub async fn observe(
     obs
 }
 
+/// What a window opened on (zk2py round 47's F-154, round 49's F-159): the
+/// round trip made after the subscriptions were declared, whose answer
+/// comes back over the same links after them, so the far side holds them
+/// once it is in. A sample put once the window opens is inside it, unless
+/// it opened on [`Opening::Margin`], a wait and no round trip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Opening {
+    /// The presence seed's liveliness read.
+    Seeded,
+    /// Across a face, where no presence is read: S4's GET of the state
+    /// metric resources in scope, at least one of them answered.
+    StateGet,
+    /// Across a face, with no state metric resource in scope or none of
+    /// their GETs answered: no round trip was made after the subscriptions,
+    /// so the far side is not known to hold them; the window opened after
+    /// [`TelemetrySpec::settle`], a margin and never proof. A stream has no
+    /// queryable, and presence and descriptors do not cross, so nothing
+    /// else could answer.
+    Margin(Duration),
+}
+
+/// S4's GET of each state metric resource in scope, after what the queue
+/// holds, each folded by the owner's stamp; bounded by `deadline` when
+/// given, else by each GET's own timeout. Whether any GET was answered:
+/// it ran to its final reply.
+async fn state_gets(
+    session: &Session,
+    scope: &TelemetryScope,
+    obs: &mut TelemetryObservation,
+    reader: &mut Reader<'_>,
+    rx: &mut tokio::sync::mpsc::Receiver<Delivery>,
+    t: Duration,
+    deadline: Option<tokio::time::Instant>,
+) -> bool {
+    let mut answered = false;
+    let state: Vec<Arc<MetricResource>> = obs
+        .resources
+        .iter()
+        .filter(|m| m.kind == Kind::State)
+        .cloned()
+        .collect();
+    for m in state {
+        let Some(sel) = scope.subscription(&m) else {
+            continue;
+        };
+        let replies = match deadline {
+            Some(d) => tokio::time::timeout_at(d, state_replies(session, &sel, t)).await,
+            None => Ok(state_replies(session, &sel, t).await),
+        };
+        reader.drain(&mut obs.book, rx);
+        match replies {
+            Ok(Ok((rs, complete))) => {
+                answered |= complete;
+                for s in rs {
+                    reader.fold_sample(&mut obs.book, s);
+                }
+            }
+            Ok(Err(e)) => obs.skipped.push(e),
+            Err(_) => obs.skipped.push(format!(
+                "GET {sel}: the window ended before its replies did, so it seeded nothing"
+            )),
+        }
+        obs.asked.push(sel);
+    }
+    answered
+}
+
 /// S4's GET of `selector` (core §4.2): target `All`, consolidation
-/// `Latest`; a reply on a wildcard key is discarded (R6).
+/// `Latest`; a reply on a wildcard key is discarded (R6). With the samples,
+/// whether the GET ran to its final reply: no error reply, zenoh's
+/// `Timeout` among them.
 async fn state_replies(
     session: &Session,
     selector: &str,
     timeout: Duration,
-) -> Result<Vec<MetricSample>, String> {
+) -> Result<(Vec<MetricSample>, bool), String> {
     let replies =
         crate::bus::query::state_get(session, selector, &crate::bus::query::GetOpts::new(timeout))
             .await
             .map_err(|e| format!("GET {selector}: {}", crate::one_line(&e)))?;
     let mut out = Vec::new();
+    let mut complete = true;
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
+            complete = false;
             continue;
         };
         if sample.key_expr().is_wild() {
@@ -462,7 +558,7 @@ async fn state_replies(
         }
         out.push(sample_of(sample, SampleVia::Get));
     }
-    Ok(out)
+    Ok((out, complete))
 }
 
 /// The reader's state beside the book: what resolves keys, and what it

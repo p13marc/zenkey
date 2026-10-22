@@ -14,7 +14,8 @@
 //!    (§2.7). Across a constrained face neither crosses, and the
 //!    deployment's word stands for them (§2.8, R7). The window opens after
 //!    this read, which was answered after the subscriptions were declared
-//!    (#819 TE, F-154); across a face, once they are declared;
+//!    (#819 TE, F-154); across a face, after the first reading's GET, the
+//!    round trip there (#819 TG, F-159);
 //! 3. two readings, a grace apart (or the window apart): each one GET of the
 //!    owners' `health.v1/state/**`, target `All`, consolidation `Latest`
 //!    (core S4), which answers a status and its checks together (§2.4, core
@@ -376,8 +377,9 @@ pub async fn run_health(
 /// `presence`, when given, is the read a caller already made (`check
 /// conform`), and is not made again. `listening` runs once the window
 /// opens, its subscriptions declared and presence read after them (zk2py
-/// round 47's F-154, #819 TE): the router holds them then, and a status or a
-/// fault put from then on is heard. The window counts from that moment; with
+/// round 47's F-154, #819 TE) or, across a face, the first reading's GET
+/// answered after them (#819 TG, F-159): the far side holds them then, and
+/// a status or a fault put from then on is heard. The window counts from that moment; with
 /// no window, or one whose subscriptions could not be declared, `listening`
 /// never runs.
 pub async fn observe(
@@ -402,12 +404,24 @@ pub async fn observe(
                 .map_err(|e| crate::one_line(&e)),
         ),
     };
+    let selector = target.state_selector();
+    // Across a face no presence is read, so the first reading's GET,
+    // answered by the owner after the subscription, is the round trip the
+    // window opens on (#819 TG, as zk2py round 49's F-159 found of
+    // `telemetry`); without a face, the presence read above was.
+    let across = if spec.face.is_some() {
+        Some(get(session, &selector, t).await)
+    } else {
+        None
+    };
     if matches!(window, Some(Ok(_))) {
         listening();
     }
     let opened = Instant::now();
-    let selector = target.state_selector();
-    let first = get(session, &selector, t).await;
+    let first = match across {
+        Some(first) => first,
+        None => get(session, &selector, t).await,
+    };
     let wait = match spec.window {
         Some(w) => (opened + w).saturating_duration_since(Instant::now()),
         None => spec.grace,

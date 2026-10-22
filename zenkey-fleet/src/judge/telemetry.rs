@@ -612,6 +612,7 @@ mod tests {
                 unresolved: 0,
                 skipped: vec![],
                 unobservable: None,
+                opening: None,
             })
         };
         let answer = |r: &TelemetryReport, key: &str| {
@@ -771,6 +772,7 @@ mod tests {
                 unresolved: 0,
                 skipped: vec![],
                 unobservable: None,
+                opening: None,
             })
         };
         let reason = |r: &TelemetryReport| match r.judgement() {

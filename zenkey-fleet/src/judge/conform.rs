@@ -4739,6 +4739,7 @@ mod tests {
             unresolved: 0,
             skipped: vec![],
             unobservable: None,
+            opening: None,
         });
         let cases = telemetry_cases(&o);
         let verdict = |case: CaseId, subject: &str| {

@@ -279,6 +279,7 @@ pub use model::alarms::{
 // profile's reader reads them — the reads, the session-free book they fold
 // into, and the judge.
 pub use bus::telemetry::{
+    DEFAULT_SETTLE as TELEMETRY_DEFAULT_SETTLE, Opening as TelemetryOpening,
     SeedSeen as TelemetrySeedSeen, TelemetryObservation, TelemetrySpec, metric_resources,
     observe as observe_telemetry, run_telemetry,
 };
@@ -540,7 +541,7 @@ const _: () = {
             &store,
             &offline,
             crate::TelemetrySpec::new(std::time::Duration::ZERO, std::time::Duration::ZERO),
-            || {},
+            |_| {},
         ));
     }
 

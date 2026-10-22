@@ -483,7 +483,7 @@ pub async fn observe(
                 &store,
                 offline,
                 tspec,
-                || {},
+                |_| {},
             )
             .await,
         )
