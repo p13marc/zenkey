@@ -191,8 +191,9 @@ fn truncate(s: String) -> String {
 ///
 /// `Clone` since #257: pinning a subject clones the recorder so the pinned
 /// pane keeps the timeline it was showing. From the clone on, the two rings
-/// are two observers — each counts its own retention and its own evictions.
-#[derive(Debug, Clone)]
+/// are two observers — each counts its own retention and its own evictions,
+/// and each has a [generation](HistoryRing::generation) of its own.
+#[derive(Debug)]
 pub struct HistoryRing {
     entries: VecDeque<HistoryEntry>,
     max_entries: usize,
@@ -201,6 +202,32 @@ pub struct HistoryRing {
     /// Entries dropped to stay within the bounds (RFC 09 §5.1 O6).
     evicted: u64,
     next_seq: u64,
+    /// See [`HistoryRing::generation`].
+    generation: u64,
+}
+
+/// Every ring generation handed out so far, process-wide: no two rings, and
+/// no ring before and after a clear, share one.
+static GENERATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn fresh_generation() -> u64 {
+    GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+impl Clone for HistoryRing {
+    /// A clone is another observer from here on: same entries, a new
+    /// generation, so nothing folded over the original is taken for it.
+    fn clone(&self) -> HistoryRing {
+        HistoryRing {
+            entries: self.entries.clone(),
+            max_entries: self.max_entries,
+            max_bytes: self.max_bytes,
+            bytes: self.bytes,
+            evicted: self.evicted,
+            next_seq: self.next_seq,
+            generation: fresh_generation(),
+        }
+    }
 }
 
 impl HistoryRing {
@@ -213,7 +240,18 @@ impl HistoryRing {
             bytes: 0,
             evicted: 0,
             next_seq: 0,
+            generation: fresh_generation(),
         }
+    }
+
+    /// Which run of entries this ring holds (#819, TD; review of PR #829).
+    /// Within one generation `seq` only grows, one per push, and entries
+    /// leave only from the oldest end; a clear, and a clone, start another.
+    /// Two rings — a pin's and its follow slot's, or one recorder and the
+    /// next — never share one, so a reading folded over one is never taken
+    /// for another's however their `seq` ranges line up.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Re-bound the ring in place (#188) — the Settings overlay's live apply,
@@ -279,6 +317,7 @@ impl HistoryRing {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.bytes = 0;
+        self.generation = fresh_generation();
     }
 
     pub fn len(&self) -> usize {

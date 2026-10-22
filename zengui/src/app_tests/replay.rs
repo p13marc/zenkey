@@ -786,3 +786,57 @@ fn a_replayed_metric_reads_as_a_live_one() {
         }
     }
 }
+
+/// A replay rewound starts each recorder over (review of PR #829): the
+/// rows come again from the top, and a ring that kept the later ones
+/// before them would pair the last count with the first — a decrease
+/// within one in-band epoch, a false finding. The ring is cleared, the
+/// fold rebuilds, and no decrease is claimed.
+#[test]
+fn a_rewound_replay_claims_no_decrease() {
+    let meter = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/meter.v1.toml");
+    let loaded = crate::services::contracts::load_all(&[meter]);
+    let header = r#"{"zrec":3,"selectors":["zk2/**"],"base":"","captured_at":"x","excluded":["@stream","@state","@op","@zk","@adv"]}"#;
+    let frames = "zk2/lab/meter/meter.v1/stream/frames";
+    let file: Vec<String> = std::iter::once(header.to_string())
+        .chain((0..5u64).map(|i| {
+            format!(
+                r#"{{"key":"{frames}","t":{},"encoding":"application/json","value":{{"timestamp":{},"value":{{"type":"counter","value":{}}},"epoch":"e1"}}}}"#,
+                i * 500_000,
+                1_000 + i * 500,
+                10 * i
+            )
+        }))
+        .collect();
+    let mut app = test_app();
+    let _ = app.update(Message::Bus(crate::message::BusMsg::ContractsLoaded(
+        Arc::new(loaded),
+    )));
+    let _ = open_replay(&mut app, file.join("\n").as_bytes());
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
+        frames.into(),
+    ))));
+    let _ = scrub(&mut app, 2_000_000);
+    let _ = scrub(&mut app, 500_000);
+    let _ = scrub(&mut app, 2_000_000);
+    let m = app
+        .sub
+        .follow
+        .series
+        .as_ref()
+        .unwrap()
+        .metric
+        .clone()
+        .unwrap();
+    assert_eq!(m.tally.decreased, 0, "no pair across the rewind");
+    assert!(m.decreases.is_empty());
+    assert_eq!(
+        m.value.points(),
+        [Some(0.0), Some(10.0), Some(20.0), Some(30.0), Some(40.0)],
+        "the rows from the top, once"
+    );
+    // Each entry decoded once: four rows after the selection, the two the
+    // rewind fed again into a cleared ring, then the last three.
+    assert_eq!(app.sub.follow.metric.as_ref().unwrap().decoded(), 4 + 2 + 3);
+}

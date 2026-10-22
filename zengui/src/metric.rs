@@ -31,10 +31,13 @@
 //! in-band or assumed. A decrease is a finding only within an in-band
 //! epoch; with none, it reads as a reset (§2.10).
 //!
-//! **The window is the ring's.** The book is rebuilt from the retained
-//! entries, so the charts and the pairs cover exactly what the timeline
-//! holds. The oldest retained sample closes no pair, whatever came before
-//! it, and a state member's merge (§2.10) runs over the window.
+//! **The window is the ring's, and it is folded once.** A [`MetricFold`]
+//! keeps one book per slot and hands it each ring entry once, in `seq`
+//! order, as the ring grows; the charts, the counts and the pairs are the
+//! retained entries'. It rebuilds over the retained entries only when it
+//! cannot follow the ring (another member, revision or ring generation, a
+//! rewind, or entries evicted before they were folded), and then the oldest
+//! retained sample closes no pair.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -173,9 +176,6 @@ pub struct NoRates {
 /// What the window's history says of one metric member: see the module doc.
 #[derive(Debug, Clone)]
 pub struct MetricRead {
-    /// What the read was made of: a read over the same window and the same
-    /// resolution is the same read ([`Window`]).
-    pub window: Window,
     /// The resource's declaration (§2.2): `declared`, or `invalid` with its
     /// reasons.
     pub declaration: Declaration,
@@ -185,7 +185,7 @@ pub struct MetricRead {
     /// The member's unit, as its latest sample gave it, else the declared
     /// one; `None` is unknown, never dimensionless (§2.5).
     pub unit: Option<(String, Source)>,
-    /// Values read, a delete not counted.
+    /// Values read in the window, a delete not counted.
     pub samples: u64,
     pub conforming: u64,
     pub does_not: u64,
@@ -210,38 +210,15 @@ pub struct MetricRead {
     /// `arrival` (§2.11).
     pub rate_base: Option<&'static str>,
     pub no_rate: NoRates,
-    /// Every pair, as the book tallied it (§2.10).
+    /// Every pair whose later sample the window holds, as the book judged
+    /// it (§2.10): a pair stays while its later sample is retained, so the
+    /// window's oldest entry may count the pair it closed with a sample
+    /// already evicted.
     pub tally: PairTally,
     pub resets: Resets,
     /// The latest decreases within an established epoch, at most
     /// [`DECREASES_KEPT`].
     pub decreases: Vec<Decrease>,
-}
-
-/// What a read was made of: the ring's extent and the resource it resolved
-/// to. Two reads of one window are equal, so a tick that brought the key
-/// nothing reuses the last read rather than decoding the ring again.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Window {
-    /// The member, namespace-relative: two members of one templated
-    /// resource are two windows however their rings line up.
-    pub key: String,
-    pub oldest: Option<u64>,
-    pub newest: Option<u64>,
-    pub fingerprint: String,
-    pub index: usize,
-}
-
-impl Window {
-    pub fn of(resolved: &Resolved, ring: &HistoryRing) -> Window {
-        Window {
-            key: resolved.key.clone(),
-            oldest: ring.iter().next_back().map(|e| e.seq),
-            newest: ring.newest().map(|e| e.seq),
-            fingerprint: resolved.revision.fingerprint().to_string(),
-            index: resolved.index(),
-        }
-    }
 }
 
 impl MetricRead {
@@ -365,65 +342,191 @@ pub fn measure_words(m: &Measure) -> String {
     }
 }
 
-/// `resolved`'s metric member over `ring` (the module doc): `None` when the
-/// resource is no metric resource (§2.1). An invalid declaration is read
-/// as one, and nothing of its samples is (§2.2).
-pub fn read(resolved: &Resolved, ring: &HistoryRing) -> Option<MetricRead> {
-    let metric = Arc::new(MetricResource::of(
-        &resolved.address,
-        &resolved.revision,
-        resolved.index(),
-    )?);
-    let declaration = metric.ty.declaration.clone();
-    let declared = declaration.declared().cloned();
-    let mut out = MetricRead {
-        window: Window::of(resolved, ring),
-        kind: declared
-            .as_ref()
-            .and_then(|d| d.kind)
-            .map(|k| (k, Source::Declared)),
-        unit: declared
-            .as_ref()
-            .and_then(|d| d.unit.clone())
-            .map(|u| (u, Source::Declared)),
-        declaration,
-        samples: 0,
-        conforming: 0,
-        does_not: 0,
-        unobservable: 0,
-        unobservable_why: None,
-        deletes: 0,
-        last_does_not: None,
-        newest_conforms: false,
-        value: Series::new(),
-        rate: None,
-        rate_unit: None,
-        rate_base: None,
-        no_rate: NoRates::default(),
-        tally: PairTally::default(),
-        resets: Resets::default(),
-        decreases: Vec::new(),
-    };
-    if declared.is_none() {
-        return Some(out);
+/// What a fold reads, apart from its ring's entries: the member and the
+/// resource it resolved to, and the ring's generation. Any of it moving is
+/// a rebuild.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Inputs {
+    /// The member, namespace-relative.
+    key: String,
+    fingerprint: String,
+    index: usize,
+    /// [`HistoryRing::generation`]: another ring, or this one cleared.
+    generation: u64,
+}
+
+impl Inputs {
+    fn of(resolved: &Resolved, ring: &HistoryRing) -> Inputs {
+        Inputs {
+            key: resolved.key.clone(),
+            fingerprint: resolved.revision.fingerprint().to_string(),
+            index: resolved.index(),
+            generation: ring.generation(),
+        }
     }
-    // Arrivals count from the window's oldest, so every one is at or after
-    // the book's origin.
-    let t0 = ring
-        .iter()
-        .map(|e| e.received)
-        .min()
-        .unwrap_or_else(Instant::now);
-    let mut book = TelemetryBook::new(None, t0);
-    let key = resolved.key.clone();
-    let mut rate = Series::new();
-    // Oldest first: the ring iterates newest first.
-    for entry in ring.iter().rev() {
-        let before = book.member(&key).map_or(0, |m| m.conforming);
-        let seen = book.sample(
-            &metric,
+}
+
+/// What the book said of one sample (§2.6), or that it was no sample.
+#[derive(Debug, Clone)]
+enum Said {
+    Delete,
+    /// A state sample the late joiner's merge did not keep (§2.10, 0.2).
+    NotKept,
+    Conforms,
+    DoesNot(Vec<Problem>),
+    Unobservable(Option<Unasked>),
+}
+
+/// One folded ring entry: what the book said of it, its plotted value, and
+/// the pair it closed.
+#[derive(Debug, Clone)]
+struct Folded {
+    seq: u64,
+    said: Said,
+    value: Option<f64>,
+    pair: Option<zenkey_fleet::PairSeen>,
+}
+
+/// One slot's metric member, folded as its ring grows (review of PR #829):
+/// each entry is decoded and judged once, by one [`TelemetryBook`] kept for
+/// the fold's life, in `seq` order.
+///
+/// **A rebuild** — a fresh book over the retained entries — happens only
+/// when the fold could not follow the ring: another member, revision or
+/// ring generation (a clear, a clone), the ring's newest entry older than
+/// the last folded, or entries evicted before they were folded, a hole a
+/// pair must not span. The first retained entry of a rebuild closes no
+/// pair.
+///
+/// **Eviction** just drops an entry from the display: the charts, the
+/// counts and the pairs are the retained entries'. A pair belongs to its
+/// later sample, so it stays while that one is retained, though its earlier
+/// sample is gone.
+#[derive(Debug, Clone)]
+pub struct MetricFold {
+    inputs: Inputs,
+    metric: Arc<MetricResource>,
+    book: TelemetryBook,
+    /// The last `seq` folded, if any.
+    folded: Option<u64>,
+    entries: std::collections::VecDeque<Folded>,
+    /// Samples handed to the book since the fold began: each entry once.
+    decoded: u64,
+    read: Arc<MetricRead>,
+}
+
+impl MetricFold {
+    /// `resolved`'s member, folded over `ring`: `None` when the resource
+    /// is no metric resource (§2.1). An invalid declaration is read as one,
+    /// and nothing of its samples is (§2.2).
+    pub fn new(resolved: &Resolved, ring: &HistoryRing) -> Option<MetricFold> {
+        let metric = Arc::new(MetricResource::of(
+            &resolved.address,
+            &resolved.revision,
+            resolved.index(),
+        )?);
+        // Arrivals count from the window's oldest, so every one folded
+        // from here is at or after the book's origin; an entry arriving
+        // before it (a replay's rewound clock) saturates to it.
+        let t0 = ring
+            .iter()
+            .map(|e| e.received)
+            .min()
+            .unwrap_or_else(Instant::now);
+        let mut fold = MetricFold {
+            inputs: Inputs::of(resolved, ring),
+            read: Arc::new(MetricRead::empty(metric.ty.declaration.clone())),
+            metric,
+            book: TelemetryBook::new(None, t0),
+            folded: None,
+            entries: std::collections::VecDeque::new(),
+            decoded: 0,
+        };
+        fold.fold(ring);
+        Some(fold)
+    }
+
+    /// Whether this fold reads `resolved`'s member through the same
+    /// revision: a fold of another member is replaced, not advanced.
+    pub fn reads(&self, resolved: &Resolved) -> bool {
+        self.inputs.key == resolved.key
+            && self.inputs.index == resolved.index()
+            && self.inputs.fingerprint == resolved.revision.fingerprint().to_string()
+    }
+
+    /// Fold what `ring` appended since the last call, or rebuild when the
+    /// fold cannot follow it (the type doc). `true` when the read moved.
+    pub fn advance(&mut self, resolved: &Resolved, ring: &HistoryRing) -> bool {
+        let oldest = ring.iter().next_back().map(|e| e.seq);
+        let newest = ring.newest().map(|e| e.seq);
+        let rewound = matches!((self.folded, newest), (Some(f), Some(n)) if n < f)
+            || (self.folded.is_some() && newest.is_none());
+        let hole = matches!((self.folded, oldest), (Some(f), Some(o)) if o > f + 1);
+        if Inputs::of(resolved, ring) != self.inputs || rewound || hole {
+            let decoded = self.decoded;
+            match MetricFold::new(resolved, ring) {
+                Some(mut fresh) => {
+                    fresh.decoded += decoded;
+                    *self = fresh;
+                }
+                None => return false,
+            }
+            return true;
+        }
+        self.fold(ring)
+    }
+
+    /// The read, as of the last fold.
+    pub fn read(&self) -> Arc<MetricRead> {
+        Arc::clone(&self.read)
+    }
+
+    /// Samples decoded since the fold began, rebuilds included: what a tick
+    /// costs is what it appended.
+    pub fn decoded(&self) -> u64 {
+        self.decoded
+    }
+
+    /// Fold the entries after the last folded, oldest first, then drop the
+    /// ones the ring evicted. `true` when anything moved.
+    fn fold(&mut self, ring: &HistoryRing) -> bool {
+        let mut moved = false;
+        if self.metric.declared() {
+            let key = self.inputs.key.clone();
+            let after = self.folded;
+            for entry in ring
+                .iter()
+                .rev()
+                .filter(|e| after.is_none_or(|f| e.seq > f))
+            {
+                self.fold_one(&key, entry);
+                moved = true;
+            }
+        }
+        if let Some(n) = ring.newest() {
+            self.folded = Some(n.seq);
+        }
+        let oldest = ring.iter().next_back().map(|e| e.seq);
+        while self
+            .entries
+            .front()
+            .is_some_and(|e| oldest.is_none_or(|o| e.seq < o))
+        {
+            self.entries.pop_front();
+            moved = true;
+        }
+        if moved {
+            self.read = Arc::new(self.snapshot());
+        }
+        moved
+    }
+
+    fn fold_one(&mut self, key: &str, entry: &crate::history::HistoryEntry) {
+        let before = self.book.member(key).map(counts).unwrap_or_default();
+        let pair = self.book.sample(
+            &self.metric,
             MetricSample {
-                key: key.clone(),
+                key: key.to_owned(),
                 delete: entry.is_delete,
                 payload: entry.payload.to_bytes().into_owned(),
                 attachment: entry.attachment.as_ref().map(|a| a.to_bytes().into_owned()),
@@ -432,77 +535,198 @@ pub fn read(resolved: &Resolved, ring: &HistoryRing) -> Option<MetricRead> {
                 via: MetricVia::Subscription,
             },
         );
-        let member = book.member(&key);
-        let conformed = member.is_some_and(|m| m.conforming > before);
-        if !entry.is_delete {
-            out.newest_conforms = conformed;
-        }
-        match member
-            .filter(|_| conformed)
-            .and_then(|m| m.latest.as_ref())
-            .and_then(|r| plotted(&r.value))
-        {
-            Some(v) => out.value.push(v),
-            None => out.value.push_gap(),
-        }
-        let Some(seen) = seen else {
-            rate.push_gap();
-            continue;
+        self.decoded += 1;
+        let member = self.book.member(key);
+        let after = member.map(counts).unwrap_or_default();
+        let said = if after.deletes > before.deletes {
+            Said::Delete
+        } else if after.conforming > before.conforming {
+            Said::Conforms
+        } else if after.does_not > before.does_not {
+            Said::DoesNot(
+                member
+                    .and_then(|m| m.last_does_not.clone())
+                    .unwrap_or_default(),
+            )
+        } else if after.unobservable > before.unobservable {
+            Said::Unobservable(member.and_then(|m| m.unobservable_why))
+        } else {
+            Said::NotKept
         };
-        match &seen.pair.rate {
-            Ok(r) => {
-                rate.push(r.per_s);
-                out.rate_unit = r.unit.clone();
-                out.rate_base = Some(seen.base);
+        let value = match said {
+            Said::Conforms => member
+                .and_then(|m| m.latest.as_ref())
+                .and_then(|r| plotted(&r.value)),
+            _ => None,
+        };
+        self.entries.push_back(Folded {
+            seq: entry.seq,
+            said,
+            value,
+            pair,
+        });
+    }
+
+    /// The read over the retained entries: the charts one point per entry,
+    /// the counts and the pairs theirs, the kind and the unit the book's
+    /// latest (§2.5).
+    fn snapshot(&self) -> MetricRead {
+        let mut out = MetricRead::empty(self.metric.ty.declaration.clone());
+        if let Some(m) = self.book.member(&self.inputs.key) {
+            if m.kind.is_some() {
+                out.kind = m.kind;
             }
-            Err(why) => {
+            out.unit = m.unit.clone();
+        }
+        let mut rate = Series::new();
+        for e in &self.entries {
+            match &e.said {
+                Said::Delete => out.deletes += 1,
+                Said::NotKept => {}
+                Said::Conforms => {
+                    out.samples += 1;
+                    out.conforming += 1;
+                }
+                Said::DoesNot(why) => {
+                    out.samples += 1;
+                    out.does_not += 1;
+                    out.last_does_not = Some(why.clone());
+                }
+                Said::Unobservable(why) => {
+                    out.samples += 1;
+                    out.unobservable += 1;
+                    out.unobservable_why = *why;
+                }
+            }
+            if !matches!(e.said, Said::Delete) {
+                out.newest_conforms = matches!(e.said, Said::Conforms);
+            }
+            match e.value {
+                Some(v) => out.value.push(v),
+                None => out.value.push_gap(),
+            }
+            let Some(seen) = &e.pair else {
                 rate.push_gap();
-                match why {
-                    NoRate::Reset => out.no_rate.reset += 1,
-                    NoRate::Decreased => out.no_rate.decreased += 1,
-                    NoRate::Elapsed => out.no_rate.elapsed += 1,
-                    NoRate::Kind => {}
+                continue;
+            };
+            match &seen.pair.rate {
+                Ok(r) => {
+                    rate.push(r.per_s);
+                    out.rate_unit = r.unit.clone();
+                    out.rate_base = Some(seen.base);
+                }
+                Err(why) => {
+                    rate.push_gap();
+                    match why {
+                        NoRate::Reset => out.no_rate.reset += 1,
+                        NoRate::Decreased => out.no_rate.decreased += 1,
+                        NoRate::Elapsed => out.no_rate.elapsed += 1,
+                        NoRate::Kind => {}
+                    }
                 }
             }
-        }
-        match (seen.pair.continuity, seen.pair.basis) {
-            (Continuity::Reset, Some(Basis::Established(Via::InBand))) => out.resets.in_band += 1,
-            (Continuity::Reset, Some(Basis::Established(Via::Presence))) => {
-                out.resets.by_presence += 1;
+            let t = &mut out.tally;
+            match seen.pair.continuity {
+                Continuity::SameEpoch => t.same_epoch += 1,
+                Continuity::Reset => t.reset += 1,
+                Continuity::Decreased => t.decreased += 1,
+                Continuity::Unobservable => t.unobservable += 1,
+                Continuity::NotAsked => t.not_asked += 1,
             }
-            (Continuity::Reset, _) => out.resets.assumed += 1,
-            (Continuity::Decreased, Some(Basis::Established(via))) => {
-                if out.decreases.len() == DECREASES_KEPT {
-                    out.decreases.remove(0);
+            match seen.pair.basis {
+                Some(Basis::Established(Via::InBand)) => t.in_band += 1,
+                Some(Basis::Established(Via::Presence)) => t.by_presence += 1,
+                Some(Basis::Assumed) => t.assumed += 1,
+                None => {}
+            }
+            match (seen.pair.continuity, seen.pair.basis) {
+                (Continuity::Reset, Some(Basis::Established(Via::InBand))) => {
+                    out.resets.in_band += 1;
                 }
-                out.decreases.push(Decrease {
-                    seq: entry.seq,
-                    earlier: seen.earlier.clone(),
-                    later: seen.later.clone(),
-                    via,
-                });
+                (Continuity::Reset, Some(Basis::Established(Via::Presence))) => {
+                    out.resets.by_presence += 1;
+                }
+                (Continuity::Reset, _) => out.resets.assumed += 1,
+                // `pair` answers `decreased` only within an established
+                // epoch; an assumed decrease is a reset (§2.10).
+                (Continuity::Decreased, Some(Basis::Established(via))) => {
+                    if out.decreases.len() == DECREASES_KEPT {
+                        out.decreases.remove(0);
+                    }
+                    out.decreases.push(Decrease {
+                        seq: e.seq,
+                        earlier: seen.earlier.clone(),
+                        later: seen.later.clone(),
+                        via,
+                    });
+                }
+                _ => {}
             }
-            _ => {}
+        }
+        if out.kind.is_some_and(|(k, _)| k == MetricKind::Counter) {
+            out.rate = Some(rate);
+        }
+        out
+    }
+}
+
+/// A member's running counts, to tell what the book said of the sample just
+/// folded.
+#[derive(Debug, Clone, Copy, Default)]
+struct Counts {
+    conforming: u64,
+    does_not: u64,
+    unobservable: u64,
+    deletes: u64,
+}
+
+fn counts(m: &zenkey_fleet::MemberBook) -> Counts {
+    Counts {
+        conforming: m.conforming,
+        does_not: m.does_not,
+        unobservable: m.unobservable,
+        deletes: m.deletes,
+    }
+}
+
+impl MetricRead {
+    /// A read of nothing yet: the declaration's kind and unit (§2.5).
+    fn empty(declaration: Declaration) -> MetricRead {
+        let declared = declaration.declared().cloned();
+        MetricRead {
+            kind: declared
+                .as_ref()
+                .and_then(|d| d.kind)
+                .map(|k| (k, Source::Declared)),
+            unit: declared
+                .as_ref()
+                .and_then(|d| d.unit.clone())
+                .map(|u| (u, Source::Declared)),
+            declaration,
+            samples: 0,
+            conforming: 0,
+            does_not: 0,
+            unobservable: 0,
+            unobservable_why: None,
+            deletes: 0,
+            last_does_not: None,
+            newest_conforms: false,
+            value: Series::new(),
+            rate: None,
+            rate_unit: None,
+            rate_base: None,
+            no_rate: NoRates::default(),
+            tally: PairTally::default(),
+            resets: Resets::default(),
+            decreases: Vec::new(),
         }
     }
-    if let Some(m) = book.member(&key) {
-        if m.kind.is_some() {
-            out.kind = m.kind;
-        }
-        out.unit = m.unit.clone();
-        out.samples = m.samples;
-        out.conforming = m.conforming;
-        out.does_not = m.does_not;
-        out.unobservable = m.unobservable;
-        out.unobservable_why = m.unobservable_why;
-        out.deletes = m.deletes;
-        out.last_does_not = m.last_does_not.clone();
-        out.tally = m.tally;
-    }
-    if out.kind.is_some_and(|(k, _)| k == MetricKind::Counter) {
-        out.rate = Some(rate);
-    }
-    Some(out)
+}
+
+/// `resolved`'s metric member over `ring`, read once ([`MetricFold`]):
+/// `None` when the resource is no metric resource (§2.1).
+pub fn read(resolved: &Resolved, ring: &HistoryRing) -> Option<MetricRead> {
+    MetricFold::new(resolved, ring).map(|f| (*f.read()).clone())
 }
 
 #[cfg(test)]
@@ -546,6 +770,122 @@ mod tests {
             });
         }
         ring
+    }
+
+    /// One bare `By` counter sample, `n`, arriving at `i` half-seconds.
+    fn push_count(ring: &mut HistoryRing, t0: Instant, i: u64, n: u64) {
+        ring.push(&zenkey_fleet::SampleView {
+            key: "k".into(),
+            payload: zenoh::bytes::ZBytes::from(n.to_string().into_bytes()),
+            encoding: "application/json".into(),
+            kind: zenoh::sample::SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: Some(zenoh::bytes::ZBytes::from(br#""e1""#.to_vec())),
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: t0 + std::time::Duration::from_millis(500 * i),
+        });
+    }
+
+    /// Review of PR #829: a long run folds each entry once, however many
+    /// ticks the window moves on, and eviction only drops entries from the
+    /// display. A pair belongs to its later sample, so the window's oldest
+    /// entry keeps the rate of the pair it closed with an evicted one.
+    #[test]
+    fn a_long_run_folds_each_entry_once() {
+        let set = meter();
+        let r = resolve(&set, "zk2/lab/meter/meter.v1/stream/bytes");
+        let t0 = Instant::now();
+        let mut ring = HistoryRing::new(16);
+        let mut fold = MetricFold::new(&r, &ring).expect("a metric");
+        for i in 0..100u64 {
+            push_count(&mut ring, t0, i, 50 * i);
+            assert!(fold.advance(&r, &ring), "each push moves the read");
+            assert!(
+                !fold.advance(&r, &ring),
+                "a tick with nothing new decodes nothing"
+            );
+        }
+        assert_eq!(fold.decoded(), 100, "each entry decoded once");
+        let m = fold.read();
+        assert_eq!(m.value.len(), 16, "the window's entries alone");
+        assert_eq!(m.samples, 16);
+        let rate = m.rate.as_ref().unwrap();
+        assert_eq!(rate.points(), [Some(100.0); 16]);
+        assert_eq!(m.tally.same_epoch, 16, "a pair stays with its later sample");
+        // A one-shot read of the same window agrees, but for the pair the
+        // oldest retained entry closed with an evicted one.
+        let once = read(&r, &ring).unwrap();
+        assert_eq!(once.value.points(), m.value.points());
+        assert_eq!(once.rate.as_ref().unwrap().points()[0], None);
+    }
+
+    /// Review of PR #829: a fold is never taken for another ring's. A new
+    /// ring with the very same `seq` range (a new recorder for the same
+    /// member, a pin's clone) is another generation, a clear is too, and
+    /// entries evicted before they were folded are a hole no pair spans —
+    /// each a rebuild over the retained entries alone.
+    #[test]
+    fn a_fold_rebuilds_when_it_cannot_follow_its_ring() {
+        let set = meter();
+        let r = resolve(&set, "zk2/lab/meter/meter.v1/stream/bytes");
+        let t0 = Instant::now();
+        let mut a = HistoryRing::new(16);
+        for i in 0..3 {
+            push_count(&mut a, t0, i, 10 * i);
+        }
+        let mut fold = MetricFold::new(&r, &a).unwrap();
+        assert_eq!(
+            fold.read().value.points(),
+            [Some(0.0), Some(10.0), Some(20.0)]
+        );
+
+        // Another ring, the same member, the same seqs 0..=2.
+        let mut b = HistoryRing::new(16);
+        for i in 0..3 {
+            push_count(&mut b, t0, i, 7 * i);
+        }
+        assert!(fold.advance(&r, &b));
+        assert_eq!(
+            fold.read().value.points(),
+            [Some(0.0), Some(7.0), Some(14.0)],
+            "the new ring's, never the old read"
+        );
+        assert_eq!(fold.decoded(), 6);
+        let pinned = b.clone();
+        assert_ne!(
+            pinned.generation(),
+            b.generation(),
+            "a clone is another observer"
+        );
+
+        // Cleared: another generation, though seqs go on from 3.
+        b.clear();
+        push_count(&mut b, t0, 3, 5);
+        assert!(fold.advance(&r, &b));
+        assert_eq!(fold.read().value.points(), [Some(5.0)]);
+        assert_eq!(fold.decoded(), 7);
+
+        // A hole: ten pushes into a ring of four between two folds.
+        let mut c = HistoryRing::new(4);
+        push_count(&mut c, t0, 0, 0);
+        let mut fold = MetricFold::new(&r, &c).unwrap();
+        for i in 1..11 {
+            push_count(&mut c, t0, i, 1000 - i);
+        }
+        assert!(fold.advance(&r, &c));
+        assert_eq!(fold.decoded(), 1 + 4, "the retained four, refolded");
+        let m = fold.read();
+        assert_eq!(
+            m.rate.as_ref().unwrap().points()[0],
+            None,
+            "no pair across the hole"
+        );
+        assert_eq!(m.decreases.len(), 3, "the retained pairs' own decreases");
     }
 
     /// A Point counter's plotted leaf is `value.value`, never `timestamp`

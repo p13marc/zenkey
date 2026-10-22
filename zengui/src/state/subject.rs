@@ -83,6 +83,11 @@ sub_state! {
         /// rebuild point; everything that can change the chart calls it, and
         /// nothing else may write this field.
         pub(crate) series: Option<view::detail::SeriesData>,
+        /// The slot key's `telemetry.v1` metric member, folded as its
+        /// history grows (#819, TD; review of PR #829): one book per slot,
+        /// each ring entry decoded once. `None` when the key resolves to no
+        /// metric resource, or nothing records it.
+        pub(crate) metric: Option<crate::metric::MetricFold>,
         /// The bounded field observation on the slot key (#223): run on
         /// demand, dropped with the subject — its report is evidence about
         /// one key's window.
@@ -115,6 +120,7 @@ impl SubjectSlot {
             rate_series: crate::series::RateSampler::new(),
             series_leaf: None,
             series: None,
+            metric: None,
             fields: view::fields::FieldsState::default(),
             why: view::why::WhyState::default(),
             consumers: view::consumers::ConsumersState::default(),
@@ -131,7 +137,29 @@ impl SubjectSlot {
     /// unit are *contract* facts about the key, not something the history
     /// ring knows (`telemetry.v1` §2.5; #819, TD).
     pub(crate) fn refresh_series(&mut self, identities: &crate::keyfacts::IdentityCache) {
+        self.advance_metric(identities);
         self.series = self.series_data(identities);
+    }
+
+    /// Fold what the slot's ring appended into its metric member (#819,
+    /// TD): the fold follows its member while the key resolves to the same
+    /// revision, and is replaced when it does not; it rebuilds itself when
+    /// it cannot follow the ring ([`crate::metric::MetricFold`]).
+    fn advance_metric(&mut self, identities: &crate::keyfacts::IdentityCache) {
+        let Some(rec) = self.history.as_ref() else {
+            self.metric = None;
+            return;
+        };
+        let Some(resolved) = identities.get(&rec.key).and_then(|r| r.resolved.as_ref()) else {
+            self.metric = None;
+            return;
+        };
+        match &mut self.metric {
+            Some(fold) if fold.reads(resolved) => {
+                fold.advance(resolved, &rec.ring);
+            }
+            _ => self.metric = crate::metric::MetricFold::new(resolved, &rec.ring),
+        }
     }
 
     /// Derive the detail section's sparkline data from the recorded history
@@ -145,27 +173,15 @@ impl SubjectSlot {
     ///
     /// A key that resolves to a `telemetry.v1` metric resource is read by
     /// the profile instead (#819, TD; [`crate::metric`]): its value, its
-    /// unit, and a counter's rate. That read is reused while the window and
-    /// the resolution stand still, so a tick that brought the key nothing
-    /// decodes nothing.
+    /// unit, and a counter's rate, from the slot's fold, which decodes each
+    /// entry once.
     fn series_data(
         &self,
         identities: &crate::keyfacts::IdentityCache,
     ) -> Option<view::detail::SeriesData> {
         let rec = self.history.as_ref()?;
         let resolved = identities.get(&rec.key).and_then(|r| r.resolved.as_ref());
-        let metric = resolved.and_then(|r| {
-            let window = crate::metric::Window::of(r, &rec.ring);
-            let held = self
-                .series
-                .as_ref()
-                .and_then(|s| s.metric.as_ref())
-                .filter(|m| m.window == window);
-            match held {
-                Some(m) => Some(Arc::clone(m)),
-                None => crate::metric::read(r, &rec.ring).map(Arc::new),
-            }
-        });
+        let metric = self.metric.as_ref().map(crate::metric::MetricFold::read);
         let unit = crate::metric::unit_of(resolved, metric.as_deref());
         // A metric member plots the profile's value; the structural leaves
         // are for everything else, a metric whose declaration is invalid
@@ -310,6 +326,9 @@ impl SubjectState {
             // Rebuilt below: a `SeriesData` carries retained canvas geometry,
             // which is per-surface by nature.
             series: None,
+            // Folded again below, over the pin's own ring: a clone is
+            // another generation, never the follow slot's fold (#819, TD).
+            metric: None,
             fields,
             why: view::why::WhyState::default(),
             consumers: view::consumers::ConsumersState::default(),
