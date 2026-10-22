@@ -20,8 +20,10 @@
 //! 4. **the window opens** (zk2py round 47's F-154): the caller's
 //!    `listening` runs with what it opened on ([`Opening`]), and
 //!    `spec.window` counts from that moment. The subscriptions are declared
-//!    and the seed's read was answered after them, so the router holds
-//!    them, and a sample put from then on is the window's. Across a face,
+//!    and, after the seed, each owner instance in scope answered its
+//!    descriptor GET (#819 TG): the seed proves only that the router holds
+//!    them, and an owner's put is dropped at its source until its session
+//!    does. So a sample put from then on is the window's. Across a face,
 //!    where no presence is read, step 5 comes first: S4's GET, answered by
 //!    the owner after the subscriptions, is the round trip (round 49's
 //!    F-159). With no state metric resource in scope, nothing can answer:
@@ -289,12 +291,14 @@ pub async fn observe(
         return obs;
     }
     // 1. What is in scope.
+    let mut first_instances = BTreeSet::new();
     let catalog = if spec.across_face {
         None
     } else {
         obs.asked.push(presence_scope.selector());
         match crate::bus::presence::observe(session, &presence_scope, t).await {
             Ok(o) => {
+                first_instances = o.instances();
                 let c = Catalog::new(&o);
                 let _ = store.fetch_all(session, &c.wanted()).await;
                 Some(c)
@@ -343,6 +347,7 @@ pub async fn observe(
         stall_seen: StallSeen::default(),
         owed_seed: false,
         seed: None,
+        seeded_instances: None,
     };
     let subscriptions: BTreeSet<String> = obs
         .resources
@@ -418,22 +423,57 @@ pub async fn observe(
     }
     drop(queue);
     reader.stall = Some(StallWatch::start(session).await);
-    // 3. The seed presence stands on, bounded by its reads' own timeouts:
-    // the round trip the window opens on (F-154).
+    // 3. The seed presence stands on, bounded by its reads' own timeouts,
+    // then the round trip the window opens on (F-154, F-159): one that
+    // reaches every owner in scope after the subscriptions.
     let opening = if spec.across_face {
         // Across a face there is no seed, so S4's GETs come first: the
         // owner's answer, made after the subscriptions, is the round trip
         // (zk2py round 49's F-159). With no state metric resource in scope
         // there is none to make.
         if state_gets(session, &scope, &mut obs, &mut reader, &mut rx, t, None).await {
-            Opening::StateGet
+            Opening::Answered { asked: 1 }
         } else {
             tokio::time::sleep(spec.settle).await;
             Opening::Margin(spec.settle)
         }
     } else {
         reader.reseed(&mut obs.book, &mut rx, None).await;
-        Opening::Seeded
+        // The seed is answered by the router from its own table: it proves
+        // the router holds the subscriptions, never that an owner's session
+        // does, and zenoh drops a put at its source until the owner's
+        // session knows a matching subscriber (#819 TG's gate: 11 of 400
+        // samples put on the line lost under load, each with its writer
+        // unmatched). Each owner instance's descriptor GET is answered by
+        // that session after the declarations reach it, over the same link.
+        let owners: BTreeSet<zenkey_model::grammar::Addr> =
+            obs.resources.iter().map(|m| m.address.clone()).collect();
+        let wanted: Vec<_> = reader
+            .seeded_instances
+            .clone()
+            .unwrap_or(first_instances)
+            .into_iter()
+            .filter(|(a, _)| owners.contains(a))
+            .collect();
+        let asked = wanted.len();
+        let reads = crate::bus::presence::describe_each(session, wanted, t).await;
+        let silent = asked
+            - reads
+                .values()
+                .filter(|r| {
+                    matches!(
+                        r,
+                        crate::model::catalog::DescriptorRead::Served(_)
+                            | crate::model::catalog::DescriptorRead::Invalid(_)
+                    )
+                })
+                .count();
+        reader.drain(&mut obs.book, &mut rx);
+        if silent == 0 {
+            Opening::Answered { asked }
+        } else {
+            Opening::Unanswered { silent, asked }
+        }
     };
     obs.opening = Some(opening);
     // 4. The window opens (F-154), and every read below keeps to its end: a
@@ -466,18 +506,23 @@ pub async fn observe(
     obs
 }
 
-/// What a window opened on (zk2py round 47's F-154, round 49's F-159): the
-/// round trip made after the subscriptions were declared, whose answer
-/// comes back over the same links after them, so the far side holds them
-/// once it is in. A sample put once the window opens is inside it, unless
-/// it opened on [`Opening::Margin`], a wait and no round trip.
+/// What a window opened on (zk2py round 47's F-154, round 49's F-159, #819
+/// TG): the round trip made after the subscriptions were declared that
+/// reaches each owner in scope, whose answer comes back after the
+/// declarations reached the owner's session over the same links, so it
+/// holds them and a put of its is not dropped at its source. A sample put
+/// once the window opens is inside it when it opened [`Opening::Answered`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Opening {
-    /// The presence seed's liveliness read.
-    Seeded,
-    /// Across a face, where no presence is read: S4's GET of the state
-    /// metric resources in scope, at least one of them answered.
-    StateGet,
+    /// Every one of the `asked` answered: each owner instance in scope its
+    /// descriptor GET, after the presence seed; across a face, where no
+    /// presence is read, S4's GET of the state metric resources in scope.
+    /// No owner in scope: nothing to ask, and nothing that could put.
+    Answered { asked: usize },
+    /// `silent` of the `asked` owner instances answered no descriptor GET
+    /// within the timeout: those may not hold the subscriptions yet, and a
+    /// sample one puts at once may be dropped before it leaves.
+    Unanswered { silent: usize, asked: usize },
     /// Across a face, with no state metric resource in scope or none of
     /// their GETs answered: no round trip was made after the subscriptions,
     /// so the far side is not known to hold them; the window opened after
@@ -579,6 +624,13 @@ struct Reader<'a> {
     stall_seen: StallSeen,
     owed_seed: bool,
     seed: Option<Result<SeedSeen, String>>,
+    /// The owner instances the last seed that stood found.
+    seeded_instances: Option<
+        BTreeSet<(
+            zenkey_model::grammar::Addr,
+            zenkey_model::grammar::InstanceId,
+        )>,
+    >,
 }
 
 impl Reader<'_> {
@@ -739,6 +791,7 @@ impl Reader<'_> {
                     continue;
                 }
                 book.seed(&observed, then.iter().map(|(k, h)| (k.as_str(), *h)));
+                self.seeded_instances = Some(observed.instances());
                 let c = Catalog::new(&observed);
                 self.seed = Some(Ok(SeedSeen {
                     selector: observed.selector.clone(),
@@ -860,6 +913,7 @@ mod tests {
             stall_seen: StallSeen::default(),
             owed_seed: false,
             seed: None,
+            seeded_instances: None,
         }
     }
 
