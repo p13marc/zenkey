@@ -78,7 +78,7 @@ case name. It exits with:
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
 | telemetry | profiles/telemetry §2.1–§2.11, §3 | `telemetry` | every file of `spec/profiles/telemetry/conformance/`: `schema.json` (the standard schema's published ids, the file's header against zk2py's tables, and each case's document by path, inside a bundle, or inline), `declarations.json` (a resolved resource's declaration), `samples.json` (one sample's conformance, and the member's kind and unit; since 0.2 a sample may come as its bytes, `json_text` read as strict JSON, `cbor_hex` as CBOR, `attachment_text` as JSON) and `continuity.json` (a pair's continuity, its epoch's evidence and its rate, compared exactly; `stamp_ntp64` read as zenoh's `as_nanos`, 0.2). An unknown file there fails. |
-| readings | | `alarms`, `telemetry` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 194. Of `telemetry.v1`, 57: Appendix B over the adopters' real contracts (zenoh-modem's 73 declared streams and 23 units, `sdu/dropped_total` a bare counter with no epoch, each ZenSight contract's revision 1.1 and both published bundles a Point declaring no kind, netring's two units, tcgui's resources none this profile's), three of §2.3's copies (a JCS-equal one keeps the id; a changed one is not the Point), two of F-148's state order, 14 of F-149's `null` members (a Point's `value`, each kind's Value, each Histogram member, and `epoch`, `unit` and `labels`), and four of 0.2's open F-150 (the double's edge, read as IEEE 754 rounds it) and F-151 (an Epoch attachment's lone surrogate, read strictly), three samples nested 100,000 deep, read as undecodable, never a crash, seven of 0.3's §5 over many pairs (`verdict`), F-152's reading among them, five of CBOR tag chains (an outer tag around a converted bignum, 100,000 tags), and three of §2.9's seed folded into a subscription's moves, the subscription's word winning. Of `alarms.v1`, 137: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 86 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, four loss sequences, four of 0.6's first answers, and four of a key gone from the scope), five of 0.6's presence read dated by its ask, six of §2.14 step 5's left-out key, a `reply_del` among them, and 21 of §2.16's two closed lists: each of the twenty neither reasons the first question gives, read from a reading of its own, on its list, and the table's reader's-sight reasons 0.8's ten. |
+| readings | | `alarms`, `telemetry` | not a fixture family: zk2py's own cases, each naming what it reads (an open finding's reading, or a stated rule beyond its fixture). Today, 199. Of `telemetry.v1`, 62: Appendix B over the adopters' real contracts (zenoh-modem's 73 declared streams and 23 units, `sdu/dropped_total` a bare counter with no epoch, each ZenSight contract's revision 1.1 and both published bundles a Point declaring no kind, netring's two units, tcgui's resources none this profile's), three of §2.3's copies (a JCS-equal one keeps the id; a changed one is not the Point), two of F-148's state order, 14 of F-149's `null` members (a Point's `value`, each kind's Value, each Histogram member, and `epoch`, `unit` and `labels`), and four of 0.2's open F-150 (the double's edge, read as IEEE 754 rounds it) and F-151 (an Epoch attachment's lone surrogate, read strictly), three samples nested 100,000 deep, read as undecodable, never a crash, twelve of §5's over many pairs (`verdict`, per member since 0.4), F-152's reading and F-157's among them, five of CBOR tag chains (an outer tag around a converted bignum, 100,000 tags), and three of §2.9's seed folded into a subscription's moves, the subscription's word winning. Of `alarms.v1`, 137: 11 of `alarms.v1` §2.4's whitespace (RFC 8259's `ws` around a payload's value reads; anything else after it, and a byte-order mark before it, is `json`), six of §2.15's window healed only by a GET asked after a break was seen, two of 0.5's whole scope (an archive's read plays no part), 86 of §2.16's change reporter (over every `transitions.json` case, every `conclusions.json` reading, four loss sequences, four of 0.6's first answers, and four of a key gone from the scope), five of 0.6's presence read dated by its ask, six of §2.14 step 5's left-out key, a `reply_del` among them, and 21 of §2.16's two closed lists: each of the twenty neither reasons the first question gives, read from a reading of its own, on its list, and the table's reader's-sight reasons 0.8's ten. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
@@ -98,7 +98,7 @@ compat        100 passed     0 failed
 budget         95 passed     0 failed
 seed           20 passed     0 failed
 examples      108 passed     0 failed
-readings      194 passed     0 failed
+readings      199 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
@@ -106,12 +106,12 @@ config        330 passed     0 failed
 link          172 passed     0 failed
 alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
-total        2226 passed     0 failed
+total        2231 passed     0 failed
 ```
 
 The figures are against `core.md` 0.35, `hostid.v1` 0.5, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.3, `link.v1` 0.8, `alarms.v1` 0.8 and
-`telemetry.v1` 0.3. `telemetry.v1` 0.3 added twelve `samples.json` cases, two
+`telemetry.v1` 0.4, which changed no fixture. `telemetry.v1` 0.3 added twelve `samples.json` cases, two
 of which (257 nested arrays, in JSON and CBOR) round 46's reader read
 otherwise, the new depth rule. `telemetry.v1` 0.2 added 24 `samples.json` cases, three
 of them input forms giving a sample's bytes, and two `continuity.json`
@@ -219,10 +219,11 @@ fixtures:
   them.
 - `telemetry.v1` 0.3 resolved F-150 and F-151, found against its 0.2,
   both as zk2py read them.
-- F-152 to F-155 are open, found against `telemetry.v1` 0.3 read cold and
-  run with the Rust tool `zenctl telemetry` judging beside zk2py's reader
-  (`SPEC-FINDINGS.md`, "At telemetry.v1 0.3"). F-152 is against the text,
-  F-153 to F-155 against the tool's help and output.
+- `telemetry.v1` 0.4 resolved F-152, found against its 0.3, as zk2py read
+  it, and asks it of each member. F-153 to F-155, against the tool's help
+  and output, are answered in `zenctl-te`.
+- F-156 to F-158 are open, found against `telemetry.v1` 0.4 read cold and
+  in a final whole-text pass (`SPEC-FINDINGS.md`, "At telemetry.v1 0.4").
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -1127,7 +1128,7 @@ published in both history roots, one file.
   - **§9's liar is always zk2py's.** Its subject is the tool, and no owner
     may put a document on another key.
 
-## telemetry.v1 (profile text 0.3, core 0.35)
+## telemetry.v1 (profile text 0.4, core 0.35)
 
 ```bash
 just py-telemetry                                # §1–§9 against zk2py's owner, about a minute
@@ -1139,8 +1140,10 @@ just py-telemetry --only 9                       # one section
 `telemetry.v1` is the seventh profile (`spec/profiles/telemetry/`), and the
 first whose first point is a standard schema (core 0.35), not a standard
 contract. zk2py read its 0.1 cold in round 45, its 0.2 cold and live
-against the Rust owner example in round 46, and its 0.3 cold, with the
-Rust tool `zenctl telemetry` judging beside zk2py's reader, in round 47.
+against the Rust owner example in round 46, its 0.3 cold, with the Rust
+tool `zenctl telemetry` judging beside zk2py's reader, in round 47, and its
+0.4 cold, with the fixed tool, and through once more as a whole, in round
+48.
 - **`zk2py.telemetry`**, the reader's and the tool's half, from the text
   alone:
   - **the standard schema** (§2.3, §3): the two published ids, oldest
@@ -1168,9 +1171,10 @@ Rust tool `zenctl telemetry` judging beside zk2py's reader, in round 47.
     bit to every fixture rate; `ntp64_ns`, a stamp's nanoseconds as §2.11
     states them; `kept_reads`, a state member's samples through core §4.2's
     merge;
-  - **a window** (§5's "over many pairs", 0.3): `verdict`, a finding, no,
-    or could not tell, the last over pairs whose every epoch was assumed,
-    and, zk2py's reading of F-152, over a counter read with no pair.
+  - **a window** (§5's "over many pairs", 0.3, 0.4): `member_answer`, one
+    member's continuity answer, and `verdict`, a finding, no, or could not
+    tell. It could not tell when any counter or histogram read formed no
+    pair, or only assumed ones, whatever another formed.
 - **The owners**, behind one adapter in `zk2py.telemetry_scenarios`:
   - **`PyMeter`**, over zk2py's owner: a checked writer that fills the
     epoch where a put leaves it out, and refuses what its declaration
@@ -1210,20 +1214,23 @@ Rust tool `zenctl telemetry` judging beside zk2py's reader, in round 47.
     subscription (§2.9, 0.3), and gives an arrival before it none.
   - **With `--tool <zenctl>`** (or `ZK2PY_ZENCTL`), `zenctl telemetry`
     judges each section beside zk2py's reader, a black box read from its
-    `--help`. It starts after the owner is up, 1 s after its "listening"
-    line (F-154). In §8 it stands across the real face with
+    `--help`. It starts after the owner is up, and the steps start the
+    moment its "listening" line appears (F-154's answer; round 47 needed
+    1 s with `zenctl-tc`). In §8 it stands across the real face with
     `--across-face`, and in §9 its own GET seeds 10. Member by member, it
     is compared with R, with R0F in §8, and with §9's witness: kind and
     unit, the samples' counts and problems, each pair's continuity,
     epoch, evidence, time base and rate (exactly, unless timed by
-    receipt), and its exit against `verdict`. Four windows are built for
-    §5's SHOULD. Each window also checks that zk2py's reader read samples
-    in it and that the tool read every one of them, so the mode cannot pass
-    testing nothing. A run logs the tool's `--version`; here `zenctl 0.12.0
-    (0.14.0-745-g8ea4effb)`.
+    receipt), each member's `continuity.answer` and `pairs_listed`, and its
+    exit against `verdict`. Seven windows are built for §5's SHOULD, and
+    two probes check the tool's answers to F-154 and F-155. Each window
+    also checks that zk2py's reader read samples in it and that the tool
+    read every one of them, so the mode cannot pass testing nothing. A run
+    logs the tool's `--version`; here `zenctl 0.12.0
+    (0.14.0-768-ge1c64ab9)`.
   - The exit is 0 when every check passes, 1 when one fails.
 
-  | § | zk2py's owner | The Rust owner example (`owner-tb`) | zk2py's owner, the tool judging too (`zenctl-tc`) |
+  | § | zk2py's owner | The Rust owner example (`owner-tb`) | zk2py's owner, the tool judging too (`zenctl-te`) |
   |---|---|---|---|
   | 1 A counter across a restart (+ the fingerprint, a new session's stamps) | 12 of 12 | 12 of 12 | 18 of 18 |
   | 2 A counter across `new_epoch` in one process | 6 of 6 | 6 of 6 | 12 of 12 |
@@ -1234,14 +1241,14 @@ Rust tool `zenctl telemetry` judging beside zk2py's reader, in round 47.
   | 7 An in-band epoch on a bare counter (+ the checked writer's refusal of step 3; the undecodable attachments, zk2py's owner only) | 6 of 6 | 5 of 5 | 11 of 11 |
   | 8 A counter that crosses a face (R0, and R0F across a real face) | 8 of 8 | 8 of 8 | 14 of 14 |
   | 9 A state counter seeded (0.2) | 5 of 5 | 5 of 5 | 10 of 10 |
-  | §5 over many pairs (0.3): four windows built for the tool | | | 17 of 17, and F-152's note |
+  | §5 over many pairs (0.3, 0.4): seven windows built for the tool, and F-154's and F-155's probes | | | 31 of 31 |
   | §2.11's conversion against zenoh-python's `as_nanos` | 1 of 1 | 1 of 1 | 1 of 1 |
-  | **Total** | **57 of 57** | **56 of 56** | **126 of 126** |
+  | **Total** | **57 of 57** | **56 of 56** | **140 of 140** |
 
   - **The tool agrees with zk2py's reader on every member of every
-    section,** its exit included. The one disagreement is F-152's: a
-    counter's one sample and no pair exits 0, where zk2py says could not
-    tell.
+    section,** its exit and each member's answer included. §8 across the
+    face exits 2 since 0.4: `drops` forms only assumed pairs, and `frames`'
+    in-band epoch answers nothing of it.
   - **The example's raw** takes an attachment's JSON only. §7's zero-byte
     and `x` attachments therefore run against zk2py's owner alone.
 

@@ -640,12 +640,12 @@ class Face:
 
 # -- the tool: zenctl telemetry, a second reader ------------------------------------------
 
-#: The tool lists a member's last 16 pairs alone, beside the count of all
-#: (``continuity.pairs``), and marks no cut (F-155).
-#: The tool prints "telemetry: listening …" about 10 ms after it starts,
-#: before its subscriptions are declared: a sample put within ~50 ms of the
-#: line was lost in two of six tries (F-154). Steps start this long after it.
-TOOL_MARGIN_S = 1.0
+#: The tool lists a member's latest 16 pairs, beside the count of all
+#: (``continuity.pairs``) and, since F-155's answer, ``pairs_listed``.
+#: Since F-154's answer the tool's "telemetry: listening …" line comes once
+#: its subscriptions are declared and presence is seeded, and ``--for``
+#: counts from then: the steps start on the line, with no margin (round 47
+#: needed 1 s with zenctl-tc).
 
 
 class ToolRun:
@@ -668,10 +668,10 @@ class ToolRun:
         self.p = subprocess.Popen(args, stdout=self.out, stderr=subprocess.PIPE, text=True)
         self.err: list[str] = []
         threading.Thread(target=self._pump, daemon=True).start()
-        if not _wait(lambda: any(x.startswith("telemetry: listening") for x in self.err), 15.0, 0.01):
+        if not _wait(lambda: any(x.startswith("telemetry: listening") for x in self.err), 15.0, 0.002):
             raise RuntimeError(f"zenctl telemetry did not start listening: {self.err[-3:]}")
-        time.sleep(TOOL_MARGIN_S)
-        #: on this process's monotonic clock, from when the steps may start
+        #: on this process's monotonic clock: the line's sighting, from when
+        #: the steps start ("a sample put from then on is inside it")
         self.ready_ns = time.monotonic_ns()
 
     def _pump(self) -> None:
@@ -733,6 +733,7 @@ def zk2py_view(reader: Reader, since_ns: int, keys: list[str] | None = None) -> 
             "problems": problems,
             "pairs": [(a, b, x.continuity, x.epoch, x.via, base, x.rate) for (a, b, x), base in zip(pairs, bases)],
             "conformances": cs, "pair_objects": [x for _, _, x in pairs],
+            "answer": tm.member_answer(cs, [x for _, _, x in pairs]),
         }
     return out
 
@@ -747,9 +748,11 @@ def _tool_view(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "kind": (r.get("kind"), r.get("kind_from")), "unit": (r.get("unit"), r.get("unit_from")),
             "samples": {k: smp.get(k) for k in ("received", "conforms", "does_not", "unobservable")},
             "problems": dict(smp.get("problems", {})),
-            #: the pair count, beside the list, which holds only the last 16
-            #: (F-155)
+            #: the pair count, beside the list, which holds the latest 16
             "pair_count": r.get("continuity", {}).get("pairs"),
+            "pairs_listed": r.get("continuity", {}).get("pairs_listed"),
+            #: the member's own answer (telemetry.v1 0.4 §5)
+            "answer": r.get("continuity", {}).get("answer"),
             # a histogram's value as zk2py shows it, its count (the whole
             # histogram is compared through its continuity)
             "pairs": [(_short(x.get("earlier")), _short(x.get("later")), x.get("continuity"), x.get("epoch"), x.get("via"),
@@ -776,24 +779,29 @@ def compare_tool(report: Report, sec: str, run: ToolRun, reader: Reader, *, keys
     :func:`zk2py.telemetry.verdict` over zk2py's own reading."""
     code, doc = run.finish()
     zk, tool = zk2py_view(reader, run.ready_ns if since_ns is None else since_ns, keys), _tool_view(doc)
-    margin = (f" (the steps started {TOOL_MARGIN_S} s after the tool's listening line, F-154; "
-              f"exit {code})")
+    margin = f" (the steps started on the tool's listening line, F-154's answer; exit {code})"
     if writes:
         # so that the tool mode cannot pass while testing nothing
         report.check(sec, f"{label}: zk2py's reader read samples in the tool's window", bool(zk),
-                     "zk2py's view is empty" + margin)
-    report.check(sec, f"{label}: the members it read samples of are zk2py's", sorted(tool) == sorted(zk),
-                 f"tool {sorted(tool)}, zk2py {sorted(zk)}" + margin)
+                     f"{sum(v['samples']['received'] for v in zk.values())} samples" if zk
+                     else "zk2py's view is empty" + margin)
+    same = sorted(tool) == sorted(zk)
+    report.check(sec, f"{label}: the members it read samples of are zk2py's", same,
+                 f"tool {sorted(tool)}, zk2py {sorted(zk)}" + ("" if same else margin))
     zk_n = {k: v["samples"]["received"] for k, v in zk.items()}
     tool_n = {k: v["samples"]["received"] for k, v in tool.items()}
     report.check(sec, f"{label} read every sample zk2py's reader did ({sum(zk_n.values())} of them)",
-                 tool_n == zk_n, f"tool {tool_n}, zk2py {zk_n}" + margin)
+                 tool_n == zk_n, f"tool {tool_n}, zk2py {zk_n}" + ("" if tool_n == zk_n else margin))
     for key in sorted(set(zk) & set(tool)):
         z, t = zk[key], tool[key]
         diffs = [f"{what}: zk2py {z[what]}, tool {t[what]}" for what in ("kind", "unit", "samples", "problems")
                  if z[what] != t[what]]
         if t["pair_count"] != len(z["pairs"]):
             diffs.append(f"pair count: zk2py {len(z['pairs'])}, tool {t['pair_count']}")
+        if t["pairs_listed"] != len(t["pairs"]):
+            diffs.append(f"pairs_listed {t['pairs_listed']}, but {len(t['pairs'])} listed")
+        if t["answer"] != z["answer"]:
+            diffs.append(f"the member's answer (§5, 0.4): zk2py {z['answer']}, tool {t['answer']}")
         # the tool lists the last pairs alone (F-155): compared on that tail
         tail = z["pairs"][len(z["pairs"]) - len(t["pairs"]):] if t["pairs"] else []
         zp = [x[:6] for x in tail]
@@ -806,10 +814,10 @@ def compare_tool(report: Report, sec: str, run: ToolRun, reader: Reader, *, keys
                 diffs.append(f"rates: {[(x[6], y[6], x[5]) for x, y in bad]}")
         member = key.removeprefix(f"{BASE}/")
         report.check(sec, f"{label} agrees on {member}: kind and unit, {z['samples']['received']} samples and their "
-                          f"problems, {len(z['pairs'])} pairs (continuity, epoch, evidence, time base, rate)",
+                          f"problems, {len(z['pairs'])} pairs (continuity, epoch, evidence, time base, rate), "
+                          f"its answer {z['answer']}",
                      not diffs, "; ".join(diffs) + margin if diffs else f"pairs {[x[:6] for x in t['pairs']]}")
-    want = tm.verdict([c for v in zk.values() for c in v["conformances"]],
-                      [x for v in zk.values() for x in v["pair_objects"]])
+    want = tm.verdict([(v["conformances"], v["pair_objects"]) for v in zk.values()])
     if open_finding is not None and code != EXIT[want]:
         report.note(sec, f"{label} disagrees ({open_finding}): exit {code}, where zk2py reads {want} (exit "
                          f"{EXIT[want]}); judgement {doc.get('judgement')}")
@@ -1394,11 +1402,14 @@ def section9(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 
 def tool_probes(report: Report, contract: Any, tool: Path) -> None:
-    """§5 "Over many pairs" (0.3), the tool's verdict over windows built for
-    it, each against zk2py's (:func:`zk2py.telemetry.verdict`): counters
+    """§5 "Over many pairs" (0.3, 0.4), the tool's verdict over windows built
+    for it, each against zk2py's (:func:`zk2py.telemetry.verdict`): counters
     whose every pair was assumed, histograms likewise (both across a face,
     so no presence is read), a counter's one sample with no pair (F-152),
-    and no sample at all."""
+    one counter established beside another with no pair (0.4: each is
+    asked), and no sample at all. Then the tool's answers to F-154 (a
+    sample put on the "listening" line is inside the window) and F-155
+    (``pairs_listed``)."""
     sec = "§5 over many pairs"
     bus = Bus("zk2py", contract, tool=tool, report=report, sec=sec)
     try:
@@ -1422,11 +1433,51 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
         run = bus.tool_start(4)
         assert run is not None
         o.put("drops", 10)
-        compare_tool(report, sec, run, bus.R, label="the tool, a counter's one sample and no pair",
-                     open_finding="F-152")
+        compare_tool(report, sec, run, bus.R, label="the tool, a counter's one sample and no pair (F-152, 0.4)")
+        run = bus.tool_start(5)
+        assert run is not None
+        for v in (100, 200):
+            o.put("frames", point(v, "counter"))
+            time.sleep(0.7)
+        o.put("drops", 11)
+        compare_tool(report, sec, run, bus.R,
+                     label="the tool, frames established in-band beside drops' one sample (0.4: each is asked)")
         run = bus.tool_start(4)
         assert run is not None
         compare_tool(report, sec, run, bus.R, label="the tool, no sample at all", writes=False)
+        run = bus.tool_start(3)
+        assert run is not None
+        o.put("level", -70.0)
+        time.sleep(0.4)
+        o.raw_bytes("level", b"5 x", None)
+        compare_tool(report, sec, run, bus.R,
+                     label="the tool, a gauge's conforming sample beside an undecodable one (F-157)")
+        # F-154's answer: a sample put the moment the line appears is inside
+        # the window, three tries
+        caught = []
+        for v in (20, 21, 22):
+            run = bus.tool_start(2, selector=f"{PREFIX}/drops")
+            assert run is not None
+            o.put("drops", v)
+            code, doc = run.finish()
+            rows = [r for r in doc["rows"] if r.get("row") == "member"]
+            caught.append(rows[0]["samples"]["received"] if rows else 0)
+        report.check(sec, "F-154's answer: a sample put the moment \"listening\" appears is inside the window, "
+                          "in three tries of three", caught == [1, 1, 1], f"received {caught}")
+        # F-155's answer: pairs_listed says when the listed pairs are a tail
+        run = bus.tool_start(5, selector=f"{PREFIX}/drops")
+        assert run is not None
+        for v in range(30, 55):
+            o.put("drops", v)
+            time.sleep(0.12)
+        code, doc = run.finish()
+        m = [r for r in doc["rows"] if r.get("row") == "member"]
+        c = m[0]["continuity"] if m else {}
+        report.check(sec, "F-155's answer: 25 samples give 24 pairs, the row lists the latest 16, and pairs_listed "
+                          "says 16",
+                     c.get("pairs") == 24 and c.get("pairs_listed") == 16 and len(m[0].get("pairs", [])) == 16
+                     and m[0]["pairs"][-1]["later"] == 54, f"{ {k: c.get(k) for k in ('pairs', 'pairs_listed')} }, "
+                     f"{len(m[0].get('pairs', [])) if m else None} listed")
     finally:
         bus.close()
 

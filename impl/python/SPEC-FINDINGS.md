@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty-seven rounds.**
+**Forty-eight rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -111,8 +111,12 @@ where that was not enough, or where the spec said two things.
 - F-152 to F-155 were found against `telemetry.v1` 0.3, read cold and run
   with the Rust tool, `zenctl telemetry`, judging zk2py's owner beside
   zk2py's reader (see "At telemetry.v1 0.3" at the end). F-152 is against
-  the text; F-153 to F-155 are against the tool's help and output. All
-  four are open.
+  the text; F-153 to F-155 are against the tool's help and output.
+  `telemetry.v1` 0.4 resolved F-152 as zk2py read it, and the tool
+  answered F-153 to F-155 (`zenctl-te`).
+- F-156 to F-158 were found against `telemetry.v1` 0.4, read cold, judged
+  again with the fixed tool, and read through once more as a whole (see
+  "At telemetry.v1 0.4" at the end). All three are open.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -7892,6 +7896,15 @@ the tool's exit 0, never a failure.
 assumed, or that formed no pair of a counter or histogram it read, SHOULD
 say it could not tell", or the opposite, stated.
 
+**Status at telemetry.v1 0.4: resolved by 0.4, as zk2py read it, and asked
+of each member.** §5: "… or that formed no pair of a counter or histogram
+it read, SHOULD say it could not tell", and "Each counter or histogram read
+is asked … a pair established in-band of one says nothing of another".
+`telemetry.verdict` now asks it of each member (`member_answer`).
+`zenctl-te` exits 2 over a counter's one sample, as zk2py does. It exits 2
+too beside another counter's established pairs, the new probe. §8 across
+the face now exits 2, for `drops`, as 0.4 says.
+
 ### F-153 · gap · `zenctl telemetry --help` (#819, TC): "every counter's pair assumed", and histograms
 
 > `zenctl telemetry --help`: "2 no verdict: no metric resource in scope,
@@ -7911,6 +7924,10 @@ says less.
 probes check both.
 
 **Wording:** the help, "every counter's or histogram's pair assumed".
+
+**Status at telemetry.v1 0.4: answered in the tool.** `zenctl-te`'s help
+reads "every counter's or histogram's pair assumed", and the histogram
+probe exits 2, as before.
 
 ### F-154 · gap · `zenctl telemetry`'s stderr: "listening" before it listens
 
@@ -7939,6 +7956,13 @@ every section.
 **Wording:** print the line once the subscriptions are declared and
 presence seeded, or say in `--help` how long the window takes to open.
 
+**Status at telemetry.v1 0.4: answered in the tool.** `--for` "opens once
+the subscriptions are declared and presence is seeded, when stderr says
+"listening": a sample put from then on is inside it". zk2py dropped its
+1 s margin, and its steps start the moment the line appears. A probe puts
+a sample at once, in three tries, and the tool read it in all three. Every
+section's "read every sample" check passes with no margin.
+
 ### F-155 · gap · `zenctl telemetry --format json`: a document the help does not describe, and pairs cut to the last 16
 
 > `--help`: "--format … json (one document) or ndjson (one object per row)
@@ -7966,6 +7990,14 @@ member, so none was cut here.
 document's fields. A row should say when its `pairs` is a tail, for
 instance with `pairs_listed` beside `continuity.pairs`.
 
+**Status at telemetry.v1 0.4: answered in the tool.** The help names the
+document's fields and their tokens, and a member row's `continuity`
+carries `pairs_listed`, "the latest 16, fewer than `pairs` when it is a
+tail". A probe of 25 samples reads `pairs` 24, `pairs_listed` 16 and 16
+listed, the last ending at the last sample. The comparator checks
+`pairs_listed` against the list in every row, and each member's
+`continuity.answer` against zk2py's `member_answer`.
+
 ### Read and not filed
 
 - **§2.9's complete read.** "A subscription's history alone" is not a
@@ -7976,3 +8008,147 @@ instance with `pairs_listed` beside `continuity.pairs`.
   presence input already says what a reader saw.
 - **The depth's edges:** 256 and 257, in JSON and in CBOR, and a tag
   around 256. They are pinned by `samples.json` and agree with zk2py.
+
+## At telemetry.v1 0.4 (#609)
+
+0.4 answers F-152 the vacuous way, as zk2py read it, and asks §5's SHOULD
+of each counter or histogram read. Its last bullet states the reference
+tool's exit codes. The tool's own findings, F-153 to F-155, are answered in
+`zenctl-te` (`zenctl 0.12.0 (0.14.0-768-ge1c64ab9)`). Nothing else changed:
+the schema, every fixture and the core.
+
+**zk2py follows 0.4.**
+- **`telemetry.member_answer`:** one member's continuity answer, in the
+  judgement's tokens.
+- **`telemetry.verdict`:** asks it of each member. A counter or histogram
+  that formed no pair, or only assumed ones, could not tell, whatever
+  another formed, and a finding stands beside it.
+- **The comparator:** checks each member row's `continuity.answer`
+  against `member_answer`, and its `pairs_listed` against the list.
+- **The margin:** `TOOL_MARGIN_S` is dropped. The steps start on the
+  "listening" line.
+
+**`just py-conformance`: 2231 of 2231.** The readings family gains five
+checks of `verdict`: two members, one established and one with no pair or
+only assumed ones; a finding beside one that could not tell; a gauge beside
+two established counters; and F-157's reading. `telemetry` is unchanged at
+281.
+
+**`just py-telemetry`, three runs, each exiting 0:** 57 of 57 against
+zk2py's owner, 56 of 56 against `owner-tb`, and 140 of 140 with `zenctl-te`
+judging beside zk2py's reader.
+- **The tool agrees on every member of every section,** its exit code and
+  each member's `continuity.answer` included.
+- **§8 now exits 2.** `drops` across the face forms only assumed pairs,
+  and `frames`' in-band epoch answers nothing of it, which is what 0.4
+  says. zk2py's verdict says the same.
+- **§5's probes:** seven windows, each in agreement:
+  - counters whose every pair was assumed, and histograms likewise;
+  - a counter's one sample;
+  - one counter established beside another with one sample;
+  - no sample at all;
+  - a gauge beside an undecodable sample of it;
+  - and the F-154 and F-155 checks above.
+
+**The whole-text pass.** I read `v1.md` and `scenarios.md` through once
+more, as a reader new to both, against everything zk2py implements. Three
+places are left to a guess.
+
+### F-156 · contradiction · telemetry.v1 0.4 §2.6 "How a value is read": two definitions of a CBOR integer
+
+> §2.6, "CBOR" (0.2): "An integer is CBOR's major type 0 or 1, or a
+> bignum, tag 2 or 3 around a byte string of any length, definite or not,
+> read as the integer it denotes"
+
+> §2.6, a few bullets on: "**An integer is read exactly:** JSON text with
+> no fraction and no exponent, CBOR's major types 0 and 1."
+
+The second bullet still defines a CBOR integer as major types 0 and 1
+alone. That was 0.1's wording, which F-144 overturned. Read alone, the
+second bullet makes a bignum no integer: `wrong_type` for 2^64 in a
+counter, which was round 45's reading. Read with the first, the bignum is
+the integer, `out_of_range`. `samples.json` cases 109 to 113 decide for
+the first, but the text says both.
+
+**zk2py:** the first, as the fixture says.
+
+**Wording that would remove the guess:** the second bullet, "… CBOR's
+major types 0 and 1, and its bignums (above)".
+
+### F-157 · ambiguity · telemetry.v1 0.4 §5, the reference tool's exit codes: is an undecodable sample a question answered?
+
+> §5 (0.4): "The reference tool, `zenctl telemetry`, exits 1 on a finding,
+> 2, the no verdict, when any counter or histogram it read could not tell,
+> and 0 only when every question it asked was answered."
+
+> §5: "'unobservable' (it was put, and the observation could not answer
+> it)"; the table, "Does this sample conform? … **Unobservable:**
+> `declaration_invalid`, `undecodable`"
+
+> §2.6: "A sample the core could not decode … is unobservable here
+> (`undecodable`): the core's verdict stands, and this profile reads
+> nothing of it."
+
+Read with §5's own definition, an undecodable sample is a question put
+that the observation could not answer. So a window that holds one is not
+"every question it asked … answered", and the tool should exit 2. Read
+with §2.6, the profile "reads nothing of it", so its question is not this
+profile's to have asked, and the window can exit 0.
+
+Measured with `zenctl-te`:
+- a gauge's conforming sample beside an undecodable one exits 0;
+- a counter's two established samples beside an undecodable one of it
+  exits 0;
+- a counter whose only sample is undecodable exits 2, since "no pair
+  formed".
+
+zk2py reads it as the tool does, so the two agree. The bullet as written
+supports the other answer. A declaration that is invalid (`unobservable`,
+`declaration_invalid`) raises the same question; no section has one.
+
+**zk2py:** an undecodable sample keeps a window from no answer only through
+its member's continuity (`verdict`). A readings check and a tool probe pin
+it.
+
+**Wording:** §5, "… and 0 only when every question it asked was answered,
+a sample's conformance answered unobservable (undecodable, or an invalid
+declaration) aside", or "… 2 when any sample's conformance was
+unobservable" if the other reading is meant.
+
+### F-158 · gap · telemetry.v1 0.4 scenarios.md "Conventions": R's presence on a subscription's history alone
+
+> scenarios.md, Conventions: "**R** … holds a liveliness subscription to
+> `zk2/lab/meter/@zk/instance/*`, with history, both declared before the
+> owner starts … Its presence is what R saw: alone throughout when exactly
+> one instance token was held at every instant …"
+
+> v1.md §2.9 (0.3): "A reader's view of them stands on a complete read of
+> the tokens (core §8.1, which a subscription's history alone is not) …
+> a view that stands on no complete read … establish[es] nothing"
+
+The conventions describe R exactly as 0.3 says a reader must not stand: on
+a subscription with history, and no complete read. A runner built from
+`scenarios.md` alone, as zk2py's was in round 45, would follow it. A
+strict reader of §2.9 then establishes nothing by presence, and §1's,
+§2's, §3's and §9's "established by presence" do not hold. `scenarios.md`
+was updated at 0.2 and 0.3 for other things, and not for this.
+
+**zk2py:** R makes a complete liveliness read after its subscription
+(round 47's `Reader.seed_presence`), retried, and folded so that the
+subscription's word wins. Every section's presence evidence holds.
+
+**Wording:** the conventions' R, "… then makes a complete liveliness read
+of them (core §8.1), on which its view of presence stands (§2.9, 0.3)".
+
+### Read and not filed
+
+- **Which members are asked of continuity.** The changelog says a member
+  whose kind is unobservable is not asked: an undeclared Point that never
+  conformed, for instance. `v1.md` says "each counter or histogram read",
+  which does not hold of such a member, so it is read the same way.
+  zk2py and the tool both read it so.
+- **§5's per-pair answers** are unchanged by 0.4: an assumed pair stays a
+  no, and its SHOULD is about a window.
+- **Everything else** in §2.1 to §2.15, §3, §4 and the appendices read as
+  zk2py implements it, and every scenario's expectations hold against all
+  three runs.
