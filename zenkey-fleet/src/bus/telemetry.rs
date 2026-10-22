@@ -291,14 +291,12 @@ pub async fn observe(
         return obs;
     }
     // 1. What is in scope.
-    let mut first_instances = BTreeSet::new();
     let catalog = if spec.across_face {
         None
     } else {
         obs.asked.push(presence_scope.selector());
         match crate::bus::presence::observe(session, &presence_scope, t).await {
             Ok(o) => {
-                first_instances = o.instances();
                 let c = Catalog::new(&o);
                 let _ = store.fetch_all(session, &c.wanted()).await;
                 Some(c)
@@ -424,18 +422,26 @@ pub async fn observe(
     drop(queue);
     reader.stall = Some(StallWatch::start(session).await);
     // 3. The seed presence stands on, bounded by its reads' own timeouts,
-    // then the round trip the window opens on (F-154, F-159): one that
-    // reaches every owner in scope after the subscriptions.
+    // then the round trips the window opens on (F-154, F-159): ones that
+    // reach every owner in scope after the subscriptions, made at once, so
+    // they cost one timeout.
     let opening = if spec.across_face {
         // Across a face there is no seed, so S4's GETs come first: the
         // owner's answer, made after the subscriptions, is the round trip
         // (zk2py round 49's F-159). With no state metric resource in scope
         // there is none to make.
-        if state_gets(session, &scope, &mut obs, &mut reader, &mut rx, t, None).await {
-            Opening::Answered { asked: 1 }
+        let trips = state_gets(session, &scope, &mut obs, &mut reader, &mut rx, t, None).await;
+        // The scope names one owner across a face, and one reply from its
+        // session that ran to its final proves that every declaration made
+        // before the GET reached that session: one answered is enough.
+        if trips.answered > 0 {
+            Opening::Answered(trips)
         } else {
             tokio::time::sleep(spec.settle).await;
-            Opening::Margin(spec.settle)
+            Opening::Margin {
+                settle: spec.settle,
+                trips,
+            }
         }
     } else {
         reader.reseed(&mut obs.book, &mut rx, None).await;
@@ -446,36 +452,22 @@ pub async fn observe(
         // samples put on the line lost under load, each with its writer
         // unmatched). Each owner instance's descriptor GET is answered by
         // that session after the declarations reach it, over the same link.
-        let owners: BTreeSet<zenkey_model::grammar::Addr> =
-            obs.resources.iter().map(|m| m.address.clone()).collect();
-        let wanted: Vec<_> = reader
-            .seeded_instances
-            .clone()
-            .unwrap_or(first_instances)
-            .into_iter()
-            .filter(|(a, _)| owners.contains(a))
-            .collect();
-        let asked = wanted.len();
-        let reads = crate::bus::presence::describe_each(session, wanted, t).await;
-        let silent = asked
-            - reads
-                .values()
-                .filter(|r| {
-                    matches!(
-                        r,
-                        crate::model::catalog::DescriptorRead::Served(_)
-                            | crate::model::catalog::DescriptorRead::Invalid(_)
-                    )
-                })
-                .count();
-        reader.drain(&mut obs.book, &mut rx);
-        if silent == 0 {
-            Opening::Answered { asked }
-        } else {
-            Opening::Unanswered { silent, asked }
+        // A seed that did not stand names no instance worth asking: the
+        // first read's may be gone, so none is asked.
+        match to_ask(reader.seeded_instances.as_ref(), &obs.resources) {
+            Err(nothing) => nothing,
+            Ok(wanted) => {
+                let trips = owners_answer(session, wanted, t).await;
+                reader.drain(&mut obs.book, &mut rx);
+                if trips.unanswered.is_empty() {
+                    Opening::Answered(trips)
+                } else {
+                    Opening::Unanswered(trips)
+                }
+            }
         }
     };
-    obs.opening = Some(opening);
+    obs.opening = Some(opening.clone());
     // 4. The window opens (F-154), and every read below keeps to its end: a
     // state GET, a seed owed by a loss.
     listening(opening);
@@ -507,35 +499,145 @@ pub async fn observe(
 }
 
 /// What a window opened on (zk2py round 47's F-154, round 49's F-159, #819
-/// TG): the round trip made after the subscriptions were declared that
-/// reaches each owner in scope, whose answer comes back after the
+/// TG): the round trips made after the subscriptions were declared that
+/// reach each owner in scope, whose answers come back after the
 /// declarations reached the owner's session over the same links, so it
 /// holds them and a put of its is not dropped at its source. A sample put
-/// once the window opens is inside it when it opened [`Opening::Answered`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// once the window opens is inside it when it opened [`Opening::Answered`];
+/// every other opening says what was not proved.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Opening {
-    /// Every one of the `asked` answered: each owner instance in scope its
-    /// descriptor GET, after the presence seed; across a face, where no
-    /// presence is read, S4's GET of the state metric resources in scope.
-    /// No owner in scope: nothing to ask, and nothing that could put.
-    Answered { asked: usize },
-    /// `silent` of the `asked` owner instances answered no descriptor GET
-    /// within the timeout: those may not hold the subscriptions yet, and a
-    /// sample one puts at once may be dropped before it leaves.
-    Unanswered { silent: usize, asked: usize },
-    /// Across a face, with no state metric resource in scope or none of
-    /// their GETs answered: no round trip was made after the subscriptions,
-    /// so the far side is not known to hold them; the window opened after
-    /// [`TelemetrySpec::settle`], a margin and never proof. A stream has no
+    /// The proof holds. With no face, every owner instance in scope the
+    /// presence seed found answered its descriptor GET, made after the seed.
+    /// Across a face, where the scope names one owner and no presence is
+    /// read, the owner replied to at least one S4 GET of a state metric
+    /// resource in scope, and its final reply came.
+    Answered(RoundTrips),
+    /// With no face, some owner instance in scope answered no descriptor
+    /// GET: silent within the timeout, or its GET failed. Those may not
+    /// hold the subscriptions yet, and a sample one puts at once may be
+    /// dropped before it leaves.
+    Unanswered(RoundTrips),
+    /// With no face, nothing was asked, so nothing was proved: the seed
+    /// found no instance of an owner in scope (`seeded`), or it did not
+    /// stand, so which instances are in scope is unknown. An owner that
+    /// starts later learns the subscriptions as it starts.
+    NoOwner { seeded: bool },
+    /// Across a face, no S4 GET answered: none in scope (a stream has no
     /// queryable, and presence and descriptors do not cross, so nothing
-    /// else could answer.
-    Margin(Duration),
+    /// else could), or each drew no reply, was silent or failed. The window
+    /// opened after [`TelemetrySpec::settle`], a margin and never proof.
+    Margin { settle: Duration, trips: RoundTrips },
 }
 
-/// S4's GET of each state metric resource in scope, after what the queue
-/// holds, each folded by the owner's stamp; bounded by `deadline` when
-/// given, else by each GET's own timeout. Whether any GET was answered:
-/// it ran to its final reply.
+/// The round trips a window's opening made, counted: how many were asked,
+/// how many an owner answered, how many ran to their final reply with no
+/// reply, how many were silent within their timeout and how many failed,
+/// each of the last three named.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RoundTrips {
+    pub asked: usize,
+    /// An owner replied, and the final reply came.
+    pub answered: usize,
+    /// The final reply came with no reply: nothing shows an owner was
+    /// reached (a GET no queryable matches ends so at once).
+    pub empty: usize,
+    pub silent: usize,
+    pub errored: usize,
+    /// Each round trip that did not answer, in words: the selector or the
+    /// owner instance, and why.
+    pub unanswered: Vec<String>,
+}
+
+/// The owner instances a window asks after its seed (#819 TG): those the
+/// seed that stood found, of an owner of a metric resource in scope.
+/// Nothing to ask is an [`Opening::NoOwner`]: a seed that did not stand
+/// (whose first read's instances may be gone, so none is asked), or one
+/// that found none.
+fn to_ask(
+    seeded: Option<
+        &BTreeSet<(
+            zenkey_model::grammar::Addr,
+            zenkey_model::grammar::InstanceId,
+        )>,
+    >,
+    resources: &[Arc<MetricResource>],
+) -> Result<
+    Vec<(
+        zenkey_model::grammar::Addr,
+        zenkey_model::grammar::InstanceId,
+    )>,
+    Opening,
+> {
+    let Some(seeded) = seeded else {
+        return Err(Opening::NoOwner { seeded: false });
+    };
+    let owners: BTreeSet<&zenkey_model::grammar::Addr> =
+        resources.iter().map(|m| &m.address).collect();
+    let wanted: Vec<_> = seeded
+        .iter()
+        .filter(|(a, _)| owners.contains(a))
+        .cloned()
+        .collect();
+    if wanted.is_empty() {
+        return Err(Opening::NoOwner { seeded: true });
+    }
+    Ok(wanted)
+}
+
+/// Each of `wanted`'s descriptor GETs (core §3.3), made at once
+/// ([`crate::bus::presence::describe_each`]: up to
+/// [`crate::bus::presence::DESCRIBE_CONCURRENCY`] in flight, so one
+/// timeout up to that many instances), counted: a descriptor served or one
+/// that fails its check answered, a silent GET did not, and a GET that
+/// could not be made, or an instance the reads never returned, failed.
+async fn owners_answer(
+    session: &Session,
+    wanted: Vec<(
+        zenkey_model::grammar::Addr,
+        zenkey_model::grammar::InstanceId,
+    )>,
+    t: Duration,
+) -> RoundTrips {
+    use crate::model::catalog::DescriptorRead;
+    let mut trips = RoundTrips {
+        asked: wanted.len(),
+        ..RoundTrips::default()
+    };
+    let reads = crate::bus::presence::describe_each(session, wanted.clone(), t).await;
+    for (addr, instance) in &wanted {
+        match reads.get(&(addr.clone(), instance.clone())) {
+            Some(DescriptorRead::Served(_) | DescriptorRead::Invalid(_)) => trips.answered += 1,
+            Some(DescriptorRead::Silent) => {
+                trips.silent += 1;
+                trips.unanswered.push(format!(
+                    "{addr} {instance}: silent within {}s",
+                    t.as_secs_f64()
+                ));
+            }
+            Some(DescriptorRead::Failed(why)) => {
+                trips.errored += 1;
+                trips.unanswered.push(format!("{addr} {instance}: {why}"));
+            }
+            None => {
+                trips.errored += 1;
+                trips.unanswered.push(format!(
+                    "{addr} {instance}: its descriptor GET never returned"
+                ));
+            }
+        }
+    }
+    trips
+}
+
+/// S4's GET of each state metric resource in scope, all at once, then
+/// what the queue holds, then each GET's replies, folded by the owner's
+/// stamp; bounded by `deadline` when given, else by each GET's own
+/// timeout. The round trips counted: a GET answered when an owner replied
+/// and its final reply came; one whose final came with no reply proves
+/// nothing (`empty`); one that ran to its timeout (or the window's end)
+/// was silent; and one that could not be made or drew an error reply
+/// failed, named in the count and in `skipped`.
 async fn state_gets(
     session: &Session,
     scope: &TelemetryScope,
@@ -544,66 +646,134 @@ async fn state_gets(
     rx: &mut tokio::sync::mpsc::Receiver<Delivery>,
     t: Duration,
     deadline: Option<tokio::time::Instant>,
-) -> bool {
-    let mut answered = false;
-    let state: Vec<Arc<MetricResource>> = obs
+) -> RoundTrips {
+    let selectors: Vec<String> = obs
         .resources
         .iter()
         .filter(|m| m.kind == Kind::State)
-        .cloned()
+        .filter_map(|m| scope.subscription(m))
         .collect();
-    for m in state {
-        let Some(sel) = scope.subscription(&m) else {
-            continue;
-        };
-        let replies = match deadline {
-            Some(d) => tokio::time::timeout_at(d, state_replies(session, &sel, t)).await,
-            None => Ok(state_replies(session, &sel, t).await),
-        };
-        reader.drain(&mut obs.book, rx);
-        match replies {
-            Ok(Ok((rs, complete))) => {
-                answered |= complete;
+    let gets = selectors.iter().map(|sel| async move {
+        match deadline {
+            Some(d) => tokio::time::timeout_at(d, state_replies(session, sel, t))
+                .await
+                .unwrap_or_else(|_| Ok((Vec::new(), GetEnd::WindowEnded))),
+            None => state_replies(session, sel, t).await,
+        }
+    });
+    let ended = futures_util::future::join_all(gets).await;
+    reader.drain(&mut obs.book, rx);
+    let mut trips = RoundTrips {
+        asked: selectors.len(),
+        ..RoundTrips::default()
+    };
+    for (sel, end) in selectors.into_iter().zip(ended) {
+        match end {
+            Ok((rs, end)) => {
                 for s in rs {
                     reader.fold_sample(&mut obs.book, s);
                 }
+                match end {
+                    GetEnd::Final => trips.answered += 1,
+                    GetEnd::Empty => {
+                        trips.empty += 1;
+                        trips.unanswered.push(format!(
+                            "GET {sel}: its final reply came with no reply, so nothing shows it \
+                             reached an owner"
+                        ));
+                    }
+                    GetEnd::Timeout => {
+                        trips.silent += 1;
+                        trips.unanswered.push(format!(
+                            "GET {sel}: no final reply within {}s",
+                            t.as_secs_f64()
+                        ));
+                    }
+                    GetEnd::WindowEnded => {
+                        trips.silent += 1;
+                        let why = format!(
+                            "GET {sel}: the window ended before its replies did, so it seeded \
+                             nothing"
+                        );
+                        trips.unanswered.push(why.clone());
+                        obs.skipped.push(why);
+                    }
+                    GetEnd::Erred(e) => {
+                        trips.errored += 1;
+                        let why = format!("GET {sel}: an error reply, {e}");
+                        trips.unanswered.push(why.clone());
+                        obs.skipped.push(why);
+                    }
+                }
             }
-            Ok(Err(e)) => obs.skipped.push(e),
-            Err(_) => obs.skipped.push(format!(
-                "GET {sel}: the window ended before its replies did, so it seeded nothing"
-            )),
+            Err(e) => {
+                trips.errored += 1;
+                trips.unanswered.push(e.clone());
+                obs.skipped.push(e);
+            }
         }
         obs.asked.push(sel);
     }
-    answered
+    trips
+}
+
+/// How a GET ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GetEnd {
+    /// Its final reply came, after at least one reply: an owner answered.
+    Final,
+    /// Its final reply came with no reply before it. A GET no queryable
+    /// matches ends so at once, so nothing shows it reached an owner.
+    Empty,
+    /// zenoh ended it at its timeout.
+    Timeout,
+    /// The window ended first.
+    WindowEnded,
+    /// An error reply other than the timeout's, in words.
+    Erred(String),
 }
 
 /// S4's GET of `selector` (core §4.2): target `All`, consolidation
 /// `Latest`; a reply on a wildcard key is discarded (R6). With the samples,
-/// whether the GET ran to its final reply: no error reply, zenoh's
-/// `Timeout` among them.
+/// how the GET ended: its final reply, zenoh's `Timeout`, or another error
+/// reply.
 async fn state_replies(
     session: &Session,
     selector: &str,
     timeout: Duration,
-) -> Result<(Vec<MetricSample>, bool), String> {
+) -> Result<(Vec<MetricSample>, GetEnd), String> {
     let replies =
         crate::bus::query::state_get(session, selector, &crate::bus::query::GetOpts::new(timeout))
             .await
             .map_err(|e| format!("GET {selector}: {}", crate::one_line(&e)))?;
     let mut out = Vec::new();
-    let mut complete = true;
+    let mut end = GetEnd::Final;
+    let mut replied = false;
     while let Ok(reply) = replies.recv_async().await {
-        let Ok(sample) = reply.result() else {
-            complete = false;
-            continue;
+        let sample = match reply.result() {
+            Ok(sample) => {
+                replied = true;
+                sample
+            }
+            Err(e) => {
+                let said = String::from_utf8_lossy(&e.payload().to_bytes()).into_owned();
+                if said == "Timeout" {
+                    end = GetEnd::Timeout;
+                } else if end == GetEnd::Final {
+                    end = GetEnd::Erred(said);
+                }
+                continue;
+            }
         };
         if sample.key_expr().is_wild() {
             continue;
         }
         out.push(sample_of(sample, SampleVia::Get));
     }
-    Ok((out, complete))
+    if end == GetEnd::Final && !replied {
+        end = GetEnd::Empty;
+    }
+    Ok((out, end))
 }
 
 /// The reader's state beside the book: what resolves keys, and what it
@@ -1010,5 +1180,139 @@ mod tests {
             "a seed cut short restores nothing"
         );
         drop(tx);
+    }
+
+    /// A peer of nobody: what answers its GETs is what it holds itself.
+    async fn alone() -> zenoh::Session {
+        let mut c = zenoh::Config::default();
+        c.insert_json5("mode", "\"peer\"").unwrap();
+        c.insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+        c.insert_json5("listen/endpoints", "[]").unwrap();
+        zenoh::open(c).await.expect("a peer of nobody")
+    }
+
+    /// meter.v1's metric resources at lab/meter, in an observation.
+    fn meter_obs() -> (TelemetryObservation, TelemetryScope) {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts");
+        let (set, _) = ContractSet::load_path(&dir.join("meter.v1.toml"));
+        let rev = set.iter().next().expect("meter.v1 loads");
+        let addr: zenkey_model::grammar::Addr = "lab/meter".parse().unwrap();
+        let scope = TelemetryScope::of(&addr);
+        let resources = (0..rev.contract().resources.len())
+            .filter_map(|i| MetricResource::of(&addr, rev, i))
+            .map(Arc::new)
+            .collect();
+        let obs = TelemetryObservation {
+            namespace: String::new(),
+            spec: TelemetrySpec::new(Duration::from_millis(300), Duration::from_secs(1)),
+            scope: scope.clone(),
+            resources,
+            seed: None,
+            book: TelemetryBook::new(None, Instant::now()),
+            asked: vec![],
+            listened: Duration::ZERO,
+            unresolved: 0,
+            skipped: vec![],
+            unobservable: None,
+            opening: None,
+        };
+        (obs, scope)
+    }
+
+    /// Review of PR #835 (#819 TG): the state GETs a window opens on across
+    /// a face are counted for what they are. A GET whose final came with no
+    /// reply proves nothing (`empty`); one that drew an error reply failed,
+    /// and is named in the count and in `skipped`; one the owner answered
+    /// is the proof.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_opening_counts_its_state_gets_and_names_each_unanswered() {
+        use zenoh::Wait as _;
+        const TOTAL: &str = "zk2/lab/meter/meter.v1/state/total";
+        let s = alone().await;
+        let (store, offline) = (BundleStore::new(Duration::ZERO), ContractSet::new());
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Delivery>(16);
+        let seeder = Seeder::Fake(Arc::new(|| Box::pin(async { Ok(observed(&[])) })));
+        let mut r = reader(&store, &offline, seeder, Arc::default());
+        let t = Duration::from_millis(300);
+        let (mut obs, scope) = meter_obs();
+        let trips = state_gets(&s, &scope, &mut obs, &mut r, &mut rx, t, None).await;
+        assert_eq!(
+            (trips.asked, trips.answered, trips.empty),
+            (1, 0, 1),
+            "{trips:?}"
+        );
+        assert!(trips.unanswered[0].contains("no reply"), "{trips:?}");
+
+        let q = s
+            .declare_queryable(TOTAL)
+            .callback(|q| {
+                let _ = q.reply_err("refused").wait();
+            })
+            .await
+            .unwrap();
+        let (mut obs, _) = meter_obs();
+        let trips = state_gets(&s, &scope, &mut obs, &mut r, &mut rx, t, None).await;
+        assert_eq!((trips.answered, trips.errored), (0, 1), "{trips:?}");
+        assert!(
+            trips.unanswered[0].contains(&format!("GET {TOTAL}: an error reply, refused")),
+            "{trips:?}"
+        );
+        assert_eq!(obs.skipped, trips.unanswered, "named in skipped too");
+        drop(q);
+
+        let q = s
+            .declare_queryable(TOTAL)
+            .callback(|q| {
+                let _ = q.reply(TOTAL, "12").wait();
+            })
+            .await
+            .unwrap();
+        let (mut obs, _) = meter_obs();
+        let trips = state_gets(&s, &scope, &mut obs, &mut r, &mut rx, t, None).await;
+        assert_eq!(
+            (trips.asked, trips.answered, trips.unanswered.len()),
+            (1, 1, 0),
+            "{trips:?}"
+        );
+        drop(q);
+        drop(tx);
+    }
+
+    /// Review of PR #835 (#819 TG): with no face, a window asks the owner
+    /// instances its seed found, of an owner in scope. A seed that did not
+    /// stand asks none, never the first read's, and nothing to ask is no
+    /// owner, never "every owner answered". An instance that answers no
+    /// descriptor GET is counted silent, and named.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn nothing_to_ask_is_no_owner_and_a_silent_owner_is_counted() {
+        let (obs, _) = meter_obs();
+        let addr: zenkey_model::grammar::Addr = "lab/meter".parse().unwrap();
+        let other: zenkey_model::grammar::Addr = "lab/other".parse().unwrap();
+        assert_eq!(
+            to_ask(None, &obs.resources),
+            Err(Opening::NoOwner { seeded: false })
+        );
+        let elsewhere = BTreeSet::from([(other, I1.parse().unwrap())]);
+        assert_eq!(
+            to_ask(Some(&elsewhere), &obs.resources),
+            Err(Opening::NoOwner { seeded: true })
+        );
+        let here = BTreeSet::from([(addr.clone(), I1.parse().unwrap())]);
+        let wanted = to_ask(Some(&here), &obs.resources).expect("one to ask");
+        assert_eq!(wanted.len(), 1);
+        let s = alone().await;
+        let trips = owners_answer(&s, wanted, Duration::from_millis(300)).await;
+        assert_eq!(
+            (trips.asked, trips.answered, trips.silent),
+            (1, 0, 1),
+            "{trips:?}"
+        );
+        assert!(
+            trips.unanswered[0].starts_with(&format!("lab/meter {I1}: silent")),
+            "{trips:?}"
+        );
     }
 }

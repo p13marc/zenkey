@@ -576,7 +576,7 @@ async fn a_daemon_with_alerts_publishes_the_alarm_and_its_alarms_check() {
             clocks_synced: true,
             face: None,
         },
-        || {},
+        |_| {},
     )
     .await;
     let row = report.services.first().expect("the daemon's row");

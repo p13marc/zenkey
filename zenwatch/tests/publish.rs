@@ -113,7 +113,7 @@ async fn health_of(tool: &zenoh::Session, at: &Addr) -> zenkey_fleet::report::He
             clocks_synced: true,
             face: None,
         },
-        || {},
+        |_| {},
     )
     .await;
     assert_eq!(report.services.len(), 1, "{report:?}");
