@@ -98,13 +98,18 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   resources their revisions declare; one bounded queue carries the instance
   and member token subscriptions and each resource's members, so samples
   and token moves fold in one order; presence is seeded, and seeded again
-  after a loss, and each state metric resource gets S4's GET; the window
-  opens then, the caller's `listening` hook run and `--for` counted from
-  it (#819 TE, F-154; `zenctl alarms` and `health` alike). Across a face
-  (`--across-face`) the deployment's word stands in: one named owner and
-  `--contracts`, no presence; with no seed read, S4's GET of a state metric
-  resource in scope comes first, the owner's answer the round trip
-  (`Opening::StateGet`), and with none in scope the window opens after
+  after a loss, and each state metric resource gets S4's GET; after the
+  seed each owner instance in scope answers its descriptor GET, since the
+  seed proves only that the router holds the subscriptions and a put is
+  dropped at its source until the owner's session does too
+  (`Opening::Answered`; an owner silent within `--timeout` is
+  `Unanswered`, the line naming it; #819 TG). The window opens then, the
+  caller's `listening` hook run and `--for` counted from it (#819 TE,
+  F-154; `zenctl alarms` and `health` alike, their descriptor reads the
+  same round trip). Across a face (`--across-face`) the deployment's word
+  stands in: one named owner and `--contracts`, no presence; S4's GET of a
+  state metric resource in scope is the owner's round trip
+  (`Opening::Answered`), and with none in scope the window opens after
   `--settle` (0.25 s), a margin and never proof (`Opening::Margin`), the
   line saying so (#819 TG, F-159). `model::telemetry`'s `TelemetryBook` is
   session-free: each sample through `MetricType::check` (`Datum::decode`
