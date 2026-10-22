@@ -115,7 +115,7 @@ impl Render for TelemetryReport {
             x.assumed,
             match x.unanswered {
                 0 => String::new(),
-                n => format!("; {n} counter or histogram member(s) could not tell"),
+                n => format!("; {n} member(s) could not tell whether they went backwards"),
             }
         ));
         let mut resources = Grid::unheaded(3);

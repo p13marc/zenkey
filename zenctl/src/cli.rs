@@ -858,7 +858,8 @@ pub(crate) enum Command {
     /// telemetry.v1's telemetry-declaration (a warning: a metric resource
     /// whose declaration is invalid, so no reader reads its members) and
     /// telemetry-sample (with --deep: a state metric member's reply that does
-    /// not conform). The deployment is read through a
+    /// not conform; one that does not decode, or under an invalid
+    /// declaration, leaves it unobservable). The deployment is read through a
     /// session in its namespace; the routers' admin space and the presence
     /// domain through one in no namespace. A check whose input could not be
     /// had is unobservable, with the reason — never clean — and so is every
@@ -942,21 +943,26 @@ pub(crate) enum Command {
     /// or histogram read, did it go backwards within one epoch: it could not
     /// tell when no pair of it formed (one sample in the window, say), or
     /// when its every pair was assumed — and another member's established
-    /// pair answers nothing of it (telemetry.v1 §5, 0.4). Exit 1 a sample
-    /// that does not conform, or a decrease within an established epoch (the
-    /// findings); 0 every question asked answered without one; 2 no verdict:
-    /// no metric resource in scope, no sample in the window, a counter or
-    /// histogram that could not tell (no pair formed, or every counter's or
-    /// histogram's pair assumed: no in-band epoch, and presence unobservable
-    /// or establishing none), or a run that could not start.
+    /// pair answers nothing of it (telemetry.v1 §5, 0.4). A sample that does
+    /// not decode, or any of a member whose declaration is invalid, leaves
+    /// "did every sample conform?" unanswered, whatever conformed beside it
+    /// (§5, 0.5). Exit 1 a sample that does not conform, or a decrease within
+    /// an established epoch (the findings); 0 every question asked answered
+    /// without one; 2 no verdict: no metric resource in scope, no sample in
+    /// the window, a sample that could not be read (undecodable, or under an
+    /// invalid declaration), a counter or histogram that could not tell (no
+    /// pair formed, or every counter's or histogram's pair assumed: no
+    /// in-band epoch, and presence unobservable or establishing none), or a
+    /// run that could not start; its reason names the first member that
+    /// could not tell, and a narrower selector asks the rest.
     ///
     /// --format json is one document: `report` ("telemetry"), `namespace`,
     /// `selector`, `presence` (the seed's `selector`, `complete`, `services`
     /// and `basis`; absent across a face), `across_face`, `window_s` (from
     /// the window's opening), `asked`, `totals` (`resources`, `invalid`,
     /// `members`, `samples`, `conforms`, `does_not`, `unobservable`, `pairs`,
-    /// `decreased`, `established`, `assumed`, and `unanswered`: the counters
-    /// and histograms that could not tell), `judgement`, `rows` and `notes`;
+    /// `decreased`, `established`, `assumed`, and `unanswered`: the members
+    /// whose continuity could not be told), `judgement`, `rows` and `notes`;
     /// and `lost`, `refused`, `unresolved`, `skipped` and `unobservable` when
     /// there is something to say. The `judgement` is the exit code's:
     /// `answer` `established` (a finding, 1), `not_established` (none, 0) or
@@ -1152,8 +1158,9 @@ pub(crate) enum CheckCmd {
     ///                    itself validly: an invalid declaration, read from
     ///                    the contract, is the violation (telemetry.v1 §2.2)
     ///   telemetry-sample every sample of a metric resource the window hears
-    ///                    conforms, its reasons named when one does not
-    ///                    (telemetry.v1 §2.6)
+    ///                    conforms, its reasons named when one does not; one
+    ///                    that does not decode leaves the case unobservable,
+    ///                    never a pass (telemetry.v1 §2.6, §5)
     ///   telemetry-continuity
     ///                    no counter or histogram decreased within an
     ///                    established epoch, in-band or by presence watched

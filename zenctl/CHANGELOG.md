@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `telemetry` after zk2py round 48: a sample that could not be read (#819, TF)
+
+zk2py read `telemetry.v1` 0.4 cold and through as a whole (round 48),
+the tool agreeing with its reader on every member. Its F-157 asked whether
+an unreadable sample is a question answered; text 0.5 says it is not.
+
+| Before | Now | Notes |
+|---|---|---|
+| `telemetry` over a gauge's conforming sample beside an undecodable one: exit 0 | exit 2: a sample that could not be read leaves "did every sample conform?" unanswered (`telemetry.v1` §5, 0.5) | the reason names the first such member's key; a finding still gives 1 |
+| a member under an invalid declaration beside conforming ones: exit 0, its continuity `not_asked` | exit 2, its continuity `unobservable`: no question of its members is answered (§2.2) | the reason names the resource and its declaration's reasons; the declaration's own `invalid` stays a warning |
+| `check conform`'s `telemetry-sample`: passes with "N could not be read" when some sample conformed | unobservable: "N of its M sample(s) could not be read … so whether every sample conforms could not be told" | never a pass beside an undecodable sample; a sample that does not conform is still the violation |
+| the doctor's `telemetry-sample` (`--deep`): an undecodable reply unobservable, a reply under an invalid declaration skipped | both unobservable, each named | the invalid declaration's warning stays `telemetry-declaration`'s |
+
 ## Unreleased (`main`, zk2) — `telemetry` after zk2py round 47: a counter with no pair, the listening line, the document (#819, TE)
 
 zk2py read `telemetry.v1` 0.3 cold with `zenctl telemetry` judging beside

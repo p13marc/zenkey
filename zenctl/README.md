@@ -742,7 +742,7 @@ none.
 | `alarm-key` | does an owner hold an alarm on a key that does not re-derive from its document (error), or only through the sanitizing step (warning)? | alarms.v1 §2.2 |
 | `alarm-stale` | does a present owner hold a firing alarm unconfirmed beyond its 900 s horizon? Neither firing now nor resolved (`--clocks-synced`; warning) | alarms.v1 §2.7 |
 | `telemetry-declaration` | does a contract an owner implements declare a metric resource whose declaration is invalid, so that no reader reads its members? (warning) | telemetry.v1 §2.2 |
-| `telemetry-sample` | does an owner answer a GET of a state metric member with a sample that does not conform? (`--deep`; error) | telemetry.v1 §2.6 |
+| `telemetry-sample` | does an owner answer a GET of a state metric member with a sample that does not conform? (`--deep`; error; a reply that does not decode, or under an invalid declaration, leaves it unobservable) | telemetry.v1 §2.6 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -920,7 +920,7 @@ and `health` print theirs the same way). §5's questions:
 |---|---|---|
 | is this resource's declaration valid? | `declared`, with its kind, unit, buckets, carrier and where an in-band epoch rides; or `invalid` with its reasons, and its members unobservable | none here (the doctor's `telemetry-declaration` warns) |
 | what is this member's kind, and its unit? | the declared ones, else the conforming Point's; a unit absent is **unknown**, never dimensionless | never |
-| does this sample conform? | `conforms`, `does_not` with its reasons, or `unobservable` (an invalid declaration, bytes that do not decode as §2.6 reads them) | `does_not` (exit 1) |
+| does this sample conform? | `conforms`, `does_not` with its reasons, or `unobservable` (an invalid declaration, bytes that do not decode as §2.6 reads them); over the window, one unobservable sample is enough to say it could not tell whether every sample conformed (0.5) | `does_not` (exit 1) |
 | did this counter or histogram go backwards within one epoch? | per pair `same_epoch`, `reset` or `decreased`, the epoch established in-band (a Point's `epoch`, a bare counter's Epoch attachment), by presence (one instance or member epoch alone throughout, no loss between), or assumed; per member, no when a pair of it was established and none decreased, and **could not tell** when no pair of it formed or every one was assumed (0.4), whatever another member established | `decreased`, within an established epoch only (exit 1) |
 | what is this counter's rate over the pair? | a rate in the counter's unit per second, or none with why (`reset`, `decreased`, `elapsed`) | never |
 
@@ -937,9 +937,12 @@ monotonic clock — never one clock against another.
 Exit 1 on a sample that does not conform or a decrease within an established
 epoch; 0 when every question asked was answered without one; **2** when a
 question went unanswered: no metric resource in scope, no sample of one in
-the window, a counter or histogram read that could not tell (one sample of
-it and no pair, or every one of its pairs assumed: no in-band epoch, and
-presence unobservable or establishing none), or a run that could not start.
+the window, a sample that could not be read (bytes that do not decode, or
+any sample of a member whose declaration is invalid), a counter or
+histogram read that could not tell (one sample of it and no pair, or every
+one of its pairs assumed: no in-band epoch, and presence unobservable or
+establishing none), or a run that could not start. The reason names the
+first member that could not tell; a narrower selector asks the rest.
 
 `--format json` is one document, whose every field `zenctl telemetry
 --help` names: the envelope's `presence`, `window_s`, `totals` (with
