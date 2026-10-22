@@ -61,16 +61,28 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
     ));
     spec.face = across_face.map(|f| f == FaceGrant::Granted);
     let session = ASKING.ask(dep.session().await);
-    if let Some(w) = window {
-        eprintln!(
-            "alarms: listening {}s to the alarms and the owners' tokens, then {}s more while the \
-             owners are watched (--for, --lease and --timeout)",
-            w.as_secs_f64(),
-            (spec.lease + dep.timeout()).as_secs_f64()
-        );
-    }
-    let report =
-        zenkey_fleet::run_alarms(&session, dep.namespace(), scope, spec, at_least.severity()).await;
+    // The line comes once the window opens (#819 TE, as zk2py round 47's
+    // F-154 found of `telemetry`): the subscriptions declared and the first
+    // refresh read after them, so a put once it is read is heard.
+    let tail = (spec.lease + dep.timeout()).as_secs_f64();
+    let listening = move || {
+        if let Some(w) = window {
+            eprintln!(
+                "alarms: listening {}s to the alarms and the owners' tokens, then {tail}s more \
+                 while the owners are watched (--for, --lease and --timeout)",
+                w.as_secs_f64(),
+            );
+        }
+    };
+    let report = zenkey_fleet::run_alarms(
+        &session,
+        dep.namespace(),
+        scope,
+        spec,
+        at_least.severity(),
+        listening,
+    )
+    .await;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     let judgement = report.judgement();
     if let Judgement::Unobservable { reason } = &judgement {

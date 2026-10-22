@@ -30,7 +30,9 @@
 //! never waits on a read. [`observe`] is the one-shot reading `zenctl
 //! alarms` makes: the feed, listened to for a window when asked, then a
 //! lease and the reply timeout more while its owners are watched (core
-//! §2.7, 0.25).
+//! §2.7, 0.25). The window opens once the feed is open, its subscriptions
+//! declared and its first refresh read after them (zk2py round 47's F-154,
+//! #819 TE), so the router holds them, and a put from then on is heard.
 
 use std::collections::BTreeSet;
 use std::str::FromStr;
@@ -63,7 +65,8 @@ pub struct AlarmSpec {
     pub timeout: Duration,
     /// [`observe`]'s window: how long its subscription listens before the
     /// lease and the reply timeout it watches the owners for after (core
-    /// §2.7, 0.25). `None`: no subscription, the GET alone.
+    /// §2.7, 0.25), counted from the moment the feed is open. `None`: no
+    /// subscription, the GET alone.
     pub window: Option<Duration>,
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1).
@@ -695,22 +698,25 @@ pub async fn run_alarms(
     scope: AlarmScope,
     spec: AlarmSpec,
     at_least: zenkey_model::alarms::Severity,
+    listening: impl FnOnce() + Send,
 ) -> crate::report::AlarmsReport {
-    let obs = observe(session, namespace, scope, spec).await;
+    let obs = observe(session, namespace, scope, spec, listening).await;
     crate::judge::alarms::judge(&obs, at_least)
 }
 
 /// The one-shot reading of the module doc: the feed opened (listening when
 /// `spec.window` is set), drained over the window and the lease and reply
-/// timeout after it, its owners watched throughout.
+/// timeout after it, its owners watched throughout. With a window,
+/// `listening` runs once the feed is open, and the window counts from then;
+/// with none, or a feed that could not be opened, it never runs.
 pub async fn observe(
     session: &Session,
     namespace: &str,
     scope: AlarmScope,
     spec: AlarmSpec,
+    listening: impl FnOnce() + Send,
 ) -> AlarmObservation {
     let selector = scope.selector().to_owned();
-    let started = Instant::now();
     let opened = AlarmFeed::open(session, scope, spec, spec.window.is_some()).await;
     let mut feed = match opened {
         Ok((feed, _)) => feed,
@@ -730,7 +736,8 @@ pub async fn observe(
     };
     let mut listened = None;
     if let Some(w) = spec.window {
-        let end = started + w + spec.book().tail();
+        listening();
+        let end = Instant::now() + w + spec.book().tail();
         let deadline = tokio::time::Instant::from_std(end);
         loop {
             tokio::select! {

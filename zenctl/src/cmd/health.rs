@@ -62,14 +62,19 @@ pub async fn run(cli: HealthArgs) -> Result<()> {
     };
     let target = address.map_or(HealthTarget::All, HealthTarget::One);
     let session = ASKING.ask(dep.session().await);
-    if let Some(w) = window {
-        eprintln!(
-            "health: listening {}s to every status and to the faults before judging (--for; \
-             --clocks-synced takes the deployment's word for this host's clock instead)",
-            w.as_secs_f64()
-        );
-    }
-    let report = zenkey_fleet::run_health(&session, dep.namespace(), target, spec).await;
+    // The line comes once the window opens (#819 TE, as zk2py round 47's
+    // F-154 found of `telemetry`): the subscriptions declared and presence
+    // read after them, so a status or a fault put once it is read is heard.
+    let listening = move || {
+        if let Some(w) = window {
+            eprintln!(
+                "health: listening {}s to every status and to the faults before judging (--for; \
+                 --clocks-synced takes the deployment's word for this host's clock instead)",
+                w.as_secs_f64()
+            );
+        }
+    };
+    let report = zenkey_fleet::run_health(&session, dep.namespace(), target, spec, listening).await;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     let judgement = report.judgement();
     if let Judgement::Unobservable { reason } = &judgement {
