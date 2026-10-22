@@ -7158,8 +7158,10 @@ async fn telemetry_could_not_tell_of_a_member_under_an_invalid_declaration() {
 
 /// T with no face, `tries` times over `drops`, O up and listed before it;
 /// the moment T's "listening" line is read, O puts `drops` through its
-/// writer. The tries whose sample T did not hear or whose writer did not
-/// yet match T's subscription, with the first one's run.
+/// writer. The tries whose sample T did not hear, whose writer did not yet
+/// match T's subscription, or whose line did not say the owner's
+/// descriptor GET proved the opening (zk2py round 50's F-160), with the
+/// first one's run.
 async fn no_face_on_the_line(tries: usize) -> (Vec<usize>, Option<String>) {
     let bus = Bus::bare(None).await;
     let o = meter_owner_with(&bus.owners, false).await;
@@ -7188,7 +7190,11 @@ async fn no_face_on_the_line(tries: usize) -> (Vec<usize>, Option<String>) {
             .into_iter()
             .find(|r| r["key"] == DROPS)
             .and_then(|r| r["samples"]["received"].as_u64());
-        if heard != Some(1) || !matched {
+        let proved = run.stderr.contains(
+            "each of the 1 owner instance(s) in scope answered its descriptor GET after the \
+             subscriptions",
+        );
+        if heard != Some(1) || !matched || !proved {
             lost.push(i);
             first.get_or_insert_with(|| run.to_string());
         }
@@ -7282,6 +7288,12 @@ const ON_THE_LINE: usize = 24;
 async fn telemetry_across_a_face_hears_a_sample_put_on_its_listening_line() {
     let (lost, first, said) = across_a_face_on_the_line("zk2/lab/meter/**").await;
     assert!(!said.contains("never proof"), "the GET proved it: {said}");
+    assert!(
+        said.contains("across the face the owner answered")
+            && said
+                .contains("S4 GET(s) of a state metric resource in scope after the subscriptions"),
+        "the line says what proved it (F-160): {said}"
+    );
     assert!(
         lost.is_empty(),
         "{} of {ON_THE_LINE} samples put on the line were lost; the first:\n{}",

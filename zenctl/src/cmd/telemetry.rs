@@ -35,11 +35,12 @@ use crate::cli::TelemetryArgs;
 use crate::cmd::zk2;
 use crate::exit::unaskable;
 
-/// What the "listening" line adds of what the window opened on (#819 TG):
-/// nothing when every owner in scope answered after the subscriptions,
-/// else what was not proved, the first round trip that did not answer
-/// named.
-fn opening_words(opening: &zenkey_fleet::TelemetryOpening) -> String {
+/// What the "listening" line says the window opened on (#819 TG): the
+/// round trip that proved every owner in scope holds the subscriptions, or
+/// what was not proved, the first round trip that did not answer named
+/// (zk2py round 50's F-160: a proven opening is said, never left to the
+/// absence of `--settle`).
+fn opening_words(opening: &zenkey_fleet::TelemetryOpening, across_face: bool) -> String {
     use zenkey_fleet::TelemetryOpening as O;
     let first = |t: &zenkey_fleet::TelemetryRoundTrips| {
         t.unanswered
@@ -47,7 +48,16 @@ fn opening_words(opening: &zenkey_fleet::TelemetryOpening) -> String {
             .map_or(String::new(), |w| format!(" (the first, {w})"))
     };
     match opening {
-        O::Answered(_) => String::new(),
+        O::Answered(t) if across_face => format!(
+            "; across the face the owner answered {} of {} S4 GET(s) of a state metric resource \
+             in scope after the subscriptions, so it holds them",
+            t.answered, t.asked
+        ),
+        O::Answered(t) => format!(
+            "; each of the {} owner instance(s) in scope answered its descriptor GET after the \
+             subscriptions, so they hold them",
+            t.asked
+        ),
         O::Unanswered(t) => format!(
             "; {} of the {} owner instance(s) in scope answered no GET after the subscriptions{}, \
              so they may not hold them yet: a sample one puts at once may be dropped before it \
@@ -147,7 +157,7 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
             } else {
                 " and their owners' tokens"
             },
-            opening_words(&opening)
+            opening_words(&opening, across_face)
         );
     };
     let report = zenkey_fleet::run_telemetry(
