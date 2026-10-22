@@ -4,6 +4,68 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-22: a counter read with no pair, and the tool's words (#819, TE; #609)
+
+zk2py read 0.3 cold (round 47, PR #828), with `zenctl telemetry` judging
+beside its own reader in every section of `scenarios.md`, and the two
+agreed on every member. It filed four findings, F-152 to F-155. One is
+against the text; the other three are against the tool, and are answered
+there (`zenctl/CHANGELOG.md`). Written against core 0.35, unchanged; the
+standard schema, its ids and every fixture are unchanged:
+`declarations.json` (87), `samples.json` (137), `continuity.json` (45)
+and `schema.json` (9). `continuity.json` is per pair, so no case of it can
+pin what a window answers; the reference tool's tests do.
+
+**Answered: F-152, a counter read with no pair** (§5). 0.3's SHOULD named
+pairs whose every epoch was assumed. It said nothing of a window that read
+a counter and formed no pair of it, one sample, say. Two readings
+followed:
+- **vacuous,** zk2py's: over no pair, no decrease could have been found,
+  so a tool could not tell;
+- **non-vacuous,** the tool's: the question had nothing to answer, so
+  `zenctl telemetry` exited 0, "0 pair(s), none decreased".
+
+Now the vacuous reading, and per counter or histogram:
+- **The SHOULD covers a counter or histogram read with no pair.** A tool
+  says it could not tell over one it read and formed no pair of, as over
+  pairs whose every epoch was assumed.
+- **Each counter or histogram read is asked.** A pair established of one
+  says nothing of another. So a window in which one formed established
+  pairs, and another formed none or only assumed ones, could not tell of
+  the second.
+- **The tool reads it so.** `zenctl telemetry` exits 2 when any counter or
+  histogram it read could not tell, unless a finding gives 1. Each member
+  row carries its own answer (`continuity.answer`).
+- **`check conform` reads it so.** `telemetry-continuity` passes only
+  when every counter or histogram member it heard formed a pair whose
+  epoch was established. It never passes on zero pairs, as before.
+- **A consequence for §8.** Across the face, every pair of `drops` is
+  assumed, so the tool's run of `scenarios.md` §8 now exits 2, where round
+  47's exited 0. `frames`' in-band epoch establishes nothing of `drops`.
+  The section's expected pairs are unchanged.
+
+**Deliberately not changed.**
+- **The per-pair answers** of §2.10 and §5's table. An assumed pair stays
+  a no, and a decrease without an established epoch stays a reset. The
+  SHOULD is about a tool's answer over a window, never a pair's.
+- **A finding stands.** A decrease within an established epoch, or a sample
+  that does not conform, is the yes whatever could not be told.
+- **A SHOULD, not a MUST.** What a tool says over many pairs is its
+  presentation of §2.10's answers, which stay the MUSTs.
+- **Which members are counters or histograms.** That is a member's kind,
+  the declared one or else a conforming Point's tag (§2.5), or a pair of
+  that kind. A member whose kind is unobservable answers its samples
+  unobservable already (§2.6), and is not asked of continuity.
+
+**The tool's findings, F-153 to F-155,** are answered in `zenctl
+telemetry` alone, and change nothing here:
+- **F-153:** its help names a histogram's pairs beside a counter's.
+- **F-154:** its "listening" line comes once its subscriptions are
+  declared and presence is seeded, and `--for` counts from then.
+- **F-155:** its help names the JSON document's fields, and a member row
+  says when its listed pairs are the latest 16 of more
+  (`continuity.pairs_listed`).
+
 ## 0.3 — 2026-10-21: the tools' reading, and two findings of round 46 (#819, TC; #609)
 
 The fleet's continuity reader (`zenkey_fleet::model::telemetry`, #819's
