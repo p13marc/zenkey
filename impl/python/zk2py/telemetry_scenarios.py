@@ -550,11 +550,11 @@ class Bus:
         time.sleep(0.3)
 
     def tool_start(self, window_s: float, *, across_face: bool = False, endpoint: str | None = None,
-                   selector: str | None = None, margin: bool = True) -> ToolRun | None:
+                   selector: str | None = None) -> ToolRun | None:
         if self.tool_exe is None:
             return None
         return ToolRun(self.tool_exe, endpoint or self.endpoint, window_s, across_face=across_face,
-                       selector=selector, margin=margin)
+                       selector=selector)
 
     def owner(self, extra: list[Any] | None = None) -> Any:
         o: Any = PyMeter(self.endpoint, self.contract, extra) if self.mode == "zk2py" \
@@ -652,11 +652,10 @@ class Face:
 #: its subscriptions are declared and presence is seeded, and ``--for``
 #: counts from then: the steps start on the line, with no margin (round 47
 #: needed 1 s with zenctl-tc).
-#: With ``--across-face`` the line is still no signal to start on: no
-#: presence is read, and a sample put the moment it appears was lost in 2 of
-#: 15 tries with zenctl-tf (and 1 of 5 with zenctl-te), none of 15 put 50 ms
-#: later (F-159). Those runs alone wait this long after it.
-ACROSS_FACE_MARGIN_S = 0.2
+#: Across a face too, since F-159's answer (zenctl-tg): the line comes
+#: after S4's GET of a state metric resource in scope was answered, or,
+#: with none, after ``--settle``; :func:`tool_opening` asserts all three
+#: openings. Round 49 waited 0.2 s across a face with zenctl-tf.
 
 
 class ToolRun:
@@ -668,7 +667,7 @@ class ToolRun:
     ``totals`` and ``judgement``."""
 
     def __init__(self, exe: Path, endpoint: str, window_s: float, *, across_face: bool = False,
-                 selector: str | None = None, margin: bool = True) -> None:
+                 selector: str | None = None) -> None:
         args = [str(exe), "telemetry", "--for", str(window_s), "-c", endpoint, "--format", "json", "--color", "never"]
         if across_face:
             args += ["--across-face", "--contracts", str(CONTRACT)]
@@ -681,8 +680,6 @@ class ToolRun:
         threading.Thread(target=self._pump, daemon=True).start()
         if not _wait(lambda: any(x.startswith("telemetry: listening") for x in self.err), 15.0, 0.002):
             raise RuntimeError(f"zenctl telemetry did not start listening: {self.err[-3:]}")
-        if across_face and margin:
-            time.sleep(ACROSS_FACE_MARGIN_S)  # F-159
         #: on this process's monotonic clock: the line's sighting, from when
         #: the steps start ("a sample put from then on is inside it")
         self.ready_ns = time.monotonic_ns()
@@ -792,8 +789,7 @@ def compare_tool(report: Report, sec: str, run: ToolRun, reader: Reader, *, keys
     :func:`zk2py.telemetry.verdict` over zk2py's own reading."""
     code, doc = run.finish()
     zk, tool = zk2py_view(reader, run.ready_ns if since_ns is None else since_ns, keys), _tool_view(doc)
-    margin = (f" (the steps started on the tool's listening line, F-154's answer, {ACROSS_FACE_MARGIN_S} s after "
-              f"it across a face, F-159; exit {code})")
+    margin = f" (the steps started on the tool's listening line, F-154's and F-159's answers; exit {code})"
     if writes:
         # so that the tool mode cannot pass while testing nothing
         report.check(sec, f"{label}: zk2py's reader read samples in the tool's window", bool(zk),
@@ -1504,17 +1500,6 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
             caught.append(rows[0]["samples"]["received"] if rows else 0)
         report.check(sec, "F-154's answer: a sample put the moment \"listening\" appears is inside the window, "
                           "in three tries of three", caught == [1, 1, 1], f"received {caught}")
-        # F-159: the same across a face, with no margin, measured and noted
-        across = []
-        for v in (23, 24, 25, 26, 27):
-            run = bus.tool_start(1, across_face=True, selector=f"zk2/{ADDRESS}/**", margin=False)
-            assert run is not None
-            o.put("drops", v)
-            code, doc = run.finish()
-            rows = [r for r in doc["rows"] if r.get("row") == "member" and r["key"].endswith("/drops")]
-            across.append(rows[0]["samples"]["received"] if rows else 0)
-        report.note(sec, f"F-159: across a face (--across-face), a sample put the moment \"listening\" appears was "
-                         f"read {sum(across)} of {len(across)} times {across}")
         # F-155's answer: pairs_listed says when the listed pairs are a tail
         run = bus.tool_start(5, selector=f"{PREFIX}/drops")
         assert run is not None
@@ -1538,6 +1523,58 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
                 xsession.close()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
+        bus.close()
+
+
+def tool_opening(report: Report, contract: Any, tool: Path, tries: int = 20) -> None:
+    """F-159's answer (zenctl-tg): the "listening" line comes after a round
+    trip that reaches the owner's own session, and a sample put the moment
+    it appears is inside the window. Asserted three ways, ``tries`` times
+    each, with no margin:
+    - across the real face, a state metric resource in scope holding a value
+      (``total``): the opening stands on S4's GET of it, and the line names
+      no ``--settle``;
+    - across the real face, streams alone in scope: the opening stands on
+      ``--settle`` (0.25 s), and the line says so, "never proof";
+    - with no face: the opening stands on the owner's descriptor GET, and
+      the line names no owner that did not answer."""
+    sec = "the tool's opening (F-159)"
+    bus = Bus("zk2py", contract, face=True, tool=tool, report=report, sec=sec)
+    try:
+        assert bus.face is not None
+        o = bus.owner()
+        bus.appeared(o.instance)
+        o.put("total", 1)
+        time.sleep(0.5)
+        v = 1000
+        cases = [
+            ("across the real face, total in scope: on S4's GET",
+             {"across_face": True, "endpoint": bus.face.endpoint, "selector": f"zk2/{ADDRESS}/**"},
+             lambda line: "--settle" not in line and "answered none" not in line),
+            ("across the real face, streams alone in scope: on --settle",
+             {"across_face": True, "endpoint": bus.face.endpoint, "selector": f"{PREFIX}/**"},
+             lambda line: "--settle" in line and "never proof" in line),
+            ("with no face: on the owner's descriptor GET",
+             {"selector": f"{PREFIX}/drops"},
+             lambda line: "--settle" not in line and "did not answer" not in line),
+        ]
+        for note, kw, worded in cases:
+            got, lines = [], set()
+            for _ in range(tries):
+                run = bus.tool_start(0.6, **kw)
+                assert run is not None
+                v += 1
+                o.put("drops", v)
+                code, doc = run.finish()
+                rows = [r for r in doc["rows"] if r.get("row") == "member" and r["key"] == f"{PREFIX}/drops"]
+                got.append(rows[0]["samples"]["received"] if rows else 0)
+                lines |= {x for x in run.err if x.startswith("telemetry: listening")}
+            report.check(sec, f"{note}: a sample put the moment \"listening\" appears is inside the window, "
+                              f"{tries} tries of {tries}", got == [1] * tries,
+                         f"read {sum(got)} of {tries}: {got}")
+            report.check(sec, f"{note}: the line says what it stood on, as --help gives it",
+                         bool(lines) and all(worded(x) for x in lines), f"{sorted(lines)}")
+    finally:
         bus.close()
 
 
@@ -1586,6 +1623,14 @@ def run(report: Report, mode: Any, only: list[str] | None, tool: Path | None = N
 
             traceback.print_exc()
             report.check(f"§{name}", "the section ran", False, f"{type(e).__name__}: {e}")
+    if tool is not None and (not only or "8" in only):
+        try:
+            tool_opening(report, contract, tool)
+        except Exception as e:  # noqa: BLE001
+            import traceback
+
+            traceback.print_exc()
+            report.check("the tool's opening (F-159)", "the tries ran", False, f"{type(e).__name__}: {e}")
     if tool is not None and (not only or "5" in only):
         try:
             tool_probes(report, contract, tool)
