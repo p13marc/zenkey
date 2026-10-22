@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Forty-eight rounds.**
+**Forty-nine rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -116,7 +116,11 @@ where that was not enough, or where the spec said two things.
   answered F-153 to F-155 (`zenctl-te`).
 - F-156 to F-158 were found against `telemetry.v1` 0.4, read cold, judged
   again with the fixed tool, and read through once more as a whole (see
-  "At telemetry.v1 0.4" at the end). All three are open.
+  "At telemetry.v1 0.4"). `telemetry.v1` 0.5 resolved all three, F-157
+  against zk2py's reading.
+- F-159 was found against `zenctl telemetry` (`zenctl-tf`), judging
+  `telemetry.v1` 0.5. Nothing was found in the text, which is closed (see
+  "At telemetry.v1 0.5" at the end). F-159 is open, against the tool.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -8075,6 +8079,10 @@ the first, but the text says both.
 **Wording that would remove the guess:** the second bullet, "… CBOR's
 major types 0 and 1, and its bignums (above)".
 
+**Status at telemetry.v1 0.5: resolved by 0.5, as the fixture said.** The
+bullet now reads "… CBOR's major types 0 and 1, and CBOR's bignums (tags 2
+and 3, the CBOR reading above; 0.5)". No case changed.
+
 ### F-157 · ambiguity · telemetry.v1 0.4 §5, the reference tool's exit codes: is an undecodable sample a question answered?
 
 > §5 (0.4): "The reference tool, `zenctl telemetry`, exits 1 on a finding,
@@ -8115,6 +8123,20 @@ a sample's conformance answered unobservable (undecodable, or an invalid
 declaration) aside", or "… 2 when any sample's conformance was
 unobservable" if the other reading is meant.
 
+**Status at telemetry.v1 0.5: resolved by 0.5, against zk2py's reading
+and the tool's.** §5 gains "Over many samples": "A tool asked "did every
+sample conform?" over a window SHOULD say it could not tell when any sample
+in it was undecodable, or any member it read had an invalid declaration".
+"Every question of such a member is unanswered", its continuity included,
+and "Only what was read counts".
+- **zk2py:** `telemetry.verdict` now could not tell over either. A member
+  read under an invalid declaration answers `unobservable` in
+  `member_answer`.
+- **`zenctl-tf`** exits 2 over both, and 0 when the invalid resource is in
+  scope but unheard.
+- **Checked:** both agree on all three, through a second interface on the
+  owner's service, `meterx.v1`, whose `stream/odd` is declared `bool`.
+
 ### F-158 · gap · telemetry.v1 0.4 scenarios.md "Conventions": R's presence on a subscription's history alone
 
 > scenarios.md, Conventions: "**R** … holds a liveliness subscription to
@@ -8140,6 +8162,12 @@ subscription's word wins. Every section's presence evidence holds.
 **Wording:** the conventions' R, "… then makes a complete liveliness read
 of them (core §8.1), on which its view of presence stands (§2.9, 0.3)".
 
+**Status at telemetry.v1 0.5: resolved by 0.5, as zk2py runs it.** The
+conventions' R "makes a complete liveliness read of the same tokens (core
+§8.1), on which its view of presence stands", with "the subscription's
+moves … folded after it, the subscription's word winning where the two
+disagree". That is round 47's `Reader.seed_presence` and `fold_seed`.
+
 ### Read and not filed
 
 - **Which members are asked of continuity.** The changelog says a member
@@ -8152,3 +8180,84 @@ of them (core §8.1), on which its view of presence stands (§2.9, 0.3)".
 - **Everything else** in §2.1 to §2.15, §3, §4 and the appendices read as
   zk2py implements it, and every scenario's expectations hold against all
   three runs.
+
+## At telemetry.v1 0.5 (#609)
+
+0.5 answers F-156 to F-158:
+- **F-156:** the integer bullet names bignums.
+- **F-157:** §5 gains "Over many samples". Against zk2py's reading, an
+  undecodable sample, or a member read under an invalid declaration,
+  leaves a window unable to tell.
+- **F-158:** `scenarios.md`'s R makes a complete liveliness read.
+
+The schema, every fixture and the core are unchanged. The tool is
+`zenctl-tf`, `zenctl 0.12.0 (0.14.0-778-g12659a0c)`.
+
+**zk2py follows 0.5.**
+- **`telemetry.verdict`:** could not tell over any sample read
+  unobservable.
+- **`member_answer`:** a member read under an invalid declaration answers
+  `unobservable`, its continuity included. An undeclared Point never
+  decoded is still not asked (0.4).
+- **The probes:** the owner's service now also implements
+  `meterx.v1`, zk2py's own interface (`interop/telemetry/meterx.v1.toml`),
+  whose `stream/odd` is declared `bool` (`kind_value`). It is served
+  throughout §5's probes, so every probe but one checks that "Only what was
+  read counts".
+
+**`just py-conformance`: 2235 of 2235.** The readings family gains four
+checks, and F-157's check now expects could not tell:
+- a member under an invalid declaration beside a gauge;
+- its continuity `unobservable`;
+- a finding beside it;
+- an undeclared Point never decoded, still not asked.
+
+`telemetry` is unchanged at 281.
+
+**`just py-telemetry`, three runs, each exiting 0:**
+- **zk2py's owner:** 57 of 57;
+- **`owner-tb`:** 56 of 56;
+- **`zenctl-tf` judging beside zk2py's reader:** 151 of 151, with three
+  windows built for 0.5. The tool and zk2py agree on every member, answer
+  and exit in each:
+  - a gauge's sample beside an undecodable one: 2;
+  - a member heard under an invalid declaration beside a valid gauge: 2,
+    the member's `continuity.answer` `unobservable`, its samples
+    `declaration_invalid`;
+  - the invalid resource in scope and unheard: 0.
+
+**The text is closed.** I read 0.5's changes with full care: §2.6's
+integer bullet, §5's "Over many samples" and its reference-tool bullet,
+and the scenarios' R. Round 48's whole-text pass covered the rest. Nothing
+in `v1.md` or `scenarios.md` is left to a guess. No finding is open
+against the text.
+
+### F-159 · gap · `zenctl telemetry --across-face` (`zenctl-tf`): "listening" is still no signal across a face
+
+> `--help`, `--for`: "It opens once the subscriptions are declared and
+> presence is seeded, when stderr says "listening": a sample put from then
+> on is inside it."
+
+F-154's answer holds when the tool reads presence:
+- a sample put the moment the line appears was read 5 of 5 times, and
+  3 of 3 in the probe.
+
+With `--across-face` there is no presence to seed, and it does not hold.
+A sample put the moment the line appears was lost:
+- 2 of 15 tries with `zenctl-tf`;
+- 1 of 5 with `zenctl-te`;
+- 1 of 5 in the run's own measurement.
+
+None of 15 was lost when put 50 ms after the line. Round 48's across-face
+probes passed by chance.
+
+A caller that takes the help at its word loses the first sample of a
+window across a face. It then reads one pair fewer, and its `drops` can
+show `same_epoch` where a reset was put first.
+
+**zk2py:** its `--across-face` runs alone start their steps
+`ACROSS_FACE_MARGIN_S` (0.2 s) after the line. Each run measures the
+margin-free case five times and notes it. Every check passes.
+
+**Wording, or a fix:** in the tool, print "listening" across a face only
+once the subscriptions reach the router, or state the case in `--help`.

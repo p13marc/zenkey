@@ -1,4 +1,4 @@
-"""``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.4, core 0.35):
+"""``telemetry.v1`` (``spec/profiles/telemetry/v1.md``, text 0.5, core 0.35):
 what a metric resource carries, and what a reader may conclude from it.
 
 From the text alone:
@@ -43,7 +43,9 @@ The owner's half (:class:`MeterOwner`) and the reader on a bus
 strict JSON or CBOR, depth included (F-151). It adds a data item's depth,
 at most 256 arrays and maps (:data:`MAX_DEPTH`), and §5's "over many pairs"
 (:func:`verdict`). 0.4 answered F-152 as zk2py read it, and asks it of each
-counter or histogram read (:func:`member_answer`).
+counter or histogram read (:func:`member_answer`). 0.5 answered F-157
+against zk2py's reading: an undecodable sample, or a member read under an
+invalid declaration, leaves a window unable to tell ("Over many samples").
 """
 
 from __future__ import annotations
@@ -851,15 +853,21 @@ DECREASED_ESTABLISHED, NOT_ESTABLISHED = "established", "not_established"
 def member_answer(conformances: Iterable[Conformance], pairs: Iterable[Pair]) -> str:
     """§5 "Over many pairs" (0.4): "Each counter or histogram read is
     asked", one member's samples and pairs alone:
+    - ``unobservable`` first, for a member read under an invalid
+      declaration (§5 "Over many samples", 0.5): "Every question of such a
+      member is unanswered … its continuity unobservable";
     - ``not_asked``: neither a counter nor a histogram. A member's kind is
       the declared one or a conforming Point's tag (§2.5), so one whose kind
-      is unobservable is not asked of continuity;
+      is unobservable otherwise (an undeclared Point never decoded) is not
+      asked of continuity (0.4, unchanged by 0.5);
     - ``established``: a pair ``decreased``, within an established epoch;
     - ``unobservable``: "One that formed no pair (one sample of it in the
       window, or none that conforms), or only pairs whose epoch was assumed,
       could not tell, whatever another formed";
     - ``not_established``: a pair of it established, and none decreased."""
     cs, ps = list(conformances), list(pairs)
+    if any("declaration_invalid" in c.reasons for c in cs):
+        return UNOBSERVABLE
     if not any(c.kind in ("counter", "histogram") for c in cs):
         return NOT_ASKED
     if any(p.continuity == "decreased" for p in ps):
@@ -871,11 +879,16 @@ def member_answer(conformances: Iterable[Conformance], pairs: Iterable[Pair]) ->
 
 def verdict(members: Iterable[tuple[Iterable[Conformance], Iterable[Pair]]]) -> str:
     """A tool's answer over a window, its members' samples and pairs (§5,
-    "Over many pairs", 0.3 and 0.4):
+    "Over many pairs", 0.3 and 0.4, and "Over many samples", 0.5):
     - ``finding``: a sample that does not conform, or a pair ``decreased``:
       "A finding still stands … whatever could not be told";
-    - ``could_not_tell``: nothing conforms (silence is no verdict), or any
-      counter or histogram read could not tell (:func:`member_answer`);
+    - ``could_not_tell``: nothing conforms (silence is no verdict); any
+      sample read unobservable, undecodable or under an invalid declaration
+      ("SHOULD say it could not tell when any sample in it was undecodable,
+      or any member it read had an invalid declaration"); or any counter or
+      histogram read could not tell (:func:`member_answer`). A resource
+      none of whose members was heard counts for nothing ("Only what was
+      read counts");
     - ``no`` otherwise, a window of gauges, text, booleans or bytes alone
       included (the continuity question not asked)."""
     ms = [(list(cs), list(ps)) for cs, ps in members]
@@ -883,6 +896,8 @@ def verdict(members: Iterable[tuple[Iterable[Conformance], Iterable[Pair]]]) -> 
             any(member_answer(cs, ps) == DECREASED_ESTABLISHED for cs, ps in ms):
         return FINDING
     if not any(c.conformance == CONFORMS for cs, _ in ms for c in cs):
+        return COULD_NOT_TELL
+    if any(c.conformance == UNOBSERVABLE for cs, _ in ms for c in cs):
         return COULD_NOT_TELL
     if any(member_answer(cs, ps) == UNOBSERVABLE for cs, ps in ms):
         return COULD_NOT_TELL

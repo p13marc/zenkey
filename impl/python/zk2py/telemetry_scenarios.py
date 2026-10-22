@@ -122,14 +122,15 @@ class PyMeter:
 
     rust = False
 
-    def __init__(self, endpoint: str, contract: Any) -> None:
+    def __init__(self, endpoint: str, contract: Any, extra: list[Any] | None = None) -> None:
         from .owner import Owner
 
         self.contract = contract
         self.decls = tm.contract_declarations(contract)
         self.rids = {k.split("/", 1)[1]: k for k in self.decls}
         system, service = ADDRESS.split("/")
-        self.owner = Owner(system, service, [contract], connect=endpoint)
+        #: other contracts the same service implements (the probes' meterx.v1)
+        self.owner = Owner(system, service, [contract, *(extra or [])], connect=endpoint)
         #: what the writer put in this epoch, by member
         self.published: dict[str, list[Any]] = {}
         self.owner.start()
@@ -325,9 +326,13 @@ class Reader:
     """R (``presence``) or R0: the data keys' samples with their stamps, and
     for R the owner's instance tokens, on one monotonic clock."""
 
-    def __init__(self, session: Any, contract: Any, *, presence: bool, selector: str = f"{PREFIX}/*") -> None:
+    def __init__(self, session: Any, contract: Any, *, presence: bool, selector: str | None = None,
+                 base: str = BASE) -> None:
         import zenoh
 
+        #: the interface's key prefix, ``zk2/<address>/<iface>``
+        self.base = base
+        selector = selector if selector is not None else f"{base}/stream/*"
         self.session = session
         self.decls = tm.contract_declarations(contract)
         self.encodings = {f"{r['token']}/{r['template']}": r.get("encoding") for r in contract.canonical["resources"]}
@@ -405,7 +410,7 @@ class Reader:
     def _member(self, key: str) -> str:
         """``<token>/<template>`` of a data key (the meter's templates are
         literal)."""
-        return key.removeprefix(f"{BASE}/")
+        return key.removeprefix(f"{self.base}/")
 
     def read(self, a: Arrival) -> tm.Conformance:
         """§2.6 against the resource's declaration: the payload decoded by
@@ -429,7 +434,7 @@ class Reader:
         return tm.conform(d, tm.Sample(value))
 
     def of(self, res: str, since_ns: int = 0, key: str | None = None) -> list[tuple[Arrival, tm.Conformance]]:
-        key = key or f"{PREFIX}/{res}"
+        key = key or f"{self.base}/stream/{res}"
         with self.lock:
             got = [a for a in self.arrivals if a.key == key and a.arrival_ns >= since_ns]
         return [(a, self.read(a)) for a in got]
@@ -463,9 +468,9 @@ class Reader:
         out = []
         for (a1, c1), (a2, c2) in zip(ok, ok[1:]):
             # §2.11's time base: "for state, the owner's stamp"
-            r1 = tm.read_of(c1, stamp_ns=a1.stamp_ns if a1.key.startswith(f"{BASE}/state/") else None,
+            r1 = tm.read_of(c1, stamp_ns=a1.stamp_ns if a1.key.startswith(f"{self.base}/state/") else None,
                             arrival_ns=a1.arrival_ns)
-            r2 = tm.read_of(c2, stamp_ns=a2.stamp_ns if a2.key.startswith(f"{BASE}/state/") else None,
+            r2 = tm.read_of(c2, stamp_ns=a2.stamp_ns if a2.key.startswith(f"{self.base}/state/") else None,
                             arrival_ns=a2.arrival_ns)
             out.append((_short(r1.value), _short(r2.value),
                         tm.continuity(r1, r2, self.presence_of(a1.arrival_ns, a2.arrival_ns), c2.unit or unit)))
@@ -545,14 +550,15 @@ class Bus:
         time.sleep(0.3)
 
     def tool_start(self, window_s: float, *, across_face: bool = False, endpoint: str | None = None,
-                   selector: str | None = None) -> ToolRun | None:
+                   selector: str | None = None, margin: bool = True) -> ToolRun | None:
         if self.tool_exe is None:
             return None
         return ToolRun(self.tool_exe, endpoint or self.endpoint, window_s, across_face=across_face,
-                       selector=selector)
+                       selector=selector, margin=margin)
 
-    def owner(self) -> Any:
-        o: Any = PyMeter(self.endpoint, self.contract) if self.mode == "zk2py" else RustMeter(self.mode, self.endpoint)
+    def owner(self, extra: list[Any] | None = None) -> Any:
+        o: Any = PyMeter(self.endpoint, self.contract, extra) if self.mode == "zk2py" \
+            else RustMeter(self.mode, self.endpoint)
         self.owners.append(o)
         return o
 
@@ -646,6 +652,11 @@ class Face:
 #: its subscriptions are declared and presence is seeded, and ``--for``
 #: counts from then: the steps start on the line, with no margin (round 47
 #: needed 1 s with zenctl-tc).
+#: With ``--across-face`` the line is still no signal to start on: no
+#: presence is read, and a sample put the moment it appears was lost in 2 of
+#: 15 tries with zenctl-tf (and 1 of 5 with zenctl-te), none of 15 put 50 ms
+#: later (F-159). Those runs alone wait this long after it.
+ACROSS_FACE_MARGIN_S = 0.2
 
 
 class ToolRun:
@@ -657,7 +668,7 @@ class ToolRun:
     ``totals`` and ``judgement``."""
 
     def __init__(self, exe: Path, endpoint: str, window_s: float, *, across_face: bool = False,
-                 selector: str | None = None) -> None:
+                 selector: str | None = None, margin: bool = True) -> None:
         args = [str(exe), "telemetry", "--for", str(window_s), "-c", endpoint, "--format", "json", "--color", "never"]
         if across_face:
             args += ["--across-face", "--contracts", str(CONTRACT)]
@@ -670,6 +681,8 @@ class ToolRun:
         threading.Thread(target=self._pump, daemon=True).start()
         if not _wait(lambda: any(x.startswith("telemetry: listening") for x in self.err), 15.0, 0.002):
             raise RuntimeError(f"zenctl telemetry did not start listening: {self.err[-3:]}")
+        if across_face and margin:
+            time.sleep(ACROSS_FACE_MARGIN_S)  # F-159
         #: on this process's monotonic clock: the line's sighting, from when
         #: the steps start ("a sample put from then on is inside it")
         self.ready_ns = time.monotonic_ns()
@@ -706,7 +719,7 @@ def zk2py_view(reader: Reader, since_ns: int, keys: list[str] | None = None) -> 
         got = reader.of("", since_ns, key=key)
         if not got:
             continue
-        rid = key.removeprefix(f"{BASE}/")
+        rid = key.removeprefix(f"{reader.base}/")
         d = reader.decls[rid]
         cs = [c for _, c in got]
         conforming = [c for c in cs if c.conformance == tm.CONFORMS]
@@ -779,7 +792,8 @@ def compare_tool(report: Report, sec: str, run: ToolRun, reader: Reader, *, keys
     :func:`zk2py.telemetry.verdict` over zk2py's own reading."""
     code, doc = run.finish()
     zk, tool = zk2py_view(reader, run.ready_ns if since_ns is None else since_ns, keys), _tool_view(doc)
-    margin = f" (the steps started on the tool's listening line, F-154's answer; exit {code})"
+    margin = (f" (the steps started on the tool's listening line, F-154's answer, {ACROSS_FACE_MARGIN_S} s after "
+              f"it across a face, F-159; exit {code})")
     if writes:
         # so that the tool mode cannot pass while testing nothing
         report.check(sec, f"{label}: zk2py's reader read samples in the tool's window", bool(zk),
@@ -812,7 +826,7 @@ def compare_tool(report: Report, sec: str, run: ToolRun, reader: Reader, *, keys
             bad = [(x, y) for x, y in zip(tail, t["pairs"]) if not _rates_agree(x[6], y[6], x[5])]
             if bad:
                 diffs.append(f"rates: {[(x[6], y[6], x[5]) for x, y in bad]}")
-        member = key.removeprefix(f"{BASE}/")
+        member = key.removeprefix(f"{reader.base}/")
         report.check(sec, f"{label} agrees on {member}: kind and unit, {z['samples']['received']} samples and their "
                           f"problems, {len(z['pairs'])} pairs (continuity, epoch, evidence, time base, rate), "
                           f"its answer {z['answer']}",
@@ -1402,19 +1416,34 @@ def section9(report: Report, mode: Any, contract: Any, tool: Path | None = None)
 
 
 def tool_probes(report: Report, contract: Any, tool: Path) -> None:
-    """§5 "Over many pairs" (0.3, 0.4), the tool's verdict over windows built
-    for it, each against zk2py's (:func:`zk2py.telemetry.verdict`): counters
+    """§5 "Over many pairs" (0.3, 0.4) and "Over many samples" (0.5), the
+    tool's verdict over windows built for it, each against zk2py's
+    (:func:`zk2py.telemetry.verdict`): an undecodable sample beside a
+    conforming one, a member heard under an invalid declaration
+    (``meterx.v1``'s ``stream/odd``) and one in scope unheard; counters
     whose every pair was assumed, histograms likewise (both across a face,
     so no presence is read), a counter's one sample with no pair (F-152),
     one counter established beside another with no pair (0.4: each is
     asked), and no sample at all. Then the tool's answers to F-154 (a
     sample put on the "listening" line is inside the window) and F-155
     (``pairs_listed``)."""
-    sec = "§5 over many pairs"
+    sec = "§5 over many pairs and samples"
     bus = Bus("zk2py", contract, tool=tool, report=report, sec=sec)
+    xsession: Any = None
+    X: Reader | None = None
     try:
-        o = bus.owner()
+        from . import live
+        from .contract import load_contract
+
+        # meterx.v1 is served throughout, its stream/odd's declaration
+        # invalid: every window but the one that writes it checks that "only
+        # what was read counts" (§5, 0.5).
+        meterx = load_contract(CONTRACT.parent / "meterx.v1.toml", check_file_name=True)
+        o = bus.owner(extra=[meterx])
         bus.appeared(o.instance)
+        xbase = f"zk2/{ADDRESS}/meterx.v1"
+        xsession = live.open_client(bus.endpoint)
+        X = Reader(xsession, meterx, presence=True, base=xbase)
         face: dict[str, Any] = {"across_face": True, "selector": f"zk2/{ADDRESS}/**"}
         run = bus.tool_start(4, **face)
         assert run is not None
@@ -1451,7 +1480,18 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
         time.sleep(0.4)
         o.raw_bytes("level", b"5 x", None)
         compare_tool(report, sec, run, bus.R,
-                     label="the tool, a gauge's conforming sample beside an undecodable one (F-157)")
+                     label="the tool, a gauge's conforming sample beside an undecodable one (F-157, 0.5)")
+        run = bus.tool_start(3)
+        assert run is not None
+        o.owner.publish(f"{xbase}/stream/odd", b"1.5")
+        o.owner.publish(f"{xbase}/stream/good", b"2.5")
+        compare_tool(report, sec, run, X,
+                     label="the tool, a member under an invalid declaration heard, beside a valid gauge (0.5)")
+        run = bus.tool_start(3)
+        assert run is not None
+        o.owner.publish(f"{xbase}/stream/good", b"3.5")
+        compare_tool(report, sec, run, X,
+                     label="the tool, the invalid resource in scope and unheard, a valid gauge heard (0.5)")
         # F-154's answer: a sample put the moment the line appears is inside
         # the window, three tries
         caught = []
@@ -1464,6 +1504,17 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
             caught.append(rows[0]["samples"]["received"] if rows else 0)
         report.check(sec, "F-154's answer: a sample put the moment \"listening\" appears is inside the window, "
                           "in three tries of three", caught == [1, 1, 1], f"received {caught}")
+        # F-159: the same across a face, with no margin, measured and noted
+        across = []
+        for v in (23, 24, 25, 26, 27):
+            run = bus.tool_start(1, across_face=True, selector=f"zk2/{ADDRESS}/**", margin=False)
+            assert run is not None
+            o.put("drops", v)
+            code, doc = run.finish()
+            rows = [r for r in doc["rows"] if r.get("row") == "member" and r["key"].endswith("/drops")]
+            across.append(rows[0]["samples"]["received"] if rows else 0)
+        report.note(sec, f"F-159: across a face (--across-face), a sample put the moment \"listening\" appears was "
+                         f"read {sum(across)} of {len(across)} times {across}")
         # F-155's answer: pairs_listed says when the listed pairs are a tail
         run = bus.tool_start(5, selector=f"{PREFIX}/drops")
         assert run is not None
@@ -1479,6 +1530,14 @@ def tool_probes(report: Report, contract: Any, tool: Path) -> None:
                      and m[0]["pairs"][-1]["later"] == 54, f"{ {k: c.get(k) for k in ('pairs', 'pairs_listed')} }, "
                      f"{len(m[0].get('pairs', [])) if m else None} listed")
     finally:
+        # the meterx reader and its session are closed however the probes end
+        if X is not None:
+            X.close()
+        if xsession is not None:
+            try:
+                xsession.close()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
         bus.close()
 
 
