@@ -31,7 +31,7 @@ Options:
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a reply's stamp is then aged against this clock (freshness.v1 §2.6). Without it, only a clock the window measured on a live put of it is trusted
 
       --for <SECS>
-          The reading's window, seconds: a subscription to the alarms and to the owners' instance tokens, declared before the GET, then --lease and --timeout more while the owners are watched (spec §2.7, 0.25). An owner whose GET drew nothing is known whole only by a lossless window longer than 900 s, the owner present throughout (§2.15). Omitted, no subscription: the GET alone
+          The reading's window, seconds: a subscription to the alarms and to the owners' instance tokens, declared before the GET, then --lease and --timeout more while the owners are watched (spec §2.7, 0.25). It opens once the subscriptions are declared and the first presence read and GET were made after them, when stderr says "listening". An owner whose GET drew nothing is known whole only by a lossless window longer than 900 s, the owner present throughout (§2.15). Omitted, no subscription: the GET alone
 
       --lease <SECS>
           The deployment's link lease, seconds: a window's owner is watched for this, and --timeout, past the window's end (spec §2.7, 0.25)

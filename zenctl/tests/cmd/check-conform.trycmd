@@ -103,8 +103,9 @@ on one resource:
   telemetry-continuity
                    no counter or histogram decreased within an
                    established epoch, in-band or by presence watched
-                   over the window; a window whose every pair had its
-                   epoch assumed answers nothing (telemetry.v1 §2.10)
+                   over the window; a member that formed no pair, or
+                   only pairs whose epoch was assumed, could not tell,
+                   and neither can the case (telemetry.v1 §2.10, §5)
 
 "Lost no delivery" is established, never assumed (§2.7, 0.25): this
 run lost nothing, and the resource is reliable with block, which no

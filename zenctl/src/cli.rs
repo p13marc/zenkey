@@ -924,10 +924,11 @@ pub(crate) enum Command {
     /// descriptor, the revisions they name, and every metric resource those
     /// declare (a stream or state with a telemetry.* annotation, or typed by
     /// the profile's Point, known by its artifact's id) — those the
-    /// selector reaches when one is given. Then, over --for, one queue fed by
-    /// the owners' instance and member tokens and each resource's members, a
-    /// seed of presence, and S4's GET of each state metric resource, merged
-    /// by the owner's stamp. Per resource, whether its declaration is valid;
+    /// selector reaches when one is given. Then one queue fed by the owners'
+    /// instance and member tokens and each resource's members, a seed of
+    /// presence, and, over --for, S4's GET of each state metric resource,
+    /// merged by the owner's stamp. Per resource, whether its declaration is
+    /// valid;
     /// per member, its kind and unit (the declared ones, else a Point's; a
     /// unit absent is unknown, never dimensionless), each sample's
     /// conformance with its reasons, and each pair of consecutive conforming
@@ -937,12 +938,52 @@ pub(crate) enum Command {
     /// loss), or assumed — and a counter's rate with its unit. A decrease
     /// with no established epoch is a reset, never a finding and never a
     /// negative rate. No clock is trusted: a rate is timed by the Points'
-    /// timestamps, the owner's stamps, or this host's receipt. Exit 1 a
-    /// sample that does not conform, or a decrease within an established
-    /// epoch (the findings); 0 every question asked answered without one; 2
-    /// no verdict: no metric resource in scope, no sample in the window,
-    /// every counter's pair assumed (presence unobservable throughout, no
-    /// in-band epoch), or a run that could not start.
+    /// timestamps, the owner's stamps, or this host's receipt. Per counter
+    /// or histogram read, did it go backwards within one epoch: it could not
+    /// tell when no pair of it formed (one sample in the window, say), or
+    /// when its every pair was assumed — and another member's established
+    /// pair answers nothing of it (telemetry.v1 §5, 0.4). Exit 1 a sample
+    /// that does not conform, or a decrease within an established epoch (the
+    /// findings); 0 every question asked answered without one; 2 no verdict:
+    /// no metric resource in scope, no sample in the window, a counter or
+    /// histogram that could not tell (no pair formed, or every counter's or
+    /// histogram's pair assumed: no in-band epoch, and presence unobservable
+    /// or establishing none), or a run that could not start.
+    ///
+    /// --format json is one document: `report` ("telemetry"), `namespace`,
+    /// `selector`, `presence` (the seed's `selector`, `complete`, `services`
+    /// and `basis`; absent across a face), `across_face`, `window_s` (from
+    /// the window's opening), `asked`, `totals` (`resources`, `invalid`,
+    /// `members`, `samples`, `conforms`, `does_not`, `unobservable`, `pairs`,
+    /// `decreased`, `established`, `assumed`, and `unanswered`: the counters
+    /// and histograms that could not tell), `judgement`, `rows` and `notes`;
+    /// and `lost`, `refused`, `unresolved`, `skipped` and `unobservable` when
+    /// there is something to say. The `judgement` is the exit code's:
+    /// `answer` `established` (a finding, 1), `not_established` (none, 0) or
+    /// `unobservable` (no verdict, 2), with its `reason`. A `resource` row:
+    /// `address`, `iface`, `fingerprint`, `resource`, `selector`,
+    /// `declaration` (`answer` `declared` or `invalid`, its `reasons`, and the
+    /// `carrier`, `kind`, `unit`, `buckets`, `semantic` and `epoch_in` it
+    /// declares, `says` in words) and `members` heard. A `member` row:
+    /// `key`, `address`, `iface`, `resource`, `kind` and `kind_from`, `unit`
+    /// and `unit_from` (absent when unknown, never dimensionless), `samples`
+    /// (`received`, `conforms`, `does_not`, `unobservable`, `problems`, …),
+    /// `latest`, `rate`, `continuity` and `pairs`. `continuity` is the
+    /// member's answer in the judgement's tokens (`answer`, `reason`;
+    /// `not_asked` for neither a counter nor a histogram), `pairs` (every
+    /// pair formed), `pairs_listed` (how many the row's `pairs` holds: the
+    /// latest 16, fewer than `pairs` when it is a tail), then the pairs
+    /// counted by answer and by how their epoch was had. Each of `pairs`,
+    /// oldest first: `earlier` and `later`, `continuity` (`same_epoch`,
+    /// `reset`, `decreased`, `unobservable` for incomparable, `not_asked`),
+    /// `epoch` (`established` or `assumed`), `via` (`in_band` or `presence`;
+    /// absent when assumed), `presence` (`observed`; `spans_loss`, a loss
+    /// between the two arrivals; `none`, no presence at either, as across a
+    /// face), `rate` and `rate_unit` or `no_rate` (`reset`, `decreased`,
+    /// `elapsed`, `kind`), `base` (the rate's time base: `timestamp`,
+    /// `stamp` or `arrival`) and `elapsed_s`. A field absent is a question
+    /// not asked, never null; ndjson carries the same, the envelope first,
+    /// then a line per row.
     Telemetry(TelemetryArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
@@ -1116,8 +1157,9 @@ pub(crate) enum CheckCmd {
     ///   telemetry-continuity
     ///                    no counter or histogram decreased within an
     ///                    established epoch, in-band or by presence watched
-    ///                    over the window; a window whose every pair had its
-    ///                    epoch assumed answers nothing (telemetry.v1 §2.10)
+    ///                    over the window; a member that formed no pair, or
+    ///                    only pairs whose epoch was assumed, could not tell,
+    ///                    and neither can the case (telemetry.v1 §2.10, §5)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
@@ -2995,9 +3037,11 @@ pub(crate) struct HealthArgs {
     pub(crate) clocks_synced: bool,
     /// The reading's window, seconds: a subscription to every status and to
     /// the faults, which measures this host's clock on the owners' live puts,
-    /// confirms each status, and answers "is its clock ahead?". Default 31,
-    /// just over the 30 s an owner re-puts its status within; with
-    /// --clocks-synced, no window unless given.
+    /// confirms each status, and answers "is its clock ahead?". It opens
+    /// once the subscription is declared and presence was read after it,
+    /// when stderr says "listening". Default 31, just over the 30 s an owner
+    /// re-puts its status within; with --clocks-synced, no window unless
+    /// given.
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
     /// Seconds between the two readings when no window separates them: a
@@ -3043,9 +3087,11 @@ pub(crate) struct AlarmsArgs {
     /// The reading's window, seconds: a subscription to the alarms and to
     /// the owners' instance tokens, declared before the GET, then --lease
     /// and --timeout more while the owners are watched (spec §2.7, 0.25).
-    /// An owner whose GET drew nothing is known whole only by a lossless
-    /// window longer than 900 s, the owner present throughout (§2.15).
-    /// Omitted, no subscription: the GET alone.
+    /// It opens once the subscriptions are declared and the first presence
+    /// read and GET were made after them, when stderr says "listening". An
+    /// owner whose GET drew nothing is known whole only by a lossless window
+    /// longer than 900 s, the owner present throughout (§2.15). Omitted, no
+    /// subscription: the GET alone.
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
     /// The deployment's link lease, seconds: a window's owner is watched for
@@ -3081,8 +3127,10 @@ pub(crate) struct TelemetryArgs {
     /// metric resource the descriptors in the namespace declare.
     #[arg(value_name = "SELECTOR")]
     pub(crate) selector: Option<String>,
-    /// The reading's window, seconds: the subscriptions listen this long. A
-    /// pair needs two conforming samples of one member within it.
+    /// The reading's window, seconds. It opens once the subscriptions are
+    /// declared and presence is seeded, when stderr says "listening": a
+    /// sample put from then on is inside it. A pair needs two conforming
+    /// samples of one member within it.
     #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
     pub(crate) for_secs: f64,
     /// The deployment's link lease, seconds: with --wait-before-close, the
