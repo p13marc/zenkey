@@ -40,7 +40,6 @@
 //! retained sample closes no pair.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use zenkey_fleet::model::telemetry::{invalid_words, problem_words};
 use zenkey_fleet::{MetricResource, MetricSample, MetricVia, PairTally, Resolved, TelemetryBook};
@@ -406,7 +405,9 @@ struct Folded {
 pub struct MetricFold {
     inputs: Inputs,
     metric: Arc<MetricResource>,
-    book: TelemetryBook,
+    /// Opened at the first entry folded, its origin that entry's arrival:
+    /// a fold begun over an empty ring has no arrival to count from yet.
+    book: Option<TelemetryBook>,
     /// The last `seq` folded, if any.
     folded: Option<u64>,
     entries: std::collections::VecDeque<Folded>,
@@ -425,19 +426,11 @@ impl MetricFold {
             &resolved.revision,
             resolved.index(),
         )?);
-        // Arrivals count from the window's oldest, so every one folded
-        // from here is at or after the book's origin; an entry arriving
-        // before it (a replay's rewound clock) saturates to it.
-        let t0 = ring
-            .iter()
-            .map(|e| e.received)
-            .min()
-            .unwrap_or_else(Instant::now);
         let mut fold = MetricFold {
             inputs: Inputs::of(resolved, ring),
             read: Arc::new(MetricRead::empty(metric.ty.declaration.clone())),
             metric,
-            book: TelemetryBook::new(None, t0),
+            book: None,
             folded: None,
             entries: std::collections::VecDeque::new(),
             decoded: 0,
@@ -494,11 +487,18 @@ impl MetricFold {
         if self.metric.declared() {
             let key = self.inputs.key.clone();
             let after = self.folded;
-            for entry in ring
-                .iter()
-                .rev()
-                .filter(|e| after.is_none_or(|f| e.seq > f))
+            let fresh = || ring.iter().filter(|e| after.is_none_or(|f| e.seq > f));
+            // Arrivals count from the first entries folded, so every one
+            // is at or after the book's origin — never the fold's own
+            // instant, which a ring's arrivals may well precede. One
+            // arriving before it saturates to it.
+            if self.book.is_none()
+                && let Some(t0) = fresh().map(|e| e.received).min()
             {
+                self.book = Some(TelemetryBook::new(None, t0));
+            }
+            let newest_first: Vec<&crate::history::HistoryEntry> = fresh().collect();
+            for entry in newest_first.into_iter().rev() {
                 self.fold_one(&key, entry);
                 moved = true;
             }
@@ -522,8 +522,11 @@ impl MetricFold {
     }
 
     fn fold_one(&mut self, key: &str, entry: &crate::history::HistoryEntry) {
-        let before = self.book.member(key).map(counts).unwrap_or_default();
-        let pair = self.book.sample(
+        let Some(book) = self.book.as_mut() else {
+            return;
+        };
+        let before = book.member(key).map(counts).unwrap_or_default();
+        let pair = book.sample(
             &self.metric,
             MetricSample {
                 key: key.to_owned(),
@@ -536,7 +539,7 @@ impl MetricFold {
             },
         );
         self.decoded += 1;
-        let member = self.book.member(key);
+        let member = book.member(key);
         let after = member.map(counts).unwrap_or_default();
         let said = if after.deletes > before.deletes {
             Said::Delete
@@ -572,7 +575,7 @@ impl MetricFold {
     /// latest (§2.5).
     fn snapshot(&self) -> MetricRead {
         let mut out = MetricRead::empty(self.metric.ty.declaration.clone());
-        if let Some(m) = self.book.member(&self.inputs.key) {
+        if let Some(m) = self.book.as_ref().and_then(|b| b.member(&self.inputs.key)) {
             if m.kind.is_some() {
                 out.kind = m.kind;
             }
@@ -732,6 +735,7 @@ pub fn read(resolved: &Resolved, ring: &HistoryRing) -> Option<MetricRead> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     fn meter() -> Arc<zenkey_fleet::ContractSet> {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -822,6 +826,31 @@ mod tests {
         let once = read(&r, &ring).unwrap();
         assert_eq!(once.value.points(), m.value.points());
         assert_eq!(once.rate.as_ref().unwrap().points()[0], None);
+    }
+
+    /// A fold begun over an empty ring — a selection, before its first
+    /// sample — counts arrivals from its first entry's, never its own
+    /// instant: entries that arrived before the fold was made (a scene's
+    /// world, a capture's clock) are timed all the same (§2.11).
+    #[test]
+    fn a_fold_begun_empty_times_what_arrived_before_it() {
+        let set = meter();
+        let r = resolve(&set, "zk2/lab/meter/meter.v1/stream/bytes");
+        let past = Instant::now()
+            .checked_sub(std::time::Duration::from_secs(60))
+            .unwrap_or_else(Instant::now);
+        let mut ring = HistoryRing::new(16);
+        let mut fold = MetricFold::new(&r, &ring).unwrap();
+        for i in 0..3 {
+            push_count(&mut ring, past, i, 50 * i);
+        }
+        assert!(fold.advance(&r, &ring));
+        let m = fold.read();
+        assert_eq!(
+            m.rate.as_ref().unwrap().points(),
+            [None, Some(100.0), Some(100.0)]
+        );
+        assert_eq!(m.no_rate.elapsed, 0);
     }
 
     /// Review of PR #829: a fold is never taken for another ring's. A new
