@@ -517,6 +517,7 @@ const _: () = {
                 clocks_synced: false,
                 face: None,
             },
+            || {},
         ));
         // An alarms reading holds its subscriptions, its queue and its
         // receive path's watch across awaits (#800, AC).
@@ -526,6 +527,7 @@ const _: () = {
             crate::AlarmScope::all(),
             crate::AlarmSpec::new(std::time::Duration::ZERO),
             zenkey_model::alarms::Severity::Warning,
+            || {},
         ));
         // A telemetry reading holds its subscriptions, its queue and its
         // receive path's watch across awaits (#819, TC).
@@ -538,6 +540,7 @@ const _: () = {
             &store,
             &offline,
             crate::TelemetrySpec::new(std::time::Duration::ZERO, std::time::Duration::ZERO),
+            || {},
         ));
     }
 

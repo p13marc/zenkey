@@ -314,6 +314,27 @@ impl Bus {
         tokio::task::spawn_blocking(move || run_within(&argv, &home, None, None, limit))
     }
 
+    /// [`Bus::spawn`], and a signal on the first line of its stderr that
+    /// holds `needle`, the moment a case acts on (#819 TE, F-154: the
+    /// "listening" line).
+    fn spawn_on_line(
+        &self,
+        args: &[&str],
+        needle: &'static str,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::task::JoinHandle<Run>,
+    ) {
+        let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        argv.extend(["-c".into(), self.endpoint.clone()]);
+        let home = self.home.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let run = tokio::task::spawn_blocking(move || {
+            run_watched(&argv, &home, None, None, RUN_LIMIT, Some((needle, tx)))
+        });
+        (rx, run)
+    }
+
     /// Rerun until `done` holds, within [`SETTLE`]; the last run either way.
     async fn until(&self, args: &[&str], done: impl Fn(&Run) -> bool) -> Run {
         let deadline = Instant::now() + SETTLE;
@@ -373,7 +394,20 @@ fn run_within(
     stdin: Option<Vec<u8>>,
     limit: Duration,
 ) -> Run {
-    use std::io::{Read as _, Write as _};
+    run_watched(argv, home, memlock_kib, stdin, limit, None)
+}
+
+/// [`run_within`], signalling `on_line`'s sender at the first stderr line
+/// that holds its needle, as the line is read.
+fn run_watched(
+    argv: &[String],
+    home: &Path,
+    memlock_kib: Option<u64>,
+    stdin: Option<Vec<u8>>,
+    limit: Duration,
+    on_line: Option<(&'static str, tokio::sync::oneshot::Sender<()>)>,
+) -> Run {
+    use std::io::{BufRead as _, Read as _, Write as _};
     let zenctl = env!("CARGO_BIN_EXE_zenctl");
     let mut command = match memlock_kib {
         Some(kib) => {
@@ -418,7 +452,24 @@ fn run_within(
         })
     };
     let out = drain(Box::new(child.stdout.take().expect("stdout")));
-    let err = drain(Box::new(child.stderr.take().expect("stderr")));
+    let err = {
+        let pipe = child.stderr.take().expect("stderr");
+        std::thread::spawn(move || {
+            let mut on_line = on_line;
+            let mut s = String::new();
+            let mut lines = std::io::BufReader::new(pipe);
+            let mut line = String::new();
+            while lines.read_line(&mut line).is_ok_and(|n| n > 0) {
+                if on_line.as_ref().is_some_and(|(n, _)| line.contains(n)) {
+                    let (_, tx) = on_line.take().expect("just held");
+                    let _ = tx.send(());
+                }
+                s.push_str(&line);
+                line.clear();
+            }
+            s
+        })
+    };
     let deadline = Instant::now() + limit;
     let status = loop {
         if let Some(status) = child.try_wait().expect("wait on zenctl") {
@@ -6689,6 +6740,13 @@ struct Meter {
 /// O started on `session`, every resource exposed, once a subscriber
 /// matches both writers.
 async fn meter_owner(session: &zenoh::Session) -> Meter {
+    meter_owner_with(session, true).await
+}
+
+/// O started on `session`, every resource exposed; once a subscriber
+/// matches both writers when `matched`, at once otherwise: an owner up
+/// before its reader (#819 TE).
+async fn meter_owner_with(session: &zenoh::Session, matched: bool) -> Meter {
     let l = load_path(&meter_contract_path());
     let c = l
         .contract
@@ -6714,7 +6772,7 @@ async fn meter_owner(session: &zenoh::Session) -> Meter {
         .expect("drops");
     let svc = b.start().await.expect("start");
     let deadline = Instant::now() + SETTLE;
-    for w in [&frames, &drops] {
+    for w in [&frames, &drops].into_iter().filter(|_| matched) {
         while !w.matching().await.expect("matching") {
             assert!(
                 Instant::now() < deadline,
@@ -6789,8 +6847,10 @@ fn telemetry_pairs(doc: &Value, key: &str) -> Vec<(u64, u64, String, String, Str
 /// `drops` 10 → 20 same_epoch, assumed, with a rate; 20 → 3 a reset,
 /// assumed, with none; 3 → 8 same_epoch, assumed — and `frames` 20 → 3 a
 /// reset established in-band, the Point's epoch having crossed with it.
-/// Nothing decreased, no rate is negative, and an established pair answers
-/// the run: exit 0.
+/// Nothing decreased and no rate is negative. Since 0.4 (#819 TE, zk2py
+/// round 47's F-152) the run exits 2: `frames` answers, but every pair of
+/// `drops` is assumed, so of `drops` T could not tell, and `frames`' in-band
+/// epoch establishes nothing of it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn telemetry_s8_a_counter_that_crosses_a_face() {
     let (bus, ground) = face_bus(false).await;
@@ -6828,12 +6888,30 @@ async fn telemetry_s8_a_counter_that_crosses_a_face() {
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
     let run = t.await.expect("the telemetry run");
-    exits(&run, 0);
+    exits(&run, 2);
     let doc = run.json();
     assert_eq!(doc["across_face"], true, "{run}");
     assert!(doc.get("presence").is_none(), "no presence crosses: {run}");
     assert_eq!(doc["totals"]["decreased"], 0, "{run}");
     assert_eq!(doc["totals"]["does_not"], 0, "{run}");
+    assert_eq!(doc["totals"]["unanswered"], 1, "{run}");
+    assert_eq!(doc["judgement"]["answer"], "unobservable", "{run}");
+    let answer = |key: &str| {
+        rows_of(&doc, "member")
+            .into_iter()
+            .find(|r| r["key"] == key)
+            .map(|r| r["continuity"]["answer"].clone())
+    };
+    assert_eq!(
+        answer("zk2/lab/meter/meter.v1/stream/drops"),
+        Some(Value::from("unobservable")),
+        "{run}"
+    );
+    assert_eq!(
+        answer("zk2/lab/meter/meter.v1/stream/frames"),
+        Some(Value::from("not_established")),
+        "{run}"
+    );
     let row = |a: u64, b: u64, c: &str, e: &str, v: &str, rated: bool| {
         (a, b, c.to_owned(), e.to_owned(), v.to_owned(), rated)
     };
@@ -6857,6 +6935,106 @@ async fn telemetry_s8_a_counter_that_crosses_a_face() {
     );
     drop(i2);
     o2.close().await.expect("closes");
+}
+
+/// `zenctl telemetry` of `drops` alone, once O is up and listed: T's run,
+/// and the moment its "listening" line is read.
+async fn telemetry_of_drops(
+    bus: &Bus,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::task::JoinHandle<Run>,
+) {
+    wait_for(bus, &["lab/meter"]).await;
+    let contracts = meter_contract_path();
+    let contracts = contracts.to_str().expect("a UTF-8 path").to_owned();
+    bus.spawn_on_line(
+        &[
+            "telemetry",
+            DROPS,
+            "--contracts",
+            &contracts,
+            "--for",
+            "3",
+            "--format",
+            "json",
+        ],
+        "telemetry: listening",
+    )
+}
+
+const DROPS: &str = "zk2/lab/meter/meter.v1/stream/drops";
+
+/// zk2py round 47's F-154 (#819 TE): T's "listening" line comes once its
+/// subscriptions are declared and presence is seeded, and `--for` counts
+/// from then. O is up before T, so T's seed finds its one instance. The
+/// moment T's line is read, O puts `drops` at 10 and then at 7, raw, since
+/// O's own writer refuses a decrease. T reads both, pairs 10 → 7 as
+/// `decreased` within the epoch presence established (O alone
+/// throughout), and exits 1. Before, the line came before T had read
+/// presence, and a sample put on it was lost.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_hears_a_decrease_put_right_after_its_listening_line() {
+    let bus = Bus::bare(None).await;
+    let o = meter_owner_with(&bus.owners, false).await;
+    let (listening, t) = telemetry_of_drops(&bus).await;
+    listening.await.expect("T says it listens");
+    for n in ["10", "7"] {
+        bus.owners.put(DROPS, n).await.expect("a put");
+    }
+    let run = t.await.expect("the telemetry run");
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["totals"]["samples"], 2, "both samples heard: {run}");
+    assert_eq!(
+        telemetry_pairs(&doc, DROPS),
+        [(
+            10,
+            7,
+            "decreased".to_owned(),
+            "established".to_owned(),
+            "presence".to_owned(),
+            false
+        )],
+        "{run}"
+    );
+    drop(o);
+}
+
+/// zk2py round 47's F-152 (telemetry.v1 0.4 §5, #819 TE): one conforming
+/// sample of a counter forms no pair, so T could not tell whether it went
+/// backwards: exit 2, never "none decreased". Its member row says so, and
+/// lists no pair of none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_could_not_tell_of_a_counter_heard_once() {
+    let bus = Bus::bare(None).await;
+    let o = meter_owner_with(&bus.owners, false).await;
+    let (listening, t) = telemetry_of_drops(&bus).await;
+    listening.await.expect("T says it listens");
+    o.drops.put_value(&10u64).await.expect("drops");
+    let run = t.await.expect("the telemetry run");
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["totals"]["conforms"], 1, "{run}");
+    assert_eq!(doc["totals"]["unanswered"], 1, "{run}");
+    assert_eq!(doc["judgement"]["answer"], "unobservable", "{run}");
+    let drops = rows_of(&doc, "member")
+        .into_iter()
+        .find(|r| r["key"] == DROPS)
+        .unwrap_or_else(|| panic!("a member row: {run}"));
+    assert_eq!(drops["continuity"]["answer"], "unobservable", "{run}");
+    assert!(
+        drops["continuity"]["reason"]
+            .as_str()
+            .is_some_and(|r| r.starts_with("no pair formed")),
+        "{run}"
+    );
+    assert_eq!(drops["continuity"]["pairs"], 0, "{run}");
+    assert_eq!(drops["continuity"]["pairs_listed"], 0, "{run}");
+    assert!(
+        run.stderr.contains("could not tell"),
+        "the exit's reason names it: {run}"
+    );
 }
 
 /// #825, and a tool's reading of a mock owner's metrics: `gen` brings up an

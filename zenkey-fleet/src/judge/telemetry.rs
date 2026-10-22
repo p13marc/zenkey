@@ -19,12 +19,16 @@
 //!   is `Established`;
 //! - "did this counter or histogram go backwards within one epoch?"
 //!   ([`decreased`]): `decreased` is `Established`, and only within an
-//!   established epoch — a decrease read as a reset is no;
+//!   established epoch — a decrease read as a reset is no. Over one
+//!   member's pairs ([`member_decreased`], §5, 0.4), the no needs an
+//!   established pair: a counter or histogram that formed no pair, or only
+//!   pairs whose epoch was assumed, could not tell;
 //! - "what is this counter's rate over the pair?" ([`rate`]): informative.
 //!
 //! The two unestablished kinds stay apart in every one (core O5). Of the
 //! five, only a sample that does not conform and a decrease are the run's
-//! findings ([`TelemetryReport::judgement`]).
+//! findings, and a member whose continuity could not be told leaves the run
+//! without a verdict ([`TelemetryReport::judgement`]).
 
 use zenkey_model::telemetry::{
     Basis, Checked, Conformance, Continuity, Declaration, Measure, NoRate, Pair, Via,
@@ -109,6 +113,60 @@ pub fn decreased(p: &Pair) -> Judgement {
         },
         Continuity::NotAsked => Judgement::NotAsked,
     }
+}
+
+/// "Did this counter or histogram go backwards within one epoch?" over every
+/// pair of one member in the window (§5, 0.4; zk2py round 47's F-152). A
+/// decrease within an established epoch is the yes, the finding. The no
+/// needs evidence: at least one pair whose epoch was established, in-band
+/// or by presence, and none decreased. A counter or histogram that formed
+/// no pair, or only pairs whose epoch was assumed or that were
+/// incomparable, could not tell: no decrease could have been found.
+/// Neither a counter nor a histogram, by the member's kind and its pairs,
+/// is not asked. `reads_presence` says why an assumed epoch was: no
+/// presence read (across a face), or none established.
+pub fn member_decreased(m: &MemberBook, reads_presence: bool) -> Judgement {
+    let t = &m.tally;
+    if t.decreased > 0 {
+        return Judgement::Established;
+    }
+    let cumulative =
+        m.kind.is_some_and(|(k, _)| k.is_cumulative()) || t.asked() + t.unobservable > 0;
+    if !cumulative {
+        return Judgement::NotAsked;
+    }
+    let established = t.in_band + t.by_presence;
+    if established > 0 {
+        return Judgement::NotEstablished {
+            reason: format!(
+                "{established} pair(s) whose epoch was established ({} in-band, {} by presence), \
+                 none decreased; {} assumed, {} reset",
+                t.in_band, t.by_presence, t.assumed, t.reset
+            ),
+        };
+    }
+    let reason = if t.total() == 0 {
+        format!(
+            "no pair formed: {} conforming sample(s) of it in the window, and a pair needs two",
+            m.conforming
+        )
+    } else if t.assumed > 0 {
+        format!(
+            "every one of its {} pair(s) had its epoch assumed: no in-band epoch, and {}",
+            t.assumed,
+            if reads_presence {
+                "presence established none"
+            } else {
+                "no presence read"
+            }
+        )
+    } else {
+        format!(
+            "its {} pair(s) incomparable: the kinds, or a histogram's bounds or length, differ",
+            t.unobservable
+        )
+    };
+    Judgement::Unobservable { reason }
 }
 
 /// "What is this counter's rate over the pair?" (§2.11): informative. A
@@ -262,8 +320,9 @@ pub fn pair_row(p: &PairSeen) -> TelemetryPair {
     }
 }
 
-/// One member, as the report spells it.
-pub fn member_row(key: &str, m: &MemberBook) -> TelemetryMember {
+/// One member, as the report spells it. `reads_presence` as
+/// [`member_decreased`] takes it.
+pub fn member_row(key: &str, m: &MemberBook, reads_presence: bool) -> TelemetryMember {
     let r = &m.metric;
     TelemetryMember {
         key: key.to_owned(),
@@ -296,7 +355,9 @@ pub fn member_row(key: &str, m: &MemberBook) -> TelemetryMember {
         },
         latest: m.latest.as_ref().map(|r| measure_json(&r.value)),
         continuity: TelemetryContinuity {
+            answer: member_decreased(m, reads_presence),
             pairs: m.tally.total(),
+            pairs_listed: m.pairs.len() as u64,
             same_epoch: m.tally.same_epoch,
             reset: m.tally.reset,
             decreased: m.tally.decreased,
@@ -321,7 +382,10 @@ fn same_resource(a: &MetricResource, b: &MetricResource) -> bool {
 /// Every verdict of one reading.
 pub fn judge(obs: &TelemetryObservation) -> TelemetryReport {
     let book = &obs.book;
-    let members: Vec<TelemetryMember> = book.members().map(|(k, m)| member_row(k, m)).collect();
+    let members: Vec<TelemetryMember> = book
+        .members()
+        .map(|(k, m)| member_row(k, m, book.reads_presence()))
+        .collect();
     let resources: Vec<TelemetryResource> = obs
         .resources
         .iter()
@@ -361,6 +425,10 @@ pub fn judge(obs: &TelemetryObservation) -> TelemetryReport {
         totals.established += m.tally.in_band + m.tally.by_presence;
         totals.assumed += m.tally.assumed;
     }
+    totals.unanswered = members
+        .iter()
+        .filter(|m| m.continuity.answer.is_unobservable())
+        .count() as u64;
     let mut skipped = obs.skipped.clone();
     let presence = match &obs.seed {
         Some(Ok(s)) => Some(TelemetryPresence {
@@ -464,5 +532,163 @@ mod tests {
         let gauges = pair(Continuity::NotAsked, None, Err(NoRate::Kind));
         assert_eq!(code(decreased(&gauges)), 2);
         assert_eq!(code(rate(&gauges)), 2, "not asked");
+    }
+
+    /// zk2py round 47's F-152 (§5, 0.4), through the book over `meter.v1`:
+    /// the continuity question is each counter's or histogram's. One that
+    /// formed no pair, or only pairs whose epoch was assumed, could not
+    /// tell, and the run says so (exit 2) even beside another member's
+    /// established pair; a decrease or a sample that does not conform still
+    /// wins (exit 1); a gauge is not asked.
+    #[test]
+    fn a_counter_that_formed_no_pair_could_not_tell() {
+        use crate::bus::telemetry::{TelemetryObservation, TelemetrySpec};
+        use crate::model::catalog::{ContractSet, Observed};
+        use crate::model::telemetry::{
+            MetricResource, MetricSample, SampleVia, TelemetryBook, TelemetryScope,
+        };
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/meter.v1.toml");
+        let (set, _) = ContractSet::load_path(&path);
+        let rev = Arc::clone(set.iter().next().expect("meter.v1"));
+        let addr: zenkey_model::grammar::Addr = "lab/meter".parse().unwrap();
+        let resources: Vec<Arc<MetricResource>> = (0..rev.contract().resources.len())
+            .filter_map(|i| MetricResource::of(&addr, &rev, i))
+            .map(Arc::new)
+            .collect();
+        let of = |r: &str| Arc::clone(resources.iter().find(|m| m.resource == r).unwrap());
+        let t0 = Instant::now();
+        let put = |r: &str, payload: &str, epoch: Option<&str>, ms: u64| MetricSample {
+            key: format!("zk2/lab/meter/meter.v1/{r}"),
+            delete: false,
+            payload: payload.as_bytes().to_vec(),
+            attachment: epoch.map(|e| format!("{e:?}").into_bytes()),
+            stamp: None,
+            at: t0 + Duration::from_millis(ms),
+            via: SampleVia::Subscription,
+        };
+        let book = |presence: bool| {
+            let mut b = TelemetryBook::new(
+                presence.then(|| crate::bus::presence::Scope::service(&addr)),
+                t0,
+            );
+            b.seed(
+                &Observed::from_keys(
+                    "zk2/lab/meter/@zk/**",
+                    &["zk2/lab/meter/@zk/instance/00000000000000a1".to_owned()],
+                    true,
+                ),
+                std::iter::empty::<(&str, bool)>(),
+            );
+            b
+        };
+        let judged = |book: TelemetryBook, across_face: bool| {
+            let mut spec = TelemetrySpec::new(Duration::from_secs(1), Duration::from_secs(2));
+            spec.across_face = across_face;
+            judge(&TelemetryObservation {
+                namespace: "acme".into(),
+                spec,
+                scope: TelemetryScope::of(&addr),
+                resources: resources.clone(),
+                seed: None,
+                book,
+                asked: vec![],
+                listened: Duration::from_secs(2),
+                unresolved: 0,
+                skipped: vec![],
+                unobservable: None,
+            })
+        };
+        let answer = |r: &TelemetryReport, key: &str| {
+            r.members
+                .iter()
+                .find(|m| m.key.ends_with(key))
+                .unwrap_or_else(|| panic!("{key}: {r:#?}"))
+                .continuity
+                .answer
+                .clone()
+        };
+        let code = |r: &TelemetryReport| judgement_exit_code(&r.judgement());
+
+        // One conforming sample of `drops` and no pair: could not tell.
+        let mut b = book(true);
+        b.sample(&of("stream/drops"), put("stream/drops", "10", None, 0));
+        let r = judged(b.clone(), false);
+        assert!(
+            matches!(answer(&r, "drops"), Judgement::Unobservable { reason }
+                if reason.starts_with("no pair formed: 1 conforming sample(s)")),
+            "{r:#?}"
+        );
+        assert_eq!(
+            (r.totals.unanswered, code(&r)),
+            (1, 2),
+            "{:?}",
+            r.judgement()
+        );
+
+        // A gauge beside it is not asked, and changes nothing.
+        b.sample(&of("stream/level"), put("stream/level", "-70.5", None, 0));
+        b.sample(&of("stream/level"), put("stream/level", "-70.0", None, 300));
+        let r = judged(b.clone(), false);
+        assert_eq!(answer(&r, "level"), Judgement::NotAsked);
+        assert_eq!(code(&r), 2);
+
+        // `bytes`, established in-band, answers for itself and not for
+        // `drops`.
+        b.sample(&of("stream/bytes"), put("stream/bytes", "1", Some("e1"), 0));
+        b.sample(
+            &of("stream/bytes"),
+            put("stream/bytes", "5", Some("e1"), 300),
+        );
+        let r = judged(b.clone(), false);
+        assert!(
+            matches!(answer(&r, "bytes"), Judgement::NotEstablished { .. }),
+            "{r:#?}"
+        );
+        assert_eq!((r.totals.unanswered, code(&r)), (1, 2));
+
+        // `drops`' second sample, its epoch by presence: every counter
+        // answered, and nothing went backwards.
+        b.sample(&of("stream/drops"), put("stream/drops", "12", None, 300));
+        let r = judged(b.clone(), false);
+        assert!(matches!(
+            answer(&r, "drops"),
+            Judgement::NotEstablished { .. }
+        ));
+        assert_eq!(
+            (r.totals.unanswered, code(&r)),
+            (0, 0),
+            "{:?}",
+            r.judgement()
+        );
+
+        // Across a face, with no presence read, `drops`' pair is assumed:
+        // could not tell, whatever `bytes` established in-band.
+        let mut b = book(false);
+        for (n, ms) in [("10", 0), ("12", 300)] {
+            b.sample(&of("stream/drops"), put("stream/drops", n, None, ms));
+        }
+        for (n, ms) in [("1", 0), ("5", 300)] {
+            b.sample(&of("stream/bytes"), put("stream/bytes", n, Some("e1"), ms));
+        }
+        let r = judged(b.clone(), true);
+        assert!(
+            matches!(answer(&r, "drops"), Judgement::Unobservable { reason }
+                if reason.contains("assumed") && reason.contains("no presence read")),
+            "{r:#?}"
+        );
+        assert_eq!(code(&r), 2);
+
+        // A decrease within an established epoch is the finding, beside a
+        // counter that could not tell.
+        b.sample(
+            &of("stream/bytes"),
+            put("stream/bytes", "3", Some("e1"), 600),
+        );
+        let r = judged(b, true);
+        assert_eq!(answer(&r, "bytes"), Judgement::Established);
+        assert_eq!(code(&r), 1);
     }
 }

@@ -17,9 +17,15 @@
 //!    loss, which leaves every pair across it without presence (§2.9);
 //! 3. a liveliness read of the owners' tokens, the seed presence stands on
 //!    ([`TelemetryBook::seed`]), read again after every loss;
-//! 4. S4's GET of each state metric resource (core §4.2), its replies merged
+//! 4. **the window opens** (zk2py round 47's F-154): the caller's
+//!    `listening` runs, and `spec.window` counts from that moment. The
+//!    subscriptions are declared and the seed's read was answered after
+//!    them, so the router holds them, and a sample put from then on is the
+//!    window's. Across a face, where no presence is read, the window opens
+//!    once the subscriptions are declared;
+//! 5. S4's GET of each state metric resource (core §4.2), its replies merged
 //!    with the live puts by the owner's stamp in the book (§2.10, 0.2);
-//! 5. the window, every delivery folded as it comes.
+//! 6. the window, every delivery folded as it comes.
 //!
 //! Nothing is judged here: every sample is read and paired by
 //! `zenkey_model::telemetry` inside the book ([`crate::model::telemetry`]),
@@ -51,7 +57,8 @@ pub const QUEUE: usize = 1024;
 pub struct TelemetrySpec {
     /// Each read's timeout: presence, a descriptor, a retrieval, a GET.
     pub timeout: Duration,
-    /// How long the subscriptions listen.
+    /// How long the window runs, from its opening: the subscriptions
+    /// declared and presence seeded (step 4 of the module doc).
     pub window: Duration,
     /// The deployment's link lease (core §2.7): with `wait_before_close`,
     /// the longest this reader may stall before it counts a loss.
@@ -111,7 +118,7 @@ pub struct TelemetryObservation {
     pub book: TelemetryBook,
     /// The selectors put to the bus, base-relative.
     pub asked: Vec<String>,
-    /// How long the subscriptions listened.
+    /// How long the window ran, from its opening.
     pub listened: Duration,
     /// Samples on a key that resolved to no metric member, or a wildcard
     /// key (R6).
@@ -219,12 +226,16 @@ pub async fn run_telemetry(
     store: &BundleStore,
     offline: &ContractSet,
     spec: TelemetrySpec,
+    listening: impl FnOnce() + Send,
 ) -> crate::report::TelemetryReport {
-    let obs = observe(session, namespace, scope, store, offline, spec).await;
+    let obs = observe(session, namespace, scope, store, offline, spec, listening).await;
     crate::judge::telemetry::judge(&obs)
 }
 
-/// The reader of the module doc, over `spec.window`.
+/// The reader of the module doc, over `spec.window`. `listening` runs once,
+/// when the window opens (step 4), and never when the reading ends before
+/// it: nothing in scope, or a read or a subscription that could not be
+/// made.
 pub async fn observe(
     session: &Session,
     namespace: &str,
@@ -232,6 +243,7 @@ pub async fn observe(
     store: &BundleStore,
     offline: &ContractSet,
     spec: TelemetrySpec,
+    listening: impl FnOnce() + Send,
 ) -> TelemetryObservation {
     let t = spec.timeout;
     let presence_scope = scope.presence_scope();
@@ -327,7 +339,6 @@ pub async fn observe(
         refused: Arc::clone(&reader.refused),
     };
     let mut held = Vec::new();
-    let listening = Instant::now();
     if !spec.across_face {
         let [instances, _alive, members] = presence_scope_selectors;
         for sel in [instances, members] {
@@ -390,14 +401,16 @@ pub async fn observe(
     }
     drop(queue);
     reader.stall = Some(StallWatch::start(session).await);
-    // The window counts from the subscriptions' declaration, and every read
-    // below keeps to its end: the seed, a state GET, a seed owed by a loss.
-    let deadline = tokio::time::Instant::from_std(listening + spec.window);
-    // 3. The seed presence stands on.
+    // 3. The seed presence stands on, bounded by its reads' own timeouts.
     if !spec.across_face {
-        reader.reseed(&mut obs.book, &mut rx, deadline).await;
+        reader.reseed(&mut obs.book, &mut rx, None).await;
     }
-    // 4. S4's GET of each state metric resource, after what the queue holds.
+    // 4. The window opens (F-154), and every read below keeps to its end: a
+    // state GET, a seed owed by a loss.
+    listening();
+    let opened = Instant::now();
+    let deadline = tokio::time::Instant::from_std(opened + spec.window);
+    // 5. S4's GET of each state metric resource, after what the queue holds.
     for m in obs.resources.iter().filter(|m| m.kind == Kind::State) {
         let Some(sel) = scope.subscription(m) else {
             continue;
@@ -417,9 +430,9 @@ pub async fn observe(
         }
         obs.asked.push(sel);
     }
-    // 5. The window.
+    // 6. The window.
     reader.window(&mut obs.book, &mut rx, deadline).await;
-    obs.listened = listening.elapsed();
+    obs.listened = opened.elapsed();
     drop(held);
     obs.seed = reader.seed.take();
     obs.unresolved = reader.unresolved + reader.discarded.load(Ordering::Relaxed);
@@ -556,7 +569,7 @@ impl Reader<'_> {
     ) {
         loop {
             if self.owed_seed {
-                self.reseed(book, rx, deadline).await;
+                self.reseed(book, rx, Some(deadline)).await;
             }
             if tokio::time::Instant::now() >= deadline {
                 break;
@@ -584,12 +597,14 @@ impl Reader<'_> {
     /// that cannot stand — a read that fails, or loses twice, or that
     /// `deadline` cuts short — says why in [`Reader::seed`], folds the moves
     /// it drained as live ones, and leaves presence where the loss left it,
-    /// unobservable; one that lost twice is owed again.
+    /// unobservable; one that lost twice is owed again. With no `deadline`
+    /// (the first seed, before the window opens), each read is bounded by
+    /// its own timeout alone.
     async fn reseed(
         &mut self,
         book: &mut TelemetryBook,
         rx: &mut tokio::sync::mpsc::Receiver<Delivery>,
-        deadline: tokio::time::Instant,
+        deadline: Option<tokio::time::Instant>,
     ) {
         self.owed_seed = false;
         if !book.reads_presence() {
@@ -598,15 +613,18 @@ impl Reader<'_> {
         let mut then: Vec<(String, bool)> = Vec::new();
         let failed = 'read: {
             for _ in 0..2 {
-                let observed: Observed =
-                    match tokio::time::timeout_at(deadline, self.seeder.read()).await {
-                        Ok(Ok(o)) => o,
-                        Ok(Err(e)) => break 'read crate::one_line(&e),
-                        Err(_) => {
-                            break 'read "the window ended before the presence seed was read"
-                                .to_owned();
-                        }
-                    };
+                let read = match deadline {
+                    Some(d) => tokio::time::timeout_at(d, self.seeder.read()).await,
+                    None => Ok(self.seeder.read().await),
+                };
+                let observed: Observed = match read {
+                    Ok(Ok(o)) => o,
+                    Ok(Err(e)) => break 'read crate::one_line(&e),
+                    Err(_) => {
+                        break 'read "the window ended before the presence seed was read"
+                            .to_owned();
+                    }
+                };
                 let mut samples = Vec::new();
                 while let Ok(d) = rx.try_recv() {
                     match d {
@@ -793,7 +811,7 @@ mod tests {
         book.seed(&observed(&[I1]), std::iter::empty::<(&str, bool)>());
         book.lose(1);
         let far = tokio::time::Instant::now() + Duration::from_secs(30);
-        r.reseed(&mut book, &mut rx, far).await;
+        r.reseed(&mut book, &mut rx, Some(far)).await;
         assert_eq!(calls.load(Ordering::Relaxed), 2, "read again after a loss");
         assert!(matches!(r.seed, Some(Ok(_))), "{:?}", r.seed);
         assert_eq!(held(&book), [I2], "the re-mint was not lost");

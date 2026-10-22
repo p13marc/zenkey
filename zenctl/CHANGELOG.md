@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `telemetry` after zk2py round 47: a counter with no pair, the listening line, the document (#819, TE)
+
+zk2py read `telemetry.v1` 0.3 cold with `zenctl telemetry` judging beside
+its reader, and found four things (F-152 to F-155). The text moved to 0.4
+for the first; the rest are the tool's.
+
+| Before | Now | Notes |
+|---|---|---|
+| `telemetry` over one conforming sample of a counter: exit 0, "0 pair(s), none decreased" | exit 2: a counter or histogram read that formed no pair, or only pairs whose epoch was assumed, could not tell (`telemetry.v1` §5, 0.4) | asked of each counter or histogram, so another member's established pair answers nothing of it; a finding still gives 1. `scenarios.md` §8 across a face now exits 2: every pair of `drops` is assumed |
+| `telemetry`'s exit 2: "every counter's pair assumed" | "a counter or histogram that could not tell (no pair formed, or every counter's or histogram's pair assumed …)" | the help now says what the tool already did of histograms (F-153) |
+| `check conform`'s `telemetry-continuity`: passes when the resource's pairs, summed, had an established one | passes only when every counter or histogram member heard formed a pair whose epoch was established | never on zero pairs, as before |
+| the "listening" line (`telemetry`, `alarms`, `health`) printed before the reads, and the window counted from before the subscriptions | printed once the subscriptions are declared and presence is seeded (alarms: the first presence read and GET; health: the presence read), and `--for` counts from then | a sample put once the line is read is inside the window (F-154); each `--for` help says when the window opens |
+| `telemetry --format json`: no field described | the help names every field of the document and its rows, the judgement's `answer` tokens, and a pair's `base`, `via` and `presence` | F-155 |
+| a member row: `continuity` counts, `pairs` silently the latest 16 | `continuity.answer` and `reason` (the member's own answer, in the judgement's tokens), and `continuity.pairs_listed` beside `continuity.pairs`; `totals.unanswered` | a list is a tail when `pairs_listed` < `pairs`; the table says "the latest N of its M pair(s)" and marks a member that could not tell `?` |
+
 ## Unreleased (`main`, zk2) — `telemetry.v1` in the tools: `telemetry`, two doctor checks, three conform cases (#819, TC)
 
 `telemetry.v1` (`spec/profiles/telemetry/v1.md`) says what a metric is, so

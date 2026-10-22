@@ -907,18 +907,21 @@ ok. `check conform` asks an owner's keys and documents as `alarm-key` and
 as its §2.9–§2.11 reader does: every metric resource the descriptors in the
 namespace declare — a stream or state with a `telemetry.*` annotation, or
 typed by the profile's Point, known by its artifact's id — or those a
-base-relative selector reaches. Over `--for`, one queue fed by the owners'
-instance and member tokens and each resource's members, so samples and token
-moves are folded in the one order received; a presence seed, read again
-after a loss; and S4's GET of each state metric resource, merged with the
-live puts by the owner's stamp. §5's questions:
+base-relative selector reaches. One queue fed by the owners' instance and
+member tokens and each resource's members, so samples and token moves are
+folded in the one order received; a presence seed, read again after a loss;
+and S4's GET of each state metric resource, merged with the live puts by
+the owner's stamp. The window opens once the subscriptions are declared and
+presence is seeded, when stderr says `telemetry: listening …`, and `--for`
+counts from then: a sample put once that line is read is inside it (`alarms`
+and `health` print theirs the same way). §5's questions:
 
 | question | answered | the finding |
 |---|---|---|
 | is this resource's declaration valid? | `declared`, with its kind, unit, buckets, carrier and where an in-band epoch rides; or `invalid` with its reasons, and its members unobservable | none here (the doctor's `telemetry-declaration` warns) |
 | what is this member's kind, and its unit? | the declared ones, else the conforming Point's; a unit absent is **unknown**, never dimensionless | never |
 | does this sample conform? | `conforms`, `does_not` with its reasons, or `unobservable` (an invalid declaration, bytes that do not decode as §2.6 reads them) | `does_not` (exit 1) |
-| did this counter or histogram go backwards within one epoch? | per pair `same_epoch`, `reset` or `decreased`, the epoch established in-band (a Point's `epoch`, a bare counter's Epoch attachment), by presence (one instance or member epoch alone throughout, no loss between), or assumed | `decreased`, within an established epoch only (exit 1) |
+| did this counter or histogram go backwards within one epoch? | per pair `same_epoch`, `reset` or `decreased`, the epoch established in-band (a Point's `epoch`, a bare counter's Epoch attachment), by presence (one instance or member epoch alone throughout, no loss between), or assumed; per member, no when a pair of it was established and none decreased, and **could not tell** when no pair of it formed or every one was assumed (0.4), whatever another member established | `decreased`, within an established epoch only (exit 1) |
 | what is this counter's rate over the pair? | a rate in the counter's unit per second, or none with why (`reset`, `decreased`, `elapsed`) | never |
 
 A decrease with no established epoch reads as a **reset**: never a finding,
@@ -932,10 +935,25 @@ timestamps, two of the owner's stamps, or two receipts on this host's
 monotonic clock — never one clock against another.
 
 Exit 1 on a sample that does not conform or a decrease within an established
-epoch; 0 when every question asked was answered without one; **2** when
-nothing could be answered: no metric resource in scope, no sample of one in
-the window, every pair of a counter or histogram assumed (presence
-unobservable throughout and no in-band epoch), or a run that could not start.
+epoch; 0 when every question asked was answered without one; **2** when a
+question went unanswered: no metric resource in scope, no sample of one in
+the window, a counter or histogram read that could not tell (one sample of
+it and no pair, or every one of its pairs assumed: no in-band epoch, and
+presence unobservable or establishing none), or a run that could not start.
+
+`--format json` is one document, whose every field `zenctl telemetry
+--help` names: the envelope's `presence`, `window_s`, `totals` (with
+`unanswered`, the counters and histograms that could not tell) and
+`judgement` (`answer` `established`, `not_established` or `unobservable`:
+exit 1, 0 or 2), then a `resource` row per metric resource and a `member`
+row per member. A member's `continuity` carries its own answer in the
+same tokens (`not_asked` for a gauge), `pairs`, every pair formed, and
+`pairs_listed`, how many of the latest the row's `pairs` holds: at most 16,
+so a list is a tail when `pairs_listed` is less than `pairs`. Each pair
+says its `continuity`, its `epoch` (`established` or `assumed`) and `via`
+(`in_band` or `presence`), its `presence` (`observed`, `spans_loss`, or
+`none` across a face) and its rate's time `base` (`timestamp`, `stamp` or
+`arrival`).
 
 ```
 $ zenctl telemetry --namespace acme --for 5 -c tcp/127.0.0.1:7447

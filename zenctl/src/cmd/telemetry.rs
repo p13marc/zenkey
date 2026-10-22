@@ -76,18 +76,31 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     spec.across_face = across_face;
     let session = ASKING.ask(dep.session().await);
     let store = zk2::store(&dep, &offline);
-    eprintln!(
-        "telemetry: listening {}s to the metric members in scope{} (--for)",
-        window.as_secs_f64(),
-        if across_face {
-            "; across a face this reader reads no presence (the session opens as any \
-             other's), so only an in-band epoch establishes one"
-        } else {
-            " and their owners' tokens"
-        }
-    );
-    let report =
-        zenkey_fleet::run_telemetry(&session, dep.namespace(), scope, &store, &offline, spec).await;
+    // The line comes once the window opens (zk2py round 47's F-154): the
+    // subscriptions declared and presence seeded after them, so a sample put
+    // once it is read is inside the window.
+    let listening = move || {
+        eprintln!(
+            "telemetry: listening {}s to the metric members in scope{} (--for)",
+            window.as_secs_f64(),
+            if across_face {
+                "; across a face this reader reads no presence (the session opens as any \
+                 other's), so only an in-band epoch establishes one"
+            } else {
+                " and their owners' tokens"
+            }
+        );
+    };
+    let report = zenkey_fleet::run_telemetry(
+        &session,
+        dep.namespace(),
+        scope,
+        &store,
+        &offline,
+        spec,
+        listening,
+    )
+    .await;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     let judgement = report.judgement();
     if let Judgement::Unobservable { reason } = &judgement {

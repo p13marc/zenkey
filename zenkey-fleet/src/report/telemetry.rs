@@ -13,14 +13,25 @@
 //!   answer, every reason of the samples that did not;
 //! - "did this counter or histogram go backwards within one epoch?" — each
 //!   [`TelemetryPair`]'s `continuity` (§2.10), with how its epoch was had
-//!   (`established` in-band or by presence, or `assumed`);
+//!   (`established` in-band or by presence, or `assumed`), and over a
+//!   member's pairs [`TelemetryContinuity`]'s `answer` (§5, 0.4): a member
+//!   that formed no pair, or only pairs whose epoch was assumed, could not
+//!   tell;
 //! - "what is this counter's rate over the pair?" — its `rate` and
 //!   `rate_unit`, or `no_rate` with why (§2.11).
 //!
 //! [`TelemetryReport::judgement`] is the run as the one [`Judgement`] a
 //! frontend exits through: a sample that does not conform, or a decrease
-//! within an established epoch, is the finding; everything else is
-//! informative. Computed by `crate::judge::telemetry`, pinned here.
+//! within an established epoch, is the finding; a counter or histogram
+//! whose continuity could not be told leaves the run without a verdict;
+//! everything else is informative. Computed by `crate::judge::telemetry`,
+//! pinned here.
+//!
+//! **The pairs a row lists are a tail.** A member keeps its latest 16 pairs
+//! (`crate::model::telemetry::PAIRS_KEPT`) beside a tally of all of them:
+//! [`TelemetryContinuity`]'s `pairs` counts every one, and `pairs_listed`
+//! the ones [`TelemetryMember::pairs`] holds, so a script tells a whole
+//! list from a cut one (zk2py round 47's F-155).
 
 use std::collections::BTreeMap;
 
@@ -116,10 +127,23 @@ pub struct TelemetrySamples {
 }
 
 /// Every pair of one member, counted by answer (§2.10) and by how its epoch
-/// was had (§2.9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// was had (§2.9), and the member's own answer over them (§5, 0.4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TelemetryContinuity {
+    /// "Did this counter or histogram go backwards within one epoch?" over
+    /// every pair of the member in the window, as `answer` (and `reason`):
+    /// `established`, a decrease within an established epoch (the
+    /// finding); `not_established`, an established pair and none
+    /// decreased; `unobservable`, could not tell — no pair formed, or every
+    /// pair's epoch assumed or the pair incomparable; `not_asked`, neither
+    /// a counter nor a histogram.
+    #[serde(flatten)]
+    pub answer: Judgement,
+    /// Every pair formed in the window.
     pub pairs: u64,
+    /// The pairs [`TelemetryMember::pairs`] lists: the latest, at most 16.
+    /// Fewer than `pairs` when the list is a tail.
+    pub pairs_listed: u64,
     pub same_epoch: u64,
     pub reset: u64,
     /// The finding: a decrease within an established epoch.
@@ -231,7 +255,8 @@ pub struct TelemetryMember {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest: Option<serde_json::Value>,
     pub continuity: TelemetryContinuity,
-    /// The latest pairs, at most `crate::model::telemetry::PAIRS_KEPT`.
+    /// The latest pairs, at most `crate::model::telemetry::PAIRS_KEPT` (16),
+    /// oldest first: `continuity.pairs_listed` of `continuity.pairs`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pairs: Vec<TelemetryPair>,
     /// The latest rate derived.
@@ -271,6 +296,10 @@ pub struct TelemetryTotals {
     pub established: u64,
     /// …and assumed.
     pub assumed: u64,
+    /// Counter or histogram members whose continuity could not be told: no
+    /// pair formed, or only pairs whose epoch was assumed or that were
+    /// incomparable (§5, 0.4).
+    pub unanswered: u64,
 }
 
 /// `zenctl telemetry` (#819, TC): the metric members a scope reaches, read
@@ -321,12 +350,13 @@ pub struct TelemetryReport {
 impl TelemetryReport {
     /// The run as one [`Judgement`]: a sample that does not conform, or a
     /// decrease within an established epoch, is the finding (exit 1),
-    /// whatever else is known. Otherwise no verdict (exit 2) when nothing
-    /// could be answered — the reading could not be made, no metric
-    /// resource is in scope, no sample of one arrived, or every pair of a
-    /// counter or histogram had its epoch assumed, so no decrease could
-    /// have been found; and clean (exit 0) when every question asked was
-    /// answered without one.
+    /// whatever else is known. Otherwise no verdict (exit 2) when a question
+    /// asked went unanswered — the reading could not be made, no metric
+    /// resource is in scope, no sample of one arrived, none could be read,
+    /// or a counter or histogram read formed no pair, or only pairs whose
+    /// epoch was assumed, so no decrease of it could have been found (§5,
+    /// 0.4); and clean (exit 0) when every question asked was answered
+    /// without one.
     pub fn judgement(&self) -> Judgement {
         let t = &self.totals;
         if t.does_not > 0 || t.decreased > 0 {
@@ -368,21 +398,38 @@ impl TelemetryReport {
                 ),
             };
         }
-        if t.assumed > 0 && t.established == 0 {
+        if t.unanswered > 0 {
+            let first = self
+                .members
+                .iter()
+                .find_map(|m| match &m.continuity.answer {
+                    Judgement::Unobservable { reason } => Some(format!("; {}: {reason}", m.key)),
+                    _ => None,
+                });
             return Judgement::Unobservable {
                 reason: format!(
-                    "every one of the {} pair(s) of a counter or histogram had its epoch assumed — \
-                     no in-band epoch, and presence unobservable throughout — so a decrease \
-                     within one epoch could not have been found (telemetry.v1 §2.9, §2.10)",
-                    t.assumed
+                    "{} counter or histogram member(s) read could not tell whether they went \
+                     backwards within one epoch: no pair formed, or only pairs whose epoch was \
+                     assumed, so no decrease could have been found (telemetry.v1 §5){}",
+                    t.unanswered,
+                    first.unwrap_or_default()
                 ),
             };
         }
         Judgement::NotEstablished {
             reason: format!(
                 "{} sample(s) of {} member(s) conform; {} pair(s), none decreased within an \
-                 established epoch ({} established, {} assumed)",
-                t.conforms, t.members, t.pairs, t.established, t.assumed
+                 established epoch ({} established, {} assumed){}",
+                t.conforms,
+                t.members,
+                t.pairs,
+                t.established,
+                t.assumed,
+                if t.established == 0 {
+                    "; no counter or histogram was read, so no continuity was asked"
+                } else {
+                    "; every counter or histogram read formed an established pair"
+                }
             ),
         }
     }
@@ -393,6 +440,47 @@ mod tests {
     use super::*;
     use crate::report::judgement_exit_code;
     use serde_json::json;
+
+    /// A counter member whose continuity answered `answer`.
+    fn member(answer: Judgement) -> TelemetryMember {
+        TelemetryMember {
+            key: "zk2/lab/meter/meter.v1/stream/drops".into(),
+            address: "lab/meter".into(),
+            iface: "meter.v1".into(),
+            resource: "stream/drops".into(),
+            kind: Some("counter".into()),
+            kind_from: Some("declared".into()),
+            unit: None,
+            unit_from: None,
+            samples: TelemetrySamples {
+                received: 1,
+                conforms: 1,
+                does_not: 0,
+                unobservable: 0,
+                unobservable_reason: None,
+                not_kept: 0,
+                deletes: 0,
+                problems: BTreeMap::new(),
+                latest_does_not: vec![],
+            },
+            latest: None,
+            continuity: TelemetryContinuity {
+                answer,
+                pairs: 0,
+                pairs_listed: 0,
+                same_epoch: 0,
+                reset: 0,
+                decreased: 0,
+                unobservable: 0,
+                not_asked: 0,
+                in_band: 0,
+                by_presence: 0,
+                assumed: 0,
+            },
+            pairs: vec![],
+            rate: None,
+        }
+    }
 
     fn report() -> TelemetryReport {
         TelemetryReport {
@@ -472,7 +560,9 @@ mod tests {
             },
             latest: Some(json!(9)),
             continuity: TelemetryContinuity {
+                answer: Judgement::NotEstablished { reason: "r".into() },
                 pairs: 2,
+                pairs_listed: 1,
                 same_epoch: 1,
                 reset: 1,
                 decreased: 0,
@@ -513,7 +603,9 @@ mod tests {
                 "kind": "counter", "kind_from": "declared",
                 "samples": {"received": 3, "conforms": 3, "does_not": 0, "unobservable": 0},
                 "latest": 9,
-                "continuity": {"pairs": 2, "same_epoch": 1, "reset": 1, "decreased": 0,
+                "continuity": {"answer": "not_established", "reason": "r",
+                               "pairs": 2, "pairs_listed": 1,
+                               "same_epoch": 1, "reset": 1, "decreased": 0,
                                "unobservable": 0, "not_asked": 0, "in_band": 0,
                                "by_presence": 2, "assumed": 0},
                 "pairs": [{"earlier": 5, "later": 9, "continuity": "same_epoch",
@@ -546,6 +638,32 @@ mod tests {
             serde_json::to_value(PairPresenceToken::SpansLoss).unwrap(),
             json!("spans_loss")
         );
+        // The member's own answer, in the judgement's four tokens, and a
+        // whole list (`pairs_listed` equal to `pairs`) said as plainly as a
+        // cut one.
+        let mut c = r.members[0].continuity.clone();
+        for (answer, want) in [
+            (Judgement::Established, json!({"answer": "established"})),
+            (Judgement::NotAsked, json!({"answer": "not_asked"})),
+            (
+                Judgement::Unobservable {
+                    reason: "no pair formed".into(),
+                },
+                json!({"answer": "unobservable", "reason": "no pair formed"}),
+            ),
+        ] {
+            c.answer = answer;
+            let v = serde_json::to_value(&c).unwrap();
+            for (k, x) in want.as_object().unwrap() {
+                assert_eq!(&v[k], x, "{v}");
+            }
+            assert_eq!(
+                v.get("reason").is_some(),
+                want.get("reason").is_some(),
+                "{v}"
+            );
+        }
+        assert_eq!(v["totals"]["unanswered"], 0, "always said: {v}");
     }
 
     /// Only a sample that does not conform, or a decrease within an
@@ -571,8 +689,33 @@ mod tests {
         let mut r = report();
         r.totals.established = 0;
         r.totals.assumed = 2;
+        r.totals.unanswered = 1;
         assert_eq!(exit(&r), 2, "presence unobservable throughout");
         r.totals.established = 1;
-        assert_eq!(exit(&r), 0, "one established pair answers");
+        assert_eq!(
+            exit(&r),
+            2,
+            "another member's established pair answers nothing of this one"
+        );
+        r.totals.unanswered = 0;
+        assert_eq!(exit(&r), 0, "every member with an established pair");
+        // F-152: one sample of a counter and no pair could not tell, and
+        // says which member.
+        let mut r = report();
+        r.totals.pairs = 0;
+        r.totals.established = 0;
+        r.totals.unanswered = 1;
+        r.members = vec![member(Judgement::Unobservable {
+            reason: "no pair formed".into(),
+        })];
+        let j = r.judgement();
+        assert_eq!(judgement_exit_code(&j), 2, "{j:?}");
+        assert!(
+            matches!(&j, Judgement::Unobservable { reason }
+                if reason.contains("zk2/lab/meter/meter.v1/stream/drops: no pair formed")),
+            "{j:?}"
+        );
+        r.totals.does_not = 1;
+        assert_eq!(exit(&r), 1, "a finding still wins");
     }
 }

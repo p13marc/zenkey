@@ -98,14 +98,20 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   resources their revisions declare; one bounded queue carries the instance
   and member token subscriptions and each resource's members, so samples
   and token moves fold in one order; presence is seeded, and seeded again
-  after a loss, and each state metric resource gets S4's GET. Across a face
+  after a loss, and each state metric resource gets S4's GET; the window
+  opens then, the caller's `listening` hook run and `--for` counted from
+  it (#819 TE, F-154; `zenctl alarms` and `health` alike). Across a face
   (`--across-face`) the deployment's word stands in: one named owner and
   `--contracts`, no presence. `model::telemetry`'s `TelemetryBook` is
   session-free: each sample through `MetricType::check` (`Datum::decode`
   and `attachment`, then the model's `check`), consecutive conforming
   samples through `pair` with the presence seen between them (a loss
   leaves a pair with none), a state member's in its merge order (one
-  `Held` per key). `judge::telemetry` and `report::telemetry` complete it.
+  `Held` per key). `judge::telemetry::member_decreased` asks each counter
+  or histogram read on its own: no pair, or only assumed ones, could not
+  tell (text 0.4, #819 TE, F-152), and a member row's `continuity` carries
+  that `answer` and `pairs_listed` (F-155). `judge::telemetry` and
+  `report::telemetry` complete it.
   `Lens::check_sample` and `sample_conformance` run the profile's `check`
   after the JSON Schema's, so a Point whose tag, unit, range or bounds
   disagree is `invalid`, its reasons named: what replaced v1's
@@ -418,7 +424,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `telemetry [SELECTOR] [--for SECS] [--across-face]`, a root judgement
   over `telemetry.v1` (exit 1 a sample that does not conform or a decrease
   within an established epoch, 0 everything asked answered clean, 2
-  otherwise, every counter pair's epoch assumed included; no
+  otherwise, a counter or histogram that formed no pair, or only assumed
+  ones, included, text 0.4; no
   `--clocks-synced`, since every time base subtracts two readings of one
   clock), the doctor's `telemetry-declaration` (a warning, from contracts)
   and `telemetry-sample` (`--deep`), and `check conform`'s
@@ -685,7 +692,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   types, `Point`, `Value` and a `Histogram` that observes into its bounds;
   text 0.3, F-150 and F-151, #819 TC: a number finite by IEEE rounding,
   the Epoch attachment read strictly, a depth limit of 256 counted alike in
-  JSON and CBOR, and §2.9's presence only from a complete seed).
+  JSON and CBOR, and §2.9's presence only from a complete seed; text 0.4,
+  F-152, #819 TE: a counter or histogram read with no pair could not tell).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2

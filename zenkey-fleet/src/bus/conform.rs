@@ -424,8 +424,15 @@ pub async fn observe(
         };
         let target = crate::bus::health::HealthTarget::One(address.clone());
         Some(
-            crate::bus::health::observe(session, &bus.namespace, target, spec, Some(o.clone()))
-                .await,
+            crate::bus::health::observe(
+                session,
+                &bus.namespace,
+                target,
+                spec,
+                Some(o.clone()),
+                || {},
+            )
+            .await,
         )
     };
     let config = async {
@@ -469,8 +476,16 @@ pub async fn observe(
         tspec.wait_before_close = spec.wait_before_close;
         let scope = crate::model::telemetry::TelemetryScope::of(&address).with_iface(iface.clone());
         Some(
-            crate::bus::telemetry::observe(session, &bus.namespace, scope, &store, offline, tspec)
-                .await,
+            crate::bus::telemetry::observe(
+                session,
+                &bus.namespace,
+                scope,
+                &store,
+                offline,
+                tspec,
+                || {},
+            )
+            .await,
         )
     };
     let suite = suite(

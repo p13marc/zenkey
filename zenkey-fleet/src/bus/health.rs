@@ -12,7 +12,9 @@
 //! 2. presence and every instance's descriptor (core §8.1, §3.3): a service
 //!    implements `health.v1` when its descriptor lists it, token or not
 //!    (§2.7). Across a constrained face neither crosses, and the
-//!    deployment's word stands for them (§2.8, R7);
+//!    deployment's word stands for them (§2.8, R7). The window opens after
+//!    this read, which was answered after the subscriptions were declared
+//!    (#819 TE, F-154); across a face, once they are declared;
 //! 3. two readings, a grace apart (or the window apart): each one GET of the
 //!    owners' `health.v1/state/**`, target `All`, consolidation `Latest`
 //!    (core S4), which answers a status and its checks together (§2.4, core
@@ -108,7 +110,8 @@ pub struct HealthSpec {
     /// Each read's timeout: presence, a descriptor, a GET, an archive.
     pub timeout: Duration,
     /// The window: how long a subscription to every status and to the
-    /// faults listens, from before the first reading. `None`: no
+    /// faults listens, from its opening, before the first reading: the
+    /// subscriptions declared and presence read after them. `None`: no
     /// subscription, and §5's clock question is not asked.
     pub window: Option<Duration>,
     /// How far apart the two readings are when no window separates them.
@@ -363,23 +366,29 @@ pub async fn run_health(
     namespace: &str,
     target: HealthTarget,
     spec: HealthSpec,
+    listening: impl FnOnce() + Send,
 ) -> crate::report::HealthReport {
-    let obs = observe(session, namespace, target, spec, None).await;
+    let obs = observe(session, namespace, target, spec, None, listening).await;
     crate::judge::health::judge(&obs)
 }
 
 /// The two readings, the window and the archive, as the module doc says.
 /// `presence`, when given, is the read a caller already made (`check
-/// conform`), and is not made again.
+/// conform`), and is not made again. `listening` runs once the window
+/// opens, its subscriptions declared and presence read after them (zk2py
+/// round 47's F-154, #819 TE): the router holds them then, and a status or a
+/// fault put from then on is heard. The window counts from that moment; with
+/// no window, or one whose subscriptions could not be declared, `listening`
+/// never runs.
 pub async fn observe(
     session: &Session,
     namespace: &str,
     target: HealthTarget,
     spec: HealthSpec,
     presence: Option<Observed>,
+    listening: impl FnOnce() + Send,
 ) -> HealthObservation {
     let t = spec.timeout;
-    let declared = Instant::now();
     let window = match spec.window {
         Some(_) => Some(Window::open(session, &target).await),
         None => None,
@@ -393,10 +402,14 @@ pub async fn observe(
                 .map_err(|e| crate::one_line(&e)),
         ),
     };
+    if matches!(window, Some(Ok(_))) {
+        listening();
+    }
+    let opened = Instant::now();
     let selector = target.state_selector();
     let first = get(session, &selector, t).await;
     let wait = match spec.window {
-        Some(w) => (declared + w).saturating_duration_since(Instant::now()),
+        Some(w) => (opened + w).saturating_duration_since(Instant::now()),
         None => spec.grace,
     };
     tokio::time::sleep(wait).await;
