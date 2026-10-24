@@ -92,6 +92,14 @@
 //!   questions (`spec/profiles/desired/v1.md`,
 //!   #840). The author's writes and record, and the target's subscription,
 //!   seed and archive read, are the runtime's.
+//! - [`redundancy`]: `redundancy.v1`'s vocabulary, the declaration read
+//!   from a contract (governed, its election `claim` or `external`), how
+//!   instance ids compare, the descriptor's standby mark read and checked,
+//!   the election's decision over one read and the heal's over two, one
+//!   candidate's pure two-phase state machine (claim, stand by, take over,
+//!   step down), and §5's four questions of an address and an instance
+//!   (`spec/profiles/redundancy/v1.md`, #841). The reads, the watch, the
+//!   timers, the lock and the acts in core §8.2's order are the runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -116,6 +124,7 @@ pub mod health;
 pub mod history;
 pub mod hostid;
 pub mod link;
+pub mod redundancy;
 pub mod schema;
 pub mod seed;
 pub mod slug;

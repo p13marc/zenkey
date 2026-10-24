@@ -197,7 +197,7 @@ profile must be listed in `uses`.
 | `alarms.v1` | none: published empty by [`alarms.v1`](../../spec/profiles/alarms/v1.md) §4 (core 0.34), which dropped `severity_default`, every document carrying its severity. The key recipe is fixed by the profile (§2.2), not annotated |
 | `media.v1` | `tiers` (list), `tier_param` (template parameter naming the tier), `frame_clock` (`capture` \| `encode`, or the FrameMeta clock field), `control` and `receiver_report` (bool: mark the stream-control and receiver-feedback operations) |
 | `views.v1` | `document` (`sha256:…` of a presentation artifact carried in the bundle's `extras`) |
-| `redundancy.v1` | `election` (`claim` \| `external`) |
+| `redundancy.v1` | `election` (`claim` \| `external`, default `claim`; written once on `[defaults]`): published by [`redundancy.v1`](../../spec/profiles/redundancy/v1.md) §4 (core 0.39), unchanged from the interim row. An interface whose contract lists the profile in `uses` is governed; its standby is marked in the descriptor (`"standby": true`, core §3.3) |
 
 ### What stays out of the contract
 

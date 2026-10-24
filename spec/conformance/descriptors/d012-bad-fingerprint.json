@@ -1,0 +1,24 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "vehicle-01/navigation",
+ "instance": "3fa9c2d41b7e0018",
+ "interfaces": [
+  {
+   "iface": "nav.v2",
+   "contract": "sha256:not-a-fingerprint",
+   "minor": 1,
+   "token": false,
+   "standby": true
+  },
+  {
+   "iface": "archive.v1",
+   "contract": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+   "minor": 1,
+   "token": false,
+   "standby": true
+  }
+ ],
+ "meta": {
+  "note": "D012 reads standby and token only: a malformed contract does not suppress it (D003 beside it), and an archive.v1 entry so marked gives D011 and D012 (cascade 7, 0.39)"
+ }
+}

@@ -1,0 +1,2358 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "one incumbent, one standby: the shape the profile keeps (spike S6's standby)",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "one incumbent, no standby",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 2,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          },
+          "000000000000000c": {
+            "answer": "no",
+            "reason": "standby"
+          },
+          "000000000000000d": {
+            "answer": "not_asked",
+            "reason": "not_a_candidate"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "one incumbent, two standbys and a pure consumer",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000c",
+              "token": false
+            },
+            {
+              "descriptor": "not_listed",
+              "id": "000000000000000d",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000c",
+              "token": false
+            },
+            {
+              "descriptor": "not_listed",
+              "id": "000000000000000d",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "no",
+          "reason": "split"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "yes",
+            "reason": "split_lowest"
+          },
+          "000000000000000b": {
+            "answer": "yes",
+            "reason": "split"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a split in both reads: no, and each holder a twin, the lowest the one the heal keeps",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "no",
+          "reason": "split"
+        },
+        "standbys": {
+          "answer": "unobservable",
+          "count": 0,
+          "exact": false,
+          "reason": "presence_incomplete"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "yes",
+            "reason": "split_lowest"
+          },
+          "000000000000000b": {
+            "answer": "yes",
+            "reason": "split"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a split seen through reads not complete: still a split, a read cannot invent a holder",
+      "reading": {
+        "first": {
+          "complete": false,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": false,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "no",
+          "reason": "split"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "not_asked",
+            "reason": "absent"
+          },
+          "000000000000000b": {
+            "answer": "yes",
+            "reason": "split_lowest"
+          },
+          "000000000000000c": {
+            "answer": "unobservable",
+            "reason": "in_transition"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a split of three, not the same instances in both reads (core §6)",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000c",
+              "token": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "in_transition"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "in_transition"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "in_transition"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "two holders in the second read only: a re-mint's overlap, or a split not established",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "two holders in the first read only: healed by the second",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": false,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "one holder in a second read not complete: another may have been missed",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": false,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "no",
+          "reason": "vacant"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "yes",
+          "reason": "lasting"
+        }
+      },
+      "note": "a lasting vacancy: a standby, no incumbent, in two complete reads",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "in_transition"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "not_asked",
+            "reason": "absent"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "yes",
+          "reason": "vacant"
+        }
+      },
+      "note": "a vacancy in the second read only: the incumbent just went, a takeover due (§2.8)",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "yes",
+          "reason": "vacant"
+        }
+      },
+      "note": "a vacancy after a first read not complete: not lasting",
+      "reading": {
+        "first": {
+          "complete": false,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": false,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          }
+        },
+        "vacancy": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        }
+      },
+      "note": "no holder in a second read not complete: unobservable",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": false,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "not_asked",
+          "reason": "no_candidate"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000d": {
+            "answer": "not_asked",
+            "reason": "not_a_candidate"
+          }
+        },
+        "vacancy": {
+          "answer": "not_asked",
+          "reason": "no_candidate"
+        }
+      },
+      "note": "no candidate: instances that do not list the interface",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "not_listed",
+              "id": "000000000000000d",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "not_listed",
+              "id": "000000000000000d",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        },
+        "standbys": {
+          "answer": "unobservable",
+          "count": 0,
+          "exact": false,
+          "reason": "no_descriptor"
+        },
+        "twins": {
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "no_descriptor"
+          }
+        },
+        "vacancy": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        }
+      },
+      "note": "no candidate seen, a descriptor unread: it may be one",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "unread",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "unread",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "no",
+          "reason": "vacant"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": false,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          },
+          "000000000000000c": {
+            "answer": "unobservable",
+            "reason": "no_descriptor"
+          }
+        },
+        "vacancy": {
+          "answer": "yes",
+          "reason": "lasting"
+        }
+      },
+      "note": "a candidate beside an unread descriptor: the vacancy stands",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            },
+            {
+              "descriptor": "unread",
+              "id": "000000000000000c",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            },
+            {
+              "descriptor": "unread",
+              "id": "000000000000000c",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "not_asked",
+          "reason": "absent"
+        },
+        "standbys": {
+          "answer": "not_asked",
+          "count": 0,
+          "exact": false,
+          "reason": "absent"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "not_asked",
+            "reason": "absent"
+          },
+          "000000000000000b": {
+            "answer": "not_asked",
+            "reason": "absent"
+          }
+        },
+        "vacancy": {
+          "answer": "not_asked",
+          "reason": "absent"
+        }
+      },
+      "note": "absent: a complete second read with no instance",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "standbys": {
+          "answer": "unobservable",
+          "count": 0,
+          "exact": false,
+          "reason": "presence_incomplete"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          }
+        },
+        "vacancy": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        }
+      },
+      "note": "nothing seen in a second read not complete: unobservable",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": false,
+          "instances": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "not_this_profiles",
+          "reason": "not_governed"
+        },
+        "standbys": {
+          "answer": "not_this_profiles",
+          "count": 0,
+          "exact": false,
+          "reason": "not_governed"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "not_this_profiles",
+            "reason": "not_governed"
+          },
+          "000000000000000b": {
+            "answer": "not_this_profiles",
+            "reason": "not_governed"
+          }
+        },
+        "vacancy": {
+          "answer": "not_this_profiles",
+          "reason": "not_governed"
+        }
+      },
+      "note": "not governed: not this profile's, whatever the shapes",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "not_governed",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "no_contract"
+        },
+        "standbys": {
+          "answer": "unobservable",
+          "count": 0,
+          "exact": false,
+          "reason": "no_contract"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "no_contract"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "no_contract"
+          }
+        },
+        "vacancy": {
+          "answer": "unobservable",
+          "reason": "no_contract"
+        }
+      },
+      "note": "a contract not read: unobservable",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "no_contract",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "revisions_disagree"
+        },
+        "standbys": {
+          "answer": "unobservable",
+          "count": 0,
+          "exact": false,
+          "reason": "revisions_disagree"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "revisions_disagree"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "revisions_disagree"
+          }
+        },
+        "vacancy": {
+          "answer": "unobservable",
+          "reason": "revisions_disagree"
+        }
+      },
+      "note": "candidates' revisions that disagree on governance or the election: unobservable",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "disagree",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        },
+        "standbys": {
+          "answer": "unobservable",
+          "count": 0,
+          "exact": false,
+          "reason": "across_face"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "across_face"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "across_face"
+          }
+        },
+        "vacancy": {
+          "answer": "unobservable",
+          "reason": "across_face"
+        }
+      },
+      "note": "across a constrained face: unobservable, presence does not cross (§2.13)",
+      "reading": {
+        "across_face": true,
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "external: the same questions, the same answers (§2.11)",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "external",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "no",
+          "reason": "split"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "yes",
+            "reason": "split_lowest"
+          },
+          "000000000000000b": {
+            "answer": "yes",
+            "reason": "split"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "external, a split the profile does not heal: still a split",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        },
+        "governance": "external",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "yes",
+            "reason": "marked_holding"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a holder marked standby in both reads: a twin, marked_holding; the address has one incumbent",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "in_transition"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a holder marked standby in the second read only: a takeover or a step-down in flight",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "yes",
+            "reason": "unmarked"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "an instance listing the interface unmarked with no token, in two complete reads: unmarked, beside the incumbent",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "in_transition"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "unmarked with no token in one read only: a takeover between the descriptor and the token",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "unmarked with no token in two reads, one not complete: its token may have been missed",
+      "reading": {
+        "first": {
+          "complete": false,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "yes",
+            "reason": "unlisted"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a holder not listing the interface in both reads: unlisted",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "not_listed",
+              "id": "000000000000000a",
+              "token": true
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "not_listed",
+              "id": "000000000000000a",
+              "token": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": false,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "no_descriptor"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a holder whose descriptor was not read: the address answers, the instance does not",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "unread",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "unread",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": false,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a standby in a second read not complete: its token may have been missed",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": false,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          },
+          "000000000000000c": {
+            "answer": "not_asked",
+            "reason": "absent"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "an instance in the first read only: absent from the second, complete",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000c",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": false,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          },
+          "000000000000000b": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          },
+          "000000000000000c": {
+            "answer": "unobservable",
+            "reason": "presence_incomplete"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "an instance in the first read only, the second not complete",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000c",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": false,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": false,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "standby"
+          },
+          "000000000000000c": {
+            "answer": "unobservable",
+            "reason": "no_descriptor"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a standby counted in a read with an unread descriptor: at least one",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            },
+            {
+              "descriptor": "unread",
+              "id": "000000000000000c",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            },
+            {
+              "descriptor": "unread",
+              "id": "000000000000000c",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "unobservable",
+          "count": 0,
+          "exact": false,
+          "reason": "no_descriptor"
+        },
+        "twins": {
+          "000000000000000a": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "000000000000000c": {
+            "answer": "unobservable",
+            "reason": "no_descriptor"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "no standby, a descriptor unread",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "unread",
+              "id": "000000000000000c",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000a",
+              "token": true
+            },
+            {
+              "descriptor": "unread",
+              "id": "000000000000000c",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "yes",
+          "count": 1,
+          "exact": true,
+          "reason": "standing_by"
+        },
+        "twins": {
+          "00000000000000ff": {
+            "answer": "no",
+            "reason": "incumbent"
+          },
+          "0000000000000100": {
+            "answer": "no",
+            "reason": "standby"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "hostid.v1 §2.12's second process, recognised: the incumbent and a standby of one address",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "00000000000000ff",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "0000000000000100",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "00000000000000ff",
+              "token": true
+            },
+            {
+              "descriptor": "standby",
+              "id": "0000000000000100",
+              "token": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "no",
+          "reason": "split"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "00000000000000ff": {
+            "answer": "yes",
+            "reason": "split_lowest"
+          },
+          "0000000000000100": {
+            "answer": "yes",
+            "reason": "split"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "ids compare as unsigned integers in a split: 00000000000000ff is the lowest",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "00000000000000ff",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "0000000000000100",
+              "token": true
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "00000000000000ff",
+              "token": true
+            },
+            {
+              "descriptor": "serving",
+              "id": "0000000000000100",
+              "token": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "one_incumbent": {
+          "answer": "yes",
+          "reason": "one"
+        },
+        "standbys": {
+          "answer": "no",
+          "count": 0,
+          "exact": true,
+          "reason": "none"
+        },
+        "twins": {
+          "000000000000000b": {
+            "answer": "no",
+            "reason": "incumbent"
+          }
+        },
+        "vacancy": {
+          "answer": "no",
+          "reason": "held"
+        }
+      },
+      "note": "a takeover seen between the reads: a vacancy, then one incumbent",
+      "reading": {
+        "first": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "standby",
+              "id": "000000000000000b",
+              "token": false
+            }
+          ]
+        },
+        "governance": "claim",
+        "second": {
+          "complete": true,
+          "instances": [
+            {
+              "descriptor": "serving",
+              "id": "000000000000000b",
+              "token": true
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "description": "redundancy.v1 §2.15, §5: a tool's reading of one address and governed interface -> §5's questions. reading.governance is \"claim\" or \"external\" (governed, by contracts read and agreeing), \"not_governed\", \"no_contract\" (a candidate's contract not read) or \"disagree\" (the candidates' revisions disagree on governance or the election); reading.across_face is true across a constrained face (false when absent); reading.first and reading.second are two reads a grace apart, each as elections.json writes one. The holders of a read are its instances with token true; a candidate one whose descriptor is \"standby\" or \"serving\". expect.one_incumbent, expect.vacancy and expect.standbys answer of the address, expect.twins of each instance named in either read, by id; each is {answer, reason}, answer one of yes, no, unobservable, not_asked, not_this_profiles, and standbys adds count and exact. The premises, in order, for every question: across_face -> unobservable, across_face; the second read without any instance (for twins, without that instance) -> not_asked, absent when it is complete, else unobservable, presence_incomplete; governance not_governed -> not_this_profiles, not_governed; no_contract -> unobservable, no_contract; disagree -> unobservable, revisions_disagree. Then each question's steps are v1.md §2.15's, in its order: one_incumbent (split, in_transition, one, presence_incomplete, no_descriptor, no_candidate, vacant), vacancy (held, presence_incomplete, no_descriptor, no_candidate, lasting, vacant), standbys (standing_by with the count of the second read's instances marked standby and holding no token, exact when that read is complete and every descriptor in it read; presence_incomplete; no_descriptor; none, count 0, exact), twins (split, split_lowest, no_descriptor, not_a_candidate, unlisted, in_transition, marked_holding, incumbent, presence_incomplete, standby, unmarked). On a premise's answer, standbys has count 0 and exact false."
+}

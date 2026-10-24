@@ -1,0 +1,372 @@
+{
+  "cases": [
+    {
+      "election": "claim",
+      "expect": {
+        "lower": "000000000000000a",
+        "step_down": true
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "a split in both reads: the higher steps down to the lower (§2.9)",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "step_down": false,
+        "why": "lowest"
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "the same split, from the lower: it stays",
+      "own": "000000000000000a",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "lower": "000000000000000a",
+        "step_down": true
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b",
+          "000000000000000c"
+        ]
+      },
+      "note": "three incumbents: all but the lowest step down",
+      "own": "000000000000000c",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b",
+          "000000000000000c"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "lower": "000000000000000a",
+        "step_down": true
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b",
+          "000000000000000c"
+        ]
+      },
+      "note": "three incumbents, the middle one steps down too",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b",
+          "000000000000000c"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "lower": "000000000000000a",
+        "step_down": true
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000b",
+          "000000000000000c"
+        ]
+      },
+      "note": "not necessarily the same instances (core §6): the second read decides who is lower",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "step_down": false,
+        "why": "lowest"
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "the first read's lowest gone by the second: the second read decides, and it is the lowest now",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000b",
+          "000000000000000c"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "step_down": false,
+        "why": "no_split"
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000b"
+        ]
+      },
+      "note": "two holders in the second read only: a re-mint's overlap, or a split not yet established",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "step_down": false,
+        "why": "no_split"
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "two holders in the first read only: healed, or a re-mint done",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "lower": "000000000000000a",
+        "step_down": true
+      },
+      "first": {
+        "complete": false,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "reads not complete still count the holders they show: a read cannot invent one",
+      "own": "000000000000000b",
+      "second": {
+        "complete": false,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "step_down": false,
+        "why": "no_split"
+      },
+      "first": {
+        "complete": false,
+        "holders": []
+      },
+      "note": "a read not made shows none: no split",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "lower": "000000000000000a",
+        "step_down": true
+      },
+      "first": {
+        "complete": false,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "a read cut off while it ran counts the holders it returned (core §8.1, 0.38)",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "step_down": false,
+        "why": "not_holding"
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "not holding in the second read: it already stepped down, or never served",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000c"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "lower": "00000000000000ff",
+        "step_down": true
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "00000000000000ff",
+          "0000000000000100"
+        ]
+      },
+      "note": "ids compare as unsigned integers: 0000000000000100 steps down to 00000000000000ff",
+      "own": "0000000000000100",
+      "second": {
+        "complete": true,
+        "holders": [
+          "00000000000000ff",
+          "0000000000000100"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "step_down": false,
+        "why": "lowest"
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "00000000000000ff",
+          "0000000000000100"
+        ]
+      },
+      "note": "ids compare as unsigned integers: 00000000000000ff stays",
+      "own": "00000000000000ff",
+      "second": {
+        "complete": true,
+        "holders": [
+          "00000000000000ff",
+          "0000000000000100"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "step_down": false,
+        "why": "no_split"
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000b",
+          "000000000000000b"
+        ]
+      },
+      "note": "a holder listed twice is one holder",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000b",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "external",
+      "expect": {
+        "step_down": false,
+        "why": "external"
+      },
+      "first": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "external: never by this rule, the lock elects (§2.11)",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    }
+  ],
+  "description": "redundancy.v1 §2.9: an incumbent own, its interface's election, and the holders of the interface's token at the address in two reads a grace apart, first then second (each a set: a holder listed twice is one) -> whether it steps down. The first of: election \"external\" -> stays, external (§2.11); own not among the second read's holders -> stays, not_holding; fewer than two holders in either read -> stays, no_split; the second read's lowest holder lower than own (ids compared as their digits, §2.3) -> steps down, naming that lower holder; otherwise stays, lowest. A read's completeness plays no part: a read cannot invent a holder, so a read not complete counts the holders it shows, one cut off while it ran (core §8.1, 0.38) the holders it returned, and a read not made shows none."
+}

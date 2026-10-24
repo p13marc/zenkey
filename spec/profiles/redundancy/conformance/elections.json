@@ -1,0 +1,654 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "decision": "take_over"
+      },
+      "note": "alone, its own claim in a complete read: the lowest, so it takes over (§2.5 step 4)",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000b",
+        "why": "incumbent"
+      },
+      "note": "a live incumbent wins, whatever its id: a lower newcomer stands by (§2.5 step 2, ZenSight #1104)",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "serving",
+            "id": "000000000000000b",
+            "token": true
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000b",
+        "why": "incumbent"
+      },
+      "note": "a live incumbent wins even in a read not complete: a read cannot invent a token",
+      "own": "000000000000000a",
+      "read": {
+        "complete": false,
+        "instances": [
+          {
+            "descriptor": "serving",
+            "id": "000000000000000b",
+            "token": true
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000b",
+        "why": "incumbent"
+      },
+      "note": "an incumbent whose descriptor was not read is still the incumbent: the token decides (§2.3)",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "unread",
+            "id": "000000000000000b",
+            "token": true
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000b",
+        "why": "incumbent"
+      },
+      "note": "an incumbent whose descriptor marks it standby is still the incumbent (§2.3)",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": true
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000b",
+        "why": "incumbent"
+      },
+      "note": "two incumbents, a split: it stands by, naming the lowest",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "serving",
+            "id": "000000000000000c",
+            "token": true
+          },
+          {
+            "descriptor": "serving",
+            "id": "000000000000000b",
+            "token": true
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "why": "incomplete"
+      },
+      "note": "no incumbent, the read not complete: stand by, never the only candidate (§2.5 step 3, ZenSight #1105)",
+      "own": "000000000000000a",
+      "read": {
+        "complete": false,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "why": "incomplete"
+      },
+      "note": "a read not made, its session reaching no node, is read as one not complete (core §8.1, 0.37, 0.38): stand by",
+      "own": "000000000000000a",
+      "read": {
+        "complete": false,
+        "instances": []
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "why": "incomplete"
+      },
+      "note": "a read cut off while it ran, its links gone when it ended, is possibly incomplete (core §8.1, 0.38): stand by, though it showed its own claim",
+      "own": "000000000000000a",
+      "read": {
+        "complete": false,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "why": "own_claim_missing"
+      },
+      "note": "a complete read missing its own claim: a refused read is complete and empty (core §8.1): stand by",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": []
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "why": "own_claim_missing"
+      },
+      "note": "a complete read missing its own claim, others in it: stand by",
+      "own": "000000000000000b",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000c",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000a",
+        "why": "lower_candidate"
+      },
+      "note": "a lower candidate standing by: stand by, it should take over",
+      "own": "000000000000000b",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000a",
+        "why": "lower_candidate"
+      },
+      "note": "a lower candidate listing the interface unmarked, no token: still a lower candidate",
+      "own": "000000000000000b",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "serving",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "take_over"
+      },
+      "note": "a lower instance that does not list the interface is no candidate: take over (§2.3)",
+      "own": "000000000000000b",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "not_listed",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000a",
+        "why": "descriptor_unread"
+      },
+      "note": "a lower instance whose descriptor was not read may be a candidate: stand by",
+      "own": "000000000000000b",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "unread",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "take_over"
+      },
+      "note": "a higher instance whose descriptor was not read cannot beat it: take over",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "unread",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "take_over"
+      },
+      "note": "higher candidates do not matter: take over",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000c",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000a",
+        "why": "lower_candidate"
+      },
+      "note": "the lowest lower instance decides: a candidate below an unread one",
+      "own": "000000000000000c",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "unread",
+            "id": "000000000000000b",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000c",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000a",
+        "why": "descriptor_unread"
+      },
+      "note": "the lowest lower instance decides: an unread one below a candidate",
+      "own": "000000000000000c",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "unread",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000c",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "take_over"
+      },
+      "note": "consumers below, a candidate above: take over",
+      "own": "000000000000000c",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "not_listed",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "not_listed",
+            "id": "000000000000000b",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000c",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000d",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "00000000000000ff",
+        "why": "lower_candidate"
+      },
+      "note": "ids compare as unsigned integers: 00000000000000ff is below 0000000000000100",
+      "own": "0000000000000100",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "00000000000000ff",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "0000000000000100",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "take_over"
+      },
+      "note": "ids compare as unsigned integers: 00000000000000ff wins",
+      "own": "00000000000000ff",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "00000000000000ff",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "0000000000000100",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "take_over"
+      },
+      "note": "its own descriptor's reading plays no part: it knows its claim",
+      "own": "000000000000000a",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "unread",
+            "id": "000000000000000a",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000d",
+        "why": "incumbent"
+      },
+      "note": "the incumbent check comes first: an incumbent beside an unread lower instance",
+      "own": "000000000000000c",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "unread",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "serving",
+            "id": "000000000000000d",
+            "token": true
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000c",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "why": "incomplete"
+      },
+      "note": "an incomplete read with a lower candidate in it: incomplete first",
+      "own": "000000000000000b",
+      "read": {
+        "complete": false,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "election": "external",
+      "expect": {
+        "decision": "take_over"
+      },
+      "note": "external, its lock held: no incumbent, complete, its claim seen: take over, the lock having decided (§2.11)",
+      "own": "000000000000000b",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "election": "external",
+      "expect": {
+        "decision": "stand_by",
+        "instance": "000000000000000a",
+        "why": "incumbent"
+      },
+      "note": "external: another instance holds the token, which may outlive a crash by a lease: wait for the vacancy (§2.11)",
+      "own": "000000000000000b",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "serving",
+            "id": "000000000000000a",
+            "token": true
+          },
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "election": "external",
+      "expect": {
+        "decision": "stand_by",
+        "why": "incomplete"
+      },
+      "note": "external: a read not complete is retried",
+      "own": "000000000000000b",
+      "read": {
+        "complete": false,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000b",
+            "token": false
+          }
+        ]
+      }
+    },
+    {
+      "election": "external",
+      "expect": {
+        "decision": "stand_by",
+        "why": "own_claim_missing"
+      },
+      "note": "external: its own claim missing",
+      "own": "000000000000000b",
+      "read": {
+        "complete": true,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          }
+        ]
+      }
+    }
+  ],
+  "description": "redundancy.v1 §2.5 (and §2.11 for election \"external\", its lock held): one read of the address, from the instance own's view -> what it does. election is \"claim\" when absent. read.complete is core §8.1's (0.37, 0.38): false for a read that ended at its timeout or drew an error reply, one cut off while it ran (its session's links gone when it ended), and a read not made, which is read as one not complete (a profile's premise, 0.38), with no instance; read.instances[] is each instance the read found: id (16 lowercase hex digits), token (it holds the governed interface's token, at any revision), descriptor (\"unread\", \"not_listed\": it does not list the interface, \"standby\": listed with \"standby\": true, \"serving\": listed unmarked). Ids compare as their digits, character by character, which is their order as unsigned 64-bit integers (§2.3). The decision is the first of: another instance holding the token, whatever the read's completeness -> stand_by, incumbent, naming the lowest such; the read not complete -> stand_by, incomplete; own not among the instances -> stand_by, own_claim_missing; under \"external\", otherwise take_over; under \"claim\", the lowest instance whose id is lower than own's and whose descriptor is not \"not_listed\": \"unread\" -> stand_by, descriptor_unread, naming it; listed -> stand_by, lower_candidate, naming it; none -> take_over. own's own descriptor reading plays no part."
+}

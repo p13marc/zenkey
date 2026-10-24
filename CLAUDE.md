@@ -760,7 +760,22 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   revision read by its exact value (`decode`, `revision_of_text`,
   `revision_of_value`), the author absent only by a complete read (core
   §8.1), and with config.v1 text 0.5 `config::Owner::baseline_document`,
-  what a delete reverts a config.v1 target to).
+  what a delete reverts a config.v1 target to), and `redundancy.v1`'s
+  (`redundancy`, #841 RA: the declaration, governed through `uses`, its
+  `election` `claim` or `external` written once on `[defaults]` and read
+  from every resource, invalid `not_used`, `value`, `disagrees` or
+  `tokenless`; instance ids compared as unsigned integers; the descriptor's
+  standby mark read and checked (core 0.39: `InterfaceEntry::standby`,
+  D012, a standby exposing nothing); `elect` and `elect_external` over one
+  read of the address's `@zk/**` — a live incumbent wins, then a complete
+  read holding its own claim (a read cut off while it ran, or not made,
+  standing by: core 0.38), then the lowest id; `heal` over two reads a
+  grace apart, the higher ids stepping down; `Elector`, a pure two-phase
+  state machine (`start`, `observe(Read|Appeared|Withdrawn|Timer|Lock)`,
+  `finish` after claim, take-over and step-down); and §5's
+  `one_incumbent`, `vacancy`, `standbys`, `twin` in five states; text 0.1,
+  core 0.39 marking a standby and publishing `election`; hostid.v1 text 0.6
+  counting no recognised standby).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -945,9 +960,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.38 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.39 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
-    implementation's findings against it, #849; changes go through
+    implementation's findings against it, #849; 0.39: the standby mark and
+    `redundancy.v1`'s vocabulary, #841; changes go through
     `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

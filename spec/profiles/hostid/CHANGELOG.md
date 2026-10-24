@@ -4,6 +4,48 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.6 — 2026-10-24: a standby recognised, by `redundancy.v1` (#841, RA)
+
+§2.12 read a standby on a minted system as its finding "until
+`redundancy.v1` says how a tool recognises a standby". `redundancy.v1`'s
+text 0.1 says it (its §2.15 and §5), over core 0.39's standby mark, and
+this text now points there.
+
+**Changed: a recognised standby is not counted** (§2.12, §5).
+`[Sc: §6]`
+- **The rule.** A recognised standby lists only interfaces whose contracts
+  use `redundancy.v1`, at least one, and that profile's fourth question,
+  "is this instance a standby, or a twin?", answers no, `standby`, of
+  each, from the finding's own two reads. It is not counted, so an
+  incumbent and its standbys of one address state one counted `meta.zid`,
+  and make no finding. A twin is counted, and so is an instance listing
+  an interface the profile does not govern, which would expose it beside
+  the incumbent (`redundancy.v1` §2.4).
+- **Undecided** gains a case: an instance listing only governed
+  interfaces whose standby question is unobservable for one of them, the
+  counted instances not establishing the finding. §5's row says the same,
+  and its "no" counts a recognised standby as accounted for.
+- **The scenario.** `scenarios.md` §6 gains step 6, an incumbent and a
+  standby of a governed `ledger.v1` on one minted address: no finding. The
+  reference doctor runs it once it reads the mark (#841, RC).
+
+**Changed: written against core 0.39.** The text reads the descriptor's
+standby mark through `redundancy.v1`. Nothing else it relies on changed
+between core 0.22 and 0.39.
+
+**Deliberately not changed.**
+- **The finding's causes.** A collision, a cloned machine id and a second
+  process still look alike on the bus, and a tool names none. A standby
+  was never one of them once recognised: the deployment runs it on
+  purpose.
+- **An instance standing by on one governed interface and serving
+  another** is not a recognised standby, and is counted: two such
+  instances of one address state two counted `meta.zid`. It is rare, the
+  finding is a warning a person decides, and recognising it would need a
+  rule for every mix of roles.
+- **No fixture.** `conformance/` holds the derivation and the shape; the
+  finding is read from presence, and is a scenario's.
+
 ## 0.5 — 2026-10-10: a v1 source cited where it still is (#614)
 
 #614's FL3 rewrote zenwatch as a zk2 service, and `zenwatch/src/publish.rs`

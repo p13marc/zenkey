@@ -30,6 +30,7 @@ use zenkey_model::grammar::KindToken;
 use zenkey_model::health::{self, Judged, Level, Listing, Presence, Read, Reading};
 use zenkey_model::hostid;
 use zenkey_model::link;
+use zenkey_model::redundancy;
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::telemetry::{self, Datum, Declaration, MetricKind, TypeView};
 use zenkey_model::template::Template;
@@ -67,6 +68,12 @@ const KNOWN: &[(&str, &str)] = &[
     ("desired", "order.json"),
     ("desired", "reports.json"),
     ("desired", "conclusions.json"),
+    ("redundancy", "declarations.json"),
+    ("redundancy", "elections.json"),
+    ("redundancy", "heals.json"),
+    ("redundancy", "descriptors.json"),
+    ("redundancy", "lifecycle.json"),
+    ("redundancy", "conclusions.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -2575,4 +2582,343 @@ fn desired_conclusions() {
     if bless() {
         write_json(&path, &doc);
     }
+}
+
+// --- redundancy.v1 (#841, RA) ----------------------------------------------------
+//
+// The expectations were written by an independent transcription of the text
+// (the RA chunk's), so these runners check them; a bless claims the reference
+// and the text agree.
+
+fn rd_id(v: &Value) -> zenkey_model::grammar::InstanceId {
+    v.as_str()
+        .expect("an id")
+        .parse()
+        .expect("16 lowercase hex digits")
+}
+
+fn rd_read(v: &Value) -> redundancy::Read {
+    redundancy::Read {
+        complete: v["complete"].as_bool().expect("complete"),
+        instances: v["instances"]
+            .as_array()
+            .expect("instances")
+            .iter()
+            .map(|i| redundancy::Seen {
+                id: rd_id(&i["id"]),
+                token: i["token"].as_bool().expect("token"),
+                descriptor: match i["descriptor"].as_str().expect("descriptor") {
+                    "unread" => redundancy::Listing::Unread,
+                    "not_listed" => redundancy::Listing::NotListed,
+                    "standby" => redundancy::Listing::Listed { standby: true },
+                    "serving" => redundancy::Listing::Listed { standby: false },
+                    other => panic!("descriptor {other:?}"),
+                },
+            })
+            .collect(),
+    }
+}
+
+fn rd_election(v: &Value) -> redundancy::Election {
+    match v.as_str().unwrap_or("claim") {
+        "claim" => redundancy::Election::Claim,
+        "external" => redundancy::Election::External,
+        other => panic!("election {other:?}"),
+    }
+}
+
+fn rd_why(why: &redundancy::Why, mut out: Value) -> Value {
+    out["why"] = json!(why.as_str());
+    if let Some(i) = why.instance() {
+        out["instance"] = json!(i.as_str());
+    }
+    out
+}
+
+/// `redundancy/conformance/declarations.json`: a contract's `uses` and its
+/// resources' resolved annotations, and the tokenless set → the declaration
+/// (redundancy.v1 §2.2).
+#[test]
+fn redundancy_declarations() {
+    let path = profiles().join("redundancy/conformance/declarations.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let uses: Vec<zenkey_model::grammar::IfaceId> = case["contract"]["uses"]
+            .as_array()
+            .expect("uses")
+            .iter()
+            .map(|u| {
+                u.as_str()
+                    .expect("a profile")
+                    .parse()
+                    .expect("a profile id")
+            })
+            .collect();
+        let anns: Vec<BTreeMap<String, Value>> = case["contract"]["resources"]
+            .as_array()
+            .expect("resources")
+            .iter()
+            .map(|r| annotations(&r["annotations"]))
+            .collect();
+        let d = redundancy::declaration(&uses, &anns, case["tokenless"] == json!(true));
+        let got = match &d {
+            redundancy::Declaration::Governed(e) => {
+                json!({"declaration": d.as_str(), "election": e.as_str()})
+            }
+            redundancy::Declaration::Invalid(r) => json!({
+                "declaration": d.as_str(),
+                "reasons": r.iter().map(|r| r.as_str()).collect::<Vec<_>>(),
+            }),
+            redundancy::Declaration::NotGoverned => json!({"declaration": d.as_str()}),
+        };
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `redundancy/conformance/elections.json`: one read of the address, from
+/// one instance's view → what it does (redundancy.v1 §2.5, §2.11).
+#[test]
+fn redundancy_elections() {
+    let path = profiles().join("redundancy/conformance/elections.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let own = rd_id(&case["own"]);
+        let read = rd_read(&case["read"]);
+        let decision = match rd_election(&case["election"]) {
+            redundancy::Election::Claim => redundancy::elect(&own, &read),
+            redundancy::Election::External => redundancy::elect_external(&own, &read),
+        };
+        let got = match &decision {
+            redundancy::Decision::TakeOver => json!({"decision": decision.as_str()}),
+            redundancy::Decision::StandBy(why) => {
+                rd_why(why, json!({"decision": decision.as_str()}))
+            }
+        };
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `redundancy/conformance/heals.json`: an incumbent and the holders of two
+/// reads a grace apart → whether it steps down (redundancy.v1 §2.9).
+#[test]
+fn redundancy_heals() {
+    let path = profiles().join("redundancy/conformance/heals.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let holders = |v: &Value| -> Vec<zenkey_model::grammar::InstanceId> {
+            v["holders"]
+                .as_array()
+                .expect("holders")
+                .iter()
+                .map(rd_id)
+                .collect()
+        };
+        let got = match redundancy::heal(
+            &rd_id(&case["own"]),
+            rd_election(&case["election"]),
+            &holders(&case["first"]),
+            &holders(&case["second"]),
+        ) {
+            redundancy::Heal::StepDown(low) => json!({"step_down": true, "lower": low.as_str()}),
+            redundancy::Heal::Stay(why) => json!({"step_down": false, "why": why.as_str()}),
+        };
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `redundancy/conformance/descriptors.json`: one interface entry and the
+/// interface's governance → its mark and the findings (redundancy.v1 §2.4,
+/// §2.14; core §3.3).
+#[test]
+fn redundancy_descriptors() {
+    let path = profiles().join("redundancy/conformance/descriptors.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let governance =
+            redundancy::Governance::parse(case["governance"].as_str().expect("governance"))
+                .expect("a governance");
+        let m = redundancy::read_mark(&case["entry"], governance);
+        let got = json!({
+            "mark": m.mark.map(redundancy::Mark::as_str),
+            "findings": m.findings.iter().map(|f| f.as_str()).collect::<Vec<_>>(),
+        });
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn rd_step(step: &redundancy::Step) -> Value {
+    let base = json!({"step": step.as_str()});
+    match step {
+        redundancy::Step::StandBy { why, retry } => {
+            let mut v = rd_why(why, base);
+            v["retry"] = json!(retry);
+            v
+        }
+        redundancy::Step::StepDown(why) => {
+            let mut v = base;
+            v["why"] = json!(why.as_str());
+            if let redundancy::StepDownWhy::LowerHolder(i) = why {
+                v["instance"] = json!(i.as_str());
+            }
+            v
+        }
+        _ => base,
+    }
+}
+
+/// `redundancy/conformance/lifecycle.json`: one candidate's events → the
+/// step each returns, and its role after the last (redundancy.v1 §2.5 to
+/// §2.11).
+#[test]
+fn redundancy_lifecycle() {
+    let path = profiles().join("redundancy/conformance/lifecycle.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let mut e = redundancy::Elector::new(rd_id(&case["own"]), rd_election(&case["election"]));
+        let mut steps = Vec::new();
+        for event in case["events"].as_array().expect("events") {
+            let step = match event {
+                Value::String(s) if s == "start" => e.start(),
+                Value::String(s) if s == "finish" => e.finish(),
+                Value::String(s) if s == "withdrawn" => e.observe(redundancy::Event::Withdrawn),
+                Value::String(s) if s == "timer" => e.observe(redundancy::Event::Timer),
+                ev if ev.get("read").is_some() => {
+                    e.observe(redundancy::Event::Read(rd_read(&ev["read"])))
+                }
+                ev if ev.get("appeared").is_some() => {
+                    e.observe(redundancy::Event::Appeared(rd_id(&ev["appeared"])))
+                }
+                ev if ev.get("lock").is_some() => e.observe(redundancy::Event::Lock(
+                    ev["lock"].as_bool().expect("a lock"),
+                )),
+                other => panic!("event {other}"),
+            };
+            steps.push(rd_step(&step));
+        }
+        let got = json!({"steps": steps, "role": e.role().as_str()});
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn rd_judged(j: redundancy::Judged) -> Value {
+    json!({"answer": j.answer.as_str(), "reason": j.reason.as_str()})
+}
+
+/// `redundancy/conformance/conclusions.json`: a tool's two reads of an
+/// address → §5's four questions (redundancy.v1 §2.15).
+#[test]
+fn redundancy_conclusions() {
+    let path = profiles().join("redundancy/conformance/conclusions.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let r = &case["reading"];
+        let reading = redundancy::Reading {
+            across_face: r["across_face"] == json!(true),
+            governance: redundancy::Governance::parse(
+                r["governance"].as_str().expect("governance"),
+            )
+            .expect("a governance"),
+            first: rd_read(&r["first"]),
+            second: rd_read(&r["second"]),
+        };
+        let ids: std::collections::BTreeSet<String> = reading
+            .first
+            .instances
+            .iter()
+            .chain(&reading.second.instances)
+            .map(|s| s.id.as_str().to_owned())
+            .collect();
+        let twins: serde_json::Map<String, Value> = ids
+            .iter()
+            .map(|id| {
+                let x = rd_id(&json!(id));
+                (id.clone(), rd_judged(redundancy::twin(&reading, &x)))
+            })
+            .collect();
+        let (sb, count) = redundancy::standbys(&reading);
+        let mut standbys = rd_judged(sb);
+        standbys["count"] = json!(count.count);
+        standbys["exact"] = json!(count.exact);
+        let got = json!({
+            "one_incumbent": rd_judged(redundancy::one_incumbent(&reading)),
+            "vacancy": rd_judged(redundancy::vacancy(&reading)),
+            "standbys": standbys,
+            "twins": twins,
+        });
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// The adopters' singletons read as governed under `claim`, and the
+/// scenarios' contracts as `claim` and `external` (redundancy.v1 §2.2,
+/// Appendix B; #841's "done when").
+#[test]
+fn redundancy_examples_are_governed() {
+    use zenkey_model::contract::load_path;
+    let root = repo_root();
+    for (file, election) in [
+        (
+            "examples/zk2/zensight/zs.catalog.v1.toml",
+            redundancy::Election::Claim,
+        ),
+        (
+            "examples/zk2/zensight/zs.desired.v1.toml",
+            redundancy::Election::Claim,
+        ),
+        (
+            "zenkey/tests/contracts/ledger.v1.toml",
+            redundancy::Election::Claim,
+        ),
+        (
+            "zenkey/tests/contracts/valve.v1.toml",
+            redundancy::Election::External,
+        ),
+    ] {
+        let l = load_path(&root.join(file));
+        assert!(l.report.0.is_empty(), "{file}:\n{}", l.report);
+        let c = l.contract.expect("a contract");
+        assert!(redundancy::is_governed(&c), "{file}");
+        assert_eq!(
+            redundancy::declaration_of(&c, false),
+            redundancy::Declaration::Governed(election),
+            "{file}"
+        );
+        assert_eq!(
+            redundancy::declaration_of(&c, true),
+            redundancy::Declaration::Invalid(vec![redundancy::Invalid::Tokenless]),
+            "{file}: a governed interface is never tokenless"
+        );
+    }
+    // A contract that is not governed is not this profile's.
+    let l = load_path(&root.join("examples/zk2/tcgui/tc.netif.v1.toml"));
+    let c = l.contract.expect("a contract");
+    assert!(!redundancy::is_governed(&c));
+    assert_eq!(
+        redundancy::declaration_of(&c, true),
+        redundancy::Declaration::NotGoverned
+    );
 }

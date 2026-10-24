@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.38** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.39** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -39,10 +39,12 @@ what `telemetry.v1` needed: a standard schema as a profile's first
 point, and its vocabulary published, in 0.36 what `desired.v1`
 needed: its vocabulary published without the interim `target`, in
 0.37 what a complete presence read is: one through a session cut off, a
-withdrawal heard live, and a read beside a liveliness subscriber, and in
+withdrawal heard live, and a read beside a liveliness subscriber, in
 0.38 the second implementation's findings against 0.37: a read cut off
 while it runs, a read not made in a profile's premise, and scenarios that
-observe the reader).
+observe the reader, and in 0.39 what `redundancy.v1` needed: a standby
+marked in the descriptor, exposing nothing and holding no interface
+token, never tokenless, and its vocabulary published).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -771,6 +773,8 @@ gate does not name.
   - The exposed resources of an interface are its contract's resources,
     minus the optional ones gated on a capability the instance does not
     hold, minus those listed in `unavailable`.
+  - An entry marked `"standby": true` exposes none of them, whatever else
+    it says (below, 0.39).
   - `unavailable` lists only optional resources whose absence the missing
     capabilities do not already imply.
   - Each entry gives a cause, `build`, `config` or `capability`, saying why
@@ -781,7 +785,26 @@ gate does not name.
   error (D005). One that a missing capability already implies is a warning
   (D006). `[F: descriptors/d005-*, d006-implied]`
 - **`token`** is `false` for an interface in the owner's tokenless set
-  (§8.1), and `true` otherwise, which is the default.
+  (§8.1), and `true` otherwise, which is the default. It states the
+  configuration, not what is held now: a standby's entry states `true`,
+  and its instance holds no token of the interface (§6, 0.39).
+- **`standby`** (0.39) is `true` for an interface the instance **stands
+  by** on: it implements the interface, lists it, and serves none of it
+  now (§6). Absent is serving, and `false` written out is the same as
+  absent, as for a role's `optional`. `[F: descriptors/ok-standby]`
+  - **It exposes nothing.** A standby entry exposes none of the
+    interface's resources, required ones included (§8.2). Its
+    `unavailable` and `cardinality` state what the instance will expose
+    once it serves, and are checked as any entry's (D005–D007). A tool
+    reads them so, never as exposure.
+  - **Only as a profile says.** An instance stands by on an interface only
+    as a profile it follows says when it stands by and when it serves:
+    [`redundancy.v1`](profiles/redundancy/v1.md) for an interface whose
+    contract uses it (§6, §10).
+  - **Never tokenless.** An entry marked both `"standby": true` and
+    `"token": false` is D012: the instance serving an interface that has a
+    standby is known by its interface token (§6), and a tokenless
+    interface has none. `[F: descriptors/d012-standby-tokenless]`
 - **`cardinality`** MAY lower a template's bound for this instance, keyed
   `<kind token>/<template>`, to a value from 1 to the contract's. It MUST
   NOT raise it. `[F: descriptors/d007-*]` The bound it states is the one
@@ -811,7 +834,7 @@ gate does not name.
   and sorted as §9.5 sorts a contract's `uses`: by name as a string, then
   by major as a number (0.20). So `views.v2` comes before `views.v10`, and
   `a.v1` before `a.b.v1`, where a sort of the whole strings gives the
-  reverse of each. The checker does not read the order (cascade 7). It is
+  reverse of each. The checker does not read the order (cascade 8). It is
   the union of two sets (0.19):
   - the `uses` of the contracts the instance implements;
   - the derivation-only profiles the instance follows (§10). Today that is
@@ -860,6 +883,7 @@ and reports these codes. `[F: descriptors/]`
 | D009 | in a requirement entry: `role` is not `[a-z][a-z0-9_]*`; `interface` is not an interface id; `declared_by` is not one of the interfaces this descriptor lists; a `params` key is not `[a-z][a-z0-9_]*`, or its value is empty; a binding is not `<system>/<service>`, each chunk plain or `*` | error | per finding |
 | D010 | a profile is not `<name>.v<major>`; or one is listed twice | error | as D008: once per malformed occurrence, once for the repeats |
 | D011 | an interface entry for `archive.v1` is marked `"token": false`: an archive is never tokenless (§4.4, 0.17) | error | per entry |
+| D012 | an interface entry is marked both `"standby": true` and `"token": false`: an interface with a standby is never tokenless (§6, §8.1, 0.39) | error | per entry |
 
 **Cascades and scope.**
 1. D000 stops the check: no other code is reported.
@@ -885,7 +909,12 @@ and reports these codes. `[F: descriptors/]`
    3 and 5 do not suppress it. An entry checked no further by cascade 2 is
    no `archive.v1` entry. `[F: descriptors/d011-tokenless-archive,
    d011-bad-fingerprint]`
-7. Not checked, deliberately `[F: descriptors/ok-unchecked]`:
+7. D012 reads an entry's `standby` and `token`, and nothing else (0.39),
+   as D011 reads its `iface` and `token`: cascades 3 and 5 do not
+   suppress it, and an entry checked no further by cascade 2 is not
+   checked for it. An `archive.v1` entry so marked gives D011 and D012.
+   `[F: descriptors/d012-standby-tokenless, d012-bad-fingerprint]`
+8. Not checked, deliberately `[F: descriptors/ok-unchecked]`:
    - that a `cause` agrees with the resource's gates: an owner may lack a
      resource for a reason its gates do not name;
    - R3's completeness, that every requirement a contract declares is
@@ -903,7 +932,13 @@ and reports these codes. `[F: descriptors/]`
      `bindings.md §5` checks the runtime instead;
    - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
      read it to order two revisions, §9.8), and `token` except on
-     `archive.v1` (D011, cascade 6);
+     `archive.v1` (D011, cascade 6) and beside `standby` (D012, cascade
+     7);
+   - that a standby's interface is one a profile governs, and that a
+     `"token": false` entry's contract does not use `redundancy.v1`
+     (0.39): a checker reads the mark for its form, and the profile says
+     what a tool concludes of either (`redundancy.v1` §2.14, its
+     `descriptors.json`). The owner's start refuses the second (§8.2);
    - that a role's `optional` agrees with the contract that declares it
      (0.11): a tool reads the contract's `[requires]` instead.
      `[F: descriptors/ok-optional-unchecked]`
@@ -1545,13 +1580,32 @@ any other reply error is the transport's.
   Each instance that exposes a replicated operation is active on its
   interface (§5.1), and so holds the interface's token, tokenless sets
   aside (§8.1).
-- **No core roles.**
-  - A standby instance exposes no exclusive resource, and declares no
-    interface token for an interface it exposes nothing of.
+- **No core roles, one mark** (0.39).
+  - **A standby.** An instance **stands by** on an interface it implements
+    when its descriptor marks the interface's entry `"standby": true`
+    (§3.3). It exposes none of the interface's resources, required ones
+    included (§8.2), declares none of its operation queryables,
+    `unavailable` ones included (§5.1), and holds none of its interface or
+    member tokens (§8.1). It holds its instance token and serves its
+    descriptor, which lists the interface marked, so alive ⇒ callable
+    holds, and a call finds no standby (O1, O3). It still holds the
+    interface's bundle (§8.2 step 3, §8.4), which is not one of the
+    interface's resources. `[Sc: profiles/redundancy/scenarios.md §1, §8]`
+  - **When an instance stands by,** and when it serves, is a profile's:
+    [`redundancy.v1`](profiles/redundancy/v1.md) for an interface whose
+    contract uses it (§10). The core defines no election.
   - Two instances of one service holding an interface token for the same
     interface, for longer than a grace period, is a **finding**, except
-    where replicated serving explains it (below). A tool diagnoses it, and
-    the runtime does not fence.
+    where replicated serving explains it (below). A tool diagnoses it,
+    and the runtime does not fence, but for an interface whose contract
+    uses `redundancy.v1`: its holders step down as that profile's §2.9
+    says (0.39), which is no fence either, since writes in flight still
+    land.
+    - **A holder is an incumbent, whatever its mark** (0.39). The check
+      counts the instances holding the token. One whose descriptor marks
+      the interface standby is counted all the same, and its descriptor
+      disagrees with its tokens besides: it holds a token for an interface
+      its descriptor says it exposes nothing of (§8.1).
     - **Replicated serving.** Holders are not a finding when at most one
       of them exposes an exclusive resource of the interface: an interface
       whose holders expose only replicated operations is held by any number
@@ -1570,8 +1624,18 @@ any other reply error is the transport's.
     - An owner SHOULD keep a re-mint's overlap below one second.
 
     `[Sc: operations.md §8]`
+  - **Reading the mark** (0.39). A tool tells a standby from a twin by
+    it. An instance listing the interface marked standby, and holding no
+    token of it in a complete read (§8.1), is a standby: no finding of
+    this check, nor of §8.1's fault shapes, since its listing claims
+    nothing exposed. One listing it unmarked, outside its tokenless set,
+    and holding no token of it in two complete reads a grace apart,
+    claims an exposure no token covers (§8.1). `redundancy.v1` §5 states
+    what a tool concludes of each instance and of the address.
+    `[Sc: profiles/redundancy/scenarios.md §12]`
   - Election and fencing belong to `redundancy.v1`. An actuator keeps an
-    exclusivity lock outside the bus.
+    exclusivity lock outside the bus, which the profile names
+    `election = "external"` and does not replace (its §2.11).
 
 ---
 
@@ -1725,6 +1789,9 @@ Liveliness tokens carry no payload; everything is in the key.
   one resource**, and none otherwise, except for its **tokenless set**.
   "Who implements `nav.v2`" is the liveliness selector
   `zk2/*/*/@zk/alive/nav.v2/**`. `[Sc: presence.md §1]`
+  A standby (§6, 0.39) exposes none of the interface's resources, so it
+  holds no interface token for it, and no member token.
+  `[Sc: profiles/redundancy/scenarios.md §1]`
 - **The tokenless set** (U22, decided at acceptance).
   - A deployment MAY configure an owner with interfaces for which it holds
     no interface token. These SHOULD be the interfaces every service of the
@@ -1734,6 +1801,10 @@ Liveliness tokens carry no payload; everything is in the key.
     the rest of a framework set.
   - The owner's descriptor marks each such interface `"token": false`
     (§3.3).
+  - It never names `archive.v1` (§4.4), nor, since 0.39, an interface
+    whose contract uses `redundancy.v1`: the instance serving it is known
+    by its interface token (§6, [`redundancy.v1`](profiles/redundancy/v1.md)
+    §2.14). §8.2 step 2 refuses both.
   - Their providers are found through instance tokens and descriptors, not
     through a token selector. The split-brain check (§6) does not cover
     them.
@@ -1944,7 +2015,24 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
   claimed. It also refuses an owner whose tokenless set names `archive.v1`,
   whether or not the owner implements it (§4.4, 0.17): the set is the
   deployment's configuration, and naming the archive in it is an error.
-  `[Sc: presence.md §2]`
+  `[Sc: presence.md §2]` And it refuses one whose tokenless set names an
+  interface it implements whose contract uses `redundancy.v1` (0.39): that
+  interface's incumbent is the instance holding its token
+  ([`redundancy.v1`](profiles/redundancy/v1.md) §2.14).
+  `[Sc: profiles/redundancy/scenarios.md §11]`
+- **A standby** (§6, 0.39) exposes none of an interface's resources,
+  required ones included, and its descriptor says so (§3.3): step 2 does
+  not refuse it. It validates at its start what it will expose once it
+  serves, as its entry's `unavailable` states, so that its taking over
+  cannot fail step 2. `[Sc: profiles/redundancy/scenarios.md §1]`
+- **Serving later, and stopping** (0.39). An instance that starts to
+  serve an interface while it runs, a standby taking over, does steps 1
+  to 4 for that interface, in their order: its resources, then its
+  descriptor put again without the mark, then the interface's token, so
+  alive ⇒ callable holds as at a start. One that stops serving an
+  interface while it runs undoes them in the reverse order: the
+  interface's tokens first, then its resources, then its descriptor put
+  marked. `[Sc: profiles/redundancy/scenarios.md §1, §7]`
 - **The order of steps 1 and 2** is free: what it protects is that
   nothing of steps 3 and 4 happens unless step 2 passes. The reference
   validates first, then declares its state queryables and `unavailable`
@@ -2858,7 +2946,8 @@ here names a profile ([`health.v1`](profiles/health/v1.md) for reporting,
 [`link.v1`](profiles/link/v1.md) for face configuration, `archive.v1` for archives,
 [`freshness.v1`](profiles/freshness/v1.md) for a value's age,
 [`telemetry.v1`](profiles/telemetry/v1.md) for a counter's epoch,
-[`desired.v1`](profiles/desired/v1.md) for store-and-forward), it names
+[`desired.v1`](profiles/desired/v1.md) for store-and-forward,
+[`redundancy.v1`](profiles/redundancy/v1.md) for exclusivity), it names
 the standard way to meet the rule, which the core states in its own
 terms. A profile contributes through these four points, and through no
 other:
@@ -2898,9 +2987,11 @@ other:
    ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4);
    `link.v1`'s ([`profiles/link/v1.md`](profiles/link/v1.md) §4, 0.29),
    `telemetry.v1`'s
-   ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, 0.35) and
+   ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, 0.35),
    `desired.v1`'s ([`profiles/desired/v1.md`](profiles/desired/v1.md) §4,
-   0.36) followed.
+   0.36) and `redundancy.v1`'s
+   ([`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4, 0.39)
+   followed. `[F: contracts/w105-redundancy-epoch]`
    A profile may publish an empty one, as `alarms.v1` does
    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4, 0.34): it
    defines no key, so W105 warns of every key under its name.
@@ -2916,6 +3007,11 @@ other:
    point is reserved: this version refuses such keys (§1.2), and a later
    version defines their form.
 4. **The descriptor's `profiles` list** (§3.3).
+
+**The standby mark** (0.39) is the core's own member (§3.3, §6), not a
+fifth point: the core says what a standby is, holds and exposes, and a
+profile says only when an instance stands by and when it serves, as
+`redundancy.v1` does for an interface whose contract uses it.
 
 **Derivation-only profiles** (0.19). A profile uses any of the four points,
 and states which. One that uses point 4 alone is **derivation-only**:
@@ -3367,6 +3463,7 @@ reader, clients, some under CPU load:
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
 | `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
 | `profiles/desired/scenarios.md` §1, §3, §6, §7, §10 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.36), and an owner silent within the timeout across a cut, its own answer after the heal (§10, 0.37) |
+| `profiles/redundancy/scenarios.md` §1, §7, §8, §11, §12 | §3.3 the standby mark; §6 a standby, and a tool reading the mark; §8.1 a standby holding no interface token; §8.2 a standby exposing nothing, taking over and stepping down in the steps' order, and a governed interface refused in the tokenless set; O1, O3 a call finding no standby (0.39) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)
@@ -3402,6 +3499,7 @@ profile's own table replaces its interim one.
 | `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 (0.34) |
 | `telemetry` | `kind`, `unit`, `buckets`, `semantic` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4 (0.35) |
 | `desired` | `target_param` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4 (0.36) |
+| `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 (0.39) |
 
 `link.downsample_ms` left with the interim `link` row (0.29): a face's
 rate is its face policy's `interval_s` (`link.v1` §2.8), a deployment
@@ -3419,6 +3517,13 @@ already says which identity fills each target parameter (R2), and no
 contract wrote it, so it is outside `desired.v1`'s published table, and a
 contract that writes it draws W105. `[F: contracts/w105-desired-target]`
 
+`redundancy.v1` publishes the interim `redundancy` row's one key
+unchanged (0.39): `election`, `claim` or `external`, which a contract
+writes once on `[defaults]` (`redundancy.v1` §2.2). A contract that writes
+any other `redundancy.<key>`, a fencing epoch among them, draws W105: the
+profile carries no epoch in a payload at 1.0 (its §2.16).
+`[F: contracts/w105-redundancy-epoch]`
+
 **Interim annotation vocabularies** (W105 outside them, until each profile
 publishes its own):
 
@@ -3428,7 +3533,6 @@ publishes its own):
 | `arbitration` | `policy` |
 | `media` | `tiers`, `tier_param`, `frame_clock`, `control`, `receiver_report` |
 | `views` | `document` (an extra's id, `sha256:…`; §9.6) |
-| `redundancy` | `election` |
 
 ## Appendix E. Fixture formats
 

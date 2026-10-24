@@ -150,6 +150,10 @@ pub const CODES: &[(&str, &str)] = &[
         "archive.v1 is marked tokenless: an archive is never tokenless",
     ),
     (
+        "D012",
+        "an interface is marked standby and tokenless: an interface with a standby is never tokenless",
+    ),
+    (
         "E000",
         "the file is not valid TOML 1.0, or does not fit the authoring format's shape",
     ),

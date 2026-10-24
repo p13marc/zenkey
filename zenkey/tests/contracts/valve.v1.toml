@@ -1,0 +1,20 @@
+# redundancy.v1's scenarios (#841; spec/profiles/redundancy/scenarios.md §10):
+# an actuator whose exclusivity is a lock outside the bus. The profile only
+# says how its standby shows and what a tool concludes (redundancy.v1 §2.11).
+[interface]
+name  = "valve"
+major = 1
+minor = 0
+uses  = ["redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "external" }
+
+[resources.position]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.set]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
