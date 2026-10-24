@@ -901,18 +901,19 @@ async fn s6_the_authors_restart_moves_no_target_to_act_again() {
         .into_descriptor()
         .unwrap();
     assert_eq!(desc.meta["zid"].as_str(), Some(zid.as_str()));
+    // "Before the token" is what the GETs above, made as soon as the new
+    // instance token was seen, show: the owner held the re-put and the
+    // re-delete, under the new zid. S's receipt order is not the owner's:
+    // a put and a token reach it on two subscriptions, at two priorities,
+    // with no order kept between them (as `profile_alarms.rs`'s
+    // `at_new_token` says).
     tokio::time::sleep(Duration::from_secs(3)).await;
     let log: Vec<Rec> = s.all().into_iter().skip(mark).collect();
-    let token_at = log
-        .iter()
-        .position(|r| r.token && !r.delete && r.key.starts_with("zk2/lab/author/@zk/instance/"))
-        .unwrap();
     let put_at = log.iter().position(|r| !r.token && r.key == D).unwrap();
     let del_at = log
         .iter()
         .position(|r| !r.token && r.key == D2 && r.delete)
         .unwrap();
-    assert!(put_at < token_at && del_at < token_at, "before the token");
     let reput = log[put_at].stamp.unwrap();
     assert_eq!(log[del_at].stamp.unwrap().get_id(), reput.get_id());
     assert!(s.on(RUN, mark).is_empty(), "Run receives nothing");
