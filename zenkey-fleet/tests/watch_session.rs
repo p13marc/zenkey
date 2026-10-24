@@ -317,6 +317,74 @@ async fn an_alarm_feed_that_listens_needs_a_watch_session_of_its_own() {
         .expect("a reader that does not listen");
 }
 
+/// A telemetry reading follows its owners' tokens on a watch session of its
+/// own (#830): with none, or its read session, it is unobservable, saying
+/// why, before it subscribes to anything; with one, the subscription is
+/// there and its seed and reads are on the read session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_telemetry_reading_needs_a_watch_session_of_its_own() {
+    let (_router, ep) = router(None).await;
+    let (owner, tool, watch) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let meter = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/meter.v1.toml");
+        let l = zenkey_model::contract::load_path(&path);
+        l.contract
+            .unwrap_or_else(|| panic!("meter.v1 does not load:\n{}", l.report))
+    };
+    let mut b = zenkey::ServiceBuilder::new(&owner, util::zk2::config("lab/meter"));
+    b.implement(zenkey::Implementation::new(meter.clone()))
+        .expect("implement");
+    for r in &meter.resources {
+        let _ = b.expose(&meter.iface, &zenkey::implementation::resource_name(r));
+    }
+    let _svc = b.start().await.expect("the owner");
+    let store = zenkey_fleet::BundleStore::new(T);
+    let offline = zenkey_fleet::ContractSet::new();
+    let mut spec = zenkey_fleet::TelemetrySpec::new(T, Duration::from_millis(200));
+    spec.lease = Duration::from_millis(200);
+    let read = |watch: Option<zenoh::Session>| {
+        let (tool, store, offline) = (tool.clone(), store.clone(), offline.clone());
+        async move {
+            zenkey_fleet::observe_telemetry(
+                &tool,
+                watch.as_ref(),
+                "",
+                zenkey_fleet::TelemetryScope::all(),
+                &store,
+                &offline,
+                spec,
+                |_| {},
+            )
+            .await
+        }
+    };
+    for refused in [None, Some(tool.clone())] {
+        let obs = read(refused).await;
+        assert!(
+            !obs.resources.is_empty(),
+            "the meter's resources are in scope"
+        );
+        assert!(
+            obs.unobservable
+                .as_deref()
+                .is_some_and(|why| why.contains("watch session")),
+            "{:?}",
+            obs.unobservable
+        );
+    }
+    assert!(!zenkey::presence::watching(&tool));
+    let obs = read(Some(watch.clone())).await;
+    assert!(obs.unobservable.is_none(), "{:?}", obs.unobservable);
+    assert!(
+        matches!(&obs.seed, Some(Ok(seed)) if seed.complete),
+        "the seed was read, on the read session: {:?}",
+        obs.seed
+    );
+    assert!(zenkey::presence::watching(&watch), "its subscription");
+    assert!(!zenkey::presence::watching(&tool), "its reads");
+}
+
 /// **A cut-off session's reads** (core §8.1, 0.37): a session that reaches
 /// no other zenoh node is answered at once, complete and empty, though
 /// nothing was asked of anyone. The fleet makes no such read, and says

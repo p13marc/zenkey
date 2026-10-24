@@ -1358,3 +1358,29 @@ async fn config_suite(
         probes,
     }
 }
+
+#[cfg(test)]
+mod watch_tests {
+    /// A window's owner is watched on a watch session of its own (#830):
+    /// with none, or the session the run reads through, the watch is
+    /// refused before anything is declared, and says why.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_window_watch_needs_a_watch_session_of_its_own() {
+        let mut c = zenoh::Config::default();
+        c.insert_json5("mode", "\"peer\"").unwrap();
+        c.insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        c.insert_json5("listen/endpoints", "[]").unwrap();
+        let s = zenoh::open(c).await.expect("a session");
+        let addr: zenkey_model::grammar::Addr = "h1/tc".parse().unwrap();
+        for watch in [None, Some(&s)] {
+            let refused = super::watch_instances(watch, &s, &addr, std::time::Duration::ZERO)
+                .await
+                .map(|_| ())
+                .expect_err("refused");
+            assert!(refused.contains("watch session"), "{refused}");
+        }
+        assert!(!zenkey::presence::watching(&s), "nothing declared");
+        s.close().await.unwrap();
+    }
+}

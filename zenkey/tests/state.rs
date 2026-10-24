@@ -820,3 +820,30 @@ async fn an_archive_is_never_tokenless() {
     };
     assert!(e.to_string().contains("never tokenless"), "{e}");
 }
+
+/// An archive reads its owners' presence on its own session, so its watch
+/// session must be another (#830, core §8.1, 0.37): its own session as one
+/// is refused at the start, nothing declared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_archive_refuses_its_own_session_as_its_watch() {
+    let (_r1, ep) = router(None).await;
+    let s = client(&ep).await;
+    let refused = Archive::start(
+        &s,
+        ArchiveConfig {
+            service: config("vehicle-01/archive"),
+            records: vec![recorded(ORIGIN)],
+            peers: vec![],
+            unconfirmed_horizon: None,
+            watch: Some(s.clone()),
+        },
+    )
+    .await
+    .err()
+    .expect("refused");
+    assert!(
+        matches!(refused, zenkey::Error::ReadBesideSubscriber { .. }),
+        "{refused}"
+    );
+    assert!(!zenkey::presence::watching(&s));
+}
