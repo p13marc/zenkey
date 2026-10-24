@@ -1098,7 +1098,6 @@ async fn s8_the_kill_switch() {
         .await
         .expect("the target's token")
         .unwrap();
-    let mark = s.mark();
     let desc = presence::descriptor(&g, &addr(WORKER), w.svc.instance(), T)
         .await
         .unwrap()
@@ -1123,8 +1122,10 @@ async fn s8_the_kill_switch() {
     );
     assert_eq!((w.target.seeds(), w.target.acts()), (0, 0));
     assert_eq!(w.target.key(), None);
-    assert!(s.on(RUN, mark).is_empty(), "nothing on Run after the token");
-    assert!(s.on(RP, mark).is_empty(), "nothing on Rp after the token");
+    // S's receipts are not ordered against G's token (two sessions, core
+    // §8.1): count what S received in all, each one put before the tokens.
+    assert_eq!(s.on(RUN, 0).len(), 1, "Run: the baseline only");
+    assert_eq!(s.on(RP, 0).len(), 1, "Rp: the baseline report only");
     w.svc.close().await.unwrap();
     a.svc.close().await.unwrap();
 }

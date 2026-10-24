@@ -1279,7 +1279,9 @@ pub enum AuthorSeen {
     Present,
     /// A complete read with none: absent.
     Absent,
-    /// None, in a read possibly incomplete: unobservable.
+    /// None, in a read possibly incomplete: unobservable. A read cut off
+    /// while it ran ([`crate::presence::PresenceRead::cut_off_during`],
+    /// core §8.1, 0.38) is one: what it shows absent establishes nothing.
     Incomplete,
     /// Not made, and why: its session is cut off from every other zenoh
     /// node, or holds a liveliness subscriber. Unobservable.
@@ -1744,7 +1746,9 @@ impl TargetInner {
 
     /// The author's presence, by one read on the target's session (core
     /// §8.1, 0.37): absent only when the read is complete and shows no
-    /// instance token.
+    /// instance token. One cut off while it ran is not complete (0.38), so
+    /// it is [`AuthorSeen::Incomplete`], and no archive is read on it; a
+    /// token it returned was seen, so present.
     async fn author_presence(&self) -> AuthorSeen {
         let Some(sel) = self.author_selector() else {
             return AuthorSeen::NotRead;
