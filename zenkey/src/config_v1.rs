@@ -321,6 +321,10 @@ struct Core {
     desired: Option<DesiredConfig>,
     /// The revision of the last document acted on.
     acted: Option<u64>,
+    /// The parameters the documents fed through `desired.v1` named since
+    /// the last revert, refused ones aside: what a delete reverts
+    /// (`desired.v1` §2.16).
+    named: std::collections::BTreeSet<(String, String)>,
 }
 
 impl Core {
@@ -407,6 +411,7 @@ impl Configuration {
                 queue: VecDeque::new(),
                 desired: None,
                 acted: None,
+                named: std::collections::BTreeSet::new(),
             }),
             published: tokio::sync::Mutex::new(None),
             view,
@@ -524,6 +529,58 @@ impl Configuration {
     pub async fn set_desired(&self, doc: DesiredConfig) {
         self.inner.core.lock().await.desired = Some(doc);
         self.inner.wake.notify_one();
+    }
+
+    /// Converges `doc` now, as `desired.v1` feeds it (§2.18, `desired.v1`
+    /// §2.16): whatever its revision, since the reader acts on each version
+    /// once and adopts the same document unacted; waiting while a change is
+    /// pending; through one `set` without a window per group whose values
+    /// differ. Its report is the view's and the status's, and returned.
+    pub(crate) async fn converge_desired(&self, doc: DesiredConfig) -> DesiredReport {
+        let report = self.inner.converge_doc(&doc, true).await;
+        // A refused document applied nothing: none of its parameters is a
+        // delete's to revert. A converged or failed one set what it set.
+        if report.outcome != model::DesiredOutcome::Refused {
+            let mut c = self.inner.core.lock().await;
+            for (g, ps) in &doc.values {
+                for p in ps.keys() {
+                    c.named.insert((g.clone(), p.clone()));
+                }
+            }
+        }
+        self.inner.wake.notify_one();
+        report
+    }
+
+    /// A delete fed through `desired.v1` (`desired.v1` §2.16, `config.v1`
+    /// §2.18, text 0.5): each parameter the documents named since the last
+    /// revert back at its startup value, the persisted layer's, else the
+    /// startup file's or the default ([`Owner::baseline_document`]), through
+    /// one `set` without a window per group that differs; and no `desired`
+    /// in the view and the status from then on. `Err`: the refusal of a
+    /// `set` that could not restore its group, the groups before it
+    /// restored.
+    pub(crate) async fn revert_desired(
+        &self,
+    ) -> std::result::Result<(), zenkey_model::config::DesiredRefusal> {
+        let doc = {
+            let c = self.inner.core.lock().await;
+            c.owner
+                .baseline_document(c.named.iter().map(|(g, p)| (g.as_str(), p.as_str())))
+        };
+        let report = self.inner.converge_doc(&doc, false).await;
+        {
+            let mut c = self.inner.core.lock().await;
+            c.named.clear();
+            c.owner.report_desired(None);
+            c.enqueue(&[]);
+        }
+        self.inner.flush().await;
+        self.inner.wake.notify_one();
+        match report.refusal {
+            Some(r) => Err(r),
+            None => Ok(()),
+        }
     }
 
     /// The desired document this instance holds, the latest given
@@ -843,6 +900,66 @@ impl Inner {
             };
             let Some(step) = step else { break };
             self.drive(step).await;
+            self.flush().await;
+        }
+    }
+
+    /// Converges `doc` to its end (§2.18), waiting while a change is
+    /// pending or an act is in flight, and returns its report: refused,
+    /// failed, or converged. With `report`, the report is the view's and the
+    /// status's; without, the owner's `desired` is left as it is (a revert's
+    /// own document, `desired.v1` §2.16).
+    async fn converge_doc(&self, doc: &DesiredConfig, report: bool) -> DesiredReport {
+        loop {
+            let (group, step) = {
+                let mut c = self.core.lock().await;
+                match c.owner.converge(doc) {
+                    Converge::Wait => {
+                        drop(c);
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                        continue;
+                    }
+                    Converge::Refused(r) | Converge::Converged(r) => {
+                        tracing::info!(
+                            service = %self.service, instance = %self.instance,
+                            revision = doc.revision,
+                            report = %serde_json::to_string(&r).unwrap_or_default(),
+                            "config.v1: a desired document acted on (desired.v1)"
+                        );
+                        if report {
+                            c.owner.report_desired(Some(r.clone()));
+                            c.enqueue(&[]);
+                        }
+                        drop(c);
+                        self.flush().await;
+                        return r;
+                    }
+                    Converge::Set { group, request } => {
+                        let s = c
+                            .owner
+                            .set(self.now(), &group, &request, &model::Call::default());
+                        c.after(&s);
+                        (group, s)
+                    }
+                }
+            };
+            let done = self.drive(step).await;
+            if let Some(Err(refusal)) = &done.reply {
+                let r = model::desired_failed(doc.revision, &group, refusal);
+                tracing::info!(
+                    service = %self.service, instance = %self.instance,
+                    revision = doc.revision,
+                    report = %serde_json::to_string(&r).unwrap_or_default(),
+                    "config.v1: a desired document failed (desired.v1)"
+                );
+                if report {
+                    let mut c = self.core.lock().await;
+                    c.owner.report_desired(Some(r.clone()));
+                    c.enqueue(&[]);
+                }
+                self.flush().await;
+                return r;
+            }
             self.flush().await;
         }
     }

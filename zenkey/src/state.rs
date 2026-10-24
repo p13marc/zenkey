@@ -264,14 +264,17 @@ impl Store {
         );
     }
 
-    fn delete(&self, key: &OwnedKeyExpr, ts: Timestamp) {
+    /// A delete recorded `age` ago: its tombstone is answered for what is
+    /// left of the window (S3), as a delete made then would be.
+    fn delete_aged(&self, key: &OwnedKeyExpr, ts: Timestamp, age: Duration) {
+        let now = Instant::now();
         self.map.lock().expect("not poisoned").insert(
             key.clone(),
             Entry {
                 value: None,
                 attachment: None,
                 ts,
-                at: Instant::now(),
+                at: now.checked_sub(age).unwrap_or(now),
             },
         );
     }
@@ -631,12 +634,20 @@ impl StateWriter {
     /// Deletes the member, stamped; GETs within the window answer it with
     /// `reply_del` (S3).
     pub async fn delete(&self) -> Result<Timestamp> {
+        self.delete_aged(Duration::ZERO).await
+    }
+
+    /// [`StateWriter::delete`] of a delete first made `age` ago, made again
+    /// by a new instance (`desired.v1` §2.11): a fresh stamp, and its
+    /// tombstone answered for what is left of the window (S3), not a window
+    /// more.
+    pub(crate) async fn delete_aged(&self, age: Duration) -> Result<Timestamp> {
         let mut held = self.member.held.lock().await;
         let ts = self.minter.mint()?;
         // A deleted member is not re-put (`freshness.v1` §2.4).
         held.value = None;
         held.at = tokio::time::Instant::now();
-        self.store.delete(&self.key, ts);
+        self.store.delete_aged(&self.key, ts, age);
         // §2.7: a deleted key is not live, so it frees a member.
         self.writer.release();
         let sent = self.writer.delete_stamped(ts).await;

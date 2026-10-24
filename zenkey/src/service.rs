@@ -150,6 +150,10 @@ pub struct ServiceBuilder {
     pub(crate) config_v1: Option<crate::config_v1::Configuration>,
     /// `alarms.v1`, once [`ServiceBuilder::alarms`] implemented it.
     pub(crate) alarms: Option<crate::alarms::Alarms>,
+    /// `desired.v1`'s desired resources this service authors.
+    pub(crate) desired_authors: Vec<crate::desired::Author>,
+    /// `desired.v1`'s roles this service holds as a target.
+    pub(crate) desired_targets: Vec<crate::desired::Target>,
 }
 
 fn mint() -> InstanceId {
@@ -254,6 +258,8 @@ impl ServiceBuilder {
             health: None,
             config_v1: None,
             alarms: None,
+            desired_authors: Vec::new(),
+            desired_targets: Vec::new(),
         }
     }
 
@@ -329,6 +335,105 @@ impl ServiceBuilder {
             return Err(Error::Duplicate(iface));
         }
         crate::alarms::Alarms::declare(self, imp, startup).await
+    }
+
+    /// Authors the desired resource `resource` (`state/<template>`) of
+    /// `iface`, which this service implements ([`crate::desired`],
+    /// `desired.v1` §2.11): the resource exposed and its GETs served, then
+    /// the previous instance's documents and deletes taken over from
+    /// `startup`'s record, else its archive, and put again before this
+    /// returns ([`crate::desired::Pace::All`]), so before the instance token.
+    /// The handle returned puts a document only on a content change, and
+    /// deletes. Refused for a resource whose `desired.target_param` is not
+    /// a valid declaration (§2.2).
+    pub async fn desired_author(
+        &mut self,
+        iface: &IfaceId,
+        resource: &str,
+        startup: crate::desired::AuthorStartup,
+    ) -> Result<crate::desired::Author> {
+        if self
+            .desired_authors
+            .iter()
+            .any(|a| a.iface() == iface && a.resource() == resource)
+        {
+            return Err(Error::Contract(format!(
+                "{iface} {resource:?} is authored twice (desired.v1 §2.11)"
+            )));
+        }
+        crate::desired::Author::declare(self, iface, resource, startup).await
+    }
+
+    /// Holds the role `role` as a target of `author`'s desired resource
+    /// `resource` (`state/<template>`; [`crate::desired`], `desired.v1`
+    /// §2.5–§2.10): `author` is the required interface's implementation the
+    /// target is compiled against (R4), its bundle what documents are
+    /// decoded and checked by. The role's configured binding gives the
+    /// slice's key (§2.3); an optional role left unbound is the kill switch
+    /// (§2.12). The report is put here, at `report`, before the tokens; the
+    /// target reads from [`ServiceBuilder::start`] on, after the tokens, and
+    /// acts on `handler`. Refused for a role this service does not hold, an
+    /// invalid declaration or binding, or a watch session that is this
+    /// service's own.
+    pub async fn desired_target(
+        &mut self,
+        role: &str,
+        author: &Implementation,
+        resource: &str,
+        report: crate::desired::ReportAt,
+        handler: Arc<dyn crate::desired::Handler>,
+        startup: crate::desired::TargetStartup,
+    ) -> Result<crate::desired::Target> {
+        self.no_target_yet(role)?;
+        crate::desired::Target::declare(
+            self,
+            role,
+            author,
+            resource,
+            Some(report),
+            handler,
+            startup,
+        )
+        .await
+    }
+
+    /// `config.v1`'s owner as a target (`desired.v1` §2.16): the role
+    /// `role`, as [`ServiceBuilder::desired_target`] holds it, each act made
+    /// on the `config.v1` this builder implements
+    /// ([`ServiceBuilder::config_v1`], called first). A put is converged
+    /// once in the instance, whatever its revision, and reported in the view
+    /// and the status; a delete reverts each parameter the documents it
+    /// acted on named to its startup value, and the view and the status
+    /// carry no `desired` from then on (`config.v1` §2.18, text 0.5). Its
+    /// `desired.v1.Report` is put at `report`, if given: `config.v1`'s
+    /// standard contract carries none (§2.16).
+    pub async fn desired_config(
+        &mut self,
+        role: &str,
+        author: &Implementation,
+        resource: &str,
+        report: Option<crate::desired::ReportAt>,
+        startup: crate::desired::TargetStartup,
+    ) -> Result<crate::desired::Target> {
+        self.no_target_yet(role)?;
+        let Some(cfg) = self.config_v1.clone() else {
+            return Err(Error::Contract(
+                "desired.v1 §2.16: implement config.v1 (ServiceBuilder::config_v1) first"
+                    .to_owned(),
+            ));
+        };
+        let handler = Arc::new(crate::desired::ConfigHandler { cfg });
+        crate::desired::Target::declare(self, role, author, resource, report, handler, startup)
+            .await
+    }
+
+    fn no_target_yet(&self, role: &str) -> Result<()> {
+        if self.desired_targets.iter().any(|t| t.role() == role) {
+            return Err(Error::Contract(format!(
+                "role {role:?} is held as a desired.v1 target twice"
+            )));
+        }
+        Ok(())
     }
 
     /// The service's state stamp minter (§4.3): catch-up before the first
@@ -709,6 +814,8 @@ impl ServiceBuilder {
             health: self.health,
             config_v1: self.config_v1,
             alarms: self.alarms,
+            desired_authors: self.desired_authors,
+            desired_targets: self.desired_targets,
             descriptor: Arc::new(RwLock::new(Arc::from(Vec::new()))),
             session: self.session,
             config: self.config,
@@ -765,6 +872,11 @@ impl ServiceBuilder {
         let instance = svc.instance.clone();
         svc.instance_token = Some(svc.token(instance_key(&svc.addr, &instance)?).await?);
         svc.alive = svc.declare_alive(&instance).await?;
+        // desired.v1 §2.5: each target reads from here on, after the tokens,
+        // its baseline report put before them (§2.10).
+        for t in &svc.desired_targets {
+            t.start(svc.closed.subscribe());
+        }
         Ok(svc)
     }
 }
@@ -856,6 +968,9 @@ pub struct Service {
     config_v1: Option<crate::config_v1::Configuration>,
     /// `alarms.v1`, when the builder implemented it.
     alarms: Option<crate::alarms::Alarms>,
+    /// `desired.v1`'s authored resources and target roles.
+    desired_authors: Vec<crate::desired::Author>,
+    desired_targets: Vec<crate::desired::Target>,
     descriptor: Arc<RwLock<Arc<[u8]>>>,
     session: zenoh::Session,
     config: ServiceConfig,
@@ -991,6 +1106,26 @@ impl Service {
     #[must_use]
     pub fn alarms(&self) -> Option<&crate::alarms::Alarms> {
         self.alarms.as_ref()
+    }
+
+    /// Its authorship of `iface`'s desired resource `resource`, when
+    /// [`ServiceBuilder::desired_author`] declared it.
+    #[must_use]
+    pub fn desired_author(
+        &self,
+        iface: &IfaceId,
+        resource: &str,
+    ) -> Option<&crate::desired::Author> {
+        self.desired_authors
+            .iter()
+            .find(|a| a.iface() == iface && a.resource() == resource)
+    }
+
+    /// Its `desired.v1` role `role`, when [`ServiceBuilder::desired_target`]
+    /// or [`ServiceBuilder::desired_config`] declared it.
+    #[must_use]
+    pub fn desired_target(&self, role: &str) -> Option<&crate::desired::Target> {
+        self.desired_targets.iter().find(|t| t.role() == role)
     }
 
     /// Declares `iface`'s state queryables, once: one over `state/**` and
@@ -1175,7 +1310,9 @@ impl Service {
     ///
     /// A service implementing `alarms.v1` through [`ServiceBuilder::alarms`]
     /// puts every alarm it holds again first, before the new descriptor and
-    /// tokens (`alarms.v1` §2.9).
+    /// tokens (`alarms.v1` §2.9), and an author of `desired.v1` documents
+    /// every document it keeps, and every delete within its window
+    /// (`desired.v1` §2.11).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
         if self.config_v1.is_some() {
             return Err(Error::Contract(
@@ -1187,6 +1324,12 @@ impl Service {
         // alarms.v1 §2.9: each alarm kept put again from the new instance,
         // before its new instance token.
         if let Some(a) = &self.alarms {
+            a.reput_all().await?;
+        }
+        // desired.v1 §2.11: so is each document an author keeps, and each
+        // delete within its window. A target keeps its acts and its report:
+        // the process that applied them runs on.
+        for a in &self.desired_authors {
             a.reput_all().await?;
         }
         let next = mint();
@@ -1404,6 +1547,16 @@ impl ServiceBuilder {
 
     pub(crate) fn availability(&self) -> &Arc<crate::operation::Availability> {
         &self.ops
+    }
+
+    /// A role this service holds (§3.1): its interface, and whether it is
+    /// optional.
+    pub(crate) fn role_of(&self, role: &str) -> Result<(IfaceId, bool)> {
+        self.roles
+            .iter()
+            .find(|r| r.role == role)
+            .map(|r| (r.interface.clone(), r.optional))
+            .ok_or_else(|| Error::Contract(format!("this service has no role {role:?}")))
     }
 
     /// The budget every writer of `resource` keeps (core §2.7): the

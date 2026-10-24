@@ -2338,6 +2338,42 @@ impl Owner {
             .or_else(|| self.file.get(k).cloned())
     }
 
+    /// A parameter's startup value and its source (§2.12): the persisted
+    /// layer's, else the startup file's or the default. `None` for a
+    /// parameter that starts unknown, or that the schema does not declare.
+    #[must_use]
+    pub fn startup(&self, group: &str, parameter: &str) -> Option<(Value, Source)> {
+        self.startup_value(&key(group, parameter))
+    }
+
+    /// The document a delete reverts the owner to, when `desired.v1` feeds
+    /// it (`desired.v1` §2.16, text 0.3): each parameter of `named` (the
+    /// ones the documents it acted on named) at its startup value, the
+    /// persisted layer's, else the startup file's or the default; one that
+    /// starts unknown is left out, and keeps its running value. Converged
+    /// as any document is ([`Owner::converge`]): one `set` without a window
+    /// per group whose running values differ, nothing for one that already
+    /// runs its startup values.
+    #[must_use]
+    pub fn baseline_document<'n>(
+        &self,
+        named: impl IntoIterator<Item = (&'n str, &'n str)>,
+    ) -> DesiredConfig {
+        let mut values: BTreeMap<String, BTreeMap<String, Json>> = BTreeMap::new();
+        for (g, p) in named {
+            if let Some((v, _)) = self.startup(g, p) {
+                values
+                    .entry(g.to_owned())
+                    .or_default()
+                    .insert(p.to_owned(), serde_json::to_value(&v).unwrap_or(Json::Null));
+            }
+        }
+        DesiredConfig {
+            revision: 0,
+            values,
+        }
+    }
+
     fn render(&self, slots: &BTreeMap<Key, Slot>) -> ConfigView {
         let groups = self
             .schema

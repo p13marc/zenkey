@@ -699,6 +699,71 @@ enum RevisionRead {
     TooLarge,
 }
 
+/// A revision read from its number's exact value (text 0.3, F-181), as
+/// [`exact_number`] writes it: an integer from 0, whatever its spelling
+/// (`3`, `3.0`, `30e-1`, `18446744073709551615.0`), in range up to 2^64−1;
+/// `None` for a negative number or one with a fraction (`1.5`).
+fn exact_revision(canonical: &str) -> Option<RevisionRead> {
+    if canonical == "0" {
+        return Some(RevisionRead::InRange(0));
+    }
+    if canonical.starts_with('-') {
+        return None;
+    }
+    let (digits, exp) = canonical.split_once('e')?;
+    let exp: i128 = exp.parse().ok()?;
+    // The significant digits keep no trailing zero, so a negative exponent
+    // is a fraction.
+    let zeros = usize::try_from(exp).ok()?;
+    // 2^64−1 has 20 digits.
+    if digits.len().saturating_add(zeros) > 20 {
+        return Some(RevisionRead::TooLarge);
+    }
+    let text = format!("{digits}{}", "0".repeat(zeros));
+    Some(
+        text.parse::<u64>()
+            .map_or(RevisionRead::TooLarge, RevisionRead::InRange),
+    )
+}
+
+/// A document's own revision (§2.4): a top-level member `revision` of a
+/// JSON payload, an integer from 0 to 2^64−1 read by its exact value
+/// (F-181), as a report's is. `None` when the payload is not strict JSON
+/// (§2.10's reading), is not an object, has no such member, or holds one
+/// that is no such integer.
+#[must_use]
+pub fn revision_of_text(bytes: &[u8]) -> Option<u64> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    match Exact::of_strict_text(text)? {
+        Exact::Object(m) => match m.get("revision")? {
+            Exact::Number(n) => match exact_revision(n)? {
+                RevisionRead::InRange(r) => Some(r),
+                RevisionRead::TooLarge => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A document's own revision from its decoded value (§2.4): a top-level
+/// member `revision`, an integer from 0 to 2^64−1, an integral number read
+/// as that integer, or a decimal string, as protobuf's JSON mapping writes a
+/// 64-bit field. A JSON payload's is read from its text instead
+/// ([`revision_of_text`]), every number exact.
+#[must_use]
+pub fn revision_of_value(v: &Value) -> Option<u64> {
+    match v.get("revision")? {
+        Value::String(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) => {
+            s.parse().ok()
+        }
+        r => match revision(r)? {
+            RevisionRead::InRange(n) => Some(n),
+            RevisionRead::TooLarge => None,
+        },
+    }
+}
+
 fn revision(v: &Value) -> Option<RevisionRead> {
     let Value::Number(n) = v else {
         return None;
@@ -728,7 +793,14 @@ struct RawVersion<'a> {
     revision: Option<RevisionRead>,
 }
 
-fn raw_version<'a>(v: &'a Value, member: &str) -> Result<RawVersion<'a>, Unreadable> {
+/// `exact` is the version's object as [`Exact`] read it from the report's
+/// text, when the reader had the text: its `revision` is then read by its
+/// exact value (text 0.3, F-181), never as a double.
+fn raw_version<'a>(
+    v: &'a Value,
+    member: &str,
+    exact: Option<&Exact>,
+) -> Result<RawVersion<'a>, Unreadable> {
     let schema = |why: &str| Unreadable::Schema(format!("/{member}{why}"));
     let Value::Object(o) = v else {
         return Err(schema(": not an object"));
@@ -739,9 +811,21 @@ fn raw_version<'a>(v: &'a Value, member: &str) -> Result<RawVersion<'a>, Unreada
         Some(_) => return Err(schema("/stamp: not a string")),
         None => return Err(schema("/stamp: missing")),
     };
-    let revision = match o.get("revision") {
-        None => None,
-        Some(r) => Some(revision(r).ok_or_else(|| schema("/revision: not an integer from 0"))?),
+    let exact = match exact {
+        Some(Exact::Object(m)) => match m.get("revision") {
+            Some(Exact::Number(n)) => Some(n.as_str()),
+            _ => None,
+        },
+        _ => None,
+    };
+    let revision = match (o.get("revision"), exact) {
+        (None, _) => None,
+        (Some(Value::Number(_)), Some(text)) => {
+            Some(exact_revision(text).ok_or_else(|| schema("/revision: not an integer from 0"))?)
+        }
+        (Some(r), _) => {
+            Some(revision(r).ok_or_else(|| schema("/revision: not an integer from 0"))?)
+        }
     };
     Ok(RawVersion { stamp, revision })
 }
@@ -777,15 +861,29 @@ impl Report {
     /// Reads a decoded payload (§2.10): the schema's members, types and
     /// enums, an integral number read as an integer and a member the schema
     /// does not name ignored; then each stamp's form; then each revision's
-    /// range.
+    /// range. A decoded value holds a number with a fraction or an exponent
+    /// as its double, so a revision past 2^53 written so is read as that
+    /// double here; [`decode`] reads the text, every number by its exact
+    /// value (text 0.3, F-181).
     ///
     /// # Errors
     ///
     /// [`Unreadable`]: the first refusal, in that order.
     pub fn from_json(v: &Value) -> Result<Self, Unreadable> {
+        Self::read(v, None)
+    }
+
+    /// [`Report::from_json`], each revision read from `exact`, the report's
+    /// text read with every number exact, when the reader has it
+    /// ([`decode`]; text 0.3, F-181).
+    fn read(v: &Value, exact: Option<&Exact>) -> Result<Self, Unreadable> {
         let schema = |why: String| Unreadable::Schema(why);
         let Value::Object(o) = v else {
             return Err(schema("not an object".into()));
+        };
+        let exact_of = |m: &str| match exact {
+            Some(Exact::Object(e)) => e.get(m),
+            _ => None,
         };
         let source = match o.get("source") {
             Some(Value::String(s)) => Source::parse(s),
@@ -795,11 +893,11 @@ impl Report {
         let key = optional_string(o, "key", "")?;
         let in_force = o
             .get("in_force")
-            .map(|v| raw_version(v, "in_force"))
+            .map(|v| raw_version(v, "in_force", exact_of("in_force")))
             .transpose()?;
         let observed = o
             .get("observed")
-            .map(|v| raw_version(v, "observed"))
+            .map(|v| raw_version(v, "observed", exact_of("observed")))
             .transpose()?;
         let outcome = match o.get("outcome") {
             None => None,
@@ -980,7 +1078,11 @@ pub fn strict_json(bytes: &[u8]) -> Option<Value> {
 /// exact value rounded to the nearest double is not an infinity, so 10^400
 /// written out is not strict JSON, and `1.7976931348623158e308` is.
 /// **Depth** (text 0.2): 256 nested arrays read, 257 do not; `serde_json`'s
-/// own recursion limit decides nothing ([`strict_json`]).
+/// own recursion limit decides nothing ([`strict_json`]). **Numbers**
+/// (text 0.3, F-181) are read by their exact value, as §2.7 compares a
+/// document's: a number with a zero fraction is that integer, so
+/// `18446744073709551615.0` is the revision 2^64−1, and `1.5` is no
+/// integer.
 ///
 /// # Errors
 ///
@@ -992,7 +1094,12 @@ pub fn decode(bytes: &[u8]) -> Result<Report, Unreadable> {
             "not strict JSON: UTF-8, RFC 8259, no duplicate member, every number finite, at most {MAX_DEPTH} deep"
         ))
     })?;
-    Report::from_json(&v)
+    // Every number by its exact value (text 0.3, F-181): a revision written
+    // `18446744073709551615.0` is 2^64−1, in range.
+    let exact = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(Exact::of_strict_text);
+    Report::read(&v, exact.as_ref())
 }
 
 // --- §2.6–§2.10: a target ------------------------------------------------------
