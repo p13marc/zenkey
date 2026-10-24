@@ -42,12 +42,18 @@ rule: a read not made is read as a profile's possibly-incomplete premise
 reads it, unobservable. The profile's reason stands, and the tool reports
 the read's own reason beside it. 0.37's "never folded into either" is
 about the read's kind, which the tool keeps apart. It is not about a
-profile's answer. No profile text changes.
+profile's answer. No profile text changes. The reference's readers of
+alarms, health, config and telemetry each read a read not made as their
+possibly incomplete premise, and keep its reason in the report beside the
+profile's: alarms' now in its scope answer's words too, and config's
+beside the GET's when both failed, where it was dropped.
 
 **Changed: "has never held"** (§8.1; F-190). 0.37 said a read goes on a
 session that "holds no liveliness subscriber". One undeclared leaves its
 session exposed, as the sentence before said, so the rule now reads "has
 never held". This is how the reference marks a session: for its life.
+`scenarios/presence.md` §9 says so too, and the reference's refusals name
+a session that has held one.
 
 **Changed: the scenarios observe the reader** (`scenarios/presence.md`
 §4, §8, §9; F-186, F-188, F-189).
@@ -69,6 +75,24 @@ never held". This is how the reference marks a session: for its life.
   - a read asked there is refused;
   - a token withdrawn as soon as the seed is answered is heard going in
     every run.
+
+**Changed while building the reference** (`scenarios/presence.md` §4, §9).
+- **§4's population.** 10,000 tokens became "at least 1,200", past the 996
+  from which spike S2 measured the hang. The handler rule needs no more,
+  and at 10,000 the reference's own run, in a debug build, took 24 s to
+  set up. Its GETs wait 5 s, stated, where the scenarios' 1 s would have
+  applied. Its pairings with a bounded subscriber nobody drains are left
+  to zenoh's measurements: the reference declares every liveliness
+  subscriber with a callback, and those pairings wedge zenoh's threads in
+  process.
+- **§9 step 5 stalls the watch session's link** while a fresh reader
+  starts. Without the stall, a reader that skips the round trip missed the
+  withdrawal in 0 of 200 runs on one router in process: the race the step
+  names is too narrow to catch it, so "in some runs" was a guess. With
+  the link stalled, the declarations reach the router late, and such a
+  reader misses in every run, while a reader whose round trip waits for
+  the link hears the token go in every run. The Setup gains the link.
+- **What the check reads**, §8.1 above.
 
 **Unchanged.** desired.v1 §2.5's "token gone" (F-187) is desired's text
 0.3. alarms.v1 §2.7 gets the same wording as a fix, and its text stays 0.8
