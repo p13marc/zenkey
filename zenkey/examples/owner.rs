@@ -10,6 +10,9 @@
 //!     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
 //!     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
 //!     [--alarms-rules <rule>[,<rule>...]] [--telemetry]
+//!     [--desired-author] [--desired-record <file>] [--desired-window <s>]
+//!     [--desired-target <system>/<service>] [--desired-unbound] [--desired-archive <system>/<service>]
+//!     [--desired-watch] [--desired-reread-ms <ms>] [--desired-hold]
 //!     <address> <contract.toml>...
 //! ```
 //!
@@ -290,6 +293,86 @@
 //! make-before-break, answered `telemetry new-epoch <id>` once the old
 //! tokens are withdrawn: a Point put after it carries the new id. `instance`
 //! is answered `telemetry instance <id>`.
+//!
+//! **`desired.v1`** (`spec/profiles/desired/v1.md`, #840) is the runtime's
+//! ([`zenkey::desired`]), on the scenarios' contracts
+//! (`spec/profiles/desired/scenarios.md`, "The contracts"), embedded byte
+//! for byte as `zenkey/tests/contracts/` keeps them (`tasking.v1.toml`,
+//! `worker.v1.toml`, `tasking.json`, with the profile's `desired.v1.json`):
+//! a contract file given that implements `tasking.v1` or `worker.v1` is
+//! implemented instead, a runner's own copy. One owner may be the author,
+//! the target, or both (§2.1).
+//!
+//! - `--desired-author` implements `tasking.v1` and authors its
+//!   `tasks/{system}/{service}` (§2.11): a document is put only when its
+//!   content changes; at a start, the record's documents are put again and
+//!   its deletes within the window made again, before the tokens.
+//! - `--desired-record <file>` is the author's record
+//!   ([`zenkey::desired::FileRecord`]), read at start and rewritten whole
+//!   after every put and delete: `{"profile": "desired.v1", "documents":
+//!   {"<system>/<service>": {"stamp": "<time>/<id>", "document": <JSON>}},
+//!   "deletes": {"<system>/<service>": {"stamp": …, "at_ms": <n>}}}`.
+//! - `--desired-window <s>` is the service's tombstone window (core S3), 60
+//!   s by default.
+//! - `--desired-target <system>/<service>` implements `worker.v1`, its role
+//!   `task` bound to that author with `{system} = self.system` and
+//!   `{service} = self.service` (§2.3): its slice is
+//!   `zk2/<author>/tasking.v1/state/tasks/<own system>/<own service>`, its
+//!   report `…/worker.v1/state/desired/task`, what it runs
+//!   `…/worker.v1/state/running`, its baseline `{"revision": 0, "mode":
+//!   "idle", "rate_hz": 1}`. `--desired-unbound` implements `worker.v1`
+//!   with the role unbound, the kill switch (§2.12).
+//! - `--desired-archive <system>/<service>` is the archive the target reads
+//!   its slice's last-known from (§2.9), within 1 s, when a seed draws
+//!   nothing and a complete presence read shows the author absent (core
+//!   §8.1).
+//! - `--desired-watch` gives the target a watch session of its own, a
+//!   second client of the same router, where it follows the author's
+//!   instance tokens (core §8.1, 0.37); without it, it reads them every
+//!   500 ms. `--desired-reread-ms <ms>` is the deployment's re-read period
+//!   (§2.5). `--desired-hold` holds the drive's first act from its start
+//!   until `desired release` (`scenarios.md` §5).
+//!
+//! The drive is simulated, as `scenarios.md`'s "The target" says: it refuses
+//! a document holding a member `endpoint` `reach` at `/endpoint`, and one
+//! whose `rate_hz` is above 100 `invalid` at `/rate_hz`; it applies any
+//! other by putting its value on `Run`, a delete by putting the baseline.
+//! **A restart is the process's**, as for `alarms.v1`: kill the owner, or
+//! close its standard input, and start it again (the same
+//! `--desired-record` for an author). Run `--connect` to a router of the
+//! runner's: a target reads presence through its session, and a router
+//! alone reaches no other node.
+//!
+//! Its commands, each answered by one line:
+//!
+//! ```text
+//! desired put <target> <json>               author: <target>'s document, <system>/<service>
+//! desired delete <target>                   author: its delete
+//! desired documents                         author: the documents held
+//! desired adoption                          author: what the start took over (§2.11)
+//! desired new-epoch                         a re-mint in this session (core §8.1): the author puts again what it keeps
+//! desired report                            target: its report (§2.10)
+//! desired running                           target: what the drive runs
+//! desired fail-next                         target: the drive's next act fails after setting the rate
+//! desired refuse-next <code> [<pointer>]    target: the drive refuses its next act
+//! desired hold | release                    target: the drive's next act waits at its start | goes on
+//! desired reread <ms>|off                   target: the re-read period (§2.5)
+//! desired acts                              target: the acts and seeds so far
+//! ```
+//!
+//! `put` is answered `desired put <key> <stamp>`, the stamp as a report
+//! writes it (`<time>/<id>`, §2.4), or `desired unchanged <key>` when the
+//! document is the one held (nothing put); a put past the bound is
+//! refused, naming it (§2.13). `delete` is answered `desired deleted <key>
+//! <stamp>`, or `desired none <key>` when no document is held. `documents`
+//! is answered `desired documents <json>`, the documents by target;
+//! `adoption` `desired adoption found=<record|archive|nothing>
+//! reput=<targets> redeleted=<targets> expired=<targets> failed=<targets>`,
+//! each list comma-separated, `-` when empty; `new-epoch` `desired new-epoch
+//! zk2/<system>/<service>/@zk/instance/<id>`; `report` `desired report
+//! <json>`, the `desired.v1.Report` as held now; `running` `desired running
+//! <json>`; `acts` `desired acts <n> seeds=<n> held=<true|false>`; every
+//! other command as it was asked.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -300,6 +383,7 @@ use std::time::{Duration, SystemTime};
 
 use zenkey::alarms::{self, Alarms, Condition, FileRecord};
 use zenkey::config_v1::{self, Configuration, DesiredConfig, Startup};
+use zenkey::desired::{self, AuthorStartup, ReportAt, TargetStartup, Written};
 use zenkey::health::{self, Effective, Health, Level};
 use zenkey::hostid::{HostIdMinter, HostIdSource};
 use zenkey::model::authoring::{Encoding as WireEncoding, Kind};
@@ -315,6 +399,9 @@ use zenkey::{Address, Implementation, OpError, Service, ServiceBuilder, ServiceC
 
 #[path = "owner/config.rs"]
 pub mod config;
+
+#[path = "owner/desired.rs"]
+pub mod drive;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -365,6 +452,31 @@ pub struct Options {
     /// `--telemetry`: `meter.v1`, the scenarios' contract, implemented
     /// (telemetry.v1), unless a contract file implements it.
     pub telemetry: bool,
+    /// `--desired-author`, or implied by `--desired-record`: the
+    /// scenarios' `tasking.v1` implemented, its tasks authored (desired.v1
+    /// §2.11).
+    pub desired_author: bool,
+    /// `--desired-record <file>`: the author's record (§2.11).
+    pub desired_record: Option<PathBuf>,
+    /// `--desired-window <s>`: the service's tombstone window (core S3).
+    pub desired_window_s: Option<u64>,
+    /// `--desired-target <system>/<service>`: `worker.v1` implemented, its
+    /// role `task` bound to that author (§2.3).
+    pub desired_target: Option<String>,
+    /// `--desired-unbound`: `worker.v1` implemented, its role unbound
+    /// (§2.12).
+    pub desired_unbound: bool,
+    /// `--desired-archive <system>/<service>`: the target's last-known
+    /// (§2.9).
+    pub desired_archive: Option<String>,
+    /// `--desired-watch`: the target follows its author on a watch session
+    /// of its own (core §8.1); else it reads presence every 500 ms.
+    pub desired_watch: bool,
+    /// `--desired-reread-ms <ms>`: the target's re-read period (§2.5).
+    pub desired_reread_ms: Option<u64>,
+    /// `--desired-hold`: the drive holds its first act until `desired
+    /// release`.
+    pub desired_hold: bool,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
@@ -395,6 +507,10 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
     [--alarms-rules <rule>[,<rule>...]] [--telemetry]
+    [--desired-author] [--desired-record <file>] [--desired-window <s>]
+    [--desired-target <system>/<service>] [--desired-unbound]
+    [--desired-archive <system>/<service>] [--desired-watch] [--desired-reread-ms <ms>]
+    [--desired-hold]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
 
 Standard output, first:
@@ -413,6 +529,7 @@ Command words:
   config ...                              config.v1 (--config)
   alarm ...                               alarms.v1 (--alarms), below
   telemetry ...                           telemetry.v1's writers, below
+  desired ...                             desired.v1 (--desired-*), below
 
 alarms.v1 (spec/profiles/alarms/v1.md)
   Implemented by the runtime with --alarms, implied by any --alarms-* option,
@@ -497,6 +614,73 @@ telemetry.v1 (spec/profiles/telemetry/v1.md)
                                   §2.6's tokens), undecodable,
                                   epoch given=<json> current=<id>, decreased epoch=<id>;
                                   nothing is published
+
+desired.v1 (spec/profiles/desired/v1.md)
+  On the scenarios' contracts (scenarios.md, The contracts), embedded as
+  zenkey/tests/contracts/ keeps them: tasking.v1 (the author's) and worker.v1
+  (the target's); a tasking.v1 or worker.v1 contract file given is used
+  instead. One owner may be the author, the target, or both. Use --connect.
+
+  --desired-author                implement tasking.v1 and author tasks/{system}/{service}:
+                                  a document put only when its content changes
+  --desired-record <file>         the author's record, read at start (each document put
+                                  again, each delete within the window made again,
+                                  before the tokens) and rewritten whole after every
+                                  put and delete: {\"profile\": \"desired.v1\",
+                                  \"documents\": {\"<system>/<service>\": {\"stamp\": \"<time>/<id>\",
+                                  \"document\": <JSON>}}, \"deletes\": {\"<system>/<service>\":
+                                  {\"stamp\": ..., \"at_ms\": <n>}}}
+  --desired-window <s>            the tombstone window (core S3), 60 s by default
+  --desired-target <sys>/<svc>    implement worker.v1, its role task bound to that author,
+                                  {system} = self.system, {service} = self.service
+  --desired-unbound               implement worker.v1, the role unbound: the kill switch
+  --desired-archive <sys>/<svc>   the target's last-known (within 1 s), read when a seed
+                                  draws nothing and a complete presence read shows the
+                                  author absent
+  --desired-watch                 the target follows its author on a watch session of its
+                                  own; else it reads its presence every 500 ms
+  --desired-reread-ms <ms>        the target's re-read period
+  --desired-hold                  the drive holds its first act until desired release
+
+  The drive: a document with a member endpoint is refused reach at /endpoint, one
+  with rate_hz above 100 invalid at /rate_hz; any other is applied, its value put on
+  worker.v1's state/running; a delete puts the baseline
+  {\"revision\": 0, \"mode\": \"idle\", \"rate_hz\": 1}.
+
+  desired put <target> <json>     author: <target> (<system>/<service>)'s document, the
+                                  rest of the line as written
+  desired delete <target>         author: its delete
+  desired documents               author: the documents held
+  desired adoption                author: what the start took over
+  desired new-epoch               a re-mint in this session: the author puts again what
+                                  it keeps, before the new tokens
+  desired report                  target: its desired.v1.Report
+  desired running                 target: what the drive runs
+  desired fail-next               target: the drive's next act fails after setting the rate
+  desired refuse-next <code> [<pointer>]
+                                  target: the drive refuses its next act so
+  desired hold                    target: the drive's next act waits at its start
+  desired release                 target: a held act goes on
+  desired reread <ms>|off         target: the re-read period
+  desired acts                    target: the acts and seeds so far
+
+  Answers, one line each:
+    desired put <key> <stamp>     the stamp as a report writes it, <time>/<id>
+    desired unchanged <key>       the document held: nothing put
+    desired deleted <key> <stamp>, or desired none <key>
+    desired documents <json>      the documents held, by target
+    desired adoption found=<record|archive|nothing> reput=<targets> redeleted=<targets>
+      expired=<targets> failed=<targets>
+                                  each list comma-separated, - when empty
+    desired new-epoch zk2/<system>/<service>/@zk/instance/<id>
+    desired report <json>
+    desired running <json>
+    desired acts <n> seeds=<n> held=<true|false>
+    desired fail-next|refuse-next <code>|hold|release|reread <ms>|off
+    refused <line>: <why>
+
+  A restart is the process's: kill it, or close standard input, and start it
+  again (an author with the same --desired-record).
 ";
 
 fn level_name(l: Option<Level>) -> String {
@@ -516,6 +700,10 @@ impl Options {
              [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist] \
              [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>] \
              [--alarms-rules <rule>[,<rule>...]] [--telemetry] \
+             [--desired-author] [--desired-record <file>] [--desired-window <s>] \
+             [--desired-target <system>/<service>] [--desired-unbound] \
+             [--desired-archive <system>/<service>] [--desired-watch] \
+             [--desired-reread-ms <ms>] [--desired-hold] \
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
@@ -539,6 +727,15 @@ impl Options {
             alarms_archive: None,
             alarms_rules: None,
             telemetry: false,
+            desired_author: false,
+            desired_record: None,
+            desired_window_s: None,
+            desired_target: None,
+            desired_unbound: false,
+            desired_archive: None,
+            desired_watch: false,
+            desired_reread_ms: None,
+            desired_hold: false,
             address: String::new(),
             contracts: Vec::new(),
         };
@@ -671,6 +868,57 @@ impl Options {
                     o.telemetry = true;
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--desired-author" => {
+                    o.desired_author = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--desired-record" => {
+                    o.desired_record = Some(PathBuf::from(value));
+                    o.desired_author = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--desired-window" => {
+                    o.desired_window_s = Some(
+                        value
+                            .parse()
+                            .map_err(|e| format!("--desired-window {value:?}: {e}"))?,
+                    );
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--desired-target" => {
+                    value
+                        .parse::<zenkey::model::grammar::Addr>()
+                        .map_err(|e| format!("--desired-target {value:?}: {e}"))?;
+                    o.desired_target = Some(value.clone());
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--desired-unbound" => {
+                    o.desired_unbound = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--desired-archive" => {
+                    value
+                        .parse::<zenkey::model::grammar::Addr>()
+                        .map_err(|e| format!("--desired-archive {value:?}: {e}"))?;
+                    o.desired_archive = Some(value.clone());
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--desired-watch" => {
+                    o.desired_watch = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--desired-reread-ms" => {
+                    o.desired_reread_ms = Some(
+                        value
+                            .parse()
+                            .map_err(|e| format!("--desired-reread-ms {value:?}: {e}"))?,
+                    );
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--desired-hold" => {
+                    o.desired_hold = true;
+                    rest = tail;
+                }
                 [flag, ..] if flag.starts_with("--") => return Err(usage()),
                 _ => break,
             }
@@ -678,6 +926,24 @@ impl Options {
         let [address, files @ ..] = rest else {
             return Err(usage());
         };
+        if o.desired_target.is_some() && o.desired_unbound {
+            return Err(
+                "--desired-target and --desired-unbound: a role is bound or not".to_owned(),
+            );
+        }
+        let target = o.desired_target.is_some() || o.desired_unbound;
+        if !target
+            && (o.desired_archive.is_some()
+                || o.desired_watch
+                || o.desired_hold
+                || o.desired_reread_ms.is_some())
+        {
+            return Err(
+                "--desired-archive, --desired-watch, --desired-reread-ms and --desired-hold are \
+                 the target's: give --desired-target or --desired-unbound"
+                    .to_owned(),
+            );
+        }
         o.address = address.clone();
         o.contracts = files.iter().map(PathBuf::from).collect();
         Ok(o)
@@ -715,6 +981,11 @@ pub async fn run_with(
     config.clock_reference = opts.clock_reference.clone();
     let mut imps = Vec::new();
     let mut alarms_revision = None;
+    // desired.v1 (#840): the scenarios' tasking.v1 and worker.v1, embedded,
+    // unless a file given implements one.
+    let target = opts.desired_target.is_some() || opts.desired_unbound;
+    let mut tasking = None;
+    let mut worker = None;
     for f in &opts.contracts {
         let l = load_path(f);
         let Some(c) = l.contract else {
@@ -752,7 +1023,37 @@ pub async fn run_with(
                 continue;
             }
         }
+        if (opts.desired_author || target) && imp.iface().to_string() == "tasking.v1" {
+            tasking = Some(imp);
+            continue;
+        }
+        if target && imp.iface().to_string() == "worker.v1" {
+            worker = Some(imp);
+            continue;
+        }
         imps.push(imp);
+    }
+    let desired_ctx = if opts.desired_author || target {
+        let (t, w) = drive::contracts()?;
+        Some(DesiredCtx {
+            tasking: tasking.unwrap_or_else(|| Implementation::new(t)),
+            worker: worker.unwrap_or_else(|| Implementation::new(w)),
+            watch: None,
+        })
+    } else {
+        None
+    };
+    config.tombstone_window_s = opts.desired_window_s;
+    if let Some(author) = &opts.desired_target {
+        // §2.3: one author, each target parameter its own identity.
+        config = config.bind(drive::ROLE, &[author.as_str()]);
+        if let Some(b) = config.bindings.get_mut(drive::ROLE) {
+            b.params = [
+                ("system".to_owned(), "self.system".to_owned()),
+                ("service".to_owned(), "self.service".to_owned()),
+            ]
+            .into();
+        }
     }
     // telemetry.v1 (#819): the scenarios' meter.v1, unless a file has it.
     if opts.telemetry && !imps.iter().any(|i| i.iface().to_string() == "meter.v1") {
@@ -773,7 +1074,7 @@ pub async fn run_with(
 
     let mut z = zenoh::Config::default();
     z.insert_json5("scouting/multicast/enabled", "false")?;
-    let session = match &opts.connect {
+    let (session, endpoint) = match &opts.connect {
         None => {
             z.insert_json5("mode", "\"router\"")?;
             z.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:0\"]")?;
@@ -787,7 +1088,7 @@ pub async fn run_with(
                 .find(|l| l.starts_with("tcp/127.0.0.1:"))
                 .ok_or("no loopback listener")?;
             say(format!("listening {endpoint}"));
-            session
+            (session, endpoint)
         }
         Some(endpoint) => {
             z.insert_json5("mode", "\"client\"")?;
@@ -800,9 +1101,21 @@ pub async fn run_with(
             }
             let session = zenoh::open(z).await?;
             say(format!("connected {endpoint}"));
-            session
+            (session, endpoint.clone())
         }
     };
+    // desired.v1 §2.5, core §8.1 (0.37): a watch session of the target's
+    // own, a client of the same router, where it follows its author.
+    let mut desired_ctx = desired_ctx;
+    if let Some(d) = desired_ctx.as_mut()
+        && opts.desired_watch
+    {
+        let mut w = zenoh::Config::default();
+        w.insert_json5("scouting/multicast/enabled", "false")?;
+        w.insert_json5("mode", "\"client\"")?;
+        w.insert_json5("connect/endpoints", &serde_json::to_string(&[&endpoint])?)?;
+        d.watch = Some(zenoh::open(w).await?);
+    }
 
     // config.v1: the rf owner's startup, and its simulated device.
     let configured = opts.config.then(|| {
@@ -823,6 +1136,7 @@ pub async fn run_with(
         imps,
         configured,
         alarms_revision,
+        desired: desired_ctx,
     };
     let mut up = ctx.up(Vec::new()).await?;
     say(format!("ready {}", up.svc.instance_key()?));
@@ -848,6 +1162,9 @@ pub async fn run_with(
         say(answer);
     }
     up.close().await?;
+    if let Some(w) = ctx.desired.as_ref().and_then(|d| d.watch.as_ref()) {
+        w.close().await?;
+    }
     session.close().await?;
     Ok(())
 }
@@ -865,6 +1182,20 @@ struct Ctx<'a> {
     /// The revision of alarms.v1 among the files, with `--alarms`; `None`:
     /// the standard one.
     alarms_revision: Option<Implementation>,
+    /// desired.v1's contracts and the target's watch session, with a
+    /// `--desired-*` option.
+    desired: Option<DesiredCtx>,
+}
+
+/// desired.v1's part of every bring-up (#840).
+struct DesiredCtx {
+    /// `tasking.v1`: the author's interface, and what the target is
+    /// compiled against (R4).
+    tasking: Implementation,
+    /// `worker.v1`: the target's.
+    worker: Implementation,
+    /// The target's watch session, with `--desired-watch`.
+    watch: Option<zenoh::Session>,
 }
 
 /// One running instance of the service, and what it holds.
@@ -876,6 +1207,10 @@ struct Up {
     members: Members,
     config: Option<Configuration>,
     alarms: Option<Alarms>,
+    /// desired.v1's author, its target and the target's drive.
+    author: Option<desired::Author>,
+    target: Option<desired::Target>,
+    drive: Option<Arc<drive::Drive>>,
 }
 
 impl Up {
@@ -1072,6 +1407,52 @@ impl Ctx<'_> {
         } else {
             None
         };
+        // desired.v1 (#840): the author takes over its record before the
+        // tokens (§2.11); the target puts its baseline report before them
+        // (§2.10), and reads from start() on.
+        let (mut author, mut target, mut drive_) = (None, None, None);
+        if let Some(d) = &self.desired {
+            let none = Bindings::new();
+            if opts.desired_author {
+                let iface = d.tasking.iface().clone();
+                b.implement(d.tasking.clone())?;
+                let mut st = AuthorStartup::default();
+                if let Some(path) = &opts.desired_record {
+                    st = st.with_record(Arc::new(desired::FileRecord::new(path)));
+                }
+                author = Some(b.desired_author(&iface, drive::TASKS, st).await?);
+            }
+            if opts.desired_target.is_some() || opts.desired_unbound {
+                let wi = d.worker.iface().clone();
+                b.implement(d.worker.clone())?;
+                let run = b.declare_state_writer(&wi, drive::RUNNING, &none).await?;
+                run.put_value(&drive::baseline()).await?;
+                let dr = Arc::new(drive::Drive::new(run));
+                if opts.desired_hold {
+                    dr.hold();
+                }
+                let mut st = TargetStartup::default();
+                if let Some(a) = &opts.desired_archive {
+                    st = st.with_archive(a.parse()?, Duration::from_secs(1));
+                }
+                if let Some(ms) = opts.desired_reread_ms {
+                    st = st.with_reread(Duration::from_millis(ms));
+                }
+                st.watch = d.watch.clone();
+                target = Some(
+                    b.desired_target(
+                        drive::ROLE,
+                        &d.tasking,
+                        drive::TASKS,
+                        ReportAt::new(wi, drive::REPORT),
+                        Arc::clone(&dr) as Arc<dyn desired::Handler>,
+                        st,
+                    )
+                    .await?,
+                );
+                drive_ = Some(dr);
+            }
+        }
         // §8.2 "State values" (F-68): the value is put before the tokens, so a
         // GET made the moment they appear finds it.
         for w in &states {
@@ -1086,6 +1467,9 @@ impl Ctx<'_> {
             members,
             config,
             alarms,
+            author,
+            target,
+            drive: drive_,
         })
     }
 }
@@ -1550,6 +1934,149 @@ fn telemetry_refusal(e: &zenkey::Error) -> String {
 }
 
 /// Answers a `telemetry` command (the module doc's).
+/// A list as `desired adoption` answers it: comma-separated, `-` when
+/// empty.
+fn desired_listed(items: &[String]) -> String {
+    if items.is_empty() {
+        "-".to_owned()
+    } else {
+        items.join(",")
+    }
+}
+
+/// The `desired` commands (the module doc's), each answered by one line.
+async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<String, String> {
+    let author = || {
+        up.author.clone().ok_or_else(|| {
+            "this owner authors no desired.v1 document (--desired-author)".to_owned()
+        })
+    };
+    let target = || {
+        up.target
+            .clone()
+            .ok_or_else(|| "this owner is no desired.v1 target (--desired-target)".to_owned())
+    };
+    let drive = || {
+        up.drive
+            .clone()
+            .ok_or_else(|| "this owner is no desired.v1 target (--desired-target)".to_owned())
+    };
+    let err = |e: zenkey::Error| e.to_string();
+    let stamp = |ts: &zenoh::time::Timestamp| desired::stamp(ts).to_string();
+    match words {
+        ["desired", "put", t, _, ..] => {
+            let a = author()?;
+            let doc: serde_json::Value =
+                serde_json::from_str(rest).map_err(|e| format!("the document is not JSON: {e}"))?;
+            let key = a.key(t).map_err(err)?;
+            let bytes = serde_json::to_vec(&doc).map_err(|e| e.to_string())?;
+            match a.put(t, bytes).await.map_err(err)? {
+                Written::Put(ts) => Ok(format!("desired put {key} {}", stamp(&ts))),
+                _ => Ok(format!("desired unchanged {key}")),
+            }
+        }
+        ["desired", "delete", t] => {
+            let a = author()?;
+            let key = a.key(t).map_err(err)?;
+            match a.delete(t).await.map_err(err)? {
+                Written::Deleted(ts) => Ok(format!("desired deleted {key} {}", stamp(&ts))),
+                _ => Ok(format!("desired none {key}")),
+            }
+        }
+        ["desired", "documents"] => {
+            let docs = author()?.documents().await;
+            let map: serde_json::Map<String, serde_json::Value> = docs
+                .into_iter()
+                .map(|(t, p)| {
+                    let v = serde_json::from_slice(&p).unwrap_or(serde_json::Value::Null);
+                    (t, v)
+                })
+                .collect();
+            Ok(format!(
+                "desired documents {}",
+                serde_json::Value::Object(map)
+            ))
+        }
+        ["desired", "adoption"] => {
+            let a = author()?.adoption();
+            let failed: Vec<String> = a.failed.iter().map(|(t, _)| t.clone()).collect();
+            Ok(format!(
+                "desired adoption found={} reput={} redeleted={} expired={} failed={}",
+                a.found.as_str(),
+                desired_listed(&a.reput),
+                desired_listed(&a.redeleted),
+                desired_listed(&a.expired),
+                desired_listed(&failed)
+            ))
+        }
+        ["desired", "new-epoch"] => {
+            up.svc.new_epoch().await.map_err(err)?;
+            Ok(format!(
+                "desired new-epoch {}",
+                up.svc.instance_key().map_err(err)?
+            ))
+        }
+        ["desired", "report"] => {
+            let r = target()?.report().await;
+            Ok(format!("desired report {}", r.to_json()))
+        }
+        ["desired", "running"] => {
+            let d = drive()?;
+            Ok(format!("desired running {}", d.with(|s| s.running.clone())))
+        }
+        ["desired", "fail-next"] => {
+            drive()?.fail_next();
+            Ok("desired fail-next".to_owned())
+        }
+        ["desired", "refuse-next", code, pointer @ ..] if pointer.len() <= 1 => {
+            if code.is_empty() || code.chars().count() > zenkey::model::desired::MAX_CODE {
+                return Err("a refusal's code is 1 to 64 characters (desired.v1 §3)".to_owned());
+            }
+            drive()?.refuse_next(desired::Refusal {
+                code: (*code).to_owned(),
+                pointer: pointer.first().map(|p| (*p).to_owned()),
+                detail: Some("refused on the runner's word".to_owned()),
+            });
+            Ok(format!("desired refuse-next {code}"))
+        }
+        ["desired", "hold"] => {
+            drive()?.hold();
+            Ok("desired hold".to_owned())
+        }
+        ["desired", "release"] => {
+            drive()?.release();
+            Ok("desired release".to_owned())
+        }
+        ["desired", "reread", period] => {
+            let t = target()?;
+            if *period == "off" {
+                t.set_reread(None);
+            } else {
+                let ms: u64 = period
+                    .parse()
+                    .map_err(|e| format!("reread <ms>|off: {e}"))?;
+                t.set_reread(Some(Duration::from_millis(ms)));
+            }
+            Ok(format!("desired reread {period}"))
+        }
+        ["desired", "acts"] => {
+            let t = target()?;
+            let held = drive()?.with(|s| s.held);
+            Ok(format!(
+                "desired acts {} seeds={} held={held}",
+                t.acts(),
+                t.seeds()
+            ))
+        }
+        _ => Err(
+            "usage: desired put <target> <json> | delete <target> | documents | adoption | \
+             new-epoch | report | running | fail-next | refuse-next <code> [<pointer>] | hold | \
+             release | reread <ms>|off | acts"
+                .to_owned(),
+        ),
+    }
+}
+
 async fn telemetry_command(
     line: &str,
     up: &mut Up,
@@ -1624,6 +2151,17 @@ async fn command(
             return refuse("alarms.v1 is not implemented here (--alarms)");
         };
         return match alarm_command(&words, after_words(line, 2), a).await {
+            Ok(answer) => answer,
+            Err(why) => refuse(&why),
+        };
+    }
+    if words.first() == Some(&"desired") {
+        if up.author.is_none() && up.target.is_none() {
+            return refuse(
+                "desired.v1 is not implemented here (--desired-author, --desired-target)",
+            );
+        }
+        return match desired_command(&words, after_words(line, 3), up).await {
             Ok(answer) => answer,
             Err(why) => refuse(&why),
         };

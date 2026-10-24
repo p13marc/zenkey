@@ -1239,3 +1239,269 @@ fn the_help_documents_the_telemetry_surface() {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
 }
+
+/// `desired.v1` in the owner example (#840, DC): `--desired-author` and
+/// `--desired-target`, two owners of one router, the scenarios' contracts
+/// embedded. The author puts a document only on a change, the target acts
+/// on its drive and reports; the drive refuses, fails and holds on the
+/// runner's word; a restart is the process's, from the author's record;
+/// `--desired-unbound` is the kill switch.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_implements_desired() {
+    use zenkey::model::desired::{Outcome, Report, Source};
+
+    let (_r1, ep) = router(None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join("author.json");
+    let record_arg = record.display().to_string();
+    let author_args = [
+        "--connect",
+        &ep,
+        "--desired-record",
+        &record_arg,
+        "--desired-window",
+        "10",
+        "lab/author",
+    ];
+    let a = spawn_owner(&author_args);
+    assert_eq!(line(&a.lines).await, format!("connected {ep}"));
+    line(&a.lines).await;
+    assert_eq!(
+        a.ask("desired adoption").await,
+        "desired adoption found=nothing reput=- redeleted=- expired=- failed=-"
+    );
+    let t = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--desired-target",
+        "lab/author",
+        "--desired-watch",
+        "lab/worker",
+    ]);
+    assert_eq!(line(&t.lines).await, format!("connected {ep}"));
+    line(&t.lines).await;
+    let d = "zk2/lab/author/tasking.v1/state/tasks/lab/worker";
+    let report = |answer: String| -> Report {
+        serde_json::from_str(answer.strip_prefix("desired report ").expect(&answer)).unwrap()
+    };
+    assert_eq!(
+        report(t.ask("desired report").await),
+        Report::baseline(Some(d.to_owned()))
+    );
+    loop {
+        let acts = t.ask("desired acts").await;
+        if !acts.contains("seeds=0") {
+            assert!(acts.starts_with("desired acts 0 "), "{acts}");
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // A put: converged on it, its stamp the report's.
+    let v1 = r#"{"revision": 1, "mode": "run", "rate_hz": 10}"#;
+    let put = a.ask(&format!("desired put lab/worker {v1}")).await;
+    let stamp = put
+        .strip_prefix(&format!("desired put {d} "))
+        .unwrap_or_else(|| panic!("{put}"))
+        .to_owned();
+    let until = async |what: &str, f: &dyn Fn(&Report) -> bool| -> Report {
+        let deadline = tokio::time::Instant::now() + SETTLE;
+        loop {
+            let r = report(t.ask("desired report").await);
+            if f(&r) {
+                return r;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "never: {what}: {r:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    let r = until("converged", &|r| r.outcome == Some(Outcome::Converged)).await;
+    assert_eq!(r.observed.unwrap().stamp.to_string(), stamp);
+    assert_eq!(r.in_force, r.observed);
+    assert_eq!(
+        t.ask("desired running").await,
+        r#"desired running {"mode":"run","rate_hz":10,"revision":1}"#
+    );
+    assert_eq!(
+        a.ask(&format!("desired put lab/worker {v1}")).await,
+        format!("desired unchanged {d}"),
+        "the same content: nothing put (§2.11)"
+    );
+
+    // The drive refuses its next act, then fails one partway.
+    assert_eq!(
+        t.ask("desired refuse-next invalid /mode").await,
+        "desired refuse-next invalid"
+    );
+    a.ask(r#"desired put lab/worker {"revision": 2, "mode": "halt", "rate_hz": 10}"#)
+        .await;
+    let r = until("refused", &|r| r.outcome == Some(Outcome::Refused)).await;
+    let refusal = r.refusal.unwrap();
+    assert_eq!(
+        (refusal.code.as_str(), refusal.pointer.as_deref()),
+        ("invalid", Some("/mode"))
+    );
+    assert_eq!(t.ask("desired fail-next").await, "desired fail-next");
+    a.ask(r#"desired put lab/worker {"revision": 3, "mode": "halt", "rate_hz": 20}"#)
+        .await;
+    let r = until("failed", &|r| r.outcome == Some(Outcome::Failed)).await;
+    assert_eq!(r.refusal.unwrap().code, "apply");
+    assert_eq!(
+        t.ask("desired running").await,
+        r#"desired running {"mode":"run","rate_hz":20,"revision":1}"#
+    );
+    // The scenarios' own refusals: an endpoint is reach.
+    a.ask(r#"desired put lab/worker {"revision": 4, "mode": "run", "rate_hz": 10, "endpoint": "tcp/10.0.0.9:7447"}"#)
+        .await;
+    let r = until("refused reach", &|r| {
+        r.refusal.as_ref().is_some_and(|f| f.code == "reach")
+    })
+    .await;
+    assert_eq!(r.source, Source::Desired);
+
+    // A held act, released.
+    assert_eq!(t.ask("desired hold").await, "desired hold");
+    a.ask(r#"desired put lab/worker {"revision": 5, "mode": "run", "rate_hz": 30}"#)
+        .await;
+    loop {
+        if t.ask("desired acts").await.ends_with("held=true") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(t.ask("desired release").await, "desired release");
+    until("converged on v5", &|r| {
+        r.outcome == Some(Outcome::Converged) && r.observed.is_some_and(|o| o.revision == Some(5))
+    })
+    .await;
+    assert_eq!(t.ask("desired reread 2000").await, "desired reread 2000");
+    assert_eq!(t.ask("desired reread off").await, "desired reread off");
+
+    // The delete: reverted.
+    let del = a.ask("desired delete lab/worker").await;
+    assert!(del.starts_with(&format!("desired deleted {d} ")), "{del}");
+    until("reverted", &|r| r.outcome == Some(Outcome::Reverted)).await;
+    assert_eq!(
+        t.ask("desired running").await,
+        r#"desired running {"mode":"idle","rate_hz":1,"revision":0}"#
+    );
+    assert_eq!(
+        a.ask("desired delete lab/worker").await,
+        format!("desired none {d}")
+    );
+    assert_eq!(a.ask("desired documents").await, "desired documents {}");
+    a.ask(r#"desired put lab/spare {"revision": 1, "mode": "run", "rate_hz": 10}"#)
+        .await;
+    assert_eq!(
+        a.ask("desired documents").await,
+        r#"desired documents {"lab/spare":{"mode":"run","rate_hz":10,"revision":1}}"#
+    );
+    let e = a.ask("desired new-epoch").await;
+    assert!(
+        e.starts_with("desired new-epoch zk2/lab/author/@zk/instance/"),
+        "{e}"
+    );
+
+    // Refusals.
+    assert!(
+        a.ask("desired report")
+            .await
+            .starts_with("refused desired report: this owner is no desired.v1 target")
+    );
+    assert!(
+        t.ask("desired put lab/x {}")
+            .await
+            .starts_with("refused desired put lab/x {}: this owner authors no desired.v1 document")
+    );
+    assert!(
+        a.ask("desired nope")
+            .await
+            .starts_with("refused desired nope: usage")
+    );
+    assert!(
+        a.ask("desired put worker {}")
+            .await
+            .starts_with("refused desired put worker {}: \"worker\" names no target")
+    );
+
+    // A restart from the record: the documents put again, the delete
+    // within its window made again.
+    a.stop().await;
+    let a = spawn_owner(&author_args);
+    line(&a.lines).await;
+    line(&a.lines).await;
+    assert_eq!(
+        a.ask("desired adoption").await,
+        "desired adoption found=record reput=lab/spare redeleted=lab/worker expired=- failed=-"
+    );
+    a.stop().await;
+    t.stop().await;
+
+    // The kill switch.
+    let u = spawn_owner(&["--connect", &ep, "--desired-unbound", "lab/other"]);
+    line(&u.lines).await;
+    line(&u.lines).await;
+    assert_eq!(
+        u.ask("desired report").await,
+        r#"desired report {"source":"baseline"}"#
+    );
+    assert_eq!(
+        u.ask("desired acts").await,
+        "desired acts 0 seeds=0 held=false"
+    );
+    u.stop().await;
+
+    // Without --desired-*, a desired command is refused.
+    let o = spawn_owner(&["--connect", &ep, "ex/plain"]);
+    line(&o.lines).await;
+    line(&o.lines).await;
+    assert!(
+        o.ask("desired report")
+            .await
+            .starts_with("refused desired report: desired.v1 is not implemented here")
+    );
+    o.stop().await;
+    assert!(owner::Options::parse(&["--desired-hold".into(), "ex/x".into()]).is_err());
+}
+
+/// `owner --help` documents the `desired.v1` surface a live runner drives
+/// (#840, DC): every option, command and answer.
+#[test]
+fn the_help_documents_the_desired_surface() {
+    for piece in [
+        "--desired-author",
+        "--desired-record <file>",
+        "--desired-window <s>",
+        "--desired-target <sys>/<svc>",
+        "--desired-unbound",
+        "--desired-archive <sys>/<svc>",
+        "--desired-watch",
+        "--desired-reread-ms <ms>",
+        "--desired-hold",
+        "desired put <target> <json>",
+        "desired delete <target>",
+        "desired documents",
+        "desired adoption",
+        "desired new-epoch",
+        "desired report",
+        "desired running",
+        "desired fail-next",
+        "desired refuse-next <code> [<pointer>]",
+        "desired hold",
+        "desired release",
+        "desired reread <ms>|off",
+        "desired acts",
+        "desired put <key> <stamp>",
+        "desired unchanged <key>",
+        "desired deleted <key> <stamp>, or desired none <key>",
+        "desired adoption found=<record|archive|nothing>",
+        "desired acts <n> seeds=<n> held=<true|false>",
+        "{\"revision\": 0, \"mode\": \"idle\", \"rate_hz\": 1}",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}
