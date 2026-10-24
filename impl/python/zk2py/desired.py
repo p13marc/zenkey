@@ -1,10 +1,10 @@
-"""desired.v1, text 0.1 (``spec/profiles/desired/v1.md``), with core 0.36.
+"""desired.v1, text 0.2 (``spec/profiles/desired/v1.md``), with core 0.36.
 
 A desired document is state of its **author**, keyed by its **target**: the
 author writes it under its own address, and the target binds its own slice of
 the author's template (core R2), converges, and says what it did in a
 ``desired.v1.Report`` of its own. Written from the text alone (#609, round
-52):
+52; text 0.2 in round 53):
 
 - the declaration (§2.2): ``desired.target_param`` read into its target
   parameters, or the reasons it is invalid;
@@ -20,7 +20,7 @@ the author's template (core R2), converges, and says what it did in a
 - §2.17's conclusions, §5's four questions.
 
 Where the text left a choice, the choice is commented with its finding
-(``SPEC-FINDINGS.md``, "At desired.v1 0.1").
+(``SPEC-FINDINGS.md``, "At desired.v1 0.1" and "At desired.v1 0.2").
 """
 
 from __future__ import annotations
@@ -28,14 +28,14 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import rfc8785
-
-from . import alarms, jcs, keys, slug, templates
+from . import alarms, jcs, keys, slug, telemetry, templates
 from .lexical import is_plain_chunk
 from . import freshness as fr
 
@@ -50,6 +50,9 @@ REPORT, VERSION, REFUSAL = "desired.v1.Report", "desired.v1.Version", "desired.v
 #: §3's table, oldest first: (artifact id, the text that published it).
 PUBLISHED: tuple[tuple[str, str], ...] = (
     ("sha256:8c5ffce35fadeb6196233a46e163ee3b15cbd2bd8339a05de2cf8fe22b52e9ef", "0.1"),
+    # 0.2 (F-173): the descriptions of the Report, its observed and its
+    # outcome say "acted on or adopted"; every keyword unchanged.
+    ("sha256:43c952598f454ec903dba63bad36419f5dcff3312db727bd4e58a88dc1ca55ae", "0.2"),
 )
 PUBLISHED_IDS = tuple(i for i, _ in PUBLISHED)
 CURRENT = PUBLISHED[-1][0]
@@ -100,8 +103,10 @@ def load_schema() -> dict[str, Any]:
 
 DECLARED, INVALID, NOT_THIS = "declared", "invalid", "not_this_profiles"
 #: §2.2's reasons, "checked in this order, each alone, a check that needs a
-#: value an earlier one found wrong skipped".
-DECLARATION_REASONS = ("not_state", "value", "repeated", "not_a_param", "rest_param", "param_not_target")
+#: value an earlier one found wrong skipped"; ``not_string`` since 0.2
+#: (F-170).
+DECLARATION_REASONS = ("not_state", "value", "repeated", "not_a_param", "rest_param", "param_not_target",
+                       "not_string")
 
 
 @dataclass(frozen=True)
@@ -150,10 +155,12 @@ def _names(value: Any) -> list[str] | None:
     return None
 
 
-def declare(kind: str, template: str, annotations: dict[str, Any]) -> Declaration:
+def declare(kind: str, template: str, annotations: dict[str, Any], params: dict[str, str]) -> Declaration:
     """§2.2 over a resolved resource: its authoring kind (or kind token), its
-    template, and its resolved annotations (core §9.3). "A resource without
-    the key is not this profile's, whatever else it declares"."""
+    template, its resolved annotations (core §9.3) and its parameters' types
+    as its contract declares them (core §2.2: ``string``, ``uint``,
+    ``path``). "A resource without the key is not this profile's, whatever
+    else it declares"."""
     if KEY not in annotations:
         return Declaration(NOT_THIS)
     horizon = fr.horizon("state", annotations) if fr.KEY in annotations else None
@@ -175,6 +182,12 @@ def declare(kind: str, template: str, annotations: dict[str, Any]) -> Declaratio
             reasons.append("rest_param")
         if any(p not in names for p in t.param_names):
             reasons.append("param_not_target")
+        # 0.2 (F-170): "a target parameter whose type (core §2.2) is not
+        # string … It reads the type of a name that is a parameter and not
+        # a rest one". A type the contract leaves out is not string either
+        # (core's E011 refuses such a contract first).
+        if any(n in single and params.get(n) != "string" for n in names):
+            reasons.append("not_string")
     if reasons:
         return Declaration(INVALID, tuple(reasons), horizon=horizon)
     assert names is not None
@@ -322,10 +335,13 @@ class Payload:
         """§2.7: "Equal is JCS-equal (RFC 8785) for a payload encoded as JSON
         (a JSON Schema type whose encoding is json, core §7.2): the two read
         as strict JSON … Any other payload, CBOR, protobuf or raw, and JSON
-        that does not read, is equal byte for byte"."""
+        that does not read, is equal byte for byte". Read as strict JSON as
+        §2.10 reads (finite by rounding, at most 256 deep), every number by
+        its exact value (0.2): an integer as itself, any other number as the
+        decimal its text denotes."""
         if json_encoded:
             try:
-                return cls(value=strict_json(data))
+                return cls(value=strict_json(data, exact=True))
             except NotStrict:
                 pass
         return cls(data=bytes(data))
@@ -333,27 +349,39 @@ class Payload:
 
 def _in_strict_domain(v: Any) -> bool:
     """Whether ``v`` is a value strict JSON reading can yield (§2.10, as
-    :func:`strict_json` reads): null, a boolean, an integer, a finite float,
-    a string with a UTF-8 form, and arrays and objects of them, every key a
-    string with a UTF-8 form."""
-    if v is None or isinstance(v, (bool, int)):
-        return True
-    if isinstance(v, float):
-        return math.isfinite(v)
-    if isinstance(v, str):
-        return _utf8(v)
-    if isinstance(v, list):
-        return all(_in_strict_domain(x) for x in v)
-    if isinstance(v, dict):
-        return all(isinstance(k, str) and _utf8(k) and _in_strict_domain(x) for k, x in v.items())
-    return False
+    :func:`strict_json` reads): null, a boolean, an integer, a finite float
+    or decimal, a string with a UTF-8 form, and arrays and objects of them,
+    every key a string with a UTF-8 form, at most 256 deep."""
+    def walk(x: Any) -> bool:
+        if x is None or isinstance(x, (bool, int)):
+            return True
+        if isinstance(x, float):
+            return math.isfinite(x)
+        if isinstance(x, Decimal):
+            return x.is_finite() and math.isfinite(float(x))
+        if isinstance(x, str):
+            return _utf8(x)
+        if isinstance(x, list):
+            return all(walk(y) for y in x)
+        if isinstance(x, dict):
+            return all(isinstance(k, str) and _utf8(k) and walk(y) for k, y in x.items())
+        return False
+
+    try:
+        return telemetry.depth(v) <= MAX_DEPTH and walk(v)
+    except RecursionError:
+        return False
+
+
+_NUMBER = (int, float, Decimal)
 
 
 def _exactly_equal(a: Any, b: Any) -> bool:
-    """JSON values equal by value, a number's exactly (``10`` is ``10.0``),
-    a boolean never a number."""
-    num = (int, float)
-    if isinstance(a, num) and isinstance(b, num) and not isinstance(a, bool) and not isinstance(b, bool):
+    """JSON values equal by value, a number's exactly (``10`` is ``10.0`` is
+    ``1e1``; a float is the exact value of its double, a decimal of its
+    text), a boolean never a number, members in any order. Python compares
+    ``int``, ``float`` and ``Decimal`` by their exact values."""
+    if isinstance(a, _NUMBER) and isinstance(b, _NUMBER) and not isinstance(a, bool) and not isinstance(b, bool):
         return a == b
     if type(a) is not type(b):
         return False
@@ -365,24 +393,21 @@ def _exactly_equal(a: Any, b: Any) -> bool:
 
 
 def jcs_equal(a: Any, b: Any) -> bool:
-    """§2.7's JCS-equal. RFC 8785 is defined over I-JSON, whose numbers are
-    doubles: where both documents are in its domain, their JCS bytes are
-    compared. A document with an integer beyond ±(2^53−1), which RFC 8785
-    does not canonicalize (and a double could not tell from its neighbour),
-    is compared by exact value instead, so that two documents whose
-    revisions differ above 2^53 are two documents, never one (F-166).
+    """§2.7 (0.2, F-166): "JCS-equal … **Every number compares by its exact
+    value**, the value its text denotes, never the double RFC 8785 reads it
+    as: 10, 10.0 and 1e1 are one value, and two documents that differ in an
+    integer beyond 2^53, such as 2^53 and 2^53 + 1, are two documents". JCS's
+    other rules (members in any order, strings by their code points) are a
+    structural comparison. A decoded document's float is its double; a
+    document read from its text (:meth:`Payload.of_bytes`) holds decimals.
 
-    That fallback is for ``IntegerDomainError`` alone, and only over two
-    values strict JSON reading can yield. Any other value RFC 8785 refuses
-    (a non-finite float, a string with no UTF-8 form, a key that is not a
-    string, anything that is not JSON) is no document read as strict JSON,
-    so it equals nothing, itself included, and costs an act. Both ways keep
-    §2.7's "conservative" direction: an act may be spent, never skipped."""
+    A value strict JSON reading cannot yield (a non-finite number, a string
+    with no UTF-8 form, a key that is not a string, a value that is not
+    JSON, a nesting past 256) is no document read as strict JSON: it equals
+    nothing, itself included, and costs an act, never skips one."""
     try:
-        return rfc8785.dumps(a) == rfc8785.dumps(b)
-    except rfc8785.IntegerDomainError:
         return _in_strict_domain(a) and _in_strict_domain(b) and _exactly_equal(a, b)
-    except rfc8785.CanonicalizationError:
+    except RecursionError:
         return False
 
 
@@ -402,6 +427,9 @@ def same_document(a: Payload | None, b: Payload | None) -> bool:
 OWNER, ARCHIVE = "owner", "archive"
 #: The words a step answers with (order.json's ``expect.steps``).
 UNSTAMPED, SAME_VERSION, CONFIRMED, OLDER, HELD = "unstamped", "same_version", "confirmed", "older", "held"
+#: §2.6 "What it remembers" (0.2, F-163): "at least the 16 most recent ids
+#: it acted on or adopted a version of". zk2py remembers exactly that many.
+REMEMBERED_IDS = 16
 ADOPTED, ACT, REVERT, DONE, CALLED, RESTARTED = "adopted", "act", "revert", "done", "called", "restarted"
 #: §2.10's sources and outcomes.
 BASELINE, DESIRED, CALL = "baseline", "desired", "call"
@@ -464,8 +492,9 @@ class TargetRole:
     told how it ended (:meth:`finish`). ``key`` is the slice's (§2.3), None
     for a role left unbound (§2.12)."""
 
-    def __init__(self, key: str | None) -> None:
+    def __init__(self, key: str | None, memory: int = REMEMBERED_IDS) -> None:
         self.key = key
+        self.memory = memory
         self._fresh()
 
     def _fresh(self) -> None:
@@ -480,15 +509,26 @@ class TargetRole:
         self.last_known = False
         #: How many times the report moved (§2.10 "and after each change").
         self.report_puts = 1
+        #: §2.6 (0.2): per id, "the latest time it acted on or adopted a
+        #: version of that id in this instance", the most recent last.
+        self.remembered: OrderedDict[int, int] = OrderedDict()
+
+    def _remember(self, v: _Version) -> None:
+        """§2.6 "What it remembers": an act (recorded when it starts, §2.7)
+        or an adoption moves its id to the most recent, at its latest time;
+        an id beyond the 16 most recent is forgotten, and then read as new."""
+        m = self.remembered
+        m[v.stamp.id] = max(m.get(v.stamp.id, v.stamp.time), v.stamp.time)
+        m.move_to_end(v.stamp.id)
+        while len(m) > self.memory:
+            m.popitem(last=False)
 
     # The order of versions (§2.6), one held version against another.
     @staticmethod
     def _judge(v: _Version, held: _Version) -> str | None:
         """§2.6 steps 3 and 4 against one held version: the same version,
         older, or None for admitted (a later time of its id, or another
-        id). Only the held version is compared, as step 4 and order.json
-        say, so an old id's version older than one acted on before a new
-        id is admitted, which "Never an older version" forbids (F-163)."""
+        id). The ids it remembers are judged beside it (0.2, F-163)."""
         if v.stamp.id == held.stamp.id:
             if v.stamp.time == held.stamp.time:
                 return SAME_VERSION
@@ -508,20 +548,34 @@ class TargetRole:
         return SAME_VERSION
 
     def receive(self, s: Sample) -> str:
-        """§2.6: judge one sample or reply, in the order received. While an
-        act runs (§2.7, "One act at a time"), "judged against the running
-        act's and then against the held one", an admitted version held
-        waiting, the later replacing the earlier (F-162)."""
+        """§2.6: judge one sample or reply, in the order received: against the
+        version last acted on or adopted (the running act's while one runs)
+        and every id it remembers (0.2, F-163), then, while an act runs,
+        against the one held waiting (0.2, F-162). It is admitted when each
+        admits it, and held waiting while an act runs."""
         if s.stamp is None:
             return UNSTAMPED  # step 1: nothing it holds changes
         v = _Version(s.stamp, s.delete, None if s.delete else s.payload, None if s.delete else s.revision,
                      s.origin == ARCHIVE)
-        for held in (self.current, self.waiting if self.running else None):
-            if held is None:
-                continue
-            word = self._judge(v, held)
+        if self.current is not None:
+            word = self._judge(v, self.current)
             if word == SAME_VERSION:
-                return self._same(v, held, s.origin)
+                return self._same(v, self.current, s.origin)
+            if word == OLDER:
+                return OLDER
+        # Step 4 (0.2): "never an older version of an id it remembers …
+        # whichever id is held, and from whichever path it came: earlier is
+        # older …; equal is the same version …; later is admitted."
+        latest = self.remembered.get(v.stamp.id)
+        if latest is not None:
+            if v.stamp.time < latest:
+                return OLDER
+            if v.stamp.time == latest:
+                return SAME_VERSION
+        if self.running and self.waiting is not None:
+            word = self._judge(v, self.waiting)
+            if word == SAME_VERSION:
+                return self._same(v, self.waiting, s.origin)
             if word == OLDER:
                 return OLDER
         if self.running:
@@ -541,11 +595,13 @@ class TargetRole:
             if self.in_force is not None and self.in_force == prev.written():
                 self.in_force = v.written()
             self.current = v
+            self._remember(v)
             self.observed = v.written()
             self.last_known = v.last_known
             self.report_puts += 1
             return ADOPTED
         self.current = v
+        self._remember(v)
         self.running = True
         return REVERT if v.delete else ACT
 
@@ -638,14 +694,16 @@ def _utf8(v: Any) -> bool:
 
 
 def _finite(v: Any) -> bool:
-    """"every number finite". An integer's text is read exactly, and is
-    finite when its value, rounded to the nearest double, is not an infinity:
-    telemetry.v1 §2.6's reading (0.3, F-150), which neither alarms.v1 §2.4
-    nor this text spells out (F-167)."""
+    """§2.10 (0.2, F-167): "Finite is by rounding, as telemetry.v1 §2.6
+    reads it: a number's text, an integer's included, is finite when its
+    exact value, rounded to the nearest double …, is not an infinity".
+    Python's ``float()`` rounds so, from an integer and from a decimal."""
     if isinstance(v, bool):
         return True
     if isinstance(v, float):
         return math.isfinite(v)
+    if isinstance(v, Decimal):
+        return v.is_finite() and math.isfinite(float(v))
     if isinstance(v, int):
         try:
             float(v)
@@ -672,29 +730,47 @@ def _no_constant(name: str) -> Any:
     raise NotStrict(f"{name} is not JSON")
 
 
-def strict_json(payload: bytes) -> Any:
+#: §2.10 "Depth" (0.2): "a document nests at most 256 arrays and objects
+#: deep, counted as telemetry.v1 §2.6 counts it".
+MAX_DEPTH = 256
+
+
+def _decimal(text: str) -> Decimal:
+    return Decimal(text)
+
+
+def strict_json(payload: bytes, exact: bool = False) -> Any:
     """§2.10, "As alarms.v1 §2.4 reads a document: strict JSON first (UTF-8,
     RFC 8259, nothing after the value but whitespace, no duplicate member at
     any depth, every number finite, every string with a UTF-8 form)". The
-    whitespace is RFC 8259's ``ws`` (alarms.v1 0.3). A value nested past
-    Python's recursion limit is not read, never a crash. Raises
-    :class:`NotStrict`."""
+    whitespace is RFC 8259's ``ws`` (alarms.v1 0.3). "Finite (0.2) is by
+    rounding", and "Depth (0.2): a document nests at most 256 arrays and
+    objects deep": one at depth 257 is not strict JSON. A value nested past
+    Python's recursion limit is not read either, never a crash.
+
+    ``exact`` reads a number that is not an integer as the decimal its text
+    denotes, for §2.7's equality (0.2, F-166); otherwise as its double, as
+    ``telemetry.v1`` §2.6 reads a float, which is how zk2py reads a report
+    (F-181). An integer is exact either way. Raises :class:`NotStrict`."""
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as e:
         raise NotStrict(f"not UTF-8: {e}") from e
     try:
-        value = json.loads(text.strip(" \t\n\r"), object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
+        value = json.loads(text.strip(" \t\n\r"), object_pairs_hook=_no_duplicates, parse_constant=_no_constant,
+                           **({"parse_float": _decimal} if exact else {}))
+        if not _utf8(value):
+            raise NotStrict("a string with no UTF-8 form")
+        if not _finite(value):
+            raise NotStrict("a number past the double's finite range")
+        if telemetry.depth(value) > MAX_DEPTH:
+            raise NotStrict(f"nested deeper than {MAX_DEPTH} arrays and objects")
     except NotStrict:
         raise
     except RecursionError as e:
         raise NotStrict("nested past this reader's depth") from e
     except ValueError as e:
         raise NotStrict(str(e)) from e
-    if not _utf8(value):
-        raise NotStrict("a string with no UTF-8 form")
-    if not _finite(value):
-        raise NotStrict("a number past the double's finite range")
     return value
 
 
@@ -828,6 +904,9 @@ class Reading:
     - ``target_presence``: present, absent, incomplete or across_face;
     - ``descriptor``: None when not read, else whether its ``requires`` list
       the role and whether its bindings are not empty;
+    - ``deployment``: across a face, the deployment's word for what the
+      descriptor would say, as ``descriptor`` reads, None when the tool has
+      none (0.2, F-168); ignored elsewhere;
     - ``report``: None when none was read, else its reading (§2.10);
     - ``report_freshness``: freshness.v1's verdict on it (fresh, stale,
       unobservable), ``not_asked`` with no horizon declared;
@@ -841,6 +920,7 @@ class Reading:
     report_freshness: str
     author_presence: str
     author_current: Any
+    deployment: tuple[bool, bool] | None = None
 
 
 def _all(answer: str, reason: str) -> dict[str, Answer]:
@@ -857,18 +937,20 @@ def conclude(r: Reading) -> dict[str, Answer]:
     if r.target_presence == INCOMPLETE:
         return _all(UNOBSERVABLE, "presence_incomplete")
     across = r.target_presence == ACROSS_FACE
-    # 2. Its descriptor; across a face, "the deployment's word stands for the
-    # descriptor, and step 3": step 2 is not read there (F-168).
-    if not across:
-        if r.descriptor is None:
-            return _all(UNOBSERVABLE, "no_descriptor")
-        lists, bound = r.descriptor
-        if not lists:
-            return _all(NOT_ASKED, "not_a_target")
-        if not bound:
-            out = _all(NOT_ASKED, "unbound")
-            out[Q_IN_FORCE] = Answer(NO, "unbound")
-            return out
+    # 2. Its descriptor, "or across a constrained face the deployment's word
+    # for what it would say, listed and bound (0.2): not read, or no word
+    # had, unobservable, no_descriptor". A kill switch is answered here
+    # across a face too, before any report is read (F-168).
+    said = r.deployment if across else r.descriptor
+    if said is None:
+        return _all(UNOBSERVABLE, "no_descriptor")
+    lists, bound = said
+    if not lists:
+        return _all(NOT_ASKED, "not_a_target")
+    if not bound:
+        out = _all(NOT_ASKED, "unbound")
+        out[Q_IN_FORCE] = Answer(NO, "unbound")
+        return out
     # 3. Its report of the role's slice.
     if r.report is None:
         return _all(UNOBSERVABLE, "nothing_crossed" if across else "no_report")
@@ -930,7 +1012,7 @@ def _converged(r: Reading, observed: dict[str, Any] | None, outcome: str | None)
 def reading_of(x: dict[str, Any]) -> Reading:
     """conclusions.json's ``reading``, read."""
     t, a = x["target"], x["author"]
-    d = t["descriptor"]
+    d, w = t["descriptor"], t.get("deployment")
     rep = t["report"]
     if rep is None:
         report = None
@@ -943,7 +1025,8 @@ def reading_of(x: dict[str, Any]) -> Reading:
         (kind, st), = cur.items()
         cur = (kind, Stamp.of(st))
     return Reading(t["presence"], None if d is None else (bool(d["lists"]), bool(d["bound"])), report,
-                   t["report_freshness"], a["presence"], cur)
+                   t["report_freshness"], a["presence"], cur,
+                   None if w is None else (bool(w["lists"]), bool(w["bound"])))
 
 
 # -- order.json's steps --------------------------------------------------------------------------
@@ -956,6 +1039,10 @@ def sample_of(x: dict[str, Any]) -> Sample:
         return Sample(x["from"], True, stamp)
     if "document" in x:
         payload = Payload(value=x["document"])
+    elif "text" in x:
+        # 0.2: "its text, read as strict JSON as reports.json reads a report
+        # … or byte for byte when it does not read".
+        payload = Payload.of_bytes(x["text"].encode("utf-8", "surrogatepass"), True)
     else:
         payload = Payload(data=bytes.fromhex(x["bytes"]))
     rev = x.get("revision")

@@ -981,7 +981,7 @@ def _desired_declarations(path: Path) -> list[Result]:
         r = c["resource"]
         kind = "@state" if r.get("explicit") and r["kind"] == "state" else r["kind"]
         out.append(_check(f"declarations #{i}: {c['note']}",
-                          ds.declare(kind, r["template"], r["annotations"]).expect(), c["expect"]))
+                          ds.declare(kind, r["template"], r["annotations"], r["params"]).expect(), c["expect"]))
     return out
 
 
@@ -994,7 +994,7 @@ def _desired_bindings(path: Path) -> list[Result]:
     out: list[Result] = []
     for i, c in enumerate(_load_json(path)["cases"]):
         r = c["resource"]
-        decl = ds.declare(r["kind"], r["template"], r["annotations"])
+        decl = ds.declare(r["kind"], r["template"], r["annotations"], r["params"])
         if decl.declaration != ds.DECLARED:
             out.append((f"bindings #{i}: {c['note']}", False, f"the resource is not declared: {decl.expect()}"))
             continue
@@ -1890,7 +1890,7 @@ def _desired_adopters(root: Path) -> list[tuple[str, Any, Any]]:
         contracts[f.stem] = c
         for r in c.canonical["resources"]:
             decls[f"{f.stem}:{r['template']}"] = ds.declare(r["token"] if r["kind"] == "state" else r["kind"],
-                                                            r["template"], r["annotations"])
+                                                            r["template"], r["annotations"], r["params"])
     mine = {k: d for k, d in decls.items() if d.declaration != ds.NOT_THIS}
     out.append((f"{label}: the examples' desired resources are the walkthrough's one and zs.desired.v1's seven, "
                 "none invalid",
@@ -1940,7 +1940,8 @@ def _desired_adopters(root: Path) -> list[tuple[str, Any, Any]]:
                                                          applied["annotations"]).ttl_s), reports),
                 (("AppliedConfig", 900), [])))
     task = ds.declare("state", "tasks/{system}/{service}",
-                      {"desired.target_param": ["system", "service"], "freshness.ttl_s": 0})
+                      {"desired.target_param": ["system", "service"], "freshness.ttl_s": 0},
+                      {"system": "string", "service": "string"})
     got = ds.bind(task, "tasks/{system}/{service}", False, "tasking.v1", "lab/worker",
                   {"bindings": ["lab/author"], "params": {"system": "self.system", "service": "self.service"},
                    "optional": True})
@@ -1956,8 +1957,9 @@ def _desired_adopters(root: Path) -> list[tuple[str, Any, Any]]:
 
 
 def _desired_readings() -> list[tuple[str, Any, Any]]:
-    """zk2py's readings of desired.v1 0.1 beyond its fixtures: the open
-    findings' readings (F-162, F-163, F-166, F-167, F-168), §2.7's equality
+    """zk2py's readings of desired.v1 beyond its fixtures: the readings of
+    round 52's findings (F-162, F-163, F-166, F-167, F-168), now 0.2's rules,
+    and F-181's, §2.7's equality
     over a payload's bytes, §2.10's report puts, and a report's bytes that
     no fixture gives."""
     from . import desired as ds
@@ -1991,13 +1993,33 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
                 ["act", "held", "same_version", "act", "done"]))
     out.append((f"{lab}: older than the running act's, another id held, is older",
                 run([put(100, 0xa1, v), put(50, 0xb2, w), put(90, 0xa1, v)])[0], ["act", "held", "older"]))
-    lab = "desired.v1 0.1 §2.6 (F-163): judged against the last version alone, as step 4 says"
+    out.append(("desired.v1 0.2 §2.6 step 3 (F-184): the author's own sample of a version it holds waiting from the "
+                "author itself is the same version, never confirmed",
+                run([put(100, 0xa1, v), put(200, 0xa1, w), put(200, 0xa1, w), "done", "done"]),
+                (["act", "held", "same_version", "act", "done"],
+                 {"key": K, "source": "desired", "in_force": {"stamp": "200/a1", "revision": 2},
+                  "observed": {"stamp": "200/a1", "revision": 2}, "outcome": "converged"}, 3)))
+    lab = "desired.v1 0.2 §2.6 (F-163): every id it remembers, at least the 16 most recent"
     words, rep, _ = run([put(500, 0xa1, v), "done", put(100, 0xb2, w), "done",
-                         put(400, 0xa1, {"mode": "halt", "rate_hz": 1, "revision": 0}, ds.ARCHIVE), "done"])
-    out.append((f"{lab}: an archive's older version of the old id, after the new id's first, is acted on",
+                         put(400, 0xa1, {"mode": "halt", "rate_hz": 1, "revision": 0}, ds.ARCHIVE)])
+    out.append((f"{lab}: an archive's older version of the old id, after the new id's first, is older",
                 (words, rep["observed"], rep.get("last_known")),
-                (["act", "done", "act", "done", "act", "done"], {"stamp": "400/a1", "revision": 0}, True)))
-    lab = "desired.v1 0.1 §2.7 (F-166): JCS-equal where RFC 8785 is defined, exact value beyond it"
+                (["act", "done", "act", "done", "older"], {"stamp": "100/b2", "revision": 2}, None)))
+    ids = [put(500, 0xa0 + i, {"mode": "run", "rate_hz": 10, "revision": i}) for i in range(17)]
+    seq: list[Any] = []
+    for x in ids:
+        seq += [x, "done"]
+    out.append((f"{lab}: zk2py remembers exactly 16, so a 17th id forgets the first, whose stale value is then "
+                "read as new: the residual the text accepts",
+                run(seq + [put(400, 0xa0, {"mode": "halt", "rate_hz": 1, "revision": 99}, ds.ARCHIVE)])[0][-1], "act"))
+    out.append((f"{lab}: the 16 most recent are still remembered",
+                run(seq + [put(400, 0xa1, {"mode": "halt", "rate_hz": 1, "revision": 99}, ds.ARCHIVE)])[0][-1],
+                "older"))
+    out.append((f"{lab}: a remembered id's latest time again, by the archive's path, is the same version",
+                run([put(500, 0xa1, v), "done", put(100, 0xb2, w), "done", put(500, 0xa1, v, ds.ARCHIVE)])[0][-1],
+                "same_version"))
+    out.append((f"{lab}: a restart forgets every id", _restart_forgets(ds), "act"))
+    lab = "desired.v1 0.2 §2.7 (F-166): JCS-equal, every number by its exact value"
     out.append((f"{lab}: revisions 2^53 and 2^53+1 are two documents",
                 ds.jcs_equal({"revision": 2**53}, {"revision": 2**53 + 1}), False))
     out.append((f"{lab}: 10^16 written as an integer and as 1e16 are one document",
@@ -2005,7 +2027,7 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
     out.append((f"{lab}: a boolean is never a number", ds.jcs_equal({"n": True}, {"n": 1}), False))
     out.append((f"{lab}: past 2^53 on both sides and otherwise equal, one document",
                 ds.jcs_equal({"revision": 2**64 - 1, "b": [1.5]}, {"b": [1.5], "revision": 2**64 - 1}), True))
-    lab = "desired.v1 0.1 §2.7: a value RFC 8785 refuses for any other reason equals nothing, itself included"
+    lab = "desired.v1 0.2 §2.7: a value strict JSON cannot yield equals nothing, itself included"
     inf, nan = float("inf"), float("nan")
     out += [
         (f"{lab}: a non-finite float (FloatDomainError)", ds.jcs_equal({"n": inf}, {"n": inf}), False),
@@ -2021,7 +2043,7 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
     out.append((f"{lab}: a revision moved above 2^53 is acted on, not adopted",
                 run([put(100, 0xa1, {"revision": 2**53}), "done", put(200, 0xa1, {"revision": 2**53 + 1})])[0],
                 ["act", "done", "act"]))
-    lab = "desired.v1 0.1 §2.7: a JSON payload's bytes read as strict JSON, else compared byte for byte"
+    lab = "desired.v1 0.2 §2.7: a JSON payload's bytes read as strict JSON, exactly, else compared byte for byte"
     j = lambda text: ds.Payload.of_bytes(text.encode(), True)  # noqa: E731
     out += [
         (f"{lab}: members in another order and 10.0 for 10 are one document",
@@ -2035,6 +2057,18 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
         (f"{lab}: CBOR, protobuf or raw: byte for byte, so one value's two encodings are two documents",
          ds.same_document(ds.Payload.of_bytes(b"\x18\x0a", False), ds.Payload.of_bytes(b"\x0a", False)), False),
         (f"{lab}: a put is never a delete", ds.same_document(j("null"), None), False),
+        (f"{lab}: -0 and 0 are one value", ds.same_document(j('{"a":-0}'), j('{"a":0.0}')), True),
+        (f"{lab}: 1e1, 10, 10.0 and 100e-1 are one value",
+         [ds.same_document(j('{"a":10}'), j('{"a":%s}' % t)) for t in ("1e1", "10.0", "100e-1")], [True, True, True]),
+        (f"{lab}: decimals equal to the 30th digit and apart after it are two",
+         ds.same_document(j('{"a":0.1000000000000000000000000000001}'), j('{"a":0.1000000000000000000000000000002}')),
+         False),
+        (f"{lab}: 256 deep reads and compares by value",
+         ds.same_document(j("[" * 256 + "]" * 256), j("[ " * 256 + "]" * 256)), True),
+        (f"{lab}: 257 deep does not read, so byte for byte: one space apart, two",
+         ds.same_document(j("[" * 257 + "]" * 257), j("[ " * 257 + "]" * 257)), False),
+        (f"{lab}: 257 deep, the same bytes: one document",
+         ds.same_document(j("[" * 257 + "]" * 257), j("[" * 257 + "]" * 257)), True),
     ]
     lab = "desired.v1 0.1 §2.10 \"put it again whenever\""
     out += [
@@ -2053,9 +2087,20 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
     out += [
         (f"{lab}: nested 100,000 deep under a member the schema does not name: not read, never a crash",
          ds.read_report_bytes(deep).expect(), {"readable": False, "errors": ["json"]}),
-        (f"{lab}: nested 300 deep there reads: no depth rule here",
+        (f"{lab} (0.2): nested 300 deep there is past 256: not read",
          ds.read_report_bytes(b'{"source":"baseline","x":' + b"[" * 300 + b"]" * 300 + b"}").expect(),
-         {"readable": True, "errors": []}),
+         {"readable": False, "errors": ["json"]}),
+        (f"{lab} (F-181): a revision 18446744073709551615.0 is read as its double, 2^64: revision_range",
+         ds.read_report_bytes(('{"key":"%s","source":"desired","observed":{"stamp":"1/1",'
+                               '"revision":18446744073709551615.0},"in_force":{"stamp":"1/1",'
+                               '"revision":18446744073709551615},"outcome":"converged"}' % K).encode()).expect(),
+         {"readable": False, "errors": ["revision_range"]}),
+        (f"{lab} (F-181): in_force's 9007199254740993 and observed's 9007199254740993.0, its double 2^53: "
+         "not observed",
+         ds.read_report_bytes(('{"key":"%s","source":"desired","observed":{"stamp":"1/1",'
+                               '"revision":9007199254740993.0},"in_force":{"stamp":"1/1",'
+                               '"revision":9007199254740993},"outcome":"converged"}' % K).encode()).expect(),
+         {"readable": True, "errors": ["in_force"]}),
         (f"{lab}: a byte-order mark before the value is not RFC 8259's whitespace",
          ds.read_report_bytes(b'\xef\xbb\xbf{"source":"baseline"}').expect(), {"readable": False, "errors": ["json"]}),
         (f"{lab}: a lone surrogate escape has no UTF-8 form",
@@ -2066,16 +2111,33 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
                                '"in_force":{"stamp":"1/1"},"outcome":"converged"}' % (K, "0" * 400)).encode()).expect(),
          {"readable": False, "errors": ["json"]}),
     ]
-    lab = "desired.v1 0.1 §2.17 step 1 (F-168): across a face, step 2 is the deployment's word, not read"
+    lab = "desired.v1 0.2 §2.17 step 2 (F-168): across a face, the deployment's word, never the descriptor"
 
-    def across(report: Any) -> dict[str, Any]:
-        r = ds.Reading(ds.ACROSS_FACE, None, None if report is None else ds.read_report(report), "not_asked",
-                       ds.ACROSS_FACE, ("put", ds.Stamp(100, 0xa1)))
+    def across(descriptor: Any, word: Any) -> dict[str, Any]:
+        r = ds.Reading(ds.ACROSS_FACE, descriptor, None, "not_asked", ds.ACROSS_FACE, ("put", ds.Stamp(100, 0xa1)),
+                       word)
         return {q: a.pair() for q, a in ds.conclude(r).items()}
 
-    out.append((f"{lab}: a role unbound across a face has no keyed report: nothing crossed, never unbound",
-                across(None)[ds.Q_IN_FORCE], {"answer": "unobservable", "reason": "nothing_crossed"}))
+    out.append((f"{lab}: a descriptor read across a face, and no word: nothing stands for it",
+                across((True, True), None)[ds.Q_IN_FORCE], {"answer": "unobservable", "reason": "no_descriptor"}))
+    out.append((f"{lab}: the word unbound beside a descriptor bound: the word answers",
+                across((True, True), (True, False))[ds.Q_IN_FORCE], {"answer": "no", "reason": "unbound"}))
+    out.append((f"{lab}: present, the word is ignored",
+                {q: a.pair() for q, a in ds.conclude(ds.Reading(ds.PRESENT, (True, False), None, "not_asked",
+                                                                 ds.PRESENT, None, (True, True))).items()}
+                [ds.Q_IN_FORCE], {"answer": "no", "reason": "unbound"}))
     return out
+
+
+def _restart_forgets(ds: Any) -> str:
+    """desired.v1 0.2 §2.6: "A restart forgets every id, as it forgets every
+    act (§2.7)": an old id's older version after a restart is acted on."""
+    t = ds.TargetRole("zk2/lab/author/tasking.v1/state/tasks/lab/worker")
+    doc = {"mode": "run", "rate_hz": 10, "revision": 1}
+    t.receive(ds.Sample(ds.OWNER, False, ds.Stamp(500, 0xa1), ds.Payload(value=doc), 1))
+    t.finish(ds.Finish(ds.DONE))
+    t.restart()
+    return t.receive(ds.Sample(ds.OWNER, False, ds.Stamp(400, 0xa1), ds.Payload(value=doc), 1))
 
 
 def family_readings(root: Path) -> list[Result]:
