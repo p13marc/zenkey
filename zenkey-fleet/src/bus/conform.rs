@@ -522,15 +522,11 @@ pub async fn observe(
     if obs.presence.is_ok() && target {
         let store = BundleStore::new(t);
         store.seed(offline);
+        let mut ds = crate::bus::desired::DesiredSpec::new(t);
+        // No case reads an archive's last-known.
+        ds.archives = false;
         obs.desired = Some(
-            crate::bus::desired::observe(
-                session,
-                Some(&obs.address),
-                &crate::bus::desired::DesiredSpec::new(t),
-                &store,
-                offline,
-            )
-            .await,
+            crate::bus::desired::observe(session, Some(&obs.address), &ds, &store, offline).await,
         );
     }
     obs

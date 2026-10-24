@@ -481,6 +481,13 @@ fn resolve_roles(
         named_revision(d, &e.iface, contracts, offline)
             .is_some_and(|r| !report_resources(r.contract()).is_empty())
     });
+    // Whether every revision it names is in hand: when one is not, a role
+    // whose author's contract is not either may be desired, and cannot be
+    // told apart from one that is not.
+    let all_held = d
+        .interfaces
+        .iter()
+        .all(|e| named_revision(d, &e.iface, contracts, offline).is_some());
     let mut out = Vec::new();
     for e in roles_of(d, spec) {
         let templates = e.declared_by.as_deref().and_then(|by| {
@@ -505,7 +512,7 @@ fn resolve_roles(
         });
         let held = author_c.is_some();
         match resolve_role(&t.addr, e, templates.as_deref(), author_c) {
-            Some(res) if held || reporting => out.push(RoleRead {
+            Some(res) if held || reporting || !all_held => out.push(RoleRead {
                 resolution: res,
                 author_seen: None,
                 current: None,
