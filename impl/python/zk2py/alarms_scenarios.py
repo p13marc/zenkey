@@ -349,11 +349,10 @@ class Bus:
                 e.close()
             except Exception:  # noqa: BLE001
                 pass
+        from . import live
+
         for x in (self.s_session, self.g_session, self.t_session, self.router):
-            try:
-                x.close()
-            except Exception:  # noqa: BLE001
-                pass
+            live.close(x)  # and the watch session zk2py opened for it
 
 
 def key(alarm: tuple[str, dict[str, str]], address: str = ADDRESS) -> str:

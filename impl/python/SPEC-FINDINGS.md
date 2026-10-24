@@ -9428,9 +9428,33 @@ What it does not let zk2py do:
   sessions through its own configuration, with a lease, so its windows
   keep their subscriber beside their reads, as before 0.37.
 
-**`just py-conformance`: 2665 of 2665.** Before this round, 2652 passed;
-`readings` gained 13 cases of the view and of a read's kinds, and nothing
-else moved.
+**`just py-conformance`: 2680 of 2680.** Before this round, 2652 passed;
+`readings` gained 28 cases, of the view, of a read's kinds, and of
+`list_presence`'s guards on fake sessions, and nothing else moved.
+
+**On review of PR #848** zk2py tightened four things:
+- **The registry.** Closed sessions are pruned as the registry is touched,
+  and a closed reading session takes its watch session with it.
+  `forget` and `close` drop a session's entries. Every lookup checks that
+  the stored session *is* the one asked about. Without that check, a pruned
+  entry's id reused by a new session handed it the previous section's
+  watch session, which the alarms and telemetry runners showed at once.
+- **A transports accessor that fails,** before the read or at its end,
+  leaves the read possibly incomplete, with that reason, never complete.
+- **The follower** reads its state under its lock. It retries a read
+  that settles nothing after 0.2 s, doubling to a 5 s cap and back after
+  a complete one, and survives a read that raises. A seed whose round
+  trip did not come back is folded as possibly incomplete.
+  `watch_or_beside` tries the round trip three times and says whether it
+  came back. The readers that use it take a failed one as a start not
+  shown complete.
+- **The fold** lets each key's latest move since the read was asked
+  decide it: put, deleted and put again is held. A withdrawal heard back
+  owes no read.
+
+The runners pass again after these changes: telemetry 57/57, alarms
+`--quick` 78/78 (one not run), hostid 34/34, health §1, and
+`presence_scenarios` 26/26 three times, now polling instead of sleeping.
 
 **`python -m zk2py.presence_scenarios`: 26 of 26**, three runs. Each
 section observes zenoh as the scenario says, then zk2py's reader:

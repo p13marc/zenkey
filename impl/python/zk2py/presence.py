@@ -134,6 +134,11 @@ class PresenceView:
             # shows one"), whatever came before.
             x.held.add(key)
             x.confirmed, x.why = True, ""
+            # the reason to read again is gone when nothing is left
+            # unconfirmed by a withdrawal
+            if self.owed_since is not None and not any(
+                    y.why == WITHDRAWN and not y.held for y in self.holders.values()):
+                self.owed_since = None
         else:
             x.held.discard(key)
             if not x.held:
@@ -168,7 +173,12 @@ class PresenceView:
         self.reads.append(read)
         later = [(k, kind) for t, k, kind in self.events if t > read.asked_ns]
         moved = {k for k, _ in later}
-        withdrawn_since = {holder_of(k) for k, kind in later if kind == "delete"}
+        # each moved key's latest move since the ask decides it (put, delete
+        # and put again is held; put and delete is withdrawn)
+        last: dict[str, str] = {}
+        for k, kind in later:
+            last[k] = kind
+        withdrawn_since = {holder_of(k) for k, kind in last.items() if kind == "delete"}
         shown = {k for k in read.keys if holder_of(k) is not None}
         scope = {h for h in self.holders if self._scoped(read.selector, h)}
         scope |= {holder_of(k) for k in shown}  # type: ignore[misc]
@@ -176,7 +186,7 @@ class PresenceView:
             x = self._holder(h)
             mine = {k for k in shown if holder_of(k) == h and k not in moved}
             if read.kind == "complete":
-                x.held = {k for k in x.held if k in moved} | mine
+                x.held = {k for k in moved if holder_of(k) == h and last[k] == "put"} | mine
                 if x.held or h not in withdrawn_since:
                     x.confirmed, x.why = True, ""
             elif mine:
@@ -230,22 +240,34 @@ class PresenceFollower:
     one round trip there (:func:`zk2py.live.settle`) before the seed; every
     read on ``session``, which holds no liveliness subscriber; and, soon
     after a withdrawal that leaves something with nothing held, one read for
-    the burst. A read not made (cut off) is made again every
-    ``retry_s`` until one is."""
+    the burst.
+
+    A read that does not settle what is owed (not made, possibly
+    incomplete, or one that raised) is made again after ``retry_s``,
+    doubling each time up to ``max_retry_s``, and back to ``retry_s`` after
+    a complete read: a session that stays cut off is not asked five times a
+    second forever. A seed whose round trip did not come back cannot be
+    shown ordered against the subscriber, so it is folded as possibly
+    incomplete, and retried as one."""
 
     def __init__(self, session: Any, watch: Any, selector: str = "zk2/*/*/@zk/**", *,
-                 reread_delay_s: float = REREAD_DELAY_S, retry_s: float = 0.2, timeout: float = 1.0) -> None:
+                 reread_delay_s: float = REREAD_DELAY_S, retry_s: float = 0.2, max_retry_s: float = 5.0,
+                 timeout: float = 1.0) -> None:
         import zenoh
 
         from . import live
 
         self.session, self.watch, self.selector = session, watch, selector
-        self.delay, self.retry, self.timeout = reread_delay_s, retry_s, timeout
+        self.delay, self.timeout = reread_delay_s, timeout
+        self.retry_min, self.retry_max = retry_s, max_retry_s
+        self.backoff = retry_s
         self.view = PresenceView(selector)
         self.lock = threading.Lock()
         self._timer: threading.Timer | None = None
         self._closed = False
         self.reads: list[Any] = []
+        #: reads that raised, with the exception
+        self.failures: list[BaseException] = []
 
         def got(sample: Any) -> None:
             kind = "delete" if sample.kind == zenoh.SampleKind.DELETE else "put"
@@ -256,8 +278,8 @@ class PresenceFollower:
                 self._schedule(self.delay)
 
         self.sub = live.declare_liveliness_subscriber(watch, selector, got, history=True)
-        self.settled = live.settle(watch, timeout)
-        self.read()
+        self.settled = any(live.settle(watch, timeout) for _ in range(live.SETTLE_TRIES))
+        self._attempt(seed=True)
 
     def _schedule(self, after_s: float) -> None:
         with self.lock:
@@ -267,15 +289,40 @@ class PresenceFollower:
             self._timer.daemon = True
             self._timer.start()
 
+    @property
+    def idle(self) -> bool:
+        """No read scheduled, and none owed."""
+        with self.lock:
+            return self._timer is None and not self.view.owes_read
+
+    def _attempt(self, seed: bool = False) -> None:
+        """One read, and the next one scheduled when it settled nothing."""
+        try:
+            p = self.read(unordered=seed and not self.settled)
+            ok = p.kind == "complete" and not (seed and not self.settled)
+        except Exception as e:  # noqa: BLE001 - a read that raised is retried, never fatal
+            with self.lock:
+                self.failures.append(e)
+            ok = False
+        with self.lock:
+            owed = self.view.owes_read
+            if ok:
+                self.backoff = self.retry_min
+                again = None if not owed else self.retry_min
+            else:
+                again = self.backoff
+                self.backoff = min(self.backoff * 2, self.retry_max)
+        if again is not None and (not ok or owed):
+            self._schedule(again)
+
     def _fire(self) -> None:
         with self.lock:
             self._timer = None
-        p = self.read()
-        if p.kind != "complete" or self.view.owes_read:
-            self._schedule(self.retry)
+        self._attempt()
 
-    def read(self) -> Any:
-        """One read on the reading session, folded as of when it was asked."""
+    def read(self, unordered: bool = False) -> Any:
+        """One read on the reading session, folded as of when it was asked;
+        ``unordered`` folds it as possibly incomplete."""
         from . import live
 
         with self.lock:
@@ -286,8 +333,9 @@ class PresenceFollower:
                   for x in p.alive) + \
             tuple(f"zk2/{x['system']}/{x['service']}/@zk/member/{x['iface']}/{x['member']}/{x['epoch']}"
                   for x in p.members)
+        kind = live.POSSIBLY_INCOMPLETE if unordered and p.kind == live.COMPLETE else p.kind
         with self.lock:
-            self.view.answered(Read(asked, self.selector, p.kind, found))
+            self.view.answered(Read(asked, self.selector, kind, found))
             self.reads.append(p)
         return p
 

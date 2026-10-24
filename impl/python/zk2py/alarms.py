@@ -1287,12 +1287,15 @@ class AlarmsReader:
         # read of what is held, recorded under the lock gaps() reads it by.
         # Core §8.1 (0.37): the subscriber on the reader's watch session, one
         # round trip there, and the read on its own session.
-        sub, _ = live.watch_or_beside(self.session, f"zk2/{address}/@zk/instance/*", zenoh.handlers.Callback(got))
+        sub, placed = live.watch_or_beside(self.session, f"zk2/{address}/@zk/instance/*",
+                                           zenoh.handlers.Callback(got))
         self.subs.append(sub)
         pres = live.list_presence(self.session, f"zk2/{address}/@zk/instance/*")
         with self.lock:
             self.held_at_start[address] = pres.instances[0]["instance"] if pres.instances else None
-            if not pres.complete:
+            # A round trip on the watch session that did not come back leaves
+            # the read unordered against the subscriber: not shown complete.
+            if not pres.complete or placed.settled is False:
                 # §2.15: present throughout is "held its instance token from
                 # the window's start". A read possibly incomplete does not
                 # show it: owner_gap until a complete GET after this read.

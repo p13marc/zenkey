@@ -185,9 +185,11 @@ class Bus:
         return None
 
     def close(self) -> None:
+        from . import live
+
         for s in self._subs:
             s.undeclare()
-        self.tool.close()
+        live.close(self.tool)  # and the watch session zk2py opened for it
         self.router.close()
 
 

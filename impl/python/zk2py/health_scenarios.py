@@ -154,8 +154,11 @@ class Bus:
                 e.close()
             except Exception:  # noqa: BLE001
                 pass
+        from . import live
+
+        # live.close: each session with the watch session zk2py opened for it
         for x in (self.s_session, self.g_session, self.t_session, self.router):
-            x.close()
+            live.close(x)
 
 
 def _status(payload: bytes) -> dict[str, Any] | None:

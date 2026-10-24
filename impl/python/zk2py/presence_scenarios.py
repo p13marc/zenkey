@@ -157,7 +157,7 @@ def section8(report: Report) -> None:
         report.check(sec, "2. on the cut, the subscriber hears the token withdrawn",
                      _wait(lambda: any("DELETE" in k for k, _ in heard), 5.0))
         report.check(sec, "2. R1's own session still reads it: the owner never left", INSTANCE in _raw_read(bus.router)[1])
-        time.sleep(0.6)
+        _wait(lambda: len(f.reads) > made_before, 5.0)
         st = f.address("lab", "owner")
         report.check(sec, "2. zk2py's follower reads the owner unobservable (withdrawn, unconfirmed), never down, "
                           "and its re-read is not made while cut off",
@@ -240,16 +240,23 @@ def section_follower(report: Report) -> None:
         for t in tokens.values():
             t.undeclare()
         ok = _wait(lambda: all(f.address("lab", f"b{n}")[0] == pr.DOWN for n in range(1, 4)), 5.0)
-        time.sleep(0.5)
+        ok = _wait(lambda: f.idle, 5.0) and ok  # nothing scheduled and nothing owed: no read can follow
         report.check(sec, "a burst of three withdrawals: one read, then each down", ok and len(f.reads) - before == 1,
                      f"{len(f.reads) - before} reads, {[f.address('lab', f'b{n}') for n in range(1, 4)]}")
         old = holder.liveliness().declare_token("zk2/lab/m/@zk/instance/" + "c" * 16)
         report.check(sec, "an owner up", _wait(lambda: f.address("lab", "m")[0] == pr.UP, 5.0))
         before = len(f.reads)
-        new = holder.liveliness().declare_token("zk2/lab/m/@zk/instance/" + "d" * 16)
-        time.sleep(0.3)
+        new_key, old_key = "zk2/lab/m/@zk/instance/" + "d" * 16, "zk2/lab/m/@zk/instance/" + "c" * 16
+
+        def heard(key: str, kind: str) -> bool:
+            with f.lock:
+                return any(k == key and what == kind for _, k, what in f.view.events)
+
+        new = holder.liveliness().declare_token(new_key)
+        _wait(lambda: heard(new_key, "put"), 5.0)
         old.undeclare()
-        time.sleep(0.6)
+        _wait(lambda: heard(old_key, "delete"), 5.0)
+        _wait(lambda: f.idle, 5.0)
         report.check(sec, "a make-before-break re-mint owes no read: no read made, the owner up throughout",
                      len(f.reads) == before and f.address("lab", "m")[0] == pr.UP and not f.view.owes_read,
                      f"{len(f.reads) - before} reads, {f.address('lab', 'm')}")

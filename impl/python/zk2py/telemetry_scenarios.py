@@ -363,10 +363,16 @@ class Reader:
             # (never beside its read: a history subscriber's session reads
             # its tokens missing at once, Appendix B), one round trip there,
             # then the seed on its own session.
-            sub, _ = live.watch_or_beside(session, f"zk2/{ADDRESS}/@zk/instance/*", zenoh.handlers.Callback(token),
-                                          history=True)
+            sub, placed = live.watch_or_beside(session, f"zk2/{ADDRESS}/@zk/instance/*",
+                                               zenoh.handlers.Callback(token), history=True)
             self.entities.append(sub)
-            self.seed_presence()
+            if placed.settled is False:
+                # the round trip did not come back: no seed can be shown
+                # ordered against the subscriber (core §8.1, 0.37)
+                self.unseeded = ("the watch session's round trip did not come back (core §8.1, 0.37): presence is "
+                                 "unobservable for this reader")
+            else:
+                self.seed_presence()
 
     #: §2.9 (0.3): a read that comes back possibly incomplete is made again
     SEED_TRIES = 3
