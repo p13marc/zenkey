@@ -16,6 +16,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -37,6 +40,9 @@
           ]
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -64,6 +70,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       }
     },
@@ -91,6 +101,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/targets.snmp"
       }
     },
@@ -119,6 +133,10 @@
         },
         "explicit": true,
         "kind": "state",
+        "params": {
+          "service": "string",
+          "system": "string"
+        },
         "template": "tasks/{system}/{service}"
       }
     },
@@ -145,6 +163,10 @@
           ]
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       }
     },
@@ -165,6 +187,9 @@
           "freshness.ttl_s": 0.0
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -185,6 +210,9 @@
           "freshness.ttl_s": -0.0
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -205,6 +233,9 @@
           "freshness.ttl_s": "60"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -225,6 +256,9 @@
           "freshness.ttl_s": 1.5
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -236,6 +270,9 @@
       "resource": {
         "annotations": {},
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -249,6 +286,9 @@
           "desired.target": "system"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -260,6 +300,7 @@
       "resource": {
         "annotations": {},
         "kind": "state",
+        "params": {},
         "template": "desired"
       }
     },
@@ -276,6 +317,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "stream",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -292,6 +336,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "event",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -308,6 +355,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "operation",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -325,6 +375,9 @@
           "freshness.ttl_s": 60
         },
         "kind": "stream",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -342,6 +395,9 @@
           "freshness.ttl_s": 60
         },
         "kind": "event",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -358,6 +414,9 @@
           "desired.target_param": 3
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -374,6 +433,9 @@
           "desired.target_param": []
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -394,6 +456,11 @@
           ]
         },
         "kind": "state",
+        "params": {
+          "a": "string",
+          "b": "string",
+          "c": "string"
+        },
         "template": "x/{a}/{b}/{c}"
       }
     },
@@ -413,6 +480,10 @@
           ]
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/t"
       }
     },
@@ -431,6 +502,9 @@
           }
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -447,6 +521,9 @@
           "desired.target_param": true
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -466,6 +543,9 @@
           ]
         },
         "kind": "state",
+        "params": {
+          "host": "string"
+        },
         "template": "desired/{host}"
       }
     },
@@ -483,6 +563,9 @@
           "desired.target_param": "vehicel"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -500,6 +583,9 @@
           "desired.target_param": ""
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -517,6 +603,9 @@
           "desired.target_param": "plans"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -527,12 +616,15 @@
           "rest_param"
         ]
       },
-      "note": "a rest parameter: no single identity fills it",
+      "note": "a rest parameter: no single identity fills it, and its type, path, is no second reason",
       "resource": {
         "annotations": {
           "desired.target_param": "path"
         },
         "kind": "state",
+        "params": {
+          "path": "path"
+        },
         "template": "files/{path...}"
       }
     },
@@ -552,6 +644,10 @@
           ]
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "path": "path"
+        },
         "template": "t/{host}/{path...}"
       }
     },
@@ -568,6 +664,10 @@
           "desired.target_param": "host"
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       }
     },
@@ -584,6 +684,10 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "slot": "string",
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}/{slot}"
       }
     },
@@ -604,6 +708,9 @@
           "freshness.ttl_s": 900
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -624,6 +731,9 @@
           "freshness.ttl_s": 1.0
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       }
     },
@@ -651,6 +761,10 @@
           "freshness.ttl_s": 3600
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       }
     },
@@ -673,6 +787,10 @@
           "freshness.ttl_s": 30
         },
         "kind": "stream",
+        "params": {
+          "a": "string",
+          "b": "string"
+        },
         "template": "x/{a}/{b}"
       }
     },
@@ -691,9 +809,137 @@
           "freshness.ttl_s": 30
         },
         "kind": "stream",
+        "params": {
+          "vehicle": "string"
+        },
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_string"
+        ]
+      },
+      "note": "a target parameter typed uint: a system or a service name is a string (0.2, F-170)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "params": {
+          "vehicle": "uint"
+        },
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_string"
+        ]
+      },
+      "note": "the second of two typed uint",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ]
+        },
+        "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "uint"
+        },
+        "template": "desired/{host}/{service}/thresholds"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "param_not_target"
+        ]
+      },
+      "note": "a parameter that is no target, typed uint: param_not_target alone",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "params": {
+          "slot": "uint",
+          "vehicle": "string"
+        },
+        "template": "plans/{vehicle}/{slot}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_param",
+          "param_not_target"
+        ]
+      },
+      "note": "a misspelt name beside a uint parameter: a name that is no parameter has no type",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicel"
+        },
+        "kind": "state",
+        "params": {
+          "vehicle": "uint"
+        },
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "repeated",
+          "not_string"
+        ]
+      },
+      "note": "a name twice, typed uint: each check alone",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "host"
+          ]
+        },
+        "kind": "state",
+        "params": {
+          "host": "uint"
+        },
+        "template": "desired/{host}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_state",
+          "not_string"
+        ]
+      },
+      "note": "a uint target on a stream: each check alone",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "stream",
+        "params": {
+          "vehicle": "uint"
+        },
         "template": "plans/{vehicle}"
       }
     }
   ],
-  "description": "desired.v1 §2.2: a resolved resource -> its declaration. resource.kind is the authoring kind (stream, state, event, operation), resource.explicit is true for an explicit resource (@state, @stream), resource.template its template, resource.annotations its resolved annotations (core §9.3). expect.declaration is one of: \"not_this_profiles\" (no desired.target_param, whatever else under desired. it holds, which is W105's); \"invalid\", with reasons, in this order, each checked alone and a check that needs a value an earlier one found wrong skipped: not_state (the kind is not state), value (not a string, nor an array of one or two strings; a string is a one-element array), repeated (a name twice), not_a_param (a name that is no parameter of the template), rest_param (a name of a rest parameter), param_not_target (a parameter of the template the value does not name); a freshness.ttl_s, whatever its value, makes no declaration invalid (§2.2); or \"declared\", with targets, in the value's order, each {param, binds}: one target parameter binds \"either\" (self.system or self.service, the deployment's choice), two bind \"self.system\" then \"self.service\"."
+  "description": "desired.v1 §2.2: a resolved resource -> its declaration. resource.kind is the authoring kind (stream, state, event, operation), resource.explicit is true for an explicit resource (@state, @stream), resource.template its template, resource.params its parameters' types as its contract declares them (core §2.2: string, uint, path; a rest parameter is path, 0.2), resource.annotations its resolved annotations (core §9.3). expect.declaration is one of: \"not_this_profiles\" (no desired.target_param, whatever else under desired. it holds, which is W105's); \"invalid\", with reasons, in this order, each checked alone and a check that needs a value an earlier one found wrong skipped: not_state (the kind is not state), value (not a string, nor an array of one or two strings; a string is a one-element array), repeated (a name twice), not_a_param (a name that is no parameter of the template), rest_param (a name of a rest parameter), param_not_target (a parameter of the template the value does not name), not_string (0.2, F-170: a target parameter, not a rest one, whose type is not string, since a system or a service name is a string; a name that is no parameter, or a rest one, has no type checked here); a freshness.ttl_s, whatever its value, makes no declaration invalid (§2.2); or \"declared\", with targets, in the value's order, each {param, binds}: one target parameter binds \"either\" (self.system or self.service, the deployment's choice), two bind \"self.system\" then \"self.service\"."
 }

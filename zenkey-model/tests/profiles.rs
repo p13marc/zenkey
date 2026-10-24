@@ -2251,9 +2251,16 @@ fn desired_schema() {
     }
 }
 
-/// A resource as `desired/conformance/` writes it: its kind, template and
-/// resolved annotations.
-fn desired_resource(r: &Value) -> (Kind, Template, BTreeMap<String, Value>) {
+/// A resource as `desired/conformance/` writes it: its kind, template,
+/// parameter types (text 0.2, F-170) and resolved annotations.
+fn desired_resource(
+    r: &Value,
+) -> (
+    Kind,
+    Template,
+    BTreeMap<String, zenkey_model::authoring::ParamType>,
+    BTreeMap<String, Value>,
+) {
     let kind = match r["kind"].as_str().expect("kind") {
         "stream" => Kind::Stream,
         "state" => Kind::State,
@@ -2262,7 +2269,8 @@ fn desired_resource(r: &Value) -> (Kind, Template, BTreeMap<String, Value>) {
         other => panic!("kind {other:?}"),
     };
     let template = Template::parse(r["template"].as_str().expect("template")).expect("a template");
-    (kind, template, annotations(&r["annotations"]))
+    let params = serde_json::from_value(r["params"].clone()).expect("params, by name");
+    (kind, template, params, annotations(&r["annotations"]))
 }
 
 fn desired_declaration_json(d: &desired::Declaration) -> Value {
@@ -2289,8 +2297,8 @@ fn desired_declarations() {
     let path = profiles().join("desired/conformance/declarations.json");
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
-        let (kind, template, ann) = desired_resource(&case["resource"]);
-        let got = desired_declaration_json(&desired::declaration(kind, &template, &ann));
+        let (kind, template, params, ann) = desired_resource(&case["resource"]);
+        let got = desired_declaration_json(&desired::declaration(kind, &template, &params, &ann));
         let what = format!("{}: {}", case["note"], case["resource"]);
         expect(case, got, &what);
     }
@@ -2308,8 +2316,8 @@ fn desired_bindings() {
     let path = profiles().join("desired/conformance/bindings.json");
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
-        let (kind, template, ann) = desired_resource(&case["resource"]);
-        let decl = desired::declaration(kind, &template, &ann);
+        let (kind, template, params, ann) = desired_resource(&case["resource"]);
+        let decl = desired::declaration(kind, &template, &params, &ann);
         let targets = decl.targets().expect("a declared resource");
         let iface: IfaceId = case["iface"]
             .as_str()
@@ -2414,10 +2422,17 @@ fn desired_order() {
                     },
                     stamp: desired_stamp(&s["stamp"]),
                     revision: s.get("revision").and_then(Value::as_u64),
-                    content: match (s.get("document"), s.get("bytes").and_then(Value::as_str)) {
-                        (Some(d), _) => Some(desired::Content::of_json(d)),
-                        (None, Some(h)) => Some(desired::Content::of_bytes(&unhex(h))),
-                        (None, None) => None,
+                    content: match (
+                        s.get("document"),
+                        s.get("text").and_then(Value::as_str),
+                        s.get("bytes").and_then(Value::as_str),
+                    ) {
+                        (Some(d), _, _) => Some(desired::Content::of_json(d)),
+                        (None, Some(t), _) => {
+                            Some(desired::Content::of_payload(t.as_bytes(), true))
+                        }
+                        (None, None, Some(h)) => Some(desired::Content::of_bytes(&unhex(h))),
+                        (None, None, None) => None,
                     },
                 };
                 t.observe(sample).as_str()
@@ -2511,15 +2526,17 @@ fn desired_conclusions() {
             Value::String(s) if s == "undecodable" => Some(Err(())),
             r => Some(desired::Report::from_json(&r["document"]).map_err(|_| ())),
         };
+        let listing = |d: &Value| match d {
+            Value::Null => None,
+            d if d["lists"] == json!(false) => Some(desired::Listing::NotListed),
+            d => Some(desired::Listing::Listed {
+                bound: d["bound"] == json!(true),
+            }),
+        };
         let target = desired::TargetReading {
             presence: desired_seen(&t["presence"]),
-            descriptor: match &t["descriptor"] {
-                Value::Null => None,
-                d if d["lists"] == json!(false) => Some(desired::Listing::NotListed),
-                d => Some(desired::Listing::Listed {
-                    bound: d["bound"] == json!(true),
-                }),
-            },
+            descriptor: listing(&t["descriptor"]),
+            deployment: listing(&t["deployment"]),
             report: match &report {
                 None => desired::ReportRead::NotRead,
                 Some(Err(())) => desired::ReportRead::Unreadable,

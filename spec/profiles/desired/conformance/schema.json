@@ -2,7 +2,7 @@
   "cases": [
     {
       "expect": {
-        "id": "sha256:8c5ffce35fadeb6196233a46e163ee3b15cbd2bd8339a05de2cf8fe22b52e9ef",
+        "id": "sha256:43c952598f454ec903dba63bad36419f5dcff3312db727bd4e58a88dc1ca55ae",
         "published": true
       },
       "note": "the profile's file: the current revision",
@@ -105,7 +105,7 @@
         "id": "sha256:8c5ffce35fadeb6196233a46e163ee3b15cbd2bd8339a05de2cf8fe22b52e9ef",
         "published": true
       },
-      "note": "a copy, inline: JCS-equal, so the same id and the profile's types"
+      "note": "text 0.1's revision, inline: published, so its types are the profile's still"
     },
     {
       "document": {
@@ -132,7 +132,7 @@
       "note": "a desired.v1.Report in another artifact is not the profile's, whatever its name (core §7.1)"
     }
   ],
-  "current": "sha256:8c5ffce35fadeb6196233a46e163ee3b15cbd2bd8339a05de2cf8fe22b52e9ef",
+  "current": "sha256:43c952598f454ec903dba63bad36419f5dcff3312db727bd4e58a88dc1ca55ae",
   "description": "desired.v1 §2.10, §3: the standard schema's published artifact ids. file is the profile's schema, a path relative to this profile's directory, and current its artifact's id: sha256 over the document's JCS bytes (RFC 8785; core §7.1, §9.4), as sha256:<64 lowercase hex>. published lists every id the profile publishes, oldest first, each with the text that published it; a type of an artifact whose id is listed is the profile's. types are the profile's type names, each a $defs member of every published revision that defines it (since: the first revision that does). Each case names a document, by path (relative to the repository's root), or inline (document) -> expect.id, its artifact id, and expect.published, whether that id is listed.",
   "file": "desired.v1.json",
   "published": [
@@ -140,6 +140,11 @@
       "id": "sha256:8c5ffce35fadeb6196233a46e163ee3b15cbd2bd8339a05de2cf8fe22b52e9ef",
       "note": "desired.v1 0.1: desired.v1.Report, desired.v1.Version and desired.v1.Refusal.",
       "revision": "0.1"
+    },
+    {
+      "id": "sha256:43c952598f454ec903dba63bad36419f5dcff3312db727bd4e58a88dc1ca55ae",
+      "note": "desired.v1 0.2: the descriptions of the Report, its observed and its outcome say acted on or adopted (F-173). Every keyword is unchanged.",
+      "revision": "0.2"
     }
   ],
   "types": [

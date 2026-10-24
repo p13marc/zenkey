@@ -4,6 +4,257 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.2 — 2026-10-24: the cold reader's round 52 (#840, DB; #609)
+
+The spec-only implementation read 0.1 cold with core 0.36 (zk2py round
+52, PR #843): every fixture passed the first time it ran, 222 cases and
+64 report read-backs, and it filed twenty findings, F-161 to F-180. Three
+are fixture expectations that decided what the text left open or said
+otherwise (F-161, F-164, F-165); two are readings no case told apart
+(F-162, F-163); five more are rules a reader had to guess (F-166 to
+F-170); two are `config.v1`'s (F-171, F-172); two are the record's (F-173,
+F-174); and six are scenarios a second implementation could not run from
+their text alone (F-175 to F-180). The answers are #840's coordinator's,
+posted on #840. Written against core 0.36, unchanged: no answer needed the
+core, and F-164's "an id is never 0" is stated here, not in core
+Appendix B.
+
+The chunks were re-cut for this round: these answers are DB, the runtime
+(`zenkey::desired`, `config.v1` fed through it, the owner example's
+`--desired`) is DC, and the tools are DD. The text, `scenarios.md` and
+Appendix B now say so; 0.1's entry keeps the letters it was written with.
+
+Each rule answer is stated in the text and pinned by a fixture case where
+one can pin it. No expectation of a case that existed changes: the new
+cases were written by hand and passed as written, and a bless from the
+model changed none of them. Three inputs are new: every resource of
+`declarations.json` and `bindings.json` gives its parameters' types
+(`params`, F-170), every reading of `conclusions.json` gives the
+deployment's word (`deployment`, F-168: bound for the two cases across a
+face, `null` elsewhere), and an `order.json` sample may give a JSON
+payload as its text (`text`, F-166). The evidence, counted from the files:
+`conformance/declarations.json` (43 cases), `conformance/bindings.json`
+(25), `conformance/order.json` (78), `conformance/reports.json` (74),
+`conformance/conclusions.json` (35) and `conformance/schema.json` (3), 258
+in all, and ten scenario sections.
+
+**Answered: the rules.**
+- **F-161, `wrong_self` of a literal or an unbound parameter** (§2.3).
+  0.1's words, "the first not bound to `self.system`", made every wrong
+  binding of two parameters `wrong_self` too; the fixture's description,
+  and its last case, did not. Now `wrong_self` is a parameter bound to the
+  other's `self`, the first to `self.service` or the second to
+  `self.system`; a literal is `not_self`'s alone, an unbound parameter
+  `target_unbound`'s alone. That was the fixture's reading, the model's
+  and zk2py's. `bindings.json`: its description, and four cases (a
+  literal first, a literal second, the first unbound, and the other's
+  `self` beside a literal, which gives both findings).
+- **F-162, which version a sample is judged against while an act runs**
+  (§2.6, §2.7). §2.6 and the fixture's description judged against the one
+  held waiting alone, §2.7 against the running act's and then the held
+  one; they differ when the held version has another id, and the first
+  let the running act's version be held again over a new epoch's and
+  acted on twice in one instance.
+  - Now §2.6 says §2.7's: against the version last acted on or adopted,
+    which while an act runs is the running act's, then against the one
+    held waiting.
+  - The model judged against the held one alone whenever one was held
+    (`Target::observe`), and now reads §2.7's; zk2py already did.
+  - `order.json`: its description, and three cases: the running act's
+    version again with a new epoch's held (the same version), an older
+    time of the running act's id with another id held (older), and the
+    author's own sample of a version held waiting from an archive
+    (confirmed).
+- **F-163, "never an older version" against step 4** (§2.6). Step 4
+  compared a version with the held one alone, so an archive's stale
+  `400/a1`, after `500/a1` and then the new epoch's `100/b2` were acted
+  on, was another id, acted on: a stale plan applied, which S12 measured
+  none of.
+  - Now step 4 is widened to the bullet. A target keeps, per id, the
+    latest time it acted on or adopted a version of that id in the
+    instance; a version older than that, within its id, is older,
+    whichever id is held and from whichever path, archive or not; an equal
+    one is the same version, never acted on twice; a later one is
+    admitted, the new-id rule standing across ids.
+  - **Memory:** at least the 16 most recent ids an instance acted on or
+    adopted a version of. An id forgotten beyond them is read as new, and
+    the text states that residual, accepted at this version.
+  - The model kept the held version alone; it now remembers 16 ids
+    (`desired::REMEMBERED_IDS`, `Target::remembered`), and a unit test
+    shows the seventeenth forgotten. zk2py's reading, the held version
+    alone, changes.
+  - `order.json`: six cases: the archive's stale `400/a1` after `100/b2`
+    (older), the same from the author's own path, the old id's last acted
+    version again (the same version), an older one while the new id's act
+    runs, an adopted version counting as acted on, and sixteen ids
+    remembered.
+- **F-164, a stamp's id of 0** (§2.4). Stated: the id is never 0, since a
+  zenoh id is never zero. The fixture and both readers already refused
+  `100/0`. `reports.json`: one case, `0/0`, a time of 0 beside an id of 0.
+- **F-165, an absent member in the report's consistency** (§2.10). Now,
+  with `converged` and `desired`, an `in_force` that is absent or not
+  `observed` is a finding, and `last_known` counts only when true: the
+  fixture's reading, the model's and zk2py's. `reports.json`: one case
+  (`last_known: false` with no `observed`, no finding), and case 62's note
+  names the absent `in_force`.
+- **F-166, an integer past 2^53 in equal documents** (§2.7). RFC 8785
+  reads a number as a double, so `{"revision": 9007199254740992}` and
+  `{"revision": 9007199254740993}` were one document, and an author's
+  re-issue past 2^53 was adopted, never acted on.
+  - Now equal is JCS-equal with every number compared by its exact value,
+    the value its text denotes: `10`, `10.0` and `1e1` are one document,
+    2^53 and 2^53 + 1 two.
+  - The model's `Content` hashed `serde_json_canonicalizer`'s bytes,
+    which write every number as a double, so it read 2^53 + 1 as 2^53. It
+    now hashes a canonical form whose numbers are their exact values
+    (`desired::exact_number`), read from the payload's text
+    (`Content::of_payload`); a decoded `serde_json` value
+    (`Content::of_json`, the fixture's `document`) keeps its integers
+    exact and reads a float as its double.
+  - zk2py compared JCS bytes where both documents are in RFC 8785's
+    domain, and exact values otherwise. That reading agrees on every case
+    but one: two documents in that domain whose floats differ in text and
+    round to one double, which a new case pins, and which it now reads as
+    two.
+  - `order.json`: the `text` input, and four cases: 2^53 against
+    2^53 + 1 (acted on), `10` against `10.0` and `1e1` as their text (one
+    document), two integers past 64 bits as their text (two), and `0.1`
+    against `0.10000000000000000555`, one double and two exact values
+    (two). Case 46, `10` against `10.0` decoded, stands.
+- **F-167, "every number finite" for an integer's text** (§2.10). Now
+  finite is defined in this text's words as `telemetry.v1` §2.6 defines
+  it, by rounding, so 10^400 written out, `1e400` and
+  `1.7976931348623159e308` are not strict JSON, in any member, and the
+  largest double's text is.
+  - The model's reader already read so, through `serde_json` with
+    `float_roundtrip`; it now reads through `telemetry.v1`'s strict reader
+    (below), and a unit test pins the edge. zk2py already read so.
+  - `reports.json`: four cases as `text` (a revision of 10^400 written
+    out, `1e400` and `1.7976931348623159e308` in a member the schema does
+    not name, all `json`, and `1.7976931348623158e308` there, read).
+    `order.json`: one case, a document with `1e400`, which does not read
+    and so compares byte for byte.
+- **F-168, the kill switch across a constrained face** (§2.17). Step 1
+  said the deployment's word "stands for the descriptor, and step 3",
+  and the fixture had no input for that word: a role unbound across a
+  face read `unobservable`, `nothing_crossed`, never `unbound`.
+  - Now the deployment's word answers step 2 across a face, listed and
+    bound, as the descriptor does elsewhere; with no word, nothing stands
+    for the descriptor: **unobservable**, `no_descriptor`. A kill switch
+    across a face is answered before any report is read.
+  - The model's `TargetReading` gains `deployment`, which `premises`
+    reads across a face in the descriptor's place. zk2py's reading, step 2
+    not read across a face, changes.
+  - `conclusions.json`: the `deployment` input, and four cases: a role
+    unbound across a face (not asked, `unbound`; in force **no**,
+    `unbound`), the same with the kill switch's report crossed, not a
+    target, and no word.
+- **F-169, the kill switch's report among several roles** (§2.10,
+  §2.12). Stated: a report with no `key` belongs to no role a reader asks
+  about; it tells whoever reads that member that the role it was put for
+  is unbound, and §2.17 answers the kill switch from the descriptor,
+  never reading it. No fixture: no reader reads it.
+- **F-170, a target parameter's type** (§2.2). A seventh reason,
+  `not_string`: a target parameter whose type is not `string`, since a
+  system or a service name is a string. It reads the type of a name that
+  is a parameter and not a rest one, so a rest parameter (`path`, core
+  §2.2) stays `rest_param`'s alone and a name that is no parameter has
+  no type, by §2.2's own rule that a check needing a value an earlier one
+  found wrong is skipped.
+  - The model's `declaration` takes the resource's parameter types, and
+    `declaration_of` passes a contract's. zk2py read no reason, as 0.1's
+    closed list said; that reading changes.
+  - `declarations.json`: `resource.params` on every case, and six cases:
+    a `uint` target, a `uint` second of two, a `uint` parameter that is no
+    target (`param_not_target` alone), a misspelt name beside a `uint`
+    one, a `uint` named twice, and a `uint` target on a stream.
+
+**Also stated: a depth limit** (§2.10, §2.7; found while answering
+F-167, decided by #840's coordinator before round 53). 0.1 bounded no
+depth, so two readers stopped at two places: the model, through
+`serde_json`'s recursion limit, refused a report 128 arrays and objects
+deep as `json`, and zk2py read one 300 deep.
+- Now a report or a document nests at most 256 arrays and objects deep,
+  counted as `telemetry.v1` §2.6 counts it, the top one at depth 1; a
+  report with one at depth 257 is `json`, and a document with one does not
+  read, so it compares byte for byte (§2.7). `alarms.v1` §2.4's reading
+  is unchanged.
+- The model reads a report and a document through `telemetry.v1`'s
+  strict reader (`desired::strict_json`, `desired::MAX_DEPTH`, 256), so
+  `serde_json`'s recursion limit decides nothing; every case that read
+  before reads alike.
+- `reports.json`: two cases as `text`, a report's object holding 255
+  nested arrays (256 deep, read) and 256 (257 deep, `json`).
+
+**Answered: `config.v1`'s** (§2.16, and `config.v1` text 0.4).
+- **F-171, once per revision against once per version.** §2.7 governs a
+  `config.v1` owner fed through this profile: it acts on each version
+  once in an instance, and adopts the same document. To keep the two
+  rules from diverging, `config.v1` §2.18 (text 0.4) makes a
+  `DesiredConfig`'s author move `revision` whenever `values` change; its
+  "once per revision" then reads as §2.7's once per version.
+- **F-172, the mapping's codes and pointer.** The codes add `busy` and
+  `device-refused` for `failed`; the pointer is `/values/<group>`, then
+  `/<parameter>` when the refusal names one, each name escaped as RFC 6901
+  says. No fixture reads the mapping: a tool shows `config.v1`'s report as
+  `config.v1` §5 says.
+
+**Answered: the record.**
+- **F-173, `observed`'s description in the schema** (§3). The schema's
+  next revision says "acted on or adopted" in `observed`'s description
+  and in the Report's, and `outcome`'s names the last act, which an
+  adoption keeps; every keyword is unchanged. Its artifact,
+  `sha256:43c95259…`, is published in §3 beside `sha256:8c5ffce3…`, which
+  stays the profile's, and `schema.json` pins both (its inline copy of
+  0.1's file, published still). `zenkey_model::desired::PUBLISHED` lists
+  both. The scenarios' `worker.v1` lists the file by its path, so its
+  fingerprint moves; it is published in no history.
+- **F-174, `bindings.json`'s count.** 0.1's evidence line said 20; the
+  file held 21, and the six files 222. The line is corrected as an
+  erratum, and this entry's counts are taken from the files.
+
+**Answered: the scenarios.**
+- **F-175, the restarted author's answer** (§7). Expected 2 described the
+  first draft's design, a zid reused, which 0.1's review dropped. Now the
+  restarted author puts v1's document again under its new instance's
+  stamp, another id with the same document, so the target **adopts** it:
+  nothing acted on, its report moved to that stamp without `last_known`.
+  A new section, §10, shows **confirmation**: the same author instance
+  answers after its link heals, while the target, restarted during the
+  cut, had read the archive.
+- **F-176, the baseline report against the first act** (§5). The test now
+  holds the target's act from its start until G has its reply; the
+  drive's simulation can hold one. Nothing orders a target's seed after
+  its tokens, and the text does not make it so.
+- **F-177, `tasking.json` in prose.** It is now given in full, byte for
+  byte the file `zenkey/tests/contracts/tasking.json`, as `telemetry.v1`'s
+  scenarios give `meter.json`; the file is unchanged.
+- **F-178, who sees the target during the cut** (§1). S2, a client of R2,
+  subscribes to `Rp` and `Run`, and Expected 3 is read through it; §10
+  reads through it too.
+- **F-179, a re-mint in one session** (§2.11, §4). A re-mint in its own
+  session keeps its zid (core §8.1), and its re-put carries that zid and
+  a later time; a restart is a new session with a fresh zid. §4's step 3
+  says it re-mints in its own session, and its Expected 3 a later stamp of
+  the same id.
+- **F-180, §9's questions** (§9). Expected 2 to 4 give all four answers.
+
+**Deliberately not changed.**
+- **The core.** F-164's rule is this profile's §2.4, as the coordinator
+  decided; core Appendix B does not say it.
+- **A revision's range** stays 0 to 2^64−1 (§2.4): F-166's other remedy,
+  a bound at 2^53−1, would refuse revisions the adopters may write.
+- **Where an unbound role's report sits** in a resource shared by several
+  roles (F-169's other remedy): no reader reads it.
+- **When a target seeds** (F-176's other remedy, "after its tokens"):
+  §2.5 keeps "at its start", and §5's runner holds the act instead.
+- **The size of a target's memory beyond 16 ids,** and so its forgetting,
+  which no fixture can pin when an implementation may remember more.
+- **The scenarios' two contracts,** already given in full; their comment
+  lines differ from the reference files', which no fingerprint reads.
+- **`alarms.v1`'s reader,** which this profile's §2.10 cites: its own
+  depth stays its text's question.
+
 ## 0.1 — 2026-10-24: the first text, draft (#840, DA)
 
 `desired.v1` is the profile that three places defined each on its own:
@@ -86,7 +337,8 @@ reopened here).
   against v1's `@desired` plane (Appendix A), and the adopters' mappings
   (Appendix B).
 - **Evidence:** `conformance/declarations.json` (37 cases),
-  `conformance/bindings.json` (20), `conformance/order.json` (64),
+  `conformance/bindings.json` (21; this line said 20 until the erratum of
+  0.2, F-174: the six files held 222), `conformance/order.json` (64),
   `conformance/reports.json` (66), `conformance/conclusions.json` (31),
   `conformance/schema.json` (3), each expectation computed twice, by
   `zenkey_model::desired` and by an independent transcription of the

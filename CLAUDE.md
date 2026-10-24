@@ -721,7 +721,18 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   same document as its last act adopted without an act (JCS-equal for
   JSON, else byte-equal), refused whole or reverted, last-known confirmed
   by the author; and §5's four questions with `not_yet`; text 0.1, core
-  0.36 publishing its vocabulary and retiring `target`).
+  0.36 publishing its vocabulary and retiring `target`; text 0.2, F-161 to
+  F-180, #840 DB: `PUBLISHED` 0.1's `8c5ffce3…` and 0.2's `43c95259…`
+  (descriptions only); a seventh declaration reason, `not_string`
+  (`declaration` takes the parameter types); `wrong_self` only for the
+  other's `self`; a per-id memory of the latest time acted on or adopted
+  (`REMEMBERED_IDS`, 16), so an old id's stale version is `older` whichever
+  id is held, the running act's version judged before the held one; equal
+  documents by JCS with every number's exact value (2^53 and 2^53+1 two);
+  reports and documents read strictly, finite by rounding and at most 256
+  deep (`strict_json`, telemetry's reader); across a face the deployment's
+  word answers step 2 (`TargetReading::deployment`); with config.v1 text
+  0.4, a `DesiredConfig`'s author moving `revision` with `values`).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2

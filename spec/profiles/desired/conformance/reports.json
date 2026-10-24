@@ -1136,7 +1136,7 @@
         ],
         "readable": true
       },
-      "note": "converged, nothing said in force"
+      "note": "converged, nothing said in force: an absent in_force is not observed (0.2, F-165)"
     },
     {
       "document": {
@@ -1197,7 +1197,95 @@
         "readable": true
       },
       "note": "every finding at once, in order"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "0/0"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "0/0"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "stamp"
+        ],
+        "readable": false
+      },
+      "note": "the stamp 0/0: a time may be 0, an id never (0.2, F-164)"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "last_known": false,
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "last_known false with no observed: false is absent, no finding (0.2, F-165)"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false
+      },
+      "note": "a revision of 10^400 written out: not finite by rounding, so not strict JSON (0.2, F-167)",
+      "text": "{\"key\":\"zk2/lab/author/tasking.v1/state/tasks/lab/worker\",\"source\":\"desired\",\"in_force\":{\"stamp\":\"100/a1\",\"revision\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000},\"observed\":{\"stamp\":\"100/a1\",\"revision\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000},\"outcome\":\"converged\"}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false
+      },
+      "note": "1e400 in a member the schema does not name: the report does not read",
+      "text": "{\"key\":\"zk2/lab/author/tasking.v1/state/tasks/lab/worker\",\"source\":\"baseline\",\"x\":1e400}"
+    },
+    {
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "1.7976931348623158e308, read as the largest double, in a member the schema does not name: finite, read",
+      "text": "{\"key\":\"zk2/lab/author/tasking.v1/state/tasks/lab/worker\",\"source\":\"baseline\",\"x\":1.7976931348623158e308}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false
+      },
+      "note": "1.7976931348623159e308, past the edge, 2^1024 - 2^970: it rounds to an infinity, not finite",
+      "text": "{\"key\":\"zk2/lab/author/tasking.v1/state/tasks/lab/worker\",\"source\":\"baseline\",\"x\":1.7976931348623159e308}"
+    },
+    {
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "256 deep: the report's object at depth 1 and 255 nested arrays in a member the schema does not name, read (0.2)",
+      "text": "{\"key\":\"zk2/lab/author/tasking.v1/state/tasks/lab/worker\",\"source\":\"baseline\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false
+      },
+      "note": "257 deep: one array more, at depth 257, is not strict JSON",
+      "text": "{\"key\":\"zk2/lab/author/tasking.v1/state/tasks/lab/worker\",\"source\":\"baseline\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"
     }
   ],
-  "description": "desired.v1 §2.4, §2.10: a target's report, decoded as JSON (document), or as its bytes' text (text, read as strict JSON: UTF-8, RFC 8259, nothing after the value but RFC 8259's whitespace, no duplicate member at any depth, every number finite) -> whether a reader reads it (readable), and its findings (errors), in the order checked. Unreadable, the first only: json (text that is not strict JSON); schema (outside desired.v1.json's desired.v1.Report: source required and one of baseline, desired, call; key a string; in_force and observed objects, each with stamp a string of at least 3 characters and revision, if present, an integer from 0, an integral number read as an integer; outcome one of converged, refused, failed, reverted; refusal an object with code a string of 1 to 64 characters, pointer and detail strings; last_known a boolean; a member the schema does not name ignored); stamp (a stamp not in zenoh's form: the time in decimal, 0 or without a leading zero, at most 2^64-1, a slash, the id in lowercase hexadecimal, without a leading zero, at most 32 digits); revision_range (a revision above 2^64-1). Readable, every finding that applies, in this order: keyless (no key, with a source other than baseline, or with observed); key_form (a key that is not a concrete zk2 data key, core §1.1, of kind token state or @state); observed_outcome (observed without outcome, or outcome without observed); refusal (a refusal with an outcome other than refused or failed, or refused or failed without one); source (desired without observed; converged with baseline; reverted with desired); in_force (in_force with a source other than desired, or with failed; or converged with desired and an in_force that is not observed, its revision compared as an integer); revision_on_revert (reverted with a revision in observed); last_known (last_known true without observed)."
+  "description": "desired.v1 §2.4, §2.10: a target's report, decoded as JSON (document), or as its bytes' text (text, read as strict JSON: UTF-8, RFC 8259, nothing after the value but RFC 8259's whitespace, no duplicate member at any depth, every number finite by rounding, 0.2, F-167: its exact value, rounded to the nearest double, not an infinity, as telemetry.v1 §2.6 reads it; and at most 256 arrays and objects deep, 0.2, counted as telemetry.v1 §2.6 counts it: an array or an object at the top at depth 1, one inside another one deeper, a scalar adding none) -> whether a reader reads it (readable), and its findings (errors), in the order checked. Unreadable, the first only: json (text that is not strict JSON); schema (outside desired.v1.json's desired.v1.Report: source required and one of baseline, desired, call; key a string; in_force and observed objects, each with stamp a string of at least 3 characters and revision, if present, an integer from 0, an integral number read as an integer; outcome one of converged, refused, failed, reverted; refusal an object with code a string of 1 to 64 characters, pointer and detail strings; last_known a boolean; a member the schema does not name ignored); stamp (a stamp not in zenoh's form: the time in decimal, 0 or without a leading zero, at most 2^64-1, a slash, the id, never 0 (0.2, F-164: a zenoh id is never zero), in lowercase hexadecimal, without a leading zero, at most 32 digits); revision_range (a revision above 2^64-1). Readable, every finding that applies, in this order: keyless (no key, with a source other than baseline, or with observed); key_form (a key that is not a concrete zk2 data key, core §1.1, of kind token state or @state); observed_outcome (observed without outcome, or outcome without observed); refusal (a refusal with an outcome other than refused or failed, or refused or failed without one); source (desired without observed; converged with baseline; reverted with desired); in_force (in_force with a source other than desired, or with failed; or converged with desired and no in_force or one that is not observed, its revision compared as an integer; 0.2, F-165); revision_on_revert (reverted with a revision in observed); last_known (last_known true without observed; false is absent, 0.2, F-165)."
 }

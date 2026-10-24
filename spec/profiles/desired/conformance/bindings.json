@@ -21,6 +21,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       },
       "target": "vehicle-01/executor"
@@ -46,6 +49,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       },
       "target": "vehicle-01/executor"
@@ -76,6 +82,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
@@ -106,6 +116,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/targets.snmp"
       },
       "target": "h-3fa9c2d41b7e/snmp.router01"
@@ -137,6 +151,10 @@
         },
         "explicit": true,
         "kind": "state",
+        "params": {
+          "service": "string",
+          "system": "string"
+        },
         "template": "tasks/{system}/{service}"
       },
       "target": "lab/worker"
@@ -168,6 +186,10 @@
         },
         "explicit": true,
         "kind": "state",
+        "params": {
+          "service": "string",
+          "system": "string"
+        },
         "template": "tasks/{system}/{service}"
       },
       "target": "x-lab/worker"
@@ -199,6 +221,10 @@
         },
         "explicit": true,
         "kind": "state",
+        "params": {
+          "service": "string",
+          "system": "string"
+        },
         "template": "tasks/{system}/{service}"
       },
       "target": "lab/x-worker"
@@ -225,6 +251,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       },
       "target": "vehicle-01/executor"
@@ -249,6 +278,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
@@ -276,6 +309,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
@@ -303,6 +340,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
@@ -331,6 +372,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       },
       "target": "vehicle-01/executor"
@@ -358,6 +402,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       },
       "target": "vehicle-01/executor"
@@ -390,6 +437,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
@@ -421,6 +472,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
@@ -446,6 +501,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       },
       "target": "vehicle-01/executor"
@@ -473,6 +531,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       },
       "target": "vehicle-01/executor"
@@ -500,6 +561,9 @@
           "desired.target_param": "vehicle"
         },
         "kind": "state",
+        "params": {
+          "vehicle": "string"
+        },
         "template": "plans/{vehicle}"
       },
       "target": "vehicle-01/executor"
@@ -532,6 +596,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
@@ -564,6 +632,10 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
@@ -598,10 +670,158 @@
           "freshness.ttl_s": 0
         },
         "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_self"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "a literal in the first of two: not_self alone, never wrong_self (0.2, F-161)",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "h-0000",
+          "service": "self.service"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_self"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "a literal in the second of two: not_self alone",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "self.system",
+          "service": "sysinfo"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "target_unbound"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "the first unbound, the second its own self: target_unbound alone",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "service": "self.service"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_self",
+          "wrong_self"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "the first bound to the other's self, the second a literal: each finding alone",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "self.service",
+          "service": "sysinfo"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "params": {
+          "host": "string",
+          "service": "string"
+        },
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
     }
   ],
-  "description": "desired.v1 §2.3: a desired resource (as declarations.json writes it, its declaration declared), its author's interface id (iface), the target's own address (target, <system>/<service>), and the target's requirement as its descriptor lists it (core §3.3: bindings, the provider addresses; params, the parameter bindings as configured; optional) -> expect.binding: \"unbound\" (no binding, and optional: the kill switch, §2.12); \"invalid\", with reasons in this order: required_unbound (no binding, and required; checked alone), not_one_author (more than one binding, or one with * at either position), target_unbound (a target parameter params does not bind), not_self (a target parameter bound to anything but self.system or self.service), wrong_self (of two target parameters, one bound to a self other than its own: the first is self.system's, the second self.service's); or \"bound\", with key: zk2/<author system>/<author service>/<iface>/<state, or @state for an explicit resource>/<the template's chunks, each target parameter's the target's own system or service as its binding says, slugged as core §1.4 slugs a value>."
+  "description": "desired.v1 §2.3: a desired resource (as declarations.json writes it, its declaration declared), its author's interface id (iface), the target's own address (target, <system>/<service>), and the target's requirement as its descriptor lists it (core §3.3: bindings, the provider addresses; params, the parameter bindings as configured; optional) -> expect.binding: \"unbound\" (no binding, and optional: the kill switch, §2.12); \"invalid\", with reasons in this order: required_unbound (no binding, and required; checked alone), not_one_author (more than one binding, or one with * at either position), target_unbound (a target parameter params does not bind), not_self (a target parameter bound to anything but self.system or self.service), wrong_self (0.2, F-161: of two target parameters, one bound to the other's self, the first to self.service or the second to self.system; a literal is not_self's alone, and an unbound parameter target_unbound's); or \"bound\", with key: zk2/<author system>/<author service>/<iface>/<state, or @state for an explicit resource>/<the template's chunks, each target parameter's the target's own system or service as its binding says, slugged as core §1.4 slugs a value>."
 }

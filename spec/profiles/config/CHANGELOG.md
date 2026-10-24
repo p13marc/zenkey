@@ -4,6 +4,43 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-24: a document fed through `desired.v1` (#840, DB; #609)
+
+`desired.v1` exists now (its text 0.2), and states this profile's §2.18
+as the rules of one document type, `DesiredConfig` (its §2.16). zk2py's
+round 52, reading `desired.v1` 0.1 cold, found the two texts disagreeing
+in one case and leaving the mapping half said (F-171, F-172); the answers
+are #840's coordinator's. Still written against core 0.28. Every fixture
+is unchanged: no rule here needs one, the author's being shown by
+`scenarios.md` §12, whose every document moves its revision, and the
+owner's by `desired.v1`'s `order.json`.
+
+**Answered.**
+- **F-171, once per revision against once per version** (§2.18).
+  `desired.v1` §2.7 tells two documents apart by their content, this text
+  by their revision; they disagreed when an author changed `values` and
+  kept `revision`.
+  - Now an owner fed through `desired.v1` acts as its §2.7 says: on each
+    version once in an instance, adopting without an act a version whose
+    document equals the last one it acted on or adopted.
+  - A `DesiredConfig`'s author MUST move `revision` whenever `values`
+    change, so that the two rules never diverge: "once per revision" then
+    reads as `desired.v1`'s once per version, and a revision put again
+    unchanged is adopted. A document that breaks the author's rule is
+    acted on, as `desired.v1` §2.7 says.
+- **F-172, the mapping onto `desired.v1`'s Report** (§2.18). The pointer
+  of a refusal is `/values/<group>`, then `/<parameter>` when the refusal
+  names one, each name escaped as RFC 6901 says; `desired.v1` §2.16 lists
+  `busy` and `device-refused`, `failed`'s codes, beside the refusals'.
+
+**Deliberately not changed.**
+- **What a delete reverts an owner to,** which `desired.v1` §2.16 leaves
+  to this text: the runtime that feeds an owner through `desired.v1`
+  (#840's DC) is where it will be settled.
+- **The report's own type.** `DesiredReport` keeps its members and carries
+  no stamp; `desired.v1` §5 does not read it, and §5 here answers it.
+- **The order of refusals and the codes,** unchanged since 0.1.
+
 ## 0.3 — 2026-10-18: round 29's two findings, and the four points 0.2 left open (#768, CC; #609)
 
 zk2py's round 29 read 0.2 cold and passed every fixture (1240 of 1240)
