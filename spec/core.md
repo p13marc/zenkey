@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.35** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.37** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -34,9 +34,11 @@ covers, as compiling `link.v1` measured, in 0.31 whether a principal's
 own keys are in its complement, in 0.32 that its complement is taken
 per message and flow, in 0.33 that a principal is bound by one kind
 of name, in 0.34 what `alarms.v1` needed: its vocabulary
-published empty, without the interim `severity_default`, and in 0.35
+published empty, without the interim `severity_default`, in 0.35
 what `telemetry.v1` needed: a standard schema as a profile's first
-point, and its vocabulary published).
+point, and its vocabulary published, and in 0.37 what `desired.v1`
+needed: its vocabulary published without the interim `target`, and an
+owner restarting from its record keeping its zid).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -225,6 +227,14 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
   - It SHOULD do so in a new session, so that its timestamps' id changes
     too (§4.3). That change, and presence, are how a consumer sees the
     discontinuity.
+  - **An owner restarting from its record** (0.37) has no discontinuity to
+    show: its catch-up keeps its state's ordering (§4.3), and it answers a
+    member it has not changed since under the stamp its record holds for
+    it (S2). It still mints a new instance id, and MAY keep its session's
+    zid, so that a tool's S1 check (§4.2) reads those stamps as its own.
+    [`desired.v1`](profiles/desired/v1.md)'s author does (its §2.11): it
+    puts nothing unchanged, since every put of a document is a version its
+    targets act on again.
   - A counter that crosses a face where neither is visible SHOULD carry
     its epoch in-band, in its value or its attachment, as
     [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9,
@@ -1223,7 +1233,7 @@ section is what the core requires of it.
   `[F: descriptors/d011-tokenless-archive]`
 - **Placement.** An archive on the consumer's side covers losing the link,
   and one on the owner's side covers losing the owner. Store-and-forward
-  (`desired.v1`) uses both.
+  ([`desired.v1`](profiles/desired/v1.md) §2.9, 0.37) uses both.
 - **What a tool can see** (0.10). An archive publishes no alignment status
   at this version: not when it last aligned, from where, or how many
   attempts it made. A tool sees each key's `confirmed` and nothing more, so
@@ -2762,7 +2772,9 @@ A **profile** is an independently versioned specification, such as
 here names a profile ([`health.v1`](profiles/health/v1.md) for reporting,
 [`link.v1`](profiles/link/v1.md) for face configuration, `archive.v1` for archives,
 [`freshness.v1`](profiles/freshness/v1.md) for a value's age,
-[`telemetry.v1`](profiles/telemetry/v1.md) for a counter's epoch), it names
+[`telemetry.v1`](profiles/telemetry/v1.md) for a counter's epoch,
+[`desired.v1`](profiles/desired/v1.md) for store-and-forward and an owner
+restarting from its record), it names
 the standard way to meet the rule, which the core states in its own
 terms. A profile contributes through these four points, and through no
 other:
@@ -2785,7 +2797,9 @@ other:
      profile's types, and a type of the same name in another artifact
      does not. The first is `telemetry.v1`'s
      ([`profiles/telemetry/telemetry.v1.json`](profiles/telemetry/telemetry.v1.json),
-     its §3, 0.35). A standard schema adds no interface, and a
+     its §3, 0.35), and `desired.v1`'s followed
+     ([`profiles/desired/desired.v1.json`](profiles/desired/desired.v1.json),
+     its §3, 0.37). A standard schema adds no interface, and a
      contract that lists it is classified and published as any other
      (§9.7, §9.8).
 2. **An annotation vocabulary.** Keys are `<profile>.<key>`. A contract
@@ -2798,10 +2812,11 @@ other:
    A published vocabulary replaces its interim table, and W105 reads it
    the same way (0.21). The first is `freshness.v1`'s
    ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4);
-   `link.v1`'s ([`profiles/link/v1.md`](profiles/link/v1.md) §4, 0.29)
-   and `telemetry.v1`'s
-   ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, 0.35)
-   followed.
+   `link.v1`'s ([`profiles/link/v1.md`](profiles/link/v1.md) §4, 0.29),
+   `telemetry.v1`'s
+   ([`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, 0.35) and
+   `desired.v1`'s ([`profiles/desired/v1.md`](profiles/desired/v1.md) §4,
+   0.37) followed.
    A profile may publish an empty one, as `alarms.v1` does
    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4, 0.34): it
    defines no key, so W105 warns of every key under its name.
@@ -3226,6 +3241,7 @@ Appendix B. These are the ones the rules above cite:
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
 | `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
+| `profiles/desired/scenarios.md` §6 | §1.5 an owner restarting from its record, answering with its recorded stamps under the zid it kept (0.37) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)
@@ -3260,6 +3276,7 @@ profile's own table replaces its interim one.
 | `link` | `exposure` | [`profiles/link/v1.md`](profiles/link/v1.md) §4 (0.29) |
 | `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 (0.34) |
 | `telemetry` | `kind`, `unit`, `buckets`, `semantic` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4 (0.35) |
+| `desired` | `target_param` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4 (0.37) |
 
 `link.downsample_ms` left with the interim `link` row (0.29): a face's
 rate is its face policy's `interval_s` (`link.v1` §2.8), a deployment
@@ -3272,6 +3289,11 @@ there is nothing for a default to fill, and `alarms.v1` publishes no key.
 A contract that writes `alarms.<key>` draws W105.
 `[F: contracts/w105-alarms-vocabulary]`
 
+`desired.target` left with the interim `desired` row (0.37): the binding
+already says which identity fills each target parameter (R2), and no
+contract wrote it, so it is outside `desired.v1`'s published table, and a
+contract that writes it draws W105. `[F: contracts/w105-desired-target]`
+
 **Interim annotation vocabularies** (W105 outside them, until each profile
 publishes its own):
 
@@ -3279,7 +3301,6 @@ publishes its own):
 |---|---|
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` |
 | `arbitration` | `policy` |
-| `desired` | `target_param`, `target` |
 | `media` | `tiers`, `tier_param`, `frame_clock`, `control`, `receiver_report` |
 | `views` | `document` (an extra's id, `sha256:…`; §9.6) |
 | `redundancy` | `election` |

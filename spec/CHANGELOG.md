@@ -3,6 +3,83 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.37 — 2026-10-24: what `desired.v1` needed of the core (#840)
+
+`desired.v1`'s first text (#840, DA) states the profile three adopters
+had each defined on its own (`config.v1` §2.18, the walkthrough's
+`mission_plan.v1`, ZenSight's `zs.desired.v1`), and publishes the interim
+`desired` row of Appendix D. 0.36 is #839's (what a complete presence read
+is). No fixture case changed; one is added.
+
+**Changed: `desired.v1`'s vocabulary published, without `target`
+(Appendix D, §10).**
+- **The gap.** Appendix D's interim tables gave `desired` two keys,
+  `target_param` and `target`, from architecture D19's list, and nothing
+  said what either meant. `target_param` is what the walkthrough and
+  ZenSight write; `target` no contract under `examples/zk2/` or `spec/`
+  wrote, and R2's `self.system` and `self.service` (0.20) already say
+  which identity fills each target parameter.
+- **The rule.** `desired.v1` §4 publishes `target_param` alone. Appendix
+  D's published table gains `desired`, and the interim row is gone. W105
+  reads the published table as it reads any other (0.21), so a contract
+  that writes `desired.target` draws W105, and `desired.target_param`
+  draws none. `[F: contracts/w105-desired-target]`
+- **What the value means** is the profile's (§10): its §2.2 reads it, one
+  template parameter or two, the first bound to `self.system` and the
+  second to `self.service`.
+- **§10** names `desired.v1` among the profiles the core names, for
+  store-and-forward (§4.4) and an owner restarting from its record
+  (§1.5), its standard schema beside `telemetry.v1`'s (point 1), and its
+  vocabulary beside the published ones (point 2).
+
+**Changed: an owner restarting from its record may keep its zid (§1.5).**
+- **The gap.** §1.5 has an owner mint a new instance id whenever its
+  state's ordering restarts, and SHOULD do so in a new session, so that
+  its timestamps' id changes and a consumer sees the discontinuity. An
+  owner that restarts from its persistent record has none to show: §4.3's
+  catch-up keeps its ordering. `desired.v1`'s author must then answer its
+  targets' seeds with the versions they acted on, each document under the
+  stamp its record holds (S2: a reply carries the stamp of the mutation
+  it represents), because a re-put of an unchanged document is a new
+  version, which every target acts on again (`desired.v1` §2.6, §2.11).
+  Under a new zid, a tool's S1 check (§4.2) reads those stamps as
+  foreign, since it attributes a stamp by `meta.zid`.
+- **The rule.** §1.5 says that such an owner still mints a new instance
+  id, and MAY keep its session's zid, so that the stamps it answers with
+  stay its own. `desired.v1` §2.11 makes it a SHOULD for its authors. No
+  MUST is added, so no evidence is owed; `desired.v1`'s scenarios §6
+  observes it, and Appendix C lists it.
+- **Why not re-put, as `alarms.v1` does.** `alarms.v1` §2.9 puts every
+  alarm again from a new instance, so that its GET answers carry its own
+  stamps: an alarm re-put is a confirmation, which no reader acts on. A
+  desired document re-put is a version, which its target applies again: a
+  mission plan restarted, a fleet reconverging at every restart of its
+  author (ZenSight's `zensight-desired` writes nothing on a restart for
+  that reason).
+
+**Changed: a pointer (§4.4).** "Store-and-forward (`desired.v1`) uses
+both" cites `desired.v1` §2.9.
+
+**Deliberately not changed.**
+- **The order of versions.** `desired.v1` §2.6 is §4.3's consumer rule:
+  by time within one id, the first value under another id accepted. Two
+  ids within one seed stay §4.3's residual risk, as 0.26 left them; the
+  profile names the case and adds no rule of the core's.
+- **S1–S7.** A document is state, and its version the owner's stamp
+  (S1, S2): nothing new is needed to carry it. The author's tombstone
+  window covering the outage to its targets is S3's rule, extended by the
+  profile to targets, as `link.v1` §2.11 extends it to every state behind
+  a face.
+- **A late joiner's seed** (§4.2) is the target's reading, unchanged, and
+  silence is still no verdict (O5): a target reverts only on a delete or
+  a `reply_del`.
+- **No core lint reads `target_param`'s value.** A declaration
+  `desired.v1` §2.2 reads as invalid (a stream, a name that is no
+  parameter, a horizon above 0) still loads, as `freshness.ttl_s` and
+  `telemetry.*` values do (0.21, 0.35). A linter SHOULD warn.
+- **§8.1 and Appendix B** are untouched: a target watches its author's
+  instance token, which the tokenless set never removes.
+
 ## 0.35 — 2026-10-21: what `telemetry.v1` needed of the core (#819)
 
 `telemetry.v1`'s first text (#819, TA) states what a metric is, moves
