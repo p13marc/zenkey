@@ -17,6 +17,7 @@ and `examples/zk2/`.
 | [`alarms.v1`](alarms/v1.md) | 0.8 | draft | 0.34 | 1: [`alarms.v1.toml`](alarms/alarms.v1.toml); 2: published empty; 4 through `uses` (`freshness.v1`) | The active alarms of one service, one state key per alarm, keyed from its document by ZenSight's recipe: raised, escalated, refreshed and resolved, the state read from the document; confirmed every 450 s while firing, so a hung owner's alarms read stale and an absent one's last-known, and "nothing fires" only from an owner's alarms known whole (core S2, S6, O5) |
 | [`telemetry.v1`](telemetry/v1.md) | 0.5 | draft | 0.35 | 1: a standard schema, [`telemetry.v1.json`](telemetry/telemetry.v1.json); 2: `kind`, `unit`, `buckets`, `semantic`; 4 through `uses` | What a metric is: a member's kind and unit, declared or carried by the Point, whose types are the profile's by their artifact's id; whether a sample conforms; a counter's or a histogram's epoch, in-band or from presence, a decrease within an established one the finding and one without evidence a reset; a counter's rate over one epoch; absent is not zero (core §1.5, §7.1, O5) |
 | [`desired.v1`](desired/v1.md) | 0.2 | draft | 0.36 | 1: a standard schema, [`desired.v1.json`](desired/desired.v1.json); 2: `target_param`; 4 through `uses` | A document an author keeps as its own state, keyed by its target: the target binds its own slice by R2, orders versions by its author's stamp, acts on each once per instance and never on an older one, refuses whole what it cannot take with the previous kept in force, reverts on a delete and never on silence, and reports what is in force and what it last did in the standard `Report`; the author writes only on a change, and restarts from its record (core S1–S7, §4.2, §4.4, R2) |
+| [`redundancy.v1`](redundancy/v1.md) | 0.1 | draft | 0.39 | 2: `election`; 4 through `uses` | One instance serves a governed interface, the others stand by: a candidate's claim is its instance token, the incumbent the holder of the interface's token, a standby marked in its descriptor and exposing nothing, so a call finds none; a live incumbent wins, the lowest id of a complete read breaks a tie, a vacancy is a withdrawal confirmed by a complete read, and a healed split leaves the lower id; consumers follow the incumbent's stamps; `external` names an actuator's own lock; eventual single writer, never a fence (core §5.1 O1, §6, §8.1, §8.2) |
 
 ## Layout
 
@@ -131,7 +132,13 @@ thing in the same place.
   author's restart needed no core change: it puts its documents again from
   its new instance, as `alarms.v1`'s owner does, and its targets adopt
   them without an act. Its text 0.2 needed none either: a stamp's id
-  that is never 0 is its own §2.4's.
+  that is never 0 is its own §2.4's. `redundancy.v1` needed 0.39, so that
+  a descriptor marks a standby (`"standby": true`, D012 when tokenless),
+  the core defines what a standby holds and exposes, a standby taking
+  over and an incumbent stepping down follow §8.2's steps and their
+  reverse, the tokenless set never names a governed interface, the
+  split-brain check reads the mark, and Appendix D publishes its
+  vocabulary, the interim `election` unchanged.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in
@@ -151,7 +158,8 @@ thing in the same place.
     is named by its interface id, and is published in
     `spec/profiles/.history`, compatible with every earlier revision there.
   - A profile's session-free code lives in `zenkey-model` (`hostid`,
-    `freshness`, `health`, `config`, `link`, `alarms`, `telemetry`, `desired`), and its runtime in
+    `freshness`, `health`, `config`, `link`, `alarms`, `telemetry`, `desired`,
+    `redundancy`), and its runtime in
     `zenkey`. Its scenarios run as tests of the runtime, one test per
     section, named after it, as the core's do. A scenario that is a tool's
     runs as a test of that tool.

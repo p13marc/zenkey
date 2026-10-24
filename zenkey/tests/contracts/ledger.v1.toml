@@ -1,0 +1,25 @@
+# redundancy.v1's scenarios (#841; spec/profiles/redundancy/scenarios.md): a
+# single writer elected by the profile's claim protocol. Governed through
+# `uses`; the election is written once on [defaults], where it reaches every
+# resource (redundancy.v1 §2.2). `claim` is the default, spelled out.
+[interface]
+name  = "ledger"
+major = 1
+minor = 0
+uses  = ["redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.balance]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.entries]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.append]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }

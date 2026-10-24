@@ -77,6 +77,8 @@ pub(crate) fn build(
                 iface: s.imp.iface().to_string(),
                 contract: s.imp.fingerprint().to_string(),
                 minor: u64::from(s.imp.contract().minor.unwrap_or(0)),
+                // A standby's mark is redundancy.v1's runtime (#841, RB).
+                standby: false,
                 token: !config.tokenless.contains(s.imp.iface()),
                 unavailable,
                 cardinality: s.cardinality.clone(),

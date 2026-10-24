@@ -525,6 +525,7 @@ congestion = "block"
                     iface: iface.to_string(),
                     contract: revision.fingerprint().to_string(),
                     minor: 0,
+                    standby: false,
                     token: true,
                     unavailable: Vec::new(),
                     cardinality: Map::new(),

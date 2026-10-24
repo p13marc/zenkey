@@ -555,9 +555,10 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// interim `downsample_ms`), `alarms.v1` an empty one
 /// (`alarms::VOCABULARY`, core 0.34, which drops the interim
 /// `severity_default`), `telemetry.v1` the interim row's four keys
-/// (`telemetry::VOCABULARY`, core 0.35), and `desired.v1` `target_param`
+/// (`telemetry::VOCABULARY`, core 0.35), `desired.v1` `target_param`
 /// alone (`desired::VOCABULARY`, core 0.36, which retires the interim
-/// `target`).
+/// `target`), and `redundancy.v1` the interim row's `election`
+/// (`redundancy::VOCABULARY`, core 0.39).
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),
     ("timing", &["period_ms", "deadline_ms", "lifespan_ms"]),
@@ -577,7 +578,7 @@ const VOCABULARIES: &[(&str, &[&str])] = &[
         ],
     ),
     ("views", &["document"]),
-    ("redundancy", &["election"]),
+    (crate::redundancy::NAME, crate::redundancy::VOCABULARY),
 ];
 
 fn check_annotations(

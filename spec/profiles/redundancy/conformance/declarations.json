@@ -1,0 +1,633 @@
+{
+  "cases": [
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "freshness.ttl_s": 900
+            },
+            "template": "entities/{entity_id}"
+          },
+          {
+            "annotations": {
+              "freshness.ttl_s": 900
+            },
+            "template": "incidents/{incident_id}"
+          },
+          {
+            "annotations": {},
+            "template": "assert_link"
+          }
+        ],
+        "uses": [
+          "redundancy.v1",
+          "freshness.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "governed",
+        "election": "claim"
+      },
+      "note": "ZenSight's catalog: governed through uses, no election written, so claim (§2.2, Appendix B)",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "claim"
+            },
+            "template": "balance"
+          },
+          {
+            "annotations": {
+              "redundancy.election": "claim"
+            },
+            "template": "entries"
+          },
+          {
+            "annotations": {
+              "redundancy.election": "claim"
+            },
+            "template": "append"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "governed",
+        "election": "claim"
+      },
+      "note": "the election written once on [defaults], resolved onto every resource: claim",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "external"
+            },
+            "template": "position"
+          },
+          {
+            "annotations": {
+              "redundancy.election": "external"
+            },
+            "template": "set"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "governed",
+        "election": "external"
+      },
+      "note": "external on every resource: an outside lock elects (§2.11)",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "governed",
+        "election": "claim"
+      },
+      "note": "an interface with no resource is claim",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "freshness.ttl_s": 60
+            },
+            "template": "status"
+          }
+        ],
+        "uses": [
+          "freshness.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "not_governed"
+      },
+      "note": "not governed: uses lists other profiles only",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {},
+            "template": "position"
+          }
+        ],
+        "uses": []
+      },
+      "expect": {
+        "declaration": "not_governed"
+      },
+      "note": "not governed: no uses at all",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {},
+            "template": "status"
+          }
+        ],
+        "uses": [
+          "freshness.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "not_governed"
+      },
+      "note": "not governed, and the tokenless set may name it: only a governed interface is refused there",
+      "tokenless": true
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "quorum"
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v2"
+        ]
+      },
+      "expect": {
+        "declaration": "not_governed"
+      },
+      "note": "another major of the profile is that major's text, its key its own",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "claim"
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "freshness.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_used"
+        ]
+      },
+      "note": "not_used: the election written, uses naming no major of redundancy (core E020's)",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "vote"
+            },
+            "template": "a"
+          }
+        ],
+        "uses": []
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_used",
+          "value"
+        ]
+      },
+      "note": "not_used, and the value checked alone beside it",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "vote"
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "value: a string outside the vocabulary",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "Claim"
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "value: case is not folded",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": true
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "value: a boolean is not the string",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": [
+                "external"
+              ]
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "value: a one-element array is not the string",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": ""
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "value: the empty string",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "external"
+            },
+            "template": "position"
+          },
+          {
+            "annotations": {},
+            "template": "set"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "disagrees"
+        ]
+      },
+      "note": "disagrees: a [defaults.state] election reaches only the state resources, the rest read as claim",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "claim"
+            },
+            "template": "a"
+          },
+          {
+            "annotations": {
+              "redundancy.election": "external"
+            },
+            "template": "b"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "disagrees"
+        ]
+      },
+      "note": "disagrees: claim and external written apart",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "claim"
+            },
+            "template": "a"
+          },
+          {
+            "annotations": {},
+            "template": "b"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "governed",
+        "election": "claim"
+      },
+      "note": "no disagreement: a resource carrying none reads as claim, beside one writing claim",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "external"
+            },
+            "template": "a"
+          },
+          {
+            "annotations": {
+              "redundancy.election": 3
+            },
+            "template": "b"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "a resource found value takes no part in disagrees",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "external"
+            },
+            "template": "a"
+          },
+          {
+            "annotations": {},
+            "template": "b"
+          },
+          {
+            "annotations": {
+              "redundancy.election": null
+            },
+            "template": "c"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value",
+          "disagrees"
+        ]
+      },
+      "note": "value and disagrees together: the valid resources still disagree",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {},
+            "template": "balance"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "tokenless"
+        ]
+      },
+      "note": "tokenless: a governed interface in the deployment's tokenless set (§2.14)",
+      "tokenless": true
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "external"
+            },
+            "template": "position"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "tokenless"
+        ]
+      },
+      "note": "tokenless under external too: its incumbent is the holder of its token as well",
+      "tokenless": true
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "external"
+            },
+            "template": "a"
+          },
+          {
+            "annotations": {},
+            "template": "b"
+          },
+          {
+            "annotations": {
+              "redundancy.election": "x"
+            },
+            "template": "c"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value",
+          "disagrees",
+          "tokenless"
+        ]
+      },
+      "note": "value, disagrees and tokenless together: not_used and tokenless exclude each other, so three is the most",
+      "tokenless": true
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.election": "claim",
+              "redundancy.epoch": 1
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "governed",
+        "election": "claim"
+      },
+      "note": "another redundancy key is W105's and makes nothing invalid (core 0.39)",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {
+              "redundancy.role": "primary"
+            },
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v1"
+        ]
+      },
+      "expect": {
+        "declaration": "governed",
+        "election": "claim"
+      },
+      "note": "another redundancy key alone: still claim",
+      "tokenless": false
+    },
+    {
+      "contract": {
+        "resources": [
+          {
+            "annotations": {},
+            "template": "a"
+          }
+        ],
+        "uses": [
+          "redundancy.v1",
+          "redundancy.v2"
+        ]
+      },
+      "expect": {
+        "declaration": "governed",
+        "election": "claim"
+      },
+      "note": "redundancy.v1 listed beside another major is E002 to a linter; here the v1 text governs",
+      "tokenless": false
+    }
+  ],
+  "description": "redundancy.v1 §2.2: a contract's uses and each resource's resolved annotations (core §9.3, any order), and whether the deployment's tokenless set names the interface -> its declaration. contract.uses lists profile ids as <name>.v<major>; contract.resources[].annotations is the resource's merged annotations. expect.declaration is one of: \"not_governed\" (uses lists no redundancy.v1 and no resource carries redundancy.election; or uses lists another major of redundancy and not v1, that major's text then governing its keys); \"governed\", with election, \"claim\" or \"external\": the one election every resource resolves to, a resource carrying none read as claim, an interface with no resource claim; or \"invalid\", with reasons, in this order, each checked alone: not_used (a resource carries redundancy.election, and uses names no major of redundancy: core E020's), value (a resource's redundancy.election is not the string claim or external), disagrees (two resources resolve to two elections, each valid, one carrying none read as claim; a resource found value takes no part), tokenless (governed, and the tokenless set names the interface). Another redundancy.<key> makes nothing invalid (it is W105's), and annotations on requirements are not read."
+}

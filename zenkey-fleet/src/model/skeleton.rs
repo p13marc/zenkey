@@ -773,6 +773,7 @@ response = { raw = "text/plain" }
                     iface: r.iface().to_string(),
                     contract: r.fingerprint().to_string(),
                     minor: 0,
+                    standby: false,
                     token: *token,
                     unavailable: Vec::new(),
                     cardinality: BTreeMap::new(),

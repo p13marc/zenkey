@@ -65,6 +65,11 @@ pub struct InterfaceEntry {
     pub contract: String,
     /// The contract's informative minor.
     pub minor: u64,
+    /// Whether the instance stands by on this interface (§3.3, §6, 0.39):
+    /// it lists it, and serves none of it now. Written only when `true`;
+    /// absent is serving.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub standby: bool,
     /// Whether the instance holds this interface's token. `false` for an
     /// interface in the deployment's tokenless set (U22, spec §8.1).
     #[serde(default = "yes")]
@@ -229,6 +234,20 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
                 "D011",
                 &at,
                 "archive.v1 is marked \"token\": false: an archive is never tokenless (§4.4)",
+            ));
+        }
+        // §3.3, §6 (0.39): an interface with a standby is never tokenless.
+        // D012 reads `standby` and `token` only, as D011 reads `iface` and
+        // `token` (cascade 7).
+        if e.standby && !e.token {
+            report.push(Diagnostic::error(
+                "D012",
+                &at,
+                format!(
+                    "{} is marked \"standby\": true and \"token\": false: an interface with a \
+                     standby is never tokenless (§6, §8.1)",
+                    e.iface
+                ),
             ));
         }
         let fp_ok = e
@@ -396,8 +415,10 @@ fn check_exposure(
 impl Descriptor {
     /// The resources of `contract` this instance exposes (§3.3): the
     /// contract's, minus the optional ones gated on a capability it does not
-    /// hold, minus those its entry lists `unavailable`. `None` when it lists
-    /// no entry for the contract's interface.
+    /// hold, minus those its entry lists `unavailable`; none at all when the
+    /// entry marks the interface `"standby": true` (§3.3, §6, 0.39), whose
+    /// `unavailable` says what it will expose once it serves. `None` when it
+    /// lists no entry for the contract's interface.
     ///
     /// What a tool decides a split-brain from, beside replicated serving
     /// (§6, 0.7, #660). The entry's revision is the caller's to match: this
@@ -409,6 +430,9 @@ impl Descriptor {
     ) -> Option<Vec<&'c crate::contract::Resource>> {
         let iface = contract.iface.to_string();
         let entry = self.interfaces.iter().find(|e| e.iface == iface)?;
+        if entry.standby {
+            return Some(Vec::new());
+        }
         let held = |cap: &str| self.capabilities.iter().any(|h| h == cap);
         Some(
             contract
@@ -493,6 +517,10 @@ mod tests {
             names(&d("\"x\"", r#"{"resource": "@op/b", "cause": "config"}"#)),
             ["a", "c"]
         );
+        // A standby exposes nothing, whatever else its entry says (0.39).
+        let mut standby = d("\"x\"", "");
+        standby.interfaces[0].standby = true;
+        assert!(names(&standby).is_empty());
         let mut other = d("", "");
         other.interfaces[0].iface = "u.v1".into();
         assert!(other.exposed(&c).is_none());

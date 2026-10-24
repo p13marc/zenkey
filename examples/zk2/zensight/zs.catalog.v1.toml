@@ -7,25 +7,26 @@
 # `fleet` is a logical system (shapes.md row 4). Every correlator process also runs its own host
 # service `correlator` (health.v1, alarms.v1, zs.evidence.v1 self): v1's correlator.toml.
 #
-# SINGLE WRITER UNDER redundancy.v1. ZenSight's claim protocol (zensight-common/src/service_guard.rs)
-# is the reference r3.2 names, and it maps onto core presence without new keys:
-#   - claim: every candidate's instance token zk2/fleet/catalog/@zk/instance/<instance> is its claim.
-#     v1 declared v1/@catalog/state/claim/<zid> (keyexpr.rs:724, hand-built).
-#   - incumbent: whoever holds the interface token zk2/fleet/catalog/@zk/alive/zs.catalog.v1/**. A
-#     standby exposes nothing of zs.catalog.v1, so it holds no interface token (r3.2 §3.8, §3.10).
-#     v1 used v1/@catalog/state/alive.
+# SINGLE WRITER UNDER redundancy.v1 (spec/profiles/redundancy/v1.md, text 0.1, Appendix B). The
+# interface is governed through `uses`, and writes no `redundancy.election`, so its election is
+# `claim`, the profile's protocol, which is ZenSight's claim protocol
+# (zensight-common/src/service_guard.rs, #1104, #1105) on core presence, with no new key:
+#   - claim: every candidate's instance token zk2/fleet/catalog/@zk/instance/<instance>, its
+#     descriptor listing zs.catalog.v1. v1 declared v1/@catalog/state/claim/<zid> (keyexpr.rs:724).
+#   - incumbent: whoever holds the interface token zk2/fleet/catalog/@zk/alive/zs.catalog.v1/**.
+#     A standby exposes nothing of zs.catalog.v1, holds no interface token, and its descriptor marks
+#     the interface "standby": true (core 0.39). v1 used v1/@catalog/state/alive.
 #   - a live incumbent wins whatever its id, and never steps down for a lower claim.
-#   - with no incumbent, the lexically lowest live instance id wins (v1: zid). This breaks ties
-#     between simultaneous starts; it is not a standing entitlement.
+#   - with no incumbent, the lowest live instance id of a complete read wins (v1: zid). This breaks
+#     ties between simultaneous starts; it is not a standing entitlement.
 #   - an unreadable claim set means stand by, never "sole candidate" (service_guard.rs:185-200).
-#   - election and presence are two steps: the winner declares the interface token only once its
-#     queryables serve (alive => callable, r3.2 §3.10 start-up order).
-#   - a standby keeps polling the incumbent every 2 s (STANDBY_POLL) and campaigns again when the
-#     interface token drops.
-# Split brain after a partition heals means two instances exposing the same exclusive resources.
-# That is a finding diagnosed from descriptors (§3.8); there is no fencing epoch here (v1 had none).
-# Draft 0 attaches annotations to resources only, so nothing below can say "the whole interface is
-# single-writer". `uses` lists redundancy.v1 and the descriptor's `profiles` carries it (Gap G11).
+#   - the winner declares the interface token only once its queryables serve (core §8.2's order).
+#   - a standby follows the address on a watch session, not by v1's 2 s poll (STANDBY_POLL), and
+#     campaigns again when a complete read confirms the incumbent gone.
+#   - after a partition heals, the higher instance id steps down (redundancy.v1 §2.9). There is no
+#     fencing epoch in a payload (v1 had none); consumers follow the incumbent's stamps (§2.10).
+# The correlator's own health.v1 and alarms.v1 run on its host service `correlator`, so this
+# singleton's address implements a governed interface only (redundancy.v1 §2.4).
 #
 # Population budgets (cardinality) are v1's. pdns (100k) and edges (50k) now sit on a plain system,
 # so `zk2/*/*/*/state/**` reaches them; v1's verbatim @catalog origin kept them off `v1/*/state/**`

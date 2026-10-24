@@ -99,6 +99,10 @@
           "format": "uint64",
           "minimum": 0
         },
+        "standby": {
+          "description": "Whether the instance stands by on this interface (§3.3, §6, 0.39):\nit lists it, and serves none of it now. Written only when `true`;\nabsent is serving.",
+          "type": "boolean"
+        },
         "token": {
           "description": "Whether the instance holds this interface's token. `false` for an\ninterface in the deployment's tokenless set (U22, spec §8.1).",
           "type": "boolean",

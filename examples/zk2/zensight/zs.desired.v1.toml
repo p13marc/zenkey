@@ -23,7 +23,9 @@
 # one binds to (Gap G5).
 #
 # Single writer under redundancy.v1 with the claim protocol, exactly as zs.catalog.v1 (a
-# policy-compiler standby holds its instance token only). The compiler's process identity is the
+# policy-compiler standby holds its instance token only, its descriptor marking the interface
+# standby). A takeover's first put of each document is another id, which targets adopt without an
+# act (desired.v1 §2.7; redundancy.v1 Appendix B). The compiler's process identity is the
 # host service `policy-compiler` (v1 policy-compiler.toml: framework only).
 # No `history`. v1's publisher was plain and only the sensor side used an AdvancedSubscriber
 # (zensight-sensor-core/src/desired.rs:274-279). Durability is the owner (S4) plus an archive for last-known (r4).

@@ -1,0 +1,320 @@
+{
+  "cases": [
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true,
+        "token": true
+      },
+      "expect": {
+        "findings": [],
+        "mark": "standby"
+      },
+      "governance": "claim",
+      "note": "a standby on a governed interface: marked, token true (§2.4)"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true
+      },
+      "expect": {
+        "findings": [],
+        "mark": "standby"
+      },
+      "governance": "claim",
+      "note": "token absent is true: a standby"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "token": true
+      },
+      "expect": {
+        "findings": [],
+        "mark": "serving"
+      },
+      "governance": "claim",
+      "note": "standby absent is serving"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": false,
+        "token": true
+      },
+      "expect": {
+        "findings": [],
+        "mark": "serving"
+      },
+      "governance": "claim",
+      "note": "standby false written out is the same as absent (core §3.3)"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true
+      },
+      "expect": {
+        "findings": [],
+        "mark": "standby"
+      },
+      "governance": "external",
+      "note": "a standby under external: the same mark"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true,
+        "token": false
+      },
+      "expect": {
+        "findings": [
+          "standby_tokenless",
+          "governed_tokenless"
+        ],
+        "mark": "standby"
+      },
+      "governance": "claim",
+      "note": "D012: marked standby and tokenless, on a governed interface: both findings"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true,
+        "token": false
+      },
+      "expect": {
+        "findings": [
+          "standby_tokenless"
+        ],
+        "mark": "standby"
+      },
+      "governance": "no_contract",
+      "note": "D012 on an interface whose governance is not known: the core's finding alone"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "token": false
+      },
+      "expect": {
+        "findings": [
+          "governed_tokenless"
+        ],
+        "mark": "serving"
+      },
+      "governance": "claim",
+      "note": "a governed interface marked tokenless, serving: §2.14's finding, which needs the contract"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": false,
+        "token": false
+      },
+      "expect": {
+        "findings": [
+          "governed_tokenless"
+        ],
+        "mark": "serving"
+      },
+      "governance": "external",
+      "note": "a governed interface marked tokenless under external"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "token": false
+      },
+      "expect": {
+        "findings": [],
+        "mark": "serving"
+      },
+      "governance": "not_governed",
+      "note": "tokenless and not governed: the core's tokenless set, no finding here"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true
+      },
+      "expect": {
+        "findings": [
+          "not_governed"
+        ],
+        "mark": "standby"
+      },
+      "governance": "not_governed",
+      "note": "a standby mark on an interface no profile governs: not this profile's (§2.14)"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true,
+        "token": false
+      },
+      "expect": {
+        "findings": [
+          "standby_tokenless",
+          "not_governed"
+        ],
+        "mark": "standby"
+      },
+      "governance": "not_governed",
+      "note": "a standby mark on a tokenless interface no profile governs: D012, and not this profile's"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true
+      },
+      "expect": {
+        "findings": [],
+        "mark": "standby"
+      },
+      "governance": "no_contract",
+      "note": "a standby mark, governance not known: no finding the reader can make"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0
+      },
+      "expect": {
+        "findings": [],
+        "mark": "serving"
+      },
+      "governance": "no_contract",
+      "note": "serving, governance not known: nothing"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": "yes",
+        "token": false
+      },
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "mark": null
+      },
+      "governance": "claim",
+      "note": "standby a string: not the record's shape (core D000); nothing else is read"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": 1
+      },
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "mark": null
+      },
+      "governance": "claim",
+      "note": "standby a number: malformed"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": null
+      },
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "mark": null
+      },
+      "governance": "claim",
+      "note": "standby null: malformed, not absent"
+    },
+    {
+      "entry": {
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true,
+        "token": "true"
+      },
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "mark": null
+      },
+      "governance": "claim",
+      "note": "token a string: malformed"
+    },
+    {
+      "entry": [
+        "ledger.v1"
+      ],
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "mark": null
+      },
+      "governance": "claim",
+      "note": "an entry that is not an object: malformed"
+    },
+    {
+      "entry": {
+        "cardinality": {},
+        "contract": "sha256:abababababababababababababababababababababababababababababababab",
+        "iface": "ledger.v1",
+        "minor": 0,
+        "standby": true,
+        "unavailable": [
+          {
+            "cause": "config",
+            "resource": "@op/append"
+          }
+        ]
+      },
+      "expect": {
+        "findings": [],
+        "mark": "standby"
+      },
+      "governance": "claim",
+      "note": "unavailable and cardinality on a standby say what it will expose once it serves: no finding of the mark"
+    }
+  ],
+  "description": "redundancy.v1 §2.4, §2.14, core §3.3 (0.39): one interface entry of a descriptor, as JSON, and what the reader knows of the interface's governance (\"claim\" or \"external\": governed, with that election; \"not_governed\"; \"no_contract\": its contract not read) -> its mark and the findings. standby absent is false, token absent is true. expect.mark is \"standby\", \"serving\", or null when the entry is malformed. expect.findings, in this order: malformed (the entry not an object, or standby or token present and not a boolean, null included: core D000; nothing else is read, and it is the only finding), standby_tokenless (standby true and token false: core D012), governed_tokenless (token false, the interface governed, under either election), not_governed (standby true, the interface not governed: the mark says what core §6 says, and none of §5's questions is this profile's). Every other member of the entry is core §3.3's, and not read here."
+}

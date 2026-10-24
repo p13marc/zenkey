@@ -103,6 +103,7 @@ fn catalog(instances: &[Inst<'_>]) -> Catalog {
                         iface: iface.clone(),
                         contract: contract.clone(),
                         minor: 0,
+                        standby: false,
                         token: *token,
                         unavailable: Vec::new(),
                         cardinality: BTreeMap::new(),
