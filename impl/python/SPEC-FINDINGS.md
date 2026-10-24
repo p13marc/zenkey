@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Fifty-four rounds.**
+**Fifty-five rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -138,7 +138,15 @@ where that was not enough, or where the spec said two things.
   minor; `desired.v1` 0.3 answers them in a later round.
 - F-185 to F-191 were found against core 0.37, what a complete presence
   read is, read cold in round 54, with `scenarios/presence.md` §7 to §9
-  run from Python (see "At core 0.37" at the end). All seven are open.
+  run from Python (see "At core 0.37"). `desired.v1` 0.3 answers F-187's
+  and F-191's `desired.v1` halves; the rest are open.
+- `desired.v1` 0.3 resolved F-181 (against zk2py's reading), F-183 and
+  F-184, and `config.v1` 0.5 F-182.
+- F-192 to F-198 were found against `desired.v1` 0.3 and `config.v1` 0.5,
+  read cold and, for the first time, run live in round 55. The parties were
+  zk2py's own author and target, the Rust owner example as a black box,
+  and one of each (see "At desired.v1 0.3" at the end). F-194 is against
+  the owner example's help. All seven are open.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -9301,6 +9309,14 @@ fraction or an exponent is the double it denotes, as `telemetry.v1` §2.6
 reads it", or "its exact value, as §2.7 reads it", with a `reports.json`
 case.
 
+**Status at desired.v1 0.3:** resolved by desired.v1 0.3, against zk2py's
+reading. §2.10: "every number read by its exact value, as §2.7 compares a
+document's (0.3, F-181): a number with a zero fraction is that integer, so
+`3.0` is `3` and `18446744073709551615.0` is 2^64−1". zk2py had read the
+double. It now reads a report's bytes with every number exact
+(`exact_json`), and a document's revision too (§2.4, `revision_of`).
+`reports.json`'s five new cases pin it.
+
 ### F-182 · contradiction · config.v1 0.4 §2.18: "(text 0.4)" after `desired.v1`
 
 > config.v1 §2.18: "`config.v1` does not define desired state;
@@ -9317,6 +9333,9 @@ rule it dates, not another profile's name.
 
 **Wording that would remove the guess:** "`desired.v1` does, and its
 §2.16 (text 0.4 here) states …", or "(`desired.v1` text 0.2)".
+
+**Status at desired.v1 0.3:** resolved by config.v1 0.5: "text 0.5, F-182:
+this marker is this text's version, never `desired.v1`'s".
 
 ### F-183 · gap · desired.v1 0.2 §2.9 and core Appendix C: scenario §10 cited by no rule
 
@@ -9345,6 +9364,10 @@ never reaches §10. Both are indexes, and decide nothing.
 "Confirmed by the author" (and its "From an archive"), and §10 in core
 Appendix C's row, "S6 an owner silent within the timeout".
 
+**Status at desired.v1 0.3:** resolved by desired.v1 0.3: §2.9's "Confirmed
+by the author" and "From an archive" cite `[Sc: §10]`, and core Appendix
+C's row lists §10, an index entry that leaves core at 0.37.
+
 ### F-184 · ambiguity · desired.v1 0.2 §2.6 step 3: what "holds waiting" confirms
 
 > §2.6 step 3: "equal: **the same version** (`same_version`), received
@@ -9369,6 +9392,11 @@ delivered again is the same version. A reading pins it.
 **Wording that would remove the guess:** §2.6 step 3, "its author's own
 sample of a version the target holds from an archive, or holds waiting
 from an archive while an act runs, confirms it".
+
+**Status at desired.v1 0.3:** resolved by desired.v1 0.3, as zk2py read it:
+step 3 now says "holds waiting from an archive", and "any other delivery of
+a version held waiting, the author's own version included, is the same
+version". `order.json`'s two new cases passed unchanged.
 
 **Counts at desired.v1 0.2, config.v1 0.4 and core 0.36:** 184 entries,
 F-181 to F-184 open, every one before them resolved.
@@ -9602,6 +9630,13 @@ timeout.
 complete read without its instance token (core §8.1), or its GET silent
 …", and the same in alarms.v1 §2.7.
 
+**Status at desired.v1 0.3:** its desired.v1 half is resolved by desired.v1
+0.3. §2.5, §2.9, §2.17 and §5 now read the author's absence as "a complete
+read without its instance token (core §8.1)", and add "never on a
+withdrawal heard live, nor through a session cut off". Its alarms.v1 half
+is open: alarms.v1 §2.7 still says "With its tokens gone", its text 0.8
+unchanged.
+
 ### F-188 · gap · scenarios/presence.md §8: the reader's verdict during the cut is not observed
 
 > presence.md §8 Expected 2: "On the cut, the subscriber hears the owner's
@@ -9706,5 +9741,292 @@ way, but the reason misstates the read.
 incomplete, refused, or not made (core §8.1)", or a core sentence that a
 profile's possibly-incomplete reason covers a read not made.
 
+**Status at desired.v1 0.3:** its desired.v1 half is resolved by desired.v1
+0.3: §2.17 steps 1 and 6 count "a read not made (core §8.1, 0.37: a session
+cut off)" beside the possibly incomplete, under `presence_incomplete`. The
+other profiles' premises are unchanged, so the rest stays open.
+
 **Counts at core 0.37:** 191 entries. F-181 to F-191 are open, F-181 to
 F-184 against desired.v1 0.2, and every one before them is resolved.
+
+## At desired.v1 0.3 (#609)
+
+`desired.v1` 0.3 answers round 53's findings and F-187's `desired.v1`
+half, and says what building the reference's runtime showed: how a target
+hears its author appear, a seed made again at an appearance, the archive
+read only on absence, `invalid` for a schema's refusal, an act whose end is
+unknown, a re-mint not a restart, the author's record and a paced re-put,
+and what a delete reverts `config.v1` to. `config.v1` 0.5 states that
+revert, and moves F-182's marker. zk2py read both cold, implemented each
+change from the text, and ran the profile live for the first time.
+
+**The static half.** §2.10 now reads a report's numbers by their exact
+values (`exact_json` over strict JSON's `Exact`). §2.4 reads a document's
+revision the same way (`revision_of`). At the start of the round,
+`desired` passed 348 of 350: `reports.json` cases 74 and 77, F-181's
+answer, which zk2py had read as doubles.
+
+**`just py-conformance`: 2709 of 2709.** `desired` passes 350 of 350,
+the 265 cases with five header checks and 80 read-backs. (After the
+round, a 266th case joined `reports.json`, a revision whose exponent
+is past every double's, so the text is not strict JSON; zk2py passed it
+unchanged: 2710 of 2710, `desired` 351.) `readings`
+passes 324, 20 more than before:
+- nine of zk2py's exact encoding, each read back the same value;
+- the encoding's member order;
+- a refused non-finite number;
+- nine of §2.4's revision read exactly.
+
+**The live half.** Every module is new:
+- **`zk2py.desired_live`.**
+  - **The author.** It writes a document only when its content
+    changes, deterministically, every number by its exact value. It keeps
+    a record (the owner example's format). Before its tokens it makes again
+    each delete still in its window, for what is left of that window, and
+    puts each document again, its clock caught up past every stamp the
+    record holds. It can re-mint in its own session.
+  - **The target.** It subscribes, then seeds. It follows its author on a
+    watch session (core §8.1, 0.37), or reads its presence every 500 ms.
+    It seeds at each appearance, and up to four times more when a seed
+    draws nothing. It reads an archive only after a complete read shows
+    its author absent. `TargetRole` judges each version. The scenarios'
+    drive acts (hold, fail-next, refuse-next). It puts its report before
+    its tokens and after each change. A re-mint keeps its acts.
+- **`zk2py.desired_owner`.** Either party as a process, with the owner
+  example's `--desired-*` options and `desired …` commands.
+- **`zk2py.desired_scenarios`.** It runs `scenarios.md` §1 to §8 and §10
+  with any two parties as black boxes, and two sections of zk2py's own:
+  - nine edge documents through each target;
+  - a target's re-mint.
+
+`worker.v1` and `tasking.v1`, transcribed from `scenarios.md` alone,
+give the owner example's descriptors' fingerprints, `sha256:66e46fce…` and
+`sha256:a61f80ba…`. F-177's answer holds.
+
+**`python -m zk2py.desired_scenarios`: every check passes in all eight
+runs**, about 60 s each: four pairs of parties, each with targets on a
+watch session and polling. The checks per run:
+- §1 to §8 and §10: 41 with a zk2py author, 40 with the owner example's,
+  whose queryable's GETs (§8) its stdin does not show;
+- edges: 9;
+- re-mint: 2.
+
+| Author → target | Watch | Polling |
+|---|---|---|
+| zk2py → zk2py | 52 of 52 | 52 of 52 |
+| Rust → Rust | 51 of 51 | 51 of 51 |
+| zk2py → Rust | 52 of 52 | 52 of 52 |
+| Rust → zk2py | 51 of 51 | 51 of 51 |
+
+§1's target converges 1.11 s after the heal in every pair (spike S12: 1.4
+to 1.6 s).
+
+**The two targets agree on every edge document.** A missing required
+member is `invalid` at `""`; `1.5` is `invalid` at `/revision`, with no
+revision observed. `fly` is at `/mode`; `0` and `10.5` are at `/rate_hz`.
+`[1, 2]` is at `""`. `3.0` and `30e-1` are revision 3. 2^64 converges
+with no revision observed. zk2py's first run found one bug of its own,
+fixed: its pointer was `""` for every refusal, since it did not follow
+the type's `$ref`.
+
+**What the owner example could not do from stdin:**
+- show its author's queryable's GETs, so §8's "the author's queryable
+  receives none" stands on the target's `seeds=0`;
+- show what a target's seed found, a read not made included (§2.5: "a
+  target says so where it says what its seed found"; the runtime exposes
+  it, the example does not);
+- put a document by its exact values (F-194).
+
+Everything else ran: hold and release, fail-next, refuse-next, reread,
+new-epoch for the author and the target, the record and the window, the
+archive, unbound, watch, and tokenless.
+
+**zenoh-python** builds a timestamp's NTP64 from seconds and nanoseconds.
+1,516 of 2,000 random raw values cannot be built so (F-196), and §2's X
+reuses the timestamp S received.
+
+**Round 53's and round 54's findings at 0.3**, each with a status line
+under its entry:
+- F-181: resolved, against zk2py's reading;
+- F-182: resolved by `config.v1` 0.5;
+- F-183 and F-184: resolved, F-184 as zk2py read it;
+- F-187: its `desired.v1` half resolved, its `alarms.v1` half open;
+- F-191: its `desired.v1` half resolved.
+
+### F-192 · contradiction · desired.v1 0.3 §2.7 "A re-mint is not a restart" against "in an instance"
+
+> §2.7 (0.3): "**A re-mint is not a restart** (0.3). A target that mints a
+> new instance id in its own process (core §1.5, §8.1) still runs what it
+> applied, and keeps what it acted on and its report: its acts are its
+> process's, which a restart loses and a re-mint does not."
+
+> §2.7: "**A restart acts again.** A new instance of the target holds
+> nothing of its previous instance's acts, and MUST act on the first
+> version it reads"
+
+> §2.7: "**Once per version, in an instance.** A target MUST act on each
+> version it admits and does not adopt (§2.6) once"
+
+The text's unit of memory is still "an instance", in a dozen places:
+- §2.6, "in this instance", and its 16 remembered ids;
+- §2.7, "Once per version, in an instance", and "A new instance of the
+  target holds nothing";
+- §2.16, "a document it acted on in this instance named";
+- §5's table, "no act yet in this instance".
+
+An instance is core §1.5's, the id a re-mint changes. 0.3 now keeps the
+acts across a re-mint, so read literally, a re-minted target is "a new
+instance … [that] MUST act on the first version it reads" and keeps what
+it acted on, both at once. Both implementations keep the acts:
+zk2py's re-mint section passes against the Rust target too. The word
+means the process now, and the text does not say so.
+
+**zk2py:** the process, as 0.3's sentence says. A target's re-mint keeps
+its `TargetRole`.
+
+**Wording that would remove the guess:** §0's terms, "**In an instance**
+… of a target: in one process (a re-mint keeps it, §2.7)", or each "in
+an instance" read "in one process".
+
+### F-193 · gap · desired.v1 0.3 §2.7 "invalid": the pointer of a refusal no member carries
+
+> §2.7 (0.3): "A document that decodes and that its JSON Schema (core §7.3)
+> refuses is `invalid` too, never `undecodable` (0.3): it decodes; its
+> `pointer` is where the schema refuses it."
+
+A member's own schema refuses at that member, `/mode`. The text does not
+say where a missing required member is refused, nor a document that is no
+object. JSON Schema's own output puts both at the object, `""`. zk2py and
+the owner example both write `""` (the edges section), but no fixture
+pins any pointer of a schema's refusal, and a third implementation might
+write `/revision` for a missing `revision`.
+
+**zk2py:** `""` for both, a member's own pointer otherwise
+(`schema_pointer`).
+
+**Wording that would remove the guess:** §2.7, "… where the schema refuses
+it: a member's pointer for its own schema's refusal, the object's (`""`
+at the top) for a missing required member or a value of another type",
+with an `order.json` case, or a note that `pointer` is informative here.
+
+### F-194 · contradiction · the owner example's help (#840, DC): `desired put` "as written"
+
+> `owner --help`: "desired put <target> <json>     author: <target>
+> (<system>/<service>)'s document, the rest of the line as written"
+
+The example does not write the line as written. It re-encodes it, members
+sorted and compact, which §2.11's determinism allows. It also reads its
+numbers as doubles:
+- `0.10000000000000000555` goes on D as `0.1`;
+- `18446744073709551616` goes on D as `1.8446744073709552e+19`.
+
+§2.7 (0.2) compares numbers by their exact values. These are other
+values, so its author cannot put two documents that differ past a
+double's precision, which is F-166's case and `order.json` case 76. A
+runner that drives it to test exact equality tests something else, and
+cannot tell. zk2py's author keeps every number's exact value (the edges
+section's notes).
+
+**zk2py:** nothing to implement. Its runner notes what each author wrote.
+
+**Wording that would remove the guess:** the help, "re-encoded, members
+sorted, numbers as doubles", or the example reading the line with its
+numbers exact.
+
+### F-195 · contradiction · desired.v1 0.3 scenarios.md §7 and §10: "(core §8.1, 0.3)"
+
+> scenarios §7 Expected 1: "a complete presence read shows no instance
+> token of the author's, which is absent (core §8.1, 0.3)"
+
+> scenarios §10 Expected 1: "a complete presence read through R2 shows
+> none, absence by core §8.1 (0.3)"
+
+Placed after "core §8.1", the marker reads as core's version 0.3. The rule
+is core 0.37's, and the marker is this text's 0.3, the same slip as
+`config.v1`'s F-182.
+
+**zk2py:** nothing to implement.
+
+**Wording that would remove the guess:** "(core §8.1, 0.37; this text
+0.3)".
+
+### F-196 · gap · desired.v1 scenarios.md §2: "the timestamp s2, exactly" from a second implementation's binding
+
+> scenarios §2 Setup: "A test session X, a client of R1, can put on `D`
+> with a timestamp it sets."
+
+> scenarios §2 step 2: "X puts v3's content on `D` with the timestamp
+> `s2`, exactly."
+
+zenoh-python 1.10.1 builds a timestamp from an `NTP64(seconds,
+nanoseconds)`. A raw NTP64 time counts 2^−32 s units, finer than a
+nanosecond, so most raw values cannot be built: 1,516 of 2,000 random ones
+here. Built from `s2`'s text, as a report or a log writes it, X's stamp is
+not `s2`. Its time then differs by a few units, so the stamp is admitted,
+and acted on, the opposite of step 2's expectation. A Python runner can
+only reuse the timestamp object a subscriber received with v2, which
+zk2py's does. Step 1's "less 1 s" has no such problem.
+
+**zk2py:** X puts with the `zenoh.Timestamp` S received with s2.
+
+**Wording that would remove the guess:** §2's setup, "X puts with the
+timestamp a subscriber received with `s2` (a binding may not build every
+NTP64 from its text)".
+
+### F-197 · gap · desired.v1 0.3 scenarios.md §7 and §10: an archive read only on absence is not observed
+
+> §2.5 (0.3): "**The reference** reads an archive only after a complete
+> read shows its author absent, never on a silent GET while its author is
+> present: an archive can hold a document its author deleted past its
+> tombstone window (§2.8), which such a target would act on again."
+
+> §2.9 (0.3): "never on a withdrawal heard live, nor through a session cut
+> off (§2.5, 0.3, F-187)."
+
+In §7 the author is gone, and in §10 the target restarts during a cut and
+never sees it. In both, the author is absent and its GET silent at once,
+so a target that reads its archive on any silent GET, or on a withdrawal
+heard live, passes as one that waits for a complete read. No section has a
+silent GET while the author is present, a withdrawal heard live with the
+author back at once, or a target cut off from every node. §2.5's "a
+target says so where it says what its seed found" is observed by no
+step, and the owner example shows no seed's finding.
+
+**zk2py:** an archive read only when a seed draws nothing and a complete
+read shows the author absent. Its runner checks that read on the bus, not
+the target's own.
+
+**Wording that would remove the guess:** a step with the author present
+and its queryable silent (held), the archive holding an older version, in
+which the target reads no archive and acts on nothing.
+
+### F-198 · ambiguity · desired.v1 0.3 §2.11 "Pacing" against core S2: a kept document not yet put again
+
+> §2.11 (0.3): "A paced author makes its deletes again first, then puts its
+> documents at a rate, the tail after its instance token: the SHOULD above
+> is given up for that tail, never the MUST, since a GET is answered only
+> with what the new instance has put."
+
+> core S2: "It MUST answer a selector over them with every matching live
+> key, plus a `reply_del` for each matching key it deleted within the
+> window."
+
+A paced author keeps documents it has not yet put again, and answers a GET
+without them. Core S2 asks for "every matching live key". The text holds
+the two together only if a document kept and not yet put again is not
+live, which neither text says. A tool's §2.17 GET in the meantime reads
+`author_silent` for that target, and its S1 check sees no stamp. zk2py's
+author does not pace, so the case is not run.
+
+**zk2py:** no pacing: every document is put again before the tokens.
+
+**Wording that would remove the guess:** §2.11, "a document is live, for
+core S2, from its put by the new instance", or core S2's "live" defined
+as put by the instance that answers.
+
+**Counts at desired.v1 0.3, config.v1 0.5 and core 0.37:** 198 entries. Open:
+- F-185, F-186, F-188, F-189 and F-190;
+- F-187's and F-191's halves outside `desired.v1`;
+- F-192 to F-198.
+
+Every other entry is resolved.

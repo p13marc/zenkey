@@ -295,11 +295,15 @@ class Owner:
                  state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
                  initial: dict[str, bytes] | None = None, hlc: bool = True,
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
-                 tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None):
+                 tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
+                 params: dict[str, dict[str, str]] | None = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
           is unbound.
+        - ``params``: a role's parameter bindings as configured (R2), listed
+          in the descriptor for a bound role (R3); an unbound one lists
+          ``"params": {}`` (core §3.2).
         - ``capabilities``: the capabilities held (§3.3).
         - ``unavailable``: ``<kind token>/<template>`` → cause, for optional
           resources not exposed and listed so.
@@ -369,6 +373,7 @@ class Owner:
         self.system, self.service, self.contracts = system, service, contracts
         self.connect = connect
         self.bindings = bindings or {}
+        self.params = {k: dict(v) for k, v in (params or {}).items()}
         #: the bindings with their self.system providers resolved, at start
         self.resolved_bindings: dict[str, list[str]] = dict(self.bindings)
         self.capabilities = set(capabilities or ())
@@ -474,6 +479,15 @@ class Owner:
                 ts = zenoh.Timestamp(zenoh.NTP64(n // 1_000_000_000, n % 1_000_000_000), ts.get_id())
             self._last = ts
             return ts
+
+    def catch_up(self, ntp: zenoh.NTP64) -> None:
+        """§4.3's catch-up from a record: every stamp minted after this is
+        above ``ntp`` (a restarted owner's last stamp, read from its record)."""
+        assert self.session is not None
+        with self._lock:
+            last = self._last
+            if last is None or last.get_time_as_ntp64().as_nanos() < ntp.as_nanos():
+                self._last = zenoh.Timestamp(ntp, self.session.new_timestamp().get_id())
 
     # -- §8.2 step 2: the exposure plan ----------------------------------
 
@@ -733,7 +747,8 @@ class Owner:
             "requires": [{
                 "role": role, "interface": req["interface"], "declared_by": c.interface,
                 # R3 (0.20): "a self.system provider resolved".
-                "bindings": list(self.resolved_bindings.get(role, [])), "params": {},
+                "bindings": list(self.resolved_bindings.get(role, [])),
+                "params": dict(self.params.get(role, {})) if self.resolved_bindings.get(role) else {},
                 **({"optional": True} if req["optional"] else {}),
             } for c in self.contracts for role, req in c.canonical["requires"].items()],
             # Core §3.3 (0.19): "the union of two sets": the contracts' uses,
@@ -769,16 +784,20 @@ class Owner:
             self.closed_writers.discard(key)
             return stamp
 
-    def delete_state(self, key: str) -> zenoh.Timestamp:
+    def delete_state(self, key: str, elapsed_s: float = 0.0) -> zenoh.Timestamp:
         """Delete a state key, stamped (S1); answered with ``reply_del`` within
-        the tombstone window (S3). "A deleted member is not re-put"."""
+        the tombstone window (S3). "A deleted member is not re-put".
+
+        ``elapsed_s`` dates the tombstone that long ago: a delete made again
+        for what is left of the window counted from the delete it repeats
+        (desired.v1 §2.11, 0.3, "not a window more")."""
         with self._writes:
             if self.ahead:
                 raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
             stamp = self.mint()
             self._publishers[key].delete(timestamp=stamp)
-            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic())
+            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic() - max(0.0, elapsed_s))
             return stamp
 
     def _member_publisher(self, key: str) -> None:

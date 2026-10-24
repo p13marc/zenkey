@@ -426,6 +426,134 @@ class Exact:
         return cls(_form(sign, whole + frac, exponent), float(text))
 
 
+class NonInteger(float):
+    """A number that is no integer, carried as its double for a schema's
+    ``type``, ``minimum`` and ``maximum`` (§2.10, 0.3): its double may be
+    integral (``1e-400`` reads as 0.0), so ``is_integer`` says what its
+    exact value is."""
+
+    def is_integer(self) -> bool:  # type: ignore[override]
+        return False
+
+
+def exact_value(x: Exact) -> int | NonInteger:
+    """§2.10 (0.3, F-181): "every number read by its exact value … a number
+    with a zero fraction is that integer, so 3.0 is 3 and
+    18446744073709551615.0 is 2^64−1 … and 1.5 is no integer". A finite
+    number's exponent is at most about 308, so the integer is cheap: one
+    past the finite range, which :func:`strict_json` refuses before any
+    caller sees it, is refused here too (``NotStrict``), never computed."""
+    sign, digits, exponent = x.form
+    if not math.isfinite(x.double):
+        raise NotStrict("a number past the double's finite range")
+    if not digits:
+        return 0
+    if isinstance(exponent, tuple) or exponent < 0:
+        return NonInteger(x.double)
+    value = int(digits) * 10 ** exponent
+    return -value if sign else value
+
+
+def exact_json(value: Any) -> Any:
+    """A value :func:`strict_json` read with ``exact``, every :class:`Exact`
+    replaced by :func:`exact_value`."""
+    if isinstance(value, Exact):
+        return exact_value(value)
+    if isinstance(value, list):
+        return [exact_json(v) for v in value]
+    if isinstance(value, dict):
+        return {k: exact_json(v) for k, v in value.items()}
+    return value
+
+
+def _number_text(x: Exact) -> str:
+    """An :class:`Exact` written back, its exact value kept: its significant
+    digits and its exponent (``10000000000000000555e-20``), an integer as
+    its digits."""
+    sign, digits, exponent = x.form
+    if not digits:
+        return "0"
+    neg = "-" if sign else ""
+    if isinstance(exponent, tuple):
+        eneg, etext, adj = exponent
+        if adj >= 0:
+            mant = digits + "0" * adj
+        elif len(digits) > -adj:
+            mant = digits[:adj] + "." + digits[adj:]
+        else:
+            mant = "0." + "0" * (-adj - len(digits)) + digits
+        return f"{neg}{mant}e{'-' if eneg else ''}{etext}"
+    if exponent >= 0:
+        return neg + digits + "0" * exponent if exponent <= 400 else f"{neg}{digits}e{exponent}"
+    if -exponent <= 40:
+        k = -exponent
+        whole = digits[:-k] if len(digits) > k else "0"
+        frac = digits[-k:] if len(digits) > k else "0" * (k - len(digits)) + digits
+        return f"{neg}{whole}.{frac}"
+    return f"{neg}{digits}e{exponent}"
+
+
+def canonical_json(value: Any) -> bytes:
+    """§2.11: "encode each document deterministically (JSON's members in one
+    order …)", with every number written by its exact value (§2.7, 0.2): a
+    value :func:`strict_json` read with ``exact``, or a decoded one. Members
+    sorted by their code points, no whitespace. Raises ``ValueError`` for a
+    value strict JSON cannot carry (a non-finite number)."""
+    out: list[str] = []
+
+    def w(v: Any) -> None:
+        if v is None or isinstance(v, bool):
+            out.append("null" if v is None else "true" if v else "false")
+        elif isinstance(v, Exact):
+            if not math.isfinite(v.double):
+                raise ValueError("a number past the double's finite range")
+            out.append(_number_text(v))
+        elif isinstance(v, int):
+            out.append(str(v))
+        elif isinstance(v, float):
+            if not math.isfinite(v):
+                raise ValueError("a non-finite number")
+            out.append(repr(v))
+        elif isinstance(v, str):
+            out.append(json.dumps(v, ensure_ascii=False))
+        elif isinstance(v, list):
+            out.append("[")
+            for i, x in enumerate(v):
+                if i:
+                    out.append(",")
+                w(x)
+            out.append("]")
+        elif isinstance(v, dict):
+            out.append("{")
+            for i, k in enumerate(sorted(v)):
+                if i:
+                    out.append(",")
+                out.append(json.dumps(k, ensure_ascii=False))
+                out.append(":")
+                w(v[k])
+            out.append("}")
+        else:
+            raise ValueError(f"not JSON: {type(v).__name__}")
+
+    w(value)
+    return "".join(out).encode("utf-8")
+
+
+def revision_of(payload: bytes) -> int | None:
+    """§2.4 (0.3): a document's own revision, "a top-level member named
+    revision … an integer from 0 to 2^64−1, read by its exact value as a
+    report's is: 3.0 is 3, 1.5 is no revision". None for a document that
+    does not read, or carries none."""
+    try:
+        doc = exact_json(strict_json(payload, exact=True))
+    except NotStrict:
+        return None
+    r = doc.get("revision") if isinstance(doc, dict) else None
+    if isinstance(r, int) and not isinstance(r, bool) and 0 <= r <= U64_MAX:
+        return r
+    return None
+
+
 def number_form(x: Any) -> tuple[int, str, Any]:
     """The exact value of a JSON number as ``_form`` writes it: an integer's
     from its decimal digits (at most 4300, Python's own bound, and at most
@@ -820,9 +948,10 @@ def strict_json(payload: bytes, exact: bool = False) -> Any:
     Python's recursion limit is not read either, never a crash.
 
     ``exact`` reads a number that is not an integer as an :class:`Exact`,
-    its text's value, for §2.7's equality (0.2, F-166); otherwise as its double, as
-    ``telemetry.v1`` §2.6 reads a float, which is how zk2py reads a report
-    (F-181). An integer is exact either way. Raises :class:`NotStrict`."""
+    its text's value: for §2.7's equality (0.2, F-166), and for a report and
+    a document's revision (0.3, F-181, through :func:`exact_json`);
+    otherwise as its double. An integer is exact either way. Raises
+    :class:`NotStrict`."""
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as e:
@@ -881,9 +1010,10 @@ class ReportReading:
 
 
 def read_report_bytes(payload: bytes) -> ReportReading:
-    """§2.10 over a report's bytes: strict JSON first."""
+    """§2.10 over a report's bytes: strict JSON first, every number then read
+    by its exact value (0.3, F-181)."""
     try:
-        value = strict_json(payload)
+        value = exact_json(strict_json(payload, exact=True))
     except NotStrict:
         return ReportReading(False, ("json",))
     return read_report(value)
