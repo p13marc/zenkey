@@ -177,7 +177,14 @@ class Author:
     def gets(self, target: str) -> tuple[str, int]:
         """scenarios.md (0.4, F-197): "an author how many GETs reached a
         target's slice": the state GETs its queryables answered whose
-        selector reaches ``target``'s document key."""
+        selector reaches ``target``'s document key. ``target`` must be
+        ``<system>/<service>``, two plain chunks (core §1.1): anything else
+        raises ``ValueError``, never a key slugged from it."""
+        from .lexical import is_plain_chunk
+
+        parts = target.split("/") if isinstance(target, str) else []
+        if len(parts) != 2 or not all(is_plain_chunk(x) for x in parts):
+            raise ValueError(f"{target!r} is no <system>/<service> of two plain chunks")
         key = zenoh.KeyExpr(self.key(target))
         with self.lock:
             sels = list(self.selectors)

@@ -2386,7 +2386,55 @@ def _desired_tool_readings() -> list[tuple[str, Any, Any]]:
         b = dt._slice_from_requirement("lab/worker", r, "tasks/{system}/{service}", "lab/author", "tasking.v1",
                                        explicit)
         out.append((f"{label}: {name}", (b.binding, b.key), want))
+    out += _desired_window_readings()
     return out
+
+
+def _desired_window_readings() -> list[tuple[str, Any, Any]]:
+    """desired.v1 0.4 §2.17 "How long behind", over zk2py.desired_tool.watch
+    fed readings of its own (F-211: "every reading over the window; any
+    other answer starts it again"; on a trusted clock, one reading)."""
+    import time as _time
+
+    from . import desired as ds, desired_tool as dt
+
+    def row(answer: str, stamp: str | None) -> Any:
+        a = {q: ds.Answer(answer if q == ds.Q_CONVERGED else ds.NO, "behind" if answer == ds.NOT_YET else "x")
+             for q in ds.QUESTIONS}
+        r = ds.Reading(ds.PRESENT, (True, True), None, "not_asked", ds.PRESENT, None)
+        return dt.Row("lab/worker", "task", "bound", r, a, author_stamp=stamp)
+
+    def run(seq: list[tuple[str, str | None]], for_s: float, clocks: bool = False) -> Any:
+        it = iter(seq)
+        last = [seq[-1]]
+
+        def reader(*_: Any, **__: Any) -> list[Any]:
+            try:
+                last[0] = next(it)
+            except StopIteration:
+                pass
+            return [row(*last[0])]
+
+        return dt.watch(None, "lab/worker", for_s, "task", every_s=0.01, reader=reader,  # type: ignore[arg-type]
+                        clocks_synced=clocks).behind
+
+    now_ntp = int(_time.time() * 2 ** 32)
+    old = f"{now_ntp - 10 * 2 ** 32}/a1"  # stamped 10 s ago
+    new = f"{now_ntp}/a1"
+    nyt, yes = ds.NOT_YET, ds.YES
+    label = "desired.v1 0.4 §2.17, how long behind (F-211)"
+    return [
+        (f"{label}: not yet on one version over the whole window: behind, by the window",
+         run([(nyt, new)] * 50, 0.05), {"task": (new, "window")}),
+        (f"{label}: a later reading converged clears it", run([(nyt, old)] * 3 + [(yes, old)] * 50, 0.05,
+                                                               clocks=True), {}),
+        (f"{label}: a later reading of another answer starts the window again",
+         run([(nyt, new)] * 3 + [(ds.UNOBSERVABLE, new)] + [(nyt, new)] * 2, 0.04), {}),
+        (f"{label}: another version starts it again", run([(nyt, new)] * 3 + [(nyt, old)] * 2, 0.04), {}),
+        (f"{label}: on a trusted clock, one reading finds a version stamped longer ago than the window",
+         run([(nyt, old)], 0.0, clocks=True), {"task": (old, "clock")}),
+        (f"{label}: without one, a single reading never does", run([(nyt, old)], 0.0), {}),
+    ]
 
 
 def _redundancy_readings() -> list[tuple[str, Any, Any]]:

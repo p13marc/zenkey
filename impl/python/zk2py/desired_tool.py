@@ -70,6 +70,18 @@ class Row:
         return {q: (a.answer, a.reason) for q, a in self.answers.items()}
 
 
+def _first(x: Any) -> Any:
+    """The first element of a list from the bus, or None for anything else:
+    a malformed shape reads as nothing, never a crash."""
+    return x[0] if isinstance(x, list) and x else None
+
+
+def _id_of(instances: list[dict[str, Any]]) -> str | None:
+    first = _first(instances)
+    inst = first.get("instance") if isinstance(first, dict) else None
+    return inst if isinstance(inst, str) else None
+
+
 def _presence(session: zenoh.Session, address: str, timeout: float, reads: list) -> tuple[str, list[dict]]:
     p = live.list_presence(session, f"zk2/{address}/@zk/instance/*", timeout)
     reads.append((address, p.kind, p.not_made or (live.CUT_OFF_DURING if p.cut_off_during else "")))
@@ -181,19 +193,30 @@ def read(session: zenoh.Session, target: str, role: str | None = None, *, contra
     if t_presence != ds.PRESENT:
         r = ds.Reading(t_presence, None, None, "not_asked", ds.INCOMPLETE, None)
         return [Row(target, role or "-", "unread", r, ds.conclude(r), reads=reads)]
-    doc = _descriptor(session, target, instances[0]["instance"], timeout)
+    inst = _id_of(instances)
+    doc = _descriptor(session, target, inst, timeout) if inst is not None else None
     if doc is None:
         r = ds.Reading(t_presence, None, None, "not_asked", ds.INCOMPLETE, None)
         return [Row(target, role or "-", "unread", r, ds.conclude(r), reads=reads)]
     rows = []
+    if "requires" in doc and not isinstance(doc["requires"], list):
+        # a descriptor of a shape no rule reads (core §3.3 D000): unobservable
+        r = ds.Reading(t_presence, None, None, "not_asked", ds.INCOMPLETE, None)
+        return [Row(target, role or "-", "unread", r, ds.conclude(r), problems=["malformed: requires"], reads=reads)]
     requires = [x for x in doc.get("requires") or [] if isinstance(x, dict)]
     asked = [x for x in requires if role is None or x.get("role") == role]
     if role is not None and not asked:
         r = ds.Reading(t_presence, (False, False), None, "not_asked", ds.INCOMPLETE, None)
         return [Row(target, role, "not_listed", r, ds.conclude(r), reads=reads)]
     for req in asked:
-        rows.append(_read_role(session, target, doc, req, offline, by_iface, timeout, clocks_synced, archives,
-                               list(reads)))
+        try:
+            rows.append(_read_role(session, target, doc, req, offline, by_iface, timeout, clocks_synced, archives,
+                                   list(reads)))
+        except (KeyError, IndexError, TypeError, AttributeError, ValueError) as e:
+            # a descriptor or a contract of a shape no rule reads: unobservable
+            r = ds.Reading(t_presence, None, None, "not_asked", ds.INCOMPLETE, None)
+            rows.append(Row(target, str(req.get("role")), "unread", r, ds.conclude(r),
+                            problems=[f"malformed: {type(e).__name__}: {e}"], reads=list(reads)))
     return [r for r in rows if r is not None]
 
 
@@ -206,8 +229,10 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
     t_canon, _ = _contract(session, str(req.get("declared_by")), None if own is None else own.get("contract"),
                            offline, timeout)
     problems: list[str] = []
-    rr = None if t_canon is None else (t_canon.get("requires") or {}).get(name)
-    template = (rr or {}).get("resources", [None])[0] if rr else None
+    requires = t_canon.get("requires") if isinstance(t_canon, dict) else None
+    rr = requires.get(name) if isinstance(requires, dict) else None
+    template = _first(rr.get("resources")) if isinstance(rr, dict) else None
+    template = template if isinstance(template, str) else None
 
     def row(r: ds.Reading, **kw: Any) -> Row:
         return Row(target, name, "bound" if bound else "unbound", r, ds.conclude(r), problems=problems,
@@ -218,10 +243,15 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
             problems.append("required_unbound")
         r = ds.Reading(ds.PRESENT, (True, False), None, "not_asked", ds.INCOMPLETE, None)
         return row(r)
-    author = str(req["bindings"][0])
+    author = _first(req.get("bindings"))
+    if not isinstance(author, str) or len(author.split("/")) != 2:
+        problems.append("not_one_author")
+        r = ds.Reading(ds.PRESENT, (True, True), None, "not_asked", ds.INCOMPLETE, None)
+        return row(r)
     # the author's contract, by its descriptor's revision
     a_presence, a_instances = _presence(session, author, timeout, reads)
-    a_doc = _descriptor(session, author, a_instances[0]["instance"], timeout) if a_instances else None
+    a_inst = _id_of(a_instances)
+    a_doc = _descriptor(session, author, a_inst, timeout) if a_inst is not None else None
     a_entry = _entry(a_doc, iface)
     a_canon, how = _contract(session, iface, None if a_entry is None else a_entry.get("contract"), offline, timeout)
     if a_canon is None and a_entry is None:
@@ -337,36 +367,60 @@ class Window:
 
 
 def watch(session: zenoh.Session, target: str, for_s: float, role: str | None = None, *,
-          clocks_synced: bool = False, every_s: float = 0.5, **kw: Any) -> Window:
+          clocks_synced: bool = False, every_s: float = 0.5, reader: Any = None, **kw: Any) -> Window:
     """§2.17 (0.4): "never from one reading alone: the author's same version
     current, and the target not yet on it, in readings that long apart; or,
     with a clock trusted to the HLC delta, that version stamped more than
     that long and the delta before the reading". The answers stay not yet;
-    ``behind`` is the tool's own finding beside them."""
-    start = time.monotonic()
-    first_seen: dict[str, tuple[str, float]] = {}
+    ``behind`` is the tool's own finding beside them.
+
+    - **By the window** (F-211, answered on #840): every reading over the
+      window not yet on one version of the author's; any other answer, or
+      another version, starts it again.
+    - **By the clock**, with ``clocks_synced``: one reading may find it, the
+      author's version stamped longer ago than the window and the delta.
+
+    The finding follows the latest reading: a later reading that is not
+    not yet on that version clears it, so ``behind`` holds only what the
+    window's end still shows. ``reader`` stands in for :func:`read` (a
+    reading's own test)."""
+    reader = reader or read
+    #: the window counts from the first reading's answer, so that a run of
+    #: not-yet readings from it can last the whole window
+    start: float | None = None
+    #: per role, the version a run of not-yet readings is on, when it began,
+    #: and how many readings it holds
+    first_seen: dict[str, tuple[str, float, int]] = {}
     behind: dict[str, tuple[str, str]] = {}
     n = 0
     rows: list[Row] = []
     while True:
-        rows = read(session, target, role, clocks_synced=clocks_synced, **kw)
+        rows = reader(session, target, role, clocks_synced=clocks_synced, **kw)
         n += 1
         now = time.monotonic()
+        if start is None:
+            start = now
         for r in rows:
             a = r.answers.get(ds.Q_CONVERGED)
             if a is None or a.answer != ds.NOT_YET or r.author_stamp is None:
+                # any other answer starts the window again, and clears it
                 first_seen.pop(r.role, None)
+                behind.pop(r.role, None)
                 continue
             seen = first_seen.get(r.role)
             if seen is None or seen[0] != r.author_stamp:
-                first_seen[r.role] = (r.author_stamp, now)
-                seen = first_seen[r.role]
+                first_seen[r.role] = (r.author_stamp, now, 1)
+                behind.pop(r.role, None)  # another version: started again
+            else:
+                first_seen[r.role] = (seen[0], seen[1], seen[2] + 1)
+            seen = first_seen[r.role]
             if clocks_synced and r.role not in behind:
                 st = ds.Stamp.parse(r.author_stamp)
                 age = time.time() - (st.time >> 32) - (st.time & 0xFFFFFFFF) / 2 ** 32 if st else 0
                 if age > for_s + HLC_DELTA_S:
                     behind[r.role] = (r.author_stamp, "clock")
-            if now - seen[1] >= for_s and r.role not in behind:
+            # "never from one reading alone": two readings at least
+            if seen[2] >= 2 and now - seen[1] >= for_s and r.role not in behind:
                 behind[r.role] = (r.author_stamp, "window")
         if now - start >= for_s:
             break

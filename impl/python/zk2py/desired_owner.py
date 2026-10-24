@@ -72,9 +72,11 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
     if cmd == "queries":
         return f"desired queries {author.queries}"  # type: ignore[union-attr]
     if cmd == "gets":
+        if not rest.strip():
+            return f"refused {line}: desired gets <system>/<service>"
         try:
             key, n = author.gets(rest.strip())  # type: ignore[union-attr]
-        except ValueError as e:
+        except Exception as e:  # noqa: BLE001 - a bad target is refused; main's loop refuses anything else too
             return f"refused {line}: {e}"
         return f"desired gets {key} {n}"
     if cmd == "seeds":

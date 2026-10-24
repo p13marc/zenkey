@@ -804,7 +804,25 @@ def section10(ctx: Ctx) -> None:
         bus.close()
 
 
+#: the Rust tool (§9): ``--zenctl`` or ``ZK2PY_ZENCTL``, else this path;
+#: ``--no-zenctl`` runs zk2py's tool alone, said loudly. A path that is not
+#: a file fails §9, never a quiet pass.
 ZENCTL = Path(os.environ.get("ZK2PY_ZENCTL", "/srv/dev/repos/zenkey-wt/.s840/bin/zenctl-dd"))
+#: set by --no-zenctl
+ZENCTL_OFF = False
+
+
+def _zenctl_ready(rp: Report, sec: str, checks: int) -> bool:
+    """Whether §9's Rust tool runs: True when it is a file; else, with
+    --no-zenctl, a NOT RUN line counting its checks; else a failure."""
+    if ZENCTL_OFF:
+        rp.cannot(sec, f"zenctl not asked (--no-zenctl): {checks} of the section's checks not run")
+        return False
+    if not ZENCTL.is_file():
+        rp.check(sec, f"the Rust tool is at {ZENCTL} (--zenctl, ZK2PY_ZENCTL; --no-zenctl to run without it)",
+                 False, "not a file")
+        return False
+    return True
 #: §9's Expected, per step: (converged, refused, last_known, in_force),
 #: each (answer, reason).
 S9_EXPECT = {
@@ -871,19 +889,18 @@ def section9(ctx: Ctx) -> None:
     from .contract import load_contract
 
     sec, rp = ctx.name("§9 a tool's questions"), ctx.report
-    if not ZENCTL.is_file():
-        rp.note(sec, f"{ZENCTL} not found: the Rust tool is not run")
+    use_z = _zenctl_ready(rp, sec, 17)
     disagree: list[str] = []
 
     def ask(bus: Bus, step: int, extra: list[str] = ()) -> tuple[Any, Any, Any]:
         mine = dt.read(bus.g1, TARGET, "task")
-        rc, doc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *extra]) if ZENCTL.is_file() \
+        rc, doc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *extra]) if use_z \
             else (None, None, "")
         z = _z_answers(_z_row(doc))
         m = mine[0].pairs() if mine else None
         want = S9_EXPECT[step]
         rp.check(sec, f"{step}. zk2py's tool answers as §9 Expected {step}", m == want, f"{m}")
-        if ZENCTL.is_file():
+        if use_z:
             rp.check(sec, f"{step}. zenctl desired answers as §9 Expected {step}", z == want, f"{z}, exit {rc}")
             if z != m:
                 disagree.append(f"step {step}: zk2py {m}, zenctl {z}")
@@ -907,12 +924,12 @@ def section9(ctx: Ctx) -> None:
         _wait(lambda: converged_on(target.report(), s2, 2), 10.0, 0.05)
         row, doc, rc = ask(bus, 1)
         rp.check(sec, "1. zenctl desired exits 0: every role asked converged on its author's current document",
-                 not ZENCTL.is_file() or rc == 0, f"exit {rc}")
+                 not use_z or rc == 0, f"exit {rc}")
         rp.check(sec, "1. both tools take the slice from the author's contract",
                  row is not None and row.slice == D and row.slice_from == "author_contract"
-                 and (not ZENCTL.is_file() or (_z_row(doc) or {}).get("slice_from") == "author_contract"),
+                 and (not use_z or (_z_row(doc) or {}).get("slice_from") == "author_contract"),
                  f"zk2py {row and row.slice_from}, zenctl {(_z_row(doc) or {}).get('slice_from')}")
-        if ZENCTL.is_file():
+        if use_z:
             rc, cdoc, _ = zenctl(["check", "conform", TARGET, "worker.v1", "-c", bus.ep1, "--timeout", "1",
                                   "--for", "2"])
             rp.check(sec, "check conform on lab/worker: desired-report and desired-binding pass",
@@ -932,7 +949,7 @@ def section9(ctx: Ctx) -> None:
         s3 = author.put(TARGET, v(3, endpoint="tcp/10.0.0.9:7447"))
         _wait(lambda: (target.report() or {}).get("outcome") == "refused", 10.0, 0.05)
         ask(bus, 2)
-        if ZENCTL.is_file():
+        if use_z:
             drc, ddoc = doctor(bus)
             ans, finds = _z_check(ddoc, "desired-refused")
             rp.check(sec, "2. the doctor's desired-refused finds the target's refused act", ans == "established"
@@ -941,7 +958,7 @@ def section9(ctx: Ctx) -> None:
         author.put(TARGET, v(4, rate_hz=20, mode="halt"))
         _wait(lambda: (target.report() or {}).get("outcome") == "failed", 10.0, 0.05)
         ask(bus, 3)
-        if ZENCTL.is_file():
+        if use_z:
             drc, ddoc = doctor(bus)
             rp.check(sec, "3. the doctor's desired-refused finds the failed act",
                      _z_check(ddoc, "desired-refused")[0] == "established", f"{_z_check(ddoc, 'desired-refused')}")
@@ -955,7 +972,7 @@ def section9(ctx: Ctx) -> None:
         rp.check(sec, "6. once: the report's observed v5's stamp, the author's v6's; no verdict (a reading alone "
                       "never finds a target behind)",
                  row is not None and (row.reading.report.report or {}).get("observed", {}).get("stamp") == s5
-                 and row.author_stamp == s6 and (not ZENCTL.is_file() or rc == 2),
+                 and row.author_stamp == s6 and (not use_z or rc == 2),
                  f"zk2py observed {row and (row.reading.report.report or {}).get('observed')}, author "
                  f"{row and row.author_stamp}; zenctl exit {rc}")
         w = dt.watch(bus.g1, TARGET, 2.0, "task")
@@ -963,7 +980,7 @@ def section9(ctx: Ctx) -> None:
                       "still not yet", w.behind.get("task", (None, None))[0] == s6
                  and all(r.answers["converged"].answer == "not_yet" for r in w.rows),
                  f"{w.readings} readings, behind {w.behind}")
-        if ZENCTL.is_file():
+        if use_z:
             rc, doc, _ = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", "--for", "2"])
             zb = (_z_row(doc) or {}).get("behind")
             rp.check(sec, "6. over the window, zenctl desired --for 2 finds the target behind v6, exit 1",
@@ -1011,13 +1028,13 @@ def section9(ctx: Ctx) -> None:
         z = _z_row(doc) or {}
         rp.check(sec, "4. with its author absent, both tools take D from the target's requirement and binding",
                  row is not None and row.slice == D and row.slice_from == "requirement"
-                 and (not ZENCTL.is_file() or (z.get("slice") == D and z.get("slice_from") == "requirement")),
+                 and (not use_z or (z.get("slice") == D and z.get("slice_from") == "requirement")),
                  f"zk2py {row and row.slice_from}, zenctl {z.get('slice_from')}")
         rp.check(sec, "4. both show the archive's v1 as last-known, never current",
                  row is not None and any(st == s1 for _, st, _ in row.archived)
-                 and (not ZENCTL.is_file() or s1 in json.dumps(z.get("archived"))),
+                 and (not use_z or s1 in json.dumps(z.get("archived"))),
                  f"zk2py {row and [(a, st) for a, st, _ in row.archived]}, zenctl {z.get('archived')}")
-        if ZENCTL.is_file():
+        if use_z:
             drc, ddoc = doctor(bus)
             rp.check(sec, "4. the doctor's desired-last-known (info): the target runs a document read from an "
                           "archive", _z_check(ddoc, "desired-last-known")[0] == "established",
@@ -1036,7 +1053,7 @@ def section9(ctx: Ctx) -> None:
         bus.close()
     if disagree:
         rp.note(sec, "the two tools disagree: " + "; ".join(disagree))
-    else:
+    elif use_z:
         rp.note(sec, "the two tools agree on every step")
 
 
@@ -1091,6 +1108,7 @@ def section_tool_shapes(ctx: Ctx) -> None:
     sec, rp = "§9 beyond: the tool's 0.4 readings", ctx.report
     if ctx.author_impl != "zk2py" or ctx.target_impl != "zk2py":
         return  # no party runs here: once is enough
+    use_z = _zenctl_ready(rp, sec, 11)
     worker, tasking, two = contract("worker.v1"), contract("tasking.v1"), contract("zk2py_worker2.v1")
     offline = str(REPO / "impl" / "python" / "interop" / "desired")
 
@@ -1182,7 +1200,7 @@ def section_tool_shapes(ctx: Ctx) -> None:
             mine = dt.read(bus.g1, TARGET, "task", contracts=held)
             m = mine[0].pairs() if mine else None
             rp.check(sec, f"zk2py's tool: {name}", m == want, f"{m}; problems {mine[0].problems if mine else None}")
-            if ZENCTL.is_file():
+            if use_z:
                 path = (str(REPO / "impl/python/interop/desired/tasking.v1.toml") if "not in hand" in name
                         else str(REPO / "impl/python/interop/desired/worker.v1.toml")
                         if "no contract of its interface" in name else offline)
@@ -1195,7 +1213,8 @@ def section_tool_shapes(ctx: Ctx) -> None:
             for f in fakes:
                 f.close()
             bus.close()
-    rp.note(sec, "the two tools disagree: " + "; ".join(disagree) if disagree else "the two tools agree on every shape")
+    rp.note(sec, ("the two tools disagree: " + "; ".join(disagree)) if disagree
+            else "the two tools agree on every shape" if use_z else "zk2py's tool alone")
 
 
 #: zk2py's own, beyond scenarios.md: a document text each target reads as
@@ -1291,7 +1310,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--only", action="append", choices=list(SECTIONS), help="run only these sections (edges: "
                     "zk2py's own documents beyond scenarios.md)")
     ap.add_argument("--poll", action="store_true", help="targets read their author's presence on a period")
+    ap.add_argument("--zenctl", type=Path, help="§9's Rust tool (default: $ZK2PY_ZENCTL, else the round's build)")
+    ap.add_argument("--no-zenctl", action="store_true", help="run §9 with zk2py's tool alone, its other checks "
+                    "counted as not run")
     args = ap.parse_args(argv)
+    global ZENCTL, ZENCTL_OFF
+    if args.zenctl is not None:
+        ZENCTL = args.zenctl
+    ZENCTL_OFF = args.no_zenctl
     author = args.owner or args.author
     target = args.owner or args.target
     for p in (author, target):
@@ -1316,7 +1342,7 @@ def main(argv: list[str] | None = None) -> int:
     a = "zk2py" if author == "zk2py" else "rust"
     t = "zk2py" if target == "zk2py" else "rust"
     print(f"desired scenarios ({a} author, {t} target{', polling' if args.poll else ''}): {passed} passed, "
-          f"{failed} failed")
+          f"{failed} failed" + (f", {len(report.not_run)} not run" if report.not_run else ""))
     for sec, name, ok, detail in report.rows:
         if not ok:
             print(f"FAIL [{sec}] {name}: {detail}")
