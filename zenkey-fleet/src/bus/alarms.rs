@@ -388,17 +388,17 @@ impl AlarmFeed {
             restart_stall: false,
             log: ReadLog::default(),
         };
-        if listen {
-            feed.listen().await?;
+        if let Some(watch) = feed.watch.clone() {
+            feed.listen(&watch).await?;
         }
         let refreshed = feed.refresh_plan().run().await;
         let out = feed.fold(refreshed);
         Ok((feed, out))
     }
 
-    /// The subscriptions, in core §4.2's order, and the watch of this
-    /// reader's receive path.
-    async fn listen(&mut self) -> crate::Result<()> {
+    /// The subscriptions, in core §4.2's order, the instance tokens' on
+    /// `watch` (#830), and the watch of this reader's receive path.
+    async fn listen(&mut self, watch: &Session) -> crate::Result<()> {
         let (tx, rx) = tokio::sync::mpsc::channel(QUEUE);
         let queue = Queue {
             tx,
@@ -406,14 +406,10 @@ impl AlarmFeed {
         };
         let scope = self.book.scope().clone();
         let q = queue.clone();
-        let watch = self
-            .watch
-            .clone()
-            .expect("a listening feed holds a watch session");
         let tokens = crate::bus::teardown::declared(
             "alarms' instance tokens",
             scope.instance_selector(),
-            zenkey::presence::declare_subscriber(&watch, scope.instance_selector()).callback(
+            zenkey::presence::declare_subscriber(watch, scope.instance_selector()).callback(
                 move |s: Sample| {
                     if let Ok(key @ ZkKey::Instance { .. }) =
                         zenkey_model::grammar::parse(s.key_expr().as_str())
@@ -430,7 +426,7 @@ impl AlarmFeed {
         .await?;
         // Its routers have read the subscription before any presence read
         // on the other session is answered (#830).
-        if !zenkey::presence::settle(&watch, &scope.instance_selector(), self.spec.timeout)
+        if !zenkey::presence::settle(watch, &scope.instance_selector(), self.spec.timeout)
             .await
             .unwrap_or(false)
         {

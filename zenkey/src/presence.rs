@@ -141,9 +141,15 @@ async fn get(session: &zenoh::Session, selector: &str, timeout: Duration) -> Res
 /// the face's `local_tokens` as they are), so the hazard lasts as long as
 /// the session. A zid names one session, so one process's sessions never
 /// share a mark.
-fn watch_sessions() -> &'static Mutex<HashSet<zenoh::session::ZenohId>> {
+///
+/// A panic elsewhere while the lock is held leaves the set as it was (an
+/// insert or a lookup), so a poisoned lock is read through, never fatal.
+fn watch_sessions() -> std::sync::MutexGuard<'static, HashSet<zenoh::session::ZenohId>> {
     static MARKED: OnceLock<Mutex<HashSet<zenoh::session::ZenohId>>> = OnceLock::new();
-    MARKED.get_or_init(Mutex::default)
+    MARKED
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Declares a liveliness subscriber on `session`, **marking it a watch
@@ -151,6 +157,10 @@ fn watch_sessions() -> &'static Mutex<HashSet<zenoh::session::ZenohId>> {
 /// liveliness read on it is refused from now on
 /// ([`Error::ReadBesideSubscriber`]). The builder is zenoh's own, so a
 /// caller sets history, a callback or a handler as before.
+///
+/// The mark is made here, before the builder is awaited, so a declaration
+/// that fails or is never awaited marks the session too: conservative,
+/// since a read there is then refused and goes on a session of its own.
 ///
 /// The one way the runtime and `zenkey-fleet` declare a liveliness
 /// subscriber: a declaration made around it would leave its session
@@ -163,10 +173,7 @@ where
     K: TryInto<zenoh::key_expr::KeyExpr<'b>>,
     <K as TryInto<zenoh::key_expr::KeyExpr<'b>>>::Error: Into<zenoh::Error>,
 {
-    watch_sessions()
-        .lock()
-        .expect("the watch-session registry is never poisoned")
-        .insert(session.zid());
+    watch_sessions().insert(session.zid());
     session.liveliness().declare_subscriber(key_expr)
 }
 
@@ -175,10 +182,7 @@ where
 /// (#830).
 #[must_use]
 pub fn watching(session: &zenoh::Session) -> bool {
-    watch_sessions()
-        .lock()
-        .expect("the watch-session registry is never poisoned")
-        .contains(&session.zid())
+    watch_sessions().contains(&session.zid())
 }
 
 /// Whether `session` reaches no other zenoh node (core §8.1, 0.37): it holds
