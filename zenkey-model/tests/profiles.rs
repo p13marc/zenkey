@@ -2807,6 +2807,9 @@ fn redundancy_lifecycle() {
                 ev if ev.get("lock").is_some() => e.observe(redundancy::Event::Lock(
                     ev["lock"].as_bool().expect("a lock"),
                 )),
+                ev if ev.get("reminted").is_some() => {
+                    e.observe(redundancy::Event::Reminted(rd_id(&ev["reminted"])))
+                }
                 other => panic!("event {other}"),
             };
             steps.push(rd_step(&step));
