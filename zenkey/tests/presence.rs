@@ -1036,3 +1036,111 @@ async fn s9_a_read_beside_a_liveliness_subscriber() {
         .unwrap();
     assert!(read.complete && read.keys.contains(&key), "{read:?}");
 }
+
+/// Core §8.1's implementation note (0.40; `redundancy.v1` text 0.2,
+/// F-204), measured: a session's liveliness read returns the session's own
+/// tokens even when its router's access control refuses the read, since
+/// the session answers its own tokens itself. On another session the same
+/// read through the same router is complete and empty (0.8's refusal), and
+/// a read on the token's own session says nothing about the bus for that
+/// token.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_read_on_a_tokens_own_session_still_returns_it() {
+    let acl = r#"{
+        enabled: true,
+        default_permission: "allow",
+        rules: [{
+            id: "no-presence-reads",
+            messages: ["liveliness_query"],
+            flows: ["ingress"],
+            permission: "deny",
+            key_exprs: ["zk2/*/*/@zk/**"],
+        }],
+        subjects: [{ id: "anyone" }],
+        policies: [{ rules: ["no-presence-reads"], subjects: ["anyone"] }],
+    }"#;
+    let (r1, ep) = common::router_with(None, &[("access_control", acl)]).await;
+    let (owner, other) = (client(&ep).await, client(&ep).await);
+    let key = "zk2/lab/ledger/@zk/instance/000000000000000a";
+    let _token = owner.liveliness().declare_token(key).await.unwrap();
+    eventually("the router holds the token", || async {
+        keys(&r1, "zk2/lab/ledger/@zk/**").await == [key]
+    })
+    .await;
+    let sel = "zk2/lab/ledger/@zk/**";
+    for _ in 0..5 {
+        let own = presence::liveliness_read(&owner, sel, T).await.unwrap();
+        assert!(own.complete, "{own:?}");
+        assert_eq!(own.keys, [key], "its own token, from the session itself");
+        let refused = presence::liveliness_read(&other, sel, T).await.unwrap();
+        assert!(refused.complete && refused.errors.is_empty(), "{refused:?}");
+        assert!(
+            refused.keys.is_empty(),
+            "refused at the router: {refused:?}"
+        );
+    }
+}
+
+/// Core §8.1 (0.40; `redundancy.v1` text 0.2, F-206), measured against
+/// zenoh 1.10.1 (`hat/peer/token.rs`: a router's south peer region, the
+/// `auto` gateway's, propagates no token from one of its peers to another,
+/// which are expected to be linked to each other): two peers behind one
+/// router, neither listening, so neither can link to the other, one
+/// holding a token. The other's read through the router is complete and
+/// empty, every time, while a client of the same router reads the token.
+/// `routing.router.peers_failover_brokering` has no effect in 1.10.1
+/// (`zenoh-config`: deprecated, read and ignored). With both peers
+/// listening and gossiping through a router that gossips, zenoh's default,
+/// they link, and the token is read. A read is complete only for what its
+/// routers' clients and its linked peers hold.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_peers_read_through_a_router_misses_an_unlinked_peers_token() {
+    // The router gossips, zenoh's default, so that peers that listen learn
+    // of each other through it.
+    let (_r1, ep) = common::router_with(None, &[("scouting/gossip/enabled", "true")]).await;
+    let tool = client(&ep).await;
+    let sel = "zk2/lab/ledger/@zk/**";
+    let key = "zk2/lab/ledger/@zk/instance/000000000000000a";
+    let read = |s: &zenoh::Session| {
+        let s = s.clone();
+        async move { presence::liveliness_read(&s, sel, T).await.unwrap() }
+    };
+    // Neither listening, gossip on (zenoh's default) or off.
+    for gossip in [true, false] {
+        let holder = common::peer(&ep, false, gossip).await;
+        let reader = common::peer(&ep, false, gossip).await;
+        let token = holder.liveliness().declare_token(key).await.unwrap();
+        eventually("a client of the router reads it", || async {
+            let r = read(&tool).await;
+            r.complete && r.keys == [key]
+        })
+        .await;
+        for _ in 0..6 {
+            let r = read(&reader).await;
+            assert!(r.complete, "gossip {gossip}: {r:?}");
+            assert!(
+                r.keys.is_empty(),
+                "gossip {gossip}: the peer missed it: {r:?}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        drop(token);
+        for s in [holder, reader] {
+            s.close().await.unwrap();
+        }
+        eventually("the token is gone", || async {
+            let r = read(&tool).await;
+            r.complete && r.keys.is_empty()
+        })
+        .await;
+    }
+    // Both listening, gossiping: they link, and the read finds it.
+    let holder = common::peer(&ep, true, true).await;
+    let reader = common::peer(&ep, true, true).await;
+    let _token = holder.liveliness().declare_token(key).await.unwrap();
+    eventually("the linked peer reads the token", || async {
+        let r = read(&reader).await;
+        r.complete && r.keys == [key]
+    })
+    .await;
+}
