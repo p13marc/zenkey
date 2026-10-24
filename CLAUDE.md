@@ -43,7 +43,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   through a session cut off is not made (`PresenceBasis::CutOff`), and the
   monitor holds its liveliness subscribers on a watch session of its own
   while the feed reads on the deployment's, refusing the monitor's zid,
-  #830). For zengui's tree (#614, FL4):
+  #830; a read cut off while it runs is a seed possibly incomplete, said
+  beside `complete` as `cut_off_during` in every presence report but the
+  doctor's, which zenwatch.v1 pins, and the feed counts the reads it makes,
+  `PresenceFeed::reads`, core 0.38, #849). For zengui's tree (#614, FL4):
   `model::skeleton` (the declared keyspace from the lens, merged with the
   observed snapshot and the watch set into typed `NodeStatus`es),
   `model::identity::IdentityCache` (each key's resolution, bounded, dropped
@@ -772,13 +775,19 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `consumer` reads through a role's bindings: R2 parameter binding, R6's
   wildcard-key discard, R5's presence wait, R7's *unobservable*; tools
   consume with `Consumer::for_tool` and read presence with
-  `presence::liveliness_read`, which flags a GET that ran to its timeout as
-  possibly incomplete (§8.1); every liveliness subscriber goes through
+  `presence::liveliness_read`, which flags a GET that ran to its timeout,
+  or whose session was cut off while it ran, as possibly incomplete (§8.1;
+  `PresenceRead::cut_off_during`, core 0.38: the session is checked again
+  when the read ends, by its links, since zenoh 1.10.1 still lists a
+  closing transport in `transports()` when it answers the read at the
+  cut); every liveliness subscriber goes through
   `presence::declare_subscriber`, which marks its session a watch session
   for good, and `liveliness_read` refuses one (`Error::ReadBesideSubscriber`)
   and a session cut off (`Error::CutOff`), with `presence::settle` a watch
-  session's one barrier GET (#830, core 0.37;
-  `scripts/check-liveliness-seam.sh` keeps the seam the only one). The
+  session's one barrier GET (#830, core 0.37; every liveliness GET goes
+  through `presence` too, counted per session by
+  `presence::liveliness_gets`, and `scripts/check-liveliness-seam.sh`
+  keeps the seam the only one). The
   archive hears owners on `ArchiveConfig::watch` or reads presence every
   500 ms, and R5's wait reads presence. `state`
   stamps every put and delete (the `Minter`: §4.3's minting, catch-up, a
@@ -905,8 +914,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.37 is the current version
-    (0.37: what a complete presence read is, #839/#830; changes go through
+  - `spec/core.md` v0.1 is accepted, and v0.38 is the current version
+    (0.37: what a complete presence read is, #839/#830; 0.38: the second
+    implementation's findings against it, #849; changes go through
     `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
