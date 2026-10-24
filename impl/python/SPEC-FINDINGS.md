@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Fifty-three rounds.**
+**Fifty-four rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -134,8 +134,11 @@ where that was not enough, or where the spec said two things.
   `desired.v1` 0.2 and `config.v1` 0.4 resolved all twenty, F-163, F-166
   (partly), F-168 and F-170 against zk2py's reading.
 - F-181 to F-184 were found against `desired.v1` 0.2 and `config.v1` 0.4,
-  read cold in round 53 (see "At desired.v1 0.2" at the end). All four
-  are open, and minor.
+  read cold in round 53 (see "At desired.v1 0.2"). All four are open, and
+  minor; `desired.v1` 0.3 answers them in a later round.
+- F-185 to F-191 were found against core 0.37, what a complete presence
+  read is, read cold in round 54, with `scenarios/presence.md` §7 to §9
+  run from Python (see "At core 0.37" at the end). All seven are open.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -9369,3 +9372,315 @@ from an archive while an act runs, confirms it".
 
 **Counts at desired.v1 0.2, config.v1 0.4 and core 0.36:** 184 entries,
 F-181 to F-184 open, every one before them resolved.
+
+## At core 0.37 (#609)
+
+Core 0.37 says what a complete presence read is (§8.1, §2.7, Appendix
+B). It adds three rules:
+- a read through a session cut off is not complete, and SHOULD NOT be
+  made;
+- absence is established only by a complete read, so a withdrawal heard
+  live is a reason to read again;
+- a read that may conclude absence goes on a session with no liveliness
+  subscriber, beside a **watch session** that holds them, with one round
+  trip there before the seed.
+
+`scenarios/presence.md` §7 to §9 are new. No fixture changed, and the
+profiles keep their texts. zk2py read §8.1 and Appendix B cold, and the
+two files of `docs/zk2/upstream/` that Appendix B cites. It implemented
+the rules from the text:
+- **`zk2py.live`.** `list_presence` makes no read through a session that
+  holds no transport, and none on a session marked by a liveliness
+  subscriber zk2py declared. It reports each **not made**, a third kind
+  (`Presence.kind`). It checks the transports again when the read ends
+  (F-185).
+- **The watch session.** `declare_liveliness_subscriber` marks a session
+  for its life. `watch_session` opens a reader's watch session the way
+  `open_client` opened the reader. `settle` is the round trip.
+  `watch_or_beside` moves a reader's subscriber, and `AlarmsReader`,
+  `budget.Window`, the telemetry reader, and the alarms, health and
+  hostid runners' token watches use it.
+- **`zk2py.presence`.** `PresenceView` is session-free. Its holders are an
+  address's instance tokens, an interface's tokens and a member's epochs.
+  A withdrawal that leaves one with nothing held makes it unobservable,
+  never down, and owes a read; one read asked answers the burst. A
+  make-before-break re-mint owes none. A complete read showing none makes
+  it down. A read not made, or possibly incomplete, leaves it unconfirmed,
+  and the read still owed. `PresenceFollower` is the live half. It reads
+  0.1 s after a withdrawal, the reference's interval, which the CHANGELOG
+  states and the text leaves at "soon", and retries a read not made every
+  0.2 s.
+
+**What zenoh-python 1.10.1 lets it do.** Everything the rules ask:
+- `Session.info.transports()` is there, and its stub does not mark it
+  unstable, unlike Rust's. It was empty within 0.05 s of a cut, and filled
+  again within about 1 s of a heal, by the client's own retry.
+- A transport events listener is there too (`budget.StallWatch` uses one).
+- A liveliness GET with a callback handler, a liveliness subscriber with
+  or without history, and a second client session are all stable API.
+
+What it does not let zk2py do:
+- **Mark a session itself.** A `zenoh.Session` takes no attribute and no
+  weak reference. zk2py's registry therefore holds each marked session by
+  its id, and keeps a strong reference, so that the id is never reused.
+- **Open a watch session for a session it did not open.** A session's
+  configuration cannot be read back. `budget_scenarios.client` opens its
+  sessions through its own configuration, with a lease, so its windows
+  keep their subscriber beside their reads, as before 0.37.
+
+**`just py-conformance`: 2665 of 2665.** Before this round, 2652 passed;
+`readings` gained 13 cases of the view and of a read's kinds, and nothing
+else moved.
+
+**`python -m zk2py.presence_scenarios`: 26 of 26**, three runs. Each
+section observes zenoh as the scenario says, then zk2py's reader:
+- **§7.** Cut, the GET is answered at once: the final reply, no token, no
+  error reply, in under a millisecond. R1's own read holds the token.
+  zk2py's read is not made, cut off. After the heal, it holds the token.
+- **§8.** On the cut, the watch session's subscriber hears the token
+  withdrawn, and R1 still holds it. zk2py's follower reads the owner
+  unobservable (withdrawn), never down, and its re-reads are not made
+  while cut off. On the heal, the subscriber hears the token again, and
+  the follower reads up. After a clean stop, the follower reads down,
+  and only from its complete re-read.
+- **§9.** A GET made at once beside a history subscriber completes without
+  the token, in every run, as Appendix B measured. The tool's GET holds it,
+  and zk2py's reader refuses a read on a marked session.
+- **The follower** (zk2py's own). Three owners withdrawn at once take one
+  read, then each is down. A make-before-break re-mint takes no read, and
+  the owner stays up.
+- **F-185.** A read in flight when the link closes comes back at once with
+  no token, and zk2py's end-of-read check reads it not complete.
+
+After the move to watch sessions, the converted runners pass against
+zk2py's owner:
+- `telemetry_scenarios`: 57 of 57;
+- `hostid_scenarios`: 34 of 34;
+- `health_scenarios`: every check of §1 to §8;
+- `alarms_scenarios --quick`: 78 of 78, one not run.
+
+`live_interop`'s budget run was not rerun: it needs the Rust owner
+example, which cargo builds.
+
+**The other profiles against rule (b).** No profile's verdict concludes
+absence from a withdrawal:
+- the presence premises of alarms.v1 §2.14 step 1, health.v1 §2.11,
+  config.v1 §5 and desired.v1 §2.17 are complete reads;
+- alarms.v1 §2.15 reads a withdrawal as a gap in its window, which is
+  unobservable, not absence;
+- telemetry.v1 §2.9 reads one as no evidence of an epoch, which is
+  unobservable too;
+- config.v1 §2.12's late confirm reads "the instance token it knew is
+  gone, and another is there", which is positive evidence.
+
+Two rules word absence loosely, and one premise has no input for a read
+not made (F-187, F-191).
+
+**The scenarios, read for sufficiency.** Each of §7 to §9 runs from its
+text alone. But §8 and §9 observe zenoh more than the reader (F-188,
+F-189), and §7 cuts no read in flight (F-185).
+
+### F-185 · gap · core 0.37 §8.1 "A read through a session cut off": a transport that closes during the read
+
+> core §8.1: "A reader SHOULD NOT make it: before a read, it checks that its
+> session holds a transport to another node (in zenoh 1.10.1,
+> `Session::info().transports()`, unstable, §0), and reports a read not
+> made, with that reason, as it reports one possibly incomplete."
+
+> core §8.1: "Such a read is **not complete, whatever its replies say.**"
+
+The text checks before the read only. zk2py measured a read in flight when
+the session's last transport closes. Its link was stalled, the read was
+asked, and the link was cut 0.3 s later. It came back at the cut, with the
+final reply, no token and no error reply, in 3 of 3 runs, and again in the
+runner's check. A transport was held when it was asked, so the check
+before passes it, and a reader reads absence. The answer came through a
+session that by then reached no node, and the rule calls that not
+complete. A reader can only know by looking again: at the read's end
+(the transports empty then, since the answer comes at once at the close),
+or by a transport event during it. §7 cuts the link before its read, so
+it does not show the case.
+
+**zk2py:** checks before and after (`list_presence`). A read whose
+session holds no transport when it ends is not complete
+(`cut_off_during`), and its tokens are kept as seen. The runner's F-185
+check pins it.
+
+**Wording that would remove the guess:** §8.1, "before a read, and again
+when it ends, it checks …; a read during which its session's last
+transport closed is not complete either", and a step of §7 that cuts the
+link while a read is in flight.
+
+### F-186 · contradiction · scenarios/presence.md §4 against core 0.37 §8.1 and Appendix B: a GET beside a subscriber, expected whole
+
+> presence.md §4: "**Steps.** A session that holds a liveliness subscriber
+> issues a liveliness GET, under each pairing of the GET's handler and the
+> subscriber's."
+
+> presence.md §4, Expected: "With callbacks for both, the GET completes
+> with every token."
+
+> core §8.1: "a liveliness GET from a session that holds a liveliness
+> subscriber can complete without live tokens the subscriber covers: the
+> final reply and no error reply, the tokens missing. It happens with
+> history or without"
+
+§4 is unchanged at 0.37. It still expects a GET beside a subscriber to
+hold every token, which Appendix B now measures failing, every time for
+a history subscriber declared just before. §4 names neither the
+subscriber's selector nor its history, nor the order of the tokens and
+the subscriber. It holds in Appendix B's one safe cell: a subscriber
+without history, declared after every token ("B tokens-first", 0 of
+5,760). zk2py's run of §4 (`live_interop`, `_scale_check`) holds a
+non-history subscriber declared after its holder declared the 2,000
+tokens, which reach the router over about 3 s, and polls its GET until
+it lists every one: a miss there delays the pass, and never fails it.
+Read with 0.37,
+§4 checks a rule (§8.1's handler rule) on the one read 0.37 says not to
+make, and gives no read made that way a verdict.
+
+**zk2py:** its §4 run unchanged, a measurement of the handler rule. The
+GETs it reads presence by are on sessions with no subscriber.
+
+**Wording that would remove the guess:** §4, "a session that holds a
+liveliness subscriber without history, declared after the tokens, …
+(Appendix B: any other subscriber can make the GET miss them)", or §4
+moved to the watch session's round trip, whose answer is discarded.
+
+### F-187 · ambiguity · desired.v1 0.2 §2.5 and alarms.v1 0.8 §2.7 against core 0.37 §8.1: "token gone"
+
+> desired.v1 §2.5: "**The author absent.** With its author's instance token
+> gone, or its GET silent within the timeout, the target MAY read an
+> archive's last-known instead (§2.9, core S6)."
+
+> alarms.v1 §2.7: "**An absent owner's alarms are last-known.** With its
+> tokens gone, its alarms are presence's word and an archive's last-known
+> (core S6), never firing now (§2.14)."
+
+> core §8.1: "A reader MUST NOT conclude absence from a withdrawal alone."
+
+> core S6: "A consumer turns to an archive only when the owner gave no
+> reply within the GET's timeout, or presence shows it absent."
+
+"Gone" reads as heard withdrawn, the one thing 0.37 says is never absence
+by itself. A target whose own router restarts hears its author's token
+withdrawn and turns to an archive on it. That is S6's turn without its
+premise, since presence has shown nothing absent. alarms.v1's §2.14 step
+1, which its CHANGELOG cites, makes its verdict a complete read, so only
+§2.7's sentence is loose there. desired.v1's §2.5 rule is the target's
+own act, and nothing else in desired.v1 binds it to a read.
+
+**zk2py:** no target on a bus yet. Its reader would turn to an archive
+only on a complete read without the token, or on a GET silent within the
+timeout.
+
+**Wording that would remove the guess:** "With its author absent, a
+complete read without its instance token (core §8.1), or its GET silent
+…", and the same in alarms.v1 §2.7.
+
+### F-188 · gap · scenarios/presence.md §8: the reader's verdict during the cut is not observed
+
+> presence.md §8 Expected 2: "On the cut, the subscriber hears the owner's
+> instance token withdrawn, and R1's own session still reads it: the owner
+> never left. On the heal, the subscriber hears it again, and the tool's
+> read holds it. A reader that concluded absence from the withdrawal would
+> have read a live owner down"
+
+Every observation of §8 is of zenoh: what the subscriber hears, what R1
+holds, what the tool's read holds after the heal. None is of the reader's
+verdict. The sentence on a reader that concluded absence describes a
+failure, but no step asks the reader between the cut and the heal. So an
+implementation that reads the owner down from the withdrawal passes §8.
+Nor does any step observe §8.1's other four points:
+- one read for a burst;
+- a make-before-break re-mint owing none;
+- a re-read not made while cut off, leaving the withdrawal unconfirmed;
+- step 3's absence said only once the read after the withdrawal completes.
+
+**zk2py:** its runner asks its follower at each of those points. It also
+runs a burst and a re-mint of its own (the "follower" section).
+
+**Wording that would remove the guess:** §8 Expected 2, "between the cut
+and the heal, the reader reports the owner unobservable, never down, and
+its re-read not made", and steps for a burst and a re-mint.
+
+### F-189 · gap · scenarios/presence.md §9: the reader's own placement is not observed
+
+> presence.md §9 Expected 3: "A reader makes the read that establishes
+> absence on a session like the tool's (core §8.1, "The read that
+> establishes absence"): the reference refuses a liveliness read on a
+> session that holds a liveliness subscriber it declared, and reports it
+> not made."
+
+Steps 2 and 3 are GETs the test makes, so they show zenoh's miss and its
+cure. A reader that holds its subscriber and makes its own reads on one
+session passes them. §8.1's round trip on the watch session before the
+seed is in no step either. Its case, a token withdrawn between the seed's
+answer and the router's reading of the subscriber, is never made to
+happen, so a reader that leaves it out passes as well.
+
+**zk2py:** its runner checks its own refusal on a marked session. The
+round trip is in its follower and its readers (`settle`), and nothing
+observes it.
+
+**Wording that would remove the guess:** a step in which the reader under
+test follows and seeds presence, observed to make no liveliness read on its
+watch session but the round trip, and one that withdraws a token right
+after the seed is answered.
+
+### F-190 · ambiguity · core 0.37 §8.1 "The read that establishes absence": "holds no liveliness subscriber", and one undeclared
+
+> core §8.1: "It happens with history or without, and by zenoh's code it
+> lasts after the subscriber is undeclared (Appendix B)."
+
+> core §8.1: "A reader SHOULD make every liveliness read it may conclude
+> absence from … on a session that holds no liveliness subscriber of any
+> kind"
+
+"Holds no" is the present tense. A session whose subscriber was declared
+and then undeclared holds none, yet the sentence before says it stays
+exposed. The reference marks a session "for its life", as the CHANGELOG
+says, which is the stricter reading.
+
+**zk2py:** the CHANGELOG's, a session marked for its life.
+
+**Wording that would remove the guess:** "on a session that has never held
+a liveliness subscriber of any kind".
+
+### F-191 · gap · the profiles' presence premises against core 0.37: a read not made
+
+> core CHANGELOG 0.37: "**Possibly incomplete** reads (a timeout, an error
+> reply) keep their meaning. A read not made is a third kind, never folded
+> into either."
+
+> core §8.1: "… reports a read not made, with that reason, as it reports
+> one possibly incomplete. What a read not made would have established is
+> unobservable."
+
+> desired.v1 `conclusions.json`: "incomplete: not seen in a read possibly
+> incomplete or refused"
+
+A tool's question goes through a profile's premises, and every profile
+names three readings: present, absent, and a read possibly incomplete or
+refused:
+- alarms.v1 §2.14 step 1, and its `conclusions.json` presence;
+- health.v1 §2.11;
+- config.v1 §5;
+- desired.v1 §2.17 steps 1 and 6, and its `conclusions.json` input;
+- telemetry.v1 §2.9, a view that stands on a complete read.
+
+None names a read not made. A tool must give one a profile's unobservable
+reason, and the only one there is "presence possibly incomplete" (for
+desired.v1, `presence_incomplete`). That folds the third kind into the
+second, which the core says never to do. The answer is unobservable either
+way, but the reason misstates the read.
+
+**zk2py:** a read not made goes to each profile as `incomplete`, its
+`Presence.kind` and reason kept beside it.
+
+**Wording that would remove the guess:** each premise, "a read possibly
+incomplete, refused, or not made (core §8.1)", or a core sentence that a
+profile's possibly-incomplete reason covers a read not made.
+
+**Counts at core 0.37:** 191 entries. F-181 to F-191 are open, F-181 to
+F-184 against desired.v1 0.2, and every one before them is resolved.
