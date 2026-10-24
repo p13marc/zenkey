@@ -31,6 +31,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -86,6 +87,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -136,6 +138,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -194,6 +197,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -248,6 +252,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -302,6 +307,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -357,6 +363,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -412,6 +419,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -467,6 +475,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -513,6 +522,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -559,6 +569,7 @@
           "presence": "absent"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -610,6 +621,7 @@
           "presence": "incomplete"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -660,6 +672,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -710,6 +723,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -760,6 +774,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -815,6 +830,7 @@
           "presence": "across_face"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -870,6 +886,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": null,
           "presence": "absent",
           "report": null,
@@ -908,6 +925,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": null,
           "presence": "incomplete",
           "report": null,
@@ -946,6 +964,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": null,
           "presence": "present",
           "report": {
@@ -998,6 +1017,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": false,
             "lists": false
@@ -1039,6 +1059,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": false,
             "lists": true
@@ -1084,6 +1105,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -1125,6 +1147,10 @@
           "presence": "across_face"
         },
         "target": {
+          "deployment": {
+            "bound": true,
+            "lists": true
+          },
           "descriptor": null,
           "presence": "across_face",
           "report": null,
@@ -1163,6 +1189,10 @@
           "presence": "across_face"
         },
         "target": {
+          "deployment": {
+            "bound": true,
+            "lists": true
+          },
           "descriptor": null,
           "presence": "across_face",
           "report": {
@@ -1215,6 +1245,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -1256,6 +1287,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -1302,6 +1334,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -1357,6 +1390,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -1412,6 +1446,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -1467,6 +1502,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -1522,6 +1558,7 @@
           "presence": "present"
         },
         "target": {
+          "deployment": null,
           "descriptor": {
             "bound": true,
             "lists": true
@@ -1545,7 +1582,190 @@
           "report_freshness": "not_asked"
         }
       }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        },
+        "in_force": {
+          "answer": "no",
+          "reason": "unbound"
+        },
+        "last_known": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        },
+        "refused": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        }
+      },
+      "note": "across a face, the role unbound by the deployment's word: the kill switch, answered before any report (0.2, F-168)",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "across_face"
+        },
+        "target": {
+          "deployment": {
+            "bound": false,
+            "lists": true
+          },
+          "descriptor": null,
+          "presence": "across_face",
+          "report": null,
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        },
+        "in_force": {
+          "answer": "no",
+          "reason": "unbound"
+        },
+        "last_known": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        },
+        "refused": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        }
+      },
+      "note": "across a face, the kill switch's report crossed: still answered by the deployment's word",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "across_face"
+        },
+        "target": {
+          "deployment": {
+            "bound": false,
+            "lists": true
+          },
+          "descriptor": null,
+          "presence": "across_face",
+          "report": {
+            "document": {
+              "source": "baseline"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_asked",
+          "reason": "not_a_target"
+        },
+        "in_force": {
+          "answer": "not_asked",
+          "reason": "not_a_target"
+        },
+        "last_known": {
+          "answer": "not_asked",
+          "reason": "not_a_target"
+        },
+        "refused": {
+          "answer": "not_asked",
+          "reason": "not_a_target"
+        }
+      },
+      "note": "across a face, not a target by the deployment's word",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "across_face"
+        },
+        "target": {
+          "deployment": {
+            "bound": false,
+            "lists": false
+          },
+          "descriptor": null,
+          "presence": "across_face",
+          "report": null,
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        }
+      },
+      "note": "across a face with no word of the deployment's: nothing stands for the descriptor",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "across_face"
+        },
+        "target": {
+          "deployment": null,
+          "descriptor": null,
+          "presence": "across_face",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
     }
   ],
-  "description": "desired.v1 §2.17, §5: one reading of one target's role against its author's document -> §5's four questions, each an answer (yes, no, not_yet, unobservable, not_asked) and a reason. reading.target: its presence (present, absent: a complete read without its instance token, incomplete: not seen in a read possibly incomplete or refused, across_face: across a constrained face, where the deployment's word stands for its descriptor); its descriptor ({lists: whether its requires list the role, bound: whether its bindings are not empty}, or null when not read; not read across a face); its report of the role's slice, the one whose key is that slice's (null when none was read, \"undecodable\" for bytes that are not strict JSON, or {document}, read as reports.json reads one: unreadable or with any finding, it is invalid); report_freshness, its freshness.v1 verdict (fresh, stale, unobservable; not_asked when its resource declares no horizon). reading.author: its presence (as the target's), and current, its latest version of the slice by S4's GET (null when no GET was made, \"incomplete\" for one that ended at its timeout or with an error reply, \"silent\" for one that drew nothing for the key, or {put: stamp} or {delete: stamp}, the stamp {time, id}). The questions: converged (has the target converged on its author's current document?), refused (is its last act refused or failed?), last_known (is what it acted on last-known?), in_force (is a desired document in force?). Steps 1 to 4 of §2.17 answer every question alike, but in_force for an unbound role, no, unbound; then each question as §2.17 step 5 says, converged by steps 6 and 7: observed compared with the author's stamp by value (time, then the id as a 128-bit value)."
+  "description": "desired.v1 §2.17, §5: one reading of one target's role against its author's document -> §5's four questions, each an answer (yes, no, not_yet, unobservable, not_asked) and a reason. reading.target: its presence (present, absent: a complete read without its instance token, incomplete: not seen in a read possibly incomplete or refused, across_face: across a constrained face, where the deployment's word stands for its descriptor and answers step 2, 0.2, F-168); its descriptor ({lists: whether its requires list the role, bound: whether its bindings are not empty}, or null when not read; not read across a face); its deployment, across a face only, the deployment's word for what its descriptor would say ({lists, bound}, as descriptor reads them, or null when the tool has none, which answers as a descriptor not read: unobservable, no_descriptor; null and ignored elsewhere); its report of the role's slice, the one whose key is that slice's (null when none was read, \"undecodable\" for bytes that are not strict JSON, or {document}, read as reports.json reads one: unreadable or with any finding, it is invalid); report_freshness, its freshness.v1 verdict (fresh, stale, unobservable; not_asked when its resource declares no horizon). reading.author: its presence (as the target's), and current, its latest version of the slice by S4's GET (null when no GET was made, \"incomplete\" for one that ended at its timeout or with an error reply, \"silent\" for one that drew nothing for the key, or {put: stamp} or {delete: stamp}, the stamp {time, id}). The questions: converged (has the target converged on its author's current document?), refused (is its last act refused or failed?), last_known (is what it acted on last-known?), in_force (is a desired document in force?). Steps 1 to 4 of §2.17 answer every question alike, but in_force for an unbound role, no, unbound; then each question as §2.17 step 5 says, converged by steps 6 and 7: observed compared with the author's stamp by value (time, then the id as a 128-bit value)."
 }

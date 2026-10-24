@@ -4,7 +4,7 @@
   "$comment": "desired.v1's standard schema (spec/profiles/desired/v1.md §2.10, §3; core §10 point 1). A target's contract lists this file, or a copy whose JCS bytes are equal, and types its report desired.v1.Report: a type is the profile's by this artifact's id, never by its name alone. Objects are open: a later minor may add a member, and a reader ignores one it does not know. Descriptions and comments are annotations (core §7.3).",
   "$defs": {
     "desired.v1.Report": {
-      "description": "What a target holds of one desired document, put by the target as its own state (§2.10): what is in force, and the last version it acted on with that act's outcome.",
+      "description": "What a target holds of one desired document, put by the target as its own state (§2.10): what is in force, and the last version it acted on or adopted, with its last act's outcome.",
       "type": "object",
       "properties": {
         "key": {
@@ -21,11 +21,11 @@
           "$ref": "#/$defs/desired.v1.Version"
         },
         "observed": {
-          "description": "The last version the target acted on in this instance, whatever the outcome (§2.7). Absent before its first act.",
+          "description": "The last version the target acted on or adopted in this instance, whatever the outcome (§2.7). Absent before its first act.",
           "$ref": "#/$defs/desired.v1.Version"
         },
         "outcome": {
-          "description": "What that act did (§2.7, §2.8): converged, the document in force; refused, nothing of it applied and what was in force kept; failed, applied in part; reverted, a delete acted on and the baseline back in force.",
+          "description": "What the last act did (§2.7, §2.8), which an adoption keeps: converged, the document in force; refused, nothing of it applied and what was in force kept; failed, applied in part; reverted, a delete acted on and the baseline back in force.",
           "type": "string",
           "enum": ["converged", "refused", "failed", "reverted"]
         },

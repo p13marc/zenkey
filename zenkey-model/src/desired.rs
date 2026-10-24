@@ -14,8 +14,9 @@
 //! parse_stamp(text) / Stamp's Display       ─▶ <time>/<id>, as zenoh writes a timestamp                    §2.4
 //! decode(bytes), Report::from_json(v)       ─▶ Report │ Unreadable{json, schema, stamp, revision_range}    §2.10
 //! Report::check()                           ─▶ the findings: keyless, key_form, observed_outcome, …        §2.10
-//! Content::of_payload(bytes, json)          ─▶ a put's document, JCS-equal for JSON, else byte-equal       §2.7
+//! Content::of_payload(bytes, json)          ─▶ a put's document, JCS-equal by exact value for JSON, else byte-equal  §2.7
 //! Target::observe(sample)                   ─▶ act │ revert │ adopted │ held │ unstamped │ same_version │ older │ confirmed  §2.6–§2.9
+//!   against the version held, every id remembered (16), then the one held waiting while an act runs
 //! Target::finish(ended)                     ─▶ the report updated; done, or the held version adopted or acted on  §2.7, §2.10
 //! Target::call()                            ─▶ source call                                                 §2.7
 //! converged(target, author)                 ─▶ §5 "has the target converged on its author's current document?"
@@ -36,7 +37,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::authoring::Kind;
+use crate::authoring::{Kind, ParamType};
 use crate::contract::Resource;
 use crate::freshness;
 use crate::grammar::{self, Addr, IfaceId, Key, KindToken, ZkKey};
@@ -67,9 +68,12 @@ pub const VERSION: &str = "desired.v1.Version";
 pub const REFUSAL: &str = "desired.v1.Refusal";
 
 /// The standard schema's artifact ids the profile publishes (§3), oldest
-/// first. A type of one of these artifacts is the profile's.
-pub const PUBLISHED: &[&str] =
-    &["sha256:8c5ffce35fadeb6196233a46e163ee3b15cbd2bd8339a05de2cf8fe22b52e9ef"];
+/// first: text 0.1's, then text 0.2's, whose descriptions say "acted on or
+/// adopted" (F-173). A type of one of these artifacts is the profile's.
+pub const PUBLISHED: &[&str] = &[
+    "sha256:8c5ffce35fadeb6196233a46e163ee3b15cbd2bd8339a05de2cf8fe22b52e9ef",
+    "sha256:43c952598f454ec903dba63bad36419f5dcff3312db727bd4e58a88dc1ca55ae",
+];
 
 /// Whether `id` is one of the standard schema's published artifact ids.
 #[must_use]
@@ -156,6 +160,9 @@ pub enum Invalid {
     RestParam,
     /// A template parameter the value does not name.
     ParamNotTarget,
+    /// A target parameter, not a rest one, whose type is not `string`
+    /// (text 0.2, F-170).
+    NotString,
 }
 
 impl Invalid {
@@ -169,6 +176,7 @@ impl Invalid {
             Self::NotAParam => "not_a_param",
             Self::RestParam => "rest_param",
             Self::ParamNotTarget => "param_not_target",
+            Self::NotString => "not_string",
         }
     }
 
@@ -184,6 +192,7 @@ impl Invalid {
             Self::ParamNotTarget => {
                 "every template parameter must be a target parameter: one document per target"
             }
+            Self::NotString => "a target parameter holds a system or a service name, a string",
         }
     }
 }
@@ -226,20 +235,25 @@ impl Declaration {
     }
 }
 
-/// Reads the declaration of a resource of `kind` and `template` from its
-/// resolved annotations (§2.2, core §9.3). Each check runs alone, and a
-/// check that needs a value an earlier one found wrong is skipped. A
-/// horizon, whatever its value, makes no declaration invalid: its re-puts
-/// are the same document, which a target adopts (§2.7).
+/// Reads the declaration of a resource of `kind`, `template` and parameter
+/// types `params` (core §2.2) from its resolved annotations (§2.2, core
+/// §9.3). Each check runs alone, and a check that needs a value an earlier
+/// one found wrong is skipped: `not_string` reads the type of a name that
+/// is a parameter and not a rest one, and a parameter `params` does not
+/// list (core E011's) is no finding here. A horizon, whatever its value,
+/// makes no declaration invalid: its re-puts are the same document, which
+/// a target adopts (§2.7).
 #[must_use]
 pub fn declaration(
     kind: Kind,
     template: &Template,
+    params: &BTreeMap<String, ParamType>,
     annotations: &BTreeMap<String, Value>,
 ) -> Declaration {
     let Some(v) = annotations.get(TARGET_PARAM) else {
         return Declaration::NotThisProfiles;
     };
+    let typed = params;
     let params: Vec<(&str, bool)> = template.params().collect();
     let mut why = Vec::new();
     if kind != Kind::State {
@@ -270,6 +284,14 @@ pub fn declaration(
             if params.iter().any(|(p, _)| !names.contains(p)) {
                 why.push(Invalid::ParamNotTarget);
             }
+            // A system or a service name is a string (0.2, F-170). A rest
+            // parameter is `path` (core §2.2), and `rest_param`'s alone.
+            if names.iter().any(|n| {
+                params.iter().any(|(p, rest)| !*rest && p == n)
+                    && typed.get(*n).is_some_and(|t| *t != ParamType::String)
+            }) {
+                why.push(Invalid::NotString);
+            }
         }
     }
     match names {
@@ -298,7 +320,7 @@ pub fn declaration(
 /// [`declaration`] of a resource of a contract.
 #[must_use]
 pub fn declaration_of(r: &Resource) -> Declaration {
-    declaration(r.kind, &r.template, &r.annotations)
+    declaration(r.kind, &r.template, &r.params, &r.annotations)
 }
 
 // --- §2.3: the binding ---------------------------------------------------------
@@ -911,6 +933,12 @@ impl Report {
 /// whitespace, no duplicate member at any depth, every number finite), then
 /// [`Report::from_json`].
 ///
+/// **Finite** is by rounding (text 0.2, F-167, as `telemetry.v1` §2.6
+/// reads it): a number's text, an integer's included, is finite when its
+/// exact value rounded to the nearest double is not an infinity, so 10^400
+/// written out is not strict JSON, and `1.7976931348623158e308` is.
+/// `serde_json` reads so with `float_roundtrip`, which this crate asks for.
+///
 /// # Errors
 ///
 /// [`Unreadable::Json`] for bytes that are not strict JSON, else
@@ -941,8 +969,16 @@ pub enum Mutation {
 }
 
 /// A put's document, as a target compares two (§2.7): the SHA-256 of its
-/// JCS bytes (RFC 8785) for a payload encoded as JSON that reads as strict
-/// JSON, else of its bytes. Equal digests are the same document.
+/// canonical form for a payload encoded as JSON that reads as strict JSON,
+/// else of its bytes. Equal digests are the same document.
+///
+/// The canonical form is JCS's (RFC 8785), members in order and nothing
+/// but the value, with one change (text 0.2, F-166): a number is written
+/// by its exact value, never as the double RFC 8785 reads, so `10`, `10.0`
+/// and `1e1` are one document and 2^53 and 2^53 + 1 are two. Its bytes are
+/// strict JSON, a number spelled as [`exact_number`] writes it, so they are
+/// their own canonical form, and never the bytes of a payload that does
+/// not read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Content([u8; 32]);
 
@@ -954,10 +990,16 @@ impl Content {
         Self(d)
     }
 
-    /// A decoded JSON document, compared by its JCS bytes.
+    /// A decoded JSON document, compared by its canonical form. A
+    /// `serde_json` float is a double, so it compares as the double's
+    /// shortest spelling; an integer within 64 bits is exact. A runtime
+    /// compares a payload's bytes ([`Content::of_payload`]), whose every
+    /// number is exact.
     #[must_use]
     pub fn of_json(v: &Value) -> Self {
-        Self::digest(&crate::schema::jcs(v))
+        let mut out = Vec::new();
+        Exact::of_value(v).write(&mut out);
+        Self::digest(&out)
     }
 
     /// A payload compared byte for byte: CBOR, protobuf, raw.
@@ -967,17 +1009,276 @@ impl Content {
     }
 
     /// A payload as a target compares it (§2.7): one encoded as JSON
-    /// (`json`) by its JCS bytes when it reads as strict JSON, and every
-    /// other payload, or JSON that does not read, byte for byte.
+    /// (`json`) by its canonical form when it reads as strict JSON (§2.10's
+    /// reading, every number finite by rounding), and every other payload,
+    /// or JSON that does not read, byte for byte.
     #[must_use]
     pub fn of_payload(bytes: &[u8], json: bool) -> Self {
         let read = json
             .then(|| std::str::from_utf8(bytes).ok())
             .flatten()
-            .and_then(|t| crate::strict::parse_json(t).ok());
+            .filter(|t| crate::strict::parse_json(t).is_ok())
+            .and_then(Exact::of_text);
         match read {
-            Some(v) => Self::of_json(&v),
+            Some(e) => {
+                let mut out = Vec::new();
+                e.write(&mut out);
+                Self::digest(&out)
+            }
             None => Self::of_bytes(bytes),
+        }
+    }
+}
+
+/// A number's text (RFC 8259's grammar) as its exact value, canonical
+/// (§2.7, text 0.2): `0`, or an optional `-`, the significant digits with
+/// no leading and no trailing zero, `e`, and the exponent in decimal. So
+/// `10`, `10.0`, `1e1` and `100e-1` are `1e1`; `-0` is `0`; 2^53 is
+/// `9007199254740992e0` and 2^53 + 1 `9007199254740993e0`. `None` for text
+/// outside the grammar, or an exponent whose text does not fit 128 bits,
+/// which a comparison then reads byte for byte.
+#[must_use]
+pub fn exact_number(text: &str) -> Option<String> {
+    let (neg, rest) = match text.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, text),
+    };
+    let (mantissa, exp) = match rest.find(['e', 'E']) {
+        Some(i) => (&rest[..i], Some(&rest[i + 1..])),
+        None => (rest, None),
+    };
+    let (int, frac) = match mantissa.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (mantissa, None),
+    };
+    let digits = |d: &str| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit());
+    if !digits(int) || (int.len() > 1 && int.starts_with('0')) {
+        return None;
+    }
+    if frac.is_some_and(|f| !digits(f)) {
+        return None;
+    }
+    let exp: i128 = match exp {
+        None => 0,
+        Some(e) => {
+            let body = e.strip_prefix(['+', '-']).unwrap_or(e);
+            if !digits(body) {
+                return None;
+            }
+            e.parse().ok()?
+        }
+    };
+    let frac = frac.unwrap_or("");
+    let all: String = [int, frac].concat();
+    let significant = all.trim_start_matches('0');
+    if significant.is_empty() {
+        return Some("0".to_owned());
+    }
+    let kept = significant.trim_end_matches('0');
+    let trailing = i128::try_from(significant.len() - kept.len()).ok()?;
+    let exp = exp
+        .checked_sub(i128::try_from(frac.len()).ok()?)?
+        .checked_add(trailing)?;
+    Some(format!("{}{kept}e{exp}", if neg { "-" } else { "" }))
+}
+
+/// A JSON value as §2.7 compares it: members by name, every number by its
+/// exact value.
+enum Exact {
+    Null,
+    Bool(bool),
+    Number(String),
+    Text(String),
+    Array(Vec<Exact>),
+    Object(BTreeMap<String, Exact>),
+}
+
+impl Exact {
+    fn of_value(v: &Value) -> Self {
+        match v {
+            Value::Null => Self::Null,
+            Value::Bool(b) => Self::Bool(*b),
+            Value::Number(n) => {
+                let text = match (n.as_u64(), n.as_i64(), n.as_f64()) {
+                    (Some(u), _, _) => u.to_string(),
+                    (None, Some(i), _) => i.to_string(),
+                    (None, None, Some(f)) => format!("{f:e}"),
+                    (None, None, None) => n.to_string(),
+                };
+                // Every spelling above is in RFC 8259's grammar.
+                Self::Number(exact_number(&text).unwrap_or(text))
+            }
+            Value::String(s) => Self::Text(s.clone()),
+            Value::Array(a) => Self::Array(a.iter().map(Self::of_value).collect()),
+            Value::Object(m) => Self::Object(
+                m.iter()
+                    .map(|(k, v)| (k.clone(), Self::of_value(v)))
+                    .collect(),
+            ),
+        }
+    }
+
+    /// A text that already read as strict JSON, its numbers exact. `None`
+    /// when a number's exponent does not fit (see [`exact_number`]).
+    fn of_text(text: &str) -> Option<Self> {
+        let mut r = ExactReader {
+            text,
+            s: text.as_bytes(),
+            at: 0,
+        };
+        let v = r.value()?;
+        r.ws();
+        (r.at == r.s.len()).then_some(v)
+    }
+
+    fn write(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Null => out.extend_from_slice(b"null"),
+            Self::Bool(b) => out.extend_from_slice(if *b { b"true" } else { b"false" }),
+            Self::Number(n) => out.extend_from_slice(n.as_bytes()),
+            Self::Text(s) => write_string(s, out),
+            Self::Array(a) => {
+                out.push(b'[');
+                for (i, v) in a.iter().enumerate() {
+                    if i > 0 {
+                        out.push(b',');
+                    }
+                    v.write(out);
+                }
+                out.push(b']');
+            }
+            Self::Object(m) => {
+                // JCS orders members by their names' UTF-16 code units.
+                let mut members: Vec<(&String, &Exact)> = m.iter().collect();
+                members.sort_by(|a, b| a.0.encode_utf16().cmp(b.0.encode_utf16()));
+                out.push(b'{');
+                for (i, (k, v)) in members.into_iter().enumerate() {
+                    if i > 0 {
+                        out.push(b',');
+                    }
+                    write_string(k, out);
+                    out.push(b':');
+                    v.write(out);
+                }
+                out.push(b'}');
+            }
+        }
+    }
+}
+
+fn write_string(s: &str, out: &mut Vec<u8>) {
+    let quoted = serde_json::to_string(s).unwrap_or_default();
+    out.extend_from_slice(quoted.as_bytes());
+}
+
+/// Reads a text [`crate::strict::parse_json`] already accepted, so that
+/// its numbers keep their text: no duplicate, nothing after the value, and
+/// a depth `serde_json` bounds.
+struct ExactReader<'a> {
+    text: &'a str,
+    s: &'a [u8],
+    at: usize,
+}
+
+impl ExactReader<'_> {
+    fn ws(&mut self) {
+        while let Some(b' ' | b'\t' | b'\n' | b'\r') = self.s.get(self.at) {
+            self.at += 1;
+        }
+    }
+
+    fn eat(&mut self, b: u8) -> bool {
+        let hit = self.s.get(self.at) == Some(&b);
+        if hit {
+            self.at += 1;
+        }
+        hit
+    }
+
+    fn string(&mut self) -> Option<String> {
+        let start = self.at;
+        if !self.eat(b'"') {
+            return None;
+        }
+        loop {
+            match self.s.get(self.at)? {
+                b'"' => break,
+                b'\\' => self.at += 2,
+                _ => self.at += 1,
+            }
+        }
+        self.at += 1;
+        serde_json::from_str(self.text.get(start..self.at)?).ok()
+    }
+
+    fn value(&mut self) -> Option<Exact> {
+        self.ws();
+        match *self.s.get(self.at)? {
+            b'{' => {
+                self.at += 1;
+                let mut m = BTreeMap::new();
+                self.ws();
+                if self.eat(b'}') {
+                    return Some(Exact::Object(m));
+                }
+                loop {
+                    self.ws();
+                    let k = self.string()?;
+                    self.ws();
+                    if !self.eat(b':') {
+                        return None;
+                    }
+                    let v = self.value()?;
+                    m.insert(k, v);
+                    self.ws();
+                    if self.eat(b'}') {
+                        return Some(Exact::Object(m));
+                    }
+                    if !self.eat(b',') {
+                        return None;
+                    }
+                }
+            }
+            b'[' => {
+                self.at += 1;
+                let mut a = Vec::new();
+                self.ws();
+                if self.eat(b']') {
+                    return Some(Exact::Array(a));
+                }
+                loop {
+                    a.push(self.value()?);
+                    self.ws();
+                    if self.eat(b']') {
+                        return Some(Exact::Array(a));
+                    }
+                    if !self.eat(b',') {
+                        return None;
+                    }
+                }
+            }
+            b'"' => self.string().map(Exact::Text),
+            b't' | b'f' | b'n' => {
+                for (word, v) in [
+                    ("true", Exact::Bool(true)),
+                    ("false", Exact::Bool(false)),
+                    ("null", Exact::Null),
+                ] {
+                    if self.s[self.at..].starts_with(word.as_bytes()) {
+                        self.at += word.len();
+                        return Some(v);
+                    }
+                }
+                None
+            }
+            _ => {
+                let start = self.at;
+                while let Some(b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9') = self.s.get(self.at)
+                {
+                    self.at += 1;
+                }
+                exact_number(self.text.get(start..self.at)?).map(Exact::Number)
+            }
         }
     }
 }
@@ -1135,14 +1436,23 @@ fn admits(held: &Stamp, incoming: &Stamp) -> Result<(), Step> {
     }
 }
 
+/// How many ids a target remembers (§2.6, text 0.2, F-163): at least the
+/// 16 most recent ids an instance acted on or adopted a version of. An id
+/// forgotten beyond them is read as new.
+pub const REMEMBERED_IDS: usize = 16;
+
 /// One instance of a target's role (§2.6–§2.10): the version it last acted
-/// on or adopted, the one it holds while an act runs, and its report. A
-/// restart is a new `Target`, holding nothing (§2.7).
+/// on or adopted, the one it holds while an act runs, per id the latest
+/// time it acted on or adopted (F-163), and its report. A restart is a new
+/// `Target`, holding nothing (§2.7).
 #[derive(Debug, Clone)]
 pub struct Target {
     acted: Option<Act>,
     running: bool,
     waiting: Option<Act>,
+    /// `(id, time)`, the id acted on or adopted most recently first, at most
+    /// [`REMEMBERED_IDS`].
+    ids: Vec<(u128, u64)>,
     report: Report,
 }
 
@@ -1155,6 +1465,7 @@ impl Target {
             acted: None,
             running: false,
             waiting: None,
+            ids: Vec::new(),
             report: Report::baseline(key),
         }
     }
@@ -1171,28 +1482,61 @@ impl Target {
         self.acted.as_ref().filter(|_| self.running)
     }
 
-    /// Judges a sample (§2.6) against the version held waiting, else the
-    /// last acted on or adopted: an act to start, adopted, held while one
-    /// runs, or ignored with why. After [`Step::Adopted`] the report
-    /// changed.
+    /// The latest time this instance acted on or adopted a version of `id`
+    /// at, if it remembers the id (§2.6 step 4).
+    #[must_use]
+    pub fn remembered(&self, id: u128) -> Option<u64> {
+        self.ids.iter().find(|(i, _)| *i == id).map(|(_, t)| *t)
+    }
+
+    fn remember(&mut self, stamp: Stamp) {
+        let time = match self.ids.iter().position(|(i, _)| *i == stamp.id) {
+            Some(at) => self.ids.remove(at).1.max(stamp.time),
+            None => stamp.time,
+        };
+        self.ids.insert(0, (stamp.id, time));
+        self.ids.truncate(REMEMBERED_IDS);
+    }
+
+    /// Judges a sample (§2.6): against the version last acted on or adopted
+    /// (the running act's while one runs) and every id remembered, then,
+    /// while an act runs, against the version held waiting (§2.7, text
+    /// 0.2, F-162): an act to start, adopted, held while one runs, or
+    /// ignored with why. After [`Step::Adopted`] the report changed.
     pub fn observe(&mut self, s: Sample) -> Step {
         let Some(stamp) = s.stamp else {
             return Step::Unstamped;
         };
-        let waiting = self.waiting.is_some();
-        let reference = if waiting {
-            self.waiting.as_mut()
-        } else {
-            self.acted.as_mut()
-        };
-        if let Some(r) = reference {
-            match admits(&r.stamp, &stamp) {
-                Ok(()) => {}
-                Err(Step::SameVersion) if s.via == Via::Owner && r.via == Via::Archive => {
-                    r.via = Via::Owner;
-                    if !waiting && !self.running {
-                        self.report.last_known = false;
+        let remembered = self.remembered(stamp.id);
+        if let Some(r) = self.acted.as_mut() {
+            if r.stamp.id == stamp.id {
+                match admits(&r.stamp, &stamp) {
+                    Ok(()) => {}
+                    Err(Step::SameVersion) if s.via == Via::Owner && r.via == Via::Archive => {
+                        r.via = Via::Owner;
+                        if !self.running {
+                            self.report.last_known = false;
+                        }
+                        return Step::Confirmed;
                     }
+                    Err(why) => return why,
+                }
+            } else if let Some(time) = remembered {
+                // Another id than the held one, acted on or adopted before
+                // in this instance: never an older version of it (F-163),
+                // nor one acted on again.
+                match stamp.time.cmp(&time) {
+                    std::cmp::Ordering::Greater => {}
+                    std::cmp::Ordering::Equal => return Step::SameVersion,
+                    std::cmp::Ordering::Less => return Step::Older,
+                }
+            }
+        }
+        if let Some(w) = self.waiting.as_mut() {
+            match admits(&w.stamp, &stamp) {
+                Ok(()) => {}
+                Err(Step::SameVersion) if s.via == Via::Owner && w.via == Via::Archive => {
+                    w.via = Via::Owner;
                     return Step::Confirmed;
                 }
                 Err(why) => return why,
@@ -1207,6 +1551,7 @@ impl Target {
     }
 
     fn start(&mut self, act: Act) -> Step {
+        self.remember(act.stamp);
         if let Some(prev) = self.acted
             && prev.same_document(&act)
         {
@@ -1289,7 +1634,8 @@ pub enum Seen {
     /// Not seen, in a read possibly incomplete or refused.
     Incomplete,
     /// Across a constrained face, where presence does not cross and the
-    /// deployment's word stands for the descriptor.
+    /// deployment's word stands for the descriptor (§2.17, text 0.2,
+    /// F-168).
     AcrossFace,
 }
 
@@ -1319,6 +1665,10 @@ pub struct TargetReading<'a> {
     pub presence: Seen,
     /// Its descriptor, `None` when not read. Ignored across a face.
     pub descriptor: Option<Listing>,
+    /// Across a face, the deployment's word for what the descriptor would
+    /// say, `None` when the tool has none (§2.17 step 2, text 0.2, F-168).
+    /// Ignored elsewhere.
+    pub deployment: Option<Listing>,
     pub report: ReportRead<'a>,
     /// The report's freshness by `freshness.v1`, [`freshness::Verdict::NotAsked`]
     /// when its resource declares no horizon.
@@ -1474,18 +1824,21 @@ impl Judged {
 
 /// §2.17 steps 1 to 4, shared by every question: the report to answer
 /// from, or the answer. `unbound` is the answer for an unbound role.
+/// Across a face, the deployment's word answers step 2 in the descriptor's
+/// place (text 0.2, F-168).
 fn premises<'a>(t: &TargetReading<'a>, unbound: Judged) -> Result<&'a Report, Judged> {
     use Answer::{NotAsked, Unobservable};
-    match t.presence {
+    let listing = match t.presence {
         Seen::Absent => return Err(Judged::new(NotAsked, Reason::TargetAbsent)),
         Seen::Incomplete => return Err(Judged::new(Unobservable, Reason::PresenceIncomplete)),
-        Seen::AcrossFace => {}
-        Seen::Present => match t.descriptor {
-            None => return Err(Judged::new(Unobservable, Reason::NoDescriptor)),
-            Some(Listing::NotListed) => return Err(Judged::new(NotAsked, Reason::NotATarget)),
-            Some(Listing::Listed { bound: false }) => return Err(unbound),
-            Some(Listing::Listed { bound: true }) => {}
-        },
+        Seen::AcrossFace => t.deployment,
+        Seen::Present => t.descriptor,
+    };
+    match listing {
+        None => return Err(Judged::new(Unobservable, Reason::NoDescriptor)),
+        Some(Listing::NotListed) => return Err(Judged::new(NotAsked, Reason::NotATarget)),
+        Some(Listing::Listed { bound: false }) => return Err(unbound),
+        Some(Listing::Listed { bound: true }) => {}
     }
     let report = match t.report {
         ReportRead::NotRead => {
@@ -1736,5 +2089,110 @@ mod tests {
         for r in &seen {
             assert!(r.check().is_empty(), "{r:?}: {:?}", r.check());
         }
+    }
+
+    #[test]
+    fn numbers_compare_by_their_exact_value() {
+        for (text, exact) in [
+            ("0", "0"),
+            ("-0", "0"),
+            ("0.000", "0"),
+            ("0e99", "0"),
+            ("10", "1e1"),
+            ("10.0", "1e1"),
+            ("1e1", "1e1"),
+            ("100E-1", "1e1"),
+            ("1.5", "15e-1"),
+            ("-0.25", "-25e-2"),
+            ("9007199254740992", "9007199254740992e0"),
+            ("9007199254740993", "9007199254740993e0"),
+            ("18446744073709551617", "18446744073709551617e0"),
+            ("1e+2", "1e2"),
+        ] {
+            assert_eq!(exact_number(text).as_deref(), Some(exact), "{text}");
+        }
+        for bad in ["", "-", "01", "1.", ".5", "+1", "1e", "1e+", "--1", "0x1"] {
+            assert_eq!(exact_number(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_payload_and_its_decoded_value_compare_alike() {
+        let same = |a: &str, b: &str| {
+            Content::of_payload(a.as_bytes(), true) == Content::of_payload(b.as_bytes(), true)
+        };
+        assert!(same(
+            r#"{"a":10,"b":[1,2]}"#,
+            r#" { "b" : [1, 2.0], "a" : 1e1 } "#
+        ));
+        assert!(same(r#"{"s":"\u0041"}"#, r#"{"s":"A"}"#));
+        assert!(!same(
+            r#"{"revision":9007199254740992}"#,
+            r#"{"revision":9007199254740993}"#
+        ));
+        assert!(!same(
+            r#"{"revision":18446744073709551616}"#,
+            r#"{"revision":18446744073709551617}"#
+        ));
+        assert!(!same(r#"{"x":0.1}"#, r#"{"x":0.10000000000000000555}"#));
+        // Not strict JSON: byte for byte.
+        assert!(same(r#"{"a":1e400}"#, r#"{"a":1e400}"#));
+        assert!(!same(r#"{"a":1e400}"#, r#"{"a": 1e400}"#));
+        assert!(!same(r#"{"a":1,"a":1}"#, r#"{"a":1}"#));
+        for text in [
+            r#"{"mode":"run","rate_hz":10.0,"revision":1}"#,
+            r#"{"revision":9007199254740993,"x":[-0.5,true,null,"é"]}"#,
+        ] {
+            let v = crate::strict::parse_json(text).expect("strict JSON");
+            assert_eq!(
+                Content::of_payload(text.as_bytes(), true),
+                Content::of_json(&v),
+                "{text}"
+            );
+        }
+        assert_ne!(
+            Content::of_payload(b"{}", false),
+            Content::of_payload(b"{ }", false),
+            "a payload that is not JSON compares byte for byte"
+        );
+    }
+
+    #[test]
+    fn finite_is_by_rounding() {
+        let with = |n: &str| format!(r#"{{"source":"baseline","x":{n}}}"#);
+        assert!(decode(with("1.7976931348623158e308").as_bytes()).is_ok());
+        for n in ["1.7976931348623159e308", "1e400", "-1e400"] {
+            assert!(
+                matches!(decode(with(n).as_bytes()), Err(Unreadable::Json(_))),
+                "{n}"
+            );
+        }
+        let big = format!("1{}", "0".repeat(400));
+        assert!(matches!(
+            decode(with(&big).as_bytes()),
+            Err(Unreadable::Json(_))
+        ));
+    }
+
+    #[test]
+    fn an_id_forgotten_beyond_sixteen_is_read_as_new() {
+        let mut t = Target::new(Some("zk2/a/b/i.v1/state/x".into()));
+        let ids: Vec<String> = (1..=17).map(|i| format!("{i:x}")).collect();
+        for (n, id) in ids.iter().enumerate() {
+            let s = Sample {
+                revision: Some(n as u64),
+                content: Some(Content::of_json(&serde_json::json!({"revision": n}))),
+                ..put(500, id)
+            };
+            assert!(matches!(t.observe(s), Step::Act(_)), "{id}");
+            t.finish(Ended::Done);
+        }
+        // The second id is the sixteenth most recent: still remembered.
+        assert_eq!(t.remembered(2), Some(500));
+        assert_eq!(t.observe(put(400, "2")), Step::Older);
+        assert_eq!(t.observe(put(500, "2")), Step::SameVersion);
+        // The first is the seventeenth: forgotten, so new.
+        assert_eq!(t.remembered(1), None);
+        assert!(matches!(t.observe(put(400, "1")), Step::Act(_)));
     }
 }
