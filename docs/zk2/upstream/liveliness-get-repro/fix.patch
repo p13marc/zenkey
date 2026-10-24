@@ -1,0 +1,14 @@
+--- a/zenoh/src/net/routing/hat/broker/interests.rs	2006-07-24 01:21:28.000000000 +0000
++++ b/zenoh/src/net/routing/hat/broker/interests.rs	2026-10-24 11:22:23.312290307 +0000
+@@ -385,7 +385,10 @@
+ 
+         debug_assert!(dst.region.bound().is_south());
+ 
+-        if self.face_hat(&dst).local_tokens.contains_key(&res) {
++        // lgr fix (zenkey #830): a Current interest (a liveliness GET) is answered only by
++        // declarations carrying its interest id, so a token the face already holds for a Future
++        // interest (a liveliness subscriber) must still be sent to it.
++        if interest.mode.is_future() && self.face_hat(&dst).local_tokens.contains_key(&res) {
+             tracing::debug!("Already propagated");
+             return;
+         }
