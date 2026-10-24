@@ -715,7 +715,15 @@ fn exact_revision(canonical: &str) -> Option<RevisionRead> {
     let exp: i128 = exp.parse().ok()?;
     // The significant digits keep no trailing zero, so a negative exponent
     // is a fraction.
-    let zeros = usize::try_from(exp).ok()?;
+    if exp < 0 {
+        return None;
+    }
+    // A positive exponent is an integer, however large: past `usize` it is
+    // far past 2^64−1. (Such a number is never finite, so strict JSON
+    // refuses its text first, §2.10; this reads it as its text says.)
+    let Ok(zeros) = usize::try_from(exp) else {
+        return Some(RevisionRead::TooLarge);
+    };
     // 2^64−1 has 20 digits.
     if digits.len().saturating_add(zeros) > 20 {
         return Some(RevisionRead::TooLarge);
@@ -2452,6 +2460,15 @@ mod tests {
             Err(Unreadable::RevisionRange(_))
         ));
         assert!(matches!(observed("1e400"), Err(Unreadable::Json(_))));
+        assert!(
+            matches!(observed("1e99999999999999999999"), Err(Unreadable::Json(_))),
+            "never finite: not strict JSON, before the schema"
+        );
+        assert!(matches!(
+            exact_revision("1e99999999999999999999"),
+            Some(RevisionRead::TooLarge)
+        ));
+        assert!(exact_revision("1e-99999999999999999999").is_none());
         assert!(matches!(observed("1.5"), Err(Unreadable::Schema(_))));
         assert!(matches!(observed("-1"), Err(Unreadable::Schema(_))));
         // A decoded value holds the double: 2^64 exactly.

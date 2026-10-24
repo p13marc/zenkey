@@ -1193,8 +1193,7 @@ async fn config_v1_as_a_target() {
     use zenkey::config_v1;
     use zenkey::model::config::{DesiredOutcome, Value as CValue};
 
-    const RF0: &str = "lab/rf0";
-    const RES: &str = "state/configs/{system}/{service}";
+    const RES: &str = CONFIGS;
     let bus = one_router().await;
     let configs = imp("configs.v1");
     let ci = configs.iface().clone();
@@ -1310,6 +1309,254 @@ async fn config_v1_as_a_target() {
     );
     svc.close().await.unwrap();
     asvc.close().await.unwrap();
+}
+
+/// `config.v1`'s owner `lab/rf0` as a target of `lab/author`'s
+/// `configs.v1`, on `device`, its floor `floor_s`.
+struct ConfigUp {
+    _sessions: (zenoh::Session, zenoh::Session),
+    author: desired::Author,
+    asvc: Service,
+    svc: Service,
+    cfg: zenkey::config_v1::Configuration,
+    target: desired::Target,
+}
+
+const RF0: &str = "lab/rf0";
+const CONFIGS: &str = "state/configs/{system}/{service}";
+
+async fn config_up(
+    bus: &Bus,
+    startup: zenkey::config_v1::Startup,
+    device: Arc<dyn zenkey::config_v1::Device>,
+) -> ConfigUp {
+    let configs = imp("configs.v1");
+    let ci = configs.iface().clone();
+    let author_session = client(&bus.ep1).await;
+    let mut ab = ServiceBuilder::new(&author_session, config(AUTHOR));
+    ab.implement(configs.clone()).unwrap();
+    let author = ab
+        .desired_author(&ci, CONFIGS, AuthorStartup::default())
+        .await
+        .unwrap();
+    let asvc = ab.start().await.unwrap();
+    let owner = client(&bus.ep1).await;
+    let mut cfg = config(RF0).bind("configs", &[AUTHOR]);
+    cfg.bindings.get_mut("configs").unwrap().params = [
+        ("system".to_owned(), "self.system".to_owned()),
+        ("service".to_owned(), "self.service".to_owned()),
+    ]
+    .into();
+    let mut b = ServiceBuilder::new(&owner, cfg);
+    b.require("configs", ci, true);
+    let c = b.config_v1(startup, device).await.unwrap();
+    let target = b
+        .desired_config("configs", &configs, CONFIGS, None, TargetStartup::default())
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    eventually("the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    ConfigUp {
+        _sessions: (author_session, owner),
+        author,
+        asvc,
+        svc,
+        cfg: c,
+        target,
+    }
+}
+
+impl ConfigUp {
+    async fn duty(&self) -> zenkey::model::config::Value {
+        self.cfg.status().await.values["duty"]["fraction_ppm"].clone()
+    }
+
+    async fn until(&self, what: &str, f: impl Fn(&Report) -> bool) -> Report {
+        let deadline = tokio::time::Instant::now() + SETTLE;
+        loop {
+            let r = self.target.report().await;
+            if f(&r) {
+                return r;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "never: {what}: {r:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn close(self) {
+        self.svc.close().await.unwrap();
+        self.asvc.close().await.unwrap();
+    }
+}
+
+/// `desired.v1` §2.16, a revert that fails: the device refuses the `set`
+/// that would restore `duty`, so the revert ends `failed` and `duty` stays
+/// the delete's to revert: a document naming nothing, then its delete,
+/// restores it (review of PR #850).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_v1_a_failed_revert_keeps_what_it_did_not_restore() {
+    use zenkey::model::config::Value as CValue;
+
+    let bus = one_router().await;
+    let startup = sim::rf_startup(false, 10, Duration::from_secs(1), true);
+    let device = Arc::new(sim::SimDevice::new(&startup));
+    let up = config_up(
+        &bus,
+        startup,
+        Arc::clone(&device) as Arc<dyn zenkey::config_v1::Device>,
+    )
+    .await;
+    let doc = |rev: u64, values: Value| bytes(&json!({"revision": rev, "values": values}));
+    up.author
+        .put(RF0, doc(1, json!({"duty": {"fraction_ppm": 20000}})))
+        .await
+        .unwrap();
+    up.until("revision 1 converged", |r| {
+        r.outcome == Some(Outcome::Converged)
+    })
+    .await;
+    assert_eq!(up.duty().await, CValue::Integer(20000));
+
+    // The revert's set refused: failed, duty not restored.
+    device.with(|s| s.refuse_apply = Some("the radio is busy".to_owned()));
+    up.author.delete(RF0).await.unwrap();
+    let r = up
+        .until("the revert failed", |r| r.outcome == Some(Outcome::Failed))
+        .await;
+    assert_eq!(r.source, Source::Baseline);
+    let f = r.refusal.unwrap();
+    assert_eq!(
+        (f.code.as_str(), f.pointer.as_deref()),
+        ("device-refused", Some("/values/duty"))
+    );
+    assert_eq!(up.duty().await, CValue::Integer(20000));
+    assert_eq!(up.cfg.desired().await, None);
+
+    // A document that names nothing converges, and its delete reverts what
+    // the first delete could not.
+    let r2 = put_stamp(up.author.put(RF0, doc(2, json!({}))).await.unwrap());
+    up.until("revision 2 converged", |r| {
+        r.observed == Some(version(&r2, Some(2))) && r.outcome == Some(Outcome::Converged)
+    })
+    .await;
+    assert_eq!(up.duty().await, CValue::Integer(20000), "nothing set");
+    up.author.delete(RF0).await.unwrap();
+    up.until("reverted", |r| r.outcome == Some(Outcome::Reverted))
+        .await;
+    assert_eq!(
+        up.duty().await,
+        CValue::Integer(10000),
+        "the parameter the failed revert kept named, restored"
+    );
+    up.close().await;
+}
+
+/// A device whose undo never returns: a pending change it holds never ends.
+struct HangingUndo(Arc<sim::SimDevice>);
+
+impl zenkey::config_v1::Device for HangingUndo {
+    fn apply<'a>(
+        &'a self,
+        group: &'a str,
+        values: &'a std::collections::BTreeMap<String, zenkey::config_v1::Value>,
+    ) -> zenkey::call::BoxFuture<'a, Result<(), String>> {
+        zenkey::config_v1::Device::apply(&*self.0, group, values)
+    }
+
+    fn undo<'a>(
+        &'a self,
+        _restore: &'a [zenkey::config_v1::Restore],
+    ) -> zenkey::call::BoxFuture<'a, Result<(), zenkey::config_v1::UndoFailed>> {
+        Box::pin(std::future::pending())
+    }
+}
+
+/// `desired.v1` §2.16, §2.7, a wait that cannot end: an operator's change
+/// with a 2 s window is pending, and its undo at the deadline never
+/// returns. The document's act gives up 5 s past the deadline, `failed`,
+/// `apply`, and the next version is acted on, never held behind it
+/// (review of PR #850).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_v1_a_wait_that_cannot_end_gives_up() {
+    use zenkey::config_v1;
+
+    let bus = one_router().await;
+    let startup = sim::rf_startup(false, 2, Duration::from_millis(500), true);
+    let device = Arc::new(HangingUndo(Arc::new(sim::SimDevice::new(&startup))));
+    let up = config_up(&bus, startup, device as Arc<dyn config_v1::Device>).await;
+
+    // The operator's change, its window 2 s: pending.
+    let tool = client(&bus.ep1).await;
+    let c = zenkey::Client::new(&tool, config_v1::implementation().shared_contract(), &[RF0])
+        .unwrap()
+        .with_timeout(Duration::from_secs(2));
+    let values: Bindings = [("group".to_owned(), vec!["duty".to_owned()])].into();
+    let out = c
+        .call_value(
+            &addr(RF0),
+            config_v1::SET,
+            &values,
+            &json!({"values": {"fraction_ppm": 50000}, "confirm_s": 2}),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(out, zenkey::Outcome::Value(_)), "{out:?}");
+    assert!(up.cfg.view().await.pending.is_some(), "a change pending");
+
+    // A document: its act waits, past the deadline, and gives up.
+    let asked = Instant::now();
+    let r1 = put_stamp(
+        up.author
+            .put(
+                RF0,
+                bytes(&json!({"revision": 1, "values": {"duty": {"fraction_ppm": 20000}}})),
+            )
+            .await
+            .unwrap(),
+    );
+    let r = up
+        .until("the wait given up", |r| {
+            r.observed == Some(version(&r1, Some(1)))
+        })
+        .await;
+    let waited = asked.elapsed();
+    assert!(
+        waited >= config_v1::DESIRED_WAIT_PAST_DEADLINE,
+        "gave up {waited:?} after the put: past the deadline's grace"
+    );
+    assert_eq!(r.outcome, Some(Outcome::Failed));
+    let f = r.refusal.unwrap();
+    assert_eq!(f.code, "apply");
+    assert!(
+        f.detail
+            .as_deref()
+            .is_some_and(|d| d.contains("pending change")),
+        "{f:?}"
+    );
+
+    // The next version is acted on, not held behind the stuck one.
+    let r2 = put_stamp(
+        up.author
+            .put(
+                RF0,
+                bytes(&json!({"revision": 2, "values": {"duty": {"fraction_ppm": 30000}}})),
+            )
+            .await
+            .unwrap(),
+    );
+    up.until("revision 2 acted on", |r| {
+        r.observed == Some(version(&r2, Some(2))) && r.outcome == Some(Outcome::Failed)
+    })
+    .await;
+    assert_eq!(up.target.acts(), 2);
+    up.close().await;
 }
 
 /// The two contracts the scenarios give load as the owner example embeds

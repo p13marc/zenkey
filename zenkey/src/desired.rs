@@ -49,7 +49,7 @@
 //! | §2.11 a re-mint puts again what it keeps | [`crate::Service::new_epoch`] re-puts every document and re-deletes every delete within its window first |
 //! | §2.12 the kill switch: an optional role left unbound | the report `{"source": "baseline"}` put before the tokens, and nothing read |
 //! | §2.13 the cardinality bounds the targets | the resource's budget (core §2.7): a new target's first document past the bound is [`Error::Budget`] |
-//! | §2.16 `config.v1` as a target | [`ServiceBuilder::desired_config`]: each act converges the document on the owner, its report the view's and the status's; a delete reverts every parameter the documents acted on named to its startup value |
+//! | §2.16 `config.v1` as a target | [`ServiceBuilder::desired_config`]: each act converges the document on the owner, its report the view's and the status's; a delete reverts every parameter the documents acted on named to its startup value, a failed revert keeping the names it did not restore; a wait on a change that never ends gives up `failed`, `apply`, 5 s past its deadline or when the service closes ([`crate::config_v1::DESIRED_WAIT_PAST_DEADLINE`]) |
 //!
 //! **The record is the application's** ([`Record`]), as `alarms.v1`'s is:
 //! loaded once, at [`ServiceBuilder::desired_author`], and saved whole after
@@ -57,6 +57,13 @@
 //! and each delete within the tombstone window, each with its stamp, so a
 //! restart catches its clock up (core §4.3). [`FileRecord`] is one record,
 //! a JSON file.
+//!
+//! **What an archive gives a restart without a stamp** (core S1). A delete
+//! is dropped, logged and named in [`Adoption::unstamped`]: it cannot be
+//! dated within its window, and no unstamped sample is acted on. A document
+//! is put again, its content being the author's own, and catches no clock
+//! up. A record's entries carry `at_ms` beside their stamps, so a record's
+//! delete with no stamp is dated still, and kept.
 //!
 //! **Pacing a large re-put** (§2.11's cost). [`Pace::All`], the default,
 //! puts everything again before the builder returns, so before the instance
@@ -105,6 +112,7 @@ pub use zenkey_model::seed::Stamp;
 
 use crate::budget::Budget;
 use crate::call::BoxFuture;
+use crate::config_v1::DesiredEnd;
 use crate::error::{Error, Result, zenoh};
 use crate::implementation::{Implementation, resource_name};
 use crate::service::ServiceBuilder;
@@ -458,6 +466,10 @@ pub struct Adoption {
     pub redeleted: Vec<String>,
     /// Each delete past its window, dropped from the record.
     pub expired: Vec<String>,
+    /// Each delete an archive holds with no stamp, dropped and logged: it
+    /// cannot be dated within its window, and core S1 acts on no unstamped
+    /// sample.
+    pub unstamped: Vec<String>,
     /// Each step that failed on the bus, and why: the document stays in the
     /// record for the next start.
     pub failed: Vec<(String, String)>,
@@ -797,11 +809,13 @@ impl Author {
     }
 
     /// Where the previous instance's documents are (§2.11): the record,
-    /// else the archive, else nothing.
-    async fn load(&self, startup: &AuthorStartup) -> (Found, Kept) {
+    /// else the archive, else nothing; and the targets of the archive's
+    /// deletes that carry no stamp, dropped.
+    async fn load(&self, startup: &AuthorStartup) -> (Found, Kept, Vec<String>) {
+        let mut unstamped = Vec::new();
         if let Some(r) = &startup.record {
             match r.load().await {
-                Ok(Some(k)) => return (Found::Record, k),
+                Ok(Some(k)) => return (Found::Record, k, unstamped),
                 Ok(None) => {}
                 Err(e) => tracing::warn!(
                     "desired.v1: the author's record could not be read, so it is read as none \
@@ -831,25 +845,38 @@ impl Author {
                                 );
                             }
                             None => {
-                                let at_ms = lk.timestamp.map_or(0, |t| {
-                                    t.get_time()
-                                        .to_system_time()
-                                        .duration_since(UNIX_EPOCH)
-                                        .map(|d| u64::try_from(d.as_millis()).unwrap_or(0))
-                                        .unwrap_or(0)
-                                });
+                                // A delete with no stamp cannot be dated
+                                // within its window, and core S1 acts on no
+                                // unstamped sample: dropped, and said.
+                                let Some(t) = lk.timestamp else {
+                                    tracing::warn!(
+                                        target,
+                                        "desired.v1: the archive holds a delete with no stamp, \
+                                         which is not made again: it cannot be dated within \
+                                         its window (§2.11), and an unstamped sample is never \
+                                         acted on (core S1)"
+                                    );
+                                    unstamped.push(target);
+                                    continue;
+                                };
+                                let at_ms = t
+                                    .get_time()
+                                    .to_system_time()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map(|d| u64::try_from(d.as_millis()).unwrap_or(0))
+                                    .unwrap_or(0);
                                 kept.deletes.insert(
                                     target,
                                     KeptDelete {
                                         at_ms,
-                                        stamp: lk.timestamp,
+                                        stamp: Some(t),
                                     },
                                 );
                             }
                         }
                     }
                     if !(kept.documents.is_empty() && kept.deletes.is_empty()) {
-                        return (Found::Archive, kept);
+                        return (Found::Archive, kept, unstamped);
                     }
                 }
                 Err(e) => tracing::warn!(
@@ -858,7 +885,7 @@ impl Author {
                 ),
             }
         }
-        (Found::Nothing, Kept::default())
+        (Found::Nothing, Kept::default(), unstamped)
     }
 
     /// Every member of the resource, as one key expression.
@@ -907,12 +934,13 @@ impl Author {
     /// put again, unchanged, in key order, before anything is alive (or
     /// paced, [`Pace::Spread`]); the clock caught up first.
     async fn adopt(&self, startup: &AuthorStartup) -> Result<()> {
-        let (found, kept) = self.load(startup).await;
+        let (found, kept, unstamped) = self.load(startup).await;
         if let Some(last) = kept.latest() {
             self.inner.minter.catch_up(last);
         }
         let mut report = Adoption {
             found,
+            unstamped,
             ..Adoption::default()
         };
         let now = now_ms();
@@ -2020,6 +2048,31 @@ fn refusal_of(r: &zenkey_model::config::DesiredRefusal) -> Refusal {
     }
 }
 
+/// A wait given up (`config.v1`'s pending change never ended, or the
+/// service closed): `failed`, code `apply`, since what converged before it
+/// stays applied (§2.7).
+fn gave_up(why: String) -> Ended {
+    Ended::Failed(Refusal {
+        code: APPLY.to_owned(),
+        pointer: None,
+        detail: Some(why),
+    })
+}
+
+/// How a document's convergence ended, in this profile's words (§2.16).
+fn ended(end: DesiredEnd) -> Ended {
+    use zenkey_model::config::DesiredOutcome;
+    match end {
+        DesiredEnd::Report(r) => match (r.outcome, &r.refusal) {
+            (DesiredOutcome::Converged, _) => Ended::Done,
+            (DesiredOutcome::Refused, Some(f)) => Ended::Refused(refusal_of(f)),
+            (DesiredOutcome::Failed, Some(f)) => Ended::Failed(refusal_of(f)),
+            (_, None) => Ended::Failed(Refusal::new(APPLY)),
+        },
+        DesiredEnd::GaveUp(why) => gave_up(why),
+    }
+}
+
 impl Handler for ConfigHandler {
     fn apply<'a>(&'a self, doc: &'a Document) -> BoxFuture<'a, Ended> {
         Box::pin(async move {
@@ -2031,17 +2084,7 @@ impl Handler for ConfigHandler {
                     return Ended::Refused(r);
                 }
             };
-            let report = self.cfg.converge_desired(d).await;
-            match (report.outcome, &report.refusal) {
-                (zenkey_model::config::DesiredOutcome::Converged, _) => Ended::Done,
-                (zenkey_model::config::DesiredOutcome::Refused, Some(r)) => {
-                    Ended::Refused(refusal_of(r))
-                }
-                (zenkey_model::config::DesiredOutcome::Failed, Some(r)) => {
-                    Ended::Failed(refusal_of(r))
-                }
-                (_, None) => Ended::Failed(Refusal::new(APPLY)),
-            }
+            ended(self.cfg.converge_desired(d).await)
         })
     }
 
@@ -2049,7 +2092,14 @@ impl Handler for ConfigHandler {
         Box::pin(async move {
             match self.cfg.revert_desired().await {
                 Ok(()) => Ended::Done,
-                Err(r) => Ended::Failed(refusal_of(&r)),
+                // A revert is never refused (§2.8): its refusing `set` is a
+                // failure, the groups before it restored.
+                Err(DesiredEnd::Report(r)) => Ended::Failed(
+                    r.refusal
+                        .as_ref()
+                        .map_or_else(|| Refusal::new(APPLY), refusal_of),
+                ),
+                Err(DesiredEnd::GaveUp(why)) => gave_up(why),
             }
         })
     }

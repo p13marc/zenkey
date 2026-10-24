@@ -18,11 +18,11 @@ read presence as its §8.1 does.
 
 The evidence, counted from the files: `conformance/declarations.json` (43
 cases), `conformance/bindings.json` (25), `conformance/order.json` (80),
-`conformance/reports.json` (79), `conformance/conclusions.json` (35) and
-`conformance/schema.json` (3), 265 in all; and ten scenario sections, of
+`conformance/reports.json` (80), `conformance/conclusions.json` (35) and
+`conformance/schema.json` (3), 266 in all; and ten scenario sections, of
 which the reference runs §1 to §8 and §10 (`zenkey/tests/profile_desired.rs`,
 one test per section). No expectation of a case that existed changes: the
-seven new cases were written by hand and passed as written, and the two
+eight new cases were written by hand and passed as written, and the two
 descriptions they extend say what they pin. The standard schema is
 unchanged, and so is its id.
 
@@ -44,7 +44,11 @@ unchanged, and so is its id.
     `18446744073709551615.0` in range, `18446744073709551616.0` past it,
     `1.5` outside the schema, `9007199254740993` beside
     `9007199254740993.0` one revision with no `in_force` finding, and
-    `30e-1` the integer 3.
+    `30e-1` the integer 3; and, on review of PR #850,
+    `1e99999999999999999999`, an integer far past 2^64−1 by its exact
+    value and never finite, so `json`: strict JSON is read before the
+    schema. The model reads a huge positive exponent as too large, never
+    as a fraction, where it is ever asked.
 - **F-182** is `config.v1`'s: its text 0.5 moves the marker.
 - **F-183, scenario §10 cited by no rule** (§2.9; core Appendix C).
   §2.9's "Confirmed by the author" and "From an archive" cite `[Sc: §10]`,
@@ -108,9 +112,13 @@ unchanged, and so is its id.
   an owner to, which 0.2 left to the runtime: each parameter a document
   it acted on named, a refused one's aside, back at its startup value,
   through one `set` per group as converging does, its view and status
-  then carrying no `desired` (`config.v1` text 0.5). And, fed through
-  this profile, the owner acts on each act it is given, whatever the
-  revision.
+  then carrying no `desired` (`config.v1` text 0.5); a revert that fails
+  keeps the parameters it did not restore for the next delete (on review
+  of PR #850). And, fed through this profile, the owner acts on each act
+  it is given, whatever the revision; a wait on a pending change that
+  never ends is bounded in the reference (5 s past its deadline, or the
+  service's close), the act `failed`, `apply`, since one act at a time
+  would otherwise hold every later version.
 - **scenarios.md** names the owner example's options (`--desired-author`,
   `--desired-target`, `--desired-unbound`), and §7 and §10 say that the
   author's absence is a complete read's.

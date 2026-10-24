@@ -122,6 +122,27 @@ pub const PERSIST: &str = "@op/persist";
 /// The change event (§2.17).
 pub const CHANGE: &str = "events/change";
 
+/// How long past a pending change's deadline a document fed through
+/// `desired.v1` waits for that change to end (its undo at the deadline, or
+/// a confirm's act), before its act gives up (`desired.v1` §2.16, §2.7).
+pub const DESIRED_WAIT_PAST_DEADLINE: Duration = Duration::from_secs(5);
+
+/// How long such a document waits on an act in flight with no change
+/// pending, which no deadline bounds, before its act gives up.
+pub const DESIRED_WAIT_IN_FLIGHT: Duration = Duration::from_secs(60);
+
+/// Why a document fed through `desired.v1` was not taken to its end: the
+/// refusal of a `set` it made, or the wait it gave up (`desired.v1` §2.16).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DesiredEnd {
+    /// The owner's own report: converged, refused or failed (§2.18).
+    Report(DesiredReport),
+    /// It gave up waiting for a change pending, or an act in flight, to
+    /// end, or the service closed; why, for a person. What converged before
+    /// the wait stays applied.
+    GaveUp(String),
+}
+
 /// Why `persist` is listed unavailable without a persisted layer (§2.13).
 pub const NO_LAYER: &str = "this service has no persisted layer (config.v1 §2.13)";
 
@@ -379,6 +400,9 @@ struct Inner {
     /// ([`Configuration::shutdown`]) or drops (the timer, as it ends). Their
     /// handlers hold this `Inner`, so taking them out is what frees it.
     servers: std::sync::Mutex<Vec<OperationServer>>,
+    /// The service's close: a document fed through `desired.v1` stops
+    /// waiting at it.
+    closed: tokio::sync::watch::Receiver<bool>,
 }
 
 impl Configuration {
@@ -401,6 +425,7 @@ impl Configuration {
         let view = b.declare_state_writer(&iface, VIEW, &none).await?;
         let status = b.declare_state_writer(&iface, STATUS, &none).await?;
         let change = b.event_writer(&iface, CHANGE, &none)?;
+        let (_, _, _, closing) = b.state_parts();
         let inner = Arc::new(Inner {
             iface: iface.clone(),
             service: addr.to_string(),
@@ -421,6 +446,7 @@ impl Configuration {
             wake: tokio::sync::Notify::new(),
             offset_ms: AtomicI64::new(0),
             servers: std::sync::Mutex::new(Vec::new()),
+            closed: closing,
         });
         // §2.3: the view and the status before §8.2 step 4, put here, before
         // the descriptor lists config.v1 and before any token.
@@ -538,13 +564,22 @@ impl Configuration {
     /// Converges `doc` now, as `desired.v1` feeds it (§2.18, `desired.v1`
     /// §2.16): whatever its revision, since the reader acts on each version
     /// once and adopts the same document unacted; waiting while a change is
-    /// pending; through one `set` without a window per group whose values
-    /// differ. Its report is the view's and the status's, and returned.
-    pub(crate) async fn converge_desired(&self, doc: DesiredConfig) -> DesiredReport {
-        let report = self.inner.converge_doc(&doc, true).await;
+    /// pending, up to [`DESIRED_WAIT_PAST_DEADLINE`] past its deadline (or
+    /// [`DESIRED_WAIT_IN_FLIGHT`] on an act in flight with none pending),
+    /// and no longer than the service runs; through one `set` without a
+    /// window per group whose values differ. Its report is the view's and
+    /// the status's, and returned; a wait given up leaves the report as it
+    /// was, and is [`DesiredEnd::GaveUp`].
+    pub(crate) async fn converge_desired(&self, doc: DesiredConfig) -> DesiredEnd {
+        let end = self.inner.converge_doc(&doc, true).await;
         // A refused document applied nothing: none of its parameters is a
-        // delete's to revert. A converged or failed one set what it set.
-        if report.outcome != model::DesiredOutcome::Refused {
+        // delete's to revert. A converged or failed one set what it set, and
+        // one given up may have set some.
+        let refused = matches!(
+            &end,
+            DesiredEnd::Report(r) if r.outcome == model::DesiredOutcome::Refused
+        );
+        if !refused {
             let mut c = self.inner.core.lock().await;
             for (g, ps) in &doc.values {
                 for p in ps.keys() {
@@ -553,38 +588,52 @@ impl Configuration {
             }
         }
         self.inner.wake.notify_one();
-        report
+        end
     }
 
     /// A delete fed through `desired.v1` (`desired.v1` §2.16, `config.v1`
     /// §2.18, text 0.5): each parameter the documents named since the last
     /// revert back at its startup value, the persisted layer's, else the
     /// startup file's or the default ([`Owner::baseline_document`]), through
-    /// one `set` without a window per group that differs; and no `desired`
-    /// in the view and the status from then on. `Err`: the refusal of a
-    /// `set` that could not restore its group, the groups before it
-    /// restored.
-    pub(crate) async fn revert_desired(
-        &self,
-    ) -> std::result::Result<(), zenkey_model::config::DesiredRefusal> {
+    /// one `set` without a window per group that differs, waiting as
+    /// [`Configuration::converge_desired`] does; and no `desired` in the
+    /// view and the status from then on. `Err`: the refusal of a `set` that
+    /// could not restore its group, the groups before it restored, or the
+    /// wait given up. Only what was restored is forgotten: the parameters
+    /// of the refusing group and of every group after it, or every one on a
+    /// wait given up, stay named, so that the next delete reverts them.
+    pub(crate) async fn revert_desired(&self) -> std::result::Result<(), DesiredEnd> {
         let doc = {
             let c = self.inner.core.lock().await;
             c.owner
                 .baseline_document(c.named.iter().map(|(g, p)| (g.as_str(), p.as_str())))
         };
-        let report = self.inner.converge_doc(&doc, false).await;
-        {
+        let end = self.inner.converge_doc(&doc, false).await;
+        let failed = {
             let mut c = self.inner.core.lock().await;
-            c.named.clear();
+            let failed = match &end {
+                DesiredEnd::Report(DesiredReport {
+                    refusal: Some(r), ..
+                }) => {
+                    // Groups converge in the bytewise order of their names:
+                    // those before the refusing one were restored.
+                    let from = r.group.clone();
+                    c.named.retain(|(g, _)| *g >= from);
+                    true
+                }
+                DesiredEnd::Report(_) => {
+                    c.named.clear();
+                    false
+                }
+                DesiredEnd::GaveUp(_) => true,
+            };
             c.owner.report_desired(None);
             c.enqueue(&[]);
-        }
+            failed
+        };
         self.inner.flush().await;
         self.inner.wake.notify_one();
-        match report.refusal {
-            Some(r) => Err(r),
-            None => Ok(()),
-        }
+        if failed { Err(end) } else { Ok(()) }
     }
 
     /// The desired document this instance holds, the latest given
@@ -913,14 +962,70 @@ impl Inner {
     /// failed, or converged. With `report`, the report is the view's and the
     /// status's; without, the owner's `desired` is left as it is (a revert's
     /// own document, `desired.v1` §2.16).
-    async fn converge_doc(&self, doc: &DesiredConfig, report: bool) -> DesiredReport {
+    ///
+    /// The wait is bounded: [`DESIRED_WAIT_PAST_DEADLINE`] past the pending
+    /// change's deadline, at which the timer ends it (a change whose end
+    /// hangs, its undo never returning, would hold every later version), or
+    /// [`DESIRED_WAIT_IN_FLIGHT`] on an act in flight with no change pending;
+    /// and it ends when the service closes or drops. Either is
+    /// [`DesiredEnd::GaveUp`], with why.
+    async fn converge_doc(&self, doc: &DesiredConfig, report: bool) -> DesiredEnd {
+        let mut closed = self.closed.clone();
+        let mut in_flight_since: Option<tokio::time::Instant> = None;
         loop {
             let (group, step) = {
                 let mut c = self.core.lock().await;
                 match c.owner.converge(doc) {
                     Converge::Wait => {
+                        let why = match c.owner.deadline() {
+                            Some(deadline) => {
+                                in_flight_since = None;
+                                let past = self.now().millis() - deadline.millis();
+                                let grace = i64::try_from(DESIRED_WAIT_PAST_DEADLINE.as_millis())
+                                    .unwrap_or(i64::MAX);
+                                (past > grace).then(|| {
+                                    format!(
+                                        "the pending change did not end within {} s of its \
+                                         deadline, so the document was not converged",
+                                        DESIRED_WAIT_PAST_DEADLINE.as_secs()
+                                    )
+                                })
+                            }
+                            None => {
+                                let since =
+                                    *in_flight_since.get_or_insert_with(tokio::time::Instant::now);
+                                (since.elapsed() > DESIRED_WAIT_IN_FLIGHT).then(|| {
+                                    format!(
+                                        "an act in flight did not end within {} s, so the \
+                                         document was not converged",
+                                        DESIRED_WAIT_IN_FLIGHT.as_secs()
+                                    )
+                                })
+                            }
+                        };
                         drop(c);
-                        tokio::time::sleep(Duration::from_millis(25)).await;
+                        let why = why.or_else(|| {
+                            (*closed.borrow())
+                                .then(|| "the service closed while the document waited".to_owned())
+                        });
+                        if let Some(why) = why {
+                            tracing::warn!(
+                                service = %self.service, instance = %self.instance,
+                                revision = doc.revision,
+                                "config.v1: a desired document gave up waiting (desired.v1): {why}"
+                            );
+                            return DesiredEnd::GaveUp(why);
+                        }
+                        tokio::select! {
+                            () = tokio::time::sleep(Duration::from_millis(25)) => {}
+                            changed = closed.changed() => {
+                                if changed.is_err() {
+                                    return DesiredEnd::GaveUp(
+                                        "the service dropped while the document waited".to_owned(),
+                                    );
+                                }
+                            }
+                        }
                         continue;
                     }
                     Converge::Refused(r) | Converge::Converged(r) => {
@@ -936,7 +1041,7 @@ impl Inner {
                         }
                         drop(c);
                         self.flush().await;
-                        return r;
+                        return DesiredEnd::Report(r);
                     }
                     Converge::Set { group, request } => {
                         let s = c
@@ -962,7 +1067,7 @@ impl Inner {
                     c.enqueue(&[]);
                 }
                 self.flush().await;
-                return r;
+                return DesiredEnd::Report(r);
             }
             self.flush().await;
         }
