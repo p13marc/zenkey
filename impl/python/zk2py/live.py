@@ -30,12 +30,14 @@ zenoh-python has no unbounded channel: its default handler and
 **What a complete presence read is (§8.1, 0.37).**
 - **A read through a session cut off is not complete**, "whatever its
   replies say", and "a reader SHOULD NOT make it": :func:`list_presence`
-  checks ``Session.info.transports()`` (zenoh-python 1.10.1 exposes it, and
-  its stub does not mark it unstable) and makes no read through a session
-  that holds none, reporting it **not made**, a third kind beside complete
-  and possibly incomplete. It checks again when the read ends: a read in
-  flight when the session's last transport closes is answered at once,
-  complete and empty, which zk2py measured (F-185), and it is not complete.
+  checks the session's **links** (0.38, "What the check reads":
+  ``Session.info.links()``, which zenoh-python 1.10.1 exposes, never
+  ``transports()``, which can still list a closing transport) and makes no
+  read through a session that holds none, reporting it **not made**, a
+  third kind beside complete and possibly incomplete. It checks again when
+  the read ends (0.38, F-185): a read in flight when the session's last
+  link goes is answered at once, complete and empty, and it is **possibly
+  incomplete**, cut off while it ran, its tokens kept as seen.
 - **The read that establishes absence goes on a session with no
   liveliness subscriber**: every liveliness subscriber zk2py's readers
   declare goes through :func:`declare_liveliness_subscriber`, which marks
@@ -169,27 +171,47 @@ def _open_client(endpoint: str, auth: tuple[str, str] | None = None) -> zenoh.Se
 
 # -- §8.1 presence -------------------------------------------------------------
 
-#: Why a read was not made (§8.1, 0.37).
-CUT_OFF = "cut off: the session holds no transport to another zenoh node (core §8.1, 0.37)"
+#: Why a read was not made (§8.1, 0.37; 0.38 reads the links).
+CUT_OFF = "cut off: the session holds no link to another zenoh node (core §8.1, 0.37, 0.38)"
+#: Why a read made is possibly incomplete when its session's links were
+#: gone at its end (§8.1, 0.38, F-185).
+CUT_OFF_DURING = ("cut off while it ran: the session's links were gone when it ended, so it came back at the cut "
+                  "(core §8.1, 0.38)")
 BESIDE_SUBSCRIBER = ("beside a liveliness subscriber: the session holds one, and a read there can complete "
                      "without the tokens it covers (core §8.1, 0.37; Appendix B)")
-#: Why a read cannot be shown complete: this binding's transports accessor
+#: Why a read cannot be shown complete: this binding's links accessor
 #: failed, so §8.1's check could not be made (never a pass).
-TRANSPORTS_UNREADABLE = ("the session's transports could not be read (Session.info.transports() failed), so the "
-                         "read cannot be shown complete (core §8.1, 0.37)")
+LINKS_UNREADABLE = ("the session's links could not be read (Session.info.links() failed), so the "
+                    "read cannot be shown complete (core §8.1, 0.37, 0.38)")
 #: The three kinds of a read (§8.1, 0.37: "A read not made is a third kind,
 #: never folded into either").
 COMPLETE, POSSIBLY_INCOMPLETE, NOT_MADE = "complete", "possibly incomplete", "not made"
 
 
-def transports_held(session: Any) -> bool | None:
-    """§8.1 (0.37): whether the session "holds a transport to another node",
-    by ``Session.info.transports()``; None when this binding cannot say,
-    which is then this reader's premise, never a pass."""
+def _info(session: Any) -> Any:
+    return session.info() if callable(getattr(session, "info", None)) else session.info
+
+
+def links_held(session: Any) -> bool | None:
+    """§8.1 (0.38, "What the check reads"): whether the session holds a link
+    to another node, by ``Session.info.links()``. zenoh drops a closing
+    transport's links first, then answers the reads in flight, then removes
+    the transport, so ``transports()`` can still list it when a read is
+    answered at the cut. None when this binding cannot say, which is then
+    this reader's premise, never a pass."""
     try:
-        info = session.info() if callable(getattr(session, "info", None)) else session.info
-        return bool(info.transports())
+        return bool(_info(session).links())
     except Exception:  # noqa: BLE001 - an accessor this binding lacks says nothing
+        return None
+
+
+def transports_held(session: Any) -> bool | None:
+    """Whether the session lists a transport (``Session.info.transports()``):
+    what a scenario waits on to see a cut settle, never §8.1's check, which
+    reads the links (0.38)."""
+    try:
+        return bool(_info(session).transports())
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -290,12 +312,15 @@ class Presence:
     #: §8.1 (0.37): why the read was not made (:data:`CUT_OFF`,
     #: :data:`BESIDE_SUBSCRIBER`), else None
     not_made: str | None = None
-    #: the session's last transport closed while the read ran: its answer
-    #: came through a session cut off, so it is not complete (F-185)
+    #: the session's links were gone when the read ended: it was cut off
+    #: while it ran, so it is possibly incomplete (§8.1, 0.38, F-185)
     cut_off_during: bool = False
-    #: whether the session's transports could be read, before the read and
-    #: at its end; when not, the read cannot be shown complete
-    transports_checked: bool = True
+    #: whether the session's links could be read, before the read and at its
+    #: end; when not, the read cannot be shown complete
+    links_checked: bool = True
+    #: what ``Session.info.transports()`` said at the read's end, beside the
+    #: links: informative only (core §8.1, 0.38: the check reads the links)
+    transports_at_end: bool | None = None
 
     @property
     def kind(self) -> str:
@@ -318,10 +343,9 @@ class Presence:
         if self.not_made is not None:
             return f"not made ({self.not_made}): what it would establish is unobservable"
         if self.cut_off_during:
-            return (f"not complete: the session's last transport closed while it ran (core §8.1, 0.37): "
-                    f"{self.count} tokens, silence is not a verdict")
-        if not self.transports_checked:
-            return f"possibly incomplete ({TRANSPORTS_UNREADABLE}): {self.count} tokens, silence is not a verdict"
+            return f"possibly incomplete ({CUT_OFF_DURING}): {self.count} tokens, silence is not a verdict"
+        if not self.links_checked:
+            return f"possibly incomplete ({LINKS_UNREADABLE}): {self.count} tokens, silence is not a verdict"
         if not self.complete:
             why = "; ".join(self.errors) or "no final reply"
             return f"possibly incomplete ({why}): {self.count} tokens, silence is not a verdict"
@@ -342,7 +366,7 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     """
     if marked(session):
         return Presence(not_made=BESIDE_SUBSCRIBER)
-    held = transports_held(session)
+    held = links_held(session)
     if held is False:
         return Presence(not_made=CUT_OFF)
     replies: list[Any] = []
@@ -370,16 +394,17 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     # §8.1 (0.8): ended by the routers' final reply, and no error reply. A
     # GET whose drop never came is incomplete too.
     p.complete = finished and not p.errors
-    # §8.1 (0.37): a session that reaches no node answers at once, complete
-    # and empty; a read in flight when its last transport closes is answered
-    # so too. Checked again at the read's end (F-185). A check that cannot
-    # be made, before or after, leaves the read possibly incomplete: a
-    # broken accessor never weakens the rule.
-    after = transports_held(session)
-    p.transports_checked = held is not None and after is not None
+    # §8.1 (0.37, 0.38): a session that reaches no node answers at once,
+    # complete and empty; a read in flight when its last link goes is
+    # answered so too. Checked again at the read's end, by the links (0.38,
+    # F-185). A check that cannot be made, before or after, leaves the read
+    # possibly incomplete: a broken accessor never weakens the rule.
+    after = links_held(session)
+    p.transports_at_end = transports_held(session)
+    p.links_checked = held is not None and after is not None
     if after is False:
         p.cut_off_during, p.complete = True, False
-    if not p.transports_checked:
+    if not p.links_checked:
         p.complete = False
     return p
 
@@ -574,15 +599,24 @@ def presence_shapes(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     ``(instance key, what, interface)`` for
     - ``unlisted``: an interface token its instance's descriptor does not
       list;
-    - ``no token``: an interface the descriptor lists with ``token`` true
-      and no interface token.
+    - ``no token``: an interface the descriptor lists with ``token`` true,
+      unmarked, and no interface token, in a complete read (a read not
+      complete can miss a token, never invent one: §8.1, 0.37);
+    - ``standby holding`` (0.39): an interface token for an interface its
+      descriptor marks ``"standby": true``. Core §6: "its descriptor
+      disagrees with its tokens besides: it holds a token for an interface
+      its descriptor says it exposes nothing of".
 
-    An instance whose descriptor GET gets no reply has no shape here: that
-    silence is not a verdict (O5). "Exposed" is read from the descriptor
-    alone, as listed with ``token`` not false: an instance that exposes
-    none of a listed interface's resources holds no token for it (§5.1
-    "The active instance"), which only the contract can show, and zk2py
-    does not retrieve it here."""
+    Core §6 (0.39), "Reading the mark": "An instance listing the interface
+    marked standby, and holding no token of it in a complete read … is a
+    standby: no finding of this check, nor of §8.1's fault shapes, since
+    its listing claims nothing exposed." An instance whose descriptor GET
+    gets no reply has no shape here: that silence is not a verdict (O5).
+    "Exposed" is read from the descriptor alone, as listed with ``token``
+    not false and unmarked: an instance that exposes none of a listed
+    interface's resources holds no token for it (§5.1 "The active
+    instance"), which only the contract can show, and zk2py does not
+    retrieve it here."""
     p = list_presence(session, selector, timeout)
     alive: dict[str, set[str]] = {}
     for a in p.alive:
@@ -601,7 +635,11 @@ def presence_shapes(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
         for iface in sorted(alive.get(key, set()) - set(listed)):
             shapes.add((key, "unlisted", iface))
         for iface, e in sorted(listed.items()):
-            if e.get("token", True) is not False and iface not in alive.get(key, set()):
+            held = iface in alive.get(key, set())
+            if e.get("standby") is True:
+                if held:
+                    shapes.add((key, "standby holding", str(iface)))
+            elif e.get("token", True) is not False and not held and p.complete:
                 shapes.add((key, "no token", str(iface)))
     return shapes
 
@@ -880,14 +918,22 @@ def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str |
 # -- hostid.v1 §2.12: two sessions on one address of a minted system ---------------
 
 def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0) -> tuple[str, str, list]:
-    """hostid.v1 §2.12 (0.2), and §5's last question: "Do two sessions claim
-    one address of a minted system?" A tool "reads the instance tokens of an
-    address … twice, a grace apart, and the descriptor of each instance.
-    Counting only instances whose system is known to be minted, by §5's
-    first question (yes: the descriptor lists hostid.v1, and no contract the
-    instance implements lists it in uses): when each read shows counted
-    instances stating at least two different meta.zid … that is a finding
-    whose cause is undecided."
+    """hostid.v1 §2.12 (0.2, 0.6), and §5's last question: "Do two sessions
+    claim one address of a minted system?" A tool "reads the instance tokens
+    of an address … twice, a grace apart, and the descriptor of each
+    instance. Counting only instances whose system is known to be minted,
+    by §5's first question (yes: the descriptor lists hostid.v1, and no
+    contract the instance implements lists it in uses), and not a
+    recognised standby (0.6): when each read shows counted instances
+    stating at least two different meta.zid … that is a finding whose
+    cause is undecided."
+
+    0.6's **recognised standby** "lists only interfaces whose contracts use
+    redundancy.v1, at least one, and that profile's question 'is this
+    instance a standby, or a twin?' answers no, standby, of each, from the
+    same two reads". So each read is of the address's whole ``@zk/**``,
+    instance and interface tokens at once (``redundancy.v1`` §0), and the
+    standby question is :func:`zk2py.redundancy.twin` over the two.
 
     The contracts an instance implements are read by the fingerprints its
     descriptor names (core §8.4). Returns (answer, why, reads), the answer
@@ -896,47 +942,105 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
     - ``no``: one read, ended by the routers' final reply, with every
       descriptor in it read, shows the counted instances stating at most
       one meta.zid, "and no instance in it lists hostid.v1 without being
-      counted";
+      counted or recognised a standby";
     - ``not this profile's``: no instance of the address lists hostid.v1;
     - ``unobservable``: otherwise. A descriptor could not be read, a counted
       instance states no meta.zid, an instance lists hostid.v1 while the
-      first question is unobservable for it, or a read timed out.
+      first question is unobservable for it, an instance lists only
+      governed interfaces while the standby question is unobservable for
+      one, or a read timed out.
 
-    Each read is (complete, [(instance, descriptor or None, first answer)])."""
-    from . import hostid
+    Each read is (complete, [(instance, descriptor or None, first answer,
+    standby: True recognised, False counted, None unobservable)])."""
+    from . import hostid, redundancy as rd
 
-    contracts: dict[tuple[str, str], set[str] | None] = {}
+    contracts: dict[tuple[str, str], dict[str, Any] | None] = {}
+
+    def canonical(e: dict[str, Any]) -> dict[str, Any] | None:
+        key = (str(e.get("iface")), str(e.get("contract")))
+        if key not in contracts:
+            r = retrieve_bundle(session, *key)
+            contracts[key] = r.verified.contract if r.verified else None
+        return contracts[key]
 
     def uses_of(doc: dict[str, Any]) -> set[str] | None:
         out: set[str] = set()
         for e in doc.get("interfaces") or []:
-            key = (str(e.get("iface")), str(e.get("contract")))
-            if key not in contracts:
-                r = retrieve_bundle(session, *key)
-                contracts[key] = set(r.verified.contract.get("uses") or []) if r.verified else None
-            if contracts[key] is None:
+            c = canonical(e)
+            if c is None:
                 return None
-            out |= contracts[key]
+            out |= set(c.get("uses") or [])
         return out
 
-    reads = []
+    system, service = address.split("/")
+    pres_reads = []
     for i in range(2):
         if i:
             time.sleep(grace_s)
-        pres = list_presence(session, f"zk2/{address}/@zk/instance/*")
-        rows = []
+        pres = list_presence(session, f"zk2/{address}/@zk/**")
+        docs: dict[str, dict[str, Any] | None] = {}
         for inst in pres.instances:
+            if inst["system"] != system or inst["service"] != service:
+                continue
             got = [a for a in get_descriptor(session, f"zk2/{address}/@zk/instance/{inst['instance']}") if a.ok]
             try:
                 doc = json.loads(got[0].payload) if len(got) == 1 else None
             except ValueError:
                 doc = None
+            docs[inst["instance"]] = doc if isinstance(doc, dict) else None
+        pres_reads.append((pres, docs))
+
+    def red_read(k: int, iface: str) -> rd.Read:
+        pres, docs = pres_reads[k]
+        holders = {a["instance"] for a in pres.alive if a["system"] == system and a["service"] == service
+                   and a["iface"] == iface}
+        seen = []
+        for inst in sorted(set(docs) | holders, key=rd.id_key):
+            doc = docs.get(inst)
+            desc = rd.UNREAD if doc is None else rd.NOT_LISTED
+            for e in (doc or {}).get("interfaces") or []:
+                if isinstance(e, dict) and e.get("iface") == iface:
+                    m, _ = rd.mark(e, "no_contract")
+                    desc = rd.UNREAD if m is None else m
+            seen.append(rd.Seen(inst, inst in holders, desc))
+        return rd.Read(pres.complete, tuple(seen))
+
+    def standby(inst: str, doc: dict[str, Any] | None) -> bool | None:
+        """0.6: True a recognised standby, False counted, None unobservable
+        (it lists only governed interfaces, and the question is
+        unobservable for one)."""
+        if doc is None:
+            return None
+        entries = [e for e in doc.get("interfaces") or [] if isinstance(e, dict)]
+        if not entries:
+            return False
+        answers = []
+        for e in entries:
+            c = canonical(e)
+            if c is None:
+                answers.append(None)
+                continue
+            d = rd.declaration_of(c)
+            if not d.governed:
+                return False  # "an instance that lists an interface no contract of the profile governs"
+            reading = rd.Reading(d.election or rd.CLAIM, red_read(0, str(e["iface"])), red_read(1, str(e["iface"])))
+            a = rd.twin(reading, inst)
+            answers.append(True if (a.answer, a.reason) == (rd.NO, "standby")
+                           else None if a.answer == rd.UNOBSERVABLE else False)
+        if False in answers:
+            return False
+        return None if None in answers else True
+
+    reads = []
+    for pres, docs in pres_reads:
+        rows = []
+        for inst, doc in docs.items():
             first = hostid.minted_by_listing(doc, uses_of(doc))[0] if doc is not None else "unread"
-            rows.append((inst["instance"], doc, first))
+            rows.append((inst, doc, first, standby(inst, doc) if first == "yes" else False))
         reads.append((pres.complete, rows))
 
     def counted(rows):
-        return [d for _, d, first in rows if first == "yes"]
+        return [d for _, d, first, sb in rows if first == "yes" and sb is False]
 
     def zids(rows):
         return {_zid_value((d.get("meta") or {}).get("zid")) for d in counted(rows)} - {None}
@@ -947,17 +1051,21 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
     if all(len(zids(rows)) >= 2 for _, rows in reads):
         return "finding", ("in both reads the counted instances state at least two meta.zid: its cause is "
                            "undecided (a collision, a cloned machine id, or a second process)"), reads
-    if all(all(d is not None and not lists(d) for _, d, _ in rows) for _, rows in reads):
+    if all(all(d is not None and not lists(d) for _, d, _, _ in rows) for _, rows in reads):
         return "not this profile's", "no instance of the address lists hostid.v1", reads
     for complete, rows in reads:
-        every_read = all(d is not None for _, d, _ in rows)
+        every_read = all(d is not None for _, d, _, _ in rows)
         every_zid = all(_zid_value((d.get("meta") or {}).get("zid")) is not None for d in counted(rows))
-        uncounted = [d for _, d, first in rows if lists(d) and first != "yes"]
-        if complete and every_read and every_zid and not uncounted and counted(rows) and len(zids(rows)) <= 1:
-            return "no", "one complete read, every descriptor read, shows at most one meta.zid", reads
+        unaccounted = [d for _, d, first, sb in rows if lists(d) and not (first == "yes" and sb is not None)]
+        if complete and every_read and every_zid and not unaccounted and counted(rows) and len(zids(rows)) <= 1:
+            recognised = sum(1 for _, _, first, sb in rows if first == "yes" and sb is True)
+            return "no", ("one complete read, every descriptor read, shows at most one meta.zid"
+                          + (f", and {recognised} recognised standby, not counted (redundancy.v1 §2.15, 0.6)"
+                             if recognised else "")), reads
     return "unobservable", ("the finding is not established, and a descriptor could not be read, a counted "
                             "instance states no meta.zid, an instance lists hostid.v1 while whether it is "
-                            "minted is unobservable, or a read timed out"), reads
+                            "minted is unobservable, one lists only governed interfaces while whether it "
+                            "stands by is unobservable, or a read timed out"), reads
 
 
 # -- §5.1 O3 judged from outside (0.16, 0.17)--------------------------------------

@@ -9563,6 +9563,16 @@ when it ends, it checks …; a read during which its session's last
 transport closed is not complete either", and a step of §7 that cuts the
 link while a read is in flight.
 
+**Status at core 0.38:** resolved by core 0.38: §8.1 "A read cut off
+while it runs" checks again when the read ends, by the session's links
+(`Session::info().links()`, never `transports()`), and reads such a read
+possibly incomplete, cut off during it, its tokens seen; §7 gains step 5.
+zk2py checks the links before and after (zenoh-python 1.10.1 has
+`Session.info.links()`), and step 5 passes 10 of 10. In zenoh-python
+`transports()` had dropped the closing transport by the read's end in all
+10 (the reference measured 4 of 10 still listed), so the two accessors
+agree here, and the links are what zk2py reads.
+
 ### F-186 · contradiction · scenarios/presence.md §4 against core 0.37 §8.1 and Appendix B: a GET beside a subscriber, expected whole
 
 > presence.md §4: "**Steps.** A session that holds a liveliness subscriber
@@ -9598,6 +9608,14 @@ GETs it reads presence by are on sessions with no subscriber.
 liveliness subscriber without history, declared after the tokens, …
 (Appendix B: any other subscriber can make the GET miss them)", or §4
 moved to the watch session's round trip, whose answer is discarded.
+
+**Status at core 0.38:** resolved by core 0.38: §4 is the watch
+session's round trip, "its answer discarded … so this section counts no
+token", at 1,200 tokens and a 5 s wait. zk2py runs it: callbacks for both,
+0.14 s; a drained handler beside a callback subscriber, 0.05 s; a
+callback round trip beside a bounded subscriber nobody drains, ended at
+its timeout with an error reply. The bounded GET beside it is not run: it
+hangs, as both implementations found.
 
 ### F-187 · ambiguity · desired.v1 0.2 §2.5 and alarms.v1 0.8 §2.7 against core 0.37 §8.1: "token gone"
 
@@ -9637,6 +9655,12 @@ withdrawal heard live, nor through a session cut off". Its alarms.v1 half
 is open: alarms.v1 §2.7 still says "With its tokens gone", its text 0.8
 unchanged.
 
+**Status at core 0.38:** its `alarms.v1` half is resolved too: alarms.v1
+§2.7 now reads "With its owner absent — a complete read without its
+instance token (core §8.1), never a withdrawal heard live alone", its
+text 0.8 unchanged (its CHANGELOG, "0.8, read against core 0.38"). Both
+halves resolved.
+
 ### F-188 · gap · scenarios/presence.md §8: the reader's verdict during the cut is not observed
 
 > presence.md §8 Expected 2: "On the cut, the subscriber hears the owner's
@@ -9663,6 +9687,13 @@ runs a burst and a re-mint of its own (the "follower" section).
 and the heal, the reader reports the owner unobservable, never down, and
 its re-read not made", and steps for a burst and a re-mint.
 
+**Status at core 0.38:** resolved by core 0.38: §8's Expected ask the
+reader under test, and its steps 4 and 5 add the burst and the re-mint.
+zk2py's follower passes every step through the cut link: unobservable and
+withdrawn, its re-read not made, while cut; up on the heal; down only from
+the complete read after the clean stop; one read for three; none for the
+re-mint.
+
 ### F-189 · gap · scenarios/presence.md §9: the reader's own placement is not observed
 
 > presence.md §9 Expected 3: "A reader makes the read that establishes
@@ -9687,6 +9718,15 @@ test follows and seeds presence, observed to make no liveliness read on its
 watch session but the round trip, and one that withdraws a token right
 after the seed is answered.
 
+**Status at core 0.38:** resolved by core 0.38: §9 steps 4 and 5
+observe the reader. zk2py counts each session's liveliness GETs: the
+watch session makes the round trip and no other, the reading session every
+read, and a read asked on the watch session is not made. Step 5, the
+watch link stalled 150 ms from before the subscribers and the token
+withdrawn as the seed is answered: the follower heard it go and read the
+owner down in 10 of 10; the control, a follower that skips the round
+trip, in 0 of 10.
+
 ### F-190 · ambiguity · core 0.37 §8.1 "The read that establishes absence": "holds no liveliness subscriber", and one undeclared
 
 > core §8.1: "It happens with history or without, and by zenoh's code it
@@ -9705,6 +9745,10 @@ says, which is the stricter reading.
 
 **Wording that would remove the guess:** "on a session that has never held
 a liveliness subscriber of any kind".
+
+**Status at core 0.38:** resolved by core 0.38: §8.1 reads "has never
+held a liveliness subscriber of any kind", and §9 Expected 3 "a session
+that has held one". zk2py marked a session for its life already.
 
 ### F-191 · gap · the profiles' presence premises against core 0.37: a read not made
 
@@ -9745,6 +9789,14 @@ profile's possibly-incomplete reason covers a read not made.
 0.3: §2.17 steps 1 and 6 count "a read not made (core §8.1, 0.37: a session
 cut off)" beside the possibly incomplete, under `presence_incomplete`. The
 other profiles' premises are unchanged, so the rest stays open.
+
+**Status at core 0.38:** resolved by core 0.38's premise rule (§8.1, "A
+profile's premise"): a read not made is read as the profile's possibly
+incomplete premise reads it, unobservable, the profile's reason standing
+and the read's own reported beside it. No profile text changed, and none
+needed to: zk2py already read a read not made so, its `Presence.kind` and
+reason kept beside the profile's. `redundancy.v1` §2.15 states the same
+rule for its own questions.
 
 **Counts at core 0.37:** 191 entries. F-181 to F-191 are open, F-181 to
 F-184 against desired.v1 0.2, and every one before them is resolved.
@@ -10030,3 +10082,394 @@ as put by the instance that answers.
 - F-192 to F-198.
 
 Every other entry is resolved.
+
+## At redundancy.v1 0.1 and core 0.39 (#609)
+
+Round 56 read cold `redundancy.v1`'s first text, its six fixtures (160
+cases) and its scenarios, with core 0.39 (the standby mark, D012,
+`election` published), core 0.38 (round 54's answers) and `hostid.v1`
+0.6 (§2.12's recognised standby). zk2py implemented each from the text.
+With the Rust runtime (RB) not yet written, it ran the profile live
+against itself.
+
+**Core 0.38.** Each of F-185 to F-191 is resolved; each entry has its
+status line. `list_presence` now checks the session's **links**
+(`Session.info.links()`, which zenoh-python 1.10.1 has) before and after
+a read. A read whose links are gone at its end is possibly incomplete, cut
+off during it (`CUT_OFF_DURING`). `presence_scenarios` runs the new steps:
+- §4: three pairings;
+- §7: 8 checks, step 5 in 10 of 10;
+- §8: 11 checks, its five steps through the cut link;
+- §9: 9 checks; step 4 counts each session's liveliness GETs; step 5's
+  stalled watch link passes for zk2py's follower in 10 of 10, and fails
+  for the control in 10 of 10, as predicted.
+
+31 checks, all pass. The bounded GET beside an undrained bounded
+subscriber is not run, since it hangs.
+
+**Core 0.39.** D012 is cascade 7, each entry read for `standby` and
+`token` alone, and `descriptors` passes the five new fixtures. W105 reads
+`redundancy` from the published table (`contracts/w105-redundancy-epoch`).
+zk2py's fault shapes read the mark. A standby is no "no token" shape. A
+holder marked standby is a new shape, `standby holding`. A "no token" is
+read only from a complete read. The owner (`zk2py.owner`) gains a
+standby:
+- an interface marked at start, validated, with nothing declared;
+- `take_over`, core §8.2's steps 1 to 4 for it;
+- `step_down`, their reverse;
+- a refusal of a write on a standby's keys;
+- a refusal at start of an invalid declaration, a governed interface in
+  the tokenless set among them, and of a standby on a tokenless one
+  (D012).
+
+**`redundancy.v1` 0.1, static.** `zk2py.redundancy` holds the
+declaration, an entry's mark, one read's election, the heal, the state
+machine and §5's four questions. **160 of 160** passed on their first
+run.
+
+**`hostid.v1` 0.6.** `hostid_collision` recognises a standby by
+`redundancy.twin` over the finding's two reads, and does not count it.
+Those reads are now of `@zk/**` (F-208). `hostid_scenarios` §6 step 6
+passes: no finding, and B is said to stand by.
+
+**`just py-conformance`: 2890 of 2890.** `redundancy` is 160 of 160 and
+`descriptors` 47. `contracts` is 105 and `layout` 22. `readings` is 336,
+twelve more than before:
+- three of 0.38's guards, the links read, never the transports;
+- nine of the machine's dropped events (F-199) and zk2py's own re-mint
+  (F-209), each with what zk2py's runtime gives back.
+
+**The live half** (`zk2py.redundancy_live`, `redundancy_owner`,
+`redundancy_scenarios`):
+- **The candidate** is an owner standing by, driven through the machine
+  by one worker thread, on three sessions:
+  - the claim's;
+  - a watch, following `zk2/<address>/@zk/**` with history, with its
+    round trip;
+  - a reader, after one round trip on the claim's session (F-204).
+- **Under `external`,** the lock is a `flock`.
+- **The consumer** (`Follower`) follows the lowest holder's `meta.zid`.
+- **The tool** (`tool_reading`) answers §5 from two reads a grace apart.
+- **The runner** drives each candidate as a process. A crash is a
+  SIGKILL, and a host lost is a SIGKILL behind `SilentLink`, a relay
+  that goes silent and keeps the router's side open.
+
+**`python -m zk2py.redundancy_scenarios`: 59 of 59**, in sections:
+
+| §1 | §2 | §3 | §4 | §5 | §6 | §7 | §8 | §9 | §10 | §11 | §12 | re-mint |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 9 | 3 | 1 (20 runs) | 2 | 4 | 4 | 9 | 3 | 4 | 6 | 3 | 8 | 3 |
+
+**The scenarios, read for sufficiency.** Every section ran, but for
+these:
+- §12 step 6 ran as `hostid_scenarios` §6 step 6;
+- §12 step 7's doctor is zenctl's, so zk2py's own shapes and its §5 split
+  stood in;
+- §9's held heal is zk2py's hook (`--hold-heal`).
+
+Four sections ran only after a change of what they observe:
+- §1 and §10 step 3 run both ways, as written and on a silent link
+  (F-201);
+- §1 and §3 observe the order by a GET at each token (F-202);
+- §3 judges by §2.5 step 2 (F-203);
+- §10 step 4 is judged by §2.11 (F-200).
+
+§5 holds only with the reads on a session apart from the claim's
+(F-204), the peers listening (F-206), and the reconnect held at 0.5 s
+(F-205).
+
+**What zenoh-python could not do:** nothing the scenarios need, but the
+bounded GET of §4. Two facts are zenoh's, not the binding's:
+- the order of a put and a token at a subscriber (F-202);
+- a peer's reads through a router (F-206).
+
+### F-199 · gap · redundancy.v1 0.1 `lifecycle.json`, §2.5, §2.8, §2.9: what is heard while a read runs
+
+> `lifecycle.json`: "Every other event in every other state is nothing,
+> and changes nothing."
+
+> §2.9: "a read not made shows none (core §8.1, 0.37, 0.38)"
+
+A read takes a round trip, and the watch keeps hearing during it. The
+machine drops three things a bus can hand it:
+- **An appearance while it campaigns.** B's read misses A's claim, and
+  A's token reaches B's watch while that read is in flight. B takes over.
+  A, the lower, hears B appear, heals and stays. B never reads for a heal,
+  so the split lasts. Only an appearance while taking over is kept.
+- **A withdrawal while it campaigns.** The read shows an incumbent that
+  went while it ran. The machine stands by on it, no retry armed, and
+  waits for a withdrawal it already dropped.
+- **A heal's read not made.** It shows none, so holders are own alone,
+  and the machine goes back to serving. The appearance is gone, and the
+  split is let go. A watch session that reconnects before the reading
+  session does this after a partition.
+
+zk2py's runs never hit the first two, but §3 shows appearances heard
+while campaigning, and the windows are a round trip wide.
+
+**zk2py:** the fixture's machine, and `redundancy.given_back`. Its runtime
+hands back what its watch holds:
+- after a takeover, an `appeared` per other holder heard;
+- after a stand-by on an incumbent, a `withdrawn` when none is heard;
+- after a heal's read not complete, an `appeared` again after the retry
+  interval.
+
+Seven readings show the drops and the remedy.
+
+**Wording that would remove the guess:** `lifecycle.json`, "an appearance
+or a withdrawal heard while a read is asked is kept, and decided after
+that read's decision", and §2.9, "a heal whose read is not complete reads
+again after the retry interval".
+
+### F-200 · contradiction · redundancy.v1 scenarios.md §10 Expected 4 against §2.11 and `elections.json`
+
+> scenarios.md §10 step 4: "V1 and V2 start with two lock files (a
+> misconfiguration), V2 first; the test waits 10 s." Expected 4: "Both
+> serve: two interface tokens, and neither steps down."
+
+> §2.11: "**With the lock,** it takes over (§2.6) once a read shows no
+> other holder of the interface's token"
+
+> `elections.json`: "external: another instance holds the token, which
+> may outlive the lock" → stand_by, incumbent
+
+V2 starts first, holds its lock and serves. V1 then holds its own lock,
+and reads V2's token, so §2.11 stands it by. Both serve only if V1's read
+misses V2's token, as in a simultaneous start. zk2py measured V1 standing
+by on V2 in every run.
+
+**zk2py:** judges step 4 by §2.11.
+
+**Wording that would remove the guess:** step 4, "V1 and V2 start within
+10 ms of each other", or Expected 4, "V2 serves; V1, its own lock held,
+stands by on V2's token: a lock that two hosts both hold is a split only
+when their reads miss each other".
+
+### F-201 · contradiction · redundancy.v1 §2.8 "When a departure is seen", scenarios.md §1 step 4 and §10 step 3, against core Appendix B
+
+> §2.8: "A crash is seen at zenoh's lease, 10 s by default, when the
+> incumbent's router withdraws its tokens (core Appendix B)."
+
+> scenarios.md §1: "4. The test kills A's process (SIGKILL), at instant
+> K." Expected 4: "S hears A's tokens withdrawn when R1's lease for A's
+> session runs out, 10 s after K by default"
+
+> core Appendix B: "The withdrawal reaches the reader within 1–2 ms when
+> the link closes, and one lease after a link goes silent"
+
+A process killed on a live host has its TCP links closed by its kernel.
+So the router withdraws its tokens at once: zk2py measured 2 ms after
+SIGKILL, in §1 and in §10 step 3. The lease shows only when the link
+goes silent: the host lost, or a partition. Behind a relay that went
+silent before the kill, zk2py measured 9.96 s. §1's "B made no read
+between K and the withdrawal, and never polled" is then tested at all.
+§10 step 3's "waits for V1's interface token to go (V1's lease)" depends
+on the same lease.
+
+**zk2py:** runs §1 and §10 step 3 both ways. As written: withdrawn at
+once, B (or V2) serving 0.1 s later. On a silent link: withdrawn at the
+lease, B serving within 3 s, no read before it. Every check passes.
+
+**Wording that would remove the guess:** §2.8, "a crash whose host's
+kernel closes its links is seen at once; a lost host or a partition at
+zenoh's lease"; and §1 and §10, "the test makes A's link silent, then
+kills its process".
+
+### F-202 · gap · redundancy.v1 scenarios.md §1 Expected 1 and §3 Expected 1: an order no subscriber sees
+
+> §1 Expected 1: "S receives A's first descriptor, marked standby, then
+> its instance token …, and later, once A takes over, its descriptor
+> without the mark, then its interface token"
+
+> §3 Expected 1: "Each instance's descriptor, marked standby, reaches S
+> before its instance token"
+
+zenoh carries a token's declaration and a put on different priorities.
+One session put a key, then declared a token, a hundred times. A
+subscriber session on the same router received the token first in 72 of
+100. An owner that keeps §8.2's order fails these Expected about as often
+as one that does not, and S's two kinds of delivery cannot be ordered.
+Core `presence.md` §1 observes the same order the robust way: "A GET of
+the descriptor … made the moment the instance token appears … answers".
+
+**zk2py:** S gets the descriptor the moment each token appears. At the
+instance token it must read marked, unless the interface token beat that
+GET. At the interface token it must read unmarked. S's arrival order is
+noted, never judged.
+
+**Wording that would remove the guess:** "a GET of A's descriptor, made
+the moment S hears its instance token, answers it marked standby, and
+one made the moment S hears its interface token, unmarked (core
+presence.md §1's observation)".
+
+### F-203 · contradiction · redundancy.v1 scenarios.md §3 Expected 1 against §2.5 step 2
+
+> §3 Expected 1: "In every run, A serves and B stands by within 5 s of
+> the later start plus two graces. … In a run where both read before
+> either claim reached the other, both take over; then B, the higher,
+> steps down"
+
+> §2.5 step 2: "A live incumbent never yields to a lower id: the lowest
+> id is a tie-break for simultaneous starts, not an entitlement."
+
+There is a third order. B's read misses A's claim, and B takes over
+before A reads. A's read then shows B's token, so A stands by on a live
+incumbent. One holder means no heal. zk2py saw it in 2 of 20 runs in each
+of two batches, and in none of 20 in each of two others.
+
+**zk2py:** each run must end, within the bound, with A serving, or with
+B serving and A standing by on B's token, which §2.5 step 2 asks.
+
+**Wording that would remove the guess:** "one serves and the other stands
+by: A, unless B took over before A's read, A then standing by on B as
+§2.5 step 2 says".
+
+### F-204 · gap · redundancy.v1 §2.5 step 1 and step 3: a refused read on the claim's own session
+
+> §2.5 step 1: "**Its read follows its claim.** The read goes on a
+> session that has never held a liveliness subscriber … When that is not
+> the session holding the claim, the instance makes one round trip on
+> the claim's session"
+
+> §2.5 step 3: "it shows the instance's own claim. A read that misses the
+> instance token the instance knows it holds missed what it could not
+> see, its claim not yet at its router, or the read refused (core §8.1's
+> refused read is complete and empty)"
+
+The text allows the read on the claim's own session. zenoh answers a
+session's liveliness GET with the session's own tokens locally. Through a
+router whose access control denies `liveliness_query` on ingress, zk2py
+measured two outcomes:
+- on the claim's session, the read is complete and holds the claim;
+- on another session, it is complete and empty.
+
+So step 3's check, the only one that tells a refused read from a lone
+candidate's, never sees a refusal on the claim's session. §5 step 3
+failed that way, A serving through R3, until zk2py moved its reads.
+
+**zk2py:** reads on a session of its own, neither the claim's nor the
+watch's, after one round trip on the claim's session. §5 step 3 passes:
+five reads, each complete, empty and missing the claim.
+
+**Wording that would remove the guess:** step 1, "The read goes on a
+session that holds neither a liveliness subscriber nor the claim, since
+a session answers its own tokens itself; the instance makes one round
+trip on the claim's session …".
+
+### F-205 · minor · redundancy.v1 scenarios.md §5 Expected 2: zenoh's reconnect inside the bound
+
+> §5 Expected 2: "Within the retry interval plus 2 s of R1's start, A's
+> next campaign reads complete, finds its own claim, and A serves."
+
+A, a peer, opened 4.5 s before R1. zenoh retries a peer's connect at a
+period that grows to 4 s by default, and A served 4.5 s after R1's
+start. With the period held at 0.5 s, A served 0.5 s after. The bound
+assumes a reconnect the text does not configure.
+
+**zk2py:** its peers retry every 0.5 s.
+
+**Wording that would remove the guess:** the Setup, "A's connect retry
+period at most 1 s", or "within the retry interval plus its reconnect".
+
+### F-206 · gap · core §8.1 "complete", and redundancy.v1 §0 "Read": a peer's read through a router
+
+> redundancy.v1 §0: "**Complete** is core §8.1's: it ran to the routers'
+> final reply with no error reply, on a session that has never held a
+> liveliness subscriber …, and that session's links held both before the
+> read and when it ended"
+
+> scenarios.md §5 step 1: "A starts as a peer whose only endpoint is R1's"
+
+zenoh routes no peer's tokens to another peer through a router, at its
+default peer mode. zk2py ran two peer sessions with no listener behind
+one router, one holding a token. The other read the address complete and
+empty every time, for 15 s, while a client of the same router read the
+token. Every condition of "complete" held. With both peers listening,
+they linked through gossip, and the token was read after 0.2 s, or 3.6 s
+when the router came up late. A candidate that is a peer, beside an
+incumbent that is one, can read a complete vacancy and take over.
+
+**zk2py:** its peers listen on loopback. Its candidates are clients in
+every other section.
+
+**Wording that would remove the guess:** §8.1, "a peer's read is complete
+only for the tokens its routers or its linked peers hold: a peer that
+other peers cannot link to reads none of theirs", and redundancy.v1 §2.13
+or §2.5, "candidates are clients of a router, or peers linked to each
+other".
+
+### F-207 · ambiguity · redundancy.v1 `lifecycle.json`: a withdrawal kept while stepping down, under external without the lock
+
+> `lifecycle.json`: "finish of a step_down stands by, and campaigns when
+> a withdrawal was heard while stepping down, else nothing; while standing
+> by, a withdrawal campaigns (under external only with the lock)", and
+> "the claim's finish campaigns (a read, or under external without the
+> lock stand_by no_lock)"
+
+Under `external` a step-down follows a lost lock, so the instance lacks
+it at the finish. Does a withdrawal kept while stepping down campaign
+then? "Campaigns" would give `stand_by` with `no_lock`. "Only with the
+lock" would give `nothing`. No case asks.
+
+**zk2py:** `nothing`, reading the withdrawal kept while stepping down as
+one heard standing by.
+
+**Wording that would remove the guess:** "campaigns when a withdrawal was
+heard while stepping down and it may (under external, with the lock),
+else nothing", and a case.
+
+### F-208 · gap · hostid.v1 0.6 §2.12: the finding's reads hold no interface token
+
+> hostid.v1 §2.12: "A tool reads the instance tokens of an address
+> (`zk2/<system>/<service>/@zk/instance/*`, core §8.1) twice, a grace
+> apart"
+
+> §2.12 (0.6): "that profile's question 'is this instance a standby, or a
+> twin?' answers **no**, `standby`, of each, from the same two reads"
+
+> redundancy.v1 §2.15: "X2 holding no token, marked standby: **no**,
+> `standby`, when the second read is complete"
+
+The fourth question turns on whether the instance holds the interface's
+token. A read of `@zk/instance/*` shows none, so "from the same two
+reads" cannot answer it.
+
+**zk2py:** the finding reads `zk2/<address>/@zk/**`, the instance tokens
+and the interface tokens at once, as `redundancy.v1` §0's read does.
+
+**Wording that would remove the guess:** §2.12, "reads the address's
+`@zk/**` (its instance and interface tokens) twice".
+
+### F-209 · gap · redundancy.v1 §2.5 to §2.9 and `lifecycle.json`: an incumbent's own re-mint
+
+> §2.8: "**A re-mint is no vacancy.** An incumbent's make-before-break
+> re-mint holds its new token before its old one goes (core §8.1)."
+
+> `lifecycle.json`: "while serving under claim, another instance's
+> appearance reads; that read's holders, own counted whether it shows own
+> or not"
+
+The text gives the re-mint from a standby's side only. The machine knows
+one id, `own`, and has no event for a re-mint:
+- the incumbent's watch hears its new id's token, which is "another
+  instance's appearance", and it reads;
+- the overlap is two holders, so the grace is armed;
+- the second read shows the new id, and `own`, the old id, is counted
+  beside it. When the new id is lower, it steps down to itself.
+
+A reading shows it.
+
+**zk2py:** `Machine.remint`: the new id becomes `own`, and the former ids
+are its own, neither an appearance nor another holder. The candidate's
+`new_epoch` tells the machine first. Its `re-mint` section passes: the
+new token before the old one goes; no read, no step-down, no takeover by
+B; A serving under its new id.
+
+**Wording that would remove the guess:** an event `{"reminted": id}`
+whose id is `own` from then on, its former ids never another holder, and
+§2.9, "a candidate's own re-mint is no appearance".
+
+**Counts at redundancy.v1 0.1 and core 0.39:** 209 entries. F-199 to
+F-209 are open, F-205 minor. F-181 to F-184 are resolved, and F-185 to
+F-191 by core 0.38. F-192 to F-198, against desired.v1 0.3 and config.v1
+0.5, are open.

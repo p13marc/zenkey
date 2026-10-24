@@ -5,7 +5,7 @@
 against the fixture contract."
 
 Since amendment 0.5, §3.3 "The checks" states every code with its severity
-and counting (D000–D011; D006 alone is a warning), and "Cascades and scope":
+and counting (D000–D012; D006 alone is a warning), and "Cascades and scope":
 1. D000 stops the check;
 2. an entry whose ``iface`` is not an interface id is checked no further,
    and does not count for ``declared_by``;
@@ -16,10 +16,17 @@ and counting (D000–D011; D006 alone is a warning), and "Cascades and scope":
    only; one given at other fingerprints only is D004;
 6. (0.18) D011 reads an entry's ``iface`` and ``token`` only: cascades 3
    and 5 do not suppress it;
-7. deliberately not checked: ``cause`` against gates, R3's completeness,
+7. (0.39) D012 reads an entry's ``standby`` and ``token`` only, as D011
+   reads its ``iface`` and ``token``: cascades 3 and 5 do not suppress
+   it, an entry cascade 2 stops is not checked for it, and an
+   ``archive.v1`` entry so marked gives D011 and D012;
+8. deliberately not checked: ``cause`` against gates, R3's completeness,
    ``declared_by`` against the contract's ``[requires]``, ``params``
    values, ``profiles`` against the ``uses``, ``minor``, ``token`` except
-   on ``archive.v1``, and a role's ``optional`` against its contract.
+   on ``archive.v1`` and beside ``standby``, whether a standby's interface
+   is one a profile governs, and a role's ``optional`` against its
+   contract. A standby entry's ``unavailable`` and ``cardinality`` are
+   checked as any entry's (D005–D007): they state what it will expose.
 
 This module follows that text. Before 0.5 these meanings were derived from
 the fixtures (SPEC-FINDINGS F-04, F-05).
@@ -88,6 +95,10 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
         # contract says: cascades 3 and 5 do not suppress it."
         if iface == "archive.v1" and entry.get("token") is False:
             codes.append("D011")
+        # Cascade 7 (0.39): "D012 reads an entry's standby and token, and
+        # nothing else ... cascades 3 and 5 do not suppress it".
+        if entry.get("standby") is True and entry.get("token") is False:
+            codes.append("D012")
         if FINGERPRINT.fullmatch(entry["contract"]) is None:
             codes.append("D003")
             continue

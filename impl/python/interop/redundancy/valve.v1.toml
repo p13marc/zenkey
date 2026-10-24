@@ -1,0 +1,19 @@
+# valve.v1.toml: an actuator locked outside the bus
+# (spec/profiles/redundancy/scenarios.md, "The contracts", verbatim)
+[interface]
+name  = "valve"
+major = 1
+minor = 0
+uses  = ["redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "external" }
+
+[resources.position]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.set]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }

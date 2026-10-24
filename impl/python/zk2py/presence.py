@@ -252,7 +252,10 @@ class PresenceFollower:
 
     def __init__(self, session: Any, watch: Any, selector: str = "zk2/*/*/@zk/**", *,
                  reread_delay_s: float = REREAD_DELAY_S, retry_s: float = 0.2, max_retry_s: float = 5.0,
-                 timeout: float = 1.0) -> None:
+                 timeout: float = 1.0, round_trip: bool = True) -> None:
+        """``round_trip`` False makes the reader core §8.1 warns of, a
+        scenario's control (presence.md §9 step 5): no round trip on the
+        watch session, and its seed taken as ordered."""
         import zenoh
 
         from . import live
@@ -278,7 +281,7 @@ class PresenceFollower:
                 self._schedule(self.delay)
 
         self.sub = live.declare_liveliness_subscriber(watch, selector, got, history=True)
-        self.settled = any(live.settle(watch, timeout) for _ in range(live.SETTLE_TRIES))
+        self.settled = any(live.settle(watch, timeout) for _ in range(live.SETTLE_TRIES)) if round_trip else True
         self._attempt(seed=True)
 
     def _schedule(self, after_s: float) -> None:

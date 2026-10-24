@@ -1,0 +1,23 @@
+# ledger.v1.toml: a single writer elected by claim
+# (spec/profiles/redundancy/scenarios.md, "The contracts", verbatim)
+[interface]
+name  = "ledger"
+major = 1
+minor = 0
+uses  = ["redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.balance]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.entries]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.append]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
