@@ -34,8 +34,8 @@ deployment's word (`deployment`, F-168: bound for the two cases across a
 face, `null` elsewhere), and an `order.json` sample may give a JSON
 payload as its text (`text`, F-166). The evidence, counted from the files:
 `conformance/declarations.json` (43 cases), `conformance/bindings.json`
-(25), `conformance/order.json` (78), `conformance/reports.json` (72),
-`conformance/conclusions.json` (35) and `conformance/schema.json` (3), 256
+(25), `conformance/order.json` (78), `conformance/reports.json` (74),
+`conformance/conclusions.json` (35) and `conformance/schema.json` (3), 258
 in all, and ten scenario sections.
 
 **Answered: the rules.**
@@ -126,10 +126,9 @@ in all, and ten scenario sections.
   it, by rounding, so 10^400 written out, `1e400` and
   `1.7976931348623159e308` are not strict JSON, in any member, and the
   largest double's text is.
-  - The model's reader already read so: `serde_json` with
-    `float_roundtrip`, which `zenkey-model` now asks for in its own
-    manifest rather than through `serde_json_canonicalizer`, and a unit
-    test pins the edge. zk2py already read so.
+  - The model's reader already read so, through `serde_json` with
+    `float_roundtrip`; it now reads through `telemetry.v1`'s strict reader
+    (below), and a unit test pins the edge. zk2py already read so.
   - `reports.json`: four cases as `text` (a revision of 10^400 written
     out, `1e400` and `1.7976931348623159e308` in a member the schema does
     not name, all `json`, and `1.7976931348623158e308` there, read).
@@ -169,6 +168,23 @@ in all, and ten scenario sections.
     a `uint` target, a `uint` second of two, a `uint` parameter that is no
     target (`param_not_target` alone), a misspelt name beside a `uint`
     one, a `uint` named twice, and a `uint` target on a stream.
+
+**Also stated: a depth limit** (§2.10, §2.7; found while answering
+F-167, decided by #840's coordinator before round 53). 0.1 bounded no
+depth, so two readers stopped at two places: the model, through
+`serde_json`'s recursion limit, refused a report 128 arrays and objects
+deep as `json`, and zk2py read one 300 deep.
+- Now a report or a document nests at most 256 arrays and objects deep,
+  counted as `telemetry.v1` §2.6 counts it, the top one at depth 1; a
+  report with one at depth 257 is `json`, and a document with one does not
+  read, so it compares byte for byte (§2.7). `alarms.v1` §2.4's reading
+  is unchanged.
+- The model reads a report and a document through `telemetry.v1`'s
+  strict reader (`desired::strict_json`, `desired::MAX_DEPTH`, 256), so
+  `serde_json`'s recursion limit decides nothing; every case that read
+  before reads alike.
+- `reports.json`: two cases as `text`, a report's object holding 255
+  nested arrays (256 deep, read) and 256 (257 deep, `json`).
 
 **Answered: `config.v1`'s** (§2.16, and `config.v1` text 0.4).
 - **F-171, once per revision against once per version.** §2.7 governs a
@@ -236,6 +252,8 @@ in all, and ten scenario sections.
   which no fixture can pin when an implementation may remember more.
 - **The scenarios' two contracts,** already given in full; their comment
   lines differ from the reference files', which no fingerprint reads.
+- **`alarms.v1`'s reader,** which this profile's §2.10 cites: its own
+  depth stays its text's question.
 
 ## 0.1 — 2026-10-24: the first text, draft (#840, DA)
 

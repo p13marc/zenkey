@@ -13,10 +13,7 @@ publish = false
 [dependencies]
 zenoh-keyexpr = { workspace = true }
 serde = { workspace = true }
-# `float_roundtrip`: a number's text read as its nearest double, so "finite"
-# is by rounding at the edge of the double's range (desired.v1 §2.10, text
-# 0.2; telemetry.v1 §2.6). serde_json_canonicalizer asks for it too.
-serde_json = { workspace = true, features = ["float_roundtrip"] }
+serde_json = { workspace = true }
 toml = { workspace = true }
 # The TOML 1.0 lint (spec §9.1) reads its event stream; `toml` already
 # depends on it.

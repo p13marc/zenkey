@@ -928,25 +928,70 @@ impl Report {
     }
 }
 
+/// How deep a report or a document may nest (§2.10, text 0.2), counted as
+/// `telemetry.v1` §2.6 counts it: an array or an object at the top is at
+/// depth 1, one inside another one deeper, a scalar adding none.
+pub const MAX_DEPTH: usize = crate::telemetry::decode::MAX_DEPTH;
+
+/// One JSON text as strict JSON (§2.10): UTF-8, RFC 8259's grammar,
+/// nothing after the value but whitespace, no duplicate member at any
+/// depth, every string with a UTF-8 form, every number finite by rounding,
+/// and at most [`MAX_DEPTH`] arrays and objects deep (text 0.2), read by
+/// `telemetry.v1`'s strict reader, which stops at the same place. `None`
+/// when the bytes are not one. An integer within 64 bits is held exactly;
+/// any other number as its nearest double.
+#[must_use]
+pub fn strict_json(bytes: &[u8]) -> Option<Value> {
+    fn value(d: &crate::telemetry::Datum) -> Option<Value> {
+        use crate::telemetry::Datum as D;
+        let float = |f: f64| serde_json::Number::from_f64(f).map(Value::Number);
+        Some(match d {
+            D::Null => Value::Null,
+            D::Bool(b) => Value::Bool(*b),
+            D::Int(i) => match (u64::try_from(*i), i64::try_from(*i)) {
+                (Ok(u), _) => Value::from(u),
+                (_, Ok(i)) => Value::from(i),
+                // Beyond 64 bits, as `serde_json` reads one: its double.
+                #[allow(clippy::cast_precision_loss)]
+                _ => float(*i as f64)?,
+            },
+            D::BigInt(f) | D::Float(f) => float(*f)?,
+            D::Text(t) => Value::String(t.clone()),
+            D::Array(a) => Value::Array(a.iter().map(value).collect::<Option<_>>()?),
+            D::Map(m) => Value::Object(
+                m.iter()
+                    .map(|(k, v)| Some((k.clone(), value(v)?)))
+                    .collect::<Option<_>>()?,
+            ),
+            // JSON carries no byte string.
+            D::Bytes(_) => return None,
+        })
+    }
+    value(&crate::telemetry::decode::json(bytes)?)
+}
+
 /// Reads a report's bytes (§2.10): strict JSON first, as `alarms.v1` §2.4
 /// reads a document (UTF-8, RFC 8259, nothing after the value but
-/// whitespace, no duplicate member at any depth, every number finite), then
-/// [`Report::from_json`].
+/// whitespace, no duplicate member at any depth, every number finite), at
+/// most [`MAX_DEPTH`] deep, then [`Report::from_json`].
 ///
 /// **Finite** is by rounding (text 0.2, F-167, as `telemetry.v1` §2.6
 /// reads it): a number's text, an integer's included, is finite when its
 /// exact value rounded to the nearest double is not an infinity, so 10^400
 /// written out is not strict JSON, and `1.7976931348623158e308` is.
-/// `serde_json` reads so with `float_roundtrip`, which this crate asks for.
+/// **Depth** (text 0.2): 256 nested arrays read, 257 do not; `serde_json`'s
+/// own recursion limit decides nothing ([`strict_json`]).
 ///
 /// # Errors
 ///
 /// [`Unreadable::Json`] for bytes that are not strict JSON, else
 /// [`Report::from_json`]'s.
 pub fn decode(bytes: &[u8]) -> Result<Report, Unreadable> {
-    let text =
-        std::str::from_utf8(bytes).map_err(|e| Unreadable::Json(format!("not UTF-8: {e}")))?;
-    let v = crate::strict::parse_json(text).map_err(|e| Unreadable::Json(e.to_string()))?;
+    let v = strict_json(bytes).ok_or_else(|| {
+        Unreadable::Json(format!(
+            "not strict JSON: UTF-8, RFC 8259, no duplicate member, every number finite, at most {MAX_DEPTH} deep"
+        ))
+    })?;
     Report::from_json(&v)
 }
 
@@ -1010,14 +1055,15 @@ impl Content {
 
     /// A payload as a target compares it (§2.7): one encoded as JSON
     /// (`json`) by its canonical form when it reads as strict JSON (§2.10's
-    /// reading, every number finite by rounding), and every other payload,
-    /// or JSON that does not read, byte for byte.
+    /// reading, [`strict_json`]: every number finite by rounding, at most
+    /// [`MAX_DEPTH`] deep), and every other payload, or JSON that does not
+    /// read, byte for byte.
     #[must_use]
     pub fn of_payload(bytes: &[u8], json: bool) -> Self {
         let read = json
             .then(|| std::str::from_utf8(bytes).ok())
             .flatten()
-            .filter(|t| crate::strict::parse_json(t).is_ok())
+            .filter(|t| crate::telemetry::decode::json(t.as_bytes()).is_some())
             .and_then(Exact::of_text);
         match read {
             Some(e) => {
@@ -1171,9 +1217,9 @@ fn write_string(s: &str, out: &mut Vec<u8>) {
     out.extend_from_slice(quoted.as_bytes());
 }
 
-/// Reads a text [`crate::strict::parse_json`] already accepted, so that
-/// its numbers keep their text: no duplicate, nothing after the value, and
-/// a depth `serde_json` bounds.
+/// Reads a text [`strict_json`] already accepted, so that its numbers keep
+/// their text: no duplicate, nothing after the value, and at most
+/// [`MAX_DEPTH`] deep, which bounds its recursion.
 struct ExactReader<'a> {
     text: &'a str,
     s: &'a [u8],
@@ -2167,6 +2213,34 @@ mod tests {
                 "{n}"
             );
         }
+        // Depth (0.2): the report's object at depth 1, then arrays.
+        let nested = |n: usize| {
+            format!(
+                r#"{{"source":"baseline","x":{}{}}}"#,
+                "[".repeat(n),
+                "]".repeat(n)
+            )
+        };
+        assert!(decode(nested(MAX_DEPTH - 1).as_bytes()).is_ok());
+        assert!(matches!(
+            decode(nested(MAX_DEPTH).as_bytes()),
+            Err(Unreadable::Json(_))
+        ));
+        assert!(matches!(
+            decode(nested(100_000).as_bytes()),
+            Err(Unreadable::Json(_))
+        ));
+        // A document past the depth compares byte for byte; one at it, by
+        // its canonical form.
+        let deep = |n: usize, ws: &str| format!("{}{ws}{}", "[".repeat(n), "]".repeat(n));
+        assert_eq!(
+            Content::of_payload(deep(MAX_DEPTH, " ").as_bytes(), true),
+            Content::of_payload(deep(MAX_DEPTH, "").as_bytes(), true)
+        );
+        assert_ne!(
+            Content::of_payload(deep(MAX_DEPTH + 1, " ").as_bytes(), true),
+            Content::of_payload(deep(MAX_DEPTH + 1, "").as_bytes(), true)
+        );
         let big = format!("1{}", "0".repeat(400));
         assert!(matches!(
             decode(with(&big).as_bytes()),
