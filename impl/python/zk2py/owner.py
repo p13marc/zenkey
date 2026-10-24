@@ -295,11 +295,15 @@ class Owner:
                  state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
                  initial: dict[str, bytes] | None = None, hlc: bool = True,
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
-                 tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None):
+                 tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
+                 params: dict[str, dict[str, str]] | None = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
           is unbound.
+        - ``params``: a role's parameter bindings as configured (R2), listed
+          in the descriptor for a bound role (R3); an unbound one lists
+          ``"params": {}`` (core §3.2).
         - ``capabilities``: the capabilities held (§3.3).
         - ``unavailable``: ``<kind token>/<template>`` → cause, for optional
           resources not exposed and listed so.
@@ -369,6 +373,7 @@ class Owner:
         self.system, self.service, self.contracts = system, service, contracts
         self.connect = connect
         self.bindings = bindings or {}
+        self.params = {k: dict(v) for k, v in (params or {}).items()}
         #: the bindings with their self.system providers resolved, at start
         self.resolved_bindings: dict[str, list[str]] = dict(self.bindings)
         self.capabilities = set(capabilities or ())
@@ -733,7 +738,8 @@ class Owner:
             "requires": [{
                 "role": role, "interface": req["interface"], "declared_by": c.interface,
                 # R3 (0.20): "a self.system provider resolved".
-                "bindings": list(self.resolved_bindings.get(role, [])), "params": {},
+                "bindings": list(self.resolved_bindings.get(role, [])),
+                "params": dict(self.params.get(role, {})) if self.resolved_bindings.get(role) else {},
                 **({"optional": True} if req["optional"] else {}),
             } for c in self.contracts for role, req in c.canonical["requires"].items()],
             # Core §3.3 (0.19): "the union of two sets": the contracts' uses,

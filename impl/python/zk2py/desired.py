@@ -462,6 +462,79 @@ def exact_json(value: Any) -> Any:
     return value
 
 
+def _number_text(x: Exact) -> str:
+    """An :class:`Exact` written back, its exact value kept: its significant
+    digits and its exponent (``10000000000000000555e-20``), an integer as
+    its digits."""
+    sign, digits, exponent = x.form
+    if not digits:
+        return "0"
+    neg = "-" if sign else ""
+    if isinstance(exponent, tuple):
+        eneg, etext, adj = exponent
+        if adj >= 0:
+            mant = digits + "0" * adj
+        elif len(digits) > -adj:
+            mant = digits[:adj] + "." + digits[adj:]
+        else:
+            mant = "0." + "0" * (-adj - len(digits)) + digits
+        return f"{neg}{mant}e{'-' if eneg else ''}{etext}"
+    if exponent >= 0:
+        return neg + digits + "0" * exponent if exponent <= 400 else f"{neg}{digits}e{exponent}"
+    if -exponent <= 40:
+        k = -exponent
+        whole = digits[:-k] if len(digits) > k else "0"
+        frac = digits[-k:] if len(digits) > k else "0" * (k - len(digits)) + digits
+        return f"{neg}{whole}.{frac}"
+    return f"{neg}{digits}e{exponent}"
+
+
+def canonical_json(value: Any) -> bytes:
+    """§2.11: "encode each document deterministically (JSON's members in one
+    order …)", with every number written by its exact value (§2.7, 0.2): a
+    value :func:`strict_json` read with ``exact``, or a decoded one. Members
+    sorted by their code points, no whitespace. Raises ``ValueError`` for a
+    value strict JSON cannot carry (a non-finite number)."""
+    out: list[str] = []
+
+    def w(v: Any) -> None:
+        if v is None or isinstance(v, bool):
+            out.append("null" if v is None else "true" if v else "false")
+        elif isinstance(v, Exact):
+            if not math.isfinite(v.double):
+                raise ValueError("a number past the double's finite range")
+            out.append(_number_text(v))
+        elif isinstance(v, int):
+            out.append(str(v))
+        elif isinstance(v, float):
+            if not math.isfinite(v):
+                raise ValueError("a non-finite number")
+            out.append(repr(v))
+        elif isinstance(v, str):
+            out.append(json.dumps(v, ensure_ascii=False))
+        elif isinstance(v, list):
+            out.append("[")
+            for i, x in enumerate(v):
+                if i:
+                    out.append(",")
+                w(x)
+            out.append("]")
+        elif isinstance(v, dict):
+            out.append("{")
+            for i, k in enumerate(sorted(v)):
+                if i:
+                    out.append(",")
+                out.append(json.dumps(k, ensure_ascii=False))
+                out.append(":")
+                w(v[k])
+            out.append("}")
+        else:
+            raise ValueError(f"not JSON: {type(v).__name__}")
+
+    w(value)
+    return "".join(out).encode("utf-8")
+
+
 def revision_of(payload: bytes) -> int | None:
     """§2.4 (0.3): a document's own revision, "a top-level member named
     revision … an integer from 0 to 2^64−1, read by its exact value as a

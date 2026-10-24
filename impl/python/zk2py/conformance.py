@@ -2371,8 +2371,41 @@ def family_readings(root: Path) -> list[Result]:
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
-        + _desired_readings() + _presence_view()
+        + _desired_readings() + _presence_view() + _desired_encoding()
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _desired_encoding() -> list[tuple[str, Any, Any]]:
+    """desired.v1 0.3, zk2py's author: §2.11's deterministic encoding with
+    every number written by its exact value (§2.7, 0.2), and §2.4's revision
+    of a document read exactly (0.3, F-181)."""
+    from . import desired as ds
+
+    label = "desired.v1 0.3 §2.11, zk2py's author writes each number by its exact value"
+    out: list[tuple[str, Any, Any]] = []
+    for text, want in (("1.5", "1.5"), ("0.10000000000000000555", "0.10000000000000000555"), ("10.0", "10"),
+                       ("1e1", "10"), ("-0.0", "0"), ("2.5e-30", "0.0000000000000000000000000000025"),
+                       ("1e-50", "1e-50"), ("18446744073709551616", "18446744073709551616"),
+                       ("1e-99999999999999999999999", "1e-99999999999999999999999")):
+        v = ds.strict_json(text.encode(), exact=True)
+        got = ds.canonical_json(v).decode()
+        out.append((f"{label}: {text} is written {want}, and reads back the same value",
+                    (got, ds.jcs_equal(v, ds.strict_json(got.encode(), exact=True))), (want, True)))
+    out.append((f"{label}: members sorted, no whitespace",
+                ds.canonical_json(ds.strict_json(b'{ "b": [1, 2.50], "a": {"y": null, "x": true} }', exact=True)),
+                b'{"a":{"x":true,"y":null},"b":[1,2.5]}'))
+    try:
+        ds.canonical_json(float("inf"))
+        inf = "written"
+    except ValueError:
+        inf = "refused"
+    out.append((f"{label}: a non-finite number is refused, never written", inf, "refused"))
+    lab = "desired.v1 0.3 §2.4, a document's revision read by its exact value"
+    for text, want in (('{"revision": 3.0}', 3), ('{"revision": 30e-1}', 3), ('{"revision": 1.5}', None),
+                       ('{"revision": 18446744073709551615}', 2**64 - 1), ('{"revision": 18446744073709551616}', None),
+                       ('{"revision": -1}', None), ('{"revision": true}', None), ('[3]', None), ('{"revision":', None)):
+        out.append((f"{lab}: {text}", ds.revision_of(text.encode()), want))
+    return out
 
 
 BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_population, "rate.json": _budget_rate,

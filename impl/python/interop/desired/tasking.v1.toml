@@ -1,0 +1,16 @@
+# tasking.v1.toml: a task per worker, state of its author
+[interface]
+name  = "tasking"
+major = 1
+minor = 0
+uses  = ["desired.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["tasking.json"]
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

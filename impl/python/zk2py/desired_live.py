@@ -1,0 +1,534 @@
+"""desired.v1 on a bus (``spec/profiles/desired/v1.md``, text 0.3, core 0.37):
+zk2py's author and target, written from the text alone (#609, round 55), on
+the scenarios' contracts (``scenarios.md``, "The contracts", transcribed in
+``impl/python/interop/desired/``).
+
+- :class:`Author` owns ``tasking.v1``'s ``tasks/{system}/{service}`` on
+  zk2py's :class:`zk2py.owner.Owner`: a document put only when its content
+  changes (§2.11), deterministically encoded; its record (a JSON file, the
+  owner example's format), read at start before the tokens, each delete
+  within its window made again for what is left of it, then each document
+  put again, the clock caught up past every stamp the record holds (§2.11,
+  core §4.3); a re-mint in its own session puts again what it keeps before
+  its new tokens.
+- :class:`Target` owns ``worker.v1`` (its report ``desired/task`` and what
+  it runs, ``running``), its role ``task`` bound to its author with
+  ``{system} = self.system`` and ``{service} = self.service`` (§2.3), or
+  unbound, the kill switch (§2.12). It subscribes to its slice first, then
+  seeds by S4's GET (§2.5); it follows its author's instance token live on a
+  watch session (core §8.1, 0.37) or by reading it on a period, seeds again
+  at each appearance (and up to four times more when a seed then draws
+  nothing), reads an archive only when a seed draws nothing and a complete
+  presence read shows its author absent (§2.5, §2.9, 0.3), judges every
+  version with :class:`zk2py.desired.TargetRole`, acts through the
+  scenarios' simulated drive, and puts its report before its tokens and
+  after every change (§2.10).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+import zenoh
+
+from . import alarms, desired, live
+from .contract import load_contract
+from .owner import Owner
+
+REPO = Path(__file__).resolve().parents[3]
+CONTRACTS = REPO / "impl" / "python" / "interop" / "desired"
+TEMPLATE = "tasks/{system}/{service}"
+#: scenarios.md: "Its baseline is {"revision": 0, "mode": "idle", "rate_hz": 1}".
+BASELINE = {"revision": 0, "mode": "idle", "rate_hz": 1}
+#: The drive: "The worker supports rate_hz up to 100".
+RATE_SUPPORTED = 100
+
+
+def canonical(doc: Any) -> bytes:
+    """§2.11: "encode each document deterministically (JSON's members in one
+    order …)", every number by its exact value (:func:`desired.canonical_json`)."""
+    return desired.canonical_json(doc)
+
+
+def read_document(text: str) -> Any:
+    """A document as a command writes it: strict JSON (§2.10's reading), its
+    numbers exact. Raises :class:`desired.NotStrict`."""
+    return desired.strict_json(text.encode("utf-8", "surrogatepass"), exact=True)
+
+
+def contract(name: str) -> Any:
+    return load_contract(CONTRACTS / f"{name}.toml", spec_dir=REPO / "spec")
+
+
+def slice_key(author: str, target: str) -> str:
+    """§2.3: the target's slice of its author's template."""
+    system, service = target.split("/")
+    return desired.slice_key(author, "tasking.v1", False, TEMPLATE, {"system": system, "service": service})
+
+
+def raw_time(stamp: str) -> int:
+    return int(stamp.split("/", 1)[0])
+
+
+def ntp64_at_least(raw: int) -> zenoh.NTP64:
+    """An NTP64 at or just above a raw value: zenoh-python builds one from
+    seconds and nanoseconds, which cannot hit every raw value, so the
+    nanoseconds round up."""
+    secs, frac = raw >> 32, raw & 0xFFFFFFFF
+    nanos = -(-(frac * 1_000_000_000) // (1 << 32))
+    if nanos >= 1_000_000_000:
+        secs, nanos = secs + 1, nanos - 1_000_000_000
+    return zenoh.NTP64(secs, nanos)
+
+
+def _sample(origin: str, deleted: bool, stamp_text: str | None, payload: bytes) -> desired.Sample:
+    stamp = None if stamp_text is None else desired.Stamp.parse(stamp_text)
+    if deleted:
+        return desired.Sample(origin, True, stamp)
+    return desired.Sample(origin, False, stamp, desired.Payload.of_bytes(payload, True), desired.revision_of(payload))
+
+
+# -- the author ---------------------------------------------------------------------------
+
+class Author:
+    """§2.11's author of ``tasks/{system}/{service}``."""
+
+    def __init__(self, address: str, endpoint: str, *, record: str | None = None, window_s: float = 60.0,
+                 tokenless: tuple[str, ...] = ()) -> None:
+        self.address, self.endpoint = address, endpoint
+        self.record_path = None if record is None else Path(record)
+        self.window_s, self.tokenless = window_s, set(tokenless)
+        self.contract = contract("tasking.v1")
+        self.documents: dict[str, dict[str, Any]] = {}
+        self.deletes: dict[str, dict[str, Any]] = {}
+        self.adoption = {"found": "nothing", "reput": [], "redeleted": [], "expired": [], "failed": []}
+        #: the state GETs its queryables received (scenarios.md §8)
+        self.queries = 0
+        self.lock = threading.Lock()
+        self.owner: Owner | None = None
+
+    def start(self) -> str:
+        system, service = self.address.split("/")
+        self.owner = Owner(system, service, [self.contract], connect=self.endpoint, tombstone_s=self.window_s,
+                           before_tokens=self._adopt, tokenless=self.tokenless)
+        owner = self.owner
+
+        def counted(query: Any) -> None:
+            with self.lock:
+                self.queries += 1
+            owner.answer_state(query, owner.state_answer(query))
+
+        owner.state_hold = counted
+        owner.start()
+        return owner.instance_key
+
+    def key(self, target: str) -> str:
+        return slice_key(self.address, target)
+
+    # §2.11 "A restart from its record"
+    def _read_record(self) -> dict[str, Any] | None:
+        if self.record_path is None or not self.record_path.is_file():
+            return None
+        try:
+            rec = desired.strict_json(self.record_path.read_bytes(), exact=True)
+        except (OSError, desired.NotStrict):
+            return None
+        return rec if isinstance(rec, dict) and rec.get("profile") == "desired.v1" else None
+
+    def _write_record(self) -> None:
+        if self.record_path is None:
+            return
+        tmp = self.record_path.with_suffix(".tmp")
+        tmp.write_bytes(canonical({"profile": "desired.v1", "documents": self.documents, "deletes": self.deletes}))
+        os.replace(tmp, self.record_path)
+
+    def _adopt(self, owner: Owner) -> None:
+        """Before its first write and before its tokens: its record's stamps
+        catch its clock up (core §4.3), its deletes within their window are
+        made again for what is left of it, then its documents are put again
+        (§2.11: "MUST put each document it keeps again … before it answers a
+        GET with it, and SHOULD before its new instance token")."""
+        rec = self._read_record()
+        if rec is None:
+            return
+        self.adoption["found"] = "record"
+        docs, dels = dict(rec.get("documents") or {}), dict(rec.get("deletes") or {})
+        times = [raw_time(e["stamp"]) for e in list(docs.values()) + list(dels.values()) if e.get("stamp")]
+        assert owner.session is not None
+        if times:
+            owner._last = zenoh.Timestamp(ntp64_at_least(max(times)), owner.session.new_timestamp().get_id())
+        now_ms = time.time() * 1000
+        for target, d in sorted(dels.items()):
+            at_ms = d.get("at_ms", now_ms)
+            at_ms = float(at_ms.double if isinstance(at_ms, desired.Exact) else at_ms)
+            elapsed_s = max(0.0, (now_ms - at_ms) / 1000)
+            if elapsed_s >= self.window_s:
+                self.adoption["expired"].append(target)
+                continue
+            key = self.key(target)
+            stamp = owner.delete_state(key)
+            # §2.11 (0.3): "for what is left of the window counted from the
+            # delete it repeats, not a window more"
+            held = owner._held[key]
+            held.at = time.monotonic() - elapsed_s
+            self.deletes[target] = {"stamp": str(stamp), "at_ms": d.get("at_ms")}
+            self.adoption["redeleted"].append(target)
+        for target, e in sorted(docs.items()):
+            stamp = owner.set_state(self.key(target), canonical(e["document"]))
+            self.documents[target] = {"stamp": str(stamp), "document": e["document"]}
+            self.adoption["reput"].append(target)
+        self._write_record()
+
+    def put(self, target: str, document: Any) -> tuple[str, str, str | None]:
+        """§2.11 "Only on a change": ("put", key, stamp), or ("unchanged",
+        key, None) for the document held."""
+        assert self.owner is not None
+        key = self.key(target)
+        with self.lock:
+            held = self.documents.get(target)
+            if held is not None and desired.jcs_equal(held["document"], document):
+                return "unchanged", key, None
+            stamp = self.owner.set_state(key, canonical(document))
+            self.documents[target] = {"stamp": str(stamp), "document": document}
+            self.deletes.pop(target, None)
+            self._write_record()
+        return "put", key, str(stamp)
+
+    def delete(self, target: str) -> tuple[str, str, str | None]:
+        assert self.owner is not None
+        key = self.key(target)
+        with self.lock:
+            if target not in self.documents:
+                return "none", key, None
+            stamp = self.owner.delete_state(key)
+            del self.documents[target]
+            self.deletes[target] = {"stamp": str(stamp), "at_ms": int(time.time() * 1000)}
+            self._write_record()
+        return "deleted", key, str(stamp)
+
+    def new_epoch(self) -> str:
+        """A re-mint in its own session (core §8.1; §2.11 0.3 "Its zid": it
+        keeps its zid, its re-put a later time): each document put again,
+        each delete within its window made again, before the new tokens."""
+        assert self.owner is not None
+        with self.lock:
+            now_ms = time.time() * 1000
+            for target, d in sorted(self.deletes.items()):
+                elapsed_s = max(0.0, (now_ms - float(d.get("at_ms", now_ms))) / 1000)
+                if elapsed_s < self.window_s:
+                    key = self.key(target)
+                    stamp = self.owner.delete_state(key)
+                    self.owner._held[key].at = time.monotonic() - elapsed_s
+                    d["stamp"] = str(stamp)
+            for target, e in sorted(self.documents.items()):
+                e["stamp"] = str(self.owner.set_state(self.key(target), canonical(e["document"])))
+            self._write_record()
+        self.owner.new_epoch()
+        return self.owner.instance_key
+
+    def close(self) -> None:
+        if self.owner is not None:
+            self.owner.close()
+
+
+# -- the target ---------------------------------------------------------------------------
+
+def schema_pointer(doc: Any, schema: dict[str, Any], root: dict[str, Any]) -> str | None:
+    """Where a JSON Schema refuses a decoded document (§2.7, 0.3: "its
+    pointer is where the schema refuses it"), or None when it accepts it:
+    a member's own schema at ``/<member>``; a missing required member, or a
+    value that is no object, at the object itself, ``""`` (F-192)."""
+    while "$ref" in schema and len(schema) == 1:
+        schema = alarms._resolve(root, schema["$ref"])
+    if alarms.validate(doc, schema, root):
+        return None
+    if not isinstance(doc, dict):
+        return ""
+    for name, sub in (schema.get("properties") or {}).items():
+        if name in doc and not alarms.validate(doc[name], sub, root):
+            return "/" + name.replace("~", "~0").replace("/", "~1")
+    return ""
+
+
+class Target:
+    """§2.5 to §2.10's target of ``tasks/{system}/{service}``, on
+    ``worker.v1``."""
+
+    def __init__(self, address: str, endpoint: str, *, author: str = "lab/author", unbound: bool = False,
+                 archive: str | None = None, watch: bool = False, reread_ms: int | None = None,
+                 hold: bool = False, poll_ms: int = 500, timeout: float = 1.0) -> None:
+        self.address, self.endpoint, self.author = address, endpoint, author
+        self.unbound, self.archive, self.watch_mode = unbound, archive, watch
+        self.reread_s = None if reread_ms is None else reread_ms / 1000
+        self.poll_s, self.timeout = poll_ms / 1000, timeout
+        self.contract = contract("worker.v1")
+        self.task_schema = json.loads((CONTRACTS / "tasking.json").read_text())
+        self.key = None if unbound else slice_key(author, address)
+        self.role = desired.TargetRole(self.key)
+        self.lock = threading.RLock()
+        self.seed_lock = threading.Lock()
+        self.running_doc: Any = dict(BASELINE)
+        self.acts = 0
+        self.seeds = 0
+        #: what each seed found: "answered", "silent", "archive", "not made"
+        self.seed_log: list[str] = []
+        self._hold_next = hold
+        self._release = threading.Event()
+        self.held = False
+        self._fail_next = False
+        self._refuse_next: tuple[str, str | None] | None = None
+        self._last_report: bytes | None = None
+        self._stop = threading.Event()
+        self._entities: list[Any] = []
+        self.watch_session: Any = None
+        self.owner: Owner | None = None
+        self.rp = f"zk2/{address}/worker.v1/state/desired/task"
+        self.run = f"zk2/{address}/worker.v1/state/running"
+
+    # -- bring-up --------------------------------------------------------
+    def start(self) -> str:
+        system, service = self.address.split("/")
+        bound = not self.unbound
+        self.owner = Owner(system, service, [self.contract], connect=self.endpoint,
+                           bindings={"task": [self.author]} if bound else {},
+                           params={"task": {"system": "self.system", "service": "self.service"}} if bound else {},
+                           before_tokens=self._first_puts)
+        self.owner.start()
+        if bound:
+            s = self.owner.session
+            assert s is not None
+            # §2.5 "Subscribe, then seed"
+            self._entities.append(s.declare_subscriber(self.key, zenoh.handlers.Callback(self._live)))
+            if self.watch_mode:
+                self._follow_watch()
+            else:
+                threading.Thread(target=self._poll, daemon=True).start()
+            if self.reread_s is not None:
+                threading.Thread(target=self._reread_loop, daemon=True).start()
+        return self.owner.instance_key
+
+    def _first_puts(self, owner: Owner) -> None:
+        """§2.10: "MUST put its first report of each role before its tokens …,
+        source baseline"; what it runs, its baseline."""
+        owner.set_state(self.run, canonical(self.running_doc))
+        self._put_report(owner)
+
+    def _put_report(self, owner: Owner | None = None) -> None:
+        owner = owner or self.owner
+        assert owner is not None
+        with self.lock:
+            data = canonical(self.role.report())
+            if data == self._last_report:
+                return
+            self._last_report = data
+        owner.set_state(self.rp, data)
+
+    # -- presence (§2.5, core §8.1) ----------------------------------------
+    def _instance_selector(self) -> str:
+        return f"zk2/{self.author}/@zk/instance/*"
+
+    def _follow_watch(self) -> None:
+        """A watch session of its own, one round trip there, then the seed."""
+        self.watch_session = live.open_client(self.endpoint)
+
+        def token(sample: Any) -> None:
+            if sample.kind == zenoh.SampleKind.PUT:
+                threading.Thread(target=self.seed, kwargs={"appearance": True}, daemon=True).start()
+
+        self._entities.append(live.declare_liveliness_subscriber(self.watch_session, self._instance_selector(),
+                                                                 token, history=True))
+        live.settle(self.watch_session, self.timeout)
+        threading.Thread(target=self.seed, daemon=True).start()
+
+    def _poll(self) -> None:
+        """§2.5 (0.3): "One that does not reads its author's instance tokens on
+        a period, and an appearance is a read showing a token the read before
+        it did not." It seeds at once, then reads every period."""
+        self.seed()
+        seen: set[str] | None = None
+        while not self._stop.wait(self.poll_s if seen is not None else 0):
+            p = self.presence()
+            if p.kind != live.COMPLETE and not p.instances:
+                continue
+            now = {i["instance"] for i in p.instances}
+            if seen is not None and now - seen:
+                threading.Thread(target=self.seed, kwargs={"appearance": True}, daemon=True).start()
+            seen = now if p.kind == live.COMPLETE else seen | now if seen is not None else now
+
+    def presence(self) -> live.Presence:
+        """A presence read on the target's own session, which holds no
+        liveliness subscriber (core §8.1, 0.37)."""
+        assert self.owner is not None and self.owner.session is not None
+        return live.list_presence(self.owner.session, self._instance_selector(), self.timeout)
+
+    def author_absent(self) -> bool:
+        """§2.5 (0.3, F-187): "a complete read without its instance token"."""
+        p = self.presence()
+        return p.kind == live.COMPLETE and not p.instances
+
+    def _reread_loop(self) -> None:
+        while self.reread_s is not None and not self._stop.wait(self.reread_s):
+            self.seed()
+
+    # -- seeds (§2.5) ------------------------------------------------------
+    def seed(self, appearance: bool = False) -> str:
+        """S4's GET of the slice; at an appearance, made again up to four
+        times, 100 ms more apart each time, while its author reads present
+        (§2.5, 0.3); an archive read when it draws nothing and a complete
+        presence read shows its author absent (§2.9, 0.3)."""
+        if self.unbound or self.owner is None or self.owner.session is None:
+            return "unbound"
+        with self.seed_lock:
+            self.seeds += 1
+            tries = 5 if appearance else 1
+            for n in range(tries):
+                st = live.get_state(self.owner.session, self.key, self.timeout)
+                if st.replies:
+                    for r in st.replies:
+                        self._receive(_sample(desired.OWNER, r.deleted, r.stamp, r.payload))
+                    self.seed_log.append("answered")
+                    return "answered"
+                if n + 1 < tries:
+                    if self.author_absent():
+                        break
+                    time.sleep(0.1 * (n + 1))
+            if self.archive is not None and self.author_absent():
+                form = alarms.archive_form(self.archive, self.key)
+                st = live.get_state(self.owner.session, form, self.timeout)
+                for r in st.replies:
+                    self._receive(_sample(desired.ARCHIVE, r.deleted, r.stamp, r.payload))
+                self.seed_log.append("archive" if st.replies else "silent")
+                return "archive"
+            self.seed_log.append("silent")
+            return "silent"
+
+    def reread(self, ms: int | None) -> None:
+        start = self.reread_s is None and ms is not None
+        self.reread_s = None if ms is None else ms / 1000
+        if start and not self.unbound:
+            threading.Thread(target=self._reread_loop, daemon=True).start()
+
+    # -- versions (§2.6, §2.7) ---------------------------------------------
+    def _live(self, sample: Any) -> None:
+        key = str(sample.key_expr)
+        if "*" in key or "$" in key:
+            return  # R6
+        ts = sample.timestamp
+        self._receive(_sample(desired.OWNER, sample.kind == zenoh.SampleKind.DELETE,
+                              None if ts is None else str(ts), sample.payload.to_bytes()))
+
+    def _receive(self, s: desired.Sample) -> None:
+        with self.lock:
+            word = self.role.receive(s)
+        if word in (desired.ACT, desired.REVERT):
+            threading.Thread(target=self._drive, daemon=True).start()
+        elif word in (desired.ADOPTED, desired.CONFIRMED):
+            self._put_report()
+
+    # -- the drive (scenarios.md, "The target") ----------------------------
+    def _drive(self) -> None:
+        while True:
+            with self.lock:
+                v = self.role.current
+                self.acts += 1
+                hold, self._hold_next = self._hold_next, False
+            if hold:
+                self.held = True
+                self._release.wait()
+                self._release.clear()
+                self.held = False
+            assert v is not None
+            fin = self._act(v)
+            with self.lock:
+                word = self.role.finish(fin)
+            self._put_report()
+            if word not in (desired.ACT, desired.REVERT):
+                return
+
+    def _set_running(self, doc: Any) -> None:
+        """What the drive runs, put as it was given, its numbers exact."""
+        assert self.owner is not None
+        self.running_doc = doc
+        self.owner.set_state(self.run, canonical(doc))
+
+    def _act(self, v: Any) -> desired.Finish:
+        try:
+            with self.lock:
+                fail, self._fail_next = self._fail_next, False
+                refuse, self._refuse_next = self._refuse_next, None
+            if v.delete:
+                if fail:
+                    self._set_running({**self.running_doc, "rate_hz": BASELINE["rate_hz"]})
+                    return desired.Finish(desired.FAILED, {"code": "apply", "detail": "the drive failed after the rate"})
+                self._set_running(dict(BASELINE))
+                return desired.Finish(desired.DONE)
+            if v.payload is None or v.payload.value is None:
+                return desired.Finish(desired.REFUSED, {"code": "undecodable", "detail": "not strict JSON"})
+            doc = desired.exact_json(v.payload.value)
+            ptr = schema_pointer(doc, self.task_schema["$defs"]["Task"], self.task_schema)
+            if ptr is not None:
+                return desired.Finish(desired.REFUSED, {"code": "invalid", "pointer": ptr,
+                                                        "detail": "not a tasking.v1 Task"})
+            if refuse is not None:
+                code, pointer = refuse
+                return desired.Finish(desired.REFUSED, {"code": code, **({"pointer": pointer} if pointer else {})})
+            if "endpoint" in doc:
+                return desired.Finish(desired.REFUSED, {"code": "reach", "pointer": "/endpoint",
+                                                        "detail": "names the endpoint the worker reaches the bus by"})
+            if doc["rate_hz"] > RATE_SUPPORTED:
+                return desired.Finish(desired.REFUSED, {"code": "invalid", "pointer": "/rate_hz",
+                                                        "detail": f"the worker supports rate_hz up to {RATE_SUPPORTED}"})
+            if fail:
+                self._set_running({**self.running_doc, "rate_hz": doc["rate_hz"]})
+                return desired.Finish(desired.FAILED, {"code": "apply", "pointer": "/mode",
+                                                       "detail": "the drive failed after setting the rate"})
+            self._set_running(v.payload.value)
+            return desired.Finish(desired.DONE)
+        except Exception as e:  # noqa: BLE001 - §2.7 (0.3): an act whose end is unknown is failed, apply
+            return desired.Finish(desired.FAILED, {"code": "apply", "detail": f"the act was lost: {e!r}"})
+
+    # -- knobs --------------------------------------------------------------
+    def new_epoch(self) -> str:
+        """§2.7 (0.3): "A re-mint is not a restart. A target that mints a new
+        instance id in its own process (core §1.5, §8.1) still runs what it
+        applied, and keeps what it acted on and its report"."""
+        assert self.owner is not None
+        self.owner.new_epoch()
+        return self.owner.instance_key
+
+    def hold(self) -> None:
+        with self.lock:
+            self._hold_next = True
+
+    def release(self) -> None:
+        self._release.set()
+
+    def fail_next(self) -> None:
+        with self.lock:
+            self._fail_next = True
+
+    def refuse_next(self, code: str, pointer: str | None) -> None:
+        with self.lock:
+            self._refuse_next = (code, pointer)
+
+    def report(self) -> dict[str, Any]:
+        with self.lock:
+            return self.role.report()
+
+    def close(self) -> None:
+        self._stop.set()
+        self._release.set()
+        for e in self._entities:
+            try:
+                e.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+        if self.watch_session is not None:
+            live.close(self.watch_session)
+        if self.owner is not None:
+            self.owner.close()
