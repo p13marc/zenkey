@@ -2,11 +2,12 @@
 
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
-a setup, steps, and expected observations. §1 to §8 are the runtime's: the
-reference runs them as tests of `zenkey` (`zenkey/tests/profile_desired.rs`,
-one test per section, named after it; #840, DB). §9 is a tool's: the
-reference tool runs it as a test of zenctl (`zenctl/tests/live_zk2.rs`,
-`desired_s9_…`, T being `zenctl desired`; #840, DC).
+a setup, steps, and expected observations. §1 to §8 and §10 are the
+runtime's: the reference runs them as tests of `zenkey`
+(`zenkey/tests/profile_desired.rs`, one test per section, named after it;
+#840, DC). §9 is a tool's: the reference tool runs it as a test of zenctl
+(`zenctl/tests/live_zk2.rs`, `desired_s9_…`, T being `zenctl desired`;
+#840, DD).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -65,13 +66,38 @@ reference tool runs it as a test of zenctl (`zenctl/tests/live_zk2.rs`,
   optional  = true
   ```
 
-  `tasking.json` defines one type, `Task`, an open object:
-  `revision`, an integer from 0, required (the type's revision, §2.4);
-  `mode`, one of `idle`, `run`, `halt`, required; `rate_hz`, an integer
-  from 1 to 1000, required. The worker supports `rate_hz` up to 100 and
-  refuses a higher one `invalid` at `/rate_hz`; it refuses a document
-  that holds a member named `endpoint` `reach` at `/endpoint` (§2.7): the
-  type gives no such member, and the object is open.
+  `tasking.json` (0.2) is, byte for byte, the block below without the
+  list's two-space indent, its last line ending in a line feed:
+
+  ```json
+  {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "tasking.json",
+    "$comment": "desired.v1's scenarios (spec/profiles/desired/scenarios.md): the author's document type. An open object: a worker refuses a document that holds a member named endpoint (reach), and one whose rate_hz is above what it supports (invalid).",
+    "$defs": {
+      "Task": {
+        "type": "object",
+        "properties": {
+          "revision": { "type": "integer", "minimum": 0 },
+          "mode": { "type": "string", "enum": ["idle", "run", "halt"] },
+          "rate_hz": { "type": "integer", "minimum": 1, "maximum": 1000 }
+        },
+        "required": ["revision", "mode", "rate_hz"]
+      }
+    }
+  }
+  ```
+
+  It defines one type, `Task`, an open object: `revision`, an integer
+  from 0, required (the type's revision, §2.4); `mode`, one of `idle`,
+  `run`, `halt`, required; `rate_hz`, an integer from 1 to 1000,
+  required. Its artifact's id is the hash of its JCS bytes (core §7.1):
+  whitespace and member order aside, a file that differs anywhere, its
+  `$comment` included, holds another `Task`, and gives `tasking.v1` and
+  `worker.v1` other fingerprints. The worker supports `rate_hz` up to
+  100 and refuses a higher one `invalid` at `/rate_hz`; it refuses a
+  document that holds a member named `endpoint` `reach` at `/endpoint`
+  (§2.7): the type gives no such member, and the object is open.
 - **The author** is `lab/author`, implementing `tasking.v1`, its tombstone
   window 60 s unless stated (core S3), with a persistent record of the
   documents it put, each with its stamp (the reference: a file).
@@ -83,17 +109,22 @@ reference tool runs it as a test of zenctl (`zenctl/tests/live_zk2.rs`,
   `Run = zk2/lab/worker/worker.v1/state/running`. Its baseline is
   `{"revision": 0, "mode": "idle", "rate_hz": 1}`. Its drive is
   simulated: a test can make an act fail after it set the rate and
-  before it set the mode.
+  before it set the mode, and can hold an act from its start until the
+  test releases it (0.2).
 - **Documents.** `v<n>` is a `Task` with `revision` *n*, `mode` `run` and
   `rate_hz` 10 unless a step says otherwise, put by the author on `D`;
   `s<n>` is the stamp its put carries.
 - **S** subscribes to `zk2/lab/**` before anything starts, and records
   each delivery's arrival on its monotonic clock, its key, its kind, its
-  payload and its stamp. **G** GETs as core S4 says. "The report" is the
+  payload and its stamp. Where a section cuts a link, S is a client of R1,
+  and **S2**, a client of R2, subscribes to `Rp` and `Run` before anything
+  starts and records as S does (0.2): it sees the target's side while the
+  link is cut, which S cannot, and zenoh replays nothing at the heal.
+  **G** GETs as core S4 says. "The report" is the
   latest of `Rp` by its stamp; "converged on v*n*" means the report has
   `source` `desired`, `in_force` and `observed` both `{stamp: s<n>,
   revision: n}`, `outcome` `converged`, and `Run` holds v*n*'s content.
-- **The owner example** (#840, DB). The reference's author and target are
+- **The owner example** (#840, DC). The reference's author and target are
   `zenkey/examples/owner.rs` run with `--desired`, and `owner --help` is
   the interface a black-box runner drives, as for `alarms.v1`.
 
@@ -117,8 +148,9 @@ holds `tasking.v1` in its tokenless set (core §8.1): it holds no
    before its tokens (§2.10). `Run` holds the baseline.
 2. S receives a put on `D` stamped by the author (core S1), then on `Rp`
    a report converged on v1.
-3. The target's subscription receives nothing of v2, and its report is
-   unchanged.
+3. Read through S2 (0.2): `Rp` and `Run` receive nothing during the cut.
+   The target's subscription received nothing of v2, so it acted on
+   nothing, and its report is unchanged.
 4. The target sees the author's instance token appear again, seeds (core
    §4.2), and acts on v2 (§2.5, §2.6): its report is converged on v2
    within 5 s of the heal (spike S12: 1.4 to 1.6 s). It acted on v2 once.
@@ -179,8 +211,9 @@ v1.
 **Steps.**
 1. The author puts v2 with a member `"endpoint": "tcp/10.0.0.9:7447"`.
 2. The author puts v3 with `rate_hz` 500.
-3. The author's instance is re-minted (core §1.5), so it puts v3's
-   content again from its new instance (§2.11), and the target seeds.
+3. The author's instance is re-minted in its own session (core §8.1),
+   keeping its zid, so it puts v3's content again from its new instance,
+   under its zid and a later time (§2.11, 0.2), and the target seeds.
 4. The author puts v4.
 5. The test sets the target's drive to fail its next act. The author puts
    v5 with `rate_hz` 20 and `mode` `halt`.
@@ -192,11 +225,12 @@ v1.
    reach, pointer: /endpoint, …}}`.
 2. The same, with `observed` v3 and `refusal` `{code: invalid, pointer:
    /rate_hz, …}`.
-3. The re-put carries v3's document under a later stamp: adopted, never
-   refused again (§2.7). The target applies nothing, and its report moves
-   `observed` to the re-put's stamp, `revision` 3, still `refused` with
-   the same refusal, `in_force` still v1. The seed's answer is that
-   re-put: the same version, nothing more.
+3. The re-put carries v3's document under a later stamp of the same id,
+   `s3`'s: adopted, never refused again (§2.6 step 3, §2.7). The target
+   applies nothing, and its report moves `observed` to the re-put's
+   stamp, `revision` 3, still `refused` with the same refusal, `in_force`
+   still v1. The seed's answer is that re-put: the same version, nothing
+   more.
 4. The report is converged on v4.
 5. `Run` holds `rate_hz` 20 and `mode` `run`, and the report is
    `{key: D, source: desired, observed: {stamp: s5, revision: 5},
@@ -205,11 +239,15 @@ v1.
 
 ## §5 A restart acts again (§2.7, §2.5)
 
-**Setup.** The target converged on v1.
+**Setup.** The target converged on v1. The test holds the target's next
+act from its start (0.2): the author holds v1 throughout, so the new
+instance's first seed draws it at once, and an act left to run could put
+a converged report before G's GET reaches the target.
 
 **Steps.**
 1. The target's process ends without closing. It restarts, a new
-   instance. G GETs `Rp` the moment S sees its new instance token.
+   instance. G GETs `Rp` the moment S sees its new instance token. When
+   G has its reply, the test releases the held act.
 
 **Expected.**
 1. G's reply holds `{key: D, source: baseline}` under the new instance's
@@ -271,9 +309,15 @@ target converged on it, and the archive recorded it.
    `zk2/lab/archive/archive.v1/@state/lab/author/tasking.v1/state/tasks/lab/worker`
    (core §4.4, S5), acts on v1 under `s1`, and its report is converged on
    v1 with `last_known: true` (§2.9).
-2. The target sees the author's instance token, seeds, and the author
-   answers v1 under `s1`: the same version, confirmed. The target acts on
-   nothing, and puts its report without `last_known` (§2.9, §2.10).
+2. The restarted author puts v1's document again from its new instance
+   (§2.11), under a stamp of its new zid: another id than `s1`'s, the
+   same document. The target receives it by its subscription, or as the
+   answer to the seed it makes when it sees the author's instance token,
+   and **adopts** it (§2.6, §2.7, 0.2): it acts on nothing (`Run` receives
+   nothing), and its report moves `observed` and `in_force` to that stamp,
+   `revision` 1, still `converged`, without `last_known` (§2.10). A
+   delivery of the same re-put by the other path is the same version.
+   Confirmation, the same stamp from its author, is §10's.
 
 ## §8 The kill switch (§2.12)
 
@@ -306,11 +350,38 @@ GETs `D` from the author (core S4), and asks §5's four questions.
 **Expected.**
 1. Converged: **yes**, `converged`. Refused: **no**, `converged`.
    Last-known: **no**, `current`. In force: **yes**, `desired`.
-2. Converged: **no**, `refused`. Refused: **yes**, `refused`. In force:
-   **yes**, `desired`.
-3. Converged: **no**, `failed`. Refused: **yes**, `failed`. In force:
-   **yes**, `partial`.
-4. Converged: **not asked**, `author_absent`. Last-known: **yes**,
-   `last_known`. T shows the archive's v1 as last-known, never current.
+2. Converged: **no**, `refused`. Refused: **yes**, `refused`.
+   Last-known: **no**, `current`. In force: **yes**, `desired`.
+3. Converged: **no**, `failed`. Refused: **yes**, `failed`. Last-known:
+   **no**, `current`. In force: **yes**, `partial`.
+4. Converged: **not asked**, `author_absent`. Refused: **no**,
+   `converged`. Last-known: **yes**, `last_known`. In force: **yes**,
+   `desired`. T shows the archive's v1 as last-known, never current.
 5. Converged, refused and last-known: **not asked**, `unbound`. In force:
    **no**, `unbound`.
+
+## §10 Last-known confirmed by its author (§2.9, 0.2)
+
+**Setup.** An archive, `lab/archive` (core §4.4), on the target's side,
+a client of R2, records `zk2/lab/author/tasking.v1/state/**`. The author
+on R1 and the target on R2, the link up. The author puts v1, the target
+converged on it, and the archive recorded it.
+
+**Steps.**
+1. The test cuts the link between R2 and R1. The target's process ends
+   without closing, and restarts, a new instance.
+2. The test heals the link.
+
+**Expected.**
+1. The target seeds: no instance token of the author's crosses the cut,
+   and its GET draws no reply within the timeout. The target reads `D`'s
+   archive form,
+   `zk2/lab/archive/archive.v1/@state/lab/author/tasking.v1/state/tasks/lab/worker`
+   (core §4.4, S5), acts on v1 under `s1`, and, read through S2, its
+   report is converged on v1 with `last_known: true` (§2.9).
+2. The author's instance runs throughout, so its instance token appears
+   again on R2 (core §8.1). The target seeds, and the author answers v1
+   under `s1`, its own stamp: the same version, **confirmed** (§2.6 step
+   3, §2.9). The target acts on nothing (`Run` receives nothing), and puts
+   its report again without `last_known`, `observed` and `in_force` still
+   `{stamp: s1, revision: 1}` (§2.10).
