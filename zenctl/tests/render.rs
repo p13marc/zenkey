@@ -127,6 +127,11 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ⚠  telemetry-declaration (telemetry.v1 §2.2)  finding — 1 subject(s)
     ⚠ warning: meter.v1 sha256:5d1c stream/level — implemented by lab/meter; its declaration is invalid: the type cannot carry the declared kind (not_a_carrier) — no reader reads its members' kind, conformance or continuity (telemetry.v1 §2.2)
 —  telemetry-sample (telemetry.v1 §2.6)       not asked
+⚠  desired-refused (desired.v1 §2.7)          finding — 1 subject(s)
+    ⚠ warning: lab/worker task — its last act, on 200/a1, was refused: code reach at "/endpoint" (desired.v1 §2.7)
+?  desired-behind (desired.v1 §2.17)          unobservable — 1 subject(s) unjudged
+    ? unjudged lab/w3 task: its report's observed 100/a1 is earlier than its author lab/author's current version, its put 300/a1, the same id: not yet — how long it has been so cannot be told from one reading without a trusted clock: pass --clocks-synced
+✓  desired-last-known (desired.v1 §2.9)       clean — 2 desired.v1 role(s), none running a document read from an archive
 
 "#]]
     );
@@ -178,7 +183,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
         "{said}"
     );
     assert!(
-        said.contains("9 finding(s): 5 error(s), 3 warning(s), 1 info"),
+        said.contains("10 finding(s): 5 error(s), 4 warning(s), 1 info"),
         "{said}"
     );
     // The config.v1 checks' scope (#768, CC): what they read, and the cure

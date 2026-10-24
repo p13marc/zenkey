@@ -315,6 +315,40 @@ pub fn doctor_report() -> DoctorReport {
                 "unused",
             ),
             CheckReport::not_asked(CheckId::TelemetrySample),
+            // desired.v1 (#840, DD): a refused act, a target not yet
+            // converged with no trusted clock to say how long, and no
+            // last-known.
+            CheckReport::of(
+                CheckId::DesiredRefused,
+                vec![finding(
+                    CheckId::DesiredRefused,
+                    DoctorSeverity::Warning,
+                    "lab/worker task",
+                    "its last act, on 200/a1, was refused: code reach at \"/endpoint\" \
+                     (desired.v1 §2.7)",
+                )],
+                vec![],
+                "unused",
+            ),
+            CheckReport::of(
+                CheckId::DesiredBehind,
+                vec![],
+                vec![Unjudged {
+                    subject: "lab/w3 task".into(),
+                    reason: "its report's observed 100/a1 is earlier than its author lab/author's \
+                             current version, its put 300/a1, the same id: not yet — how long it \
+                             has been so cannot be told from one reading without a trusted \
+                             clock: pass --clocks-synced"
+                        .into(),
+                }],
+                "unused",
+            ),
+            CheckReport::of(
+                CheckId::DesiredLastKnown,
+                vec![],
+                vec![],
+                "2 desired.v1 role(s), none running a document read from an archive",
+            ),
         ],
         unobservable: None,
     }

@@ -867,7 +867,7 @@ mod tests {
         );
         assert!(
             n.message
-                .contains("checks: 27 established, 0 unobservable, 0 not asked"),
+                .contains("checks: 30 established, 0 unobservable, 0 not asked"),
             "{}",
             n.message
         );
@@ -1002,7 +1002,7 @@ mod tests {
             out[0]
                 .notification
                 .message
-                .contains("checks: 27 established"),
+                .contains("checks: 30 established"),
             "{}",
             out[0].notification.message
         );
