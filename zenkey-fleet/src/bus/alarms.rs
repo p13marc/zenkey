@@ -5,8 +5,11 @@
 //! What is read, in order (core §4.2's late joiner):
 //! 1. when the reader listens: a liveliness subscription to the instance
 //!    tokens of the owners in scope (a gap in an owner's presence breaks
-//!    its window, §2.15), then a subscription to the scope's alarm keys,
-//!    then a watch of this reader's own receive path
+//!    its window, §2.15), on a **watch session** of its own and settled
+//!    there (#830, core §8.1, 0.37: no presence read is made beside a
+//!    liveliness subscriber, and the settle orders the subscription before
+//!    the reads on the other session), then a subscription to the scope's
+//!    alarm keys, then a watch of this reader's own receive path
 //!    ([`crate::bus::stall`], core §2.7, 0.27). Both subscriptions call
 //!    back into one bounded queue, and what it refuses is counted: a
 //!    [`AlarmLoss`] that makes every key unobservable, never ok;
@@ -200,11 +203,12 @@ pub struct ArchivesRead {
 
 impl AlarmRefresh {
     /// Presence, then the GET, then the archives — none of them through a
-    /// session cut off from every router and peer ([`cut_off`]).
+    /// session cut off from every router and peer
+    /// ([`crate::bus::presence::cut_off`], core §8.1, 0.37).
     pub async fn run(self) -> Refreshed {
         let started = Instant::now();
         let t = self.spec.timeout;
-        let cut = cut_off(&self.session).await;
+        let cut = crate::bus::presence::cut_off(&self.session).await;
         let presence = match self.spec.face {
             Some(_) => None,
             None => Some((
@@ -240,27 +244,6 @@ impl AlarmRefresh {
             archived,
         }
     }
-}
-
-/// Why `session` reaches no router and no peer, when it does not (#800,
-/// AD): a read through it is answered at once, complete and empty, though
-/// nothing was asked of anyone — every owner would read absent (§2.14 step
-/// 1), and the GET would heal a loss nobody answered (§2.15). A router's
-/// restart cuts a client off so until it reconnects; the refresh then makes
-/// no read, and says why. A peer alone on its bus reads nothing so too, its
-/// own process's owners included: it cannot tell alone from cut off, and a
-/// reader shares no session with an owner it judges (zenctl and zenwatch
-/// open their own).
-pub async fn cut_off(session: &Session) -> Option<String> {
-    let info = session.info();
-    if info.routers_zid().await.next().is_some() || info.peers_zid().await.next().is_some() {
-        return None;
-    }
-    Some(
-        "this session reaches no router and no peer, so a read would be answered at once, \
-         complete and empty: not made"
-            .to_owned(),
-    )
 }
 
 /// S4's GET of `selector` (core §4.2): target `All`, consolidation
@@ -337,6 +320,9 @@ async fn archived(
 pub struct AlarmFeed {
     book: AlarmBook,
     session: Session,
+    /// The watch session the instance tokens' subscription is held on, when
+    /// the feed listens (#830).
+    watch: Option<Session>,
     spec: AlarmSpec,
     rx: Option<tokio::sync::mpsc::Receiver<Delivery>>,
     refused: Arc<AtomicU64>,
@@ -362,15 +348,35 @@ impl AlarmFeed {
     /// its receive path's watch first, then one refresh, folded. Returns
     /// the feed and the transitions the refresh made: each alarm found,
     /// raised or resolved as a late reader reads it (§2.6).
+    ///
+    /// Its reads go through `session`, which holds no liveliness
+    /// subscriber; a listening feed holds its instance tokens' subscription
+    /// on `watch`, a session of its own (#830, core §8.1, 0.37). Listening
+    /// without one, or on `session` itself, is refused, nothing declared:
+    /// [`crate::Error::NotAsked`].
     pub async fn open(
         session: &Session,
+        watch: Option<&Session>,
         scope: AlarmScope,
         spec: AlarmSpec,
         listen: bool,
     ) -> crate::Result<(AlarmFeed, Vec<AlarmTransition>)> {
+        let watch = match (listen, watch) {
+            (false, _) => None,
+            (true, Some(w)) if w.zid() != session.zid() => Some(w.clone()),
+            (true, _) => {
+                return Err(crate::Error::not_asked_for(
+                    "alarms' instance tokens",
+                    crate::error::NotAsked::BesideSubscriber {
+                        zid: session.zid().to_string(),
+                    },
+                ));
+            }
+        };
         let mut feed = AlarmFeed {
             book: AlarmBook::new(scope, spec.book()),
             session: session.clone(),
+            watch,
             spec,
             rx: None,
             refused: Arc::default(),
@@ -382,17 +388,17 @@ impl AlarmFeed {
             restart_stall: false,
             log: ReadLog::default(),
         };
-        if listen {
-            feed.listen().await?;
+        if let Some(watch) = feed.watch.clone() {
+            feed.listen(&watch).await?;
         }
         let refreshed = feed.refresh_plan().run().await;
         let out = feed.fold(refreshed);
         Ok((feed, out))
     }
 
-    /// The subscriptions, in core §4.2's order, and the watch of this
-    /// reader's receive path.
-    async fn listen(&mut self) -> crate::Result<()> {
+    /// The subscriptions, in core §4.2's order, the instance tokens' on
+    /// `watch` (#830), and the watch of this reader's receive path.
+    async fn listen(&mut self, watch: &Session) -> crate::Result<()> {
         let (tx, rx) = tokio::sync::mpsc::channel(QUEUE);
         let queue = Queue {
             tx,
@@ -403,10 +409,8 @@ impl AlarmFeed {
         let tokens = crate::bus::teardown::declared(
             "alarms' instance tokens",
             scope.instance_selector(),
-            self.session
-                .liveliness()
-                .declare_subscriber(scope.instance_selector())
-                .callback(move |s: Sample| {
+            zenkey::presence::declare_subscriber(watch, scope.instance_selector()).callback(
+                move |s: Sample| {
                     if let Ok(key @ ZkKey::Instance { .. }) =
                         zenkey_model::grammar::parse(s.key_expr().as_str())
                     {
@@ -416,9 +420,22 @@ impl AlarmFeed {
                             at: Instant::now(),
                         });
                     }
-                }),
+                },
+            ),
         )
         .await?;
+        // Its routers have read the subscription before any presence read
+        // on the other session is answered (#830).
+        if !zenkey::presence::settle(watch, &scope.instance_selector(), self.spec.timeout)
+            .await
+            .unwrap_or(false)
+        {
+            tracing::warn!(
+                selector = %scope.instance_selector(),
+                "alarms' instance tokens did not settle: a withdrawal right after the first \
+                 presence read may not be told"
+            );
+        }
         let q = queue;
         let discarded = Arc::clone(&self.discarded);
         let data = crate::bus::teardown::declared(
@@ -694,30 +711,33 @@ pub struct AlarmObservation {
 /// `at_least`.
 pub async fn run_alarms(
     session: &Session,
+    watch: Option<&Session>,
     namespace: &str,
     scope: AlarmScope,
     spec: AlarmSpec,
     at_least: zenkey_model::alarms::Severity,
     listening: impl FnOnce() + Send,
 ) -> crate::report::AlarmsReport {
-    let obs = observe(session, namespace, scope, spec, listening).await;
+    let obs = observe(session, watch, namespace, scope, spec, listening).await;
     crate::judge::alarms::judge(&obs, at_least)
 }
 
 /// The one-shot reading of the module doc: the feed opened (listening when
-/// `spec.window` is set), drained over the window and the lease and reply
-/// timeout after it, its owners watched throughout. With a window,
-/// `listening` runs once the feed is open, and the window counts from then;
-/// with none, or a feed that could not be opened, it never runs.
+/// `spec.window` is set, its owners' instance tokens on `watch`, #830),
+/// drained over the window and the lease and reply timeout after it, its
+/// owners watched throughout. With a window, `listening` runs once the feed
+/// is open, and the window counts from then; with none, or a feed that
+/// could not be opened, it never runs.
 pub async fn observe(
     session: &Session,
+    watch: Option<&Session>,
     namespace: &str,
     scope: AlarmScope,
     spec: AlarmSpec,
     listening: impl FnOnce() + Send,
 ) -> AlarmObservation {
     let selector = scope.selector().to_owned();
-    let opened = AlarmFeed::open(session, scope, spec, spec.window.is_some()).await;
+    let opened = AlarmFeed::open(session, watch, scope, spec, spec.window.is_some()).await;
     let mut feed = match opened {
         Ok((feed, _)) => feed,
         Err(e) => {
@@ -778,9 +798,10 @@ mod tests {
         c.insert_json5("scouting/gossip/enabled", "false").unwrap();
         c.insert_json5("listen/endpoints", "[]").unwrap();
         let alone = zenoh::open(c).await.expect("a peer of nobody");
-        assert!(cut_off(&alone).await.is_some());
+        assert!(crate::bus::presence::cut_off(&alone).await.is_some());
         let (feed, out) = AlarmFeed::open(
             &alone,
+            None,
             AlarmScope::all(),
             AlarmSpec::new(Duration::from_millis(200)),
             false,

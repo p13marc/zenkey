@@ -568,9 +568,11 @@ fn poll_lens(dep: &mut Deployment, work: &mut Workspace) {
     }
 }
 
-/// Start the presence monitor on the session in the namespace (#614,
-/// FL6a), shutting down the one before it: its landing bumps the presence
-/// epoch, which is what starts the presence link.
+/// Start the presence monitor on a watch session of its own in the
+/// namespace (#614, FL6a; #830), shutting down the one before it, and its
+/// watch session with it: its landing bumps the presence epoch, which is
+/// what starts the presence link. Started only beside a session in the
+/// namespace, which the link reads through.
 pub(crate) fn start_presence(dep: &Deployment, obs: &mut Observation) -> Task<Message> {
     let old = obs
         .presence_monitor
@@ -578,12 +580,15 @@ pub(crate) fn start_presence(dep: &Deployment, obs: &mut Observation) -> Task<Me
         .map(services::watch::shutdown)
         .unwrap_or_else(Task::none);
     obs.presence_epoch += 1;
-    let Some(session) = dep.session.clone() else {
+    if dep.session.is_none() {
         return old;
-    };
+    }
     Task::batch([
         old,
-        services::watch::start_presence(session, dep.namespace().to_string()),
+        services::watch::start_presence(
+            services::link::Transport::of(&dep.settings),
+            dep.namespace().to_string(),
+        ),
     ])
 }
 

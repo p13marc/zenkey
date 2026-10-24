@@ -4,6 +4,24 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8, read against core 0.37 (2026-10-24, #839): no change
+
+Core 0.37 (§8.1) says what 0.4 and 0.6 left to it, for every profile's
+reader. The text keeps its words and its version: §2.14 step 1's absent
+was already "a complete read without its instance token".
+- **A read through a session cut off** is not complete, and a reader
+  makes none (0.4's and 0.6's "Deliberately not stated"). The reference
+  check moved to `zenkey_fleet::bus::presence::cut_off`.
+- **A withdrawal heard live** is a reason to read again, never absence (0.4's
+  "Absence between reads"). The reference book now reads an owner heard
+  withdrawn as presence not read whole (`presence_incomplete`, on §2.16's
+  reader's-sight list) until the next presence read, as its notifier
+  already took it; the scope's answer and each key's are unchanged
+  otherwise.
+- **The reader's own subscription** to the owners' instance tokens goes
+  on a session of its own, never beside its presence read (core §8.1,
+  0.37, #830).
+
 ## 0.8 — 2026-10-21: the cold reader's round 43 (#800, AH; #609)
 
 The spec-only implementation read 0.7 cold and ran it live (zk2py round

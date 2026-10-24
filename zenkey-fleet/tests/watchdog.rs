@@ -22,12 +22,14 @@ use util::peer_pair;
 const KEY: &str = "v1/h-dddddddddddd/state/demo/health";
 
 /// The watchdog's bus over one session: the bus-root deployment, so the
-/// session in the namespace and the raw one are the same.
-fn bus_of(session: &zenoh::Session) -> zenkey_fleet::DoctorBus {
+/// session in the namespace and the raw one are the same. `watch` holds the
+/// `instance-gone` monitor's liveliness subscribers (#830).
+fn bus_of(session: &zenoh::Session, watch: Option<&zenoh::Session>) -> zenkey_fleet::DoctorBus {
     zenkey_fleet::DoctorBus {
         session: session.clone(),
         raw: session.clone(),
         namespace: String::new(),
+        watch: watch.cloned(),
     }
 }
 
@@ -40,9 +42,10 @@ fn bus_of(session: &zenoh::Session) -> zenkey_fleet::DoctorBus {
 /// comes out of the `await` that also performs the monitor teardown.
 async fn drain(
     session: &zenoh::Session,
+    watch: Option<&zenoh::Session>,
     spec: &WatchdogSpec,
 ) -> zenkey_fleet::Result<(Vec<Transition>, WatchdogSummary)> {
-    let bus = bus_of(session);
+    let bus = bus_of(session, watch);
     let store = zenkey_fleet::BundleStore::new(spec.timeout);
     let contracts = zenkey_fleet::ContractSet::new();
     let mut run = watchdog(&bus, &store, &contracts, spec).pin();
@@ -85,7 +88,7 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
                 timeout: Duration::from_millis(300),
                 clocks_synced: false,
             };
-            drain(&b, &spec).await
+            drain(&b, None, &spec).await
         }
     });
 
@@ -154,7 +157,8 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
 /// start, the dead-man's switch — and stays one line across the run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn instance_gone_fires_on_an_absent_address_and_only_once() {
-    let (_a, b) = peer_pair().await;
+    let (a, b) = peer_pair().await;
+    let watch = util::joining(&a).await;
     let spec = WatchdogSpec {
         rules: vec![Condition::parse("instance-gone lab/nobody").expect("rule")],
         tick: Duration::from_millis(200),
@@ -162,7 +166,7 @@ async fn instance_gone_fires_on_an_absent_address_and_only_once() {
         timeout: Duration::from_millis(300),
         clocks_synced: false,
     };
-    let (transitions, summary) = drain(&b, &spec).await.expect("run");
+    let (transitions, summary) = drain(&b, Some(&watch), &spec).await.expect("run");
     assert_eq!(summary.ticks, 3);
     assert_eq!(transitions.len(), 1, "{transitions:#?}");
     assert_eq!(transitions[0].to, CondState::Firing);
@@ -212,9 +216,10 @@ async fn instance_gone_is_judged_per_address_on_the_live_projection() {
         timeout: Duration::from_millis(500),
         clocks_synced: false,
     };
+    let watch = util::joining(&a).await;
     let run = tokio::spawn({
         let b = b.clone();
-        async move { drain(&b, &spec).await }
+        async move { drain(&b, Some(&watch), &spec).await }
     });
     // The baseline at the first tick, then h2/tc goes, then comes back.
     tokio::time::sleep(Duration::from_millis(1300)).await;
@@ -312,7 +317,7 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
                 timeout: Duration::from_millis(500),
                 clocks_synced: false,
             };
-            drain(&b, &spec).await
+            drain(&b, None, &spec).await
         }
     });
 
@@ -365,7 +370,8 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
 /// where it happened and still leaves nothing half torn down.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_consumer_that_stops_sipping_still_gets_the_summary_and_the_teardown() {
-    let (_a, b) = peer_pair().await;
+    let (a, b) = peer_pair().await;
+    let watch = util::joining(&a).await;
     let spec = WatchdogSpec {
         rules: vec![Condition::parse("instance-gone lab/nobody").expect("rule")],
         tick: Duration::from_millis(100),
@@ -374,7 +380,7 @@ async fn a_consumer_that_stops_sipping_still_gets_the_summary_and_the_teardown()
         clocks_synced: false,
     };
 
-    let bus = bus_of(&b);
+    let bus = bus_of(&b, Some(&watch));
     let store = zenkey_fleet::BundleStore::new(spec.timeout);
     let contracts = zenkey_fleet::ContractSet::new();
     let mut run = watchdog(&bus, &store, &contracts, &spec).pin();

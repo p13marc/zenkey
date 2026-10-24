@@ -7,6 +7,36 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — presence reads where they can be complete (#830, #839, PS)
+
+A liveliness GET from a session that holds a liveliness subscriber, history
+or not, can complete without a token that is live (zenoh 1.10.1 and main,
+`docs/zk2/upstream/liveliness-get-misses-beside-liveliness-subscriber.md`):
+zenwatch's presence rules seeded exactly so, and a false `instance-gone`
+was a page. Core 0.37 says what a complete presence read is.
+
+### Sessions
+
+| Before | Now | Notes |
+|---|---|---|
+| two sessions: in the namespace, and in none | the same two, which make every read, and a **watch session** of each kind a rule needs: in the namespace for `instance-gone`, `liveliness-gone` on the deployment's zk2 tokens, `alerts` and `alert-firing`; in none for `liveliness-gone` on a foreign token | none that no rule needs; each one more session, with its router-side declarations |
+
+### Rules
+
+| Before | Now | Notes |
+|---|---|---|
+| `instance-gone` and `liveliness-gone …/@zk/instance/*`: gone on the owner's instance token heard withdrawn, under a complete seed | gone once the read the withdrawal owes, 0.1 s later (a burst is one read), shows none (core §8.1, 0.37) | a router's restart pages nobody; a crash pages one read's round trip after its lease runs out. The notice's `presence` is that read's move: `"source": "seed"`, `"from": "unobservable"`, where it was `"event"` and `"up"` |
+| `liveliness-gone …/@zk/alive/…` and `…/@zk/member/…`: gone on the token heard withdrawn | gone once a complete read since shows it unheld; nothing at all when it is heard again first | the evidence ends "heard withdrawn, and a complete read since shows it unheld"; the `presence` carried is the withdrawal heard |
+| `liveliness-gone` on a foreign token: gone on its delete | gone once the read the delete owes does not show it; nothing when it comes back first | the notice says "found by a re-read" |
+| a read through a session cut off from every router and peer: complete and empty, every owner gone | not made: the rules' observer is unobservable, saying why, until a complete read; the `presence` and `tokens` checks are degraded meanwhile | the presence projection's basis, the token ledger's and the health checks gained a cut-off state |
+
+### Payloads
+
+The presence transitions a notice carries (`report::presence`) gained two
+sources: `"withdrawn"` (a status move to `unobservable` on a withdrawal
+heard live) and `"cut_off"` (a read not made). The three states are
+unchanged.
+
 ## Unreleased (`main`, zk2) — the alarm rules on `alarms.v1` (#800, AD)
 
 `alerts` and `alert-firing` are back, on `alarms.v1`

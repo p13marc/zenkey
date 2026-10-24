@@ -3,6 +3,103 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.37 — 2026-10-24: what a complete presence read is (#839, #830)
+
+§8.1 said when a liveliness read is possibly incomplete (it ended at its
+timeout, or drew an error reply) and that a refused read is complete and
+empty. It said nothing of three reads that come back complete, empty and
+wrong. `alarms.v1` found two of them, and left them to the core on purpose
+(its CHANGELOG, 0.4's and 0.6's "Deliberately not stated"); #830 measured
+the third. No fixture case changed, and none is added: each rule is a
+scenario, since each is a fact about a bus.
+
+**Changed: a read through a session cut off is not complete** (§8.1, §2.7,
+Appendix B). `[Sc: presence.md §7]`
+- **The gap.** A client that has lost its router has every read answered
+  at once, the final reply alone, though nothing was asked of anyone:
+  every owner read absent, and a GET in the same state healed a loss
+  nobody answered. Only `alarms.v1`'s reference reader guarded against it
+  (#800, AD).
+- **The rule.** A read through a session that reaches no other zenoh node
+  is not complete, whatever its replies say. A reader MUST NOT conclude
+  absence from it, nor take it as healing a loss, and SHOULD NOT make it,
+  saying why it did not; what it would have established is unobservable.
+  §2.7 lists such a GET among the readings that are incomplete.
+- **The reference.** `zenkey::presence::liveliness_read` makes no read
+  through a session with no transport (`Error::CutOff`), and every fleet
+  reader reports it not made: `zenkey_fleet::bus::presence::cut_off`,
+  where `bus::alarms` had it, and a presence projection whose read was not
+  made is unobservable (`PresenceBasis::CutOff`).
+
+**Changed: absence is established only by a complete read** (§8.1).
+`[Sc: presence.md §8]`
+- **The gap.** A reader following tokens live hears every one withdrawn
+  at once when its router restarts. `alarms.v1`'s reference book read that
+  as absent at once; its notifier took absence from its next complete
+  read instead; zenwatch's presence rules read it down. Which a live
+  withdrawal is was for the core to say, for every profile's reader.
+- **The rule.** A withdrawal heard live is a reason to read again, never
+  absence by itself (MUST NOT). A reader that follows presence live
+  SHOULD read again soon after a withdrawal that leaves something with
+  nothing held, one read for a burst, and report what that read
+  establishes; until then the withdrawn address is unobservable, a
+  withdrawn token unconfirmed. A make-before-break re-mint owes no read.
+- **What it costs.** A real departure is said one read later: the owner's
+  lease runs out (or it undeclares), the token is withdrawn, the read
+  shows none, the address is down. The reference reads 0.1 s after the
+  first withdrawal of a burst, so a crash pages 0.1 s and one read's
+  round trip later than it did, and a router's restart pages nobody.
+
+**Changed: the read that establishes absence goes on a session with no
+liveliness subscriber** (§8.1, Appendix B). `[Sc: presence.md §9]`
+- **The gap** (#830). On zenoh 1.10.1, and on its main branch at
+  `766b455`, a liveliness GET from a session holding a liveliness
+  subscriber came back complete without live tokens the subscriber
+  covered: 1,656 of 23,040 trials with history subscribers, 159 of
+  16,560 without, 0 of 12,240 with the subscribers on another session,
+  and every time (720 of 720) when the GET followed a history subscriber
+  at once. Appendix B records the measurement, the mechanism (the router
+  drops its answer for every token already declared to the session's face
+  for a subscriber) and the draft upstream report, which is not filed.
+- **The rule.** A reader SHOULD make every liveliness read it may conclude
+  absence from on a session holding no liveliness subscriber of any kind,
+  and hold its subscribers on a session of its own; and SHOULD make one
+  round trip on that session after declaring them, before a seed on the
+  other, since zenoh orders no two sessions' messages. Ordinary GETs are
+  unaffected.
+- **The reference.** Every liveliness subscriber of `zenkey` and
+  `zenkey-fleet` is declared through `zenkey::presence::declare_subscriber`,
+  which marks its session for its life, and a liveliness read on a marked
+  session is refused (`Error::ReadBesideSubscriber`). `zenkey::presence::settle`
+  is the round trip. zenctl, zenwatch and zengui open a watch session for
+  their live readers.
+
+**Deliberately not changed.**
+- **The handler rule** (§8.1's first point, zenoh#2678) stands: a
+  liveliness GET on a session holding a liveliness subscriber MUST use a
+  callback or an unbounded handler. Since 0.37 the one such GET a reader
+  makes is the round trip, whose answer it discards; its handler still
+  must not hang it.
+- **"Read twice" is not the rule.** A second read at once recovered most
+  misses and left up to 10 of 720 trials wrong under load; a settle wait
+  before the read did not remove the overtaking race. A session with no
+  subscriber missed nothing in 22,320 trials per version.
+- **A refused read** (0.8) stays complete and empty: access control
+  answers it, and a tool still says what its reader could see. A read
+  through a cut-off session differs: nothing was asked.
+- **Possibly incomplete** reads (a timeout, an error reply) keep their
+  meaning. A read not made is a third kind, never folded into either.
+- **The three presence states** a tool reports stay up, down and
+  unobservable: an address heard withdrawn is unobservable, as one behind
+  a loss is, with its own reason.
+- **No fixture.** Each rule is about what a bus answers, which a
+  scenario observes and a static case cannot; `conformance/` is unchanged,
+  and nothing was blessed.
+- **Profiles keep their words.** `alarms.v1` §2.14 step 1's absent is
+  already "a complete read without its instance token"; its text stays 0.8
+  (its CHANGELOG points here). `telemetry.v1` reads a withdrawal as a gap
+  in presence between two samples, which it is: no absence is concluded.
+
 ## 0.36 — 2026-10-24: what `desired.v1` needed of the core (#840)
 
 `desired.v1`'s first text (#840, DA) states the profile three adopters

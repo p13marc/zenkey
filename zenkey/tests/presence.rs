@@ -1,4 +1,5 @@
-//! `spec/scenarios/presence.md` §1–§5 (spec §1.5, §3.3, §8.1–§8.2).
+//! `spec/scenarios/presence.md` §1–§9 (spec §1.5, §3.3, §8.1–§8.2; §7–§9,
+//! what a complete presence read is, core 0.37).
 
 mod common;
 
@@ -770,4 +771,209 @@ async fn a_refused_read_looks_complete_and_empty() {
     assert!(refused.complete, "answered, not timed out: {refused:?}");
     assert!(refused.errors.is_empty(), "no error reply: {refused:?}");
     assert!(refused.keys.is_empty(), "{refused:?}");
+}
+
+/// The raw liveliness GET of zenoh's own API, as §7 and §9 need it: whether
+/// it ended with no error reply, and the keys it returned, once each.
+async fn raw_read(s: &zenoh::Session, sel: &str) -> (bool, Vec<String>) {
+    let replies = s.liveliness().get(sel).timeout(T).await.unwrap();
+    let (mut complete, mut keys) = (true, Vec::new());
+    while let Ok(r) = replies.recv_async().await {
+        match r.result() {
+            Ok(sample) => keys.push(sample.key_expr().as_str().to_owned()),
+            Err(_) => complete = false,
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    (complete, keys)
+}
+
+/// §7 (core §8.1, 0.37): a read through a session cut off from every other
+/// zenoh node is answered at once, complete and empty, though the owner
+/// never left; the reference makes no such read, and says why.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_a_read_through_a_session_cut_off() {
+    let (r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let link = common::link_to(&ep).await;
+    let tool = common::retrying_client(link.endpoint()).await;
+    let (b, _held) = nav_builder(&owner, "p7/nav", &[]).await;
+    let svc = b.start().await.unwrap();
+    seen(&tool, &svc).await;
+    let key = svc.instance_key().unwrap().to_string();
+
+    link.cut();
+    eventually("the tool holds no transport", || async {
+        presence::cut_off(&tool).await
+    })
+    .await;
+    let started = std::time::Instant::now();
+    assert_eq!(
+        raw_read(&tool, "zk2/*/*/@zk/**").await,
+        (true, Vec::new()),
+        "complete and empty"
+    );
+    assert!(started.elapsed() < T, "answered at once, nothing asked");
+    assert!(
+        keys(&r1, "zk2/*/*/@zk/instance/*").await.contains(&key),
+        "the owner never left"
+    );
+    let refused = presence::liveliness_read(&tool, "zk2/*/*/@zk/**", T)
+        .await
+        .expect_err("not made");
+    assert!(matches!(refused, Error::CutOff { .. }), "{refused}");
+
+    link.heal();
+    eventually("the tool reads the owner again", || async {
+        presence::liveliness_read(&tool, "zk2/*/*/@zk/instance/*", T)
+            .await
+            .is_ok_and(|r| r.complete && r.keys.contains(&key))
+    })
+    .await;
+}
+
+/// §8 (core §8.1, 0.37): a withdrawal heard live is not absence. The
+/// tool's link cut, its watch session's subscriber hears the owner's token
+/// withdrawn though the owner never left, and hears it again on the heal;
+/// the owner stopping is withdrawn too, and the read after it, complete and
+/// without the token, is what establishes absence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s8_a_withdrawal_heard_live() {
+    let (r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let link = common::link_to(&ep).await;
+    let tool = common::retrying_client(link.endpoint()).await;
+    let watch = common::retrying_client(link.endpoint()).await;
+    let heard: Arc<Mutex<Vec<(String, bool)>>> = Arc::default();
+    let h = Arc::clone(&heard);
+    let _sub = presence::declare_subscriber(&watch, "zk2/*/*/@zk/instance/*")
+        .history(true)
+        .callback(move |s: Sample| {
+            h.lock().unwrap().push((
+                s.key_expr().as_str().to_owned(),
+                s.kind() == SampleKind::Put,
+            ));
+        })
+        .await
+        .unwrap();
+    let (b, _held) = nav_builder(&owner, "p8/nav", &[]).await;
+    let svc = b.start().await.unwrap();
+    let key = svc.instance_key().unwrap().to_string();
+    let last = |heard: &Arc<Mutex<Vec<(String, bool)>>>| {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(k, _)| *k == key)
+            .map(|(_, put)| *put)
+    };
+    eventually("the subscriber hears the owner", || async {
+        last(&heard) == Some(true)
+    })
+    .await;
+    seen(&tool, &svc).await;
+
+    link.cut();
+    eventually("the withdrawal is heard", || async {
+        last(&heard) == Some(false)
+    })
+    .await;
+    assert!(
+        keys(&r1, "zk2/*/*/@zk/instance/*").await.contains(&key),
+        "heard withdrawn, and the owner never left"
+    );
+    link.heal();
+    eventually("heard again", || async { last(&heard) == Some(true) }).await;
+    eventually("and read", || async {
+        presence::liveliness_read(&tool, &key, T)
+            .await
+            .is_ok_and(|r| r.complete && r.keys == [key.clone()])
+    })
+    .await;
+
+    svc.close().await.unwrap();
+    eventually("the stop is heard", || async {
+        last(&heard) == Some(false)
+    })
+    .await;
+    eventually("absence, as a read establishes it", || async {
+        presence::liveliness_read(&tool, "zk2/*/*/@zk/instance/*", T)
+            .await
+            .is_ok_and(|r| r.complete && !r.keys.contains(&key))
+    })
+    .await;
+}
+
+/// §9 (core §8.1, 0.37; Appendix B; #830): a liveliness GET made at once
+/// beside a history liveliness subscriber of the same session completes
+/// without the owner's live token; the same GET on a session that holds no
+/// liveliness subscriber holds it. The reference refuses a read on a
+/// session that holds a subscriber it declared, and its barrier there
+/// returns.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s9_a_read_beside_a_liveliness_subscriber() {
+    let (_r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let tool = client(&ep).await;
+    let (b, _held) = nav_builder(&owner, "p9/nav", &[]).await;
+    let svc = b.start().await.unwrap();
+    seen(&tool, &svc).await;
+    let key = svc.instance_key().unwrap().to_string();
+
+    // zenoh's own API: the subscriber and the GET on one session.
+    let beside = client(&ep).await;
+    let heard = Arc::new(Mutex::new(false));
+    let h = Arc::clone(&heard);
+    let k = key.clone();
+    let _sub = beside
+        .liveliness()
+        .declare_subscriber("zk2/*/*/@zk/instance/*")
+        .history(true)
+        .callback(move |s: Sample| {
+            if s.key_expr().as_str() == k {
+                *h.lock().unwrap() = true;
+            }
+        })
+        .await
+        .unwrap();
+    let (complete, found) = raw_read(&beside, "zk2/*/*/@zk/**").await;
+    assert!(complete, "the final reply, no error reply");
+    assert!(
+        !found.contains(&key),
+        "zenoh fixed #830's mechanism: revisit core §8.1's rule (0.37) and Appendix B — a GET \
+         right after a history subscriber on the same session held the live token"
+    );
+    eventually("the subscriber hears it", || async {
+        *heard.lock().unwrap()
+    })
+    .await;
+    assert!(raw_read(&tool, "zk2/*/*/@zk/**").await.1.contains(&key));
+
+    // The reference: a session that holds a subscriber it declared makes no
+    // read; its barrier returns; the tool's session reads.
+    let watch = client(&ep).await;
+    let _watched = presence::declare_subscriber(&watch, "zk2/*/*/@zk/instance/*")
+        .history(true)
+        .callback(|_| {})
+        .await
+        .unwrap();
+    assert!(presence::watching(&watch) && !presence::watching(&tool));
+    let refused = presence::liveliness_read(&watch, "zk2/*/*/@zk/**", T)
+        .await
+        .expect_err("refused");
+    assert!(
+        matches!(refused, Error::ReadBesideSubscriber { .. }),
+        "{refused}"
+    );
+    assert!(
+        presence::settle(&watch, "zk2/*/*/@zk/instance/*", T)
+            .await
+            .unwrap()
+    );
+    let read = presence::liveliness_read(&tool, "zk2/*/*/@zk/**", T)
+        .await
+        .unwrap();
+    assert!(read.complete && read.keys.contains(&key), "{read:?}");
 }

@@ -111,6 +111,7 @@ fn bus(session: &zenoh::Session, raw: &zenoh::Session, namespace: &str) -> Docto
         session: session.clone(),
         raw: raw.clone(),
         namespace: namespace.to_owned(),
+        watch: None,
     }
 }
 
@@ -676,6 +677,7 @@ async fn an_archive_serving_unconfirmed_keys_is_unaligned() {
             }],
             peers: Vec::new(),
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await

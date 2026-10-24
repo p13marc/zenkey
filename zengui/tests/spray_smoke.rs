@@ -101,6 +101,7 @@ async fn the_spray_is_a_deployment_and_the_doctor_finds_its_non_conformance() {
         session: tool.clone(),
         raw: raw.clone(),
         namespace: NAMESPACE.into(),
+        watch: None,
     };
     let report =
         zenkey_fleet::run_doctor(&bus, &BundleStore::new(Duration::from_secs(2)), &spec).await;

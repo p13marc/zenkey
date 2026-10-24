@@ -684,6 +684,7 @@ async fn invalid_payload_and_qos_mismatch_fire_and_clear() {
         session: bed.tool.clone(),
         raw: bed.tool.clone(),
         namespace: String::new(),
+        watch: None,
     };
     let spec = WatchdogSpec {
         rules: vec![

@@ -18,7 +18,9 @@
 //!   `zenkey_model::alarms::Track` into §2.6's transitions, each payload
 //!   read by `decode`, strictly (§2.4, 0.2);
 //! - **one key's reading** ([`KeyReading`]): its owner's presence and
-//!   descriptor (§2.13: found by descriptor, never by token), its
+//!   descriptor (§2.13: found by descriptor, never by token; absent only
+//!   from a complete presence read, never from a withdrawal heard live,
+//!   which leaves it unobservable until the next read: core §8.1, 0.37), its
 //!   observations as `freshness.v1` judges them (the subscription's last
 //!   delivery, the GET's reply aged against a trusted clock, dated by when
 //!   its GET was asked), the latest sample, `previous_instance` (the latest
@@ -335,6 +337,10 @@ struct OwnerEntry {
     /// The last change of its instance set this reader saw, and the first
     /// complete GET asked after it: a gap in its presence (§2.15).
     gap: Option<Break>,
+    /// A withdrawal heard live left it with no instance token, and no
+    /// presence read has spoken of it since (core §8.1, 0.37): possibly
+    /// incomplete, never absent, until that read.
+    withdrawn: bool,
 }
 
 /// A break in a window — a loss, or a gap in an owner's presence — and the
@@ -598,6 +604,11 @@ impl AlarmBook {
                     .insert(instance.clone(), seen);
             }
         }
+        // The read speaks of every owner now: a withdrawal heard before it
+        // awaits it no longer (core §8.1, 0.37).
+        for entry in self.owners.values_mut() {
+            entry.withdrawn = false;
+        }
         for (addr, instances) in &held {
             let entry = self.owner(addr);
             entry.known.insert(KnownBy::Presence);
@@ -631,7 +642,10 @@ impl AlarmBook {
 
     /// One instance token's move (core §8.1): held from `at`, or gone. A
     /// move is a gap in the owner's presence; a new instance's descriptor
-    /// is unread until the next presence read.
+    /// is unread until the next presence read. A withdrawal heard live is
+    /// not absence (core §8.1, 0.37): one that leaves the owner with no
+    /// instance token leaves its presence possibly incomplete until the
+    /// next presence read says whether it went.
     pub fn instance(&mut self, addr: &Addr, instance: &InstanceId, held: bool, at: Instant) {
         if !self.scope.selects_owner(addr) {
             return;
@@ -646,6 +660,7 @@ impl AlarmBook {
         if changed {
             entry.gap = Some(Break { at, healed: None });
         }
+        entry.withdrawn = entry.instances.is_empty() && (entry.withdrawn || (!held && changed));
     }
 
     /// One sample of an alarm key, the next to arrive: merged by the
@@ -926,8 +941,9 @@ impl AlarmBook {
 
     /// `addr`'s presence (§2.14 step 1): across a face, the deployment's
     /// word; before any read, possibly incomplete; held, with what its
-    /// descriptors say; else absent from a complete read, possibly
-    /// incomplete otherwise.
+    /// descriptors say; heard withdrawn since the last presence read,
+    /// possibly incomplete (core §8.1, 0.37); else absent from a complete
+    /// read, possibly incomplete otherwise.
     pub fn presence_of(&self, addr: &Addr) -> Presence {
         if let Some(reachable) = self.spec.face {
             return Presence::AcrossFace { reachable };
@@ -935,7 +951,8 @@ impl AlarmBook {
         let Some(basis) = self.presence else {
             return Presence::Incomplete;
         };
-        match self.owners.get(addr).filter(|o| !o.instances.is_empty()) {
+        let entry = self.owners.get(addr);
+        match entry.filter(|o| !o.instances.is_empty()) {
             Some(o) => {
                 let mut unread = false;
                 for seen in o.instances.values() {
@@ -957,6 +974,7 @@ impl AlarmBook {
                     Listing::NotListed
                 })
             }
+            None if entry.is_some_and(|o| o.withdrawn) => Presence::Incomplete,
             None if basis.complete => Presence::Absent,
             None => Presence::Incomplete,
         }

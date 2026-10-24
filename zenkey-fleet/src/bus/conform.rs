@@ -478,6 +478,7 @@ pub async fn observe(
         Some(
             crate::bus::telemetry::observe(
                 session,
+                bus.watch.as_ref(),
                 &bus.namespace,
                 scope,
                 &store,
@@ -579,7 +580,7 @@ async fn suite(
         .iter()
         .any(|r| (r.kind == Kind::Stream && r.template.has_params()) || r.kind == Kind::Event);
     let presence_watch = if windowed {
-        Some(watch_instances(session, &obs.address, t).await)
+        Some(watch_instances(bus.watch.as_ref(), session, &obs.address, t).await)
     } else {
         None
     };
@@ -750,19 +751,26 @@ type InstanceWatch = (
 );
 
 /// A callback liveliness subscriber on `addr`'s instance tokens (§8.1: a
-/// subscriber beside a GET is callback-driven), then a read of them: the
-/// tokens held when the window opens, and every one deleted from then on.
+/// subscriber beside a GET is callback-driven), on `watch`, a session of
+/// its own, and settled there; then a read of them on `session`, which
+/// holds no liveliness subscriber (#830, core §8.1, 0.37): the tokens held
+/// when the window opens, and every one deleted from then on.
 async fn watch_instances(
+    watch: Option<&Session>,
     session: &Session,
     addr: &Addr,
     timeout: Duration,
 ) -> std::result::Result<InstanceWatch, String> {
     let selector = format!("{GRAMMAR}/{}/{}/@zk/instance/*", addr.system, addr.service);
+    let Some(watch) = watch.filter(|w| w.zid() != session.zid()) else {
+        return Err(format!(
+            "watching `{selector}` needs a watch session of its own: no presence read is made \
+             beside a liveliness subscriber (#830, core §8.1)"
+        ));
+    };
     let gone: Arc<std::sync::Mutex<BTreeSet<String>>> = Arc::default();
     let g = Arc::clone(&gone);
-    let subscriber = session
-        .liveliness()
-        .declare_subscriber(&selector)
+    let subscriber = zenkey::presence::declare_subscriber(watch, &selector)
         .callback(move |sample| {
             if sample.kind() == zenoh::sample::SampleKind::Delete {
                 g.lock()
@@ -772,6 +780,16 @@ async fn watch_instances(
         })
         .await
         .map_err(|e| format!("a liveliness subscriber on `{selector}`: {e}"))?;
+    // The routers have read the subscriber before the read below, on the
+    // other session, is answered (#830).
+    if !zenkey::presence::settle(watch, &selector, timeout)
+        .await
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "the liveliness subscriber on `{selector}` did not settle within the timeout"
+        ));
+    }
     let read = zenkey::presence::liveliness_read(session, &selector, timeout)
         .await
         .map_err(|e| format!("the read of `{selector}`: {e}"))?;
@@ -1338,5 +1356,31 @@ async fn config_suite(
         first,
         reading,
         probes,
+    }
+}
+
+#[cfg(test)]
+mod watch_tests {
+    /// A window's owner is watched on a watch session of its own (#830):
+    /// with none, or the session the run reads through, the watch is
+    /// refused before anything is declared, and says why.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_window_watch_needs_a_watch_session_of_its_own() {
+        let mut c = zenoh::Config::default();
+        c.insert_json5("mode", "\"peer\"").unwrap();
+        c.insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        c.insert_json5("listen/endpoints", "[]").unwrap();
+        let s = zenoh::open(c).await.expect("a session");
+        let addr: zenkey_model::grammar::Addr = "h1/tc".parse().unwrap();
+        for watch in [None, Some(&s)] {
+            let refused = super::watch_instances(watch, &s, &addr, std::time::Duration::ZERO)
+                .await
+                .map(|_| ())
+                .expect_err("refused");
+            assert!(refused.contains("watch session"), "{refused}");
+        }
+        assert!(!zenkey::presence::watching(&s), "nothing declared");
+        s.close().await.unwrap();
     }
 }

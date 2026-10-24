@@ -60,6 +60,25 @@ pub enum Error {
         member: String,
         reason: Box<crate::telemetry::Reason>,
     },
+    /// A liveliness read refused before anything was asked (core §8.1,
+    /// 0.37; #830): its session holds a liveliness subscriber, beside which
+    /// zenoh 1.10.1 can complete a liveliness GET without tokens that are
+    /// live. A reader holds its subscribers on a session of its own
+    /// (`presence::declare_subscriber`), and reads on another.
+    #[error(
+        "liveliness read {selector}: refused on session {zid}, a watch session that holds a \
+         liveliness subscriber, beside which zenoh can complete a read without a live token \
+         (#830, core §8.1)"
+    )]
+    ReadBesideSubscriber { selector: String, zid: String },
+    /// A liveliness read not made (core §8.1, 0.37): its session reaches no
+    /// other zenoh node, so zenoh would answer it at once, complete and
+    /// empty, though nothing was asked of anyone. Never absence.
+    #[error(
+        "liveliness read {selector}: not made: this session reaches no other zenoh node, and \
+         zenoh would answer it at once, complete and empty (core §8.1)"
+    )]
+    CutOff { selector: String },
     /// A payload does not encode or decode as its declared type (§7.2): a
     /// value reply or a sample that is not what the contract says, or a
     /// value its codec cannot write.

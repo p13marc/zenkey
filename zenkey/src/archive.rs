@@ -12,7 +12,11 @@
 //! - **Alignment:** when an owner becomes reachable, it re-reads the owner's
 //!   recorded collection; while the owner is absent, it re-reads an archive
 //!   on the owner's side. It drops a key only on a `reply_del`; a key the
-//!   source neither reports nor tombstones is kept, `confirmed: false`.
+//!   source neither reports nor tombstones is kept, `confirmed: false`. It
+//!   hears an owner become reachable on a watch session of its own
+//!   ([`ArchiveConfig::watch`]), since it reads presence on its own session,
+//!   which holds no liveliness subscriber (core §8.1, 0.37; #830); with
+//!   none, it reads presence on a period ([`PRESENCE_POLL`]).
 //!
 //! `archive.v1` is a profile (#613); this is what the core requires of it,
 //! and the contract below is its minimal form until the profile is written.
@@ -95,6 +99,15 @@ pub struct ArchiveConfig {
     pub peers: Vec<Addr>,
     /// An unconfirmed key may be dropped after this long; `None` keeps it.
     pub unconfirmed_horizon: Option<Duration>,
+    /// A **watch session** of its own (#830, core §8.1, 0.37): where the
+    /// archive holds the liveliness subscriber that tells it an owner, or
+    /// an archive on an owner's side, appeared — an outage's end included,
+    /// however short. The archive's own session reads their presence when
+    /// it aligns, so it holds no liveliness subscriber. `None`: it reads
+    /// their presence every [`PRESENCE_POLL`] instead, and aligns when one
+    /// appears that the last read did not show, which misses an outage
+    /// shorter than the period whose owner comes back as it was.
+    pub watch: Option<zenoh::Session>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,9 +159,36 @@ pub struct Archive {
     inner: Arc<Inner>,
     service: Service,
     _subs: Vec<zenoh::pubsub::Subscriber<()>>,
-    _watch: Vec<zenoh::pubsub::Subscriber<()>>,
+    /// How it learns an owner appeared: a subscriber on its watch session,
+    /// or a presence read every [`PRESENCE_POLL`], aborted with the archive.
+    watch: Watch,
     _q: zenoh::query::Queryable<()>,
 }
+
+/// How an archive learns that an owner, or a peer, appeared (#830).
+enum Watch {
+    /// Liveliness subscribers on the archive's watch session, held for the
+    /// archive's life.
+    Subscribed {
+        _subscribers: Vec<zenoh::pubsub::Subscriber<()>>,
+    },
+    /// A presence read every [`PRESENCE_POLL`].
+    Polled(tokio::task::JoinHandle<()>),
+}
+
+impl Drop for Archive {
+    fn drop(&mut self) {
+        if let Watch::Polled(task) = &self.watch {
+            task.abort();
+        }
+    }
+}
+
+/// How often an archive reads the instance tokens of its owners and of the
+/// archives on their side, to align when one appears (§4.4). A read, never
+/// a liveliness subscriber: its session reads presence, and a session that
+/// does holds none (core §8.1, 0.37; #830).
+pub const PRESENCE_POLL: Duration = Duration::from_millis(500);
 
 /// An archive key for `origin` (§4.4): `origin` without `zk2`, each chunk
 /// slugged, under `<archive>`'s `@state`. Wildcard chunks stay wildcards.
@@ -389,6 +429,38 @@ impl Inner {
 }
 
 impl Inner {
+    /// Reads the instance tokens of every address in `watched` each
+    /// [`PRESENCE_POLL`], and aligns whenever one appears that the last read
+    /// did not show: a new owner, a re-minted one, an archive on an owner's
+    /// side. The first read aligns with what is already there. A read that
+    /// could not be made (a session cut off, core §8.1) leaves what that
+    /// address last showed as it was.
+    async fn watch_presence(self: Arc<Self>, watched: Vec<Addr>) {
+        let mut shown: BTreeMap<Addr, Vec<String>> = BTreeMap::new();
+        loop {
+            let mut appeared = false;
+            for o in &watched {
+                let selector = format!("zk2/{}/{}/@zk/instance/*", o.system, o.service);
+                let Ok(keys) = crate::presence::liveliness_keys(
+                    &self.session,
+                    &selector,
+                    Duration::from_secs(1),
+                )
+                .await
+                else {
+                    continue;
+                };
+                let before = shown.get(o);
+                appeared |= keys.iter().any(|k| before.is_none_or(|b| !b.contains(k)));
+                shown.insert(o.clone(), keys);
+            }
+            if appeared {
+                self.align_settled().await;
+            }
+            tokio::time::sleep(PRESENCE_POLL).await;
+        }
+    }
+
     /// Aligns, retrying a few times while keys stay unconfirmed: a token can
     /// arrive before the route to its owner's queryable does, and an empty
     /// read confirms nothing (§4.4). Bounded: an unreachable source leaves
@@ -407,7 +479,11 @@ impl Inner {
 
 impl Archive {
     /// Starts an archive: records its sources, answers on its keys, and
-    /// aligns whenever an owner's instance token appears (and once now).
+    /// aligns whenever an owner's instance token appears (and once now):
+    /// heard on [`ArchiveConfig::watch`], or read every [`PRESENCE_POLL`]
+    /// without one. A watch session that is `session` itself is refused
+    /// ([`Error::ReadBesideSubscriber`], #830): `align` reads presence on
+    /// `session`.
     pub async fn start(session: &zenoh::Session, config: ArchiveConfig) -> Result<Self> {
         let window = config
             .service
@@ -467,37 +543,55 @@ impl Archive {
             .await?;
         let service = b.start().await?;
         // Align whenever an owner, or an archive on an owner's side, becomes
-        // reachable: with the owner gone, a peer's arrival is the only
-        // signal that the link healed.
-        let mut watch = Vec::new();
+        // reachable — once now, for those already there: with the owner
+        // gone, a peer's arrival is the only signal that the link healed.
+        // `align` reads its owners' presence on this session, and a session
+        // that reads presence holds no liveliness subscriber (core §8.1,
+        // 0.37; #830): the subscriber is on the watch session, or, with
+        // none, presence is read on a period.
         let watched: Vec<Addr> = inner
             .sources
             .iter()
             .map(|s| s.rec.owner.clone())
             .chain(inner.peers.iter().cloned())
             .collect();
-        for o in &watched {
-            let i = Arc::clone(&inner);
-            let handle = tokio::runtime::Handle::current();
-            watch.push(
-                session
-                    .liveliness()
-                    .declare_subscriber(format!("zk2/{}/{}/@zk/instance/*", o.system, o.service))
-                    .callback(move |s: Sample| {
-                        if s.kind() == SampleKind::Put {
-                            let i = Arc::clone(&i);
-                            handle.spawn(async move { i.align_settled().await });
-                        }
-                    })
-                    .await
-                    .map_err(zenoh)?,
-            );
-        }
+        let watch = match &config.watch {
+            Some(w) if w.zid() == session.zid() => {
+                return Err(Error::ReadBesideSubscriber {
+                    selector: "the archive's owners' instance tokens".to_owned(),
+                    zid: session.zid().to_string(),
+                });
+            }
+            Some(w) => {
+                let mut subs = Vec::new();
+                for o in &watched {
+                    let i = Arc::clone(&inner);
+                    let handle = tokio::runtime::Handle::current();
+                    subs.push(
+                        crate::presence::declare_subscriber(
+                            w,
+                            format!("zk2/{}/{}/@zk/instance/*", o.system, o.service),
+                        )
+                        .history(true)
+                        .callback(move |s: Sample| {
+                            if s.kind() == SampleKind::Put {
+                                let i = Arc::clone(&i);
+                                handle.spawn(async move { i.align_settled().await });
+                            }
+                        })
+                        .await
+                        .map_err(zenoh)?,
+                    );
+                }
+                Watch::Subscribed { _subscribers: subs }
+            }
+            None => Watch::Polled(tokio::spawn(Arc::clone(&inner).watch_presence(watched))),
+        };
         Ok(Self {
             inner,
             service,
             _subs: subs,
-            _watch: watch,
+            watch,
             _q: q,
         })
     }

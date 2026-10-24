@@ -79,6 +79,8 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         session: ASKING.ask(dep.session().await),
         raw: ASKING.ask(dep.link().session().await),
         namespace: dep.namespace().to_owned(),
+        // The doctor follows no presence live: it reads (#830).
+        watch: None,
     };
     let store = BundleStore::new(dep.timeout());
     if transitions {

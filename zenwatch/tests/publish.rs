@@ -367,7 +367,7 @@ async fn zenwatch_passes_its_own_conformance() {
     let bus = zk2::daemon_bus(&ep, NS).await;
     for iface in ["zenwatch.v1", "health.v1"] {
         let report = zenkey_fleet::run_conform(
-            &bus,
+            &bus.bus,
             &zenkey_fleet::ContractSet::new(),
             addr(ADDRESS),
             iface.parse().unwrap(),

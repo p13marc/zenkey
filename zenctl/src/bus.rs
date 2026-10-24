@@ -212,6 +212,20 @@ impl Deployment {
         .map_err(open_error)
     }
 
+    /// A **watch session** in the namespace (#830, core §8.1, 0.37): a
+    /// session of its own over the same connection, for a live reader's
+    /// liveliness subscribers — the `instance-gone` monitor of `watchdog`
+    /// and `record --on`, the owners' instance tokens of `alert-firing`,
+    /// `alarms --for` and `check conform`, a telemetry reading's tokens. It
+    /// makes no presence read: [`Deployment::session`] holds no liveliness
+    /// subscriber beside it and makes every read, since a liveliness GET
+    /// beside one can complete without a token that is live. The cost is
+    /// one more session per such run, with its router-side declarations;
+    /// a verb that follows no presence live opens none.
+    pub(crate) async fn watch_session(&self) -> Result<zenoh::Session> {
+        self.session().await
+    }
+
     /// A session **in** the namespace that owns keys (#825): a mock
     /// owner's, `gen`'s and `serve`'s. It timestamps what it puts, as a real
     /// owner's session does — a resource that declares `history` needs it —

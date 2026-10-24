@@ -44,6 +44,16 @@ pub(crate) fn reads_deployment(rule: &Condition) -> bool {
     )
 }
 
+/// Whether a rule follows presence live — `instance-gone`'s monitor,
+/// `alert-firing`'s owners' instance tokens — and so holds liveliness
+/// subscribers on a watch session of its own (#830, core §8.1, 0.37).
+pub(crate) fn follows_presence(rule: &Condition) -> bool {
+    matches!(
+        rule,
+        Condition::InstanceGone { .. } | Condition::AlertFiring { .. }
+    )
+}
+
 pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
@@ -68,10 +78,18 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     // The deployment's own session, beside the raw one: opened for every run,
     // because the rules that read the deployment are judged through it, and
     // a run with none of them pays one idle session for a simpler shape.
+    // The rules that follow presence live hold their liveliness subscribers
+    // on a watch session of its own (#830), and only they open one.
+    let watch = if rules.iter().any(follows_presence) {
+        Some(dep.watch_session().await?)
+    } else {
+        None
+    };
     let bus = zenkey_fleet::DoctorBus {
         session: dep.session().await?,
         raw,
         namespace: dep.namespace().to_owned(),
+        watch,
     };
     let store = zk2::store(&dep, &contracts);
     let spec = WatchdogSpec {

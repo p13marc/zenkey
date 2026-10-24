@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.36** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.37** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -36,8 +36,10 @@ per message and flow, in 0.33 that a principal is bound by one kind
 of name, in 0.34 what `alarms.v1` needed: its vocabulary
 published empty, without the interim `severity_default`, in 0.35
 what `telemetry.v1` needed: a standard schema as a profile's first
-point, and its vocabulary published, and in 0.36 what `desired.v1`
-needed: its vocabulary published without the interim `target`).
+point, and its vocabulary published, in 0.36 what `desired.v1`
+needed: its vocabulary published without the interim `target`, and in
+0.37 what a complete presence read is: one through a session cut off, a
+withdrawal heard live, and a read beside a liveliness subscriber).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -615,6 +617,9 @@ presence budget (§8.3) is another. `[F: budget/]`
   live: a sample lost, a publisher matched late, and a member quiet while
   it listened look the same as no member.
   - A GET that ended at its timeout, or with an error reply.
+  - A GET made through a session that reaches no other zenoh node, which
+    zenoh answers at once, complete and empty, though nothing was asked of
+    anyone (§8.1, 0.37). It heals no loss.
   - A window shorter than one span, one not shown to have lost no
     delivery, or one over which the owner was not present throughout.
   - An archive's answer, which is last-known (S6).
@@ -1786,6 +1791,67 @@ Liveliness tokens carry no payload; everything is in the key.
       incomplete.
 
     `[Sc: presence.md §6]`
+  - **A read through a session cut off is not complete** (0.37, #839). A
+    session that reaches no other zenoh node — a client that has lost its
+    router, a peer or a router alone — has every liveliness GET answered
+    at once with the final reply alone, no token and no error reply,
+    though nothing was asked of anyone (Appendix B). Its other GETs, S4's
+    included, are answered so too.
+    - Such a read is **not complete, whatever its replies say.** A reader
+      MUST NOT conclude absence from it, and MUST NOT take it as healing a
+      loss (§2.7).
+    - A reader SHOULD NOT make it: before a read, it checks that its
+      session holds a transport to another node (in zenoh 1.10.1,
+      `Session::info().transports()`, unstable, §0), and reports a read
+      not made, with that reason, as it reports one possibly incomplete.
+      What a read not made would have established is unobservable.
+
+    `[Sc: presence.md §7]`
+  - **Absence is established only by a complete read** (0.37, #839). An
+    owner or a token is absent when a complete read (above) shows none,
+    and only then.
+    - **A withdrawal heard live is a reason to read again, never absence
+      by itself.** A liveliness subscriber hears a token withdrawn when its
+      holder undeclares it, when its lease runs out, and equally when the
+      reader's own router restarts or its own link drops: then every
+      token at once, and their owners may never have left (Appendix B). A
+      reader MUST NOT conclude absence from a withdrawal alone.
+    - A reader that follows presence live SHOULD read again soon after a
+      withdrawal that leaves something with nothing held — an address its
+      instance tokens, an interface its tokens, a member its epochs — one
+      read for a burst of them, and report what that read establishes:
+      absent when it is complete and shows none, present when it shows
+      one. Until then what was withdrawn is **unconfirmed**: an address
+      unobservable, never down, and a withdrawn token not yet gone.
+    - A make-before-break re-mint (above) leaves nothing with nothing
+      held, so it owes no read: another instance holds throughout.
+    - A read not made (above) leaves the withdrawal unconfirmed until the
+      reader's session reaches a node again and a read is made.
+
+    `[Sc: presence.md §8]`
+  - **The read that establishes absence goes on a session with no
+    liveliness subscriber** (0.37, #830). In zenoh 1.10.1, and on its main
+    branch at `766b455`, a liveliness GET from a session that holds a
+    liveliness subscriber can complete without live tokens the subscriber
+    covers: the final reply and no error reply, the tokens missing. It
+    happens with history or without, and by zenoh's code it lasts after the
+    subscriber is undeclared (Appendix B).
+    - A reader SHOULD make every liveliness read it may conclude absence
+      from — a seed, a re-read, a tool's presence read — on a session that
+      holds no liveliness subscriber of any kind, and hold its liveliness
+      subscribers on another session of its own: a **watch session**.
+    - zenoh orders one session's messages at its router, never two
+      sessions'. A reader that seeds on one session and follows
+      withdrawals on its watch session SHOULD make one round trip on the
+      watch session after declaring its subscribers, and before the seed:
+      a liveliness GET there whose answer it discards serves, since its
+      final reply follows the declarations. Otherwise a token withdrawn
+      between the seed's answer and the router's reading of the
+      subscriber is never heard going.
+    - Ordinary GETs (S4's, a descriptor's, a bundle's) are not affected,
+      and may go on either session.
+
+    `[Sc: presence.md §9]`
 - **Timeouts are the caller's.** How long a liveliness GET, a descriptor
   GET (§3.3) or a retrieval attempt (§8.4) waits, and how long a tool waits
   for presence after an owner starts, are the caller's choices. The
@@ -3138,6 +3204,11 @@ Appendix B. These are the ones the rules above cite:
   `zenoh/string`), and one the routers finished ends with none.
 - A liveliness GET that access control refuses is answered with the final
   reply alone: no token and no error reply.
+- A session with no transport to another zenoh node has every liveliness
+  GET answered at once with the final reply alone, and every GET (0.37;
+  first measured by `alarms.v1` 0.4; [`scenarios/presence.md`](scenarios/presence.md)
+  §7). A transport that closes withdraws, at the reader, every token
+  learned through it, while their owners still hold them (§8).
 - Under `allow`, allow rules are not evaluated, and access control works by
   inclusion.
 
@@ -3203,6 +3274,42 @@ Appendix B. These are the ones the rules above cite:
   `block` samples. The routers' transport closes stalled, and no token was
   withdrawn while the runs lasted.
 
+**A liveliness GET beside a liveliness subscriber** (0.37, #830). Measured
+on 2026-10-24 by the zenoh-only reproduction in
+[`docs/zk2/upstream/liveliness-get-repro/`](../docs/zk2/upstream/liveliness-get-repro/),
+61,920 trials per version on zenoh 1.10.1 and on zenoh's main branch at
+`766b455`, each a fresh process with a router, a token holder and a
+reader, clients, some under CPU load:
+- A complete liveliness GET from a session holding liveliness subscribers
+  that covered the live tokens missed one or more of them:
+  - history subscribers on the reading session: 1,656 of 23,040 (1.10.1),
+    1,647 of 23,040 (main);
+  - subscribers without history there: 159 of 16,560 and 167 of 16,560,
+    only for tokens declared after they subscribed;
+  - the subscribers on another session of the same process: 0 of 12,240;
+    no subscriber: 0 of 10,080.
+- A GET issued right after declaring a history subscriber on the same
+  session missed every time: 720 of 720 (1.10.1), 719 of 720 (main).
+- **Why**, shown by traces and by a one-condition patch that took both
+  races to 0 of 6,480 trials: the GET is a `Current` token interest,
+  answered only by declarations carrying its id. The session's own routing
+  answers it from the tokens it already knows — those its liveliness
+  subscribers asked for — and the router drops its answer for every token
+  already declared to the session's face for a subscriber
+  (`hat/broker/interests.rs`, `propagate_current_token`, `local_tokens`).
+  A token still on its way to the subscriber is in neither answer; and the
+  router's final reply can overtake the session's own answer, more often
+  under load.
+- A second GET at once still left up to 10 of 720 trials wrong under load;
+  waiting longer before the GET did not remove the overtaking race. A
+  fresh session found every token every time.
+- After the subscriber is undeclared the router keeps those declarations
+  (`unregister_interest` leaves `local_tokens` as it is; read from the
+  code, not measured), so a session that ever held one stays exposed.
+- Ordinary GETs are not on this path.
+- The draft upstream report, not filed:
+  [`docs/zk2/upstream/liveliness-get-misses-beside-liveliness-subscriber.md`](../docs/zk2/upstream/liveliness-get-misses-beside-liveliness-subscriber.md).
+
 ## Appendix C. Evidence index
 
 | Evidence | Covers |
@@ -3220,7 +3327,7 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27) |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2 |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §7–§9 what a complete presence read is (0.37): a session cut off, a withdrawal heard live, a read beside a liveliness subscriber; Appendix B |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |

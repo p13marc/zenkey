@@ -63,10 +63,21 @@ fn up_down_and_unobservable_are_kept_apart_and_unobservable_is_never_down() {
     let now = SystemTime::now();
     let nodes = NodesState::default();
 
-    // A complete read, then robot2's instance token goes: robot2 is down.
+    // A complete read, then robot2's instance token is heard going:
+    // unobservable, awaiting the read it owes (§8.1, 0.37), never down.
     let mut live = LivePresence::new(PresenceScope::all());
     live.seed(&observed(&[NAV1, NAV2], true), now);
     live.token(NAV2, false, now);
+    let withdrawn = update(live.clone());
+    let mut ui = render(Some(&withdrawn), &nodes, None);
+    assert!(ui.find("robot2/nav: unobservable").is_ok());
+    assert!(
+        ui.find("heard withdrawn, awaiting a read — not down (§8.1)")
+            .is_ok()
+    );
+    assert!(ui.find("robot2/nav: down").is_err(), "not on a withdrawal");
+    // The read that shows none: robot2 is down.
+    live.seed(&observed(&[NAV1], true), now);
     let complete = update(live.clone());
     let mut ui = render(Some(&complete), &nodes, None);
     assert!(ui.find("robot1/nav: up").is_ok());

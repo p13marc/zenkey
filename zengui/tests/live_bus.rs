@@ -1176,18 +1176,18 @@ async fn health_owner(
 }
 
 /// The window's presence link (its subscription's own stream) over a
-/// presence monitor on `session`, as the window starts one.
+/// presence monitor on `watch`, a session of its own, reading through
+/// `session`, as the window starts one (#830).
 async fn presence_stream(
     session: &zenoh::Session,
+    watch: &zenoh::Session,
 ) -> impl iced::futures::Stream<Item = zengui::message::Message> {
     let spec = MonitorSpec {
         stats_tick: Duration::from_secs(3600),
         ..MonitorSpec::default()
     }
     .with_presence("", &zenkey_fleet::PresenceScope::all());
-    let monitor = Monitor::start(session, spec)
-        .await
-        .expect("presence monitor");
+    let monitor = Monitor::start(watch, spec).await.expect("presence monitor");
     zengui::presence_link::stream(zengui::presence_link::PresenceKey {
         epoch: 1,
         session: session.clone(),
@@ -1271,11 +1271,21 @@ async fn an_owner_going_away_reads_down_and_coming_back_reads_up_with_a_new_inst
     )
     .await
     .expect("the window's session in the namespace");
+    // The presence monitor's watch session (#830).
+    let watch = zenkey_fleet::open_in_namespace(
+        "acme",
+        None,
+        std::slice::from_ref(&endpoint),
+        &[],
+        Some(false),
+    )
+    .await
+    .expect("the window's watch session");
     let svc: zenkey_model::grammar::Addr = "lab/svc".parse().expect("an address");
 
     let first = health_owner(&owners, &svc).await;
     let first_id = first.instance().to_string();
-    let mut link = Box::pin(presence_stream(&observer).await);
+    let mut link = Box::pin(presence_stream(&observer, &watch).await);
     let up = landing(&mut link, |p| p.status(&svc) == AddressStatus::Up).await;
     assert!(nodes_pane_shows(&up, &svc, "lab/svc: up"));
     assert!(
@@ -1835,6 +1845,7 @@ async fn last_known_reads_an_archive_through_the_window_and_never_as_current() {
             }],
             peers: Vec::new(),
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await

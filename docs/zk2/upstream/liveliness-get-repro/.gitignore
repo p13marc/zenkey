@@ -1,0 +1,7 @@
+# What a run rebuilds or writes beside the committed evidence (README.md).
+/target-*/
+/zenoh-1.10.1-fix/
+/scratch/
+/results-*.txt
+/traces/*/
+/traces/*.log

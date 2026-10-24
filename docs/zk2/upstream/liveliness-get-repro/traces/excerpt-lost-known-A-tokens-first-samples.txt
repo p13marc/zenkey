@@ -1,0 +1,121 @@
+34.044167 T main:01 api::session: declare_liveliness_subscriber(ke`zk2/*/*/@zk/instance/*`)
+34.044220 D main:01 sess{zid=d87dafb7}:interest{id=6 mode=CurrentFuture opts={K T} expr="zk2/*/*/@zk/instance/*"}:route_interest{self=north res=Some(zk2/*/*/@zk/instance/*) src=local/d87dafb7:0}: client.interests: return=Noop
+34.044248 T main:01 api::session: declare_liveliness_subscriber(ke`zk2/*/*/@zk/alive/**`)
+34.044275 D main:01 sess{zid=d87dafb7}:interest{id=7 mode=CurrentFuture opts={K T} expr="zk2/*/*/@zk/alive/**"}:route_interest{self=north res=Some(zk2/*/*/@zk/alive/**) src=local/d87dafb7:0}: client.interests: return=Noop
+34.044296 T main:01 api::session: declare_liveliness_subscriber(ke`zk2/*/*/@zk/member/**`)
+34.044319 D main:01 sess{zid=d87dafb7}:interest{id=8 mode=CurrentFuture opts={K T} expr="zk2/*/*/@zk/member/**"}:route_interest{self=north res=Some(zk2/*/*/@zk/member/**) src=local/d87dafb7:0}: client.interests: return=Noop
+34.044475 D rx-1:12 interest{id=1 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/instance/*"}:route_interest{self=north _res=Some(zk2/*/*/@zk/instance/*) src=south:0:client/d87dafb7:1}: router.interests: return=ResolvedCurrentInteres
+34.044494 D rx-1:12 interest{id=1 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/instance/*"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/instance/*) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044502 D rx-1:12 interest{id=1 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/instance/*"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/instance/*) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044508 D rx-1:12 interest{id=1 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/instance/*"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/instance/*) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044524 D rx-1:12 interest{id=1 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/instance/*"}:send_declare_final{self=south:0:client id=1}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044560 D rx-1:12 interest{id=2 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/alive/**"}:route_interest{self=north _res=Some(zk2/*/*/@zk/alive/**) src=south:0:client/d87dafb7:1}: router.interests: return=ResolvedCurrentInterest
+34.044569 D rx-1:12 interest{id=2 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/alive/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/alive/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044576 D rx-1:12 interest{id=2 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/alive/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/alive/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044580 D rx-1:12 interest{id=2 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/alive/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/alive/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044590 D rx-1:12 interest{id=2 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/alive/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/alive/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044595 D rx-1:12 interest{id=2 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/alive/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/alive/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044611 D rx-1:12 interest{id=2 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/alive/**"}:send_declare_final{self=south:0:client id=2}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044656 D rx-1:12 interest{id=3 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/member/**"}:route_interest{self=north _res=Some(zk2/*/*/@zk/member/**) src=south:0:client/d87dafb7:1}: router.interests: return=ResolvedCurrentInterest
+34.044665 D rx-1:12 interest{id=3 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/member/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/member/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044672 D rx-1:12 interest{id=3 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/member/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/member/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044691 D rx-1:12 interest{id=3 mode=CurrentFuture opts={K T} expr="1:Sender:/*/*/@zk/member/**"}:send_declare_final{self=south:0:client id=3}: broker.interests: dst=south:0:client/d87dafb7:1
+34.044799 D rx-0:11 declare_token{id=1 interest_id=Some(1) expr=2:Sender:}:route_current_token{self=north interest_id=1 _res=svc0:instance}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #6 CurrentFuture) }
+34.044825 D rx-0:11 declare_token{id=1 interest_id=Some(1) expr=2:Sender:}:propagate_current_token{self=local res=svc0:instance interest=CI(d87dafb7 #6 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.044837 T rx-0:11 api::session: recv DeclareToken 1
+34.044852 D rx-0:11 declare_token{id=2 interest_id=Some(1) expr=3:Sender:}:route_current_token{self=north interest_id=1 _res=svc1:instance}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #6 CurrentFuture) }
+34.044866 D rx-0:11 declare_token{id=2 interest_id=Some(1) expr=3:Sender:}:propagate_current_token{self=local res=svc1:instance interest=CI(d87dafb7 #6 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.044876 T rx-0:11 api::session: recv DeclareToken 2
+34.044889 D rx-0:11 declare_token{id=3 interest_id=Some(1) expr=4:Sender:}:route_current_token{self=north interest_id=1 _res=svc2:instance}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #6 CurrentFuture) }
+34.044906 D rx-0:11 declare_token{id=3 interest_id=Some(1) expr=4:Sender:}:propagate_current_token{self=local res=svc2:instance interest=CI(d87dafb7 #6 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.044916 T rx-0:11 api::session: recv DeclareToken 3
+34.044928 D rx-0:11 declare_final{interest_id=1}:route_declare_final{self=north interest_id=1}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #6 CurrentFuture) }
+34.044935 D rx-0:11 declare_final{interest_id=1}:send_declare_final{self=local id=6}: broker.interests: dst=local/d87dafb7:0
+34.044945 T rx-0:11 api::session: recv DeclareFinal Some(6)
+34.045024 D rx-0:11 declare_token{id=4 interest_id=Some(2) expr=5:Sender:}:route_current_token{self=north interest_id=2 _res=svc0:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #7 CurrentFuture) }
+34.045040 D rx-0:11 declare_token{id=4 interest_id=Some(2) expr=5:Sender:}:propagate_current_token{self=local res=svc0:alive interest=CI(d87dafb7 #7 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.045051 T rx-0:11 api::session: recv DeclareToken 4
+34.045062 D rx-0:11 declare_token{id=5 interest_id=Some(2) expr=6:Sender:}:route_current_token{self=north interest_id=2 _res=svc1:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #7 CurrentFuture) }
+34.045074 D rx-0:11 declare_token{id=5 interest_id=Some(2) expr=6:Sender:}:propagate_current_token{self=local res=svc1:alive interest=CI(d87dafb7 #7 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.045085 T rx-0:11 api::session: recv DeclareToken 5
+34.045095 D rx-0:11 declare_token{id=6 interest_id=Some(2) expr=7:Sender:}:route_current_token{self=north interest_id=2 _res=svc0:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #7 CurrentFuture) }
+34.045106 D rx-0:11 declare_token{id=6 interest_id=Some(2) expr=7:Sender:}:propagate_current_token{self=local res=svc0:alive interest=CI(d87dafb7 #7 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.045116 T rx-0:11 api::session: recv DeclareToken 6
+34.045126 D rx-0:11 declare_token{id=7 interest_id=Some(2) expr=8:Sender:}:route_current_token{self=north interest_id=2 _res=svc2:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #7 CurrentFuture) }
+34.045137 D rx-0:11 declare_token{id=7 interest_id=Some(2) expr=8:Sender:}:propagate_current_token{self=local res=svc2:alive interest=CI(d87dafb7 #7 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.045147 T rx-0:11 api::session: recv DeclareToken 7
+34.045157 D rx-0:11 declare_token{id=8 interest_id=Some(2) expr=9:Sender:}:route_current_token{self=north interest_id=2 _res=svc1:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #7 CurrentFuture) }
+34.045170 D rx-0:11 declare_token{id=8 interest_id=Some(2) expr=9:Sender:}:propagate_current_token{self=local res=svc1:alive interest=CI(d87dafb7 #7 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.045180 T rx-0:11 api::session: recv DeclareToken 8
+34.045192 D rx-0:11 declare_final{interest_id=2}:route_declare_final{self=north interest_id=2}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #7 CurrentFuture) }
+34.045197 D rx-0:11 declare_final{interest_id=2}:send_declare_final{self=local id=7}: broker.interests: dst=local/d87dafb7:0
+34.045208 T rx-0:11 api::session: recv DeclareFinal Some(7)
+34.045242 D rx-0:11 declare_token{id=9 interest_id=Some(3) expr=10:Sender:}:route_current_token{self=north interest_id=3 _res=svc2:member}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #8 CurrentFuture) }
+34.045254 D rx-0:11 declare_token{id=9 interest_id=Some(3) expr=10:Sender:}:propagate_current_token{self=local res=svc2:member interest=CI(d87dafb7 #8 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.045264 T rx-0:11 api::session: recv DeclareToken 9
+34.045274 D rx-0:11 declare_token{id=10 interest_id=Some(3) expr=11:Sender:}:route_current_token{self=north interest_id=3 _res=svc2:member}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #8 CurrentFuture) }
+34.045285 D rx-0:11 declare_token{id=10 interest_id=Some(3) expr=11:Sender:}:propagate_current_token{self=local res=svc2:member interest=CI(d87dafb7 #8 CurrentFuture)}: broker.interests: dst=local/d87dafb7:0
+34.045295 T rx-0:11 api::session: recv DeclareToken 10
+34.045312 D rx-0:11 declare_final{interest_id=3}:route_declare_final{self=north interest_id=3}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #8 CurrentFuture) }
+34.045317 D rx-0:11 declare_final{interest_id=3}:send_declare_final{self=local id=8}: broker.interests: dst=local/d87dafb7:0
+34.045326 T rx-0:11 api::session: recv DeclareFinal Some(8)
+34.046910 T main:01 api::session: liveliness.get(zk2/*/*/@zk/**, 1s)
+34.046934 T main:01 sess{zid=d87dafb7}: api::session: Register liveliness query 9
+34.047077 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:route_interest{self=north _res=Some(zk2/*/*/@zk/**) src=south:0:client/d87dafb7:1}: router.interests: return=ResolvedCurrentInterest
+34.047090 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047095 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047098 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047102 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047106 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047111 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047114 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047118 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047121 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047140 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_current_tokens{self=south:0:client res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047150 D rx-1:12 interest{id=4 mode=Current opts={K T} expr="1:Sender:/*/*/@zk/**"}:send_declare_final{self=south:0:client id=4}: broker.interests: dst=south:0:client/d87dafb7:1
+34.047221 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:route_interest{self=north res=Some(zk2/*/*/@zk/**) src=local/d87dafb7:0}: client.interests: return=Noop
+34.047241 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047247 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047251 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047256 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047260 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047264 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047269 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047273 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047277 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047284 D main:01 sess{zid=d87dafb7}:interest{id=9 mode=Current opts={K T} expr="zk2/*/*/@zk/**"}:send_current_tokens{self=local res=Some(zk2/*/*/@zk/**) om={..}}: broker.interests: dst=local/d87dafb7:0
+34.047313 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=6:Sender:}:route_current_token{self=north interest_id=4 _res=svc1:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047321 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=6:Sender:}:propagate_current_token{self=local res=svc1:alive interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047340 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=9:Sender:}:route_current_token{self=north interest_id=4 _res=svc1:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047347 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=9:Sender:}:propagate_current_token{self=local res=svc1:alive interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047379 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=7:Sender:}:route_current_token{self=north interest_id=4 _res=svc0:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047386 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=7:Sender:}:propagate_current_token{self=local res=svc0:alive interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047403 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=2:Sender:}:route_current_token{self=north interest_id=4 _res=svc0:instance}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047408 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=2:Sender:}:propagate_current_token{self=local res=svc0:instance interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047426 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=11:Sender:}:route_current_token{self=north interest_id=4 _res=svc2:member}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047432 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=11:Sender:}:propagate_current_token{self=local res=svc2:member interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047450 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=4:Sender:}:route_current_token{self=north interest_id=4 _res=svc2:instance}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047456 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=4:Sender:}:propagate_current_token{self=local res=svc2:instance interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047473 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=5:Sender:}:route_current_token{self=north interest_id=4 _res=svc0:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047480 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=5:Sender:}:propagate_current_token{self=local res=svc0:alive interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047496 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=3:Sender:}:route_current_token{self=north interest_id=4 _res=svc1:instance}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047503 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=3:Sender:}:propagate_current_token{self=local res=svc1:instance interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047521 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=10:Sender:}:route_current_token{self=north interest_id=4 _res=svc2:member}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047527 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=10:Sender:}:propagate_current_token{self=local res=svc2:member interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047544 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=8:Sender:}:route_current_token{self=north interest_id=4 _res=svc2:alive}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047550 D rx-0:11 declare_token{id=0 interest_id=Some(4) expr=8:Sender:}:propagate_current_token{self=local res=svc2:alive interest=CI(d87dafb7 #9 Current)}: broker.interests: Already propagated
+34.047579 D rx-0:11 declare_final{interest_id=4}:route_declare_final{self=north interest_id=4}: client.interests: return=Breadcrumb { interest: CI(d87dafb7 #9 Current) }
+34.047586 D rx-0:11 declare_final{interest_id=4}:send_declare_final{self=local id=9}: broker.interests: dst=local/d87dafb7:0
+34.047597 T rx-0:11 api::session: recv DeclareFinal Some(9)
+34.047608 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047615 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047618 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047621 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047624 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047628 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047631 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047634 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047637 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047639 T main:01 sess{zid=d87dafb7}: api::session: recv DeclareToken 0
+34.047645 T main:01 api::session: liveliness.get(zk2/*/*/@zk/**, 1s)
+34.047659 T main:01 sess{zid=d87dafb7}: api::session: Register liveliness query 10

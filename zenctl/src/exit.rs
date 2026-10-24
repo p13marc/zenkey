@@ -26,9 +26,12 @@
 //!   `--qos`, a class, or a `--fault` kind outside its vocabulary; a
 //!   `--zenoh-config` this tool refuses; an endpoint that is not one; a
 //!   session that never opened — nothing answered the endpoint, so nothing was
-//!   asked ([`NoSession`], #503); silence under a fan-out; an observation too
-//!   impaired to carry the claim (RFC 13 §1, the O4/O6 rules); and, on the
-//!   verdict verbs, *any* failure before the question was put.
+//!   asked ([`NoSession`], #503); a presence read the engine would not make
+//!   — beside a liveliness subscriber (#830), or through a session cut off
+//!   from every other zenoh node (core §8.1, 0.37); silence under a
+//!   fan-out; an observation too impaired to carry the claim (RFC 13 §1, the
+//!   O4/O6 rules); and, on the verdict verbs, *any* failure before the
+//!   question was put.
 //!
 //! ## Where each code comes from, mechanically
 //!
@@ -159,8 +162,8 @@ macro_rules! unanswered {
 pub(crate) use unanswered;
 
 /// The exit code an error chain deserves: [`NO_VERDICT`] when anything in it
-/// is an [`Unaskable`], a [`NoSession`] or an [`Unanswered`], [`FINDING`]
-/// otherwise.
+/// is an [`Unaskable`], a [`NoSession`], an [`Unanswered`] or a presence read
+/// not made (core §8.1, 0.37), [`FINDING`] otherwise.
 ///
 /// Called from `main`, once, so the choice is made in exactly one place.
 pub fn code_for(err: &anyhow::Error) -> i32 {
@@ -180,6 +183,17 @@ pub fn code_for(err: &anyhow::Error) -> i32 {
             // refusals of the caller's input; it had nowhere to say so.
             || c.downcast_ref::<zenkey_fleet::Error>()
                 .is_some_and(zenkey_fleet::Error::is_unaskable)
+            // …and a presence read not made (core §8.1, 0.37): beside a
+            // liveliness subscriber (#830), or through a session cut off.
+            // Nothing was asked of anyone, so nothing was answered.
+            || c.downcast_ref::<zenkey_fleet::Error>()
+                .is_some_and(|e| e.not_asked().is_some())
+            || c.downcast_ref::<zenkey::Error>().is_some_and(|e| {
+                matches!(
+                    e,
+                    zenkey::Error::CutOff { .. } | zenkey::Error::ReadBesideSubscriber { .. }
+                )
+            })
     });
     if unaskable { NO_VERDICT } else { FINDING }
 }
@@ -312,6 +326,24 @@ mod tests {
             ),
             "{rendered}"
         );
+    }
+
+    /// Core §8.1 (0.37): a presence read the engine or the runtime would
+    /// not make — through a session cut off, or beside a liveliness
+    /// subscriber (#830) — asked nothing, and is a 2.
+    #[test]
+    fn a_presence_read_not_made_is_a_two() {
+        let cut = anyhow::Error::new(zenkey_fleet::Error::not_asked_for(
+            "zk2/*/*/@zk/**",
+            zenkey_fleet::NotAsked::CutOff,
+        ));
+        assert_eq!(code_for(&cut), NO_VERDICT);
+        let beside = anyhow::Error::new(zenkey::Error::ReadBesideSubscriber {
+            selector: "zk2/*/*/@zk/**".into(),
+            zid: "1a2b".into(),
+        })
+        .context("service list");
+        assert_eq!(code_for(&beside), NO_VERDICT);
     }
 
     /// FJ4: a question nothing answered — a revision no holder serves — is

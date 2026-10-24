@@ -558,6 +558,7 @@ async fn w4_3_commanding_an_intermittently_connected_vehicle() {
             records: vec![record("zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*")],
             peers: vec![],
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await
@@ -569,6 +570,7 @@ async fn w4_3_commanding_an_intermittently_connected_vehicle() {
             records: vec![record(origin)],
             peers: vec![common::addr("ground/archive")],
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await

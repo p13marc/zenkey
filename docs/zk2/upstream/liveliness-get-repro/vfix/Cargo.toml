@@ -1,0 +1,29 @@
+[package]
+name = "lgr-1101-fix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "lgr"
+path = "../src/main.rs"
+
+[[bin]]
+name = "lgr-minimal"
+path = "../src/minimal.rs"
+
+# zenoh 1.10.1 with fix.patch applied (the broker hat answers a Current token
+# interest even for tokens the face already holds): the intervention that
+# tests the mechanism in README.md.
+[dependencies]
+zenoh = { version = "=1.10.1", features = ["unstable"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util", "io-std", "fs", "sync"] }
+flume = "0.11"
+
+[patch.crates-io]
+zenoh = { path = "../zenoh-1.10.1-fix" }
+
+[profile.release]
+debug = 1

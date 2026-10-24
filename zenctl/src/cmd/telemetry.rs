@@ -139,6 +139,12 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         }
     }));
     let session = ASKING.ask(dep.session().await);
+    // The owners' tokens are followed on a watch session of its own (#830,
+    // core §8.1, 0.37); across a face no presence is read, and none opens.
+    let watch = match across_face {
+        true => None,
+        false => Some(ASKING.ask(dep.watch_session().await)),
+    };
     let store = zk2::store(&dep, &offline);
     // The line comes once the window opens (zk2py round 47's F-154): the
     // subscriptions declared and a round trip made after them that reaches
@@ -162,6 +168,7 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     };
     let report = zenkey_fleet::run_telemetry(
         &session,
+        watch.as_ref(),
         dep.namespace(),
         scope,
         &store,

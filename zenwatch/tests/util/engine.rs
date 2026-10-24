@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use zenkey_fleet::{BundleStore, ContractSet, DoctorBus};
+use zenkey_fleet::{BundleStore, ContractSet};
+use zenwatch::bus::Sessions;
 use zenwatch::config::{DisciplineConfig, DoctorConfig, RuleConfig};
 use zenwatch::engine::{Engine, Publish, RunSummary, run_on};
 use zenwatch::render::RenderConfig;
@@ -129,7 +130,7 @@ pub fn rule(name: &str, text: &str, severity: &str) -> RuleConfig {
 /// The engine's run, without waiting for `ready`: what a test that expects
 /// a refusal before anything opens drives.
 pub async fn run_once_refused(
-    bus: DoctorBus,
+    bus: Sessions,
     rules: Vec<RuleConfig>,
     opts: Options,
 ) -> anyhow::Result<RunSummary> {
@@ -144,7 +145,8 @@ pub async fn run_once_refused(
     sinks.extend(opts.extra_sinks);
     run_on(
         Engine {
-            bus: &bus,
+            bus: &bus.bus,
+            raw_watch: bus.raw_watch.as_ref(),
             store: &store,
             contracts: &contracts,
             timeout: opts.timeout,
@@ -171,7 +173,7 @@ pub async fn run_once_refused(
 
 /// Start an engine on `bus` with `rules` and one capturing sink, `ops`,
 /// and wait until it is watching and seeded (the `ready` seam).
-pub async fn start(bus: DoctorBus, rules: Vec<RuleConfig>, ops: Capture, opts: Options) -> Running {
+pub async fn start(bus: Sessions, rules: Vec<RuleConfig>, ops: Capture, opts: Options) -> Running {
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
     let task = tokio::spawn(async move {
@@ -186,7 +188,8 @@ pub async fn start(bus: DoctorBus, rules: Vec<RuleConfig>, ops: Capture, opts: O
         sinks.extend(opts.extra_sinks);
         run_on(
             Engine {
-                bus: &bus,
+                bus: &bus.bus,
+                raw_watch: bus.raw_watch.as_ref(),
                 store: &store,
                 contracts: &contracts,
                 timeout: opts.timeout,

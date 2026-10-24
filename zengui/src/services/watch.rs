@@ -68,13 +68,18 @@ pub fn shutdown(monitor: Arc<Monitor>) -> Task<Message> {
     .discard()
 }
 
-/// Start the presence monitor on the session in `namespace` (#614, FL6a):
-/// zk2's three token selectors and nothing else
+/// Start the presence monitor on a watch session of its own in `namespace`
+/// (#614, FL6a; #830): zk2's three token selectors and nothing else
 /// (`MonitorSpec::with_presence`), its own broadcast, and no stats ticks
-/// worth the name — zenwatch's shape. Lands on `PresenceStarted` with the
-/// namespace it was started in, so one the window has since left is
-/// dropped.
-pub fn start_presence(session: zenoh::Session, namespace: String) -> Task<Message> {
+/// worth the name — zenwatch's shape. The session in the namespace makes
+/// the presence link's reads and holds no liveliness subscriber (core
+/// §8.1, 0.37); the watch session goes with the monitor. Lands on
+/// `PresenceStarted` with the namespace it was started in, so one the
+/// window has since left is dropped.
+pub fn start_presence(
+    transport: crate::services::link::Transport,
+    namespace: String,
+) -> Task<Message> {
     Task::perform(
         async move {
             let spec = MonitorSpec {
@@ -84,10 +89,13 @@ pub fn start_presence(session: zenoh::Session, namespace: String) -> Task<Messag
                 ..MonitorSpec::default()
             }
             .with_presence("", &zenkey_fleet::PresenceScope::all());
-            let r = Monitor::start(&session, spec)
-                .await
-                .map(Arc::new)
-                .map_err(ServiceError::of);
+            let r = match crate::services::link::watch_session(&namespace, &transport).await {
+                Ok(watch) => Monitor::start(&watch, spec)
+                    .await
+                    .map(Arc::new)
+                    .map_err(ServiceError::of),
+                Err(e) => Err(e),
+            };
             (namespace, r)
         },
         |(namespace, r)| Message::Bus(BusMsg::PresenceStarted(namespace, r)),

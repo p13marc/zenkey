@@ -83,6 +83,16 @@ async fn namespaced(namespace: &str, t: &Transport) -> ServiceResult<zenoh::Sess
     )
 }
 
+/// A **watch session** in `namespace` (#830, core §8.1, 0.37): a session of
+/// its own over the same connection, for the presence monitor's liveliness
+/// subscribers. It makes no presence read, so the session in the namespace
+/// holds no liveliness subscriber and makes every read: a liveliness GET
+/// beside one can complete without a token that is live. One more session
+/// per window, reopened with the others on a namespace switch.
+pub async fn watch_session(namespace: &str, t: &Transport) -> ServiceResult<zenoh::Session> {
+    namespaced(namespace, t).await
+}
+
 /// Both sessions, the raw one first: a dead transport is said once, by the
 /// first open, and the second is never tried against it.
 ///

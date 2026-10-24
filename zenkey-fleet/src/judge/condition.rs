@@ -697,6 +697,14 @@ pub fn presence_observer(basis: PresenceBasis, pattern: &str) -> Eval {
             CondState::Unobservable,
             format!("presence under {pattern} has not been read yet: nothing is established"),
         ),
+        PresenceBasis::CutOff => (
+            CondState::Unobservable,
+            format!(
+                "this reader's session reaches no router and no peer, so no presence read is \
+                 made: every address under {pattern} is unobservable until a complete read \
+                 (core §8.1)"
+            ),
+        ),
     };
     Eval { state, evidence }
 }
@@ -870,10 +878,12 @@ impl RuleAlarms {
         RuleAlarms { feeds: Vec::new() }
     }
 
-    /// One reader per selector `rules` read, on `session`; with none, each
-    /// is unobservable, saying why.
+    /// One reader per selector `rules` read, reading on `session` and
+    /// holding its instance tokens' subscription on `watch` (#830); with no
+    /// session, each is unobservable, saying why.
     pub(crate) async fn open(
         session: Option<&zenoh::Session>,
+        watch: Option<&zenoh::Session>,
         rules: &RuleSet,
         timeout: Duration,
         clocks_synced: bool,
@@ -889,7 +899,7 @@ impl RuleAlarms {
                     let mut spec = AlarmSpec::new(timeout);
                     spec.clocks_synced = clocks_synced;
                     spec.archives = false;
-                    AlarmFeed::open(s, scope, spec, true)
+                    AlarmFeed::open(s, watch, scope, spec, true)
                         .await
                         .map(|(f, _)| f)
                         .map_err(|e| crate::one_line(&e))
@@ -975,9 +985,11 @@ pub(crate) async fn refresh_alarms(plans: Vec<(usize, AlarmRefresh)>) -> Vec<(us
 
 /// The `instance-gone` rules' presence (#747): the live projection over the
 /// scope their patterns cover ([`RuleSet::presence_scope`]), kept current
-/// by its own monitor on the session in the namespace — a flood of samples
-/// on the raw session must not make presence unobservable — and seeded and
-/// looked at once ([`RuleSet::first_look`]) before the first window.
+/// by its own monitor on a watch session in the namespace — a flood of
+/// samples on the raw session must not make presence unobservable, and no
+/// presence read is made beside a liveliness subscriber (#830, core §8.1,
+/// 0.37) — seeded through the session in the namespace, and looked at once
+/// ([`RuleSet::first_look`]) before the first window.
 pub(crate) struct RulePresence {
     monitor: crate::Monitor,
     pub(crate) feed: PresenceFeed,
@@ -987,15 +999,27 @@ pub(crate) struct RulePresence {
 }
 
 impl RulePresence {
-    /// Opens it for `rules` when one of them reads presence.
+    /// Opens it for `rules` when one of them reads presence: its monitor on
+    /// `watch`, its seeds through `session` (#830). With no watch session,
+    /// or `session` itself as one, it is refused before anything is
+    /// declared: [`crate::Error::NotAsked`].
     pub(crate) async fn open(
         session: &zenoh::Session,
+        watch: Option<&zenoh::Session>,
         rules: &mut RuleSet,
         timeout: Duration,
     ) -> Result<Option<RulePresence>> {
         if !rules.wants_presence() {
             return Ok(None);
         }
+        let Some(watch) = watch.filter(|w| w.zid() != session.zid()) else {
+            return Err(crate::Error::not_asked_for(
+                "instance-gone's presence",
+                crate::error::NotAsked::BesideSubscriber {
+                    zid: session.zid().to_string(),
+                },
+            ));
+        };
         let scope = rules.presence_scope();
         let spec = crate::MonitorSpec {
             // A stats tick would only wake the feed, which folds tokens.
@@ -1003,10 +1027,18 @@ impl RulePresence {
             ..crate::MonitorSpec::default()
         }
         .with_presence("", &scope);
-        let monitor = crate::Monitor::start(session, spec).await?;
+        let monitor = crate::Monitor::start(watch, spec).await?;
         let mut live = LivePresence::new(scope);
         rules.track_presence(&mut live, SystemTime::now());
-        let (feed, _seeded) = PresenceFeed::open(session, monitor.events(), live, timeout).await;
+        let (feed, _seeded) = match PresenceFeed::open(session, &monitor, live, timeout).await {
+            Ok(opened) => opened,
+            Err(e) => {
+                if let Err(teardown) = monitor.shutdown().await {
+                    tracing::warn!("after a refused presence feed: {teardown}");
+                }
+                return Err(e);
+            }
+        };
         rules.first_look(feed.presence());
         Ok(Some(RulePresence {
             monitor,
@@ -1734,12 +1766,20 @@ pub fn watchdog<'a>(
         // Presence before the first window too (#747): the `instance-gone`
         // rules read the live projection per address, seeded here and fed
         // beside the drain.
-        let mut presence = RulePresence::open(&bus.session, &mut rules, spec.timeout).await?;
+        let mut presence =
+            RulePresence::open(&bus.session, bus.watch.as_ref(), &mut rules, spec.timeout).await?;
 
         // The `alert-firing` rules' readers too (#800, AC): subscribed and
         // seeded before the first window, drained beside it.
         let mut alarms = if rules.wants_alarms() {
-            RuleAlarms::open(Some(&bus.session), &rules, spec.timeout, spec.clocks_synced).await
+            RuleAlarms::open(
+                Some(&bus.session),
+                bus.watch.as_ref(),
+                &rules,
+                spec.timeout,
+                spec.clocks_synced,
+            )
+            .await
         } else {
             RuleAlarms::none()
         };
@@ -2148,8 +2188,10 @@ mod tests {
     }
 
     /// `instance-gone` on the live projection (#747), the poles of an exact
-    /// address: held is ok; its going under a complete read is firing,
-    /// worded as what this reader could see and naming it; absent from the
+    /// address: held is ok; its going is firing once the complete read it
+    /// owes shows none — heard withdrawn, what was last said stands (core
+    /// §8.1, 0.37) — worded as what this reader could see and naming it;
+    /// absent from the
     /// first complete read is firing from the start (the dead-man's
     /// switch); a read that ended at its timeout, and a `Dropped(n)`, are
     /// unobservable — never ok, never firing on their own; an evaluation
@@ -2169,6 +2211,12 @@ mod tests {
         );
         let t = p.token(&instance("host-a/tc", 1), false, at(2));
         w.fold(&t);
+        assert_eq!(
+            judge(&w, &p).state,
+            CondState::Ok,
+            "heard withdrawn: not gone until a read says so"
+        );
+        w.fold(&p.seed(&seed(&[], true), at(3)));
         let e = judge(&w, &p);
         assert_eq!(e.state, CondState::Firing);
         assert!(
@@ -2226,6 +2274,7 @@ mod tests {
         );
         let t = p.token(&instance("h2/tc", 2), false, at(2));
         w.fold(&t);
+        w.fold(&p.seed(&seed(&[instance("h1/tc", 1)], true), at(3)));
         let e = judge_instance_gone(Some(&w), Some(&p));
         assert_eq!(e.state, CondState::Firing);
         assert!(
@@ -2256,6 +2305,7 @@ mod tests {
         let state =
             |w: &AddressWatch, p: &LivePresence| judge_instance_gone(Some(w), Some(p)).state;
         w.fold(&p.token(&instance("h2/tc", 2), false, at(2)));
+        w.fold(&p.seed(&seed(&[instance("h1/tc", 1)], true), at(2)));
         assert_eq!(state(&w, &p), CondState::Firing);
         w.fold(&p.dropped(5, at(3)));
         assert_eq!(
@@ -2307,6 +2357,9 @@ mod tests {
         assert_eq!(to(&t, "instance-gone host-a/tc"), Some(CondState::Firing));
         assert_eq!(to(&t, "instance-gone host-a/*"), Some(CondState::Ok));
         rules.observe_presence(&p.token(&instance("host-a/gui", 1), false, at(2)));
+        // Heard withdrawn: a read is owed, and its answer decides.
+        assert!(p.awaits_read());
+        rules.observe_presence(&p.seed(&seed(&[], true), at(2)));
         let sweep = SweepOutcome {
             doctor: None,
             presence: Some(&p),

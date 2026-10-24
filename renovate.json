@@ -1,4 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>marcpardo/myserver//renovate/default"]
+  "extends": ["local>marcpardo/myserver//renovate/default"],
+  "packageRules": [
+    {
+      "description": "The #830 reproduction pins zenoh versions on purpose: its evidence is per version.",
+      "matchFileNames": ["docs/zk2/upstream/**"],
+      "enabled": false
+    }
+  ]
 }

@@ -327,7 +327,9 @@ where
     // rules read the live projection per address, as the watchdog's do,
     // through the deployment's session; with none, they read unobservable.
     let mut presence = match deployment {
-        Some(bus) => RulePresence::open(&bus.session, &mut rules, spec.timeout).await?,
+        Some(bus) => {
+            RulePresence::open(&bus.session, bus.watch.as_ref(), &mut rules, spec.timeout).await?
+        }
         None => None,
     };
     // The `alert-firing` rules' readers (#800, AC), as the watchdog's:
@@ -336,6 +338,7 @@ where
     let mut alarms = if rules.wants_alarms() {
         RuleAlarms::open(
             deployment.map(|b| &b.session),
+            deployment.and_then(|b| b.watch.as_ref()),
             &rules,
             spec.timeout,
             spec.clocks_synced,

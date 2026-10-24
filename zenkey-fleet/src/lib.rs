@@ -21,6 +21,18 @@
 //! attribution by the reply's own key), and every liveliness GET goes
 //! through [`bus::presence::liveliness_read`].
 //!
+//! **A watch session** (#830, core §8.1, 0.37). A liveliness GET from a
+//! session that holds a liveliness subscriber, history or not, can complete
+//! without a token that is live (zenoh 1.10.1 and main), so a reader that
+//! follows presence live holds its liveliness subscribers — a
+//! [`Monitor`]'s, an alarms or telemetry reader's — on a session of its own
+//! ([`DoctorBus::watch`]), and makes every read on the others. Every
+//! liveliness subscriber here is declared through
+//! `zenkey::presence::declare_subscriber`, which marks its session, and a
+//! read on a marked session is refused before anything is asked
+//! ([`Error::NotAsked`]); so is one through a session cut off from every
+//! other zenoh node ([`bus::presence::cut_off`]).
+//!
 //! **v1 left at FJ9** (#612). The registry slice sets, RFC 08 §6
 //! introspection, the v1 roster, the schema-aware decode seam, the v1
 //! judges (`why`, `cutover`, `retired`, `conform` and its registry checks)
@@ -66,9 +78,9 @@
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
 //!   [`bus::presence::liveliness_read`] in the same way, on the unbounded
-//!   handler spec §8.1 requires beside a liveliness subscriber
-//!   (zenoh#2678). This layer returns observations and never a verdict
-//!   about one.
+//!   handler spec §8.1 requires (zenoh#2678), and never on a watch session
+//!   or through a session cut off (core §8.1, 0.37). This layer returns
+//!   observations and never a verdict about one.
 //!
 //!   Its event sources are **`Stream`s** (#343), not only `recv` loops:
 //!   [`EventStream::into_stream`], [`SeededSubscriber`] (a direct impl),
@@ -91,7 +103,9 @@
 //!   `lens` (a raw observer's key resolved rung by rung, its payload
 //!   checked, its stamp attributed), `presence_live` (each address up, down
 //!   or unobservable, from a seed and the liveliness events after it, with
-//!   every move a value, #614), `presence_watch` (one watcher's reading of
+//!   every move a value, #614; down only on a complete read, never on a
+//!   withdrawal heard live, core §8.1, 0.37), `presence_watch` (one
+//!   watcher's reading of
 //!   it, held or gone per address a pattern matches: `instance-gone`'s in
 //!   zenctl and zenwatch alike, #747), `skeleton` (the declared keyspace a
 //!   tree starts from, merged with what was observed, #614 FL4), `identity`
@@ -301,14 +315,15 @@ pub use model::structural::{OBSERVE_LIMIT, structural, structural_value};
 // alone would read as the crate's.
 pub use bus::contracts::{BundleStore, DEFAULT_MAX_CONTRACTS, UNAVAILABLE_TTL};
 pub use bus::presence::{
-    DESCRIBE_CONCURRENCY, NAMESPACE_SELECTOR, Scope as PresenceScope,
+    DESCRIBE_CONCURRENCY, NAMESPACE_SELECTOR, Scope as PresenceScope, cut_off,
     describe as describe_instances, liveliness_read, namespace_listing,
-    observe as observe_presence, read_tokens, service_listing,
+    observe as observe_presence, read_tokens, refuse_beside, service_listing,
 };
 // Live presence, per address (#614, FL1): the session-free projection, and
 // the feed that seeds it and keeps it current from a monitor.
 pub use bus::presence::{
-    PresenceFeed, RESEED_BACKOFF, RESEED_BACKOFF_MAX, SeedOutcome, presence_selectors,
+    PresenceFeed, RESEED_BACKOFF, RESEED_BACKOFF_MAX, SeedOutcome, WITHDRAWAL_SETTLE,
+    presence_selectors,
 };
 pub use model::catalog::{
     Catalog, ContractSet, ContractState, Contracts, DescriptorRead, LoadProblem,
@@ -372,7 +387,7 @@ pub use judge::condition::{
 // reachable only by module path (#350) — which said nothing about whether it
 // was ours to use.
 pub use bus::teardown::DECLARE_TIMEOUT;
-pub use error::{BoxedCause, Error, Result, one_line};
+pub use error::{BoxedCause, Error, NotAsked, Result, one_line};
 pub use judge::field::DEFAULT_MAX_PATHS;
 // zk2's access control (spec §11, #612 FJ7): planned from an enrollment
 // and the contracts, checked against a router's config file, explained.
@@ -462,13 +477,13 @@ const _: () = {
     #[allow(dead_code)]
     fn presence_feed_futures_are_send(
         session: &zenoh::Session,
-        events: crate::EventStream,
+        monitor: &crate::Monitor,
         feed: &mut crate::PresenceFeed,
     ) {
         fn is_send<T: Send>(_: &T) {}
         is_send(&crate::PresenceFeed::open(
             session,
-            events,
+            monitor,
             crate::LivePresence::new(crate::PresenceScope::all()),
             std::time::Duration::ZERO,
         ));
@@ -525,6 +540,7 @@ const _: () = {
         // receive path's watch across awaits (#800, AC).
         is_send(&crate::run_alarms(
             session,
+            None,
             "",
             crate::AlarmScope::all(),
             crate::AlarmSpec::new(std::time::Duration::ZERO),
@@ -537,6 +553,7 @@ const _: () = {
         let offline = crate::ContractSet::new();
         is_send(&crate::run_telemetry(
             session,
+            None,
             "",
             crate::TelemetryScope::all(),
             &store,

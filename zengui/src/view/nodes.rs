@@ -192,11 +192,17 @@ fn presence_row<'a>(
     let status = match live.status {
         AddressStatus::Up => format!("since {since}"),
         AddressStatus::Down => format!("no instance token since {since}"),
-        // Why it is not down, said: a loss, or no complete seed behind it.
+        // Why it is not down, said: a loss, a read not made, a withdrawal
+        // heard and the read it owes not yet made, or no complete seed
+        // behind it (§8.1, 0.37).
         AddressStatus::Unobservable => match basis {
             PresenceBasis::Lost { .. } => {
                 "events lost since the last complete read — not down".to_string()
             }
+            PresenceBasis::CutOff => {
+                "no read made: this window reaches no router — not down (§8.1)".to_string()
+            }
+            _ if live.withdrawn => "heard withdrawn, awaiting a read — not down (§8.1)".to_string(),
             _ => "no complete read behind it — not down (§8.1)".to_string(),
         },
     };

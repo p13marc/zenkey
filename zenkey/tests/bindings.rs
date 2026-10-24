@@ -103,6 +103,9 @@ async fn s1_static_bindings_and_fan_in() {
     }
     let (found, at) = waiting.await.unwrap();
     assert!(found.is_some(), "the waiter found a provider");
+    // A presence wait reads; it holds no liveliness subscriber, so the
+    // session goes on reading presence (core §8.1, 0.37; #830).
+    assert!(!zenkey::presence::watching(&tracker_s));
     assert!(
         at.saturating_duration_since(first_up.unwrap()) < Duration::from_secs(1),
         "within one token propagation"

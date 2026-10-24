@@ -254,11 +254,19 @@ async fn run_triggered(
     // instance tokens, the lens a payload or a QoS is judged through — read
     // it through a session in its namespace, beside this one (#612, FJ6,
     // FJ8b).
+    // Its live presence readers hold their subscribers on a watch session
+    // of its own (#830).
     let deployment = if rules.iter().any(super::watchdog::reads_deployment) {
+        let watch = if rules.iter().any(super::watchdog::follows_presence) {
+            Some(dep.watch_session().await?)
+        } else {
+            None
+        };
         Some(DoctorBus {
             session: dep.session().await?,
             raw: session.clone(),
             namespace: dep.namespace().to_owned(),
+            watch,
         })
     } else {
         None

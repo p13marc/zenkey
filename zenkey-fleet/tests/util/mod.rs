@@ -74,6 +74,16 @@ pub async fn peer_pair() -> (zenoh::Session, zenoh::Session) {
     (listen, connect)
 }
 
+/// One more client of `listen` (a [`peer_pair`]'s listener): a reader's
+/// **watch session** (#830, core §8.1, 0.37), which holds its liveliness
+/// subscribers while its presence reads go through another session.
+pub async fn joining(listen: &zenoh::Session) -> zenoh::Session {
+    let endpoint = bound(listen).await;
+    zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
+        .await
+        .expect("watch session")
+}
+
 /// The same pair, with the listener **stamping what it publishes** — a fleet
 /// with `timestamping.enabled`, which the seed, stamper and `@adv` cache
 /// fixtures need (an AdvancedPublisher's sequencing is timestamp-based).

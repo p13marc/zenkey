@@ -9,8 +9,12 @@
 //!    crosses, the deployment's word stands for them: one owner, and the
 //!    contracts in hand (§2.14);
 //! 2. when the reader listens: a liveliness subscription to the owners'
-//!    instance and member tokens, then a subscription to each metric
-//!    resource's members, then a watch of this reader's own receive path
+//!    instance and member tokens, on a **watch session** of its own and
+//!    settled there (#830, core §8.1, 0.37: no presence read is made beside
+//!    a liveliness subscriber, and the settle orders the subscription
+//!    before the seed on the other session), then a subscription to each
+//!    metric resource's members, then a watch of this reader's own receive
+//!    path
 //!    ([`crate::bus::stall`], core §2.7). Every subscription calls back into
 //!    **one** bounded queue, so samples and token moves are folded in the one
 //!    order they were received, and what the queue refuses is counted: a
@@ -237,8 +241,10 @@ pub fn metric_resources(
 }
 
 /// One reading: [`observe`], then [`crate::judge::telemetry::judge`].
+#[allow(clippy::too_many_arguments)]
 pub async fn run_telemetry(
     session: &Session,
+    watch: Option<&Session>,
     namespace: &str,
     scope: TelemetryScope,
     store: &BundleStore,
@@ -246,16 +252,24 @@ pub async fn run_telemetry(
     spec: TelemetrySpec,
     listening: impl FnOnce(Opening) + Send,
 ) -> crate::report::TelemetryReport {
-    let obs = observe(session, namespace, scope, store, offline, spec, listening).await;
+    let obs = observe(
+        session, watch, namespace, scope, store, offline, spec, listening,
+    )
+    .await;
     crate::judge::telemetry::judge(&obs)
 }
 
 /// The reader of the module doc, over `spec.window`. `listening` runs once,
 /// when the window opens (step 4), and never when the reading ends before
 /// it: nothing in scope, or a read or a subscription that could not be
-/// made.
+/// made. Its presence subscription is held on `watch`, a session of its
+/// own (#830); with none, or `session` itself, the reading is
+/// unobservable, saying why, unless it runs across a face, where no
+/// presence is read.
+#[allow(clippy::too_many_arguments)]
 pub async fn observe(
     session: &Session,
+    watch: Option<&Session>,
     namespace: &str,
     scope: TelemetryScope,
     store: &BundleStore,
@@ -360,21 +374,34 @@ pub async fn observe(
     };
     let mut held = Vec::new();
     if !spec.across_face {
+        // On a watch session of its own (#830, core §8.1, 0.37): the seed
+        // below reads presence on `session`, which holds no liveliness
+        // subscriber.
+        let watch = match watch {
+            Some(w) if w.zid() != session.zid() => w.clone(),
+            _ => {
+                obs.unobservable = Some(
+                    "the presence subscription needs a watch session of its own: no presence \
+                     read is made beside a liveliness subscriber (#830, core §8.1)"
+                        .to_owned(),
+                );
+                return obs;
+            }
+        };
         let [instances, _alive, members] = presence_scope_selectors;
         for sel in [instances, members] {
             let q = queue.clone();
             let declared = crate::bus::teardown::declared(
                 "telemetry's presence tokens",
                 &sel,
-                session
-                    .liveliness()
-                    .declare_subscriber(sel.clone())
-                    .callback(move |s: Sample| {
+                zenkey::presence::declare_subscriber(&watch, sel.clone()).callback(
+                    move |s: Sample| {
                         q.send(Delivery::Token {
                             key: s.key_expr().as_str().to_owned(),
                             held: s.kind() == SampleKind::Put,
                         });
-                    }),
+                    },
+                ),
             )
             .await;
             match declared {
@@ -388,6 +415,19 @@ pub async fn observe(
                 }
             }
             obs.asked.push(sel);
+        }
+        // Its routers have read the subscriptions before the seed on the
+        // other session is answered (#830).
+        let first = obs.asked.last().cloned().unwrap_or_default();
+        if !zenkey::presence::settle(&watch, &first, t)
+            .await
+            .unwrap_or(false)
+        {
+            tracing::warn!(
+                selector = %first,
+                "telemetry's presence tokens did not settle: a withdrawal right after the seed \
+                 may not be told"
+            );
         }
     }
     for sel in &subscriptions {

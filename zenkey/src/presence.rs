@@ -13,7 +13,32 @@
 //! reaches its timeout with an error reply, `zenoh/string` `Timeout`, and
 //! one that the routers finished with no reply at all; any error reply
 //! leaves the read possibly incomplete (§8.1).
+//!
+//! **Two reads are not made** (core §8.1, 0.37), and each is refused with
+//! a typed error before anything is asked:
+//! - **beside a liveliness subscriber** (#830): on zenoh 1.10.1, and on
+//!   zenoh's main branch at 766b455, a liveliness GET from a session that
+//!   holds a liveliness subscriber, history or not, can complete without
+//!   tokens that are live. The session's router drops its answer for every
+//!   token already declared to the session for the subscriber, and the
+//!   session's own answer races it (Appendix B;
+//!   `docs/zk2/upstream/liveliness-get-misses-beside-liveliness-subscriber.md`).
+//!   So every liveliness subscriber the runtime and the fleet declare goes
+//!   through [`declare_subscriber`], which marks its session as a **watch
+//!   session** for the rest of its life (the router keeps those
+//!   declarations after the subscriber is undeclared), and [`liveliness_read`]
+//!   refuses a marked session: [`Error::ReadBesideSubscriber`]. A reader
+//!   holds its subscribers on a session of its own, and reads on another;
+//! - **through a session cut off** from every other zenoh node: zenoh
+//!   answers it at once, complete and empty, though nothing was asked of
+//!   anyone, so every owner would read absent. [`Error::CutOff`].
+//!
+//! [`settle`] is the one liveliness GET a watch session makes, and its
+//! answer is discarded: a barrier, so a reader knows its router has read the
+//! subscribers it declared before it reads presence on its other session.
 
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use zenkey_model::descriptor::{self, Descriptor};
@@ -49,11 +74,33 @@ pub async fn liveliness_keys(
 /// [`liveliness_keys`], saying whether the GET completed before `timeout`,
 /// with its error replies. A GET that runs to its timeout, or gets any
 /// error reply, is read as possibly incomplete (§8.1).
+///
+/// Refused before anything is asked (core §8.1, 0.37; see the module doc):
+/// on a session that holds a liveliness subscriber ([`watching`]),
+/// [`Error::ReadBesideSubscriber`]; through a session cut off from every
+/// other zenoh node ([`cut_off`]), [`Error::CutOff`].
 pub async fn liveliness_read(
     session: &zenoh::Session,
     selector: &str,
     timeout: Duration,
 ) -> Result<PresenceRead> {
+    if watching(session) {
+        return Err(Error::ReadBesideSubscriber {
+            selector: selector.to_owned(),
+            zid: session.zid().to_string(),
+        });
+    }
+    if cut_off(session).await {
+        return Err(Error::CutOff {
+            selector: selector.to_owned(),
+        });
+    }
+    get(session, selector, timeout).await
+}
+
+/// The GET itself, on the unbounded handler: [`liveliness_read`]'s, and the
+/// barrier's ([`settle`]).
+async fn get(session: &zenoh::Session, selector: &str, timeout: Duration) -> Result<PresenceRead> {
     let rx = session
         .liveliness()
         .get(selector)
@@ -83,6 +130,88 @@ pub async fn liveliness_read(
         complete,
         errors,
     })
+}
+
+// ─── watch sessions (#830) ──────────────────────────────────────────────────
+
+/// The zids of the sessions of this process that have declared a liveliness
+/// subscriber through [`declare_subscriber`]. A mark is never removed: the
+/// router keeps what it declared to a session for a subscriber after the
+/// subscriber is undeclared (zenoh 1.10.1's `unregister_interest` leaves
+/// the face's `local_tokens` as they are), so the hazard lasts as long as
+/// the session. A zid names one session, so one process's sessions never
+/// share a mark.
+///
+/// A panic elsewhere while the lock is held leaves the set as it was (an
+/// insert or a lookup), so a poisoned lock is read through, never fatal.
+fn watch_sessions() -> std::sync::MutexGuard<'static, HashSet<zenoh::session::ZenohId>> {
+    static MARKED: OnceLock<Mutex<HashSet<zenoh::session::ZenohId>>> = OnceLock::new();
+    MARKED
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Declares a liveliness subscriber on `session`, **marking it a watch
+/// session** for the rest of its life (#830, core §8.1, 0.37): every
+/// liveliness read on it is refused from now on
+/// ([`Error::ReadBesideSubscriber`]). The builder is zenoh's own, so a
+/// caller sets history, a callback or a handler as before.
+///
+/// The mark is made here, before the builder is awaited, so a declaration
+/// that fails or is never awaited marks the session too: conservative,
+/// since a read there is then refused and goes on a session of its own.
+///
+/// The one way the runtime and `zenkey-fleet` declare a liveliness
+/// subscriber: a declaration made around it would leave its session
+/// unmarked, and a read beside it unguarded.
+pub fn declare_subscriber<'a, 'b, K>(
+    session: &'a zenoh::Session,
+    key_expr: K,
+) -> zenoh::liveliness::LivelinessSubscriberBuilder<'a, 'b, zenoh::handlers::DefaultHandler>
+where
+    K: TryInto<zenoh::key_expr::KeyExpr<'b>>,
+    <K as TryInto<zenoh::key_expr::KeyExpr<'b>>>::Error: Into<zenoh::Error>,
+{
+    watch_sessions().insert(session.zid());
+    session.liveliness().declare_subscriber(key_expr)
+}
+
+/// Whether `session` is a watch session: it has declared a liveliness
+/// subscriber through [`declare_subscriber`], and makes no liveliness read
+/// (#830).
+#[must_use]
+pub fn watching(session: &zenoh::Session) -> bool {
+    watch_sessions().contains(&session.zid())
+}
+
+/// Whether `session` reaches no other zenoh node (core §8.1, 0.37): it holds
+/// no transport — a client that has lost its router, a peer or a router
+/// alone. zenoh answers a read through it at once, complete and empty,
+/// though nothing was asked of anyone (measured, #800 AD), so such a read
+/// is not complete, whatever its replies say.
+pub async fn cut_off(session: &zenoh::Session) -> bool {
+    session.info().transports().await.next().is_none()
+}
+
+/// A barrier for a watch session (#830): one liveliness GET of `selector`
+/// whose answer is discarded, made after the session declared its
+/// liveliness subscribers. zenoh orders one link's messages, so its routers'
+/// final reply comes after they read every declaration the session made
+/// before it: a token withdrawn from then on is told to the subscribers. A
+/// reader that seeds presence on **another** session settles the watch
+/// session first, since nothing orders two sessions' messages at their
+/// router. `selector` is one the reader may read, so access control does
+/// not refuse it.
+///
+/// Returns whether the routers' final reply came before `timeout`: `false`
+/// when the GET ran to its timeout, or when the session is cut off, and the
+/// barrier is then not established.
+pub async fn settle(session: &zenoh::Session, selector: &str, timeout: Duration) -> Result<bool> {
+    if cut_off(session).await {
+        return Ok(false);
+    }
+    Ok(get(session, selector, timeout).await?.complete)
 }
 
 /// The zk2 tokens matching `selector`, parsed (§1.1). Keys that are not
