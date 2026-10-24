@@ -9155,10 +9155,16 @@ implemented each 0.2 rule from the text before running the fixtures:
   is judged against the version last acted on or adopted, then the
   remembered ids, then the one held waiting.
 - **§2.7, every number by its exact value**: a payload's text read as
-  strict JSON with every non-integer number as the decimal its text
-  denotes, then compared structurally, members in any order, `int`,
-  `float` and `Decimal` by their exact values. RFC 8785's library is no
-  longer used for this.
+  strict JSON with every non-integer number as an `Exact`, a normalised
+  (sign, significant digits, exponent) form computed from its text, then
+  compared structurally, members in any order, an `int` and a `float`
+  normalised the same way. The cost is bounded by the numbers' texts,
+  never their exponents' values (review of PR #845: `Decimal` refused an
+  exponent past about 10^18 with `InvalidOperation`, which the reader did
+  not catch). An exponent past 25 digits, whose value's double is 0 or an
+  infinity, is kept as text, so one value written two ways there reads as
+  two, which costs an act. RFC 8785's library is no longer used for
+  this.
 - **§2.10, finite by rounding and at most 256 deep**, for a report and a
   document, counted as `telemetry.v1` counts it.
 - **§2.2, `not_string`**: `declare` takes the parameters' types and reads
@@ -9167,7 +9173,9 @@ implemented each 0.2 rule from the text before running the fixtures:
   without one; the descriptor is not read there.
 - **§3**: 0.2's id `sha256:43c95259…` published beside 0.1's.
 
-**`just py-conformance`: 2637 of 2637.** At the start of the round,
+**`just py-conformance`: 2652 of 2652** (2637 before review of PR
+#845 added 15 readings of exponents and of the finite edge). At the start
+of the round,
 round 52's code stopped the `desired` family with exit 2 at `order.json`'s
 new `text` input, which it did not read; its readings of F-163, F-166,
 F-168 and F-170 would have failed the cases 0.2 added for them.
@@ -9175,7 +9183,7 @@ F-168 and F-170 would have failed the cases 0.2 added for them.
 | Family | Before | After |
 |---|---|---|
 | desired | could not run (exit 2) | 341 of 341 |
-| readings | 246 of 246 | 261 of 261 |
+| readings | 246 of 246 | 276 of 276 |
 | the 21 others | 2035 of 2035 | 2035 of 2035 |
 
 The `desired` family's six files hold 258 cases: `schema.json` 3 (and
@@ -9185,8 +9193,13 @@ reports), `reports.json` 74, `conclusions.json` 35. Every count matches
 the CHANGELOG's. `order.json` case 72 fails with 15 ids remembered, so
 the memory's floor is pinned, and its ceiling is not, as the text says.
 
-The `readings` now hold 58 of `desired.v1`, fifteen new and three
-changed for 0.2: the archive's stale old-id version is older; the 17th id
+The `readings` now hold 73 of `desired.v1`. Fifteen were added on review
+of PR #845: exponents of 10^9, past 10^22 and of 100,000 digits, each
+compared in under half a second, a leading-zero exponent, `-0.0e5`, `1e2`
+against `100`, a 4301-digit integer, and the finite edge 2^1024 − 2^970
+written as an integer, with a fraction, as `1.7976931348623159e308` and
+as `-1e309`, each refused and its neighbour read. Of the rest, fifteen
+are new and three changed for 0.2: the archive's stale old-id version is older; the 17th id
 forgets the first, whose stale value is then acted on, the residual the
 text accepts; the 16 most recent are kept; a remembered id's latest time
 again is the same version; a restart forgets every id; `-0` and `0`,

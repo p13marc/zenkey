@@ -337,8 +337,8 @@ class Payload:
         as strict JSON … Any other payload, CBOR, protobuf or raw, and JSON
         that does not read, is equal byte for byte". Read as strict JSON as
         §2.10 reads (finite by rounding, at most 256 deep), every number by
-        its exact value (0.2): an integer as itself, any other number as the
-        decimal its text denotes."""
+        its exact value (0.2): an integer as itself, any other number as an
+        :class:`Exact`, the value its text denotes."""
         if json_encoded:
             try:
                 return cls(value=strict_json(data, exact=True))
@@ -350,15 +350,15 @@ class Payload:
 def _in_strict_domain(v: Any) -> bool:
     """Whether ``v`` is a value strict JSON reading can yield (§2.10, as
     :func:`strict_json` reads): null, a boolean, an integer, a finite float
-    or decimal, a string with a UTF-8 form, and arrays and objects of them,
+    or :class:`Exact`, a string with a UTF-8 form, and arrays and objects of them,
     every key a string with a UTF-8 form, at most 256 deep."""
     def walk(x: Any) -> bool:
         if x is None or isinstance(x, (bool, int)):
             return True
         if isinstance(x, float):
             return math.isfinite(x)
-        if isinstance(x, Decimal):
-            return x.is_finite() and math.isfinite(float(x))
+        if isinstance(x, Exact):
+            return math.isfinite(x.double)
         if isinstance(x, str):
             return _utf8(x)
         if isinstance(x, list):
@@ -373,16 +373,87 @@ def _in_strict_domain(v: Any) -> bool:
         return False
 
 
-_NUMBER = (int, float, Decimal)
+#: An exponent whose text, its leading zeros stripped, is longer than this
+#: is kept as text (``number_form``): beyond about 10^400 either way a
+#: value's double is 0 or an infinity, so no such exponent is arithmetic
+#: any reader needs, and comparing it as text keeps the cost to its length.
+_EXPONENT_DIGITS = 25
+
+_JSON_NUMBER = re.compile(r"(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?)([0-9]+))?")
+
+
+def _form(sign: int, digits: str, exponent: Any) -> tuple[int, str, Any]:
+    """(sign, significant digits, exponent), the value sign × digits ×
+    10^exponent, with no leading or trailing zero in ``digits``; zero is
+    ``(0, "", 0)``, whatever its sign. ``exponent`` is an int, or, kept as
+    text, ``(sign, text, adjustment)``."""
+    d = digits.lstrip("0")
+    if not d:
+        return (0, "", 0)
+    t = len(d) - len(d.rstrip("0"))
+    d = d[:len(d) - t] if t else d
+    if isinstance(exponent, tuple):
+        es, et, adj = exponent
+        return (sign, d, (es, et, adj + t))
+    return (sign, d, exponent + t)
+
+
+@dataclass(frozen=True)
+class Exact:
+    """A JSON number that is not an integer, read from its text for §2.7's
+    equality (0.2, F-166): its exact value as a normalised form, computed
+    from the text alone (so its cost is the text's length, never its
+    exponent's value), and its double, for §2.10's finiteness by rounding."""
+
+    form: tuple[int, str, Any]
+    double: float
+
+    @classmethod
+    def of_text(cls, text: str) -> Exact:
+        m = _JSON_NUMBER.fullmatch(text)
+        if m is None:  # the JSON parser hands only its own grammar here
+            raise NotStrict(f"no JSON number: {text[:40]!r}")
+        neg, whole, frac, esign, edigits = m.groups()
+        frac = frac or ""
+        sign = 1 if neg else 0
+        etext = (edigits or "0").lstrip("0") or "0"
+        if len(etext) > _EXPONENT_DIGITS:
+            exponent: Any = (esign == "-", etext, -len(frac))
+        else:
+            exponent = (-int(etext) if esign == "-" else int(etext)) - len(frac)
+        # float() of a number's text rounds to the nearest double, ties to
+        # even, in time linear in the text: an overflow is an infinity.
+        return cls(_form(sign, whole + frac, exponent), float(text))
+
+
+def number_form(x: Any) -> tuple[int, str, Any]:
+    """The exact value of a JSON number as ``_form`` writes it: an integer's
+    from its decimal digits (at most 4300, Python's own bound, and at most
+    309 for a finite one), a float's from its double's exact decimal (at
+    most about 1100 digits, the double's exponent being bounded), an
+    :class:`Exact`'s from its text."""
+    if isinstance(x, Exact):
+        return x.form
+    if isinstance(x, int):
+        return _form(1 if x < 0 else 0, str(abs(x)), 0)
+    t = Decimal(x).as_tuple()  # a finite double's exact value
+    return _form(t.sign, "".join(map(str, t.digits)), t.exponent)
+
+
+def _is_number(v: Any) -> bool:
+    return isinstance(v, (int, float, Exact)) and not isinstance(v, bool)
 
 
 def _exactly_equal(a: Any, b: Any) -> bool:
     """JSON values equal by value, a number's exactly (``10`` is ``10.0`` is
-    ``1e1``; a float is the exact value of its double, a decimal of its
-    text), a boolean never a number, members in any order. Python compares
-    ``int``, ``float`` and ``Decimal`` by their exact values."""
-    if isinstance(a, _NUMBER) and isinstance(b, _NUMBER) and not isinstance(a, bool) and not isinstance(b, bool):
-        return a == b
+    ``1e1``; a float is the exact value of its double, an :class:`Exact`
+    the value of its text), compared as normalised forms, so the cost is
+    bounded by the numbers' texts; a boolean never a number; members in any
+    order. Two exponents kept as text are equal only when their texts and
+    adjustments are: a value written two ways past 10^25 in its exponent
+    reads as two, which costs an act, never skips one (§2.7)."""
+    if _is_number(a) and _is_number(b):
+        return number_form(a) == number_form(b)
     if type(a) is not type(b):
         return False
     if isinstance(a, dict):
@@ -399,7 +470,8 @@ def jcs_equal(a: Any, b: Any) -> bool:
     integer beyond 2^53, such as 2^53 and 2^53 + 1, are two documents". JCS's
     other rules (members in any order, strings by their code points) are a
     structural comparison. A decoded document's float is its double; a
-    document read from its text (:meth:`Payload.of_bytes`) holds decimals.
+    document read from its text (:meth:`Payload.of_bytes`) holds
+    :class:`Exact` numbers.
 
     A value strict JSON reading cannot yield (a non-finite number, a string
     with no UTF-8 form, a key that is not a string, a value that is not
@@ -697,13 +769,16 @@ def _finite(v: Any) -> bool:
     """§2.10 (0.2, F-167): "Finite is by rounding, as telemetry.v1 §2.6
     reads it: a number's text, an integer's included, is finite when its
     exact value, rounded to the nearest double …, is not an infinity".
-    Python's ``float()`` rounds so, from an integer and from a decimal."""
+    Python's ``float()`` rounds so, ties to even: an integer past the edge
+    raises ``OverflowError``, and a number's text past it (an
+    :class:`Exact`'s, or a float's as ``json`` reads it) is an infinity, in
+    time linear in the text."""
     if isinstance(v, bool):
         return True
     if isinstance(v, float):
         return math.isfinite(v)
-    if isinstance(v, Decimal):
-        return v.is_finite() and math.isfinite(float(v))
+    if isinstance(v, Exact):
+        return math.isfinite(v.double)
     if isinstance(v, int):
         try:
             float(v)
@@ -735,10 +810,6 @@ def _no_constant(name: str) -> Any:
 MAX_DEPTH = 256
 
 
-def _decimal(text: str) -> Decimal:
-    return Decimal(text)
-
-
 def strict_json(payload: bytes, exact: bool = False) -> Any:
     """§2.10, "As alarms.v1 §2.4 reads a document: strict JSON first (UTF-8,
     RFC 8259, nothing after the value but whitespace, no duplicate member at
@@ -748,8 +819,8 @@ def strict_json(payload: bytes, exact: bool = False) -> Any:
     objects deep": one at depth 257 is not strict JSON. A value nested past
     Python's recursion limit is not read either, never a crash.
 
-    ``exact`` reads a number that is not an integer as the decimal its text
-    denotes, for §2.7's equality (0.2, F-166); otherwise as its double, as
+    ``exact`` reads a number that is not an integer as an :class:`Exact`,
+    its text's value, for §2.7's equality (0.2, F-166); otherwise as its double, as
     ``telemetry.v1`` §2.6 reads a float, which is how zk2py reads a report
     (F-181). An integer is exact either way. Raises :class:`NotStrict`."""
     try:
@@ -758,7 +829,7 @@ def strict_json(payload: bytes, exact: bool = False) -> Any:
         raise NotStrict(f"not UTF-8: {e}") from e
     try:
         value = json.loads(text.strip(" \t\n\r"), object_pairs_hook=_no_duplicates, parse_constant=_no_constant,
-                           **({"parse_float": _decimal} if exact else {}))
+                           **({"parse_float": Exact.of_text} if exact else {}))
         if not _utf8(value):
             raise NotStrict("a string with no UTF-8 form")
         if not _finite(value):
@@ -1042,6 +1113,10 @@ def sample_of(x: dict[str, Any]) -> Sample:
     elif "text" in x:
         # 0.2: "its text, read as strict JSON as reports.json reads a report
         # … or byte for byte when it does not read".
+        # surrogatepass keeps a lone surrogate in the text as its three bytes,
+        # which are no UTF-8, so strict JSON refuses them on purpose and the
+        # payload compares byte for byte, as §2.7 says of JSON that does not
+        # read.
         payload = Payload.of_bytes(x["text"].encode("utf-8", "surrogatepass"), True)
     else:
         payload = Payload(data=bytes.fromhex(x["bytes"]))

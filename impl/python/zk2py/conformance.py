@@ -2027,6 +2027,63 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
     out.append((f"{lab}: a boolean is never a number", ds.jcs_equal({"n": True}, {"n": 1}), False))
     out.append((f"{lab}: past 2^53 on both sides and otherwise equal, one document",
                 ds.jcs_equal({"revision": 2**64 - 1, "b": [1.5]}, {"b": [1.5], "revision": 2**64 - 1}), True))
+    lab = "desired.v1 0.2 §2.7, exact values in time bounded by the number's text (review of PR #845)"
+    import time
+
+    def timed(f: Any) -> tuple[Any, bool]:
+        t0 = time.perf_counter()
+        got = f()
+        return got, time.perf_counter() - t0 < 0.5
+
+    def j(text: str) -> Any:
+        return ds.Payload.of_bytes(text.encode(), True)
+
+    E = "9" * 100_000
+    out += [
+        (f"{lab}: 1e999999999 and 1e999999998 are not finite, so byte for byte: two, at once",
+         timed(lambda: ds.same_document(j('{"a":1e999999999}'), j('{"a":1e999999998}'))), (False, True)),
+        (f"{lab}: 1e-999999999 is finite (0.0) and reads; against 1e-999999998, two, at once",
+         timed(lambda: ds.same_document(j('{"a":1e-999999999}'), j('{"a":1e-999999998}'))), (False, True)),
+        (f"{lab}: 1e-999999999 against 0: two", ds.same_document(j('{"a":1e-999999999}'), j('{"a":0}')), False),
+        (f"{lab}: 10e-1000000000 and 1e-999999999 are one value, normalised, at once",
+         timed(lambda: ds.same_document(j('{"a":10e-1000000000}'), j('{"a":1e-999999999}'))), (True, True)),
+        (f"{lab}: an exponent past 10^22, which Python's decimal refuses, reads and compares by its text",
+         timed(lambda: ds.same_document(j('{"a":1e-99999999999999999999999}'), j('{"a":1e-99999999999999999999999}'))),
+         (True, True)),
+        (f"{lab}: a 100,000-digit exponent: the same text one value, at once",
+         timed(lambda: ds.same_document(j('{"a":1e-%s}' % E), j('{"a":1.0e-%s}' % E))), (True, True)),
+        (f"{lab}: a 100,000-digit exponent written another way: two, which costs an act, at once",
+         timed(lambda: ds.same_document(j('{"a":1e-%s}' % E), j('{"a":10e-%s}' % (E[:-1] + "8")))), (False, True)),
+        (f"{lab}: an exponent's leading zeros carry nothing: 1e-0000000000000000000000000000001 is 0.1",
+         ds.same_document(j('{"a":1e-0000000000000000000000000000001}'), j('{"a":0.1}')), True),
+        (f"{lab}: -0.0e5 is 0", ds.same_document(j('{"a":-0.0e5}'), j('{"a":0}')), True),
+        (f"{lab}: 1e2 against the integer 100: one", ds.same_document(j('{"a":1e2}'), j('{"a":100}')), True),
+        (f"{lab}: an integer of 4301 digits does not read (Python's bound, far past the double's)",
+         ds.same_document(j('{"a":%s}' % ("1" * 4301)), j('{"a":%s}' % ("1" * 4300 + "2"))), False),
+    ]
+    edge = 2**1024 - 2**970
+    lab = "desired.v1 0.2 §2.10, finite by rounding at the edge, 2^1024 - 2^970 (review of PR #845)"
+
+    def reads(text: str) -> bool:
+        try:
+            ds.strict_json(text.encode())
+            exact = True
+            ds.strict_json(text.encode(), exact=True)
+        except ds.NotStrict:
+            return False
+        return exact
+
+    out += [
+        (f"{lab}: the edge written as an integer is not finite, one below it is",
+         [reads(str(edge)), reads(str(edge - 1))], [False, True]),
+        (f"{lab}: the edge written with a fraction is not finite, one below it is",
+         [reads(str(edge) + ".0"), reads(str(edge - 1) + ".0")], [False, True]),
+        (f"{lab}: 1.7976931348623159e308 is not, 1.7976931348623158e308 is",
+         [reads("1.7976931348623159e308"), reads("1.7976931348623158e308")], [False, True]),
+        (f"{lab}: -1e309 is not, 1e-99999999999999999999999 is (0.0), in a report too",
+         [reads("-1e309"), reads("1e-99999999999999999999999"),
+          ds.read_report_bytes(b'{"source":"baseline","x":1e-99999999999999999999999}').readable], [False, True, True]),
+    ]
     lab = "desired.v1 0.2 §2.7: a value strict JSON cannot yield equals nothing, itself included"
     inf, nan = float("inf"), float("nan")
     out += [
@@ -2044,7 +2101,6 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
                 run([put(100, 0xa1, {"revision": 2**53}), "done", put(200, 0xa1, {"revision": 2**53 + 1})])[0],
                 ["act", "done", "act"]))
     lab = "desired.v1 0.2 §2.7: a JSON payload's bytes read as strict JSON, exactly, else compared byte for byte"
-    j = lambda text: ds.Payload.of_bytes(text.encode(), True)  # noqa: E731
     out += [
         (f"{lab}: members in another order and 10.0 for 10 are one document",
          ds.same_document(j('{"rate_hz": 10, "mode": "run"}'), j('{"mode":"run","rate_hz":10.0}')), True),
