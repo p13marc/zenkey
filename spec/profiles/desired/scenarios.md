@@ -97,9 +97,12 @@ reference tool runs it as a test of zenctl (`zenctl/tests/live_zk2.rs`,
   `zenkey/examples/owner.rs` run with `--desired`, and `owner --help` is
   the interface a black-box runner drives, as for `alarms.v1`.
 
-## §1 Converge after an outage (§2.5, §2.6, §2.10)
+## §1 Converge after an outage (§2.5, §2.6, §2.10, §2.15)
 
-**Setup.** The author on R1, the target on R2, the link up.
+**Setup.** The author on R1, the target on R2, the link up. The author
+holds `tasking.v1` in its tokenless set (core §8.1): it holds no
+`alive/tasking.v1/…` token, and its descriptor marks the interface
+`"token": false`.
 
 **Steps.**
 1. The author starts with no document. The target starts. G GETs `Rp`
@@ -119,6 +122,8 @@ reference tool runs it as a test of zenctl (`zenctl/tests/live_zk2.rs`,
 4. The target sees the author's instance token appear again, seeds (core
    §4.2), and acts on v2 (§2.5, §2.6): its report is converged on v2
    within 5 s of the heal (spike S12: 1.4 to 1.6 s). It acted on v2 once.
+   At no step did the target wait on an interface token of the author's,
+   which never appeared (§2.15).
 
 ## §2 Never an older version (§2.6, §2.7)
 
