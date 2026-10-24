@@ -148,8 +148,10 @@ class Author:
         #: until a put or a delete of the target replaces them
         self.carried: dict[str, dict[str, dict[str, Any]]] = {"documents": {}, "deletes": {}}
         self.adoption = {"found": "nothing", "reput": [], "redeleted": [], "expired": [], "failed": []}
-        #: the state GETs its queryables received (scenarios.md §8)
+        #: the state GETs its queryables received (scenarios.md §8), and each
+        #: one's selector (``desired gets``, 0.4)
         self.queries = 0
+        self.selectors: list[str] = []
         self.lock = threading.Lock()
         self.owner: Owner | None = None
 
@@ -162,6 +164,7 @@ class Author:
         def counted(query: Any) -> None:
             with self.lock:
                 self.queries += 1
+                self.selectors.append(str(query.key_expr))
             owner.answer_state(query, owner.state_answer(query))
 
         owner.state_hold = counted
@@ -170,6 +173,22 @@ class Author:
 
     def key(self, target: str) -> str:
         return slice_key(self.address, target)
+
+    def gets(self, target: str) -> tuple[str, int]:
+        """scenarios.md (0.4, F-197): "an author how many GETs reached a
+        target's slice": the state GETs its queryables answered whose
+        selector reaches ``target``'s document key. ``target`` must be
+        ``<system>/<service>``, two plain chunks (core §1.1): anything else
+        raises ``ValueError``, never a key slugged from it."""
+        from .lexical import is_plain_chunk
+
+        parts = target.split("/") if isinstance(target, str) else []
+        if len(parts) != 2 or not all(is_plain_chunk(x) for x in parts):
+            raise ValueError(f"{target!r} is no <system>/<service> of two plain chunks")
+        key = zenoh.KeyExpr(self.key(target))
+        with self.lock:
+            sels = list(self.selectors)
+        return str(key), sum(1 for x in sels if zenoh.KeyExpr(x).intersects(key))
 
     def _key_of(self, target: str) -> str | None:
         """A record's target name as its key, or None for one that names no
@@ -346,20 +365,9 @@ class Author:
 # -- the target ---------------------------------------------------------------------------
 
 def schema_pointer(doc: Any, schema: dict[str, Any], root: dict[str, Any]) -> str | None:
-    """Where a JSON Schema refuses a decoded document (§2.7, 0.3: "its
-    pointer is where the schema refuses it"), or None when it accepts it:
-    a member's own schema at ``/<member>``; a missing required member, or a
-    value that is no object, at the object itself, ``""`` (F-192)."""
-    while "$ref" in schema and len(schema) == 1:
-        schema = alarms._resolve(root, schema["$ref"])
-    if alarms.validate(doc, schema, root):
-        return None
-    if not isinstance(doc, dict):
-        return ""
-    for name, sub in (schema.get("properties") or {}).items():
-        if name in doc and not alarms.validate(doc[name], sub, root):
-            return "/" + name.replace("~", "~0").replace("/", "~1")
-    return ""
+    """Where a JSON Schema refuses a decoded document, or None when it
+    accepts it: §2.7's rules (0.4, F-193), :func:`desired.refusal_pointer`."""
+    return desired.refusal_pointer(doc, schema, root)
 
 
 class Target:
@@ -389,6 +397,11 @@ class Target:
         self.seeds = 0
         #: what each seed found: "answered", "silent", "archive", "not made"
         self.seed_log: list[str] = []
+        #: §2.5's "a target says so where it says what its seed found" (0.4,
+        #: F-197): the last seed's replies, its author's presence (read when
+        #: the GET drew nothing and it decides the archive or a retry), and
+        #: its archive read
+        self.last_seed: dict[str, Any] | None = None
         self._hold_next = hold
         self._release = threading.Event()
         self.held = False
@@ -480,8 +493,21 @@ class Target:
 
     def author_absent(self) -> bool:
         """§2.5 (0.3, F-187): "a complete read without its instance token"."""
+        return self.author_presence()[0] == "absent"
+
+    def author_presence(self) -> tuple[str, str]:
+        """The author's presence, by one read (core §8.1, 0.37, 0.38):
+        ``present``, ``absent`` (a complete read without its token),
+        ``incomplete`` (possibly incomplete, a read cut off while it ran
+        among them) or ``not-made``, each with why where there is one."""
         p = self.presence()
-        return p.kind == live.COMPLETE and not p.instances
+        if p.kind == live.NOT_MADE:
+            return "not-made", p.not_made or ""
+        if p.instances:
+            return "present", ""  # a read cannot invent a token
+        if p.kind == live.COMPLETE:
+            return "absent", ""
+        return "incomplete", p.reading
 
     def _reread_loop(self) -> None:
         while self.reread_s is not None and not self._stop.wait(self.reread_s):
@@ -524,23 +550,33 @@ class Target:
             return "unbound"  # closed while it waited
         self.seeds += 1
         tries = 5 if appearance else 1
+        seen: tuple[str, str] = ("not-read", "")
         for n in range(tries):
             st = live.get_state(self.owner.session, self.key, self.timeout)
             if st.replies:
                 for r in st.replies:
                     self._receive(_sample(desired.OWNER, r.deleted, r.stamp, r.payload))
                 self.seed_log.append("answered")
+                self.last_seed = {"answered": len(st.replies), "author": "not-read", "archive": "-", "why": ""}
                 return "answered"
             if n + 1 < tries:
-                if self.author_absent():
+                seen = self.author_presence()
+                if seen[0] == "absent":
                     break
                 time.sleep(0.1 * (n + 1))
-        if self.archive is not None and self.author_absent():
-            form = alarms.archive_form(self.archive, self.key)
-            st = live.get_state(self.owner.session, form, self.timeout)
-            for r in st.replies:
-                self._receive(_sample(desired.ARCHIVE, r.deleted, r.stamp, r.payload))
-            self.seed_log.append("archive" if st.replies else "silent")
+        archive = "-"
+        if self.archive is not None:
+            if seen[0] != "absent":
+                seen = self.author_presence()
+            if seen[0] == "absent":
+                form = alarms.archive_form(self.archive, self.key)
+                st = live.get_state(self.owner.session, form, self.timeout)
+                for r in st.replies:
+                    self._receive(_sample(desired.ARCHIVE, r.deleted, r.stamp, r.payload))
+                archive = "answered" if st.replies else "nothing"
+        self.last_seed = {"answered": 0, "author": seen[0], "archive": archive, "why": seen[1]}
+        if archive != "-":
+            self.seed_log.append("archive" if archive == "answered" else "silent")
             return "archive"
         self.seed_log.append("silent")
         return "silent"

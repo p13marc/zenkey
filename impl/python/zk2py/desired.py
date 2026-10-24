@@ -1230,6 +1230,76 @@ def reading_of(x: dict[str, Any]) -> Reading:
                    None if w is None else (bool(w["lists"]), bool(w["bound"])))
 
 
+# -- §2.7 where a refusal points (0.4, F-193) -------------------------------------------------------
+
+def _escape(name: str) -> str:
+    return name.replace("~", "~0").replace("/", "~1")
+
+
+def refusal_pointer(value: Any, schema: Any, root: dict[str, Any], at: str = "") -> str | None:
+    """§2.7 (0.4, F-193): where a JSON Schema (core §7.3) refuses a decoded
+    document, "as JSON Schema's output places an error, "" being the
+    document itself", or None when it satisfies it:
+    - "a keyword of a member's own schema that refuses the member (its
+      type, its enum, its bounds) points at the member";
+    - "a required member that is missing points at the object that holds
+      it";
+    - "a value of the wrong type points at that value".
+
+    "A document the schema refuses in more than one place is refused at one
+    of them, the target's choice": the first member refused, in the
+    document's order, then the object itself. Numbers are read by their
+    exact values (:func:`exact_json`) before."""
+    from . import alarms
+
+    if alarms.validate(value, schema, root):
+        return None
+    if not isinstance(schema, dict):
+        return at
+    if "$ref" in schema:
+        inner = refusal_pointer(value, alarms._resolve(root, schema["$ref"]), root, at)
+        if inner is not None:
+            return inner
+        schema = {k: v for k, v in schema.items() if k != "$ref"}
+        if alarms.validate(value, schema, root):
+            return at
+    if "type" in schema:
+        types = [schema["type"]] if isinstance(schema["type"], str) else schema["type"]
+        if not any(alarms._is_type(value, t) for t in types):
+            return at
+    if isinstance(value, dict):
+        props = schema.get("properties", {})
+        for k, x in value.items():
+            sub = props[k] if k in props else schema.get("additionalProperties", True)
+            inner = refusal_pointer(x, sub, root, f"{at}/{_escape(k)}")
+            if inner is not None:
+                return inner
+    elif isinstance(value, list):
+        prefix = schema.get("prefixItems", [])
+        for i, x in enumerate(value):
+            sub = prefix[i] if i < len(prefix) else schema.get("items", True)
+            inner = refusal_pointer(x, sub, root, f"{at}/{i}")
+            if inner is not None:
+                return inner
+    # a required member missing, an enum, a bound or a count: at the value
+    return at
+
+
+def check_finish(v: Any, schema: dict[str, Any]) -> Finish:
+    """order.json's ``{"finish": "check"}`` (0.4, F-193): the running act's
+    put ends as its type's JSON Schema, ``$defs.Task`` of ``schema``, judges
+    its document: done when it satisfies it, else refused whole, ``invalid``
+    at :func:`refusal_pointer`'s pointer, with no detail. A payload that does
+    not decode is ``undecodable`` (§2.7)."""
+    if v is None or v.delete or v.payload is None:
+        return Finish(DONE)
+    if v.payload.value is None and v.payload.data is not None:
+        return Finish(REFUSED, {"code": "undecodable"})
+    doc = exact_json(v.payload.value)
+    ptr = refusal_pointer(doc, schema["$defs"]["Task"], schema)
+    return Finish(DONE) if ptr is None else Finish(REFUSED, {"code": "invalid", "pointer": ptr})
+
+
 # -- order.json's steps --------------------------------------------------------------------------
 
 def sample_of(x: dict[str, Any]) -> Sample:
@@ -1254,9 +1324,11 @@ def sample_of(x: dict[str, Any]) -> Sample:
     return Sample(x["from"], False, stamp, payload, None if rev is None else int(rev))
 
 
-def run_steps(key: str | None, steps: list[dict[str, Any]]) -> tuple[list[str], dict[str, Any]]:
+def run_steps(key: str | None, steps: list[dict[str, Any]],
+              schema: dict[str, Any] | None = None) -> tuple[list[str], dict[str, Any]]:
     """order.json: one role's steps -> each step's word, and the report after
-    the last."""
+    the last. ``schema`` is the file's top-level one, which a
+    ``{"finish": "check"}`` judges by (0.4)."""
     t = TargetRole(key)
     words: list[str] = []
     for s in steps:
@@ -1266,6 +1338,10 @@ def run_steps(key: str | None, steps: list[dict[str, Any]]) -> tuple[list[str], 
             f = s["finish"]
             if f == "done":
                 words.append(t.finish(Finish(DONE)))
+            elif f == "check":
+                if schema is None:
+                    raise ValueError("a check step with no schema in the file")
+                words.append(t.finish(check_finish(t.current, schema)))
             else:
                 (how, refusal), = f.items()
                 words.append(t.finish(Finish(how, refusal)))

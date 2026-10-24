@@ -1011,12 +1011,13 @@ def _desired_order(path: Path) -> list[Result]:
     from . import desired as ds
 
     out: list[Result] = []
-    for i, c in enumerate(_load_json(path)["cases"]):
+    data = _load_json(path)
+    for i, c in enumerate(data["cases"]):
         name = f"order #{i}: {c['note']}"
         if len(c["steps"]) != len(c["expect"]["steps"]):
             out.append((name, False, "the case's steps and expected words differ in number"))
             continue
-        words, report = ds.run_steps(c["key"], c["steps"])
+        words, report = ds.run_steps(c["key"], c["steps"], data.get("schema"))
         out.append(_check(name, {"steps": words, "report": report}, c["expect"]))
         out.append(_check(f"{name} (its report reads, with no finding)", ds.read_report(report).expect(),
                           {"readable": True, "errors": []}))
@@ -2338,7 +2339,102 @@ def _presence_view() -> list[tuple[str, Any, Any]]:
           live.Presence(complete=True).kind, live.Presence().kind,
           live.Presence(complete=False, cut_off_during=True).kind],
          [live.NOT_MADE, live.NOT_MADE, live.COMPLETE, live.POSSIBLY_INCOMPLETE, live.POSSIBLY_INCOMPLETE]),
-    ] + _live_guards() + _redundancy_readings()
+    ] + _live_guards() + _redundancy_readings() + _desired_tool_readings()
+
+
+def _desired_tool_readings() -> list[tuple[str, Any, Any]]:
+    """desired.v1 0.4's tool rules, pure: §2.10's "Which reply is the
+    report" over a target's report replies, and §2.17's slice taken from
+    the target alone (zk2py.desired_tool)."""
+    import json as _json
+
+    from . import desired as ds, desired_tool as dt
+
+    key = "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+
+    def rep(stamp: str, k: str = key) -> bytes:
+        return _json.dumps({"key": k, "source": "desired", "in_force": {"stamp": stamp},
+                            "observed": {"stamp": stamp}, "outcome": "converged"}).encode()
+
+    def pick(*payloads: bytes) -> Any:
+        r = dt.pick_report([(f"r{i}", x) for i, x in enumerate(payloads)], key)
+        return None if r is None else (r.readable and not r.errors, (r.report or {}).get("in_force"))
+
+    other = "zk2/lab/author/tasking.v1/state/tasks/lab/other"
+    label = "desired.v1 0.4 §2.10, which reply is the report"
+    req = {"role": "task", "interface": "tasking.v1", "bindings": ["lab/author"],
+           "params": {"system": "self.system", "service": "self.service"}, "optional": True}
+    out = [
+        (f"{label}: the readable one whose key is the slice's", pick(rep("1/a"), rep("2/a", other)),
+         (True, {"stamp": "1/a"})),
+        (f"{label}: two readable ones that claim it and differ: unreadable", pick(rep("1/a"), rep("2/a")),
+         (False, None)),
+        (f"{label}: the same report twice is one", pick(rep("1/a"), rep("1/a")), (True, {"stamp": "1/a"})),
+        (f"{label}: none readable claiming it, one that does not read: unreadable", pick(b"{x", rep("2/a", other)),
+         (False, None)),
+        (f"{label}: a readable one claiming it beside one that does not read: the report",
+         pick(b"{x", rep("1/a")), (True, {"stamp": "1/a"})),
+        (f"{label}: none claiming it, every one readable: none read", pick(rep("2/a", other)), None),
+    ]
+    label = "desired.v1 0.4 §2.17, the slice from the target alone"
+    for name, r, explicit, want in (
+            ("its requirement's template, each parameter its binding's self", req, False, (ds.BOUND, key)),
+            ("the kind token its report's key carries, @state", req, True,
+             (ds.BOUND, key.replace("/state/", "/@state/"))),
+            ("a parameter its binding leaves unbound: no slice, target_unbound",
+             {**req, "params": {"system": "self.system"}}, False, (ds.INVALID, None))):
+        b = dt._slice_from_requirement("lab/worker", r, "tasks/{system}/{service}", "lab/author", "tasking.v1",
+                                       explicit)
+        out.append((f"{label}: {name}", (b.binding, b.key), want))
+    out += _desired_window_readings()
+    return out
+
+
+def _desired_window_readings() -> list[tuple[str, Any, Any]]:
+    """desired.v1 0.4 §2.17 "How long behind", over zk2py.desired_tool.watch
+    fed readings of its own (F-211: "every reading over the window; any
+    other answer starts it again"; on a trusted clock, one reading)."""
+    import time as _time
+
+    from . import desired as ds, desired_tool as dt
+
+    def row(answer: str, stamp: str | None) -> Any:
+        a = {q: ds.Answer(answer if q == ds.Q_CONVERGED else ds.NO, "behind" if answer == ds.NOT_YET else "x")
+             for q in ds.QUESTIONS}
+        r = ds.Reading(ds.PRESENT, (True, True), None, "not_asked", ds.PRESENT, None)
+        return dt.Row("lab/worker", "task", "bound", r, a, author_stamp=stamp)
+
+    def run(seq: list[tuple[str, str | None]], for_s: float, clocks: bool = False) -> Any:
+        it = iter(seq)
+        last = [seq[-1]]
+
+        def reader(*_: Any, **__: Any) -> list[Any]:
+            try:
+                last[0] = next(it)
+            except StopIteration:
+                pass
+            return [row(*last[0])]
+
+        return dt.watch(None, "lab/worker", for_s, "task", every_s=0.01, reader=reader,  # type: ignore[arg-type]
+                        clocks_synced=clocks).behind
+
+    now_ntp = int(_time.time() * 2 ** 32)
+    old = f"{now_ntp - 10 * 2 ** 32}/a1"  # stamped 10 s ago
+    new = f"{now_ntp}/a1"
+    nyt, yes = ds.NOT_YET, ds.YES
+    label = "desired.v1 0.4 §2.17, how long behind (F-211)"
+    return [
+        (f"{label}: not yet on one version over the whole window: behind, by the window",
+         run([(nyt, new)] * 50, 0.05), {"task": (new, "window")}),
+        (f"{label}: a later reading converged clears it", run([(nyt, old)] * 3 + [(yes, old)] * 50, 0.05,
+                                                               clocks=True), {}),
+        (f"{label}: a later reading of another answer starts the window again",
+         run([(nyt, new)] * 3 + [(ds.UNOBSERVABLE, new)] + [(nyt, new)] * 2, 0.04), {}),
+        (f"{label}: another version starts it again", run([(nyt, new)] * 3 + [(nyt, old)] * 2, 0.04), {}),
+        (f"{label}: on a trusted clock, one reading finds a version stamped longer ago than the window",
+         run([(nyt, old)], 0.0, clocks=True), {"task": (old, "clock")}),
+        (f"{label}: without one, a single reading never does", run([(nyt, old)], 0.0), {}),
+    ]
 
 
 def _redundancy_readings() -> list[tuple[str, Any, Any]]:
