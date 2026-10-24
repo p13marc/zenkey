@@ -29,7 +29,11 @@
 //! declares them, as `config.v1` §2.3 makes a MUST ([`crate::config_v1`]);
 //! one implementing `alarms.v1` through [`ServiceBuilder::alarms`] adopts
 //! its previous instance's alarms there, putting each again before
-//! anything is alive (`alarms.v1` §2.9, [`crate::alarms`]).
+//! anything is alive (`alarms.v1` §2.9, [`crate::alarms`]); an author of
+//! `desired.v1` documents through [`ServiceBuilder::desired_author`] puts
+//! again there what its record keeps (`desired.v1` §2.11), and a target
+//! through [`ServiceBuilder::desired_target`] puts its baseline report
+//! there, then reads from step 4 on, after the tokens ([`crate::desired`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
