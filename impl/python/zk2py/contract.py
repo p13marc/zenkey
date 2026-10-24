@@ -59,15 +59,18 @@ PUBLISHED_VOCABULARY = {
     # profiles/telemetry/v1.md §4 (core 0.35): the interim row's four keys,
     # published; W105 reads them as before.
     "telemetry": {"kind", "unit", "buckets", "semantic"},
+    # profiles/desired/v1.md §4 (core 0.36): target_param alone. The interim
+    # desired.target is retired: R2's binding already says which identity
+    # fills each target parameter, so desired.target draws W105.
+    "desired": {"target_param"},
 }
 
 #: Appendix D, interim annotation vocabularies (W105 outside them, until each
-#: profile publishes its own). freshness's, link's, alarms's and telemetry's
-#: rows moved to the published table.
+#: profile publishes its own). freshness's, link's, alarms's, telemetry's and
+#: desired's rows moved to the published table.
 INTERIM_VOCABULARY = {
     "timing": {"period_ms", "deadline_ms", "lifespan_ms"},
     "arbitration": {"policy"},
-    "desired": {"target_param", "target"},
     "media": {"tiers", "tier_param", "frame_clock", "control", "receiver_report"},
     "views": {"document"},
     "redundancy": {"election"},
