@@ -113,6 +113,19 @@ const CONFIG_CHECKS: [CheckId; 4] = [
 /// The checks that read `alarms.v1` (#800, AC).
 const ALARM_CHECKS: [CheckId; 2] = [CheckId::AlarmKey, CheckId::AlarmStale];
 
+/// The checks that read `desired.v1` (#840, DD).
+const DESIRED_CHECKS: [CheckId; 3] = [
+    CheckId::DesiredRefused,
+    CheckId::DesiredBehind,
+    CheckId::DesiredLastKnown,
+];
+
+/// How long a target may be behind a version its author stamped before
+/// `desired-behind` finds it, by default: past spike S12's 1.6 s to
+/// converge after a heal by far, and short of a deployment's re-read period
+/// across a face, which a longer bound suits (`--desired-behind`).
+pub const DEFAULT_DESIRED_BEHIND: Duration = Duration::from_secs(60);
+
 /// What a doctor run asks.
 #[derive(Debug, Clone)]
 pub struct DoctorSpec {
@@ -141,6 +154,10 @@ pub struct DoctorSpec {
     /// without it a status reply's age is unobservable, and so are the
     /// `health-*` checks of every service implementing `health.v1`.
     pub clocks_synced: bool,
+    /// How long a `desired.v1` target may be "not yet" on a version its
+    /// author stamped, by a clock trusted to the HLC delta, before
+    /// `desired-behind` finds it (§2.17, text 0.4; #840).
+    pub desired_behind: Duration,
 }
 
 impl DoctorSpec {
@@ -154,7 +171,14 @@ impl DoctorSpec {
             checks: CheckId::ALL.into_iter().collect(),
             trust_admin: false,
             clocks_synced: false,
+            desired_behind: DEFAULT_DESIRED_BEHIND,
         }
+    }
+
+    /// Whether the run asks a `desired.v1` check, which reads every
+    /// target's reports and each slice from its author (#840, DD).
+    fn asks_desired(&self) -> bool {
+        DESIRED_CHECKS.into_iter().any(|c| self.asks(c))
     }
 
     /// Whether the run asks a `health.v1` check, which reads every owner's
@@ -264,6 +288,11 @@ pub struct DoctorObservation {
     /// `alarms.v1/state/alarms/*`, with the second presence read. `None`
     /// when no `alarm-*` check was asked.
     pub alarms: Option<Result<crate::model::alarms::SeedRead, String>>,
+    /// `desired.v1`'s reading (#840, DD): every target's roles over the
+    /// second presence read and the revisions retrieved, its reports and
+    /// each slice from its author. `None` when no `desired-*` check was
+    /// asked.
+    pub desired: Option<crate::model::desired::DesiredRead>,
 }
 
 /// The routers' admin space, as two reads found it.
@@ -495,6 +524,7 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
         health: p.health,
         config: p.config,
         alarms: p.alarms,
+        desired: p.desired,
     }
 }
 
@@ -509,6 +539,7 @@ struct PresencePhase {
     health: Vec<Result<HealthGet, String>>,
     config: Vec<Result<ConfigGet, String>>,
     alarms: Option<Result<crate::model::alarms::SeedRead, String>>,
+    desired: Option<crate::model::desired::DesiredRead>,
 }
 
 async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> PresencePhase {
@@ -669,6 +700,28 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
     );
     readings.extend(second);
     config_readings.extend(second_config);
+    // desired.v1 (#840, DD): over this presence read and these revisions,
+    // nothing read again but the targets' reports and the slices.
+    let desired = if spec.asks_desired() {
+        let mut ds = crate::bus::desired::DesiredSpec::new(t);
+        ds.clocks_synced = spec.clocks_synced;
+        // No check reads an archive's last-known: its presence read would
+        // cost a third.
+        ds.archives = false;
+        Some(
+            crate::bus::desired::observe_in(
+                s,
+                observed.clone(),
+                contracts.clone(),
+                &ds,
+                store,
+                &crate::model::catalog::ContractSet::new(),
+            )
+            .await,
+        )
+    } else {
+        None
+    };
     PresencePhase {
         before,
         after: Some(after),
@@ -678,6 +731,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         health: readings,
         config: config_readings,
         alarms,
+        desired,
     }
 }
 
@@ -1144,6 +1198,9 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::AlarmStale => alarm_stale(p, spec),
                 CheckId::TelemetryDeclaration => telemetry_declaration(p),
                 CheckId::TelemetrySample => telemetry_sample(p),
+                CheckId::DesiredRefused => desired_refused(p, spec),
+                CheckId::DesiredBehind => desired_behind(p, spec),
+                CheckId::DesiredLastKnown => desired_last_known(p, spec),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -3604,6 +3661,154 @@ fn config_desired(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
     )
 }
 
+/// The run's `desired.v1` rows (#840, DD), judged as `zenctl desired`
+/// judges a reading: the doctor's one reading, its window the bound, so a
+/// target is found behind by a trusted clock alone, never by one reading.
+fn desired_rows(
+    p: &Presence<'_>,
+    spec: &DoctorSpec,
+) -> Result<Vec<crate::report::DesiredRow>, String> {
+    let Some(read) = &p.obs.desired else {
+        return Err("desired.v1 was not read".to_owned());
+    };
+    if let Some(why) = &read.cut_off {
+        return Err(format!("desired.v1 was not read: {why}"));
+    }
+    let mut ds = crate::bus::desired::DesiredSpec::new(spec.timeout);
+    ds.window = Some(spec.desired_behind);
+    ds.clocks_synced = spec.clocks_synced;
+    let mut behind = crate::model::desired::Behind::default();
+    Ok(crate::judge::desired::judge(&p.obs.namespace, None, &ds, read, &mut behind, 1).rows)
+}
+
+/// A desired row's subject: the target and its role.
+fn desired_subject(r: &crate::report::DesiredRow) -> String {
+    format!("{} {}", r.target, r.role)
+}
+
+/// Why a row's answer leaves it unjudged: the answer and its words.
+fn desired_unjudged(r: &crate::report::DesiredRow, q: &crate::report::DesiredQuestion) -> Unjudged {
+    unjudged(
+        desired_subject(r),
+        format!("{} ({}): {}", q.answer.as_str(), q.reason, q.says),
+    )
+}
+
+/// `desired-refused` (§2.7, §5): a target whose last act was refused or
+/// failed, by its report. A warning: the document, or the target, needs a
+/// person — a refusal is the target's answer to that version, and its next
+/// is the author's to make.
+fn desired_refused(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    use crate::report::DesiredAnswerToken as A;
+    const C: CheckId = CheckId::DesiredRefused;
+    let rows = match desired_rows(p, spec) {
+        Ok(r) => r,
+        Err(why) => return CheckReport::unobservable(C, why),
+    };
+    let (mut findings, mut undecided, mut clean) = (Vec::new(), Vec::new(), 0usize);
+    for r in &rows {
+        let q = &r.answers.refused;
+        match q.answer {
+            A::Yes => findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                desired_subject(r),
+                format!("{} (desired.v1 §2.7)", q.says),
+            )),
+            A::Unobservable => undecided.push(desired_unjudged(r, q)),
+            A::No | A::NotAsked | A::NotYet => clean += 1,
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!("{clean} desired.v1 role(s), none whose last act was refused or failed"),
+    )
+}
+
+/// `desired-behind` (§2.17, text 0.4): a target "not yet" converged on a
+/// version its author stamped longer ago than the bound, by a clock trusted
+/// to the HLC delta. One reading alone never finds it: without
+/// `--clocks-synced`, a target not yet converged is unjudged.
+fn desired_behind(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    use crate::report::DesiredAnswerToken as A;
+    const C: CheckId = CheckId::DesiredBehind;
+    let rows = match desired_rows(p, spec) {
+        Ok(r) => r,
+        Err(why) => return CheckReport::unobservable(C, why),
+    };
+    let (mut findings, mut undecided, mut clean) = (Vec::new(), Vec::new(), 0usize);
+    let bound = spec.desired_behind.as_secs_f64();
+    for r in &rows {
+        let q = &r.answers.converged;
+        match (q.answer, &r.behind) {
+            (A::NotYet, Some(b)) => findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                desired_subject(r),
+                format!(
+                    "{}; its author stamped {} {:.1}s ago, past the {bound:.0}s bound, by a clock \
+                     trusted to the HLC delta (desired.v1 §2.17)",
+                    q.says, b.version, b.since_s
+                ),
+            )),
+            (A::NotYet, None) if !spec.clocks_synced => undecided.push(unjudged(
+                desired_subject(r),
+                format!(
+                    "{} — how long it has been so cannot be told from one reading without a \
+                     trusted clock: pass --clocks-synced on the deployment's word that this \
+                     host's clock and the owners' agree (freshness.v1 §2.6)",
+                    q.says
+                ),
+            )),
+            (A::Unobservable, _) => undecided.push(desired_unjudged(r, q)),
+            _ => clean += 1,
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{clean} desired.v1 role(s), none behind a version its author stamped more than \
+             {bound:.0}s ago"
+        ),
+    )
+}
+
+/// `desired-last-known` (§2.9): a target running a document it read from
+/// an archive, its author not answering for it. Info: last-known is what
+/// §2.9 lets a target act on, and its author's confirmation clears it.
+fn desired_last_known(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    use crate::report::DesiredAnswerToken as A;
+    const C: CheckId = CheckId::DesiredLastKnown;
+    let rows = match desired_rows(p, spec) {
+        Ok(r) => r,
+        Err(why) => return CheckReport::unobservable(C, why),
+    };
+    let (mut findings, mut undecided, mut clean) = (Vec::new(), Vec::new(), 0usize);
+    for r in &rows {
+        let q = &r.answers.last_known;
+        match q.answer {
+            A::Yes => findings.push(finding(
+                C,
+                DoctorSeverity::Info,
+                desired_subject(r),
+                format!("{} (desired.v1 §2.9)", q.says),
+            )),
+            A::Unobservable => undecided.push(desired_unjudged(r, q)),
+            A::No | A::NotAsked | A::NotYet => clean += 1,
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!("{clean} desired.v1 role(s), none running a document read from an archive"),
+    )
+}
+
 // ─── the checks that read no presence ───────────────────────────────────────
 
 /// §8.3: the domain's token count against the budget. A read that ended at
@@ -5360,6 +5565,127 @@ mod tests {
             }
             Asked::NotAsked => panic!("the config readings were taken"),
         }
+    }
+
+    /// A desired.v1 reading of three targets (#840, DD): `lab/w2` refused,
+    /// `lab/w3` not yet on a version its author stamped a minute ago, and
+    /// `lab/w4` running an archive's last-known, its author absent.
+    fn desired_obs() -> DoctorObservation {
+        use crate::model::desired::{
+            DesiredRead, ReportReply, ReportsGet, RoleRead, RoleResolution, SliceFrom, SliceGet,
+            SliceReply, TargetRead,
+        };
+        use zenkey_model::desired::{Listing, Seen};
+        use zenkey_model::seed::Stamp;
+        let now = std::time::SystemTime::now();
+        let target = |name: &str, author: Seen, report: &str, current: Option<(u64, u64)>| {
+            let slice = format!("zk2/lab/author/tasking.v1/state/tasks/lab/{name}");
+            let rp = format!("zk2/lab/{name}/worker.v1/state/desired/task");
+            let mut res = RoleResolution::bare("task", Some(Listing::Listed { bound: true }));
+            res.author = Some("lab/author".parse().unwrap());
+            res.slice = vec![slice.clone()];
+            res.slice_from = Some(SliceFrom::AuthorContract);
+            TargetRead {
+                addr: format!("lab/{name}").parse().unwrap(),
+                seen: Seen::Present,
+                seen_why: None,
+                word: None,
+                descriptor: Ok(None),
+                roles: vec![RoleRead {
+                    resolution: res,
+                    author_seen: Some((author, None)),
+                    current: current.map(|(t, ago)| {
+                        Ok(SliceGet {
+                            selector: slice.clone(),
+                            complete: true,
+                            replies: vec![SliceReply {
+                                key: slice.clone(),
+                                delete: false,
+                                stamp: Some((
+                                    Stamp::parse(t, "a1").unwrap(),
+                                    now - Duration::from_secs(ago),
+                                )),
+                            }],
+                            at: now,
+                        })
+                    }),
+                    archived: None,
+                }],
+                reports: Some(Ok(ReportsGet {
+                    selectors: vec![rp.clone()],
+                    complete: true,
+                    replies: vec![ReportReply {
+                        key: rp,
+                        read: zenkey_model::desired::decode(
+                            report.replace("$D", &slice).as_bytes(),
+                        ),
+                        stamp: None,
+                        horizon: zenkey_model::freshness::Horizon::Undeclared,
+                    }],
+                    at: now,
+                })),
+            }
+        };
+        let refused = r#"{"key":"$D","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"200/a1","revision":2},"outcome":"refused","refusal":{"code":"reach","pointer":"/endpoint"}}"#;
+        let converged = r#"{"key":"$D","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"100/a1","revision":1},"outcome":"converged"}"#;
+        let last_known = r#"{"key":"$D","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"100/a1","revision":1},"outcome":"converged","last_known":true}"#;
+        let o = observed(&[inst("lab/w2", A), inst("lab/w3", B)], vec![]);
+        let mut o = obs(o, &[], &[]);
+        o.desired = Some(DesiredRead {
+            began: std::time::Instant::now(),
+            at: now,
+            cut_off: None,
+            presence: None,
+            targets: vec![
+                target("w2", Seen::Present, refused, Some((200, 0))),
+                target("w3", Seen::Present, converged, Some((300, 61))),
+                target("w4", Seen::Absent, last_known, None),
+            ],
+            asked: vec![],
+        });
+        o
+    }
+
+    /// `desired-refused` finds the refused act, `desired-last-known` the
+    /// archive's document (info), and `desired-behind` the target behind a
+    /// version stamped past the bound only on a trusted clock: from one
+    /// reading without one, it is unjudged, the cure named.
+    #[test]
+    fn desired_checks_read_each_targets_report() {
+        let o = desired_obs();
+        let r = health_check(&o, &spec(), CheckId::DesiredRefused);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/w2 task", DoctorSeverity::Warning)
+        );
+        assert!(f.evidence.contains("reach"), "{f:?}");
+        let r = health_check(&o, &spec(), CheckId::DesiredLastKnown);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/w4 task", DoctorSeverity::Info)
+        );
+        let why = unseen(&health_check(&o, &spec(), CheckId::DesiredBehind));
+        assert!(
+            why.contains("lab/w3 task") && why.contains("--clocks-synced"),
+            "{why}"
+        );
+        let r = health_check(&o, &synced(), CheckId::DesiredBehind);
+        let f = found(&r);
+        assert_eq!(f.subject, "lab/w3 task");
+        assert!(f.evidence.contains("past the 60s bound"), "{f:?}");
+        let lenient = DoctorSpec {
+            desired_behind: Duration::from_secs(120),
+            ..synced()
+        };
+        let why = clean(&health_check(&o, &lenient, CheckId::DesiredBehind));
+        assert!(why.contains("120s"), "{why}");
+        let mut none = desired_obs();
+        none.desired = None;
+        assert!(
+            unseen(&health_check(&none, &spec(), CheckId::DesiredRefused)).contains("not read")
+        );
     }
 
     /// `config-overdue` reads the owner's own clock: a view stamped more

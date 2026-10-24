@@ -93,6 +93,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.extend(config_cases(obs));
         report.cases.extend(alarm_cases(obs));
         report.cases.extend(telemetry_cases(obs));
+        report.cases.extend(desired_cases(obs));
         report.unobservable = Some(why);
         report
     };
@@ -155,6 +156,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.extend(config_cases(obs));
         report.cases.extend(alarm_cases(obs));
         report.cases.extend(telemetry_cases(obs));
+        report.cases.extend(desired_cases(obs));
         return report;
     };
     let owners: BTreeSet<String> = match &obs.presence {
@@ -242,6 +244,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
     report.cases.extend(config_cases(obs));
     report.cases.extend(alarm_cases(obs));
     report.cases.extend(telemetry_cases(obs));
+    report.cases.extend(desired_cases(obs));
     if let Some(t) = &obs.telemetry {
         report.asked.extend(t.asked.iter().cloned());
     }
@@ -1474,6 +1477,352 @@ fn alarm_cases(obs: &ConformObservation) -> [ConformCase; 2] {
         )
     };
     [key, document]
+}
+
+/// The `desired.v1` cases (#840, DD), in [`CaseId::ALL`] order:
+/// `desired-report` and `desired-binding` of the service as a target, from
+/// the reading `zenctl desired` makes of it; `desired-author` of each
+/// desired resource its claimed revision declares, from the contract and
+/// the window's subscription.
+fn desired_cases(obs: &ConformObservation) -> Vec<ConformCase> {
+    let mut out = desired_target_cases(obs);
+    out.extend(desired_author_cases(obs));
+    out
+}
+
+/// `desired-report` and `desired-binding` (§2.3, §2.10).
+fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
+    use zenkey_model::desired::Listing;
+    const SVC: &str = "service";
+    let both = |f: fn(CaseId, &str, String) -> ConformCase, why: String| {
+        vec![
+            f(CaseId::DesiredReport, SVC, why.clone()),
+            f(CaseId::DesiredBinding, SVC, why),
+        ]
+    };
+    let unseen: fn(CaseId, &str, String) -> ConformCase =
+        |c, s, w| ConformCase::unobservable(c, s, w);
+    let not: fn(CaseId, &str, String) -> ConformCase = |c, s, w| ConformCase::not_asked(c, s, w);
+    let Some(rev) = &obs.revision else {
+        return both(
+            unseen,
+            "its claimed revision is not in hand: which roles it declares cannot be told".into(),
+        );
+    };
+    let declared: BTreeSet<&str> = rev.contract().requires.keys().map(String::as_str).collect();
+    let reports_here = !crate::model::desired::report_resources(rev.contract()).is_empty();
+    let Some(read) = &obs.desired else {
+        return if declared.is_empty() && !reports_here {
+            both(
+                not,
+                "its contract declares no requirement and no desired.v1.Report resource: it is \
+                 no desired.v1 target (§2.1)"
+                    .into(),
+            )
+        } else {
+            both(unseen, "it was not read as a desired.v1 target".into())
+        };
+    };
+    if let Some(why) = &read.cut_off {
+        return both(unseen, format!("no reading was made: {why}"));
+    }
+    let Some(t) = read.targets.iter().find(|t| t.addr == obs.address) else {
+        return both(unseen, "the reading found no such target".into());
+    };
+    if let Err(why) = &t.descriptor {
+        return both(unseen, format!("its descriptor was not read: {why}"));
+    }
+    // The roles this revision declares, on a desired resource.
+    let roles: Vec<&crate::model::desired::RoleRead> = t
+        .roles
+        .iter()
+        .filter(|r| declared.contains(r.resolution.role.as_str()))
+        .filter(|r| r.resolution.listing != Some(Listing::NotListed))
+        .collect();
+    if roles.is_empty() && !reports_here {
+        return both(
+            not,
+            "its contract declares no role on a desired resource and no desired.v1.Report \
+             resource (§2.1)"
+                .into(),
+        );
+    }
+    let mut out = Vec::new();
+    // desired-report: every report of this revision's resources, and one per
+    // role.
+    let prefix = format!(
+        "zk2/{}/{}/{}/",
+        obs.address.system, obs.address.service, obs.iface
+    );
+    out.push(match &t.reports {
+        None if roles.iter().all(|r| r.resolution.slice.is_empty()) && !reports_here => {
+            ConformCase::not_asked(
+                CaseId::DesiredReport,
+                SVC,
+                "no role of it has a slice, and its revision holds no report resource",
+            )
+        }
+        None => ConformCase::unobservable(
+            CaseId::DesiredReport,
+            SVC,
+            "its report resources were not read",
+        ),
+        Some(Err(why)) => ConformCase::unobservable(
+            CaseId::DesiredReport,
+            SVC,
+            format!("its report resources could not be read: {why}"),
+        ),
+        Some(Ok(g)) => {
+            let mut broken = Vec::new();
+            let mut read_ok = 0usize;
+            for r in g.replies.iter().filter(|r| r.key.starts_with(&prefix)) {
+                match &r.read {
+                    Err(u) => broken.push(format!("{}: unreadable ({}): {u}", r.key, u.as_str())),
+                    Ok(d) => {
+                        let f = d.check();
+                        if f.is_empty() {
+                            read_ok += 1;
+                        } else {
+                            broken.push(format!(
+                                "{}: malformed ({})",
+                                r.key,
+                                f.iter().map(|f| f.as_str()).collect::<Vec<_>>().join(", ")
+                            ));
+                        }
+                    }
+                }
+            }
+            for r in &roles {
+                let res = &r.resolution;
+                let covered = if res.slice.is_empty() {
+                    !res.bound()
+                        && g.replies.iter().any(|x| {
+                            x.read.as_ref().is_ok_and(|d| {
+                                d.key.is_none()
+                                    && d.source == zenkey_model::desired::Source::Baseline
+                            })
+                        })
+                } else {
+                    g.replies.iter().any(|x| {
+                        x.read
+                            .as_ref()
+                            .is_ok_and(|d| d.key.as_ref().is_some_and(|k| res.slice.contains(k)))
+                    })
+                };
+                if !covered && (res.slice.len() + usize::from(!res.bound())) > 0 {
+                    broken.push(if res.slice.is_empty() {
+                        format!(
+                            "role {}: unbound, and no keyless baseline report of it (§2.12)",
+                            res.role
+                        )
+                    } else {
+                        format!(
+                            "role {}: no report whose key is its slice {}",
+                            res.role, res.slice[0]
+                        )
+                    });
+                }
+            }
+            if !broken.is_empty() {
+                ConformCase::failed(
+                    CaseId::DesiredReport,
+                    SVC,
+                    format!(
+                        "{} (desired.v1 §2.10)",
+                        broken
+                            .iter()
+                            .take(3)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ),
+                )
+            } else if !g.complete {
+                ConformCase::unobservable(
+                    CaseId::DesiredReport,
+                    SVC,
+                    "a GET of its reports ended at its timeout or with an error reply: a report \
+                     it did not bring back may not read",
+                )
+            } else if read_ok + roles.len() == 0 {
+                ConformCase::unobservable(
+                    CaseId::DesiredReport,
+                    SVC,
+                    "its GET drew no report: an empty reply set is no verdict (core O5)",
+                )
+            } else {
+                ConformCase::passed(
+                    CaseId::DesiredReport,
+                    SVC,
+                    format!(
+                        "{read_ok} report(s) of its own resources, each strict and consistent, \
+                         and one for each of its {} role(s) (§2.10)",
+                        roles.len()
+                    ),
+                )
+            }
+        }
+    });
+    // desired-binding: one subject per role.
+    for r in &roles {
+        let res = &r.resolution;
+        let subject = format!("requires.{}", res.role);
+        out.push(if !res.declaration_invalid.is_empty() {
+            ConformCase::failed(
+                CaseId::DesiredBinding,
+                subject,
+                format!(
+                    "its author's declaration of {} is invalid ({}): a target refuses to bind it \
+                     (§2.2)",
+                    res.resource.as_deref().unwrap_or("the resource"),
+                    res.declaration_invalid
+                        .iter()
+                        .map(|i| i.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            )
+        } else if !res.binding_problems.is_empty() {
+            ConformCase::failed(
+                CaseId::DesiredBinding,
+                subject,
+                format!(
+                    "its binding is invalid: {} (desired.v1 §2.3)",
+                    res.binding_problems
+                        .iter()
+                        .map(|p| p.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            )
+        } else if !res.bound() {
+            ConformCase::passed(
+                CaseId::DesiredBinding,
+                subject,
+                "listed unbound, an optional role: the kill switch (§2.12)",
+            )
+        } else if let Some(slice) = res.slice.first() {
+            ConformCase::passed(
+                CaseId::DesiredBinding,
+                subject,
+                format!(
+                    "bound to {}, each target parameter its own self: its slice {slice}{}",
+                    res.author
+                        .as_ref()
+                        .map_or_else(|| "its author".to_owned(), ToString::to_string),
+                    if res.slice_from == Some(crate::model::desired::SliceFrom::Requirement) {
+                        " — the author's contract not in hand, so its declaration was not read \
+                         and which self each parameter takes not checked"
+                    } else {
+                        ""
+                    }
+                ),
+            )
+        } else {
+            ConformCase::unobservable(
+                CaseId::DesiredBinding,
+                subject,
+                "no contract in hand says which resource the role binds",
+            )
+        });
+    }
+    if roles.is_empty() {
+        out.push(ConformCase::not_asked(
+            CaseId::DesiredBinding,
+            SVC,
+            "its contract declares no role on a desired resource",
+        ));
+    }
+    out
+}
+
+/// `desired-author` (§2.2, §2.11): each desired resource of the claimed
+/// revision.
+fn desired_author_cases(obs: &ConformObservation) -> Vec<ConformCase> {
+    use zenkey_model::desired::{Content, Declaration, declaration_of};
+    let Some(rev) = &obs.revision else {
+        return vec![ConformCase::unobservable(
+            CaseId::DesiredAuthor,
+            obs.iface.to_string(),
+            "its claimed revision is not in hand",
+        )];
+    };
+    let mut out = Vec::new();
+    for r in &rev.contract().resources {
+        let decl = declaration_of(r);
+        let name = zenkey::implementation::resource_name(r);
+        match decl {
+            Declaration::NotThisProfiles => continue,
+            Declaration::Invalid(why) => out.push(ConformCase::failed(
+                CaseId::DesiredAuthor,
+                name,
+                format!(
+                    "its declaration is invalid ({}): a target refuses to bind it, and no reader \
+                     reads its documents (desired.v1 §2.2)",
+                    why.iter()
+                        .map(|i| i.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            )),
+            Declaration::Declared(targets) => {
+                let horizon = matches!(
+                    zenkey_model::freshness::horizon_of(r),
+                    zenkey_model::freshness::Horizon::Within(_)
+                );
+                let mut again = BTreeSet::new();
+                let mut puts = 0usize;
+                if let Some(Ok(h)) = obs.heard.get(&name) {
+                    let mut last: BTreeMap<&str, Content> = BTreeMap::new();
+                    for s in &h.samples {
+                        let WatchEvent::Put { payload, .. } = &s.event else {
+                            last.remove(s.key.as_str());
+                            continue;
+                        };
+                        let crate::report::Rendered::Value { value, .. } = &payload.rendered else {
+                            continue;
+                        };
+                        puts += 1;
+                        let c = Content::of_json(value);
+                        if last.insert(s.key.as_str(), c) == Some(c) && !horizon {
+                            again.insert(s.key.clone());
+                        }
+                    }
+                }
+                let params: Vec<String> = targets
+                    .iter()
+                    .map(|t| format!("{} ({})", t.param, t.binds.as_str()))
+                    .collect();
+                out.push(ConformCase::passed(
+                    CaseId::DesiredAuthor,
+                    name,
+                    format!(
+                        "declared, its target parameters {}; {puts} document put(s) heard in the \
+                         window{}",
+                        params.join(", "),
+                        if again.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                ", {} key(s) put again unchanged with no horizon, which breaks \
+                                 §2.11's SHOULD to put only on a change: {}",
+                                again.len(),
+                                again.into_iter().take(3).collect::<Vec<_>>().join(", ")
+                            )
+                        }
+                    ),
+                ));
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push(ConformCase::not_asked(
+            CaseId::DesiredAuthor,
+            obs.iface.to_string(),
+            "its contract declares no desired resource: it authors no desired.v1 document",
+        ));
+    }
+    out
 }
 
 /// The `config.v1` cases (#768, CC), in [`CaseId::ALL`] order.
@@ -3231,6 +3580,7 @@ mod tests {
             config: None,
             alarms: None,
             telemetry: None,
+            desired: None,
         };
         o.heard.insert(
             "stream/bandwidth/{dev}".into(),
@@ -4802,5 +5152,147 @@ mod tests {
                 if reason.contains("1 of its 1 counter") && reason.contains("no pair formed")),
             "{once:?}"
         );
+    }
+
+    fn scenario(name: &str) -> Contract {
+        let l = zenkey_model::contract::load_path(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../zenkey/tests/contracts")
+                .join(name),
+        );
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
+    }
+
+    /// The desired.v1 cases (#840, DD): a conforming target's report and
+    /// binding pass; a malformed report, a role with no report and a
+    /// binding §2.3 refuses are each the violation; the author's side
+    /// passes on its declaration and names an unchanged re-put.
+    #[test]
+    fn desired_cases_judge_the_target_and_the_author() {
+        use crate::model::desired::{
+            DesiredRead, ReportReply, ReportsGet, RoleRead, RoleResolution, SliceFrom, TargetRead,
+        };
+        use zenkey_model::desired::{BindingProblem, Listing, Seen};
+        const D: &str = "zk2/lab/author/tasking.v1/state/tasks/lab/worker";
+        const RP: &str = "zk2/lab/worker/worker.v1/state/desired/task";
+        let target = |report: &str, problems: Vec<BindingProblem>| {
+            let mut res = RoleResolution::bare("task", Some(Listing::Listed { bound: true }));
+            res.author = Some("lab/author".parse().unwrap());
+            if problems.is_empty() {
+                res.slice = vec![D.into()];
+                res.slice_from = Some(SliceFrom::AuthorContract);
+            }
+            res.binding_problems = problems;
+            DesiredRead {
+                began: std::time::Instant::now(),
+                at: std::time::SystemTime::now(),
+                cut_off: None,
+                presence: None,
+                targets: vec![TargetRead {
+                    addr: "lab/worker".parse().unwrap(),
+                    seen: Seen::Present,
+                    seen_why: None,
+                    word: None,
+                    descriptor: Ok(None),
+                    roles: vec![RoleRead {
+                        resolution: res,
+                        author_seen: None,
+                        current: None,
+                        archived: None,
+                    }],
+                    reports: Some(Ok(ReportsGet {
+                        selectors: vec![RP.into()],
+                        complete: true,
+                        replies: vec![ReportReply {
+                            key: RP.into(),
+                            read: zenkey_model::desired::decode(report.as_bytes()),
+                            stamp: None,
+                            horizon: zenkey_model::freshness::Horizon::Undeclared,
+                        }],
+                        at: std::time::SystemTime::now(),
+                    })),
+                }],
+                asked: vec![],
+            }
+        };
+        let mut o = conforming();
+        o.address = "lab/worker".parse().unwrap();
+        o.iface = "worker.v1".parse().unwrap();
+        o.revision = Some(Arc::new(Revision::from_contract(
+            scenario("worker.v1.toml"),
+            crate::report::ContractSource::Bus,
+        )));
+        let ok = format!(r#"{{"key": "{D}", "source": "baseline"}}"#);
+        o.desired = Some(target(&ok, vec![]));
+        let cases = desired_cases(&o);
+        let verdict = |cases: &[ConformCase], c: CaseId| {
+            cases
+                .iter()
+                .find(|x| x.case == c)
+                .unwrap_or_else(|| panic!("{c}: {cases:#?}"))
+                .clone()
+        };
+        let r = verdict(&cases, CaseId::DesiredReport);
+        assert!(
+            matches!(r.verdict, Judgement::NotEstablished { .. }),
+            "{r:?}"
+        );
+        let b = verdict(&cases, CaseId::DesiredBinding);
+        assert_eq!(b.subject, "requires.task");
+        assert!(
+            matches!(b.verdict, Judgement::NotEstablished { .. }),
+            "{b:?}"
+        );
+        assert_eq!(
+            verdict(&cases, CaseId::DesiredAuthor).verdict,
+            Judgement::NotAsked,
+            "worker.v1 authors no desired resource"
+        );
+        let malformed = format!(r#"{{"key": "{D}", "source": "desired"}}"#);
+        o.desired = Some(target(&malformed, vec![]));
+        let r = verdict(&desired_cases(&o), CaseId::DesiredReport);
+        assert_eq!(r.verdict, Judgement::Established);
+        assert!(r.detail.unwrap().contains("malformed (source)"));
+        o.desired = Some(target(r#"{"source": "baseline"}"#, vec![]));
+        let r = verdict(&desired_cases(&o), CaseId::DesiredReport);
+        assert!(
+            r.detail.unwrap().contains("role task: no report"),
+            "a role with no report"
+        );
+        o.desired = Some(target(&ok, vec![BindingProblem::NotOneAuthor]));
+        let b = verdict(&desired_cases(&o), CaseId::DesiredBinding);
+        assert_eq!(b.verdict, Judgement::Established);
+        assert!(b.detail.unwrap().contains("not_one_author"));
+        // The author's side.
+        let mut a = conforming();
+        a.iface = "tasking.v1".parse().unwrap();
+        a.revision = Some(Arc::new(Revision::from_contract(
+            scenario("tasking.v1.toml"),
+            crate::report::ContractSource::Bus,
+        )));
+        let c = verdict(&desired_cases(&a), CaseId::DesiredAuthor);
+        assert_eq!(c.subject, "state/tasks/{system}/{service}");
+        assert!(
+            matches!(&c.verdict, Judgement::NotEstablished { reason } if reason.contains("system (self.system)")),
+            "{c:?}"
+        );
+        let invalid = zenkey_model::contract::load_str(
+            "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\nuses = [\"desired.v1\"]\n\
+             [resources.\"tasks/{system}/{extra}\"]\nkind = \"state\"\n\
+             type = { raw = \"application/octet-stream\" }\ncardinality = 4\n\
+             params = { system = \"string\", extra = \"string\" }\n\
+             annotations = { \"desired.target_param\" = \"system\" }\n",
+            std::path::Path::new("."),
+            None,
+        );
+        a.revision = Some(Arc::new(Revision::from_contract(
+            invalid
+                .contract
+                .unwrap_or_else(|| panic!("{}", invalid.report)),
+            crate::report::ContractSource::Bus,
+        )));
+        let c = verdict(&desired_cases(&a), CaseId::DesiredAuthor);
+        assert_eq!(c.verdict, Judgement::Established);
+        assert!(c.detail.unwrap().contains("param_not_target"));
     }
 }

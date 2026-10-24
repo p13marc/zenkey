@@ -73,7 +73,10 @@
 //!   receive path watched, live or one-shot, #800) and `telemetry` (a
 //!   `telemetry.v1` continuity reader: the metric resources the
 //!   descriptors declare, their members and the owners' tokens in one
-//!   queue, presence seeded, state seeded by S4's GET, #819). The
+//!   queue, presence seeded, state seeded by S4's GET, #819), and
+//!   `desired` (a `desired.v1` tool's reading of each target's roles: the
+//!   targets' and authors' presence, the contracts, the target's reports
+//!   and S4's GET of each slice, made again within a window, #840). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -118,7 +121,10 @@
 //!   members: each sample read as §2.6 says, each pair of consecutive
 //!   conforming ones judged with the presence the reader saw between them,
 //!   in one order, a state member's in the late joiner's merge order,
-//!   #819), `timeline`, `snapshot` and
+//!   #819), `desired` (a role's slice resolved from the author's
+//!   declaration and the target's binding, its reading projected into
+//!   `zenkey_model::desired`'s, and how long a target was behind, #840),
+//!   `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
 //!   schema reaches fall to, `stats`, `tree` and `diff`, plus the two
@@ -132,8 +138,8 @@
 //!   silence explained rung by rung, #702), `conform` (a service against
 //!   the revision it claims, #703), `health` (`health.v1`'s verdicts,
 //!   #721), `config` (`config.v1`'s §5 answers, #768), `alarms`
-//!   (`alarms.v1`'s §5 answers, #800) and `telemetry` (`telemetry.v1`'s,
-//!   #819), and
+//!   (`alarms.v1`'s §5 answers, #800), `telemetry` (`telemetry.v1`'s,
+//!   #819) and `desired` (`desired.v1`'s, each the model's, #840), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -289,6 +295,14 @@ pub use judge::alarms::judge as judge_alarms;
 pub use model::alarms::{
     AlarmBook, AlarmSample, AlarmScope, ArchivedAlarm, BookSpec as AlarmBookSpec, KeyReading,
     SeedEnd as AlarmSeedEnd, SeedRead as AlarmSeedRead,
+};
+// `desired.v1` (#840, DD): each target's roles against their authors'
+// documents, read as the profile's tool reads them — the reads, the
+// session-free projection into the model's reading, and the judge.
+pub use bus::desired::{DesiredSpec, observe as observe_desired, run_desired};
+pub use judge::desired::judge as judge_desired;
+pub use model::desired::{
+    Behind as DesiredBehindTracker, DesiredRead, FaceWord as DesiredFaceWord,
 };
 // `telemetry.v1` (#819, TC): a scope's metric members read as the
 // profile's reader reads them — the reads, the session-free book they fold

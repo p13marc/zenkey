@@ -69,7 +69,9 @@
 //! verdict and the scope's, and a reader's transitions, #800). TC gave
 //! `telemetry.v1` its domain (`telemetry`: each metric resource's
 //! declaration, each member's samples and pairs in the fixtures' tokens,
-//! #819).
+//! #819). DD gave `desired.v1` its domain (`desired`: each target's roles
+//! with §5's four answers, what was read beside them and how long a
+//! target was behind, #840).
 
 mod acl;
 mod admin;
@@ -80,6 +82,7 @@ mod condition;
 mod config;
 mod conform;
 mod contract;
+mod desired;
 mod diff;
 mod doctor;
 mod expect;
@@ -114,6 +117,7 @@ pub use condition::*;
 pub use config::*;
 pub use conform::*;
 pub use contract::*;
+pub use desired::*;
 pub use diff::*;
 pub use doctor::*;
 pub use expect::*;

@@ -64,6 +64,7 @@ pub mod bounded;
 pub mod catalog;
 pub mod compat;
 pub mod config;
+pub mod desired;
 pub mod diff;
 pub mod examples;
 pub mod health;

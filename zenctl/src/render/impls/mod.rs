@@ -20,6 +20,7 @@ mod alarms;
 mod bench;
 mod closing;
 mod config;
+mod desired;
 mod fields;
 mod findings;
 pub mod observations;

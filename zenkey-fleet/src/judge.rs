@@ -37,6 +37,7 @@ pub mod common;
 pub mod condition;
 pub mod config;
 pub mod conform;
+pub mod desired;
 pub mod doctor;
 pub mod doctor_delta;
 pub mod expect;
