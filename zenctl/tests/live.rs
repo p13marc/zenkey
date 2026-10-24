@@ -15,6 +15,10 @@
 #[path = "live/harness.rs"]
 mod harness;
 
+/// A panic whose unwind hangs ends in seconds, with stacks (#804).
+#[path = "../../zenkey/tests/common/panic_watchdog.rs"]
+mod panic_watchdog;
+
 use std::time::{Duration, Instant};
 
 use harness::{Bus, CPU, HEALTH, HEALTH_KEY, Run, SETTLE};

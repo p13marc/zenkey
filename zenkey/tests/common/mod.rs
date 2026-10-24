@@ -16,6 +16,8 @@ use zenkey::model::contract::{Contract, load_path};
 use zenkey::model::grammar::Addr;
 use zenkey::{Implementation, ServiceConfig};
 
+pub mod panic_watchdog;
+
 /// The scenarios' reply timeout (`spec/scenarios/README.md`: 1 s unless
 /// stated).
 pub const T: Duration = Duration::from_secs(1);
@@ -26,6 +28,7 @@ pub const T: Duration = Duration::from_secs(1);
 pub const SETTLE: Duration = Duration::from_secs(20);
 
 fn base_config() -> zenoh::Config {
+    panic_watchdog::install();
     let mut c = zenoh::Config::default();
     c.insert_json5("scouting/multicast/enabled", "false")
         .unwrap();

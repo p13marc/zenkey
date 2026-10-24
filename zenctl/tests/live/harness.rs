@@ -96,6 +96,7 @@ fn unique_base() -> String {
 impl Bus {
     /// The publisher, publishing.
     pub async fn up() -> Bus {
+        crate::panic_watchdog::install();
         let base = unique_base();
 
         let mut cfg = zenoh::Config::default();
