@@ -136,9 +136,9 @@ at every step, as at a start. `[Sc: profiles/redundancy/scenarios.md §1,
 - **§8.1's reading rules,** 0.37's and 0.38's, are unchanged and are not
   restated: the profile's election reads presence and follows it by them
   (its §2.5, §2.7, §2.8).
-- **`hostid.v1` §2.12** keeps its words here: its standby "until
-  `redundancy.v1` says how a tool recognises a standby" is answered by
-  that profile's §5, and its own text moves with the tools (#841, RC).
+- **`hostid.v1` §2.12** is the profile's to amend, and is: its text 0.6
+  counts no recognised standby, by `redundancy.v1` §2.15 (its CHANGELOG).
+  The core's §6 names no profile's finding.
 
 ## 0.38 — 2026-10-24: the second implementation's findings against 0.37 (#849)
 

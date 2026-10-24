@@ -6,7 +6,8 @@ a setup, steps, and expected observations. The reference runtime runs §1
 to §5 (`zenkey/tests/profile_hostid.rs`, one test per section, named after
 it). §6 is a tool's: the reference doctor's `hostid-duplicate` asks its
 question (`zenkey-fleet/tests/zk2_doctor.rs`,
-`hostid_s6_what_a_tool_concludes`; 0.4).
+`hostid_s6_what_a_tool_concludes`; 0.4), and its step 6 (0.6) with the
+doctor that reads the standby mark (#841, RC).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.4) are v1.md's rules; core
@@ -251,6 +252,11 @@ core §6 recommends (under 1 s).
    lists `hostid.v1` in `uses`, which the tool reads (core §8.4). Each holds
    it in its tokenless set (core §8.1), so that core §6's split-brain still
    does not apply.
+6. (0.6) As step 1, with each service implementing `ledger.v1` of
+   `redundancy.v1`'s scenarios, governed under `claim`, and nothing else:
+   A's serving, B's standing by, its descriptor marking `ledger.v1`
+   `"standby": true` (core §3.3, 0.39). The tool reads both contracts
+   (core §8.4).
 
 **Expected.**
 1. Both services have the system `h-bbd1aa1db10b`. The tool sees two
@@ -266,3 +272,8 @@ core §6 recommends (under 1 s).
    finding. Both descriptors list `hostid.v1`, but a contract each
    implements does too, so whether either system is minted is
    unobservable (§5), and neither instance is counted (§2.12).
+6. No finding: B is a recognised standby, `redundancy.v1` §2.15's fourth
+   question answering it no, `standby`, so it is not counted, and A states
+   the one counted `meta.zid` (§2.12). The tool says beside its answer
+   that B stands by. Core §6's split-brain does not fire either: B holds
+   no interface token.

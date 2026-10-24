@@ -77,7 +77,8 @@ reference tool runs it as a test of zenctl and of the doctor
   delivery's arrival on its monotonic clock, its key, its kind, its
   payload and its stamp. Where a section cuts a link, **S2** does the same
   as a client of R2. **G** GETs as core S4 says, and reads presence as
-  core §8.1 says, on a session holding no liveliness subscriber.
+  core §8.1 says, on a session that has never held a liveliness
+  subscriber (0.38).
 - **"A serves"** means: A holds `zk2/lab/ledger/@zk/alive/ledger.v1/<A>/<fp16>`,
   its descriptor lists `ledger.v1` without the mark, and its `append`
   queryable answers. **"A stands by"** means: A holds its instance token
@@ -317,7 +318,8 @@ within 3 s.
 ## §12 A tool's questions (§2.15, §5; core §6; hostid.v1 §2.12)
 
 **Setup.** T is the tool under test, reading `lab/ledger` twice, 2 s apart,
-on a session holding no liveliness subscriber. X is a test session that
+on a session that has never held a liveliness subscriber. X is a test
+session that
 can declare tokens under `lab/ledger` and serve a descriptor it writes, to
 build each shape.
 

@@ -219,7 +219,30 @@
         "complete": false,
         "holders": []
       },
-      "note": "a read through a session cut off shows none: no split",
+      "note": "a read not made shows none: no split",
+      "own": "000000000000000b",
+      "second": {
+        "complete": true,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      }
+    },
+    {
+      "election": "claim",
+      "expect": {
+        "lower": "000000000000000a",
+        "step_down": true
+      },
+      "first": {
+        "complete": false,
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ]
+      },
+      "note": "a read cut off while it ran counts the holders it returned (core §8.1, 0.38)",
       "own": "000000000000000b",
       "second": {
         "complete": true,
@@ -345,5 +368,5 @@
       }
     }
   ],
-  "description": "redundancy.v1 §2.9: an incumbent own, its interface's election, and the holders of the interface's token at the address in two reads a grace apart, first then second (each a set: a holder listed twice is one) -> whether it steps down. The first of: election \"external\" -> stays, external (§2.11); own not among the second read's holders -> stays, not_holding; fewer than two holders in either read -> stays, no_split; the second read's lowest holder lower than own (ids compared as their digits, §2.3) -> steps down, naming that lower holder; otherwise stays, lowest. A read's completeness plays no part: a read cannot invent a holder, so a read not complete counts the holders it shows, and one through a session cut off shows none."
+  "description": "redundancy.v1 §2.9: an incumbent own, its interface's election, and the holders of the interface's token at the address in two reads a grace apart, first then second (each a set: a holder listed twice is one) -> whether it steps down. The first of: election \"external\" -> stays, external (§2.11); own not among the second read's holders -> stays, not_holding; fewer than two holders in either read -> stays, no_split; the second read's lowest holder lower than own (ids compared as their digits, §2.3) -> steps down, naming that lower holder; otherwise stays, lowest. A read's completeness plays no part: a read cannot invent a holder, so a read not complete counts the holders it shows, one cut off while it ran (core §8.1, 0.38) the holders it returned, and a read not made shows none."
 }

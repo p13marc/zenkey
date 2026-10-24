@@ -94,15 +94,18 @@ reopened here).
   reading the mark, Appendix D's published row, and W105's fixture
   `contracts/w105-redundancy-epoch`.
 - **Evidence:** `conformance/declarations.json` (26 cases),
-  `conformance/elections.json` (28), `conformance/heals.json` (15),
+  `conformance/elections.json` (29), `conformance/heals.json` (16),
   `conformance/descriptors.json` (20), `conformance/lifecycle.json` (30),
-  `conformance/conclusions.json` (39), 158 in all. Each expectation was
+  `conformance/conclusions.json` (39), 160 in all. Each expectation was
   computed by an independent transcription of this text before
   `zenkey_model::redundancy` ran it. Twelve scenario sections, eleven the
   runtime's and one a tool's, over two test contracts, `ledger.v1`
   (`claim`) and `valve.v1` (`external`), kept under
   `zenkey/tests/contracts/`. `zenkey_model::redundancy` runs every
   fixture.
+- **`hostid.v1` text 0.6** points its §2.12 here: a recognised standby,
+  which §2.15's fourth question answers `standby` of every interface it
+  lists, all governed, is not counted (its CHANGELOG).
 - **The examples' contracts need no new revision.** `zs.catalog.v1` and
   `zs.desired.v1` list `redundancy.v1` in `uses` and write no election,
   so each reads governed, `claim`, as the reference checks; their header
@@ -134,13 +137,21 @@ reopened here).
   and interface tokens together, with the descriptors of the instances
   whose ids are lower than the reader's own: a higher id cannot beat it,
   so its descriptor is not needed.
-- **Its own claim must be in the read.** ZenSight's check ("an answer that
+- **Its own claim must be in the read** (accepted by the maintainer on
+  2026-10-24). ZenSight's check ("an answer that
   does not contain our own claim is an answer we did not really get")
   carried over: a refused read is complete and empty (core §8.1, 0.8), so
   completeness alone cannot tell it from a lone candidate's.
+- **Which reads are complete, by core 0.37 and 0.38.** A read cut off
+  while it ran (its session's links gone when it ended) is possibly
+  incomplete, and a read not made is read as one (0.38's premise rule), so
+  either makes a campaigning instance stand by and retry; the tokens a read
+  not complete returned were seen, so an incumbent it shows still wins,
+  and the holders it shows still count toward a split. A tool reads a read
+  not made as one not complete, and reports its reason beside the answer.
 - **"Claim before reading" across sessions.** The read goes on a session
-  holding no liveliness subscriber (core 0.37), which may not be the one
-  holding the claim; then the instance makes one round trip on the claim's
+  that has never held a liveliness subscriber (core 0.37, 0.38), which
+  may not be the one holding the claim; then the instance makes one round trip on the claim's
   session first, since zenoh orders no two sessions' messages. The claim
   narrows the simultaneous-start race; the heal ends what it leaves.
 - **The retry interval.** A standby that saw no incumbent (the read not
@@ -179,18 +190,20 @@ reopened here).
   pays for a split's seed: `Latest` keeps the later stamp per key,
   whichever incumbent wrote it, so the key reads nothing until its
   incumbent puts again, which the text states.
-- **`external`:** an instance without the lock refuses to start or stands
-  by; with it, it takes over once a read shows no other holder, complete
+- **`external`** (accepted by the maintainer on 2026-10-24): an instance
+  without the lock refuses to start or stands by; with it, it takes over once a read shows no other holder, complete
   and holding its own claim, without the lowest-id step, since the lock
   decided, and waits for the vacancy rather than take over beside a
   crashed holder's token, which outlives the lock by up to a lease; it
   never steps down by ids, and steps down when it loses the lock; its
   anti-twin probe is an optional early refusal. A split under `external`
   is a tool's finding the profile does not heal.
-- **Every interface at a governed address SHOULD be governed.** One that
-  is not is exposed by every instance at once, and `health.v1` and
-  `alarms.v1`, whose contracts no adopter can make use the profile, go on
-  an address of the process's own, as ZenSight's correlator does.
+- **Every interface at a governed address SHOULD be governed** (confirmed
+  by the maintainer on 2026-10-24, for #841's record). One that is not is
+  exposed by every instance at once, so an address with governed
+  interfaces implements governed interfaces only, and a process's own
+  `health.v1` and `alarms.v1`, whose contracts no adopter can make use the
+  profile, go on an address of its own, as ZenSight's correlator does.
 - **Several governed interfaces at one address** are elected apart.
 - **Constrained faces:** presence does not cross, so a deployment SHOULD
   keep an address's candidates on one side; a tool across a face answers
@@ -222,10 +235,8 @@ reopened here).
 - **No reporting by a standby at its address.** Its `health.v1` would be
   a second writer of the incumbent's status; a process's own reporting
   goes on its own address.
-- **No change to `hostid.v1`'s text.** Its §2.12 "until `redundancy.v1`
-  says how a tool recognises a standby" is answered by §2.15 and §5; the
-  doctor's `hostid-duplicate` and its words move with the tools (#841,
-  RC).
+- **No tool here.** `hostid.v1`'s text moves now (its 0.6); the doctor's
+  `hostid-duplicate` reading it is #841's RC.
 - **No timing numbers as rules.** The retry interval, the grace and the
   scenarios' 2 s are settings; the scenarios fix them for their runs.
 - **No runtime and no tool here.** `zenkey`'s `ServiceBuilder::redundancy()`

@@ -160,11 +160,29 @@
         "decision": "stand_by",
         "why": "incomplete"
       },
-      "note": "a read through a session cut off, complete-looking and empty, is not complete (core §8.1, 0.37): stand by",
+      "note": "a read not made, its session reaching no node, is read as one not complete (core §8.1, 0.37, 0.38): stand by",
       "own": "000000000000000a",
       "read": {
         "complete": false,
         "instances": []
+      }
+    },
+    {
+      "expect": {
+        "decision": "stand_by",
+        "why": "incomplete"
+      },
+      "note": "a read cut off while it ran, its links gone when it ended, is possibly incomplete (core §8.1, 0.38): stand by, though it showed its own claim",
+      "own": "000000000000000a",
+      "read": {
+        "complete": false,
+        "instances": [
+          {
+            "descriptor": "standby",
+            "id": "000000000000000a",
+            "token": false
+          }
+        ]
       }
     },
     {
@@ -632,5 +650,5 @@
       }
     }
   ],
-  "description": "redundancy.v1 §2.5 (and §2.11 for election \"external\", its lock held): one read of the address, from the instance own's view -> what it does. election is \"claim\" when absent. read.complete is core §8.1's (0.37); read.instances[] is each instance the read found: id (16 lowercase hex digits), token (it holds the governed interface's token, at any revision), descriptor (\"unread\", \"not_listed\": it does not list the interface, \"standby\": listed with \"standby\": true, \"serving\": listed unmarked). Ids compare as their digits, character by character, which is their order as unsigned 64-bit integers (§2.3). The decision is the first of: another instance holding the token, whatever the read's completeness -> stand_by, incumbent, naming the lowest such; the read not complete -> stand_by, incomplete; own not among the instances -> stand_by, own_claim_missing; under \"external\", otherwise take_over; under \"claim\", the lowest instance whose id is lower than own's and whose descriptor is not \"not_listed\": \"unread\" -> stand_by, descriptor_unread, naming it; listed -> stand_by, lower_candidate, naming it; none -> take_over. own's own descriptor reading plays no part."
+  "description": "redundancy.v1 §2.5 (and §2.11 for election \"external\", its lock held): one read of the address, from the instance own's view -> what it does. election is \"claim\" when absent. read.complete is core §8.1's (0.37, 0.38): false for a read that ended at its timeout or drew an error reply, one cut off while it ran (its session's links gone when it ended), and a read not made, which is read as one not complete (a profile's premise, 0.38), with no instance; read.instances[] is each instance the read found: id (16 lowercase hex digits), token (it holds the governed interface's token, at any revision), descriptor (\"unread\", \"not_listed\": it does not list the interface, \"standby\": listed with \"standby\": true, \"serving\": listed unmarked). Ids compare as their digits, character by character, which is their order as unsigned 64-bit integers (§2.3). The decision is the first of: another instance holding the token, whatever the read's completeness -> stand_by, incumbent, naming the lowest such; the read not complete -> stand_by, incomplete; own not among the instances -> stand_by, own_claim_missing; under \"external\", otherwise take_over; under \"claim\", the lowest instance whose id is lower than own's and whose descriptor is not \"not_listed\": \"unread\" -> stand_by, descriptor_unread, naming it; listed -> stand_by, lower_candidate, naming it; none -> take_over. own's own descriptor reading plays no part."
 }
