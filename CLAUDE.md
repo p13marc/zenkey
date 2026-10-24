@@ -138,6 +138,22 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   every question is then unanswered) leaves the run without a verdict, its
   reason naming the first (text 0.5, #819 TF, F-157). `judge::telemetry` and
   `report::telemetry` complete it.
+  `desired.v1` (#840, DD) runs through all four layers too.
+  `bus::desired`'s `run_desired` makes one reading, or with a window one
+  every 500 ms while an answer may move: presence on the deployment's
+  session (cut off: no read), each author's presence, the revisions
+  retrieved or held offline, S4's GET of each target's report resources by
+  type identity and of each slice from its author, and an absent author's
+  archives, shown last-known; `observe_in` reads over a presence read and
+  revisions a caller holds (the doctor's). `model::desired` resolves each
+  role's slice from the author's declaration and the target's binding, or,
+  with no contract of the author's in hand, from the target's requirement
+  and binding (`slice_from`), projects a reading into the model's
+  `TargetReading`, and follows how long a target is behind (`Behind`:
+  readings a window apart, or a trusted clock). `judge::desired` hands each
+  reading to the model's four judges, never re-deriving one;
+  `report::desired`'s `DesiredReport` finds a refused or failed act, or a
+  target behind past the window.
   `Lens::check_sample` and `sample_conformance` run the profile's `check`
   after the JSON Schema's, so a Point whose tag, unit, range or bounds
   disagree is `invalid`, its reasons named: what replaced v1's
@@ -338,8 +354,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: twenty-seven
-  checks since #819's TC (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  FJ6's `doctor` judges a zk2 deployment against the core: thirty
+  checks since #840's DD (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
@@ -463,7 +479,18 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   and `telemetry-sample` (`--deep`), and `check conform`'s
   `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`
   (24 cases); `gen` and `serve` open an owner's session, timestamping on
-  (#825).
+  (#825). #840's DD added `desired [SYSTEM/SERVICE] [--role R] [--for SECS]
+  [--clocks-synced] [--contracts PATH]`, a root judgement over
+  `desired.v1` (exit 1 a refused or failed act, or a target "not yet" on
+  one version of its author's for the whole window, by the readings or a
+  trusted clock; 0 every role asked converged on its author's current
+  document; 2 otherwise; an absent author's slice read from the archives,
+  never current), the doctor's `desired-refused`, `desired-behind` (under
+  `--clocks-synced`, past `--desired-behind`, 60 s; one reading never
+  finds a target behind) and `desired-last-known` (info), and `check
+  conform`'s `desired-report`, `desired-binding` and `desired-author` (27
+  cases). Scenarios §9 run live in `tests/live_zk2.rs` on the owner
+  example's drive.
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
   `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
@@ -760,7 +787,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   revision read by its exact value (`decode`, `revision_of_text`,
   `revision_of_value`), the author absent only by a complete read (core
   §8.1), and with config.v1 text 0.5 `config::Owner::baseline_document`,
-  what a delete reverts a config.v1 target to), and `redundancy.v1`'s
+  what a delete reverts a config.v1 target to; text 0.4, F-192 to F-198,
+  #840 DD: a run, a refusal's pointer with `order.json`'s `check` finish,
+  the slice from the requirement, how long behind), and `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
   from every resource, invalid `not_used`, `value`, `disagrees` or
@@ -920,7 +949,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   every change. `desired_config` is config.v1's owner as a target (a
   delete reverts what the documents set to the startup values, and the
   view drops `desired`). The owner example's `--desired-author` and
-  `--desired-target` drive it from stdin (`desired put|delete|report|…`).
+  `--desired-target` drive it from stdin (`desired put|delete|report|…`);
+  `desired put` puts the line byte for byte once it reads as strict JSON,
+  `desired seeds` says what the last seed found, and `desired gets` counts
+  the GETs that reached a slice (`Author::gets`, text 0.4).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
