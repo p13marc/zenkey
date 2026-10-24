@@ -150,9 +150,11 @@ class Bus:
                 lambda s: self.received.append((str(s.key_expr), s.payload.to_bytes())))),
             self.tool.declare_subscriber("zk2/*/*/@zk/instance/*", zenoh.handlers.Callback(
                 lambda s: self.received.append((str(s.key_expr), s.payload.to_bytes())))),
-            self.tool.liveliness().declare_subscriber("zk2/*/*/@zk/**", zenoh.handlers.Callback(
-                lambda s: self.tokens.append((str(s.kind), str(s.key_expr))))),
         ]
+        # Core §8.1 (0.37): the tool's token subscription on its watch
+        # session, never beside its presence reads.
+        self._subs.append(live.watch_or_beside(self.tool, "zk2/*/*/@zk/**", zenoh.handlers.Callback(
+            lambda s: self.tokens.append((str(s.kind), str(s.key_expr)))))[0])
 
     def owner(self, address: str, runtime: hostid.Runtime | None, contracts=None, **kw):
         from .contract import load_contract

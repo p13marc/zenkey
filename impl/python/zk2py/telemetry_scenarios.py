@@ -330,6 +330,8 @@ class Reader:
                  base: str = BASE) -> None:
         import zenoh
 
+        from . import live
+
         #: the interface's key prefix, ``zk2/<address>/<iface>``
         self.base = base
         selector = selector if selector is not None else f"{base}/stream/*"
@@ -357,8 +359,13 @@ class Reader:
                 with self.lock:
                     self.tokens.append((t, kind, str(sample.key_expr).rsplit("/", 1)[1]))
 
-            self.entities.append(session.liveliness().declare_subscriber(
-                f"zk2/{ADDRESS}/@zk/instance/*", zenoh.handlers.Callback(token), history=True))
+            # Core §8.1 (0.37): the subscriber on the reader's watch session
+            # (never beside its read: a history subscriber's session reads
+            # its tokens missing at once, Appendix B), one round trip there,
+            # then the seed on its own session.
+            sub, _ = live.watch_or_beside(session, f"zk2/{ADDRESS}/@zk/instance/*", zenoh.handlers.Callback(token),
+                                          history=True)
+            self.entities.append(sub)
             self.seed_presence()
 
     #: §2.9 (0.3): a read that comes back possibly incomplete is made again

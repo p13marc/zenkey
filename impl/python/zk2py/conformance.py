@@ -2196,6 +2196,61 @@ def _restart_forgets(ds: Any) -> str:
     return t.receive(ds.Sample(ds.OWNER, False, ds.Stamp(400, 0xa1), ds.Payload(value=doc), 1))
 
 
+def _presence_view() -> list[tuple[str, Any, Any]]:
+    """Core 0.37 §8.1, zk2py's session-free presence view
+    (:mod:`zk2py.presence`): "Absence is established only by a complete
+    read", a withdrawal unconfirmed until one, one read for a burst, none
+    for a make-before-break re-mint, and a read not made leaving the
+    withdrawal unconfirmed; and the three kinds of a read (:mod:`zk2py.live`)."""
+    from . import live
+    from . import presence as pr
+
+    I = "zk2/lab/o/@zk/instance/" + "a" * 16
+    J = "zk2/lab/o/@zk/instance/" + "b" * 16
+    K = "zk2/lab/p/@zk/instance/" + "c" * 16
+    seed = [("ask", None), ("read", ("complete", [I, K]))]
+
+    def at(ev: list[Any], addr: tuple[str, str] = ("lab", "o")) -> tuple[Any, bool]:
+        v = pr.fold(ev)
+        return v.address(*addr), v.owes_read
+
+    label = "core 0.37 §8.1, zk2py's presence view"
+    return [
+        (f"{label}: seeded by a complete read: up, nothing owed", at(seed), ((pr.UP, ""), False)),
+        (f"{label}: a withdrawal heard live is unobservable, unconfirmed, never down, and owes a read",
+         at(seed + [("delete", I)]), ((pr.UNOBSERVABLE, pr.WITHDRAWN), True)),
+        (f"{label}: the re-read, complete and showing none: down",
+         at(seed + [("delete", I), ("ask", None), ("read", ("complete", [K]))]), ((pr.DOWN, ""), False)),
+        (f"{label}: the re-read showing it again: up (its router restarted, the owner never left)",
+         at(seed + [("delete", I), ("ask", None), ("read", ("complete", [I, K]))]), ((pr.UP, ""), False)),
+        (f"{label}: the re-read not made (cut off): still unconfirmed, the read still owed",
+         at(seed + [("delete", I), ("ask", None), ("read", ("not made", []))]), ((pr.UNOBSERVABLE, pr.WITHDRAWN), True)),
+        (f"{label}: the re-read possibly incomplete and showing none: still unconfirmed, still owed",
+         at(seed + [("delete", I), ("ask", None), ("read", ("possibly incomplete", []))]),
+         ((pr.UNOBSERVABLE, pr.WITHDRAWN), True)),
+        (f"{label}: a make-before-break re-mint, the new token heard first: up, nothing owed",
+         at(seed + [("put", J), ("delete", I)]), ((pr.UP, ""), False)),
+        (f"{label}: a burst, two addresses withdrawn: one read asked answers both",
+         [at(seed + [("delete", I), ("delete", K), ("ask", None)], a) for a in (("lab", "o"), ("lab", "p"))],
+         [((pr.UNOBSERVABLE, pr.WITHDRAWN), False)] * 2),
+        (f"{label}: a withdrawal heard after the read was asked keeps its word over the read's reply",
+         at(seed + [("ask", None), ("delete", I), ("read", ("complete", [I, K]))]), ((pr.UNOBSERVABLE, pr.WITHDRAWN), True)),
+        (f"{label}: an address never heard of, under a complete read showing none: down",
+         at([("ask", None), ("read", ("complete", []))]), ((pr.DOWN, ""), False)),
+        (f"{label}: an address never heard of, under a read not made: unobservable",
+         at([("ask", None), ("read", ("not made", []))]), ((pr.UNOBSERVABLE, pr.READ_NOT_MADE), False)),
+        (f"{label}: holders are an address's instances, an interface's tokens, a member's epochs",
+         [pr.holder_of("zk2/a/b/@zk/instance/" + "1" * 16), pr.holder_of("zk2/a/b/@zk/alive/x.v1/" + "1" * 16 + "/" + "2" * 16),
+          pr.holder_of("zk2/a/b/@zk/member/x.v1/m/" + "3" * 16), pr.holder_of("zk2/a/b/x.v1/state/s")],
+         [("instance", "a", "b"), ("alive", "a", "b", "x.v1"), ("member", "a", "b", "x.v1", "m"), None]),
+        (f"{label}: a read not made is a third kind, never complete nor possibly incomplete",
+         [live.Presence(not_made=live.CUT_OFF).kind, live.Presence(not_made=live.BESIDE_SUBSCRIBER).kind,
+          live.Presence(complete=True).kind, live.Presence().kind,
+          live.Presence(complete=False, cut_off_during=True).kind],
+         [live.NOT_MADE, live.NOT_MADE, live.COMPLETE, live.POSSIBLY_INCOMPLETE, live.POSSIBLY_INCOMPLETE]),
+    ]
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -2207,7 +2262,7 @@ def family_readings(root: Path) -> list[Result]:
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
-        + _desired_readings()
+        + _desired_readings() + _presence_view()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
