@@ -174,6 +174,9 @@ ci:
     # The update thread does not touch the disk (#255): a handler that needs
     # the filesystem needs a services:: function and a landing message.
     ./scripts/check-fs-seam.sh
+    # One seam for liveliness subscribers (#830): each one marks its session,
+    # and the runtime refuses a presence read beside it.
+    ./scripts/check-liveliness-seam.sh
     # RFC chapter headers agree with rfcs/CHANGELOG.md's Amends ledger
     # (v1.25 S6), and the version stated in 00-index.md, CLAUDE.md and
     # README.md is the newest entry's. CI runs it on both lanes: ci.yml for

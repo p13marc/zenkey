@@ -51,6 +51,9 @@ jobs:
       # needs the filesystem needs a services:: function returning a Task and
       # a message for the result to land on.
       - run: ./scripts/check-fs-seam.sh
+      # One seam for liveliness subscribers (#830): each one marks its
+      # session, and the runtime refuses a presence read beside it.
+      - run: ./scripts/check-liveliness-seam.sh
       # RFC status lines agree with the CHANGELOG's Amends ledger (v1.25 S6).
       # Doc-only pushes are `paths-ignore`d here and run this same gate on
       # the Docs lane (docs.yml, #420); it stays here too so a code push that
