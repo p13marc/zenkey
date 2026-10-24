@@ -279,6 +279,17 @@ impl Store {
         );
     }
 
+    /// Forgets every key under `prefix`, values and tombstones: a governed
+    /// interface's state once its instance steps down (`redundancy.v1`
+    /// §2.9), so that a later takeover answers only what it puts again
+    /// (§2.6).
+    pub(crate) fn forget_prefix(&self, prefix: &str) {
+        self.map
+            .lock()
+            .expect("not poisoned")
+            .retain(|k, _| !k.as_str().starts_with(prefix));
+    }
+
     /// Answers a query: every matching live key with its value and stamp,
     /// and a `reply_del` with the deletion's stamp for each matching key
     /// deleted within the window (S2, S3). Older tombstones are forgotten.
@@ -321,6 +332,21 @@ struct Member {
     refresh: AtomicBool,
     /// A put, a delete, or the refresh switched: the refresher looks again.
     wake: tokio::sync::Notify,
+}
+
+/// A governed interface's state member forgets its value when its instance
+/// steps down (`redundancy.v1` §2.9): nothing is re-put, and a later
+/// takeover starts from what the application puts (§2.6).
+impl crate::gate::Slot for Member {
+    fn expose(&self) -> crate::call::BoxFuture<'_, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn unexpose(&self) -> crate::call::BoxFuture<'_, ()> {
+        Box::pin(async move {
+            self.held.lock().await.value = None;
+        })
+    }
 }
 
 /// Everything the refresher of one member needs.
@@ -373,8 +399,12 @@ impl Refresher {
         }
     }
 
-    /// One re-put, if it is still due.
+    /// One re-put, if it is still due, and only while its governed
+    /// interface serves (`redundancy.v1` §2.4).
     async fn once(&self) {
+        let Ok(_write) = self.writer.serving().await else {
+            return;
+        };
         let mut h = self.member.held.lock().await;
         if *self.closed.borrow()
             || !self.member.refresh.load(Ordering::Relaxed)
@@ -469,6 +499,9 @@ impl StateWriter {
             refresh: AtomicBool::new(true),
             wake: tokio::sync::Notify::new(),
         });
+        if let Some(g) = writer.gate() {
+            g.hold(Arc::downgrade(&member) as std::sync::Weak<dyn crate::gate::Slot>);
+        }
         let period = horizon
             .refresh_bound()
             .map(|b| b.mul_f64(REFRESH_LEAD))
@@ -559,6 +592,8 @@ impl StateWriter {
         payload: impl Into<ZBytes>,
         attachment: Option<impl Into<ZBytes>>,
     ) -> Result<Timestamp> {
+        // redundancy.v1 §2.4: a standby writes nothing of the interface.
+        let _write = self.writer.serving().await?;
         let mut held = self.member.held.lock().await;
         // telemetry.v1 (#819): a metric sample is checked before anything
         // is minted, stored or published, its epoch written in.
@@ -602,6 +637,7 @@ impl StateWriter {
     /// value over a newer one. `None`, nothing put, when the writer keeps no
     /// value: after a delete, or on a resource with no horizon above 0.
     pub(crate) async fn reput(&self) -> Result<Option<Timestamp>> {
+        let _write = self.writer.serving().await?;
         let mut held = self.member.held.lock().await;
         let Some((bytes, attachment)) = held.value.clone() else {
             return Ok(None);
@@ -642,6 +678,7 @@ impl StateWriter {
     /// tombstone answered for what is left of the window (S3), not a window
     /// more.
     pub(crate) async fn delete_aged(&self, age: Duration) -> Result<Timestamp> {
+        let _write = self.writer.serving().await?;
         let mut held = self.member.held.lock().await;
         let ts = self.minter.mint()?;
         // A deleted member is not re-put (`freshness.v1` §2.4).

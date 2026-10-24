@@ -792,7 +792,9 @@ enum Phase {
     New,
     Claiming,
     Campaigning,
-    Standby { retry: bool },
+    Standby {
+        retry: bool,
+    },
     TakingOver,
     Serving,
     HealFirst,
