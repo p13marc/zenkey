@@ -13,7 +13,7 @@ walkthrough's `mission_plan.v1`, with r4 §4.3's executor and spike S12's
 measurement; and ZenSight's `zs.desired.v1`, whose v1 implementation
 (`zensight-sensor-core/src/desired.rs`, `zensight-desired`) is the target.
 Core Appendix D's interim row (`desired | target_param, target`) was all
-the core said. This text is written against core 0.37, which publishes the
+the core said. This text is written against core 0.36, which publishes the
 vocabulary.
 
 **Decided on #840, before the text** (the maintainer's defaults, not
@@ -282,7 +282,7 @@ draft of this text).
   either, so §2.2's invalid declaration is a linter's warning.
 - **No `history`.** S4's GET at each seed converges; v1's
   AdvancedSubscriber was an accelerator.
-- **No core change for the author's restart.** Core 0.37 publishes the
+- **No core change for the author's restart.** Core 0.36 publishes the
   vocabulary, and nothing else: the restart's re-put is `alarms.v1` §2.9's
   precedent, and adoption is the target's rule (on review, above).
 - **No new core rule for ordering.** §2.6 is core §4.3's consumer rule;

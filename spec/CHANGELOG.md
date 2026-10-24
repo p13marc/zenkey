@@ -3,13 +3,12 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.37 — 2026-10-24: what `desired.v1` needed of the core (#840)
+## 0.36 — 2026-10-24: what `desired.v1` needed of the core (#840)
 
 `desired.v1`'s first text (#840, DA) states the profile three adopters
 had each defined on its own (`config.v1` §2.18, the walkthrough's
 `mission_plan.v1`, ZenSight's `zs.desired.v1`), and publishes the interim
-`desired` row of Appendix D. 0.36 is #839's (what a complete presence read
-is). No fixture case changed; one is added.
+`desired` row of Appendix D. No fixture case changed; one is added.
 
 **Changed: `desired.v1`'s vocabulary published, without `target`
 (Appendix D, §10).**

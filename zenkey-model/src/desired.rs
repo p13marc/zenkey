@@ -53,7 +53,7 @@ pub const NAME: &str = "desired";
 pub const TARGET_PARAM: &str = "desired.target_param";
 
 /// The published vocabulary (§4): the keys under `desired.`, which W105
-/// reads in place of core Appendix D's interim row (core 0.37). The interim
+/// reads in place of core Appendix D's interim row (core 0.36). The interim
 /// `target` is retired, so W105 warns of it.
 pub const VOCABULARY: &[&str] = &["target_param"];
 

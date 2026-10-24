@@ -556,7 +556,7 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// (`alarms::VOCABULARY`, core 0.34, which drops the interim
 /// `severity_default`), `telemetry.v1` the interim row's four keys
 /// (`telemetry::VOCABULARY`, core 0.35), and `desired.v1` `target_param`
-/// alone (`desired::VOCABULARY`, core 0.37, which retires the interim
+/// alone (`desired::VOCABULARY`, core 0.36, which retires the interim
 /// `target`).
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),

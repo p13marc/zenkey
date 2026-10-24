@@ -1,4 +1,4 @@
-# `desired.v1` publishes its vocabulary (core 0.37): `target_param`, and
+# `desired.v1` publishes its vocabulary (core 0.36): `target_param`, and
 # nothing else. The interim `target` left with it: the binding already says
 # which identity fills each target parameter (core R2), and no contract
 # wrote it. `target_param` is in the table, `target` draws W105.
