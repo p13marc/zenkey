@@ -15,6 +15,10 @@
 //!
 //! Shared by path: `zenkey`'s scenario suites, `zenctl`'s live suites and
 //! `zengui`'s `spray_smoke` include this one file.
+//!
+//! Linux only in effect, like the CI runner: the stacks come from `gdb`
+//! and the children are found through `/proc`. Elsewhere both steps find
+//! nothing, and the watchdog still exits.
 
 use std::process::{Command, Stdio};
 use std::sync::Once;
@@ -23,6 +27,11 @@ use std::time::Duration;
 /// How long an unwind may take before it is a hang: above the few seconds
 /// a bus's sessions take to close, far below nextest's kill.
 const GRACE: Duration = Duration::from_secs(30);
+
+/// How long `gdb` may take to print the stacks: an attach to a process
+/// mid-teardown can itself hang, and must not bring back the wait this
+/// module ends.
+const GDB_LIMIT: Duration = Duration::from_secs(20);
 
 /// Installs the hook, once per process, when nextest runs one test per
 /// process; does nothing otherwise.
@@ -76,17 +85,40 @@ fn arm() {
     });
 }
 
-/// Every thread's backtrace, from `gdb` attached to this process.
+/// Every thread's backtrace, from `gdb` attached to this process, killed
+/// if it takes longer than [`GDB_LIMIT`].
 fn dump_stacks() {
     let pid = std::process::id().to_string();
-    let status = Command::new("gdb")
+    let spawned = Command::new("gdb")
         .args(["-p", &pid, "-batch", "-nx", "-ex", "thread apply all bt"])
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .status();
-    if let Err(e) = status {
-        eprintln!("panic-watchdog: no stacks: gdb did not run: {e}");
+        .spawn();
+    let mut gdb = match spawned {
+        Ok(gdb) => gdb,
+        Err(e) => {
+            eprintln!("panic-watchdog: no stacks: gdb did not run: {e}");
+            return;
+        }
+    };
+    let deadline = std::time::Instant::now() + GDB_LIMIT;
+    loop {
+        match gdb.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            _ => {
+                eprintln!(
+                    "panic-watchdog: gdb still running after {}s; killed",
+                    GDB_LIMIT.as_secs()
+                );
+                let _ = gdb.kill();
+                let _ = gdb.wait();
+                return;
+            }
+        }
     }
 }
 
