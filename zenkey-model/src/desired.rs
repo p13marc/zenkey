@@ -1598,7 +1598,7 @@ mod tests {
     fn every_report_the_machine_makes_is_consistent() {
         let mut t = Target::new(Some("zk2/a/b/i.v1/state/x".into()));
         let mut seen = Vec::new();
-        let mut steps = vec![
+        let steps = vec![
             put(100, "a1"),
             put(200, "a1"),
             Sample {
@@ -1611,7 +1611,7 @@ mod tests {
                 ..put(400, "b2")
             },
         ];
-        for (i, s) in steps.drain(..).enumerate() {
+        for (i, s) in steps.into_iter().enumerate() {
             t.observe(s);
             let ended = match i % 3 {
                 0 => Ended::Done,
