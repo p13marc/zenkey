@@ -35,6 +35,12 @@
 //! state subscription), §14 (a tool's answers), and the doctor's and
 //! `check conform`'s config checks.
 //!
+//! DD's `desired.v1` (#840) brings up `scenarios.md`'s `lab/author` and
+//! `lab/worker` as the owner example's `--desired-author` and
+//! `--desired-target` do, on its simulated drive, and runs §9, a tool's
+//! questions: `zenctl desired`'s answers and exits, the doctor's
+//! `desired-*` checks and `check conform`'s `desired-*` cases.
+//!
 //! What is asserted is what zenctl adds on top of the fleet's zk2 core (whose
 //! own suite, `zenkey-fleet/tests/zk2_core.rs`, pins the projections): the
 //! namespaced session, the flags, the JSON each verb prints and its exit
@@ -7382,3 +7388,535 @@ async fn gen_brings_up_an_owner_of_history_resources_and_telemetry_reads_it() {
     assert_eq!(docs[1]["failed"], 0, "{generated}");
     assert!(docs[1]["sent"].as_u64() > Some(10), "{generated}");
 }
+
+// ─── desired.v1 (#840, DD): scenarios.md §9, a tool's questions ──────────
+//
+// The scenarios' author and target (`lab/author` on `tasking.v1`,
+// `lab/worker` on `worker.v1`), brought up through the runtime as the
+// owner example's `--desired-author` and `--desired-target` bring them up,
+// on the owner example's own simulated drive (`zenkey/examples/owner/
+// desired.rs`, compiled in): it refuses a document holding `endpoint`
+// (`reach`), fails an act on `fail-next`, and holds one on `hold`. T is
+// `zenctl desired`, and the doctor's `desired-*` checks beside it.
+
+#[allow(dead_code)]
+#[path = "../../zenkey/examples/owner/desired.rs"]
+mod drive;
+
+/// The scenarios' `tasking.v1`, the author's.
+fn tasking() -> Implementation {
+    Implementation::new(drive::contracts().expect("the scenarios' contracts").0)
+}
+
+/// The author, `lab/author`, on a session of its own.
+async fn desired_author(endpoint: &str) -> (zenoh::Session, Service, zenkey::desired::Author) {
+    let session = client(endpoint, None).await;
+    let imp = tasking();
+    let iface = imp.iface().clone();
+    let mut b = ServiceBuilder::new(
+        &session,
+        ServiceConfig::new("lab/author".parse().expect("an address")),
+    );
+    b.implement(imp).expect("tasking.v1");
+    let a = b
+        .desired_author(
+            &iface,
+            drive::TASKS,
+            zenkey::desired::AuthorStartup::default(),
+        )
+        .await
+        .expect("the author");
+    let svc = b.start().await.expect("start");
+    (session, svc, a)
+}
+
+/// A target of the scenarios' `worker.v1` at `address`, on a session of
+/// its own.
+struct DesiredTarget {
+    session: zenoh::Session,
+    svc: Service,
+    target: zenkey::desired::Target,
+    drive: Arc<drive::Drive>,
+}
+
+impl DesiredTarget {
+    /// The process ends without closing.
+    async fn kill(self) {
+        drop(self.svc);
+        self.session.close().await.expect("its session ends");
+    }
+
+    /// Until its report holds `f`, within [`SETTLE`].
+    async fn until(&self, what: &str, f: impl Fn(&zenkey::desired::Report) -> bool) {
+        let deadline = Instant::now() + SETTLE;
+        loop {
+            let r = self.target.report().await;
+            if f(&r) {
+                return;
+            }
+            assert!(Instant::now() < deadline, "never {what}: {r:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+/// `address` on `worker.v1`, its role `task` bound to `lab/author` (or,
+/// `bound` false, the kill switch), reading `lab/archive`'s last-known
+/// when `archive`.
+async fn desired_target(
+    endpoint: &str,
+    address: &str,
+    bound: bool,
+    archive: bool,
+) -> DesiredTarget {
+    let session = client(endpoint, None).await;
+    let worker = Implementation::new(drive::contracts().expect("the scenarios' contracts").1);
+    let wi = worker.iface().clone();
+    let mut cfg = ServiceConfig::new(address.parse().expect("an address"));
+    if bound {
+        cfg = cfg.bind(drive::ROLE, &["lab/author"]);
+        cfg.bindings.get_mut(drive::ROLE).expect("bound").params = [
+            ("system".to_owned(), "self.system".to_owned()),
+            ("service".to_owned(), "self.service".to_owned()),
+        ]
+        .into();
+    }
+    let mut b = ServiceBuilder::new(&session, cfg);
+    b.implement(worker).expect("worker.v1");
+    let run = b
+        .declare_state_writer(&wi, drive::RUNNING, &Bindings::new())
+        .await
+        .expect("Run");
+    run.put_value(&drive::baseline())
+        .await
+        .expect("the baseline");
+    let d = Arc::new(drive::Drive::new(run));
+    let mut st = zenkey::desired::TargetStartup::default();
+    if archive {
+        st = st.with_archive(
+            "lab/archive".parse().expect("an address"),
+            Duration::from_secs(1),
+        );
+    }
+    let target = b
+        .desired_target(
+            drive::ROLE,
+            &tasking(),
+            drive::TASKS,
+            zenkey::desired::ReportAt::new(wi, drive::REPORT),
+            Arc::clone(&d) as Arc<dyn zenkey::desired::Handler>,
+            st,
+        )
+        .await
+        .expect("the target");
+    let svc = b.start().await.expect("start");
+    let deadline = Instant::now() + SETTLE;
+    while target.last_seed().is_none() && bound {
+        assert!(Instant::now() < deadline, "the target's first seed");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // Its subscription has reached the router, ahead of the author's puts.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    DesiredTarget {
+        session,
+        svc,
+        target,
+        drive: d,
+    }
+}
+
+/// `v<n>` of the scenarios: a `Task` with `revision` n.
+fn task(n: u64, extra: &str) -> Vec<u8> {
+    format!(r#"{{"revision": {n}, "mode": "run", "rate_hz": 10{extra}}}"#).into_bytes()
+}
+
+/// A `desired` run's one row's four answers, `answer:reason`.
+fn desired_answers(run: &Run) -> Vec<String> {
+    let doc = run.json();
+    let rows = rows_of(&doc, "desired");
+    assert_eq!(rows.len(), 1, "{run}");
+    let a = &rows[0]["answers"];
+    ["converged", "refused", "last_known", "in_force"]
+        .iter()
+        .map(|q| {
+            format!(
+                "{}:{}",
+                a[q]["answer"].as_str().unwrap_or("?"),
+                a[q]["reason"].as_str().unwrap_or("?")
+            )
+        })
+        .collect()
+}
+
+/// The doctor's three desired checks, their verdicts by id.
+async fn desired_doctor(bus: &Bus, extra: &[&str]) -> (Run, Vec<(String, Value)>) {
+    let mut args = doctor_args(&[
+        "--check",
+        "desired-refused",
+        "--check",
+        "desired-behind",
+        "--check",
+        "desired-last-known",
+        "--format",
+        "json",
+    ]);
+    args.extend_from_slice(extra);
+    let run = bus.zenctl(&args).await;
+    let doc = run.json();
+    let rows = ["desired-refused", "desired-behind", "desired-last-known"]
+        .iter()
+        .map(|id| ((*id).to_owned(), check_row(&doc, id).clone()))
+        .collect();
+    (run, rows)
+}
+
+fn verdict(rows: &[(String, Value)], id: &str) -> String {
+    rows.iter()
+        .find(|(i, _)| i == id)
+        .map(|(_, r)| r["verdict"]["answer"].as_str().unwrap_or("?").to_owned())
+        .unwrap_or_default()
+}
+
+/// desired.v1 `scenarios.md` §9, steps 1 to 3 (§2.17, §5), and the window
+/// (text 0.4): T asks of a target converged on its author's v2 (§1's end):
+/// yes, converged, exit 0; of one that refused v3 for its `endpoint`
+/// (§4's step 1): no, refused, exit 1, and the doctor's `desired-refused`;
+/// of one whose v4 failed partway (§4's step 5): no, failed, in force in
+/// part, exit 1. Then v5 converges and the drive holds the act on v6: over
+/// a window, a target "not yet" on its author's v6 for all of it is behind,
+/// exit 1, and with
+/// `--clocks-synced` the doctor's `desired-behind` finds it once v6 is older
+/// than its bound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn desired_s9_converged_refused_failed_and_behind_for_a_tool() {
+    use zenkey::desired::Outcome;
+    let bus = Bus::bare(None).await;
+    let (_as, _author_svc, author) = desired_author(&bus.endpoint).await;
+    let w = desired_target(&bus.endpoint, "lab/worker", true, false).await;
+    let args = [
+        "desired",
+        "lab/worker",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+
+    // 1. Converged on v2.
+    author.put("lab/worker", task(1, "")).await.expect("v1");
+    author.put("lab/worker", task(2, "")).await.expect("v2");
+    w.until("converged on v2", |r| {
+        r.outcome == Some(Outcome::Converged) && r.observed.is_some_and(|o| o.revision == Some(2))
+    })
+    .await;
+    let run = bus.until(&args, |r| r.code == 0).await;
+    exits(&run, 0);
+    assert_eq!(
+        desired_answers(&run),
+        ["yes:converged", "no:converged", "no:current", "yes:desired"],
+        "{run}"
+    );
+    let doc = run.json();
+    let row = &rows_of(&doc, "desired")[0];
+    assert_eq!(row["slice"], DESIRED_D, "{run}");
+    assert_eq!(row["slice_from"], "author_contract");
+    assert_eq!(doc["judgement"]["answer"], "not_established");
+    let (dr, checks) = desired_doctor(&bus, &[]).await;
+    exits(&dr, 0);
+    for id in ["desired-refused", "desired-behind", "desired-last-known"] {
+        assert_eq!(verdict(&checks, id), "not_established", "{id}: {dr}");
+    }
+    // check conform's desired cases: the target's report and binding, and
+    // the author's declaration.
+    let conform = |address: &'static str, iface: &'static str| {
+        [
+            "check",
+            "conform",
+            address,
+            iface,
+            "--for",
+            "1",
+            "--timeout",
+            "2",
+            "--format",
+            "json",
+        ]
+    };
+    let run = bus.zenctl(&conform("lab/worker", "worker.v1")).await;
+    let doc = run.json();
+    for (case, subject) in [
+        ("desired-report", "service"),
+        ("desired-binding", "requires.task"),
+    ] {
+        assert_eq!(
+            conform_case(&doc, case, subject)["verdict"]["answer"],
+            "not_established",
+            "{case}: {run}"
+        );
+    }
+    assert_eq!(
+        conform_case(&doc, "desired-author", "worker.v1")["verdict"]["answer"],
+        "not_asked",
+        "{run}"
+    );
+    let run = bus.zenctl(&conform("lab/author", "tasking.v1")).await;
+    let doc = run.json();
+    assert_eq!(
+        conform_case(&doc, "desired-author", "state/tasks/{system}/{service}")["verdict"]["answer"],
+        "not_established",
+        "{run}"
+    );
+
+    // 2. v3 names the worker's endpoint: refused, reach, v2 still in force.
+    author
+        .put(
+            "lab/worker",
+            task(3, r#", "endpoint": "tcp/10.0.0.9:7447""#),
+        )
+        .await
+        .expect("v3");
+    w.until("refused v3", |r| r.outcome == Some(Outcome::Refused))
+        .await;
+    let run = bus.until(&args, |r| r.code == 1).await;
+    exits(&run, 1);
+    assert_eq!(
+        desired_answers(&run),
+        ["no:refused", "yes:refused", "no:current", "yes:desired"],
+        "{run}"
+    );
+    let doc = run.json();
+    let report = &rows_of(&doc, "desired")[0]["report"]["document"];
+    assert_eq!(report["refusal"]["code"], "reach", "{run}");
+    assert_eq!(report["refusal"]["pointer"], "/endpoint");
+    let (dr, checks) = desired_doctor(&bus, &[]).await;
+    exits(&dr, 1);
+    assert_eq!(verdict(&checks, "desired-refused"), "established", "{dr}");
+
+    // 3. v4 fails partway: applied in part, no one version wholly in force.
+    w.drive.fail_next();
+    author
+        .put(
+            "lab/worker",
+            br#"{"revision": 4, "mode": "halt", "rate_hz": 20}"#.to_vec(),
+        )
+        .await
+        .expect("v4");
+    w.until("failed v4", |r| r.outcome == Some(Outcome::Failed))
+        .await;
+    let run = bus
+        .until(&args, |r| {
+            r.code == 1 && desired_answers(r)[0] == "no:failed"
+        })
+        .await;
+    exits(&run, 1);
+    assert_eq!(
+        desired_answers(&run),
+        ["no:failed", "yes:failed", "no:current", "yes:partial"],
+        "{run}"
+    );
+
+    // The window: v5 converges, then the drive holds the act on v6, so the
+    // report stays on v5, its last act converged.
+    author.put("lab/worker", task(5, "")).await.expect("v5");
+    w.until("converged on v5", |r| {
+        r.outcome == Some(Outcome::Converged) && r.observed.is_some_and(|o| o.revision == Some(5))
+    })
+    .await;
+    w.drive.hold();
+    author.put("lab/worker", task(6, "")).await.expect("v6");
+    let deadline = Instant::now() + SETTLE;
+    while !w.drive.with(|s| s.held) {
+        assert!(Instant::now() < deadline, "the act on v6 held");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let one = bus.zenctl(&args).await;
+    assert_eq!(
+        desired_answers(&one)[0],
+        "not_yet:behind",
+        "one reading: not yet, no verdict: {one}"
+    );
+    let windowed = [
+        "desired",
+        "lab/worker",
+        "--for",
+        "2",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let run = bus.zenctl(&windowed).await;
+    exits(&run, 1);
+    let doc = run.json();
+    let row = &rows_of(&doc, "desired")[0];
+    assert_eq!(row["answers"]["converged"]["answer"], "not_yet", "{run}");
+    assert_eq!(row["behind"]["by"], "window", "{run}");
+    assert!(
+        row["behind"]["since_s"].as_f64().unwrap_or(0.0) >= 2.0,
+        "{run}"
+    );
+    assert!(doc["readings"].as_u64().unwrap_or(0) >= 2, "{run}");
+    let (dr, checks) = desired_doctor(&bus, &[]).await;
+    assert_eq!(
+        verdict(&checks, "desired-behind"),
+        "unobservable",
+        "one reading, no trusted clock: {dr}"
+    );
+    let (dr, checks) = desired_doctor(&bus, &["--clocks-synced", "--desired-behind", "1"]).await;
+    exits(&dr, 1);
+    assert_eq!(verdict(&checks, "desired-behind"), "established", "{dr}");
+    w.drive.release();
+    w.until("converged on v6", |r| {
+        r.outcome == Some(Outcome::Converged) && r.observed.is_some_and(|o| o.revision == Some(6))
+    })
+    .await;
+    let run = bus.until(&windowed, |r| r.code == 0).await;
+    exits(&run, 0);
+    w.kill().await;
+}
+
+/// desired.v1 `scenarios.md` §9, steps 4 and 5 (§2.9, §2.12, §2.17): after
+/// §7's step 1 — an archive on the target's side recorded v1, the author
+/// closed cleanly and the target restarted, reading v1 from the archive —
+/// T asks: converged not asked, `author_absent`; refused no; last-known
+/// yes; in force yes; and shows the archive's v1 as last-known, never
+/// current: exit 2. The doctor's `desired-last-known` names it (info).
+/// Against §8's target, its role unbound: not asked, `unbound`, and in
+/// force no, `unbound`: nothing asked, exit 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn desired_s9_last_known_and_the_kill_switch_for_a_tool() {
+    use zenkey::desired::Outcome;
+    let bus = Bus::bare(None).await;
+    let archiving = client(&bus.endpoint, None).await;
+    let archive = Archive::start(
+        &archiving,
+        ArchiveConfig {
+            service: ServiceConfig::new("lab/archive".parse().expect("an address")),
+            records: vec![Recorded {
+                owner: "lab/author".parse().expect("an address"),
+                selector: "zk2/lab/author/tasking.v1/state/**".to_owned(),
+                implementation: tasking(),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+            watch: None,
+        },
+    )
+    .await
+    .expect("an archive");
+    let (author_session, author_svc, author) = desired_author(&bus.endpoint).await;
+    wait_for(&bus, &["lab/author", "lab/archive"]).await;
+    let w = desired_target(&bus.endpoint, "lab/worker", true, true).await;
+    let s1 = match author.put("lab/worker", task(1, "")).await.expect("v1") {
+        zenkey::desired::Written::Put(ts) => zenkey::desired::stamp(&ts).to_string(),
+        other => panic!("{other:?}"),
+    };
+    w.until("converged on v1", |r| r.outcome == Some(Outcome::Converged))
+        .await;
+    let deadline = Instant::now() + SETTLE;
+    while archive.confirmed(DESIRED_D) != Some(true) {
+        assert!(Instant::now() < deadline, "the archive records v1");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // §7's step 1: the author closes cleanly; the target restarts, a new
+    // run, and reads v1 from the archive.
+    drop(author);
+    author_svc.close().await.expect("the author closes");
+    author_session.close().await.expect("its session ends");
+    w.kill().await;
+    let w = desired_target(&bus.endpoint, "lab/worker", true, true).await;
+    w.until("converged on v1, last-known", |r| {
+        r.last_known && r.outcome == Some(Outcome::Converged)
+    })
+    .await;
+    let args = [
+        "desired",
+        "lab/worker",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            r.code == 2 && desired_answers(r)[0] == "not_asked:author_absent"
+        })
+        .await;
+    exits(&run, 2);
+    assert_eq!(
+        desired_answers(&run),
+        [
+            "not_asked:author_absent",
+            "no:converged",
+            "yes:last_known",
+            "yes:desired"
+        ],
+        "{run}"
+    );
+    let doc = run.json();
+    let row = &rows_of(&doc, "desired")[0];
+    assert_eq!(row["archived"][0]["archive"], "lab/archive", "{run}");
+    assert_eq!(row["archived"][0]["stamp"], s1.as_str(), "{run}");
+    assert!(
+        row["author"].get("stamp").is_none(),
+        "the archive's v1 is never shown as the author's current: {run}"
+    );
+    assert_eq!(
+        row["slice_from"], "requirement",
+        "no contract of the absent author's: {run}"
+    );
+    let table = bus
+        .zenctl(&[
+            "desired",
+            "lab/worker",
+            "--timeout",
+            "2",
+            "--format",
+            "table",
+        ])
+        .await;
+    assert!(
+        table.stdout.contains("last-known, never current"),
+        "{table}"
+    );
+    let (dr, checks) = desired_doctor(&bus, &[]).await;
+    assert_eq!(
+        verdict(&checks, "desired-last-known"),
+        "established",
+        "{dr}"
+    );
+    assert_eq!(
+        verdict(&checks, "desired-refused"),
+        "not_established",
+        "{dr}"
+    );
+    exits(&dr, 0);
+
+    // §9's step 5: §8's target, its role unbound.
+    let spare = desired_target(&bus.endpoint, "lab/spare", false, false).await;
+    let args = ["desired", "lab/spare", "--timeout", "2", "--format", "json"];
+    let run = bus
+        .until(&args, |r| {
+            r.code == 2 && desired_answers(r)[0] == "not_asked:unbound"
+        })
+        .await;
+    exits(&run, 2);
+    assert_eq!(
+        desired_answers(&run),
+        [
+            "not_asked:unbound",
+            "not_asked:unbound",
+            "not_asked:unbound",
+            "no:unbound"
+        ],
+        "{run}"
+    );
+    assert_eq!(run.json()["judgement"]["answer"], "not_asked", "{run}");
+    spare.kill().await;
+    w.kill().await;
+    drop(archive);
+}
+
+/// The slice of `lab/worker`'s task (`scenarios.md`, "The target").
+const DESIRED_D: &str = "zk2/lab/author/tasking.v1/state/tasks/lab/worker";
