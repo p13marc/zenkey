@@ -1230,6 +1230,21 @@ pub(crate) enum CheckCmd {
     ///                    over the window; a member that formed no pair, or
     ///                    only pairs whose epoch was assumed, could not tell,
     ///                    and neither can the case (telemetry.v1 §2.10, §5)
+    ///   desired-report   when its contract declares a role on a desired
+    ///                    resource or a desired.v1.Report resource, every
+    ///                    report it puts reads strict and consistent, and
+    ///                    each such role has its report: of its slice, or
+    ///                    keyless for a role left unbound (desired.v1 §2.10)
+    ///   desired-binding  its descriptor lists each such role with a
+    ///                    binding §2.3 reads: one exact author, each target
+    ///                    parameter its own self, the author's declaration
+    ///                    valid; or unbound and optional, the kill switch
+    ///                    (desired.v1 §2.3, §2.12)
+    ///   desired-author   every desired resource the interface declares
+    ///                    declares itself validly, a target refusing to bind
+    ///                    one that does not; a document put again unchanged
+    ///                    in the window with no horizon passes, naming
+    ///                    §2.11's SHOULD (desired.v1 §2.2, §2.11)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
