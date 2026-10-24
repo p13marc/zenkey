@@ -614,16 +614,22 @@ pub fn current_of(
     }
 }
 
-/// The wall-clock time of the author's current version, when its GET
-/// answered one: what a clock trusted to the HLC delta ages it by.
-pub fn current_time(get: Option<&Result<SliceGet, String>>, slice: &str) -> Option<SystemTime> {
+/// The author's current version dated, when its GET answered one: the
+/// version's stamp on the wall clock, and this host's clock as that GET was
+/// answered ([`SliceGet::at`]), which a clock trusted to the HLC delta ages
+/// it between (review of #856). The GET ends before the reading does, so
+/// the age is never longer than the reading's own end would make it.
+pub fn current_dated(
+    get: Option<&Result<SliceGet, String>>,
+    slice: &str,
+) -> Option<(SystemTime, SystemTime)> {
     let Some(Ok(g)) = get else { return None };
     g.replies
         .iter()
         .filter(|r| r.key == slice)
         .filter_map(|r| r.stamp)
         .max_by_key(|(s, _)| *s)
-        .map(|(_, t)| t)
+        .map(|(_, t)| (t, g.at))
 }
 
 /// What a role's reading needs of the report, kept beside it.
@@ -803,8 +809,9 @@ impl Behind {
 
     /// Whether the role is behind for at least `window` at the reading of
     /// `began`, by the readings, or else by the version's time on a trusted
-    /// clock (`clocks_synced`): `version_time` its stamp's wall-clock time
-    /// and `at` this host's clock at the reading.
+    /// clock (`clocks_synced`): `clock` the version's stamp on the wall
+    /// clock and this host's clock as its GET was answered
+    /// ([`current_dated`]).
     pub fn behind(
         &self,
         target: &str,
