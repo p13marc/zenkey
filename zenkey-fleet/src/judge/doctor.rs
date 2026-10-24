@@ -1167,11 +1167,10 @@ fn empty_scope(namespace: &str, after: &Observed) -> String {
     } else {
         format!("namespace {namespace:?}")
     };
-    let how = if after.complete {
-        ""
-    } else {
-        " (and the read ended at its timeout)"
-    };
+    let how = after
+        .incomplete_reason("ended at its timeout")
+        .map(|why| format!(" (and the read {why})"))
+        .unwrap_or_default();
     format!(
         "no zk2 token visible to this reader in {ns} (`{}`){how}: a run over an empty scope \
          judged nothing, which is not a healthy deployment",
@@ -1304,6 +1303,8 @@ struct Presence<'o> {
     /// not taken — no check that compares two was asked — or one that
     /// failed is not counted here: the checks that need it say so.
     complete: bool,
+    /// A read taken was cut off while it ran (core §8.1, 0.38).
+    cut_off_during: bool,
 }
 
 impl<'o> Presence<'o> {
@@ -1318,6 +1319,7 @@ impl<'o> Presence<'o> {
             obs,
             after,
             complete: after.complete && !before.as_ref().is_ok_and(|b| !b.complete),
+            cut_off_during: after.cut_off_during || before.as_ref().is_ok_and(|b| b.cut_off_during),
             before,
             now: index(after),
             then,
@@ -1410,11 +1412,17 @@ fn unjudged(subject: impl Into<String>, reason: impl Into<String>) -> Unjudged {
 }
 
 /// The "possibly incomplete" subject a check adds when a presence read
-/// ended at its timeout and the check claims an absence.
-fn incomplete(what: &str) -> Unjudged {
+/// ended at its timeout, or was cut off while it ran (core §8.1, 0.38), and
+/// the check claims an absence.
+fn incomplete(p: &Presence<'_>, what: &str) -> Unjudged {
+    let how = if p.cut_off_during {
+        crate::bus::presence::CUT_OFF_DURING
+    } else {
+        "ended at its timeout"
+    };
     unjudged(
         "presence",
-        format!("a presence read ended at its timeout: it can miss a token, so {what} (§8.1)"),
+        format!("a presence read {how}: it can miss a token, so {what} (§8.1)"),
     )
 }
 
@@ -1477,7 +1485,7 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
         })
         .collect();
     if !p.complete {
-        undecided.push(incomplete("no split-brain seen is not none"));
+        undecided.push(incomplete(p, "no split-brain seen is not none"));
     }
     let explained = if candidates > 0 {
         format!(
@@ -1559,7 +1567,12 @@ fn binding_unsatisfied(p: &Presence<'_>) -> CheckReport {
             if !p.complete {
                 undecided.push(unjudged(
                     subject,
-                    "a presence read ended at its timeout: a provider may be present and unseen",
+                    if p.cut_off_during {
+                        "a presence read was cut off while it ran: a provider may be present and \
+                         unseen"
+                    } else {
+                        "a presence read ended at its timeout: a provider may be present and unseen"
+                    },
                 ));
                 continue;
             }
@@ -2020,7 +2033,7 @@ fn token_missing(p: &Presence<'_>) -> CheckReport {
                      instance MUST hold one",
                 ));
             } else {
-                undecided.push(incomplete("an instance token unseen may be held"));
+                undecided.push(incomplete(p, "an instance token unseen may be held"));
             }
         }
         let d = match now.descriptor {
@@ -2129,7 +2142,7 @@ fn token_missing(p: &Presence<'_>) -> CheckReport {
                             ),
                         ));
                     } else {
-                        undecided.push(incomplete("a token unseen may be held"));
+                        undecided.push(incomplete(p, "a token unseen may be held"));
                     }
                 }
                 _ => {}
@@ -2189,7 +2202,7 @@ fn archive_unaligned(p: &Presence<'_>) -> CheckReport {
         }
     }
     if p.obs.archives.is_empty() && !p.complete {
-        undecided.push(incomplete("an archive unseen may be present"));
+        undecided.push(incomplete(p, "an archive unseen may be present"));
     }
     let clean = if p.obs.archives.is_empty() {
         "no archive.v1 provider visible to this reader: nothing to align".to_owned()
@@ -2568,7 +2581,7 @@ fn health_read(p: &Presence<'_>, spec: &DoctorSpec) -> HealthRead {
     }
     if !p.complete {
         out.undecided
-            .push(incomplete("a service unseen may implement health.v1"));
+            .push(incomplete(p, "a service unseen may implement health.v1"));
     }
     out
 }
@@ -3316,7 +3329,7 @@ fn config_read<'o>(p: &Presence<'o>) -> ConfigRead<'o> {
     }
     if !p.complete {
         out.undecided
-            .push(incomplete("a service unseen may implement config.v1"));
+            .push(incomplete(p, "a service unseen may implement config.v1"));
     }
     out
 }

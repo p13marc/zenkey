@@ -192,6 +192,7 @@ pub fn judge(obs: &AlarmObservation, at_least: Severity) -> AlarmsReport {
         Some(Ok(p)) => Some(AlarmsPresence {
             selector: p.selector.clone(),
             complete: p.complete,
+            cut_off_during: p.cut_off_during,
             services: p.services,
             listing: p.listing,
         }),
@@ -241,17 +242,18 @@ pub fn judge(obs: &AlarmObservation, at_least: Severity) -> AlarmsReport {
     let any = book.any_firing(at_least, at, wall);
     let mut says = any.reason.says().to_owned();
     if any.reason == Reason::ScopeIncomplete {
-        // Which read fell short (§2.15, text 0.5, F-137).
-        says.push_str(match &obs.log.presence {
-            Some(Ok(p)) if !p.complete => {
-                ": the presence read ran to its timeout, so it is possibly incomplete (spec §8.1)"
-            }
-            Some(Err(_)) => ": the presence read could not be made",
-            _ if book.lost() > 0 => {
-                ": deliveries were lost since the last complete presence read, and an instance \
-                 token's appearance may be among them"
-            }
-            _ => ": no presence read was made",
+        // Which read fell short (§2.15, text 0.5, F-137), and the read's
+        // own reason beside the profile's (core §8.1, 0.38, F-191).
+        says.push_str(&match &obs.log.presence {
+            Some(Ok(p)) if !p.complete => format!(
+                ": the presence read {}, so it is possibly incomplete (spec §8.1)",
+                p.incomplete_reason().unwrap_or_default()
+            ),
+            Some(Err(e)) => format!(": the presence read could not be made: {e}"),
+            _ if book.lost() > 0 => ": deliveries were lost since the last complete presence \
+                                     read, and an instance token's appearance may be among them"
+                .to_owned(),
+            _ => ": no presence read was made".to_owned(),
         });
     }
     if book.refused() > 0 {
@@ -446,6 +448,7 @@ mod tests {
                 presence: Some(Ok(PresenceSeen {
                     selector: "zk2/lab/*/@zk/**".into(),
                     complete: true,
+                    cut_off_during: false,
                     services: usize::from(present),
                     listing: usize::from(present),
                 })),
@@ -559,6 +562,40 @@ mod tests {
         assert_eq!(
             r.any_firing.established, 1,
             "the owner found is still known whole"
+        );
+        assert_eq!(judgement_exit_code(&r.judgement()), 2);
+
+        // A read cut off while it ran is possibly incomplete too, and says
+        // so (core §8.1, 0.38, F-185).
+        if let Some(Ok(p)) = &mut o.log.presence {
+            p.cut_off_during = true;
+        }
+        let r = judge(&o, Severity::Warning);
+        assert_eq!(r.any_firing.reason, "scope_incomplete");
+        assert!(
+            r.any_firing.says.contains("cut off while it ran"),
+            "{}",
+            r.any_firing.says
+        );
+        assert!(r.presence.as_ref().is_some_and(|p| p.cut_off_during));
+        assert_eq!(judgement_exit_code(&r.judgement()), 2);
+
+        // A read not made: the profile's reason stands, with the read's own
+        // beside it (core §8.1, 0.38, F-191).
+        o.log.presence = Some(Err(crate::error::NotAsked::CutOff.to_string()));
+        let r = judge(&o, Severity::Warning);
+        assert_eq!(r.any_firing.reason, "scope_incomplete");
+        assert!(
+            r.any_firing.says.contains("no router and no peer"),
+            "{}",
+            r.any_firing.says
+        );
+        assert!(
+            r.unobservable
+                .as_deref()
+                .is_some_and(|u| u.contains("no router and no peer")),
+            "{:?}",
+            r.unobservable
         );
         assert_eq!(judgement_exit_code(&r.judgement()), 2);
     }

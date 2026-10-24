@@ -283,8 +283,12 @@ pub struct SinkOutcome {
 pub enum Observer {
     /// Not read yet.
     Unseeded,
-    /// The last read ended at its timeout: what it did not show may be held.
-    Incomplete,
+    /// The last read ended at its timeout, or its session was cut off while
+    /// it ran (core §8.1, 0.38): what it did not show may be held.
+    Incomplete {
+        /// The read's session was cut off while it ran.
+        cut_off_during: bool,
+    },
     /// A complete read stands, and nothing was lost since.
     Complete,
     /// Events lost (the monitor's `Dropped(n)`) since the last complete read.
@@ -301,7 +305,7 @@ impl From<zenkey_fleet::PresenceBasis> for Observer {
         use zenkey_fleet::PresenceBasis as B;
         match b {
             B::Unseeded => Observer::Unseeded,
-            B::Incomplete => Observer::Incomplete,
+            B::Incomplete { cut_off_during } => Observer::Incomplete { cut_off_during },
             B::Complete => Observer::Complete,
             B::Lost { dropped } => Observer::Lost { dropped },
             B::CutOff => Observer::CutOff,
@@ -314,7 +318,7 @@ impl From<crate::liveliness::TokenBasis> for Observer {
         use crate::liveliness::TokenBasis as B;
         match b {
             B::Unseeded => Observer::Unseeded,
-            B::Incomplete => Observer::Incomplete,
+            B::Incomplete { cut_off_during } => Observer::Incomplete { cut_off_during },
             B::Complete => Observer::Complete,
             B::Lost { dropped } => Observer::Lost { dropped },
             B::CutOff => Observer::CutOff,
@@ -374,11 +378,17 @@ fn observer_check(name: &'static str, o: Observer, what: &str) -> Check {
             format!("a complete read of {what} stands, and nothing was lost since"),
         ),
         Observer::Unseeded => (None, format!("{what} not read yet")),
-        Observer::Incomplete => (
+        Observer::Incomplete { cut_off_during } => (
             Some(Level::Degraded),
             format!(
-                "the last read of {what} ended at its timeout: what it did not show may be \
-                 held, so nothing is judged gone (core §8.1)"
+                "the last read of {what} {}: what it did not show may be held, so nothing is \
+                 judged gone (core §8.1)",
+                zenkey_fleet::model::catalog::incomplete_reason(
+                    false,
+                    cut_off_during,
+                    "ended at its timeout"
+                )
+                .unwrap_or_default()
             ),
         ),
         Observer::Lost { dropped } => (
@@ -1081,7 +1091,18 @@ mod tests {
         for (o, want) in [
             (Observer::Complete, Some(Level::Ok)),
             (Observer::Unseeded, None),
-            (Observer::Incomplete, Some(Level::Degraded)),
+            (
+                Observer::Incomplete {
+                    cut_off_during: false,
+                },
+                Some(Level::Degraded),
+            ),
+            (
+                Observer::Incomplete {
+                    cut_off_during: true,
+                },
+                Some(Level::Degraded),
+            ),
             (Observer::Lost { dropped: 3 }, Some(Level::Degraded)),
             (Observer::CutOff, Some(Level::Degraded)),
             (Observer::Stopped, Some(Level::Degraded)),

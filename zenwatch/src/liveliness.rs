@@ -61,9 +61,13 @@ use crate::sinks::NoticeKind;
 pub enum TokenBasis {
     /// Not read yet.
     Unseeded,
-    /// The last read ended at its timeout (or failed), and no complete one
-    /// stands: a token it did not show may be held.
-    Incomplete,
+    /// The last read ended at its timeout (or failed), or its session was
+    /// cut off while it ran (core §8.1, 0.38), and no complete one stands: a
+    /// token it did not show may be held.
+    Incomplete {
+        /// A read's session was cut off while it ran.
+        cut_off_during: bool,
+    },
     /// A complete read stands, and nothing was lost since.
     Complete,
     /// Events lost since the last complete read: what is held is the last
@@ -273,10 +277,12 @@ impl TokenFeed {
             }
             let mut keys = BTreeSet::new();
             let mut complete = true;
+            let mut cut_off_during = false;
             for sel in &self.selectors {
                 match zenkey_fleet::liveliness_read(&self.session, sel, self.timeout).await {
                     Ok(read) => {
                         complete &= read.complete;
+                        cut_off_during |= read.cut_off_during;
                         keys.extend(read.keys);
                     }
                     Err(e) => {
@@ -355,7 +361,7 @@ impl TokenFeed {
             self.basis = match (complete, self.basis) {
                 (true, _) => TokenBasis::Complete,
                 (false, b @ (TokenBasis::Lost { .. } | TokenBasis::Complete)) => b,
-                (false, _) => TokenBasis::Incomplete,
+                (false, _) => TokenBasis::Incomplete { cut_off_during },
             };
             if complete {
                 self.retry = None;
@@ -609,9 +615,15 @@ impl ForeignRule {
                  return inside that span was not seen — unobservable, not ok (RFC 13 §3 O6); \
                  re-reading"
             ),
-            TokenBasis::Incomplete => format!(
-                "the liveliness read of {sel} ended at its timeout, possibly incomplete (spec \
-                 §8.1): a token it did not show is not known to be absent; re-reading"
+            TokenBasis::Incomplete { cut_off_during } => format!(
+                "the liveliness read of {sel} {}, possibly incomplete (spec §8.1): a token it \
+                 did not show is not known to be absent; re-reading",
+                zenkey_fleet::model::catalog::incomplete_reason(
+                    false,
+                    cut_off_during,
+                    "ended at its timeout"
+                )
+                .unwrap_or_default()
             ),
             TokenBasis::Unseeded => format!("{sel} has not been read yet"),
             TokenBasis::CutOff => format!(
@@ -830,7 +842,15 @@ mod tests {
             ]
         );
         let mut watch = LivelinessRules::new(&r, "prod");
-        let out = watch.baseline(&held, TokenBasis::Incomplete, &announced, &ids(&r), "t");
+        let out = watch.baseline(
+            &held,
+            TokenBasis::Incomplete {
+                cut_off_during: false,
+            },
+            &announced,
+            &ids(&r),
+            "t",
+        );
         assert_eq!(
             summary(&out),
             [

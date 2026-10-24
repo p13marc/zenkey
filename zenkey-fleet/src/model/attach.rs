@@ -54,6 +54,7 @@ pub fn join(
         namespace: namespace.to_owned(),
         selector: selector.to_owned(),
         complete: false,
+        cut_off_during: false,
         verified: verified.iter().map(|r| r.router.clone()).collect(),
         unverified: unverified.iter().map(|u| u.why.clone()).collect(),
         unobservable: None,
@@ -67,6 +68,7 @@ pub fn join(
         }
     };
     out.complete = observed.complete;
+    out.cut_off_during = observed.cut_off_during;
     let descriptors = observed.descriptors.as_ref();
     let mut instances = observed.instances();
     if let Some(d) = descriptors {

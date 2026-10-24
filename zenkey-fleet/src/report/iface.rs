@@ -24,6 +24,10 @@ pub struct IfaceListing {
     pub selector: String,
     /// Whether the presence read completed before its timeout (§8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// By interface, sorted.
     pub interfaces: Vec<IfaceSummary>,
     /// Instances whose descriptor did not read: a tokenless interface they
@@ -59,6 +63,10 @@ pub struct IfaceView {
     pub iface: String,
     /// Whether the presence read completed before its timeout (§8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// By address, then instance.
     pub providers: Vec<IfaceProvider>,
     /// Every role bound to this interface, from the descriptors (R3).
@@ -158,6 +166,7 @@ mod tests {
         let listing = IfaceListing {
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             interfaces: vec![
                 IfaceSummary {
                     iface: "health.v1".into(),
@@ -204,6 +213,7 @@ mod tests {
         let view = IfaceView {
             iface: "tc.netif.v1".into(),
             complete: true,
+            cut_off_during: false,
             providers: vec![
                 IfaceProvider {
                     address: "host-a/tc".into(),

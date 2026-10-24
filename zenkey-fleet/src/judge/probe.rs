@@ -143,9 +143,14 @@ pub async fn run_probe(
                 reason: format!("nothing arrived, and presence could not be read: {e}"),
             },
             _ => Judgement::Unobservable {
-                reason: "nothing arrived, and the presence read ended at its timeout: a \
-                         provider it did not see may be there (§8.1)"
-                    .into(),
+                reason: format!(
+                    "nothing arrived, and the presence read {}: a provider it did not see may \
+                     be there (§8.1)",
+                    presence
+                        .as_ref()
+                        .and_then(ExpectPresence::incomplete_reason)
+                        .unwrap_or("was not made")
+                ),
             },
         }
     };
@@ -253,12 +258,14 @@ async fn presence(
                 .into_iter()
                 .collect(),
             complete: r.complete,
+            cut_off_during: r.cut_off_during,
             error: None,
             selector,
         },
         Err(e) => ExpectPresence {
             holders: Vec::new(),
             complete: false,
+            cut_off_during: false,
             error: Some(crate::one_line(&e)),
             selector,
         },

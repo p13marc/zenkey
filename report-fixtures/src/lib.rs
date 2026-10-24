@@ -479,6 +479,7 @@ pub fn health_report() -> HealthReport {
         presence: Some(HealthPresence {
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             services: 4,
         }),
         face: None,
@@ -699,6 +700,7 @@ pub fn telemetry_report() -> TelemetryReport {
         presence: Some(TelemetryPresence {
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             services: 1,
             basis: "complete".into(),
         }),
@@ -996,6 +998,7 @@ pub fn alarms_report() -> AlarmsReport {
         presence: Some(AlarmsPresence {
             selector: "zk2/lab/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             services: 3,
             listing: 3,
         }),
@@ -1074,6 +1077,7 @@ pub fn field_report() -> FieldReport {
             presence: Some(LensPresence {
                 selector: "zk2/*/*/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 services: 1,
             }),
             contracts: 1,
@@ -1229,6 +1233,7 @@ pub fn probe_report() -> ProbeReport {
             selector: "zk2/host-a/tc/@zk/alive/tc.netif.v1/**".into(),
             holders: vec!["host-a/tc".into()],
             complete: true,
+            cut_off_during: false,
             error: None,
         }),
         verdict: Judgement::Established,
@@ -1332,6 +1337,7 @@ pub fn rate_report() -> RateReport {
             presence: Some(LensPresence {
                 selector: "zk2/*/*/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 services: 1,
             }),
             contracts: 1,
@@ -1486,6 +1492,7 @@ pub fn topology_with_instances() -> zenkey_fleet::TopologyReport {
             namespace: "acme".into(),
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             verified: vec!["aabbccdd".into()],
             unverified: vec![
                 "`@/99887766/router`, answered by 12345678: its replier is not the router its key \
@@ -2398,6 +2405,7 @@ fn timeline_lens() -> LensScope {
         presence: Some(LensPresence {
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             services: 1,
         }),
         contracts: 1,
@@ -2583,6 +2591,7 @@ fn zsnap_header(
         presence: Some(LensPresence {
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             services: 2,
         }),
     }
@@ -2857,6 +2866,7 @@ pub fn config_report() -> ConfigReport {
         presence: Some(ConfigPresenceRead {
             selector: "zk2/lab/rf0/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             instances: vec!["3fa9c2d41b7e0012".into()],
         }),
         window_s: None,

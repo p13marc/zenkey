@@ -109,8 +109,10 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
                 )
             } else {
                 format!(
-                    "the read of `{}` ended at its timeout with no token: possibly incomplete",
-                    o.selector
+                    "the read of `{}` {} with no token: possibly incomplete",
+                    o.selector,
+                    o.incomplete_reason("ended at its timeout")
+                        .unwrap_or_default()
                 )
             };
             return whole(report, why);
@@ -478,9 +480,15 @@ fn loss_words(
 fn absence_words(obs: &ConformObservation) -> String {
     let tail = obs.spec.presence_tail();
     match &obs.window_presence {
-        Some(Ok(p)) if !p.complete => {
-            "the read of its instance tokens ended at its timeout".to_owned()
-        }
+        Some(Ok(p)) if !p.complete => format!(
+            "the read of its instance tokens {}",
+            crate::model::catalog::incomplete_reason(
+                false,
+                p.cut_off_during,
+                "ended at its timeout"
+            )
+            .unwrap_or_default()
+        ),
         Some(Ok(p)) if p.held.is_empty() => {
             "no instance token of it was visible when the window opened".to_owned()
         }
@@ -3197,6 +3205,7 @@ mod tests {
             window_presence: Some(Ok(WindowPresence {
                 held: [format!("zk2/lab/m/@zk/instance/{INST}")].into(),
                 complete: true,
+                cut_off_during: false,
                 gone: BTreeSet::new(),
                 tail: Duration::from_secs(11),
             })),

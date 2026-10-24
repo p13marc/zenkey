@@ -331,6 +331,7 @@ mod tests {
             presence: Some(LensPresence {
                 selector: "zk2/*/*/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 services: 2,
             }),
             ..header()

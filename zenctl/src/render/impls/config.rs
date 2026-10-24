@@ -367,6 +367,9 @@ impl Render for ConfigReport {
                                  cannot be told",
                             ConfigPremise::Absent =>
                                 "absent from a complete read, so nothing is asked of it",
+                            ConfigPremise::Incomplete if p.cut_off_during =>
+                                "the read was cut off while it ran, without it: possibly \
+                                 incomplete",
                             ConfigPremise::Incomplete =>
                                 "the read ran to its timeout without it: possibly incomplete",
                             ConfigPremise::AcrossFace => "",

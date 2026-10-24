@@ -343,11 +343,20 @@ impl<'o> Ladder<'o> {
                 WhyRung::unobservable(
                     RungId::Presence,
                     PRESENCE,
-                    format!(
-                        "the read of `{}` ended at its timeout with no token: possibly \
-                         incomplete, never absence — raise --timeout",
-                        o.selector
-                    ),
+                    if o.cut_off_during {
+                        format!(
+                            "the read of `{}` {} with no token: possibly incomplete, never \
+                             absence — ask again once the session reaches its router",
+                            o.selector,
+                            crate::bus::presence::CUT_OFF_DURING
+                        )
+                    } else {
+                        format!(
+                            "the read of `{}` ended at its timeout with no token: possibly \
+                             incomplete, never absence — raise --timeout",
+                            o.selector
+                        )
+                    },
                 )
             });
             return None;
@@ -379,8 +388,8 @@ impl<'o> Ladder<'o> {
                 )
             });
         }
-        if !o.complete {
-            evidence.push_str("; the read ended at its timeout, so more may hold one");
+        if let Some(why) = o.incomplete_reason("ended at its timeout") {
+            evidence.push_str(&format!("; the read {why}, so more may hold one"));
         }
         self.rungs
             .push(WhyRung::healthy(RungId::Presence, PRESENCE, evidence));
@@ -1048,11 +1057,13 @@ impl<'o> Ladder<'o> {
                     format!(
                         "no archive.v1 provider visible to this reader by interface token{}: \
                          nothing holds a last-known value of {key} to read",
-                        if a.complete {
-                            ""
-                        } else {
-                            " (the read ended at its timeout)"
-                        }
+                        crate::model::catalog::incomplete_reason(
+                            a.complete,
+                            a.cut_off_during,
+                            "ended at its timeout"
+                        )
+                        .map(|why| format!(" (the read {why})"))
+                        .unwrap_or_default()
                     ),
                 ),
                 None => WhyRung::unobservable(
@@ -1555,6 +1566,7 @@ mod tests {
         o.archives = Some(Ok(ArchiveRead {
             providers: vec!["ground/archive".parse().unwrap()],
             complete: true,
+            cut_off_during: false,
             found: Some((
                 "ground/archive".parse().unwrap(),
                 zenkey::archive::LastKnown {

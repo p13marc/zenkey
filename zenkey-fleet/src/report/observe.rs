@@ -271,6 +271,10 @@ pub struct LensPresence {
     /// `false` when the read ended at its timeout: a provider it did not
     /// see may be there (§8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// Services seen.
     pub services: usize,
 }

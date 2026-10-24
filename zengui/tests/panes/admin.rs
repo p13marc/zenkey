@@ -101,6 +101,7 @@ fn the_topology_caption_carries_the_overlay_facts() {
         namespace: "acme".into(),
         selector: "zk2/*/*/@zk/**".into(),
         complete: true,
+        cut_off_during: false,
         verified: vec!["z1".into()],
         unverified: vec![],
         unobservable: None,

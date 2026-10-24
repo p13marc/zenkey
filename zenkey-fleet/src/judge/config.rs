@@ -63,7 +63,8 @@ pub fn premise(p: ConfigPremise) -> Option<ConfigAnswer> {
         ConfigPremise::Incomplete => Some(ConfigAnswer::new(
             A::Unobservable,
             "presence_incomplete",
-            "the presence read ended at its timeout without it: possibly incomplete (core §8.1)",
+            "no instance token of it seen, and the presence read is possibly incomplete or was \
+             not made: unobservable (core §8.1)",
         )),
     }
 }
@@ -614,8 +615,14 @@ pub fn judge(obs: &ConfigObservation) -> ConfigReport {
     if let Err(e) = &obs.get {
         unobservable = Some(format!("the GET could not be made: {e}"));
     }
+    // A read not made is the premise's possibly incomplete reading, and its
+    // own reason is kept beside the GET's (core §8.1, 0.38, F-191).
     if let Some(Err(e)) = &obs.presence {
-        unobservable.get_or_insert_with(|| format!("the presence read could not be made: {e}"));
+        let read = format!("the presence read could not be made: {e}");
+        unobservable = Some(match unobservable {
+            Some(get) => format!("{get}; {read}"),
+            None => read,
+        });
     }
     if let Some(Err(e)) = &obs.window {
         unobservable
@@ -666,6 +673,7 @@ pub fn judge(obs: &ConfigObservation) -> ConfigReport {
         Some(Ok(o)) => Some(ConfigPresenceRead {
             selector: o.selector.clone(),
             complete: o.complete,
+            cut_off_during: o.cut_off_during,
             instances: o
                 .instances()
                 .into_iter()
@@ -771,6 +779,34 @@ mod tests {
             "outcome": outcome, "edits": []
         }))
         .unwrap()
+    }
+
+    /// A presence read not made is the premise's possibly incomplete
+    /// reading, unobservable, and its own reason stays in the report beside
+    /// the GET's when both failed (core §8.1, 0.38, F-191).
+    #[test]
+    fn a_read_not_made_keeps_its_reason_beside_the_premise() {
+        let obs = ConfigObservation {
+            namespace: String::new(),
+            address: "lab/rf0".parse().unwrap(),
+            spec: crate::bus::config::ConfigSpec::new(Duration::from_secs(1)),
+            presence: Some(Err(crate::error::NotAsked::CutOff.to_string())),
+            get: Err("GET zk2/lab/rf0/config.v1/@state/**: refused".into()),
+            window: None,
+            replay: None,
+        };
+        let r = judge(&obs);
+        assert_eq!(r.premise, ConfigPremise::Incomplete);
+        assert_eq!(r.pending.answer, A::Unobservable);
+        assert_eq!(
+            r.pending.reason, "presence_incomplete",
+            "the profile's reason"
+        );
+        let why = r.unobservable.as_deref().expect("why");
+        assert!(
+            why.contains("the GET could not be made") && why.contains("no router and no peer"),
+            "{why}"
+        );
     }
 
     /// The premise answers every row first: not listed and absent are not

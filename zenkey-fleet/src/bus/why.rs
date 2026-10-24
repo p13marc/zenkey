@@ -125,6 +125,8 @@ pub struct ArchiveRead {
     pub providers: Vec<Addr>,
     /// Whether that presence read ended at the routers' final reply.
     pub complete: bool,
+    /// That read's session was cut off while it ran (core §8.1, 0.38).
+    pub cut_off_during: bool,
     /// The first archive that held the key, and what it held.
     pub found: Option<(Addr, zenkey::archive::LastKnown)>,
     /// Archives whose read could not be made, with why.
@@ -389,6 +391,7 @@ async fn archives(
     let mut out = ArchiveRead {
         providers: providers.clone(),
         complete: read.complete,
+        cut_off_during: read.cut_off_during,
         ..ArchiveRead::default()
     };
     for archive in providers {

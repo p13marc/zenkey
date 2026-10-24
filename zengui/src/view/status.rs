@@ -89,7 +89,7 @@ pub fn presence_text(p: Option<&crate::presence_link::PresenceUpdate>) -> (Strin
     let counts = format!("{up} up · {down} down · {unobservable} unobservable");
     match p.presence.basis() {
         PresenceBasis::Unseeded => ("presence: not seeded yet".to_string(), false),
-        PresenceBasis::Incomplete => (
+        PresenceBasis::Incomplete { .. } => (
             format!("presence: {counts} — the seed was possibly incomplete (§8.1)"),
             false,
         ),
@@ -765,6 +765,7 @@ mod tests {
         c.presence = Some(zenkey_fleet::report::LensPresence {
             selector: "zk2/*/*/@zk/**".into(),
             complete: false,
+            cut_off_during: false,
             services: 1,
         });
         assert_eq!(

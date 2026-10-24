@@ -191,7 +191,9 @@ impl Sight {
     pub fn observer(&self) -> Observer {
         match self {
             Sight::Unseeded => Observer::Unseeded,
-            Sight::Incomplete(_) => Observer::Incomplete,
+            Sight::Incomplete(_) => Observer::Incomplete {
+                cut_off_during: false,
+            },
             Sight::Lost { lost } => Observer::Lost { dropped: *lost },
             Sight::Complete => Observer::Complete,
             Sight::Stopped(_) => Observer::Stopped,
@@ -286,9 +288,15 @@ pub fn sight(book: &AlarmBook, log: &AlarmReadLog, lost_whole: u64) -> Sight {
             return Sight::Incomplete(format!("the presence read could not be made: {e}"));
         }
         Some(Ok(p)) if !p.complete => {
-            return Sight::Incomplete(
-                "the presence read ended at its timeout, possibly incomplete (core §8.1)".into(),
-            );
+            return Sight::Incomplete(format!(
+                "the presence read {}, possibly incomplete (core §8.1)",
+                zenkey_fleet::model::catalog::incomplete_reason(
+                    false,
+                    p.cut_off_during,
+                    "ended at its timeout"
+                )
+                .unwrap_or_default()
+            ));
         }
         _ => {}
     }
@@ -1207,6 +1215,7 @@ mod tests {
             presence: Some(Ok(AlarmPresenceSeen {
                 selector: "zk2/lab/*/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 services: 1,
                 listing: 1,
             })),

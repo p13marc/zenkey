@@ -674,9 +674,15 @@ impl PresenceRule {
         };
         let sight = match basis {
             PresenceBasis::Complete => "a complete read".to_string(),
-            PresenceBasis::Incomplete => {
-                "a read that ended at its timeout: what it did not show is unobservable".into()
-            }
+            PresenceBasis::Incomplete { cut_off_during } => format!(
+                "a read that {}: what it did not show is unobservable",
+                zenkey_fleet::model::catalog::incomplete_reason(
+                    false,
+                    cut_off_during,
+                    "ended at its timeout"
+                )
+                .unwrap_or_default()
+            ),
             PresenceBasis::Lost { dropped } => {
                 format!("{dropped} event(s) lost: unobservable until a complete re-read")
             }

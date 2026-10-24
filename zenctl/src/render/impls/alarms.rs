@@ -215,13 +215,17 @@ impl Render for AlarmsReport {
                     ))
                     .cite("alarms.v1 §2.13"),
                 );
-                if !p.complete {
+                if let Some(why) = zenkey_fleet::model::catalog::incomplete_reason(
+                    p.complete,
+                    p.cut_off_during,
+                    "ran to its timeout",
+                ) {
                     notes.push(
-                        Note::coverage(
-                            "the presence read ran to its timeout, so it is possibly \
-                             incomplete: an owner unseen is unobservable, never absent, and \
-                             one it missed may fire, so nothing here reads \"nothing fires\"",
-                        )
+                        Note::coverage(format!(
+                            "the presence read {why}, so it is possibly incomplete: an owner \
+                             unseen is unobservable, never absent, and one it missed may fire, \
+                             so nothing here reads \"nothing fires\""
+                        ))
                         .cite("spec §8.1, alarms.v1 §2.15"),
                     );
                 }

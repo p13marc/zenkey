@@ -118,6 +118,8 @@ impl TelemetrySpec {
 pub struct SeedSeen {
     pub selector: String,
     pub complete: bool,
+    /// The seed's session was cut off while it ran (core §8.1, 0.38).
+    pub cut_off_during: bool,
     /// Services in scope holding an instance token.
     pub services: usize,
 }
@@ -1006,6 +1008,7 @@ impl Reader<'_> {
                 self.seed = Some(Ok(SeedSeen {
                     selector: observed.selector.clone(),
                     complete: observed.complete,
+                    cut_off_during: observed.cut_off_during,
                     services: c.addresses().filter(|a| c.has_instance(a)).count(),
                 }));
                 return;

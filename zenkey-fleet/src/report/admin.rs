@@ -209,6 +209,10 @@ pub struct InstanceJoin {
     /// Whether the presence read ended at the routers' final reply. A read
     /// that ended at its timeout may have missed an instance (§8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// The routers whose own answers were verified, by zid: the only
     /// session lists an instance is attached through.
     pub verified: Vec<String>,
@@ -293,6 +297,7 @@ mod tests {
             namespace: "acme".into(),
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             verified: vec!["aabbccdd".into()],
             unverified: vec![],
             unobservable: None,

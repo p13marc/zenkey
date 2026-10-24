@@ -38,6 +38,10 @@ pub struct ServiceListing {
     pub selector: String,
     /// Whether the read completed before its timeout (§8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// By address, sorted.
     pub services: Vec<ServiceSighting>,
     /// Keys the selector matched that are not zk2 tokens, verbatim. A
@@ -63,6 +67,10 @@ pub struct ServiceView {
     pub selector: String,
     /// Whether the read completed before its timeout (§8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// By instance id, as [`ServiceSighting::instances`].
     pub instances: Vec<InstanceSighting>,
     /// Member tokens, as [`ServiceSighting::members`].
@@ -86,6 +94,10 @@ pub struct NamespaceListing {
     pub selector: String,
     /// Whether the read completed before its timeout (§8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// By namespace, sorted; the bus root (no namespace) sorts first.
     pub namespaces: Vec<NamespaceSighting>,
     /// Keys the selector matched that are not instance tokens, verbatim.
@@ -373,6 +385,7 @@ mod tests {
         let listing = ServiceListing {
             selector: "zk2/*/*/@zk/**".into(),
             complete: false,
+            cut_off_during: false,
             services: vec![ServiceSighting {
                 address: "host-a/tc".into(),
                 instances: vec![
@@ -441,6 +454,23 @@ mod tests {
                 "unparsed": ["zk2/host-a/tc/@zk/bogus"],
             })
         );
+        // A read cut off while it ran says so beside `complete`, and only
+        // then (core §8.1, 0.38).
+        let cut = ServiceListing {
+            cut_off_during: true,
+            services: vec![],
+            unparsed: vec![],
+            ..listing
+        };
+        assert_eq!(
+            serde_json::to_value(&cut).expect("serialize"),
+            json!({
+                "selector": "zk2/*/*/@zk/**",
+                "complete": false,
+                "cut_off_during": true,
+                "services": [],
+            })
+        );
     }
 
     /// The documents `service show` and `namespace list` print: a service
@@ -452,6 +482,7 @@ mod tests {
             address: "host-a/tc".into(),
             selector: "zk2/host-a/tc/@zk/**".into(),
             complete: false,
+            cut_off_during: false,
             instances: vec![],
             members: vec![],
             unparsed: vec![],
@@ -468,6 +499,7 @@ mod tests {
         let listing = NamespaceListing {
             selector: "**/zk2/*/*/@zk/instance/*".into(),
             complete: true,
+            cut_off_during: false,
             namespaces: vec![
                 NamespaceSighting {
                     namespace: String::new(),

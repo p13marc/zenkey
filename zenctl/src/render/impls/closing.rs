@@ -282,9 +282,10 @@ impl Render for ExpectReport {
             t.line(match (&p.error, p.holders.as_slice(), p.complete) {
                 (Some(e), _, _) => format!("presence: not read — {e}"),
                 (None, [], true) => "presence: no token visible to this reader".to_owned(),
-                (None, [], false) => {
-                    "presence: no token seen, and the read ended at its timeout".to_owned()
-                }
+                (None, [], false) => format!(
+                    "presence: no token seen, and the read {}",
+                    p.incomplete_reason().unwrap_or_default()
+                ),
                 (None, holders, _) => format!("presence: held by {}", holders.join(", ")),
             });
         }
@@ -406,9 +407,10 @@ impl Render for zenkey_fleet::report::ProbeReport {
             t.line(match (&p.error, p.holders.as_slice(), p.complete) {
                 (Some(e), _, _) => format!("presence: not read — {e}"),
                 (None, [], true) => "presence: no token visible to this reader".to_owned(),
-                (None, [], false) => {
-                    "presence: no token seen, and the read ended at its timeout".to_owned()
-                }
+                (None, [], false) => format!(
+                    "presence: no token seen, and the read {}",
+                    p.incomplete_reason().unwrap_or_default()
+                ),
                 (None, holders, _) => {
                     format!("presence: held by {} — up, and silent", holders.join(", "))
                 }

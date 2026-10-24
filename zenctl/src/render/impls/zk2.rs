@@ -29,12 +29,21 @@ use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelop
 
 // ── shared pieces ──────────────────────────────────────────────────────────
 
-/// The note every presence read owes when it ran to its timeout.
-fn incomplete() -> Note {
-    Note::coverage(
+/// The note every presence read owes when it is possibly incomplete: it
+/// ran to its timeout, or its session was cut off while it ran (core §8.1,
+/// 0.38), each with what to do about it.
+fn incomplete(cut_off_during: bool) -> Note {
+    Note::coverage(if cut_off_during {
+        format!(
+            "the presence read {}, so it is possibly incomplete: anything missing here may \
+             still be up — ask again once the session reaches its router",
+            zenkey_fleet::CUT_OFF_DURING
+        )
+    } else {
         "the presence read ran to its timeout, so it is possibly incomplete: \
-         anything missing here may still be up — raise --timeout to ask again",
-    )
+         anything missing here may still be up — raise --timeout to ask again"
+            .to_owned()
+    })
     .cite("spec §8.1")
 }
 
@@ -224,7 +233,7 @@ impl Render for ServiceListing {
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         if !self.complete {
-            notes.push(incomplete());
+            notes.push(incomplete(self.cut_off_during));
         }
         if self.services.is_empty() {
             notes.push(Note::silence(
@@ -322,7 +331,7 @@ impl Render for ServiceView {
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         if !self.complete {
-            notes.push(incomplete());
+            notes.push(incomplete(self.cut_off_during));
         }
         if self.instances.is_empty() {
             notes.push(Note::silence(format!(
@@ -470,7 +479,7 @@ impl Render for IfaceListing {
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         if !self.complete {
-            notes.push(incomplete());
+            notes.push(incomplete(self.cut_off_during));
         }
         if self.interfaces.is_empty() {
             notes.push(Note::silence(
@@ -631,7 +640,7 @@ impl Render for IfaceView {
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         if !self.complete {
-            notes.push(incomplete());
+            notes.push(incomplete(self.cut_off_during));
         }
         if self.providers.is_empty() && self.consumers.is_empty() {
             notes.push(Note::silence(format!(
@@ -985,7 +994,7 @@ impl Render for NamespaceListing {
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         if !self.complete {
-            notes.push(incomplete());
+            notes.push(incomplete(self.cut_off_during));
         }
         if self.namespaces.is_empty() {
             notes.push(Note::silence(
@@ -1101,7 +1110,7 @@ impl Render for BindingGraph {
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         if !self.complete {
-            notes.push(incomplete());
+            notes.push(incomplete(self.cut_off_during));
         }
         if self.nodes.is_empty() {
             notes.push(Note::silence(
@@ -1168,7 +1177,11 @@ pub fn graph_dot(g: &BindingGraph) -> String {
         ));
     }
     if !g.complete {
-        out.push_str("  label=\"possibly incomplete: the presence read ran to its timeout\";\n");
+        out.push_str(if g.cut_off_during {
+            "  label=\"possibly incomplete: the presence read was cut off while it ran\";\n"
+        } else {
+            "  label=\"possibly incomplete: the presence read ran to its timeout\";\n"
+        });
     }
     out.push_str("}\n");
     out

@@ -357,12 +357,16 @@ fn instance_notes(join: &zenkey_fleet::report::InstanceJoin) -> Vec<Note> {
             .cite("spec §8.1"),
         );
     }
-    if !join.complete {
+    if let Some(why) = zenkey_fleet::model::catalog::incomplete_reason(
+        join.complete,
+        join.cut_off_during,
+        "ran to its timeout",
+    ) {
         notes.push(
-            Note::coverage(
-                "the presence read ran to its timeout, so it is possibly incomplete: an \
-                 instance missing here may still be up",
-            )
+            Note::coverage(format!(
+                "the presence read {why}, so it is possibly incomplete: an instance missing \
+                 here may still be up"
+            ))
             .cite("spec §8.1"),
         );
     }
