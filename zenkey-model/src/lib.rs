@@ -87,8 +87,9 @@
 //!   declaration read from a resolved resource, a requirement's binding and
 //!   its slice's key, the standard `Report` with its reading and its
 //!   consistency, a target's pure two-phase state machine (each version
-//!   ordered by its author's stamp, acted on once, refused whole or
-//!   reverted), and §5's four questions (`spec/profiles/desired/v1.md`,
+//!   ordered by its author's stamp, acted on once, the same document
+//!   adopted without an act, refused whole or reverted), and §5's four
+//!   questions (`spec/profiles/desired/v1.md`,
 //!   #840). The author's writes and record, and the target's subscription,
 //!   seed and archive read, are the runtime's.
 //!
