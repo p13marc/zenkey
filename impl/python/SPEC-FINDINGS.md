@@ -9940,6 +9940,13 @@ its `TargetRole`.
 … of a target: in one process (a re-mint keeps it, §2.7)", or each "in
 an instance" read "in one process".
 
+**Status at desired.v1 0.4:** resolved by 0.4, as zk2py read it: §0
+defines a **run**, one process of the target, and every "in an instance"
+that meant it reads "in a run". A re-mint keeps the run, and a restart
+begins another. `order.json`'s `{restart: true}` is a new run. zk2py's
+`TargetRole` already kept its memory per process, and its live target's
+re-mint keeps the role.
+
 ### F-193 · gap · desired.v1 0.3 §2.7 "invalid": the pointer of a refusal no member carries
 
 > §2.7 (0.3): "A document that decodes and that its JSON Schema (core §7.3)
@@ -9960,6 +9967,14 @@ write `/revision` for a missing `revision`.
 it: a member's pointer for its own schema's refusal, the object's (`""`
 at the top) for a missing required member or a value of another type",
 with an `order.json` case, or a note that `pointer` is informative here.
+
+**Status at desired.v1 0.4:** resolved by 0.4: §2.7's "Where a refusal
+points", as JSON Schema's output places an error. `order.json` gains a
+top-level `schema`, the step `{"finish": "check"}` and eight cases. zk2py
+implemented the rule from the text (`desired.refusal_pointer`). The
+cases failed until it did, and then passed as written. Its live targets
+use the same function, and agree with the reference's on every edge
+document.
 
 ### F-194 · contradiction · the owner example's help (#840, DC): `desired put` "as written"
 
@@ -9985,6 +10000,11 @@ section's notes).
 sorted, numbers as doubles", or the example reading the line with its
 numbers exact.
 
+**Status at desired.v1 0.4:** resolved: the owner example's
+`desired put` puts the line byte for byte once it reads as strict JSON,
+and its help says so. Measured: the Rust author writes `0.10000000000000000555`
+and 2^64 by their exact values (`edges`, every pairing).
+
 ### F-195 · contradiction · desired.v1 0.3 scenarios.md §7 and §10: "(core §8.1, 0.3)"
 
 > scenarios §7 Expected 1: "a complete presence read shows no instance
@@ -10001,6 +10021,9 @@ is core 0.37's, and the marker is this text's 0.3, the same slip as
 
 **Wording that would remove the guess:** "(core §8.1, 0.37; this text
 0.3)".
+
+**Status at desired.v1 0.4:** resolved: §7 and §10 read "(core §8.1,
+0.37; this text 0.3)".
 
 ### F-196 · gap · desired.v1 scenarios.md §2: "the timestamp s2, exactly" from a second implementation's binding
 
@@ -10024,6 +10047,10 @@ zk2py's does. Step 1's "less 1 s" has no such problem.
 **Wording that would remove the guess:** §2's setup, "X puts with the
 timestamp a subscriber received with `s2` (a binding may not build every
 NTP64 from its text)".
+
+**Status at desired.v1 0.4:** resolved: §2's X takes `s2` as S received
+it and builds each timestamp from that one, which is what zk2py's runner
+did.
 
 ### F-197 · gap · desired.v1 0.3 scenarios.md §7 and §10: an archive read only on absence is not observed
 
@@ -10052,6 +10079,15 @@ the target's own.
 and its queryable silent (held), the archive holding an older version, in
 which the target reads no archive and acts on nothing.
 
+**Status at desired.v1 0.4:** resolved: §10 gains steps 3 and 4. The
+author is present on the target's side by X's token alone, its GET is
+silent, and the archive holds v1, which v2 replaced. The owner example's
+`desired seeds` and `desired gets` make §2.5's "says what its seed found"
+and §8's GETs observable, and zk2py's owner answers both in the same
+words. Steps 3 and 4 pass in all eight runs. Each target reads no
+archive, acts on nothing, and then converges on v2 without
+`last_known`.
+
 ### F-198 · ambiguity · desired.v1 0.3 §2.11 "Pacing" against core S2: a kept document not yet put again
 
 > §2.11 (0.3): "A paced author makes its deletes again first, then puts its
@@ -10075,6 +10111,12 @@ author does not pace, so the case is not run.
 **Wording that would remove the guess:** §2.11, "a document is live, for
 core S2, from its put by the new instance", or core S2's "live" defined
 as put by the instance that answers.
+
+**Status at desired.v1 0.4:** resolved by 0.4's "Live, for a paced
+author" (§2.11), as zk2py read it: a kept document is live from its put by
+the new instance, and until then a tool reads `author_silent`. Neither
+author paces, so it is still not run. zk2py's tool reads a silent GET
+from a present author as `author_silent`, as a standby's shape shows.
 
 **Counts at desired.v1 0.3, config.v1 0.5 and core 0.37:** 198 entries. Open:
 - F-185, F-186, F-188, F-189 and F-190;
@@ -10473,3 +10515,181 @@ whose id is `own` from then on, its former ids never another holder, and
 F-209 are open, F-205 minor. F-181 to F-184 are resolved, and F-185 to
 F-191 by core 0.38. F-192 to F-198, against desired.v1 0.3 and config.v1
 0.5, are open.
+
+## At desired.v1 0.4 (#609)
+
+Round 57 read `desired.v1` text 0.4 cold, from PR #856's head. The text
+holds round 55's F-192 to F-198, as answered on #840, and what building
+the reference's tools showed. zk2py implemented each change from the
+text, built a tool of its own (`zk2py.desired_tool`), and ran the profile
+live. That covers §1 to §10, §10's steps 3 and 4 and §9 for the first
+time, in all four pairings with the owner example built from that head
+(`owner-dd`), on core 0.39's presence rules. §9 asks zk2py's tool and the
+Rust one, `zenctl-dd desired`, the doctor's `desired-*` checks and
+`check conform`'s `desired-*` cases, as black boxes.
+
+**Round 55's findings at 0.4:** F-192 to F-198 are all resolved. Each
+entry has its status line.
+
+**`just py-conformance`: 2915 of 2915.** `desired` passes 367: the 274
+cases, five header checks and 88 read-backs. `order.json`'s eight new
+cases failed until zk2py read §2.7's pointers. `readings` passes 345,
+nine more than before: six of §2.10's choice of a report, and three of
+§2.17's slice from the target alone.
+
+**Live:** every check passes in all eight runs. Under the Rust build
+running beside, no check needed a rerun.
+
+| Author → target | Watch | Polling |
+|---|---|---|
+| zk2py → zk2py | 105 of 105 | 83 of 83 |
+| Rust → Rust | 83 of 83 | 83 of 83 |
+| zk2py → Rust | 83 of 83 | 83 of 83 |
+| Rust → zk2py | 83 of 83 | 83 of 83 |
+
+Each run counts:
+- §1 to §8 and §10: 43;
+- §9: 29;
+- edges: 9;
+- re-mint: 2.
+
+The watch run of zk2py → zk2py adds 22: eleven §2.17 shapes no scenario
+makes, built by test sessions standing in for a target and an author,
+each asked of both tools with the contracts held offline. The shapes:
+- two report resources' reports differing;
+- two reports on one key;
+- one report twice;
+- an unreadable reply;
+- an unstamped author reply;
+- a standby author;
+- a binding to two authors;
+- an absent author with a report keyed under `@state`, with and without
+  its interface's contract held;
+- an absent author and no report;
+- the target's own contract not in hand.
+
+**The tools.** zk2py's tool and `zenctl-dd` agree on §9's six steps and
+on every shape, and each answers as the text does:
+- the doctor's `desired-refused` finds steps 2 and 3, `desired-last-known`
+  step 4, and `desired-behind` step 6 only on `--clocks-synced`;
+- `check conform`'s `desired-report`, `desired-binding` and
+  `desired-author` pass;
+- `zenctl desired --for 2` exits 1 behind v6, by the window, and by the
+  clock with `--clocks-synced`.
+
+They disagreed once, before zk2py changed, on an absent author whose
+report is keyed under `@state` while the tool held `tasking.v1` offline
+(F-213). The reference took the slice from the offline revision, `state`,
+and read `no_report`. zk2py took it from the requirement and the
+report's key, and answered. zk2py now reads as the reference does; the
+text supports either.
+
+**The scenarios, read for sufficiency.** Every section ran from its text.
+§9 step 4's "T shows the archive's v1 as last-known" needs a tool that
+finds the archive. zk2py's finds it by its `archive.v1` token (core §4.4),
+so the stand-in archive gained a holder of that token.
+
+**What zenoh-python could not do:** nothing these sections need.
+
+### F-210 · ambiguity · desired.v1 0.4 §2.17 "What a tool reads": the template a requirement names
+
+> §2.17 (0.4): "a tool MAY take the slice from the target alone, as the
+> reference does: the template its requirement names (core §3.1), each
+> parameter filled as its binding says"
+
+> §2.1: "**A target** implements it for each requirement it holds on a
+> desired resource: one role per document type"
+
+A requirement lists the resources it consumes, and nothing here keeps a
+desired role's to one. A role that also consumes another resource of its
+author's interface names two templates, and only the author's
+declaration says which is the desired one. From the target alone, "the
+template its requirement names" is then a guess. Matching each template
+against the key the target's report claims would settle it. Every example
+lists one resource.
+
+**zk2py:** the requirement's first template.
+
+**Wording that would remove the guess:** "the template its requirement
+names, of the desired resource; a requirement on a desired resource names
+it alone (or: the one whose slice a report of the target claims)".
+
+### F-211 · ambiguity · desired.v1 0.4 §2.17 "How long behind": readings that long apart, or every reading
+
+> §2.17 (0.4): "never from one reading alone: the author's same version
+> current, and the target not yet on it, in readings that long apart"
+
+> scenarios.md §9 Expected 6: "Over the window, every reading is not yet
+> on v6"
+
+The rule's words need two readings that long apart. The scenario, and
+the reference's `--for` ("a target 'not yet' on one version of its
+author's for all of it"), need every reading in between. The two differ
+when a reading in between is unobservable: a silent GET, an incomplete
+presence read, a report not read. The first reading finds the target
+behind; the second starts the window again.
+
+**zk2py:** every reading, as the reference does: any other answer starts
+the window again.
+
+**Wording that would remove the guess:** "in every reading over that
+long, the first and the last that long apart".
+
+### F-212 · minor · desired.v1 0.4 §2.10 "Which reply is the report": two reports on one key
+
+> §2.10 (0.4): "two readable ones that claim it and differ are
+> **unreadable**, since the target says two things of one role"
+
+The reason covers two instances of the target saying two things, a twin
+or a split, as much as two report resources. A tool reads reports by
+S4's GET, whose `Latest` consolidation keeps one reply per key, the
+later. So two instances' differing reports on one key reach the tool as
+one, which reads as the report. zk2py's shape measured it with both
+tools: the later reply answered, never `report_invalid`. The rule bites
+only across report resources.
+
+**zk2py:** as the text does: S4's GET, then the rule over what it
+returns.
+
+**Wording that would remove the guess:** "two readable ones, of two
+report resources, that claim it and differ …; two instances' reports on
+one key are one reply to S4's GET, the later (core §4.1)".
+
+### F-213 · ambiguity · desired.v1 0.4 §2.17 "The slice": a revision held offline when no descriptor names one
+
+> §2.17 (0.4): "The kind token and the target parameters are the author's
+> declaration, which needs the author's contract: the revision its
+> descriptor names, retrieved (core §8.4), or one held offline (core
+> §8.5). An author absent has no descriptor to read, so a tool MAY take
+> the slice from the target alone"
+
+"One held offline" can be read two ways:
+- as the revision the descriptor names, held offline;
+- as any revision of the author's interface a tool holds.
+
+With the author absent, no revision is named. The reference uses a
+revision of the interface it holds (`slice_from: offline_contract`).
+zk2py used the target alone (`requirement`). The two disagree when the
+report's key carries another kind token than the held revision declares.
+In the shape zk2py built, the report claimed `@state` and `tasking.v1`
+declares `state`:
+- the reference read `no_report`;
+- zk2py read the report and answered.
+
+One major's revisions declare the same keys, so the reference's reading
+is sound. The text names neither it, nor which of several held revisions
+gives the slice, nor that the contract's token wins over the report's.
+
+**zk2py:** now the reference's: with no descriptor naming one, the latest
+minor of the interface held offline, before the target alone.
+
+**Wording that would remove the guess:** "or, with no descriptor naming
+one, a revision of its interface held offline: one major's revisions
+declare the same keys", and "the slice so taken is the slice: a report
+whose key is not it is none".
+
+**Counts at desired.v1 0.4:** 213 entries. Open:
+- F-199 to F-209, against redundancy.v1 0.1 (being answered on #841);
+- F-210 to F-213, F-212 minor.
+
+Every other entry is resolved.
