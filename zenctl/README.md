@@ -193,7 +193,7 @@ One contract for the whole tool, written once in
 | **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; an act (`pub`, `replay`, `gen`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `watchdog`) land **any** failure
+Verdict verbs (`check *`, `compat`, `doctor`, `health`, `alarms`, `telemetry`, `desired`, `watchdog`) land **any** failure
 before the question was put on 2, so a dead bus never reads as a pass or as a
 finding.
 
@@ -231,6 +231,10 @@ zenctl alarms 'zk2/lab/**' --namespace prod --clocks-synced --for 905   # an own
 # Metrics, telemetry.v1: exit 1 on a sample that does not conform or a counter that went backwards within an epoch.
 zenctl telemetry --namespace prod --for 30
 zenctl telemetry 'zk2/rf/modem/**' --namespace prod --across-face --contracts contracts/   # across a constrained face: only in-band epochs establish one
+
+# Desired state, desired.v1: exit 1 on a refused or failed act, or a target behind its author's version for the whole window.
+zenctl desired --namespace prod --for 30               # every target's roles, read again while an answer may move
+zenctl desired lab/worker --role task --namespace prod --clocks-synced   # one target's role, its report's age on the deployment's word
 
 # One expectation over a zk2 resource, for CI or a cron job.
 zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 60 --at-least 1
@@ -403,6 +407,11 @@ members a scope reaches: each resource's declaration, each member's kind and
 unit, its samples' conformance, each pair's continuity with how its epoch
 was had, and a counter's rate — exit 1 on a sample that does not conform or
 a decrease within an established epoch, 2 when nothing could be answered) ·
+`zenctl desired [SYSTEM/SERVICE]` (each `desired.v1` target's roles against
+their authors' documents: has it converged on its author's current version,
+is its last act refused or failed, is what it acted on last-known, is a
+document in force — exit 1 on a refused or failed act or a target behind
+past `--for`, 0 every role asked converged, 2 otherwise) ·
 `zenctl watchdog --rule …` (conditions, as transitions).
 
 **Router configuration — generated, then checked.**
@@ -438,7 +447,8 @@ show|refresh|clear` (the name cache behind completion) · `zenctl completions
 > CC (#768) `config`, as `config.v1`'s. #800's AC brought v1's
 > `alert-firing` rule back on `alarms.v1`, and added `alarms`. #819's TC
 > answered v1's `kind-mismatch` on `telemetry.v1`, as `telemetry` and the
-> `telemetry-*` checks.
+> `telemetry-*` checks. #840's DD added `desired`, the `desired-*` checks and
+> `check conform`'s `desired-*` cases.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -707,7 +717,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks twenty-seven questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks thirty questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -743,6 +753,9 @@ none.
 | `alarm-stale` | does a present owner hold a firing alarm unconfirmed beyond its 900 s horizon? Neither firing now nor resolved (`--clocks-synced`; warning) | alarms.v1 §2.7 |
 | `telemetry-declaration` | does a contract an owner implements declare a metric resource whose declaration is invalid, so that no reader reads its members? (warning) | telemetry.v1 §2.2 |
 | `telemetry-sample` | does an owner answer a GET of a state metric member with a sample that does not conform? (`--deep`; error; a reply that does not decode, or under an invalid declaration, leaves it unobservable) | telemetry.v1 §2.6 |
+| `desired-refused` | was a desired.v1 target's last act on its author's document refused, or did it fail partway, by its report? (warning) | desired.v1 §2.7 |
+| `desired-behind` | is a desired.v1 target not yet converged on a version its author stamped longer ago than `--desired-behind` (60 s)? (warning; `--clocks-synced` only: one reading never finds a target behind) | desired.v1 §2.17 |
+| `desired-last-known` | does a desired.v1 target run a document it read from an archive, its author not answering for it? (info) | desired.v1 §2.9 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -802,6 +815,15 @@ core code). `telemetry-sample` reads the value replies of the GETs
 metric member alone: a stream has no sample to GET. `zenctl telemetry` and
 `check conform`'s `telemetry-*` cases read streams over a window, and the
 continuity no single sample shows.
+
+The `desired-*` checks (#840) make one `desired.v1` reading of every target
+over the second presence read and the revisions it retrieved: each target's
+reports, found by type identity, and each slice from its author, judged as
+`zenctl desired` judges them. `desired-behind` needs a time, which one
+reading has only on a trusted clock: with `--clocks-synced`, a target not yet
+on a version its author stamped more than `--desired-behind` ago is the
+finding; without it, every target not yet converged is unjudged, never clean
+and never a finding. `zenctl desired --for` reads over a window instead.
 
 A `doctor health-*` rule of `watchdog` or `record --on`
 runs the same doctor, so it takes the same word: `watchdog --clocks-synced`,
@@ -985,6 +1007,43 @@ non-conforming metric sample is `invalid` wherever a payload is checked —
 `invalid-payload` watchdog rule — its reasons named (`telemetry.v1 §2.6
 tag_disagrees: …`). `rate` stays message throughput: a counter's rate is a
 pair's, and a pair is this verb's.
+
+## `desired` — has each target converged on its author's document?
+
+`desired` (#840) reads `desired.v1` (`spec/profiles/desired/v1.md`) as its
+§2.17 tool does: every service in the namespace whose descriptor lists a role
+on a desired resource, or one target, or one role of it (`--role`). The
+slice is the author's declaration and the target's binding (the author's
+revision retrieved, or held by `--contracts`); with the author absent, the
+target's requirement and binding. The target's report of the slice is found
+by type identity, and the author's current version by S4's GET of the slice.
+Per role, §5's four questions, in the profile's tokens: has it converged on
+its author's current document (`yes`, `no`, `not_yet`, `unobservable`,
+`not_asked`), is its last act refused or failed, is what it acted on
+last-known, is a document in force. An absent author's slice is read from
+every archive's last-known, shown beside and never as current.
+
+"Not yet" is no verdict from one reading. `--for SECS` reads again every
+500 ms while an answer may move, and a target not yet on one version of its
+author's for the whole window is **behind**: exit 1. With `--clocks-synced`,
+one behind a version stamped longer ago than the window is found at once, and
+a report whose resource declares a horizon is aged on the deployment's word.
+
+```console
+$ zenctl desired lab/worker --namespace acme --for 5 -c tcp/127.0.0.1:7447
+desired.v1 in namespace "acme", target lab/worker — 1 role(s), 1 reading(s)
+✓  lab/worker task  converged: yes (converged) — its report's observed 7386690599959157260/33 is its author lab/author's current version, converged
+    role bound, requiring tasking.v1, its author lab/author
+    slice zk2/lab/author/tasking.v1/state/tasks/lab/worker (from the author contract)
+    …
+```
+
+Exit 1 a refused or failed act, or a target behind past `--for`; 0 every role
+asked converged on its author's current document, none refused; 2 no verdict
+(not yet, unobservable, the author absent, a role unbound or not listed, or a
+run that could not start). The same reading is the doctor's `desired-*`
+checks and `check conform`'s `desired-report` and `desired-binding` of a
+target; `desired-author` checks an author's declaration.
 
 ## `acl gen` — access control from the contracts
 
