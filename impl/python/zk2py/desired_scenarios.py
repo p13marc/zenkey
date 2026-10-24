@@ -429,8 +429,8 @@ def section2(ctx: Ctx) -> None:
                  rr == "desired reread 2000" and a is not None and acts0 is not None and a[1] > acts0[1]
                  and a[0] == acts0[0] and [x.stamp for x in g.replies] == [s2] and not bus.since(t3, RP),
                  f"acts {acts0} -> {a}, GET {[x.stamp for x in g.replies]}")
-        rp.note(sec, "zenoh-python builds an NTP64 from seconds and nanoseconds, which reaches only some raw values "
-                     "(F-196): X's \"s2 exactly\" reuses the timestamp S received with v2")
+        rp.note(sec, "X builds every timestamp from the one S received with s2 (0.4, F-196): s2 exactly is that "
+                     "timestamp, and 1 s earlier its seconds less one, its nanoseconds kept")
     finally:
         bus.close()
 
@@ -704,7 +704,7 @@ def section8(ctx: Ctx) -> None:
     try:
         author = bus.party(ctx.author_impl, AUTHOR, ["--desired-author"])
         author.put(TARGET, v(1))
-        q0 = author.cmd("desired queries")
+        q0 = author.cmd(f"desired gets {TARGET}")
         t = time.monotonic()
         target = bus.party(ctx.target_impl, TARGET, ["--desired-unbound"])
         _wait(lambda: bus.token_put(TARGET, t) is not None, 10.0, 0.01)
@@ -720,13 +720,9 @@ def section8(ctx: Ctx) -> None:
         rp.check(sec, "1. Run holds the baseline, and stays so; the target acts on nothing and makes no seed",
                  bus.get_json(RUN)[0] == BASELINE and not bus.since(t1, RUN) and a is not None and a[0] == 0 and a[1] == 0,
                  f"acts {a}")
-        q1 = author.cmd("desired queries")
-        if q0 and q0.startswith("desired queries ") and q1 and q1.startswith("desired queries "):
-            rp.check(sec, "1. the author's queryable receives no GET of D",
-                     q0 == q1, f"{q0} -> {q1}")
-        else:
-            rp.note(sec, "the author's queryable's GETs are not observable from the owner example's stdin "
-                         f"({q1!r}): the target's seeds=0 stands for it")
+        q1 = author.cmd(f"desired gets {TARGET}")
+        rp.check(sec, "1. the author's queryable receives no GET of D (desired gets lab/worker, 0.4)",
+                 q0 is not None and q0.startswith(f"desired gets {D} ") and q0 == q1, f"{q0} -> {q1}")
     finally:
         bus.close()
 
@@ -768,8 +764,438 @@ def section10(ctx: Ctx) -> None:
                  ok and target2.acts() is not None and acts0 is not None and target2.acts()[0] == acts0[0]
                  and not bus.since2(t2, RUN) and any(converged_on(r, s1, 1) for r in s2rep),
                  f"{target2.report()}, acts {acts0} -> {target2.acts()}, S2 {s2rep}")
+        # 3 (0.4, F-197): the author present on R2 by X's token alone, its
+        # GET silent there, the archive holding v1, which v2 replaced
+        bus.cut()
+        s2 = author.put(TARGET, v(2))
+        x = live.open_client(bus.ep2)
+        bus.extra.append(x)
+        xtok = x.liveliness().declare_token(f"zk2/{AUTHOR}/@zk/instance/" + "f" * 16)
+        _wait(lambda: bool(live.list_presence(bus.g2, f"zk2/{AUTHOR}/@zk/instance/*").instances), 5.0, 0.05)
+        target2.kill()
+        t3 = time.monotonic()
+        target3 = bus.party(ctx.target_impl, TARGET, tflags, on=2)
+        time.sleep(4.0)
+        seeds = target3.cmd("desired seeds") or ""
+        rep3 = target3.report()
+        s2rep = [json.loads(g[3]) for g in bus.since2(t3, RP)]
+        words = dict(w.split("=", 1) for w in seeds.split()[3:] if "=" in w)
+        rp.check(sec, "3. the author present on R2 (X's token) and its GET silent: the target reads no archive and "
+                      "acts on nothing; its report stays {key: D, source: baseline}, Run the baseline, and it says so "
+                      "(desired seeds: no reply, the author present, no archive read)",
+                 rep3 == {"key": D, "source": "baseline"} and n_acts(target3) == 0
+                 and all(r == {"key": D, "source": "baseline"} for r in s2rep)
+                 and bus.get_json(RUN, on=2)[0] == BASELINE
+                 and words.get("answered") == "0" and words.get("author") == "present" and words.get("archive") == "-",
+                 f"seeds {seeds!r}, report {rep3}, acts {target3.acts()}")
+        # 4: the heal; once the author's own token is on R2, X withdraws
+        t4 = time.monotonic()
+        bus.heal()
+        _wait(lambda: len(live.list_presence(bus.g2, f"zk2/{AUTHOR}/@zk/instance/*").instances) >= 2, 10.0, 0.05)
+        xtok.undeclare()
+        ok = _wait(lambda: converged_on(target3.report(), s2, 2), 10.0, 0.05)
+        time.sleep(0.5)
+        rep4 = target3.report()
+        rp.check(sec, "4. the author's instance token appears on R2: the target seeds, the author answers v2 under "
+                      "s2, and the target acts on it: converged on v2, without last_known; X's withdrawal moves "
+                      "nothing", ok and isinstance(rep4, dict) and "last_known" not in rep4 and n_acts(target3) == 1,
+                 f"{rep4}, acts {target3.acts()}, {round(time.monotonic() - t4, 2)} s after the heal")
     finally:
         bus.close()
+
+
+ZENCTL = Path(os.environ.get("ZK2PY_ZENCTL", "/srv/dev/repos/zenkey-wt/.s840/bin/zenctl-dd"))
+#: §9's Expected, per step: (converged, refused, last_known, in_force),
+#: each (answer, reason).
+S9_EXPECT = {
+    1: {"converged": ("yes", "converged"), "refused": ("no", "converged"), "last_known": ("no", "current"),
+        "in_force": ("yes", "desired")},
+    2: {"converged": ("no", "refused"), "refused": ("yes", "refused"), "last_known": ("no", "current"),
+        "in_force": ("yes", "desired")},
+    3: {"converged": ("no", "failed"), "refused": ("yes", "failed"), "last_known": ("no", "current"),
+        "in_force": ("yes", "partial")},
+    4: {"converged": ("not_asked", "author_absent"), "refused": ("no", "converged"),
+        "last_known": ("yes", "last_known"), "in_force": ("yes", "desired")},
+    5: {"converged": ("not_asked", "unbound"), "refused": ("not_asked", "unbound"),
+        "last_known": ("not_asked", "unbound"), "in_force": ("no", "unbound")},
+    6: {"converged": ("not_yet", "behind"), "refused": ("no", "converged"), "last_known": ("no", "current"),
+        "in_force": ("yes", "desired")},
+}
+
+
+def zenctl(args: list[str], timeout: float = 90.0) -> tuple[int | None, Any, str]:
+    """The Rust tool as a black box: (exit, its JSON, stderr)."""
+    env = dict(os.environ, ZENKEY_EXPLORER_CONFIG_DIR=tempfile.mkdtemp(prefix="zk2py-zenctl-"))
+    try:
+        p = subprocess.run([str(ZENCTL), *args, "--format", "json"], capture_output=True, text=True, env=env,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, None, "timed out"
+    try:
+        doc = json.loads(p.stdout)
+    except ValueError:
+        doc = None
+    return p.returncode, doc, p.stderr
+
+
+def _z_row(doc: Any, role: str = "task") -> dict[str, Any] | None:
+    for r in (doc or {}).get("rows") or []:
+        if r.get("row") == "desired" and r.get("role") == role:
+            return r
+    return None
+
+
+def _z_answers(row: dict[str, Any] | None) -> dict[str, tuple[str, str]] | None:
+    if row is None:
+        return None
+    return {q: (a.get("answer"), a.get("reason")) for q, a in (row.get("answers") or {}).items()}
+
+
+def _z_check(doc: Any, check: str) -> tuple[str | None, list[Any]]:
+    for r in (doc or {}).get("rows") or []:
+        if r.get("check") == check:
+            return (r.get("verdict") or {}).get("answer"), r.get("findings") or []
+    return None, []
+
+
+def _z_case(doc: Any, case: str) -> list[str | None]:
+    return [(r.get("verdict") or {}).get("answer") for r in (doc or {}).get("rows") or [] if r.get("case") == case]
+
+
+def section9(ctx: Ctx) -> None:
+    """§9 (0.4): a tool's questions, by zk2py's tool (:mod:`zk2py.desired_tool`)
+    and the Rust one (``zenctl desired``, the doctor's ``desired-*`` checks,
+    ``check conform``'s ``desired-*`` cases) as a black box, each against
+    §9's Expected and against each other."""
+    from . import desired_tool as dt, live
+    from .contract import load_contract
+
+    sec, rp = ctx.name("§9 a tool's questions"), ctx.report
+    if not ZENCTL.is_file():
+        rp.note(sec, f"{ZENCTL} not found: the Rust tool is not run")
+    disagree: list[str] = []
+
+    def ask(bus: Bus, step: int, extra: list[str] = ()) -> tuple[Any, Any, Any]:
+        mine = dt.read(bus.g1, TARGET, "task")
+        rc, doc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *extra]) if ZENCTL.is_file() \
+            else (None, None, "")
+        z = _z_answers(_z_row(doc))
+        m = mine[0].pairs() if mine else None
+        want = S9_EXPECT[step]
+        rp.check(sec, f"{step}. zk2py's tool answers as §9 Expected {step}", m == want, f"{m}")
+        if ZENCTL.is_file():
+            rp.check(sec, f"{step}. zenctl desired answers as §9 Expected {step}", z == want, f"{z}, exit {rc}")
+            if z != m:
+                disagree.append(f"step {step}: zk2py {m}, zenctl {z}")
+        return mine[0] if mine else None, doc, rc
+
+    def doctor(bus: Bus, extra: list[str] = ()) -> Any:
+        rc, doc, _ = zenctl(["doctor", "-c", bus.ep1, "--timeout", "1", "--check", "desired-refused", "--check",
+                             "desired-behind", "--check", "desired-last-known", *extra])
+        return rc, doc
+
+    # 1–3 and 6 on §1's bus
+    bus = Bus(cut=True)
+    try:
+        author = bus.party(ctx.author_impl, AUTHOR, ["--desired-author", "--tokenless", "tasking.v1"], on=1)
+        target = bus.party(ctx.target_impl, TARGET, ctx.target_flags(), on=2)
+        _converge_v1(ctx, bus, author, target, 1)
+        bus.cut()
+        s2 = author.put(TARGET, v(2))
+        time.sleep(1.0)
+        bus.heal()
+        _wait(lambda: converged_on(target.report(), s2, 2), 10.0, 0.05)
+        row, doc, rc = ask(bus, 1)
+        rp.check(sec, "1. zenctl desired exits 0: every role asked converged on its author's current document",
+                 not ZENCTL.is_file() or rc == 0, f"exit {rc}")
+        rp.check(sec, "1. both tools take the slice from the author's contract",
+                 row is not None and row.slice == D and row.slice_from == "author_contract"
+                 and (not ZENCTL.is_file() or (_z_row(doc) or {}).get("slice_from") == "author_contract"),
+                 f"zk2py {row and row.slice_from}, zenctl {(_z_row(doc) or {}).get('slice_from')}")
+        if ZENCTL.is_file():
+            rc, cdoc, _ = zenctl(["check", "conform", TARGET, "worker.v1", "-c", bus.ep1, "--timeout", "1",
+                                  "--for", "2"])
+            rp.check(sec, "check conform on lab/worker: desired-report and desired-binding pass",
+                     _z_case(cdoc, "desired-report") == ["not_established"]
+                     and _z_case(cdoc, "desired-binding") == ["not_established"],
+                     f"desired-report {_z_case(cdoc, 'desired-report')}, desired-binding "
+                     f"{_z_case(cdoc, 'desired-binding')}")
+            rc, adoc, _ = zenctl(["check", "conform", AUTHOR, "tasking.v1", "-c", bus.ep1, "--timeout", "1",
+                                  "--for", "2"])
+            rp.check(sec, "check conform on lab/author: desired-author passes",
+                     _z_case(adoc, "desired-author") == ["not_established"],
+                     f"desired-author {_z_case(adoc, 'desired-author')}")
+            drc, ddoc = doctor(bus)
+            rp.check(sec, "1. the doctor: no desired-refused, no desired-behind, no desired-last-known",
+                     [_z_check(ddoc, c)[0] for c in ("desired-refused", "desired-behind", "desired-last-known")]
+                     == ["not_established"] * 3, f"{[_z_check(ddoc, c)[0] for c in ('desired-refused', 'desired-behind', 'desired-last-known')]}")
+        s3 = author.put(TARGET, v(3, endpoint="tcp/10.0.0.9:7447"))
+        _wait(lambda: (target.report() or {}).get("outcome") == "refused", 10.0, 0.05)
+        ask(bus, 2)
+        if ZENCTL.is_file():
+            drc, ddoc = doctor(bus)
+            ans, finds = _z_check(ddoc, "desired-refused")
+            rp.check(sec, "2. the doctor's desired-refused finds the target's refused act", ans == "established"
+                     and any("lab/worker" in str(f.get("subject")) for f in finds), f"{ans}, {finds}")
+        target.cmd("desired fail-next")
+        author.put(TARGET, v(4, rate_hz=20, mode="halt"))
+        _wait(lambda: (target.report() or {}).get("outcome") == "failed", 10.0, 0.05)
+        ask(bus, 3)
+        if ZENCTL.is_file():
+            drc, ddoc = doctor(bus)
+            rp.check(sec, "3. the doctor's desired-refused finds the failed act",
+                     _z_check(ddoc, "desired-refused")[0] == "established", f"{_z_check(ddoc, 'desired-refused')}")
+        # 6: v5 converged, the next act held, v6 put
+        s5 = author.put(TARGET, v(5))
+        _wait(lambda: converged_on(target.report(), s5, 5), 10.0, 0.05)
+        target.cmd("desired hold")
+        s6 = author.put(TARGET, v(6))
+        time.sleep(0.5)
+        row, doc, rc = ask(bus, 6)
+        rp.check(sec, "6. once: the report's observed v5's stamp, the author's v6's; no verdict (a reading alone "
+                      "never finds a target behind)",
+                 row is not None and (row.reading.report.report or {}).get("observed", {}).get("stamp") == s5
+                 and row.author_stamp == s6 and (not ZENCTL.is_file() or rc == 2),
+                 f"zk2py observed {row and (row.reading.report.report or {}).get('observed')}, author "
+                 f"{row and row.author_stamp}; zenctl exit {rc}")
+        w = dt.watch(bus.g1, TARGET, 2.0, "task")
+        rp.check(sec, "6. over a 2 s window, zk2py's tool finds the target behind v6 (its finding), every answer "
+                      "still not yet", w.behind.get("task", (None, None))[0] == s6
+                 and all(r.answers["converged"].answer == "not_yet" for r in w.rows),
+                 f"{w.readings} readings, behind {w.behind}")
+        if ZENCTL.is_file():
+            rc, doc, _ = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", "--for", "2"])
+            zb = (_z_row(doc) or {}).get("behind")
+            rp.check(sec, "6. over the window, zenctl desired --for 2 finds the target behind v6, exit 1",
+                     rc == 1 and isinstance(zb, dict) and zb.get("by") == "window", f"exit {rc}, behind {zb}")
+            drc, ddoc = doctor(bus)
+            rp.check(sec, "6. the doctor without a trusted clock: one reading, no desired-behind",
+                     _z_check(ddoc, "desired-behind")[0] in ("not_established", "unobservable"),
+                     f"{_z_check(ddoc, 'desired-behind')}")
+            drc, ddoc = doctor(bus, ["--clocks-synced", "--desired-behind", "1"])
+            rp.check(sec, "6. the doctor on a trusted clock, v6 older than 1 s: desired-behind",
+                     _z_check(ddoc, "desired-behind")[0] == "established", f"{_z_check(ddoc, 'desired-behind')}")
+            rc, doc, _ = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", "--for", "1",
+                                 "--clocks-synced"])
+            zb = (_z_row(doc) or {}).get("behind")
+            rp.check(sec, "6. with a clock trusted, zenctl desired finds it behind by the clock, v6 older than the "
+                          "window", rc == 1 and isinstance(zb, dict) and zb.get("by") == "clock",
+                     f"exit {rc}, behind {zb}")
+        w = dt.watch(bus.g1, TARGET, 1.0, "task", clocks_synced=True)
+        rp.check(sec, "6. with a clock trusted, zk2py's tool finds it behind by the clock",
+                 w.behind.get("task", (None, None))[1] == "clock", f"behind {w.behind}")
+        target.cmd("desired release")
+    finally:
+        bus.close()
+    # 4 on §7's bus: the author closed, the target restarted on the archive
+    bus = Bus()
+    rec = Path(tempfile.mkdtemp(prefix="zk2py-desired-")) / "record.json"
+    try:
+        from .owner import Owner
+
+        archive = _archive(bus, 1)
+        holder = Owner("lab", "archive", [load_contract(REPO / "impl/python/interop/stand-in/archive.v1.toml",
+                                                        spec_dir=REPO / "spec")], connect=bus.ep1)
+        holder.start()
+        bus.extra.append(holder)
+        author = bus.party(ctx.author_impl, AUTHOR, ["--desired-author", "--desired-record", str(rec)])
+        tflags = ctx.target_flags("--desired-archive", "lab/archive")
+        target = bus.party(ctx.target_impl, TARGET, tflags)
+        s1 = _converge_v1(ctx, bus, author, target, 1)
+        _wait(lambda: D in archive.held, 3.0)
+        author.close()
+        target.kill()
+        target = bus.party(ctx.target_impl, TARGET, tflags)
+        _wait(lambda: converged_on(target.report(), s1, 1, last_known=True), 10.0, 0.05)
+        row, doc, rc = ask(bus, 4)
+        z = _z_row(doc) or {}
+        rp.check(sec, "4. with its author absent, both tools take D from the target's requirement and binding",
+                 row is not None and row.slice == D and row.slice_from == "requirement"
+                 and (not ZENCTL.is_file() or (z.get("slice") == D and z.get("slice_from") == "requirement")),
+                 f"zk2py {row and row.slice_from}, zenctl {z.get('slice_from')}")
+        rp.check(sec, "4. both show the archive's v1 as last-known, never current",
+                 row is not None and any(st == s1 for _, st, _ in row.archived)
+                 and (not ZENCTL.is_file() or s1 in json.dumps(z.get("archived"))),
+                 f"zk2py {row and [(a, st) for a, st, _ in row.archived]}, zenctl {z.get('archived')}")
+        if ZENCTL.is_file():
+            drc, ddoc = doctor(bus)
+            rp.check(sec, "4. the doctor's desired-last-known (info): the target runs a document read from an "
+                          "archive", _z_check(ddoc, "desired-last-known")[0] == "established",
+                     f"{_z_check(ddoc, 'desired-last-known')}")
+    finally:
+        bus.close()
+    # 5 against §8's target
+    bus = Bus()
+    try:
+        author = bus.party(ctx.author_impl, AUTHOR, ["--desired-author"])
+        author.put(TARGET, v(1))
+        target = bus.party(ctx.target_impl, TARGET, ["--desired-unbound"])
+        time.sleep(1.0)
+        ask(bus, 5)
+    finally:
+        bus.close()
+    if disagree:
+        rp.note(sec, "the two tools disagree: " + "; ".join(disagree))
+    else:
+        rp.note(sec, "the two tools agree on every step")
+
+
+class Fake:
+    """A test session standing in for a target or an author (§9's shapes no
+    scenario makes): an instance token, a descriptor it writes, and state
+    queryables answering what the test sets."""
+
+    def __init__(self, endpoint: str, address: str, doc: dict[str, Any], answers: dict[str, list[tuple[bytes, bool]]],
+                 interface_token: str | None = None) -> None:
+        import zenoh
+
+        from . import live
+
+        self.session = live.open_client(endpoint)
+        inst = doc["instance"]
+        key = f"zk2/{address}/@zk/instance/{inst}"
+        data = json.dumps({**doc, "meta": {"zid": str(self.session.zid())}}).encode()
+        self.entities = [self.session.declare_queryable(key, zenoh.handlers.Callback(
+            lambda q: q.reply(key, data, encoding="application/json")), complete=True)]
+        for prefix, replies in answers.items():
+            def answer(q: Any, replies: list[tuple[bytes, bool]] = replies, prefix: str = prefix) -> None:
+                for payload, stamped in replies:
+                    kw = {"timestamp": self.session.new_timestamp()} if stamped else {}
+                    q.reply(prefix, payload, encoding="application/json", **kw)
+
+            self.entities.append(self.session.declare_queryable(prefix, zenoh.handlers.Callback(answer),
+                                                                complete=False))
+        lv = self.session.liveliness()
+        self.entities.append(lv.declare_token(key))
+        if interface_token:
+            self.entities.append(lv.declare_token(interface_token))
+
+    def close(self) -> None:
+        from . import live
+
+        for e in reversed(self.entities):
+            try:
+                e.undeclare()
+            except Exception:  # noqa: BLE001
+                pass
+        live.close(self.session)
+
+
+def section_tool_shapes(ctx: Ctx) -> None:
+    """zk2py's own, beyond scenarios.md: §2.17's 0.4 readings no scenario
+    makes, built by test sessions, asked of both tools with the contracts
+    held offline (core §8.5), each against the text."""
+    from . import desired_tool as dt
+    from .desired_live import contract
+
+    sec, rp = "§9 beyond: the tool's 0.4 readings", ctx.report
+    if ctx.author_impl != "zk2py" or ctx.target_impl != "zk2py":
+        return  # no party runs here: once is enough
+    worker, tasking, two = contract("worker.v1"), contract("tasking.v1"), contract("zk2py_worker2.v1")
+    offline = str(REPO / "impl" / "python" / "interop" / "desired")
+
+    def target_doc(bindings: list[str], c: Any = None) -> dict[str, Any]:
+        c = c or worker
+        return {"format": "zk2-descriptor/0.1", "service": TARGET, "instance": "7" * 16,
+                "interfaces": [{"iface": c.interface, "contract": c.fingerprint, "minor": 0}],
+                "requires": [{"role": "task", "interface": "tasking.v1", "declared_by": c.interface,
+                              "bindings": bindings, "params": {"system": "self.system", "service": "self.service"},
+                              "optional": True}],
+                "profiles": ["desired.v1"]}
+
+    def author_doc(standby: bool = False) -> dict[str, Any]:
+        e: dict[str, Any] = {"iface": "tasking.v1", "contract": tasking.fingerprint, "minor": 0}
+        if standby:
+            e["standby"] = True
+        return {"format": "zk2-descriptor/0.1", "service": AUTHOR, "instance": "8" * 16, "interfaces": [e],
+                "profiles": ["desired.v1"]}
+
+    conv = json.dumps({"key": D, "source": "desired", "in_force": {"stamp": "100/a1", "revision": 1},
+                       "observed": {"stamp": "100/a1", "revision": 1}, "outcome": "converged"}).encode()
+    conv2 = json.dumps({"key": D, "source": "desired", "in_force": {"stamp": "200/a1", "revision": 2},
+                        "observed": {"stamp": "200/a1", "revision": 2}, "outcome": "converged"}).encode()
+    doc = json.dumps(v(1)).encode()
+    rp_prefix, d_prefix = RP, D
+    two_a = f"zk2/{TARGET}/zk2py_worker2.v1/state/desired/task"
+    two_b = f"zk2/{TARGET}/zk2py_worker2.v1/state/desired/again"
+    shapes = [
+        ("two report resources' readable reports claiming the slice, differing: unreadable (§2.10, 0.4)",
+         target_doc([AUTHOR], two), {two_a: [(conv, True)], two_b: [(conv2, True)]}, author_doc(),
+         {d_prefix: [(doc, True)]},
+         {q: ("unobservable", "report_invalid") for q in ("converged", "refused", "last_known", "in_force")}),
+        ("two readable reports on one key, differing: S4's Latest keeps the later, which reads as the report "
+         "(F-212)", target_doc([AUTHOR]), {rp_prefix: [(conv, True), (conv2, True)]}, author_doc(),
+         {d_prefix: [(doc, True)]},
+         {"converged": ("not_yet", "other_epoch"), "refused": ("no", "converged"), "last_known": ("no", "current"),
+          "in_force": ("yes", "desired")}),
+        ("none readable claiming it, one that does not read: unreadable (§2.10, 0.4)",
+         target_doc([AUTHOR]), {rp_prefix: [(b"{not json", True)]}, author_doc(), {d_prefix: [(doc, True)]},
+         {q: ("unobservable", "report_invalid") for q in ("converged", "refused", "last_known", "in_force")}),
+        ("the same report twice, equal: the report (§2.10)",
+         target_doc([AUTHOR]), {rp_prefix: [(conv, True), (conv, True)]}, author_doc(), {d_prefix: [(doc, True)]},
+         {"converged": ("not_yet", "other_epoch"), "refused": ("no", "converged"), "last_known": ("no", "current"),
+          "in_force": ("yes", "desired")}),
+        ("an unstamped reply of the author's: author_read_incomplete (§2.17, 0.4)",
+         target_doc([AUTHOR]), {rp_prefix: [(conv, True)]}, author_doc(), {d_prefix: [(doc, False)]},
+         {"converged": ("unobservable", "author_read_incomplete"), "refused": ("no", "converged"),
+          "last_known": ("no", "current"), "in_force": ("yes", "desired")}),
+        ("a standby author answers no GET: author_silent (§2.17, 0.4)",
+         target_doc([AUTHOR]), {rp_prefix: [(conv, True)]}, author_doc(standby=True), {},
+         {"converged": ("unobservable", "author_silent"), "refused": ("no", "converged"),
+          "last_known": ("no", "current"), "in_force": ("yes", "desired")}),
+        ("a binding §2.3 finds invalid (two authors) gives no slice: no_report (§2.17, 0.4)",
+         target_doc([AUTHOR, "lab/author2"]), {rp_prefix: [(conv, True)]}, author_doc(), {d_prefix: [(doc, True)]},
+         {q: ("unobservable", "no_report") for q in ("converged", "refused", "last_known", "in_force")}),
+    ]
+    at_key = D.replace("/tasking.v1/state/", "/tasking.v1/@state/")
+    at_conv = json.dumps({"key": at_key, "source": "desired", "in_force": {"stamp": "100/a1", "revision": 1},
+                          "observed": {"stamp": "100/a1", "revision": 1}, "outcome": "converged"}).encode()
+    absent = ("absent", None)
+    shapes += [
+        ("the author absent, tasking.v1 held offline, the report keyed under @state: the slice from the offline "
+         "revision, state, which no report claims: no report (F-213)", target_doc([AUTHOR]),
+         {rp_prefix: [(at_conv, True)]}, absent, {},
+         {q: ("unobservable", "no_report") for q in ("converged", "refused", "last_known", "in_force")}),
+        ("the author absent, no contract of its interface in hand, the report keyed under @state: the slice from "
+         "the requirement, the kind token the report's key carries (§2.17, 0.4)", target_doc([AUTHOR]),
+         {rp_prefix: [(at_conv, True)]}, absent, {},
+         {"converged": ("not_asked", "author_absent"), "refused": ("no", "converged"),
+          "last_known": ("no", "current"), "in_force": ("yes", "desired")}),
+        ("the author absent, and no report: no slice to take, no report (§2.17, 0.4)",
+         target_doc([AUTHOR]), {}, absent, {},
+         {q: ("unobservable", "no_report") for q in ("converged", "refused", "last_known", "in_force")}),
+        ("the target's own contract not in hand, nor served: no template, no slice, no report",
+         target_doc([AUTHOR]), {rp_prefix: [(conv, True)]}, author_doc(), {d_prefix: [(doc, True)]},
+         {q: ("unobservable", "no_report") for q in ("converged", "refused", "last_known", "in_force")}),
+    ]
+    disagree = []
+    for name, tdoc, tans, adoc, aans, want in shapes:
+        bus = Bus()
+        fakes = []
+        try:
+            fakes.append(Fake(bus.ep1, TARGET, tdoc, tans))
+            if adoc is not absent:
+                fakes.append(Fake(bus.ep1, AUTHOR, adoc, aans))
+            time.sleep(0.5)
+            held = [tasking] if "not in hand" in name else [worker, two] if "no contract of its interface" in name \
+                else [worker, tasking, two]
+            mine = dt.read(bus.g1, TARGET, "task", contracts=held)
+            m = mine[0].pairs() if mine else None
+            rp.check(sec, f"zk2py's tool: {name}", m == want, f"{m}; problems {mine[0].problems if mine else None}")
+            if ZENCTL.is_file():
+                path = (str(REPO / "impl/python/interop/desired/tasking.v1.toml") if "not in hand" in name
+                        else str(REPO / "impl/python/interop/desired/worker.v1.toml")
+                        if "no contract of its interface" in name else offline)
+                rc, zdoc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", "--contracts", path])
+                z = _z_answers(_z_row(zdoc))
+                rp.check(sec, f"zenctl desired: {name}", z == want, f"{z}, exit {rc}{(' ' + err[-200:]) if z is None else ''}")
+                if z != m:
+                    disagree.append(f"{name}: zk2py {m}, zenctl {z}")
+        finally:
+            for f in fakes:
+                f.close()
+            bus.close()
+    rp.note(sec, "the two tools disagree: " + "; ".join(disagree) if disagree else "the two tools agree on every shape")
 
 
 #: zk2py's own, beyond scenarios.md: a document text each target reads as
@@ -853,7 +1279,8 @@ def section_remint(ctx: Ctx) -> None:
 
 
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
-            "7": section7, "8": section8, "10": section10, "edges": section_edges, "remint": section_remint}
+            "7": section7, "8": section8, "9": section9, "10": section10, "edges": section_edges,
+            "remint": section_remint, "tool-shapes": section_tool_shapes}
 
 
 def main(argv: list[str] | None = None) -> int:

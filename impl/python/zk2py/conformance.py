@@ -1011,12 +1011,13 @@ def _desired_order(path: Path) -> list[Result]:
     from . import desired as ds
 
     out: list[Result] = []
-    for i, c in enumerate(_load_json(path)["cases"]):
+    data = _load_json(path)
+    for i, c in enumerate(data["cases"]):
         name = f"order #{i}: {c['note']}"
         if len(c["steps"]) != len(c["expect"]["steps"]):
             out.append((name, False, "the case's steps and expected words differ in number"))
             continue
-        words, report = ds.run_steps(c["key"], c["steps"])
+        words, report = ds.run_steps(c["key"], c["steps"], data.get("schema"))
         out.append(_check(name, {"steps": words, "report": report}, c["expect"]))
         out.append(_check(f"{name} (its report reads, with no finding)", ds.read_report(report).expect(),
                           {"readable": True, "errors": []}))
@@ -2338,7 +2339,54 @@ def _presence_view() -> list[tuple[str, Any, Any]]:
           live.Presence(complete=True).kind, live.Presence().kind,
           live.Presence(complete=False, cut_off_during=True).kind],
          [live.NOT_MADE, live.NOT_MADE, live.COMPLETE, live.POSSIBLY_INCOMPLETE, live.POSSIBLY_INCOMPLETE]),
-    ] + _live_guards() + _redundancy_readings()
+    ] + _live_guards() + _redundancy_readings() + _desired_tool_readings()
+
+
+def _desired_tool_readings() -> list[tuple[str, Any, Any]]:
+    """desired.v1 0.4's tool rules, pure: §2.10's "Which reply is the
+    report" over a target's report replies, and §2.17's slice taken from
+    the target alone (zk2py.desired_tool)."""
+    import json as _json
+
+    from . import desired as ds, desired_tool as dt
+
+    key = "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+
+    def rep(stamp: str, k: str = key) -> bytes:
+        return _json.dumps({"key": k, "source": "desired", "in_force": {"stamp": stamp},
+                            "observed": {"stamp": stamp}, "outcome": "converged"}).encode()
+
+    def pick(*payloads: bytes) -> Any:
+        r = dt.pick_report([(f"r{i}", x) for i, x in enumerate(payloads)], key)
+        return None if r is None else (r.readable and not r.errors, (r.report or {}).get("in_force"))
+
+    other = "zk2/lab/author/tasking.v1/state/tasks/lab/other"
+    label = "desired.v1 0.4 §2.10, which reply is the report"
+    req = {"role": "task", "interface": "tasking.v1", "bindings": ["lab/author"],
+           "params": {"system": "self.system", "service": "self.service"}, "optional": True}
+    out = [
+        (f"{label}: the readable one whose key is the slice's", pick(rep("1/a"), rep("2/a", other)),
+         (True, {"stamp": "1/a"})),
+        (f"{label}: two readable ones that claim it and differ: unreadable", pick(rep("1/a"), rep("2/a")),
+         (False, None)),
+        (f"{label}: the same report twice is one", pick(rep("1/a"), rep("1/a")), (True, {"stamp": "1/a"})),
+        (f"{label}: none readable claiming it, one that does not read: unreadable", pick(b"{x", rep("2/a", other)),
+         (False, None)),
+        (f"{label}: a readable one claiming it beside one that does not read: the report",
+         pick(b"{x", rep("1/a")), (True, {"stamp": "1/a"})),
+        (f"{label}: none claiming it, every one readable: none read", pick(rep("2/a", other)), None),
+    ]
+    label = "desired.v1 0.4 §2.17, the slice from the target alone"
+    for name, r, explicit, want in (
+            ("its requirement's template, each parameter its binding's self", req, False, (ds.BOUND, key)),
+            ("the kind token its report's key carries, @state", req, True,
+             (ds.BOUND, key.replace("/state/", "/@state/"))),
+            ("a parameter its binding leaves unbound: no slice, target_unbound",
+             {**req, "params": {"system": "self.system"}}, False, (ds.INVALID, None))):
+        b = dt._slice_from_requirement("lab/worker", r, "tasks/{system}/{service}", "lab/author", "tasking.v1",
+                                       explicit)
+        out.append((f"{label}: {name}", (b.binding, b.key), want))
+    return out
 
 
 def _redundancy_readings() -> list[tuple[str, Any, Any]]:

@@ -1,0 +1,29 @@
+# zk2py_worker2.v1.toml: worker.v1 with a second report resource, so that
+# two readable reports can claim one slice (desired.v1 §2.10, 0.4: "two
+# readable ones that claim it and differ are unreadable"). zk2py's own,
+# for its tool's shapes; it must load with no finding at all.
+[interface]
+name  = "zk2py_worker2"
+major = 1
+minor = 0
+uses  = ["desired.v1"]
+
+[schemas]
+jsonschema = ["../../../../spec/profiles/desired/desired.v1.json", "tasking.json"]
+
+[resources.running]
+kind = "state"
+type = "json:Task"
+
+[resources."desired/task"]
+kind = "state"
+type = "json:desired.v1.Report"
+
+[resources."desired/again"]
+kind = "state"
+type = "json:desired.v1.Report"
+
+[requires.task]
+interface = "tasking.v1"
+resources = ["tasks/{system}/{service}"]
+optional  = true
