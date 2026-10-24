@@ -136,7 +136,7 @@ impl Binds {
 
 /// One target parameter (§2.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Target {
+pub struct TargetParam {
     pub param: String,
     pub binds: Binds,
 }
@@ -202,7 +202,7 @@ pub enum Declaration {
     /// The reasons, in the order checked.
     Invalid(Vec<Invalid>),
     /// The target parameters, in the value's order.
-    Declared(Vec<Target>),
+    Declared(Vec<TargetParam>),
 }
 
 impl Declaration {
@@ -218,7 +218,7 @@ impl Declaration {
 
     /// The target parameters of a valid declaration.
     #[must_use]
-    pub fn targets(&self) -> Option<&[Target]> {
+    pub fn targets(&self) -> Option<&[TargetParam]> {
         match self {
             Self::Declared(t) => Some(t),
             _ => None,
@@ -274,16 +274,16 @@ pub fn declaration(
     }
     match names {
         Some(names) if why.is_empty() => Declaration::Declared(match names.as_slice() {
-            [one] => vec![Target {
+            [one] => vec![TargetParam {
                 param: (*one).to_owned(),
                 binds: Binds::Either,
             }],
             [first, second] => vec![
-                Target {
+                TargetParam {
                     param: (*first).to_owned(),
                     binds: Binds::System,
                 },
-                Target {
+                TargetParam {
                     param: (*second).to_owned(),
                     binds: Binds::Service,
                 },
@@ -322,7 +322,7 @@ pub struct Slice<'a> {
     pub iface: &'a IfaceId,
     pub token: KindToken,
     pub template: &'a Template,
-    pub targets: &'a [Target],
+    pub targets: &'a [TargetParam],
 }
 
 /// Why a binding is invalid (§2.3), in the order checked.
@@ -408,7 +408,7 @@ pub fn binding(slice: &Slice<'_>, req: &Requirement<'_>, own: &Addr) -> Binding 
     if author.is_none() {
         why.push(BindingProblem::NotOneAuthor);
     }
-    let bound = |t: &Target| req.params.get(&t.param).map(String::as_str);
+    let bound = |t: &TargetParam| req.params.get(&t.param).map(String::as_str);
     if slice.targets.iter().any(|t| bound(t).is_none()) {
         why.push(BindingProblem::TargetUnbound);
     }
@@ -540,14 +540,9 @@ impl Outcome {
     }
 
     fn parse(s: &str) -> Option<Self> {
-        [
-            Self::Converged,
-            Self::Refused,
-            Self::Failed,
-            Self::Reverted,
-        ]
-        .into_iter()
-        .find(|v| v.as_str() == s)
+        [Self::Converged, Self::Refused, Self::Failed, Self::Reverted]
+            .into_iter()
+            .find(|v| v.as_str() == s)
     }
 }
 
@@ -724,14 +719,16 @@ fn raw_version<'a>(v: &'a Value, member: &str) -> Result<RawVersion<'a>, Unreada
     };
     let revision = match o.get("revision") {
         None => None,
-        Some(r) => {
-            Some(revision(r).ok_or_else(|| schema("/revision: not an integer from 0"))?)
-        }
+        Some(r) => Some(revision(r).ok_or_else(|| schema("/revision: not an integer from 0"))?),
     };
     Ok(RawVersion { stamp, revision })
 }
 
-fn optional_string(o: &serde_json::Map<String, Value>, m: &str, at: &str) -> Result<Option<String>, Unreadable> {
+fn optional_string(
+    o: &serde_json::Map<String, Value>,
+    m: &str,
+    at: &str,
+) -> Result<Option<String>, Unreadable> {
     match o.get(m) {
         None => Ok(None),
         Some(Value::String(s)) => Ok(Some(s.clone())),
@@ -919,7 +916,8 @@ impl Report {
 /// [`Unreadable::Json`] for bytes that are not strict JSON, else
 /// [`Report::from_json`]'s.
 pub fn decode(bytes: &[u8]) -> Result<Report, Unreadable> {
-    let text = std::str::from_utf8(bytes).map_err(|e| Unreadable::Json(format!("not UTF-8: {e}")))?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|e| Unreadable::Json(format!("not UTF-8: {e}")))?;
     let v = crate::strict::parse_json(text).map_err(|e| Unreadable::Json(e.to_string()))?;
     Report::from_json(&v)
 }
@@ -1536,7 +1534,9 @@ pub fn refused(t: &TargetReading<'_>) -> Judged {
     };
     match r.outcome {
         None => Judged::new(Answer::NotAsked, Reason::NotActed),
-        Some(o @ (Outcome::Refused | Outcome::Failed)) => Judged::new(Answer::Yes, outcome_reason(o)),
+        Some(o @ (Outcome::Refused | Outcome::Failed)) => {
+            Judged::new(Answer::Yes, outcome_reason(o))
+        }
         Some(o) => Judged::new(Answer::No, outcome_reason(o)),
     }
 }
@@ -1634,13 +1634,29 @@ mod tests {
 
     #[test]
     fn stamps_read_as_zenoh_writes_them() {
-        assert_eq!(parse_stamp("7386690599959157260/33"), Some(st(7_386_690_599_959_157_260, "33")));
+        assert_eq!(
+            parse_stamp("7386690599959157260/33"),
+            Some(st(7_386_690_599_959_157_260, "33"))
+        );
         assert_eq!(st(7, "1bc0").to_string(), "7/1bc0");
         assert_eq!(parse_stamp("0/1"), Some(st(0, "1")));
-        assert_eq!(parse_stamp(&format!("{}/1", u64::MAX)), Some(st(u64::MAX, "1")));
+        assert_eq!(
+            parse_stamp(&format!("{}/1", u64::MAX)),
+            Some(st(u64::MAX, "1"))
+        );
         for bad in [
-            "", "1", "/1", "1/", "01/1", "1/01", "1/A", "+1/1", "1/0", "18446744073709551616/1",
-            "1/1/1", " 1/1",
+            "",
+            "1",
+            "/1",
+            "1/",
+            "01/1",
+            "1/01",
+            "1/A",
+            "+1/1",
+            "1/0",
+            "18446744073709551616/1",
+            "1/1/1",
+            " 1/1",
         ] {
             assert_eq!(parse_stamp(bad), None, "{bad:?}");
         }
@@ -1690,10 +1706,16 @@ mod tests {
             },
         ];
         for (i, s) in steps.into_iter().enumerate() {
-            assert!(matches!(t.observe(s), Step::Act(_)), "a new document is acted on");
+            assert!(
+                matches!(t.observe(s), Step::Act(_)),
+                "a new document is acted on"
+            );
             // The same document again, under a later stamp, while the act runs.
             let again = Sample {
-                stamp: s.stamp.map(|x| Stamp { time: x.time + 1, ..x }),
+                stamp: s.stamp.map(|x| Stamp {
+                    time: x.time + 1,
+                    ..x
+                }),
                 ..s
             };
             assert_eq!(t.observe(again), Step::Held);
@@ -1702,7 +1724,11 @@ mod tests {
                 1 => Ended::Refused(Refusal::new(REACH)),
                 _ => Ended::Failed(Refusal::new(APPLY)),
             };
-            assert_eq!(t.finish(ended), Step::Adopted, "the held re-put is the same document");
+            assert_eq!(
+                t.finish(ended),
+                Step::Adopted,
+                "the held re-put is the same document"
+            );
             seen.push(t.report().clone());
             t.call();
             seen.push(t.report().clone());

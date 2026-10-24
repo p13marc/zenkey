@@ -2311,13 +2311,21 @@ fn desired_bindings() {
         let (kind, template, ann) = desired_resource(&case["resource"]);
         let decl = desired::declaration(kind, &template, &ann);
         let targets = decl.targets().expect("a declared resource");
-        let iface: IfaceId = case["iface"].as_str().expect("iface").parse().expect("an interface id");
+        let iface: IfaceId = case["iface"]
+            .as_str()
+            .expect("iface")
+            .parse()
+            .expect("an interface id");
         let token = if case["resource"]["explicit"] == json!(true) {
             KindToken::ExplicitState
         } else {
             KindToken::State
         };
-        let own: Addr = case["target"].as_str().expect("target").parse().expect("an address");
+        let own: Addr = case["target"]
+            .as_str()
+            .expect("target")
+            .parse()
+            .expect("an address");
         let req = &case["requirement"];
         let bindings: Vec<String> = req["bindings"]
             .as_array()
@@ -2329,7 +2337,12 @@ fn desired_bindings() {
             .as_object()
             .expect("params")
             .iter()
-            .map(|(k, v)| (k.clone(), v.as_str().expect("a parameter binding").to_owned()))
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    v.as_str().expect("a parameter binding").to_owned(),
+                )
+            })
             .collect();
         let slice = desired::Slice {
             iface: &iface,
