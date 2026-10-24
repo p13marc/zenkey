@@ -440,8 +440,12 @@ def exact_value(x: Exact) -> int | NonInteger:
     """§2.10 (0.3, F-181): "every number read by its exact value … a number
     with a zero fraction is that integer, so 3.0 is 3 and
     18446744073709551615.0 is 2^64−1 … and 1.5 is no integer". A finite
-    number's exponent is at most about 308, so the integer is cheap."""
+    number's exponent is at most about 308, so the integer is cheap: one
+    past the finite range, which :func:`strict_json` refuses before any
+    caller sees it, is refused here too (``NotStrict``), never computed."""
     sign, digits, exponent = x.form
+    if not math.isfinite(x.double):
+        raise NotStrict("a number past the double's finite range")
     if not digits:
         return 0
     if isinstance(exponent, tuple) or exponent < 0:

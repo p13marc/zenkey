@@ -480,6 +480,15 @@ class Owner:
             self._last = ts
             return ts
 
+    def catch_up(self, ntp: zenoh.NTP64) -> None:
+        """§4.3's catch-up from a record: every stamp minted after this is
+        above ``ntp`` (a restarted owner's last stamp, read from its record)."""
+        assert self.session is not None
+        with self._lock:
+            last = self._last
+            if last is None or last.get_time_as_ntp64().as_nanos() < ntp.as_nanos():
+                self._last = zenoh.Timestamp(ntp, self.session.new_timestamp().get_id())
+
     # -- §8.2 step 2: the exposure plan ----------------------------------
 
     def _plan(self) -> dict[str, list[tuple[dict[str, Any], str]]]:
@@ -775,16 +784,20 @@ class Owner:
             self.closed_writers.discard(key)
             return stamp
 
-    def delete_state(self, key: str) -> zenoh.Timestamp:
+    def delete_state(self, key: str, elapsed_s: float = 0.0) -> zenoh.Timestamp:
         """Delete a state key, stamped (S1); answered with ``reply_del`` within
-        the tombstone window (S3). "A deleted member is not re-put"."""
+        the tombstone window (S3). "A deleted member is not re-put".
+
+        ``elapsed_s`` dates the tombstone that long ago: a delete made again
+        for what is left of the window counted from the delete it repeats
+        (desired.v1 §2.11, 0.3, "not a window more")."""
         with self._writes:
             if self.ahead:
                 raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
             stamp = self.mint()
             self._publishers[key].delete(timestamp=stamp)
-            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic())
+            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic() - max(0.0, elapsed_s))
             return stamp
 
     def _member_publisher(self, key: str) -> None:

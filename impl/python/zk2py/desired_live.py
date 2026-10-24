@@ -28,7 +28,9 @@ the scenarios' contracts (``scenarios.md``, "The contracts", transcribed in
 from __future__ import annotations
 
 import json
+import math
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -75,6 +77,41 @@ def raw_time(stamp: str) -> int:
     return int(stamp.split("/", 1)[0])
 
 
+def _record_time(stamp: Any) -> int | None:
+    """A record entry's stamp as its raw NTP64 time, or None when it does
+    not read as one (``<time>/<id>``)."""
+    if not isinstance(stamp, str):
+        return None
+    try:
+        t = raw_time(stamp)
+    except ValueError:
+        return None
+    return t if 0 <= t < 1 << 64 else None
+
+
+def _record_ms(at_ms: Any) -> float | None:
+    """A record delete's ``at_ms``, when it made the delete, in Unix
+    milliseconds: a finite number (an :class:`desired.Exact` by its double),
+    or None for anything else, null, a boolean, a string or a missing
+    member. §2.11 (0.3): the record holds "each delete it made within its
+    tombstone window with when it made it"; one it cannot date it cannot
+    place within its window, so it is dropped, never dated now, which would
+    answer it for a window more."""
+    if isinstance(at_ms, desired.Exact):
+        at_ms = at_ms.double
+    if isinstance(at_ms, bool) or not isinstance(at_ms, (int, float)):
+        return None
+    try:
+        v = float(at_ms)
+    except OverflowError:
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _ms_text(at_ms: float) -> int | float:
+    return int(at_ms) if at_ms.is_integer() else at_ms
+
+
 def ntp64_at_least(raw: int) -> zenoh.NTP64:
     """An NTP64 at or just above a raw value: zenoh-python builds one from
     seconds and nanoseconds, which cannot hit every raw value, so the
@@ -106,6 +143,10 @@ class Author:
         self.contract = contract("tasking.v1")
         self.documents: dict[str, dict[str, Any]] = {}
         self.deletes: dict[str, dict[str, Any]] = {}
+        #: record entries a restart or a re-mint could not write again: kept
+        #: in the record as they were, so that the next one tries again,
+        #: until a put or a delete of the target replaces them
+        self.carried: dict[str, dict[str, dict[str, Any]]] = {"documents": {}, "deletes": {}}
         self.adoption = {"found": "nothing", "reput": [], "redeleted": [], "expired": [], "failed": []}
         #: the state GETs its queryables received (scenarios.md §8)
         self.queries = 0
@@ -130,6 +171,14 @@ class Author:
     def key(self, target: str) -> str:
         return slice_key(self.address, target)
 
+    def _key_of(self, target: str) -> str | None:
+        """A record's target name as its key, or None for one that names no
+        ``system/service`` (a record edited by hand)."""
+        try:
+            return self.key(target)
+        except ValueError:
+            return None
+
     # §2.11 "A restart from its record"
     def _read_record(self) -> dict[str, Any] | None:
         if self.record_path is None or not self.record_path.is_file():
@@ -143,43 +192,83 @@ class Author:
     def _write_record(self) -> None:
         if self.record_path is None:
             return
+        docs = {**self.carried["documents"], **self.documents}
+        dels = {t: d for t, d in {**self.carried["deletes"], **self.deletes}.items() if t not in docs}
         tmp = self.record_path.with_suffix(".tmp")
-        tmp.write_bytes(canonical({"profile": "desired.v1", "documents": self.documents, "deletes": self.deletes}))
+        tmp.write_bytes(canonical({"profile": "desired.v1", "documents": docs, "deletes": dels}))
         os.replace(tmp, self.record_path)
+
+    def _uncarry(self, target: str) -> None:
+        self.carried["documents"].pop(target, None)
+        self.carried["deletes"].pop(target, None)
+
+    @staticmethod
+    def _log(text: str) -> None:
+        print(f"zk2py desired author: {text}", file=sys.stderr, flush=True)
+
+    def _failed(self, target: str, why: str, adopting: bool) -> None:
+        self._log(f"{target}: {why}")
+        if adopting:
+            self.adoption["failed"].append(target)
 
     def _adopt(self, owner: Owner) -> None:
         """Before its first write and before its tokens: its record's stamps
         catch its clock up (core §4.3), its deletes within their window are
         made again for what is left of it, then its documents are put again
         (§2.11: "MUST put each document it keeps again … before it answers a
-        GET with it, and SHOULD before its new instance token")."""
+        GET with it, and SHOULD before its new instance token").
+
+        Every entry stands alone: one that does not read is dropped and
+        logged, one whose write fails is logged and carried in the record,
+        and neither stops the rest or the tokens."""
         rec = self._read_record()
         if rec is None:
             return
         self.adoption["found"] = "record"
-        docs, dels = dict(rec.get("documents") or {}), dict(rec.get("deletes") or {})
-        times = [raw_time(e["stamp"]) for e in list(docs.values()) + list(dels.values()) if e.get("stamp")]
-        assert owner.session is not None
+        docs = rec["documents"] if isinstance(rec.get("documents"), dict) else {}
+        dels = rec["deletes"] if isinstance(rec.get("deletes"), dict) else {}
+        times = [t for e in list(docs.values()) + list(dels.values()) if isinstance(e, dict)
+                 for t in [_record_time(e.get("stamp"))] if t is not None]
         if times:
-            owner._last = zenoh.Timestamp(ntp64_at_least(max(times)), owner.session.new_timestamp().get_id())
+            owner.catch_up(ntp64_at_least(max(times)))
         now_ms = time.time() * 1000
         for target, d in sorted(dels.items()):
-            at_ms = d.get("at_ms", now_ms)
-            at_ms = float(at_ms.double if isinstance(at_ms, desired.Exact) else at_ms)
-            elapsed_s = max(0.0, (now_ms - at_ms) / 1000)
+            at_ms = _record_ms(d.get("at_ms")) if isinstance(d, dict) else None
+            key = self._key_of(target)
+            if at_ms is None or key is None:
+                self._failed(target, "a delete its record does not date (at_ms): dropped, never answered "
+                             "for a window counted from now (§2.11)" if key is not None
+                             else "no target's name: dropped", True)
+                continue
+            # one dated after now (the wall clock stepped back) counts from
+            # now, and is kept so: its window is never answered twice
+            at_ms = min(at_ms, now_ms)
+            elapsed_s = (now_ms - at_ms) / 1000
             if elapsed_s >= self.window_s:
                 self.adoption["expired"].append(target)
                 continue
-            key = self.key(target)
-            stamp = owner.delete_state(key)
-            # §2.11 (0.3): "for what is left of the window counted from the
-            # delete it repeats, not a window more"
-            held = owner._held[key]
-            held.at = time.monotonic() - elapsed_s
-            self.deletes[target] = {"stamp": str(stamp), "at_ms": d.get("at_ms")}
+            try:
+                # §2.11 (0.3): "for what is left of the window counted from
+                # the delete it repeats, not a window more"
+                stamp = owner.delete_state(key, elapsed_s=elapsed_s)
+            except Exception as e:  # noqa: BLE001 - one entry never stops the rest
+                self._failed(target, f"its delete again failed ({e}): carried in the record", True)
+                self.carried["deletes"][target] = d
+                continue
+            self.deletes[target] = {"stamp": str(stamp), "at_ms": _ms_text(at_ms)}
             self.adoption["redeleted"].append(target)
         for target, e in sorted(docs.items()):
-            stamp = owner.set_state(self.key(target), canonical(e["document"]))
+            key = self._key_of(target)
+            if key is None or not isinstance(e, dict) or "document" not in e:
+                self._failed(target, "a document entry with no document: dropped" if key is not None
+                             else "no target's name: dropped", True)
+                continue
+            try:
+                stamp = owner.set_state(key, canonical(e["document"]))
+            except Exception as ex:  # noqa: BLE001
+                self._failed(target, f"its put again failed ({ex}): carried in the record", True)
+                self.carried["documents"][target] = e
+                continue
             self.documents[target] = {"stamp": str(stamp), "document": e["document"]}
             self.adoption["reput"].append(target)
         self._write_record()
@@ -196,6 +285,7 @@ class Author:
             stamp = self.owner.set_state(key, canonical(document))
             self.documents[target] = {"stamp": str(stamp), "document": document}
             self.deletes.pop(target, None)
+            self._uncarry(target)
             self._write_record()
         return "put", key, str(stamp)
 
@@ -203,10 +293,11 @@ class Author:
         assert self.owner is not None
         key = self.key(target)
         with self.lock:
-            if target not in self.documents:
+            if target not in self.documents and target not in self.carried["documents"]:
                 return "none", key, None
             stamp = self.owner.delete_state(key)
-            del self.documents[target]
+            self.documents.pop(target, None)
+            self._uncarry(target)
             self.deletes[target] = {"stamp": str(stamp), "at_ms": int(time.time() * 1000)}
             self._write_record()
         return "deleted", key, str(stamp)
@@ -219,14 +310,30 @@ class Author:
         with self.lock:
             now_ms = time.time() * 1000
             for target, d in sorted(self.deletes.items()):
-                elapsed_s = max(0.0, (now_ms - float(d.get("at_ms", now_ms))) / 1000)
-                if elapsed_s < self.window_s:
-                    key = self.key(target)
-                    stamp = self.owner.delete_state(key)
-                    self.owner._held[key].at = time.monotonic() - elapsed_s
-                    d["stamp"] = str(stamp)
+                at_ms = _record_ms(d.get("at_ms"))
+                if at_ms is None:
+                    self._failed(target, "a delete with no time it was made (at_ms): dropped (§2.11)", False)
+                    del self.deletes[target]
+                    continue
+                at_ms = min(at_ms, now_ms)
+                d["at_ms"] = _ms_text(at_ms)
+                elapsed_s = (now_ms - at_ms) / 1000
+                if elapsed_s >= self.window_s:
+                    # §2.11 (0.3): "its record SHOULD drop a delete once that
+                    # window has passed"
+                    del self.deletes[target]
+                    continue
+                try:
+                    d["stamp"] = str(self.owner.delete_state(self.key(target), elapsed_s=elapsed_s))
+                except Exception as e:  # noqa: BLE001
+                    self._failed(target, f"its delete again failed ({e}): kept in the record", False)
             for target, e in sorted(self.documents.items()):
-                e["stamp"] = str(self.owner.set_state(self.key(target), canonical(e["document"])))
+                try:
+                    e["stamp"] = str(self.owner.set_state(self.key(target), canonical(e["document"])))
+                except Exception as ex:  # noqa: BLE001
+                    # this instance does not hold it, so a put of it is no "unchanged"
+                    self._failed(target, f"its put again failed ({ex}): carried in the record", False)
+                    self.carried["documents"][target] = self.documents.pop(target)
             self._write_record()
         self.owner.new_epoch()
         return self.owner.instance_key
@@ -271,7 +378,12 @@ class Target:
         self.key = None if unbound else slice_key(author, address)
         self.role = desired.TargetRole(self.key)
         self.lock = threading.RLock()
-        self.seed_lock = threading.Lock()
+        #: seeds coalesced: one runs, at most one waits (``_again``, an
+        #: appearance's if any request it stands for was one), and a request
+        #: while one waits is that one
+        self._seed_flags = threading.Lock()
+        self._seeding = False
+        self._again: bool | None = None
         self.running_doc: Any = dict(BASELINE)
         self.acts = 0
         self.seeds = 0
@@ -377,35 +489,61 @@ class Target:
 
     # -- seeds (§2.5) ------------------------------------------------------
     def seed(self, appearance: bool = False) -> str:
+        """A seed, coalesced: while one runs, a request leaves one to run
+        after it, and a request while that one waits is dropped, folded
+        into it ("coalesced"); so appearances never pile up a thread each
+        behind a seed's GETs. The one that runs after starts after every
+        request it stands for, so it reads at least as late as each would
+        have."""
+        if self.unbound or self.owner is None or self.owner.session is None:
+            return "unbound"
+        with self._seed_flags:
+            if self._seeding:
+                self._again = appearance or bool(self._again)
+                return "coalesced"
+            self._seeding = True
+        try:
+            while True:
+                word = self._seed_once(appearance)
+                with self._seed_flags:
+                    if self._again is None:
+                        self._seeding = False
+                        return word
+                    appearance, self._again = self._again, None
+        except BaseException:
+            with self._seed_flags:
+                self._seeding, self._again = False, None
+            raise
+
+    def _seed_once(self, appearance: bool) -> str:
         """S4's GET of the slice; at an appearance, made again up to four
         times, 100 ms more apart each time, while its author reads present
         (§2.5, 0.3); an archive read when it draws nothing and a complete
         presence read shows its author absent (§2.9, 0.3)."""
-        if self.unbound or self.owner is None or self.owner.session is None:
-            return "unbound"
-        with self.seed_lock:
-            self.seeds += 1
-            tries = 5 if appearance else 1
-            for n in range(tries):
-                st = live.get_state(self.owner.session, self.key, self.timeout)
-                if st.replies:
-                    for r in st.replies:
-                        self._receive(_sample(desired.OWNER, r.deleted, r.stamp, r.payload))
-                    self.seed_log.append("answered")
-                    return "answered"
-                if n + 1 < tries:
-                    if self.author_absent():
-                        break
-                    time.sleep(0.1 * (n + 1))
-            if self.archive is not None and self.author_absent():
-                form = alarms.archive_form(self.archive, self.key)
-                st = live.get_state(self.owner.session, form, self.timeout)
+        if self.owner is None or self.owner.session is None:
+            return "unbound"  # closed while it waited
+        self.seeds += 1
+        tries = 5 if appearance else 1
+        for n in range(tries):
+            st = live.get_state(self.owner.session, self.key, self.timeout)
+            if st.replies:
                 for r in st.replies:
-                    self._receive(_sample(desired.ARCHIVE, r.deleted, r.stamp, r.payload))
-                self.seed_log.append("archive" if st.replies else "silent")
-                return "archive"
-            self.seed_log.append("silent")
-            return "silent"
+                    self._receive(_sample(desired.OWNER, r.deleted, r.stamp, r.payload))
+                self.seed_log.append("answered")
+                return "answered"
+            if n + 1 < tries:
+                if self.author_absent():
+                    break
+                time.sleep(0.1 * (n + 1))
+        if self.archive is not None and self.author_absent():
+            form = alarms.archive_form(self.archive, self.key)
+            st = live.get_state(self.owner.session, form, self.timeout)
+            for r in st.replies:
+                self._receive(_sample(desired.ARCHIVE, r.deleted, r.stamp, r.payload))
+            self.seed_log.append("archive" if st.replies else "silent")
+            return "archive"
+        self.seed_log.append("silent")
+        return "silent"
 
     def reread(self, ms: int | None) -> None:
         start = self.reread_s is None and ms is not None

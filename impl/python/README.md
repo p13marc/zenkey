@@ -107,13 +107,18 @@ config        330 passed     0 failed
 link          172 passed     0 failed
 alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
-desired       350 passed     0 failed
-total        2709 passed     0 failed
+desired       351 passed     0 failed
+total        2710 passed     0 failed
 ```
 
 The figures are against `core.md` 0.37, which changed no fixture, `hostid.v1` 0.5, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
-`telemetry.v1` 0.5 and `desired.v1` 0.3. `desired.v1` 0.3 added seven
+`telemetry.v1` 0.5 and `desired.v1` 0.3. Since round 55, the fixtures
+gained one `reports.json` case (266), a revision
+`1e99999999999999999999`: never finite, so strict JSON refuses the text
+before its exact value is computed. zk2py passed it unchanged, and
+`exact_value` refuses such a number too, for a caller that skips that
+read. `desired.v1` 0.3 added seven
 cases (265): five of `reports.json`, F-181's exact numbers, which round
 53's reader read as doubles (two failed until zk2py read them exactly),
 and two of `order.json`, F-184's, which passed. `config.v1` 0.5 changed no
@@ -1391,13 +1396,18 @@ PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.desired_scenarios \
     every number by its exact value (`desired.canonical_json`). Its record
     is the owner example's format. Before its tokens it makes each delete
     within its window again, for what is left of the window, and puts each
-    document again, its clock caught up past the record's stamps. It can
-    re-mint in its own session.
+    document again, its clock caught up past the record's stamps. Each
+    entry stands alone: a delete with no readable `at_ms` cannot be placed
+    in its window, so it is dropped and logged, never dated now; a date
+    after now counts from now and is kept so; a write that fails is logged
+    and carried in the record; none stops the tokens. A re-mint in its own
+    session does the same, and drops a delete whose window has passed.
   - **The target.** It owns `worker.v1`, its role bound with
     `self.system` and `self.service`, or unbound. It subscribes, then
     seeds, and follows its author on a watch session or reads its presence
     every 500 ms. It seeds at each appearance, and up to four times more
-    while a seed draws nothing. It reads an archive only after a complete
+    while a seed draws nothing. Seeds coalesce: one runs, at most one
+    waits, and a request while one waits joins it. It reads an archive only after a complete
     read shows its author absent. `TargetRole` judges each version. The
     scenarios' drive acts, with hold, fail-next and refuse-next. Its report
     goes out before its tokens and after each change, and a re-mint keeps

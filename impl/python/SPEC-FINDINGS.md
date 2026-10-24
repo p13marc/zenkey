@@ -9767,7 +9767,10 @@ revision the same way (`revision_of`). At the start of the round,
 answer, which zk2py had read as doubles.
 
 **`just py-conformance`: 2709 of 2709.** `desired` passes 350 of 350,
-the 265 cases with five header checks and 80 read-backs. `readings`
+the 265 cases with five header checks and 80 read-backs. (After the
+round, a 266th case joined `reports.json`, a revision whose exponent
+is past every double's, so the text is not strict JSON; zk2py passed it
+unchanged: 2710 of 2710, `desired` 351.) `readings`
 passes 324, 20 more than before:
 - nine of zk2py's exact encoding, each read back the same value;
 - the encoding's member order;
