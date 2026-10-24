@@ -431,6 +431,7 @@ async fn an_invalid_payload_fires_a_capture_through_the_lens() {
                 session: recorder_session.clone(),
                 raw: recorder_session.clone(),
                 namespace: String::new(),
+                watch: None,
             });
             record_on(
                 &recorder_session,
@@ -491,6 +492,9 @@ async fn an_invalid_payload_fires_a_capture_through_the_lens() {
 async fn instance_gone_fires_a_capture_when_a_seen_address_goes() {
     let (_router, ep) = router(None).await;
     let (owners, recorder_session) = (client(&ep).await, client(&ep).await);
+    // The presence monitor's watch session (#830): no presence read is
+    // made beside its liveliness subscribers.
+    let watch = client(&ep).await;
     let token = |address: &str, id: u64| {
         let addr: zenkey_model::grammar::Addr = address.parse().expect("an address");
         zenkey_model::grammar::instance_key(&addr, &zenkey_model::grammar::InstanceId::from_u64(id))
@@ -526,6 +530,7 @@ async fn instance_gone_fires_a_capture_when_a_seen_address_goes() {
                 session: session.clone(),
                 raw: session.clone(),
                 namespace: String::new(),
+                watch: Some(watch),
             });
             record_on(
                 &session,

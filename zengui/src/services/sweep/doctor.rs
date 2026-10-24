@@ -35,6 +35,8 @@ pub fn doctor(
                 session,
                 raw,
                 namespace: namespace.clone(),
+                // The doctor follows no presence live (#830).
+                watch: None,
             };
             let report = zenkey_fleet::run_doctor(&bus, &store, &spec).await;
             crate::doctor::DoctorRun {

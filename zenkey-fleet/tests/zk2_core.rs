@@ -819,6 +819,7 @@ async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
             }],
             peers: Vec::new(),
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await

@@ -14,8 +14,18 @@
 //! (`…/@zk/member/…`) — a make-before-break handover is no gap (§8.1).
 //!
 //! **Three states.** An identity is `firing` (gone) or `ok` (held); a gone
-//! address needs a complete read behind it, as the projection's `down`
-//! does. Whatever the projection cannot establish — no seed yet, a seed
+//! identity needs a complete read behind it, as the projection's `down`
+//! does.
+//!
+//! **A withdrawal heard live is not gone** (core §8.1, 0.37). A reader whose
+//! router restarts hears every token withdrawn at once, and their owners
+//! never left. An address heard withdrawn is unobservable in the projection
+//! until the read the withdrawal owes says down, and only then gone here;
+//! an interface or a member heard going with nothing left held is pending
+//! until the next complete read ([`LivePresence::complete_reads`]): gone if
+//! that read shows it still unheld, nothing at all if it came back first,
+//! since it was never said gone. A crash still pages, a settle and one
+//! read's round trip after its lease runs out. Whatever the projection cannot establish — no seed yet, a seed
 //! that ended at its timeout, events lost to a `Dropped(n)` — is the
 //! rule's **observer** going `unobservable` (identity `<rule_id>:observer`),
 //! never an `ok`: one notification for the rule, not one per address, and
@@ -127,6 +137,11 @@ struct PresenceRule {
     /// The instances (interface form) or epochs (member form) holding each
     /// identity's tokens.
     holders: BTreeMap<String, BTreeSet<InstanceId>>,
+    /// The interface and member identities heard going with nothing left
+    /// held, each with the complete reads folded when it was heard and the
+    /// withdrawal itself: said gone only once a later complete read shows
+    /// it still unheld (core §8.1, 0.37).
+    pending: BTreeMap<String, (u64, PresenceTransition)>,
     /// What the rule last said of its own sight.
     observer: Option<CondState>,
 }
@@ -163,6 +178,7 @@ impl PresenceRules {
                     keyexpr,
                     known: BTreeMap::new(),
                     holders: BTreeMap::new(),
+                    pending: BTreeMap::new(),
                     observer: None,
                 })
             })
@@ -293,8 +309,21 @@ impl PresenceRules {
                     continue;
                 }
                 if let Some((identity, holds)) = r.apply(t, &namespace) {
+                    // Heard again before a read said it went: it never did.
+                    if holds {
+                        r.pending.remove(&identity);
+                    }
                     let prior = r.known.get(&identity).copied();
                     if prior == Some(holds) {
+                        continue;
+                    }
+                    // Heard going, live: a reason to read again, never gone
+                    // by itself (core §8.1, 0.37). The next complete read
+                    // decides it, below.
+                    if !holds && prior == Some(true) && t.source == PresenceSource::Event {
+                        r.pending
+                            .entry(identity)
+                            .or_insert_with(|| (presence.complete_reads(), t.clone()));
                         continue;
                     }
                     // First sight: held is not news, only remembered, so its
@@ -311,6 +340,36 @@ impl PresenceRules {
                     let (state, prior) = (state_of(holds), prior.map(state_of));
                     out.push(r.notice(&identity, state, prior, false, at, Some(t), address));
                 }
+            }
+            // The identities heard going that a complete read since shows
+            // still unheld: gone now.
+            let reads = presence.complete_reads();
+            let decided: Vec<String> = r
+                .pending
+                .iter()
+                .filter(|(_, (heard, _))| reads > *heard)
+                .map(|(identity, _)| identity.clone())
+                .collect();
+            for identity in decided {
+                let (_, t) = r.pending.remove(&identity).expect("listed");
+                if r.holders.get(&identity).is_some_and(|h| !h.is_empty()) {
+                    continue;
+                }
+                let prior = r.known.insert(identity.clone(), false).map(state_of);
+                let address = Some(t.address.to_string());
+                let mut n = r.notice(
+                    &identity,
+                    CondState::Firing,
+                    prior,
+                    false,
+                    at,
+                    Some(&t),
+                    address,
+                );
+                n.evidence.push_str(
+                    "; heard withdrawn, and a complete read since shows it unheld (core §8.1)",
+                );
+                out.push(n);
             }
             let observer = presence_observer(presence.basis(), &r.target.address).state;
             if r.observer != Some(observer) {
@@ -508,7 +567,10 @@ impl PresenceRule {
         let how = match t.map(|t| t.source) {
             Some(PresenceSource::Event) => " — heard as it happened",
             Some(PresenceSource::Seed) => " — found by a re-read: it moved at or before then",
-            Some(PresenceSource::Dropped) | None => "",
+            Some(PresenceSource::Dropped)
+            | Some(PresenceSource::Withdrawn)
+            | Some(PresenceSource::CutOff)
+            | None => "",
         };
         match (self.form, holds) {
             (Form::Address, false) => format!(
@@ -619,6 +681,11 @@ impl PresenceRule {
                 format!("{dropped} event(s) lost: unobservable until a complete re-read")
             }
             PresenceBasis::Unseeded => "no read yet".into(),
+            PresenceBasis::CutOff => {
+                "this daemon's session reaches no router and no peer: no read is made, and \
+                 everything is unobservable until a complete read"
+                    .into()
+            }
         };
         let mut evidence = format!(
             "{} {}: {} {what} held, {} gone — {sight}",
@@ -786,8 +853,11 @@ mod tests {
                 ("gui-gone".into(), "baseline".into(), CondState::Ok, false),
             ]
         );
-        // h1/tc is remembered held: its going is news.
+        // h1/tc is remembered held: its going is news, once the read its
+        // withdrawal owes says so (core §8.1, 0.37).
         let t = p.token(&instance("h1/tc", 1), false, at(2));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "heard withdrawn");
+        let t = p.seed(&seed(&[], true), at(2));
         let gone = watch.fold(&t, &p, "t");
         assert_eq!(
             summary(&gone),
@@ -836,8 +906,12 @@ mod tests {
         let t = p.token(&instance("h2/tc", 2), true, at(2));
         assert!(watch.fold(&t, &p, "t").is_empty(), "held is not news");
 
-        // It goes: firing, from ok, with the status move attached.
+        // It goes: heard withdrawn, nothing yet (core §8.1, 0.37); the read
+        // that shows none is firing, from ok, with its status move attached.
         let t = p.token(&instance("h2/tc", 2), false, at(3));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "heard withdrawn");
+        assert!(p.awaits_read());
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], true), at(3));
         let out = watch.fold(&t, &p, "t");
         assert_eq!(
             summary(&out),
@@ -850,12 +924,12 @@ mod tests {
         assert_eq!(
             moved.change,
             PresenceChange::Status {
-                from: AddressStatus::Up,
+                from: AddressStatus::Unobservable,
                 to: AddressStatus::Down
             }
         );
         assert!(
-            out[0].evidence.contains("heard as it happened"),
+            out[0].evidence.contains("found by a re-read"),
             "{}",
             out[0].evidence
         );
@@ -1016,14 +1090,21 @@ mod tests {
         );
         let out = watch.baseline(&p, &BTreeMap::new(), &ids(&rules), "t");
         assert!(out.is_empty(), "held at the first look: {out:?}");
-        // One of two holders goes: still held. The other: gone.
+        // One of two holders goes: still held. The other: heard withdrawn,
+        // and gone once a complete read since shows it unheld (core §8.1,
+        // 0.37).
         let t = p.token(&alive("h1/tc", &iface, 1), false, at(2));
         assert!(watch.fold(&t, &p, "t").is_empty());
         let t = p.token(&alive("h1/tc", &other, 1), false, at(3));
         assert!(watch.fold(&t, &p, "t").is_empty(), "not covered");
         let t = p.token(&alive("h1/tc", &iface, 2), false, at(4));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "heard withdrawn");
+        assert!(p.awaits_read(), "the interface has no token left");
+        let read = [instance("h1/tc", 1), instance("h1/tc", 2), member("a", 10)];
+        let t = p.seed(&seed(&read, true), at(4));
+        let out = watch.fold(&t, &p, "t");
         assert_eq!(
-            summary(&watch.fold(&t, &p, "t")),
+            summary(&out),
             [(
                 "netif".into(),
                 "h1/tc/tc.netif.v1".into(),
@@ -1031,13 +1112,29 @@ mod tests {
                 false
             )]
         );
+        assert!(
+            out[0]
+                .evidence
+                .contains("a complete read since shows it unheld"),
+            "{}",
+            out[0].evidence
+        );
         // Make-before-break: a handover, then the older epoch's delete —
-        // no gap; withdrawn, gone.
+        // no gap; withdrawn, gone once a read says so.
         let t = p.token(&member("a", 11), true, at(5));
         assert!(watch.fold(&t, &p, "t").is_empty());
         let t = p.token(&member("a", 10), false, at(6));
         assert!(watch.fold(&t, &p, "t").is_empty(), "a handover is no gap");
         let t = p.token(&member("a", 11), false, at(7));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "heard withdrawn");
+        // Heard again before the read: it never went, and nothing is said.
+        let t = p.token(&member("a", 11), true, at(8));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "back before a read");
+        let t = p.seed(&seed(&[instance("h1/tc", 1), member("a", 11)], true), at(8));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "held throughout");
+        let t = p.token(&member("a", 11), false, at(9));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "heard withdrawn");
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], true), at(9));
         let out = watch.fold(&t, &p, "t");
         assert_eq!(
             summary(&out),
@@ -1049,6 +1146,39 @@ mod tests {
             )]
         );
         assert_eq!(out[0].kind, NoticeKind::Liveliness);
+    }
+
+    /// A router's restart pages nothing (core §8.1, 0.37): every token is
+    /// heard withdrawn at once, and the read the withdrawals owe shows them
+    /// all, so no rule says gone, and nothing resolves either.
+    #[test]
+    fn a_router_restart_pages_nothing() {
+        let rules = vec![
+            rule("tc-gone", "instance-gone */tc"),
+            rule("netif", "liveliness-gone zk2/*/tc/@zk/alive/tc.netif.v1/**"),
+        ];
+        let iface: zenkey_model::grammar::IfaceId = "tc.netif.v1".parse().unwrap();
+        let fp = zenkey_model::grammar::Fp16::new("abababababababab").unwrap();
+        let alive = alive_key(&addr("h1/tc"), &iface, &InstanceId::from_u64(1), &fp)
+            .unwrap()
+            .as_str()
+            .to_string();
+        let held = [instance("h1/tc", 1), alive.clone()];
+        let mut watch = PresenceRules::new(&rules, "");
+        let mut p = LivePresence::new(PresenceScope::all());
+        watch.track(&mut p, at(0));
+        p.seed(&seed(&held, true), at(1));
+        assert!(
+            watch
+                .baseline(&p, &BTreeMap::new(), &ids(&rules), "t")
+                .is_empty()
+        );
+        let mut t = p.token(&alive, false, at(2));
+        t.extend(p.token(&instance("h1/tc", 1), false, at(2)));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "{t:?}");
+        let t = p.seed(&seed(&held, true), at(3));
+        assert!(watch.fold(&t, &p, "t").is_empty(), "{t:?}");
+        assert_eq!(p.status(&addr("h1/tc")), AddressStatus::Up);
     }
 
     /// One scenario, both tools' readings of it (#747): zenwatch's rules
@@ -1188,7 +1318,10 @@ mod tests {
 
         let t = p.token(&instance("h2/tc", 2), false, at(3));
         both.moved(&t, &p);
-        both.agree("h2/tc goes", &states(Firing, Firing, Ok));
+        both.agree("h2/tc heard withdrawn", &states(Ok, Firing, Ok));
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], true), at(3));
+        both.moved(&t, &p);
+        both.agree("h2/tc goes, a read says", &states(Firing, Firing, Ok));
 
         let t = p.dropped(3, at(4));
         both.moved(&t, &p);

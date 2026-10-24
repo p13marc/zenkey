@@ -101,6 +101,12 @@ pub fn presence_text(p: Option<&crate::presence_link::PresenceUpdate>) -> (Strin
             ),
             true,
         ),
+        PresenceBasis::CutOff => (
+            "presence: this window reaches no router and no peer — no read is made, and every \
+             address is unobservable until a complete one (§8.1)"
+                .to_string(),
+            true,
+        ),
     }
 }
 

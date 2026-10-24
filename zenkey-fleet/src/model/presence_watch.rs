@@ -11,7 +11,9 @@
 //! held, a complete read behind the claim (spec §8.1). An address the
 //! projection cannot see ([unobservable](AddressStatus::Unobservable): no
 //! seed yet, a seed that ended at its timeout, events lost to a
-//! `Dropped(n)`) moves nothing here: what was last said of it stands, and
+//! `Dropped(n)`, a read not made through a session cut off, or a
+//! withdrawal heard live and the read it owes not yet made, core §8.1,
+//! 0.37) moves nothing here: what was last said of it stands, and
 //! the projection's basis is the reader's to report ([`LivePresence::basis`]).
 //! So an address that went before a loss is still gone across it, and one
 //! whose going was hidden in the loss is found by the re-read that restores
@@ -240,7 +242,9 @@ mod tests {
 
     /// Under a wildcard: what is up at the first look is held, a second
     /// address appearing is remembered, not moved, and each one's going is
-    /// gone even while the other holds; its return is held again.
+    /// gone even while the other holds — once a read says so: heard
+    /// withdrawn, it moves nothing (core §8.1, 0.37); its return is held
+    /// again.
     #[test]
     fn a_wildcard_watches_every_address_it_saw_held() {
         let mut p = LivePresence::new(Scope::all());
@@ -252,6 +256,9 @@ mod tests {
         assert!(w.fold(&t).is_empty(), "held at first sight is not a move");
         assert_eq!(w.said(&addr("h2/tc")), Some(true));
         let t = p.token(&instance("h2/tc", 2), false, at(3));
+        assert!(w.fold(&t).is_empty(), "heard withdrawn is not gone");
+        assert_eq!(w.said(&addr("h2/tc")), Some(true));
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], true), at(3));
         assert_eq!(moves(&w.fold(&t)), [("h2/tc".into(), false, Some(true))]);
         assert_eq!(w.gone().collect::<Vec<_>>(), [&addr("h2/tc")]);
         assert_eq!(w.held().collect::<Vec<_>>(), [&addr("h1/tc")]);
@@ -318,6 +325,8 @@ mod tests {
         );
         w.first_look(&p);
         let t = p.token(&instance("h2/tc", 2), false, at(2));
+        assert!(w.fold(&t).is_empty(), "heard withdrawn is not gone");
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], true), at(2));
         assert_eq!(moves(&w.fold(&t)), [("h2/tc".into(), false, Some(true))]);
         let t = p.dropped(4, at(3));
         assert!(w.fold(&t).is_empty(), "unobservable is no move");

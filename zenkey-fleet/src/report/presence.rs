@@ -199,10 +199,13 @@ pub enum DescriptorAnswer {
 pub enum AddressStatus {
     /// At least one instance token held, heard since the last loss.
     Up,
-    /// No instance token held, with a complete seed behind the claim.
+    /// No instance token held, with a complete read behind the claim: the
+    /// last complete one showed none (core §8.1, 0.37).
     Down,
-    /// Neither established: no seed, a seed possibly incomplete, or events
-    /// lost since the last complete one (`model::presence_live`'s doc).
+    /// Neither established: no seed, a seed possibly incomplete, events
+    /// lost since the last complete one, a read not made through a session
+    /// cut off, or a withdrawal heard live with no complete read since
+    /// (`model::presence_live`'s doc).
     Unobservable,
 }
 
@@ -224,7 +227,8 @@ impl fmt::Display for AddressStatus {
     }
 }
 
-/// How a transition was learned: `"event"`, `"seed"`, `"dropped"`.
+/// How a transition was learned: `"event"`, `"seed"`, `"dropped"`,
+/// `"withdrawn"`, `"cut_off"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PresenceSource {
@@ -235,6 +239,15 @@ pub enum PresenceSource {
     Seed,
     /// The basis was lost to a `Dropped(n)`: what follows is unobservable.
     Dropped,
+    /// A withdrawal heard live left the address with no instance token
+    /// (core §8.1, 0.37): a status move to `unobservable`, never to `down`,
+    /// until the read it owes decides it. Its token's own move is an
+    /// `event`.
+    Withdrawn,
+    /// A read was not made: the reader's session reaches no other zenoh node
+    /// (core §8.1, 0.37). What follows is unobservable until a complete
+    /// read.
+    CutOff,
 }
 
 /// One member of an interface's `epoch` template (§8.1): the interface and
@@ -634,6 +647,8 @@ mod tests {
             (PresenceSource::Event, "event"),
             (PresenceSource::Seed, "seed"),
             (PresenceSource::Dropped, "dropped"),
+            (PresenceSource::Withdrawn, "withdrawn"),
+            (PresenceSource::CutOff, "cut_off"),
         ] {
             assert_eq!(serde_json::to_value(source).expect("serialize"), word);
         }

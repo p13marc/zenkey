@@ -7,17 +7,18 @@
 //! runs the realistic two-session shape: the owners and the seed's session
 //! in a namespace, the monitor on a session in none, so every live key
 //! arrives prefixed and the projection strips it. The others run at the
-//! bus root, most on one session, the liveliness GET beside the monitor's
-//! liveliness subscribers (spec §8.1).
+//! bus root.
 //!
-//! The two that force a loss read the address up right after `open`, so
-//! their monitor has a session of its own (#823). On a session that also
-//! holds history liveliness subscribers to the same tokens, zenoh 1.10.1's
-//! liveliness GET was seen to come back complete without a token the
-//! router held: 5 of 720 fresh processes under load, against none of 720
-//! with the subscribers on another session and none of 720 with none. The
-//! seed then reads a live address down, which is the bus's doing, and not
-//! what these two test.
+//! **Every monitor has a session of its own** (#830, core §8.1, 0.37), as
+//! the feed requires: a liveliness GET from a session that holds a
+//! liveliness subscriber, history or not, can come back complete without a
+//! token the router holds (zenoh 1.10.1 and main; #823 first saw it here, 5
+//! of 720 fresh processes under load). `tests/watch_session.rs` shows the
+//! hazard and the guard.
+//!
+//! **A withdrawal heard live is not absence** (core §8.1, 0.37): an address
+//! whose last instance token is heard going is unobservable until the read
+//! that withdrawal owes, which says down.
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -117,7 +118,9 @@ async fn an_address_goes_up_and_down_as_its_instances_come_and_go() {
         .expect("monitor");
     let mut presence = LivePresence::new(scope).wire_namespace(NS);
     presence.track(&h1, SystemTime::now());
-    let (mut feed, seeded) = PresenceFeed::open(&tool, monitor.events(), presence, T).await;
+    let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, presence, T)
+        .await
+        .expect("the feed opens");
     assert_eq!(*feed.last_seed(), SeedOutcome::Complete);
     assert_eq!(feed.presence().basis(), PresenceBasis::Complete);
     assert_eq!(feed.presence().status(&h1), Down, "complete, and empty");
@@ -172,10 +175,19 @@ async fn an_address_goes_up_and_down_as_its_instances_come_and_go() {
     })
     .await;
     assert_eq!(feed.presence().status(&h1), Up, "one of two left");
-    // 4. The last stops: down.
+    // 4. The last stops: unobservable, as heard withdrawn, then down, as
+    // the read the withdrawal owes says (core §8.1, 0.37).
     b.close().await.expect("close");
     until(&mut feed, &mut seen, "h1/tc down", |s| {
-        has(s, &PresenceChange::Status { from: Up, to: Down })
+        s.iter()
+            .skip_while(|t| t.change != PresenceChange::Status { from: Down, to: Up })
+            .any(|t| {
+                t.change
+                    == PresenceChange::Status {
+                        from: Unobservable,
+                        to: Down,
+                    }
+            })
     })
     .await;
 
@@ -199,14 +211,30 @@ async fn an_address_goes_up_and_down_as_its_instances_come_and_go() {
             PresenceChange::InstanceGone {
                 instance: ib.clone()
             },
-            PresenceChange::Status { from: Up, to: Down },
+            PresenceChange::Status {
+                from: Up,
+                to: Unobservable
+            },
+            PresenceChange::Status {
+                from: Unobservable,
+                to: Down
+            },
         ],
         "in that order"
     );
-    assert!(
-        seen[1..].iter().all(|t| t.source == PresenceSource::Event),
-        "every live move was heard as it happened: {seen:#?}"
+    let (last, withdrawn) = (&seen[seen.len() - 1], &seen[seen.len() - 2]);
+    assert_eq!(
+        (withdrawn.source, last.source),
+        (PresenceSource::Withdrawn, PresenceSource::Seed),
+        "unobservable on the withdrawal, down on the read: {seen:#?}"
     );
+    assert!(
+        seen[1..seen.len() - 2]
+            .iter()
+            .all(|t| t.source == PresenceSource::Event),
+        "every other live move was heard as it happened: {seen:#?}"
+    );
+    assert!(!feed.presence().awaits_read(), "the read was made");
     // Each instance's interface token came and went too, under its own
     // fingerprint prefix.
     for i in [&ia, &ib] {
@@ -234,21 +262,23 @@ async fn an_address_goes_up_and_down_as_its_instances_come_and_go() {
 
 /// A member's token cycled make-before-break is a handover on a live bus,
 /// and the older epoch's delete after it moves nothing; withdrawn, the
-/// member is gone. One session at the bus root holds the monitor's
-/// liveliness subscribers and makes the seed's liveliness GET (§8.1).
+/// member is gone. The monitor's liveliness subscribers are on a watch
+/// session of their own, the seed's liveliness GET on the tool's (#830).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_member_epoch_handover_is_no_gap_on_a_live_bus() {
     let (_router, ep) = router(None).await;
     let owner = client(&ep).await;
     let tool = client(&ep).await;
+    let watch = client(&ep).await;
     let nav = iface("nav.v2");
     let scope = PresenceScope::service(&addr("p3/nav"));
-    let monitor = Monitor::start(&tool, MonitorSpec::default().with_presence("", &scope))
+    let monitor = Monitor::start(&watch, MonitorSpec::default().with_presence("", &scope))
         .await
         .expect("monitor");
     let mut svc = bring_up(&owner, config("p3/nav"), &scenario("nav.v2")).await;
-    let (mut feed, seeded) =
-        PresenceFeed::open(&tool, monitor.events(), LivePresence::new(scope), T).await;
+    let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, LivePresence::new(scope), T)
+        .await
+        .expect("the feed opens");
     let mut seen = seeded;
     until(&mut feed, &mut seen, "p3/nav up", |s| {
         s.iter().any(|t| {
@@ -361,8 +391,9 @@ async fn a_loss_is_unobservable_until_the_reseed_finds_what_it_hid() {
             .is_ok_and(|r| r.keys.len() == 1)
     })
     .await;
-    let (mut feed, seeded) =
-        PresenceFeed::open(&tool, monitor.events(), LivePresence::new(scope), T).await;
+    let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, LivePresence::new(scope), T)
+        .await
+        .expect("the feed opens");
     let mut seen = seeded;
     assert_eq!(feed.presence().status(&h1), Up);
 
@@ -375,9 +406,10 @@ async fn a_loss_is_unobservable_until_the_reseed_finds_what_it_hid() {
     })
     .await;
     // The router sent the monitor's session the delete before it answers
-    // this read, on the same link, so the delete is in the broadcast before
-    // the flood. What the read says is not used (#823, the module doc).
-    let _ = zenkey_fleet::liveliness_read(&watcher, "zk2/h1/tc/@zk/instance/*", T).await;
+    // this barrier, on the same link, so the delete is in the broadcast
+    // before the flood. Its answer is discarded: a watch session makes no
+    // presence read (#830).
+    let _ = zenkey::presence::settle(&watcher, "zk2/h1/tc/@zk/instance/*", T).await;
     for i in 0..16 {
         monitor.core().node_event(format!("demo/flood/{i}"), true);
     }
@@ -461,8 +493,9 @@ async fn a_reseed_cut_short_by_a_select_is_read_again() {
             .is_ok_and(|r| r.keys.len() == 1)
     })
     .await;
-    let (mut feed, seeded) =
-        PresenceFeed::open(&tool, monitor.events(), LivePresence::new(scope), T).await;
+    let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, LivePresence::new(scope), T)
+        .await
+        .expect("the feed opens");
     let mut seen = seeded;
     assert_eq!(feed.presence().status(&h1), Up);
 
@@ -474,9 +507,10 @@ async fn a_reseed_cut_short_by_a_select_is_read_again() {
     })
     .await;
     // The router sent the monitor's session the delete before it answers
-    // this read, on the same link, so the delete is in the broadcast before
-    // the flood. What the read says is not used (#823, the module doc).
-    let _ = zenkey_fleet::liveliness_read(&watcher, "zk2/h1/tc/@zk/instance/*", T).await;
+    // this barrier, on the same link, so the delete is in the broadcast
+    // before the flood. Its answer is discarded: a watch session makes no
+    // presence read (#830).
+    let _ = zenkey::presence::settle(&watcher, "zk2/h1/tc/@zk/instance/*", T).await;
     for i in 0..16 {
         monitor.core().node_event(format!("demo/flood/{i}"), true);
     }
@@ -557,8 +591,9 @@ async fn a_lens_feed_resolves_an_appearing_instance_without_a_reread() {
     let monitor = Monitor::start(&raw, MonitorSpec::default().with_presence("", &scope))
         .await
         .expect("monitor");
-    let (mut feed, seeded) =
-        PresenceFeed::open(&tool, monitor.events(), LivePresence::new(scope), T).await;
+    let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, LivePresence::new(scope), T)
+        .await
+        .expect("the feed opens");
     assert!(
         !lens.on_presence(&seeded).await,
         "an empty seed moves no token, and swaps nothing"

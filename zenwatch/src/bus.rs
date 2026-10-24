@@ -163,32 +163,78 @@ pub fn resolve(
     Ok(settings)
 }
 
+/// Which watch sessions a run's rules need (#830, core §8.1, 0.37): a
+/// session holds a live reader's liveliness subscribers, or makes presence
+/// reads, never both, since a liveliness GET beside a liveliness subscriber
+/// can complete without a token that is live.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Watches {
+    /// In the namespace: the presence projection's monitor (`instance-gone`,
+    /// `liveliness-gone` on the deployment's own zk2 tokens), and the owners'
+    /// instance tokens of `alerts` and `alert-firing`.
+    pub namespaced: bool,
+    /// In none: the foreign-token ledger's monitor (`liveliness-gone` on any
+    /// other token).
+    pub raw: bool,
+}
+
+/// The daemon's sessions: the fleet's [`DoctorBus`] — in the namespace, in
+/// none, and the namespaced watch session when a rule needs one — and the
+/// raw watch session (#830).
+pub struct Sessions {
+    pub bus: DoctorBus,
+    pub raw_watch: Option<zenoh::Session>,
+}
+
 impl BusSettings {
-    /// Open the two sessions, saying which half failed: a config file the
-    /// user named is theirs to fix (a refusal, 2); a transport that would
-    /// not come up is the world being unavailable (1). The fork is
+    /// Open the sessions, saying which half failed: a config file the user
+    /// named is theirs to fix (a refusal, 2); a transport that would not
+    /// come up is the world being unavailable (1). The fork is
     /// `zenkey_fleet::OpenFailure`'s (#196); this is where it is spent. The
     /// raw session opens first, so a dead transport is said once.
-    pub async fn sessions(&self) -> Result<DoctorBus> {
+    ///
+    /// The two the daemon reads through always open; each watch session
+    /// only when `watches` says a rule follows presence live through it
+    /// (#830): one more session, with its router-side declarations, per
+    /// kind of live reader, and none that no rule needs.
+    pub async fn sessions(&self, watches: Watches) -> Result<Sessions> {
         let t = &self.transport;
         let raw = spend(
             zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
                 .await,
         )?;
-        let session = spend(
-            zenkey_fleet::open_in_namespace(
-                &self.namespace,
-                t.file.as_deref(),
-                &t.connect,
-                &t.listen,
-                t.scouting,
+        let namespaced = || async {
+            spend(
+                zenkey_fleet::open_in_namespace(
+                    &self.namespace,
+                    t.file.as_deref(),
+                    &t.connect,
+                    &t.listen,
+                    t.scouting,
+                )
+                .await,
             )
-            .await,
-        )?;
-        Ok(DoctorBus {
-            session,
-            raw,
-            namespace: self.namespace.clone(),
+        };
+        let session = namespaced().await?;
+        let watch = match watches.namespaced {
+            true => Some(namespaced().await?),
+            false => None,
+        };
+        let raw_watch = match watches.raw {
+            true => Some(spend(
+                zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
+                    .await,
+            )?),
+            false => None,
+        };
+        Ok(Sessions {
+            bus: DoctorBus {
+                session,
+                raw,
+                namespace: self.namespace.clone(),
+                watch,
+            },
+            raw_watch,
         })
     }
 }

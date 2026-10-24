@@ -7,10 +7,24 @@
 //! runtime's unbounded handler ([`zenkey::presence::liveliness_read`]): zenoh's
 //! default 256-slot handler hangs a liveliness GET on a session that also
 //! holds a liveliness subscriber, at every size measured from 996 tokens
-//! (zenoh#2678, spike S2), and this crate's sessions hold one whenever a
-//! [`crate::Monitor`] watches the roster. The spec forbids the default
-//! handler there, and the rule lives in one place so a new sweep cannot
-//! forget it.
+//! (zenoh#2678, spike S2). The spec forbids the default handler there, and
+//! the rule lives in one place so a new sweep cannot forget it.
+//!
+//! **Two reads are not made** (core §8.1, 0.37), and say why in
+//! [`crate::Error::NotAsked`]:
+//! - **beside a liveliness subscriber** (#830). A liveliness GET from a
+//!   session that holds one, history or not, can complete without tokens
+//!   that are live (zenoh 1.10.1, and main at 766b455). Every liveliness
+//!   subscriber of this crate is declared through
+//!   [`zenkey::presence::declare_subscriber`], which marks its session a
+//!   watch session, and the runtime refuses a read on it. A reader that
+//!   follows presence live holds its [`crate::Monitor`] on a watch session
+//!   of its own and reads here on the deployment's session, which holds
+//!   none; a [`PresenceFeed`] refuses a seed session with the monitor's zid
+//!   before it reads;
+//! - **through a session cut off** from every other zenoh node
+//!   ([`cut_off`]): zenoh answers it at once, complete and empty, though
+//!   nothing was asked of anyone.
 //!
 //! **zk2's services** (§8.1, §3.3) are read in two steps: one liveliness GET
 //! for the tokens in a [`Scope`] ([`read_tokens`]), then the descriptor of
@@ -27,9 +41,11 @@
 //! **Presence kept current** (#614, FL1): a [`PresenceFeed`] seeds a
 //! [`LivePresence`] from one read of its scope, then folds a
 //! [`crate::Monitor`]'s liveliness events into it, re-seeding after every
-//! `Dropped(n)`. The monitor watches [`presence_selectors`] (or
-//! [`crate::MonitorSpec::with_presence`]) on whichever session it runs; the
-//! seed reads through the session in the namespace.
+//! `Dropped(n)`, after every withdrawal that leaves something with nothing
+//! held (core §8.1, 0.37), and after a read not made. The monitor watches
+//! [`presence_selectors`] (or [`crate::MonitorSpec::with_presence`]) on a
+//! watch session of its own; the seed reads through the session in the
+//! namespace, which holds no liveliness subscriber (#830).
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
@@ -39,7 +55,7 @@ use zenoh::Session;
 
 use crate::bus::monitor::{EventStream, FleetEvent, StreamItem};
 use crate::model::catalog::{Catalog, DescriptorRead, Observed};
-use crate::model::presence_live::LivePresence;
+use crate::model::presence_live::{LivePresence, PresenceBasis};
 use crate::report::PresenceTransition;
 use crate::report::{NamespaceListing, ServiceListing};
 use crate::{Error, Result};
@@ -51,6 +67,10 @@ use crate::{Error, Result};
 /// have missed tokens, and a caller reports it as possibly incomplete,
 /// never as absence (§8.1, O5). Reply errors are skipped; a token carries
 /// no payload, so a reply without a key has nothing to say.
+///
+/// Not made, and [`Error::NotAsked`] (core §8.1, 0.37): on a watch session,
+/// which holds a liveliness subscriber (#830), or through a session cut off
+/// from every other zenoh node.
 pub async fn liveliness_read(
     session: &Session,
     selector: &str,
@@ -58,7 +78,25 @@ pub async fn liveliness_read(
 ) -> Result<zenkey::presence::PresenceRead> {
     zenkey::presence::liveliness_read(session, selector, timeout)
         .await
-        .map_err(|e| Error::bus("liveliness get", selector, e))
+        .map_err(|e| {
+            Error::from_runtime_refusal(&e)
+                .unwrap_or_else(|| Error::bus("liveliness get", selector, e))
+        })
+}
+
+/// Why `session` reaches no other zenoh node, when it does not (core §8.1,
+/// 0.37; #800 AD): a read through it is answered at once, complete and
+/// empty, though nothing was asked of anyone — every owner would read
+/// absent, and a GET would heal a loss nobody answered. A router's restart
+/// cuts a client off so until it reconnects; a reader then makes no read,
+/// and says why. A peer or a router alone reads nothing so too, its own
+/// process's owners included: it cannot tell alone from cut off, and a
+/// reader shares no session with an owner it judges (zenctl, zengui and
+/// zenwatch open their own).
+pub async fn cut_off(session: &Session) -> Option<String> {
+    zenkey::presence::cut_off(session)
+        .await
+        .then(|| crate::error::NotAsked::CutOff.to_string())
 }
 
 /// How many descriptor GETs [`describe`] keeps in flight at once.
@@ -272,6 +310,12 @@ pub const RESEED_BACKOFF_MAX: Duration = Duration::from_secs(30);
 /// window, before it backs off.
 const RESEED_ATTEMPTS: usize = 3;
 
+/// How long a [`PresenceFeed`] waits after a withdrawal heard live before
+/// it reads again (core §8.1, 0.37): a burst of withdrawals — every token
+/// at once, when the reader's router restarts or an owner's lease runs out —
+/// is one read. Later withdrawals never push it back.
+pub const WITHDRAWAL_SETTLE: Duration = Duration::from_millis(100);
+
 /// What a [`PresenceFeed`]'s last seed found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SeedOutcome {
@@ -284,6 +328,11 @@ pub enum SeedOutcome {
     /// The subscription lost events while the seed was read, so the seed
     /// could not stand and the feed reads again.
     Overrun { dropped: u64 },
+    /// The read was not made (core §8.1, 0.37): the session it reads
+    /// through, or the monitor's, reaches no other zenoh node, so zenoh
+    /// would have answered it at once, complete and empty. Every address is
+    /// unobservable until a complete read; the feed reads again.
+    CutOff(String),
     /// The read could not be put on the bus.
     Failed(String),
 }
@@ -291,6 +340,23 @@ pub enum SeedOutcome {
 /// A [`LivePresence`] kept current from a [`crate::Monitor`] (#614, FL1):
 /// seeded from one liveliness read of its scope, fed every token event the
 /// monitor delivers, and re-seeded after every `Dropped(n)`.
+///
+/// **Two sessions** (#830, core §8.1, 0.37). The monitor holds its
+/// liveliness subscribers on a watch session of its own; the feed reads
+/// through another, the deployment's, which holds none, and refuses one
+/// with the monitor's zid ([`PresenceFeed::open`]). A read through either
+/// session while it reaches no other zenoh node is not made
+/// ([`SeedOutcome::CutOff`]): every address is unobservable until a
+/// complete read, retried with backoff, and at once when a token is heard
+/// again.
+///
+/// **A withdrawal heard live is a reason to read again** (core §8.1, 0.37).
+/// One that leaves something with nothing held owes a read
+/// [`WITHDRAWAL_SETTLE`] later ([`LivePresence::awaits_read`]): a burst of
+/// them is one read, and its complete answer decides each address it left
+/// unobservable. A crash still pages: the owner's lease runs out, its
+/// tokens are withdrawn, the read shows none, and the address is down, a
+/// settle and one read's round trip after the withdrawal.
 ///
 /// **The order is the honesty.** The event stream is taken before the seed
 /// is read, so nothing between the two is missed; the events delivered
@@ -319,6 +385,9 @@ pub enum SeedOutcome {
 /// presence token of the scope is counted ([`LivePresence::ignored`]).
 pub struct PresenceFeed {
     session: Session,
+    /// The monitor's session: a watch session, read only for whether it is
+    /// cut off (#830, core §8.1).
+    watch: Session,
     timeout: Duration,
     events: EventStream,
     presence: LivePresence,
@@ -341,6 +410,14 @@ impl std::fmt::Debug for PresenceFeed {
     }
 }
 
+/// Why a re-seed read nothing.
+enum NotRead {
+    /// Not made: a session reaches no other zenoh node (core §8.1, 0.37).
+    CutOff(String),
+    /// Could not be put on the bus.
+    Failed(String),
+}
+
 /// What woke a feed.
 enum Wake {
     Item(Option<StreamItem>),
@@ -349,19 +426,28 @@ enum Wake {
 
 impl PresenceFeed {
     /// Seed `presence` through `session` (in the namespace; each read
-    /// bounded by `timeout`) and start folding `events` into it. `events`
-    /// must be taken from the monitor before this is called: that is what
-    /// lets the seed miss nothing. Returns the feed and the seed's
+    /// bounded by `timeout`) and start folding `monitor`'s events into it.
+    /// The event stream is taken here, before the seed is read: that is
+    /// what lets the seed miss nothing. Returns the feed and the seed's
     /// transitions; a seed that could not be made leaves the basis as it was
     /// and is retried ([`PresenceFeed::last_seed`] says why).
+    ///
+    /// **Refused** (#830, core §8.1, 0.37), with [`Error::NotAsked`] and
+    /// nothing read: a `session` that is the monitor's (the same zid), or
+    /// any watch session ([`zenkey::presence::watching`]). A liveliness
+    /// read beside a liveliness subscriber can complete without tokens that
+    /// are live; the monitor runs on a session of its own.
     pub async fn open(
         session: &Session,
-        events: EventStream,
+        monitor: &crate::Monitor,
         presence: LivePresence,
         timeout: Duration,
-    ) -> (PresenceFeed, Vec<PresenceTransition>) {
+    ) -> Result<(PresenceFeed, Vec<PresenceTransition>)> {
+        refuse_beside(session, monitor, "a presence feed's seed")?;
+        let events = monitor.events();
         let mut feed = PresenceFeed {
             session: session.clone(),
+            watch: monitor.session().clone(),
             timeout,
             events,
             presence,
@@ -370,7 +456,7 @@ impl PresenceFeed {
             pending: Vec::new(),
         };
         let seeded = feed.reseed().await;
-        (feed, seeded)
+        Ok((feed, seeded))
     }
 
     /// The projection, as folded so far.
@@ -389,8 +475,9 @@ impl PresenceFeed {
     }
 
     /// The next transitions: waits for an event that moves something, or
-    /// for a re-seed that is owed, and returns what moved. `None` only when
-    /// the monitor's broadcast closed. Cancel-safe: see the type's doc.
+    /// for a re-seed that is owed, and returns what moved — empty when a
+    /// re-seed moved the basis alone. `None` only when the monitor's
+    /// broadcast closed. Cancel-safe: see the type's doc.
     ///
     /// A `Dropped(n)` hands out its transitions (every address unobservable)
     /// first, and the re-seed it owes on the next call: cause before effect,
@@ -411,15 +498,34 @@ impl PresenceFeed {
                 None => Wake::Item(self.events.recv().await),
             };
             match wake {
-                Wake::Retry => self.reseed_pending().await,
+                Wake::Retry => {
+                    // A basis that moved with no address moving is handed
+                    // out too, so a reader's sight says so: a read not made
+                    // through a session cut off, or the complete one after.
+                    let before = self.presence.basis();
+                    self.reseed_pending().await;
+                    if self.pending.is_empty() && self.presence.basis() != before {
+                        return Some(Vec::new());
+                    }
+                }
                 Wake::Item(None) => return None,
                 Wake::Item(Some(StreamItem::Event(FleetEvent::NodeUp(key)))) => {
                     let moved = self.presence.token(&key, true, SystemTime::now());
                     self.pending.extend(moved);
+                    // A token heard while cut off: the session reaches
+                    // someone again, and the read it owes is due now.
+                    if self.presence.basis() == PresenceBasis::CutOff {
+                        self.owe_within(Duration::ZERO);
+                    }
                 }
                 Wake::Item(Some(StreamItem::Event(FleetEvent::NodeDown(key)))) => {
                     let moved = self.presence.token(&key, false, SystemTime::now());
                     self.pending.extend(moved);
+                    // A withdrawal heard live is a reason to read again,
+                    // never absence by itself (core §8.1, 0.37).
+                    if self.presence.awaits_read() {
+                        self.owe_within(WITHDRAWAL_SETTLE);
+                    }
                 }
                 Wake::Item(Some(StreamItem::Event(_))) => {}
                 Wake::Item(Some(StreamItem::Dropped(n))) => {
@@ -447,11 +553,38 @@ impl PresenceFeed {
             self.owe_now();
         }
         for _ in 0..RESEED_ATTEMPTS {
-            let read = read_tokens(&self.session, self.presence.scope(), self.timeout).await;
+            // Not made through a session that reaches nobody, the monitor's
+            // included: zenoh would answer it complete and empty, and a
+            // subscription that hears nothing cannot follow it (core §8.1,
+            // 0.37).
+            let cut = match cut_off(&self.session).await {
+                Some(why) => Some(why),
+                None => cut_off(&self.watch)
+                    .await
+                    .map(|why| format!("the monitor's session: {why}")),
+            };
+            let read = match cut {
+                Some(why) => Err(NotRead::CutOff(why)),
+                None => read_tokens(&self.session, self.presence.scope(), self.timeout)
+                    .await
+                    .map_err(|e| match e.not_asked() {
+                        Some(crate::error::NotAsked::CutOff) => {
+                            NotRead::CutOff(crate::one_line(&e))
+                        }
+                        _ => NotRead::Failed(crate::one_line(&e)),
+                    }),
+            };
             let observed = match read {
                 Ok(observed) => observed,
-                Err(e) => {
-                    self.last_seed = SeedOutcome::Failed(crate::one_line(&e));
+                Err(NotRead::CutOff(why)) => {
+                    let moved = self.presence.cut_off(SystemTime::now());
+                    self.pending.extend(moved);
+                    self.last_seed = SeedOutcome::CutOff(why);
+                    self.back_off();
+                    return;
+                }
+                Err(NotRead::Failed(why)) => {
+                    self.last_seed = SeedOutcome::Failed(why);
                     self.back_off();
                     return;
                 }
@@ -484,6 +617,11 @@ impl PresenceFeed {
             if observed.complete {
                 self.last_seed = SeedOutcome::Complete;
                 self.retry = None;
+                // A withdrawal heard while the read was in flight owes the
+                // next one.
+                if self.presence.awaits_read() {
+                    self.owe_within(WITHDRAWAL_SETTLE);
+                }
             } else {
                 self.last_seed = SeedOutcome::Incomplete;
                 self.back_off();
@@ -491,6 +629,18 @@ impl PresenceFeed {
             return;
         }
         self.back_off();
+    }
+
+    /// Owe a re-seed within `wait` from now: sooner than one already owed,
+    /// never later, so a burst of withdrawals is one read and a stream of
+    /// them never pushes it back. The backoff a run of failures reached is
+    /// kept.
+    fn owe_within(&mut self, wait: Duration) {
+        let when = tokio::time::Instant::now() + wait;
+        self.retry = Some(match self.retry {
+            Some((owed, last)) => (owed.min(when), last),
+            None => (when, Duration::ZERO),
+        });
     }
 
     /// Owe a re-seed now, keeping the backoff a run of failures has reached.
@@ -508,6 +658,22 @@ impl PresenceFeed {
         };
         self.retry = Some((tokio::time::Instant::now() + wait, wait));
     }
+}
+
+/// Refuse `session` as `what`'s read beside `monitor` (#830, core §8.1,
+/// 0.37): the monitor's own session, or any watch session — a reader that
+/// seeds beside a monitor calls this before it reads, as
+/// [`PresenceFeed::open`] does.
+pub fn refuse_beside(session: &Session, monitor: &crate::Monitor, what: &str) -> Result<()> {
+    if session.zid() == monitor.zid() || zenkey::presence::watching(session) {
+        return Err(Error::not_asked_for(
+            what,
+            crate::error::NotAsked::BesideSubscriber {
+                zid: session.zid().to_string(),
+            },
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -42,10 +42,14 @@
 //! **An owner's absence is a read's.** §2.14 step 1's *absent* is "a
 //! complete read without its instance token": the rule takes it from a
 //! refresh's presence read, never from a live token's withdrawal alone,
-//! which a router's restart makes of every owner at once. Each refresh
-//! judges every key the book holds again, so an owner that did go is said
-//! a tick later. A refresh through a session cut off from every router and
-//! peer makes no read at all (`zenkey_fleet::bus::alarms::cut_off`).
+//! which a router's restart makes of every owner at once (core §8.1, 0.37,
+//! which the fleet's book now follows too: an owner heard withdrawn is
+//! possibly incomplete until the next presence read). Each refresh judges
+//! every key the book holds again, so an owner that did go is said a tick
+//! later. A refresh through a session cut off from every router and peer
+//! makes no read at all ([`zenkey_fleet::cut_off`]). The readers' instance
+//! tokens are followed on a watch session of their own, the reads made on
+//! the namespaced session (#830).
 //!
 //! **The first look** (decided against `presence.rs`'s baseline and v1's
 //! `alerts`). An alarm already firing when zenwatch starts is **told**, as
@@ -393,12 +397,15 @@ impl AlarmRules {
     }
 
     /// Opens every reader on `session` (in the deployment's namespace):
-    /// subscribed, then seeded by S4's GET (core §4.2). Returns, per reader,
-    /// the transitions its first reading made — each alarm found, raised or
-    /// resolved as a late reader reads it (§2.6) — for [`Self::baseline`].
+    /// subscribed, then seeded by S4's GET (core §4.2), the owners' instance
+    /// tokens followed on `watch`, a session of its own (#830). Returns, per
+    /// reader, the transitions its first reading made — each alarm found,
+    /// raised or resolved as a late reader reads it (§2.6) — for
+    /// [`Self::baseline`].
     pub async fn open(
         &mut self,
         session: &zenoh::Session,
+        watch: Option<&zenoh::Session>,
         timeout: Duration,
         clocks_synced: bool,
     ) -> Vec<Vec<AlarmTransition>> {
@@ -411,7 +418,7 @@ impl AlarmRules {
             spec.archives = false;
             let opened = match AlarmScope::parse(&r.selector) {
                 Err(why) => Err(why),
-                Ok(scope) => AlarmFeed::open(session, scope, spec, true)
+                Ok(scope) => AlarmFeed::open(session, watch, scope, spec, true)
                     .await
                     .map_err(|e| zenkey_fleet::one_line(&e)),
             };

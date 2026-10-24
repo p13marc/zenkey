@@ -478,6 +478,7 @@ pub async fn observe(
         Some(
             crate::bus::telemetry::observe(
                 session,
+                bus.watch.as_ref(),
                 &bus.namespace,
                 scope,
                 &store,
@@ -579,7 +580,7 @@ async fn suite(
         .iter()
         .any(|r| (r.kind == Kind::Stream && r.template.has_params()) || r.kind == Kind::Event);
     let presence_watch = if windowed {
-        Some(watch_instances(session, &obs.address, t).await)
+        Some(watch_instances(bus.watch.as_ref(), session, &obs.address, t).await)
     } else {
         None
     };
@@ -750,19 +751,26 @@ type InstanceWatch = (
 );
 
 /// A callback liveliness subscriber on `addr`'s instance tokens (§8.1: a
-/// subscriber beside a GET is callback-driven), then a read of them: the
-/// tokens held when the window opens, and every one deleted from then on.
+/// subscriber beside a GET is callback-driven), on `watch`, a session of
+/// its own, and settled there; then a read of them on `session`, which
+/// holds no liveliness subscriber (#830, core §8.1, 0.37): the tokens held
+/// when the window opens, and every one deleted from then on.
 async fn watch_instances(
+    watch: Option<&Session>,
     session: &Session,
     addr: &Addr,
     timeout: Duration,
 ) -> std::result::Result<InstanceWatch, String> {
     let selector = format!("{GRAMMAR}/{}/{}/@zk/instance/*", addr.system, addr.service);
+    let Some(watch) = watch.filter(|w| w.zid() != session.zid()) else {
+        return Err(format!(
+            "watching `{selector}` needs a watch session of its own: no presence read is made \
+             beside a liveliness subscriber (#830, core §8.1)"
+        ));
+    };
     let gone: Arc<std::sync::Mutex<BTreeSet<String>>> = Arc::default();
     let g = Arc::clone(&gone);
-    let subscriber = session
-        .liveliness()
-        .declare_subscriber(&selector)
+    let subscriber = zenkey::presence::declare_subscriber(watch, &selector)
         .callback(move |sample| {
             if sample.kind() == zenoh::sample::SampleKind::Delete {
                 g.lock()
@@ -772,6 +780,16 @@ async fn watch_instances(
         })
         .await
         .map_err(|e| format!("a liveliness subscriber on `{selector}`: {e}"))?;
+    // The routers have read the subscriber before the read below, on the
+    // other session, is answered (#830).
+    if !zenkey::presence::settle(watch, &selector, timeout)
+        .await
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "the liveliness subscriber on `{selector}` did not settle within the timeout"
+        ));
+    }
     let read = zenkey::presence::liveliness_read(session, &selector, timeout)
         .await
         .map_err(|e| format!("the read of `{selector}`: {e}"))?;

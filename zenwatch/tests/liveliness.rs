@@ -93,13 +93,15 @@ async fn an_owner_that_stops_fires_instance_gone_and_its_restart_resolves_it() {
         "{}",
         n.evidence
     );
+    // Heard withdrawn, it was unobservable; the read the withdrawal owed
+    // said down, and that read is the deciding move (core §8.1, 0.37).
     let moved = n.presence.as_ref().expect("the deciding move");
     assert_eq!(moved.address.to_string(), "h1/tc");
-    assert_eq!(moved.source, PresenceSource::Event);
+    assert_eq!(moved.source, PresenceSource::Seed);
     assert_eq!(
         moved.change,
         PresenceChange::Status {
-            from: AddressStatus::Up,
+            from: AddressStatus::Unobservable,
             to: AddressStatus::Down
         }
     );
@@ -194,4 +196,63 @@ async fn an_address_down_at_start_is_one_baseline_and_its_arrival_resolves_it() 
     let summary = running.stop().await;
     assert_eq!(summary.discipline.baseline, 1, "the assumed address");
     svc.close().await.expect("close");
+}
+
+/// The token ledger reads beside a monitor of its own (#830, core §8.1,
+/// 0.37): `TokenFeed::open` refuses the monitor's own session, or any
+/// session holding a liveliness subscriber, before it reads; on the daemon's
+/// raw session it reads, and a token heard withdrawn is not gone until a
+/// read says so.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_token_ledger_reads_beside_a_monitor_of_its_own() {
+    use zenwatch::liveliness::{TokenBasis, TokenFeed};
+    let (_router, ep) = zk2::router().await;
+    let (raw, watch) = (zk2::client(&ep).await, zk2::client(&ep).await);
+    let other_app = zk2::client(&ep).await;
+    let token = other_app
+        .liveliness()
+        .declare_token(FOREIGN)
+        .await
+        .expect("a foreign token");
+    zk2::tokens(&other_app, FOREIGN, 1).await;
+    let spec = zenkey_fleet::MonitorSpec {
+        liveliness: vec![FOREIGN.to_owned()],
+        stats_tick: Duration::from_secs(3600),
+        ..zenkey_fleet::MonitorSpec::default()
+    };
+    let monitor = zenkey_fleet::Monitor::start(&watch, spec)
+        .await
+        .expect("a monitor");
+    let refused = TokenFeed::open(&watch, &monitor, vec![FOREIGN.to_owned()], zk2::T)
+        .await
+        .expect_err("refused");
+    assert!(refused.not_asked().is_some(), "{refused}");
+
+    let mut feed = TokenFeed::open(&raw, &monitor, vec![FOREIGN.to_owned()], zk2::T)
+        .await
+        .expect("the raw session reads");
+    assert_eq!(feed.basis(), TokenBasis::Complete);
+    assert!(feed.held().contains(FOREIGN));
+
+    token.undeclare().await.expect("undeclare");
+    let mut moves = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while !moves
+        .iter()
+        .any(|m: &zenwatch::liveliness::TokenMove| !m.held)
+    {
+        let got = tokio::time::timeout_at(deadline, feed.next())
+            .await
+            .expect("the read in time")
+            .expect("the monitor runs");
+        moves.extend(got);
+    }
+    let gone = moves.iter().find(|m| !m.held).expect("gone");
+    assert_eq!(
+        gone.source,
+        PresenceSource::Seed,
+        "a read said so: {moves:?}"
+    );
+    assert!(feed.withdrawn().is_empty());
+    monitor.shutdown().await.expect("shutdown");
 }

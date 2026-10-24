@@ -17,14 +17,32 @@
 //! **Three states, and the down pole is the one that needs evidence.**
 //! - *Up*: at least one instance token of the address is held, and nothing
 //!   was lost since it was heard.
-//! - *Down*: none is held, and a complete seed stands behind the claim — the
-//!   seed showed none, or showed some and every one was heard going since.
+//! - *Down*: none is held, and a complete read stands behind the claim: the
+//!   last complete seed showed none (core §8.1, 0.37).
 //! - *Unobservable*: neither could be established. No seed, a seed that
 //!   ended at its timeout (possibly incomplete, §8.1), a `Dropped(n)` since
-//!   the last complete seed, or a subscription's history alone: liveliness
-//!   history has no end-of-history mark, so a token not heard yet is not
-//!   absent. Silence is never a verdict (O5, S6), and *unobservable* is its
-//!   own state, never folded into either pole (R7).
+//!   the last complete seed, a read not made because the session reaches
+//!   no other zenoh node ([`PresenceBasis::CutOff`]), a subscription's
+//!   history alone — liveliness history has no end-of-history mark, so a
+//!   token not heard yet is not absent — or a withdrawal heard live and no
+//!   complete read since (below). Silence is never a verdict (O5, S6), and
+//!   *unobservable* is its own state, never folded into either pole (R7).
+//!
+//! **A withdrawal heard live is not absence** (core §8.1, 0.37; #839). A
+//! reader whose router restarts hears every token withdrawn at once, and
+//! their owners never left. So a withdrawal that leaves an address with no
+//! instance token moves it to *unobservable* — the transition's source is
+//! [`PresenceSource::Withdrawn`], and the record is
+//! [`LiveAddress::withdrawn`] — and only the next complete read says *down*
+//! (none shown) or *up* (one shown). The token moves themselves are still
+//! told as heard: an instance or interface token gone is a fact about what
+//! this reader received, and *down* is the conclusion that waits.
+//! [`LivePresence::awaits_read`] says a read is owed: after any withdrawal
+//! that left something with nothing held — an address its instance tokens,
+//! an interface of an address its tokens, a member its epochs — so that a
+//! reader of any of those learns from a read whether it went. A
+//! make-before-break re-mint stays a handover: another instance still
+//! holds, nothing is left empty, and no read is owed.
 //!
 //! An address going down is presence's word for "no instance token visible
 //! to this reader". It is not a level, and it is not a verdict about the
@@ -54,11 +72,13 @@
 //!
 //! **Bounded.** Held tokens are bounded by the bus itself (the presence
 //! budget, §8.3). What is not is the memory of addresses that went away:
-//! records with nothing held and no consumer [tracking](LivePresence::track)
-//! them are kept up to a bound ([`DEFAULT_MAX_GONE`]) and the oldest beyond
-//! it forgotten, and counted ([`LivePresence::forgotten`]). Forgetting one
-//! changes no answer [`LivePresence::status`] gives: a record with nothing
-//! held reads exactly as an address never heard of does.
+//! records with nothing held, no consumer [tracking](LivePresence::track)
+//! them and no read awaited for them are kept up to a bound
+//! ([`DEFAULT_MAX_GONE`]) and the oldest beyond it forgotten, and counted
+//! ([`LivePresence::forgotten`]). Forgetting one changes no answer
+//! [`LivePresence::status`] gives: a record with nothing held reads exactly
+//! as an address never heard of does. One heard withdrawn is kept until a
+//! read decides it, since forgetting it would read it down.
 //!
 //! **Patterns** (#614, FL2). A consumer watching `*/tc` or `host-a/*` —
 //! zenwatch's `instance-gone */tc` — tracks the pattern
@@ -97,6 +117,11 @@ pub const DEFAULT_MAX_GONE: usize = 4_096;
 /// nothing held is down, or only unobservable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresenceBasis {
+    /// The last read was not made: the session reaches no other zenoh node,
+    /// and zenoh would have answered it at once, complete and empty (core
+    /// §8.1, 0.37). Every address is unobservable until a complete read; what
+    /// is held is the last known, kept for display.
+    CutOff,
     /// No seed yet: what is held came from the subscription alone, whose
     /// history has no end mark. Nothing can be down.
     Unseeded,
@@ -180,6 +205,11 @@ pub struct LiveAddress {
     /// belong to the address: the key does not say which instance holds
     /// one.
     pub members: BTreeMap<MemberId, Vec<InstanceId>>,
+    /// A withdrawal heard live left it holding no instance token, and no
+    /// complete read has decided it since (core §8.1, 0.37): unobservable,
+    /// awaiting that read, never down on the withdrawal alone. A token of
+    /// it heard again, or a complete read, clears it.
+    pub withdrawn: bool,
 }
 
 impl LiveAddress {
@@ -190,6 +220,7 @@ impl LiveAddress {
             tracked: false,
             instances: BTreeMap::new(),
             members: BTreeMap::new(),
+            withdrawn: false,
         }
     }
 
@@ -214,6 +245,48 @@ impl LiveAddress {
     fn holds_instance_token(&self) -> bool {
         self.instances.values().any(|i| i.instance_token)
     }
+
+    fn holds_iface(&self, iface: &IfaceId) -> bool {
+        self.instances
+            .values()
+            .any(|i| i.interfaces.get(iface).is_some_and(|fps| !fps.is_empty()))
+    }
+
+    /// Whether folding `token`'s withdrawal into this record left something
+    /// it held with nothing held: the address its instance tokens, an
+    /// interface its tokens, a member its epochs. `before` is the record as
+    /// it was before the fold.
+    fn emptied_by(before: &Emptiness, after: &LiveAddress, token: &Token) -> bool {
+        match token {
+            Token::Instance(_) => before.instance && !after.holds_instance_token(),
+            Token::Alive(_, iface, _) => before.iface && !after.holds_iface(iface),
+            Token::Member(member, _) => before.member && !after.members.contains_key(member),
+        }
+    }
+}
+
+/// What a record held of one token's identities before a withdrawal was
+/// folded: [`LiveAddress::emptied_by`]'s other half.
+struct Emptiness {
+    instance: bool,
+    iface: bool,
+    member: bool,
+}
+
+impl Emptiness {
+    fn of(record: &LiveAddress, token: &Token) -> Emptiness {
+        Emptiness {
+            instance: record.holds_instance_token(),
+            iface: match token {
+                Token::Alive(_, iface, _) => record.holds_iface(iface),
+                _ => false,
+            },
+            member: match token {
+                Token::Member(member, _) => record.members.contains_key(member),
+                _ => false,
+            },
+        }
+    }
 }
 
 /// A presence token, its address taken off.
@@ -237,6 +310,11 @@ pub struct LivePresence {
     ignored: PresenceIgnored,
     max_gone: usize,
     forgotten: u64,
+    /// Withdrawals heard live since the last complete read that left
+    /// something with nothing held (core §8.1, 0.37): a read is owed.
+    unread: u64,
+    /// Complete reads folded.
+    reads: u64,
 }
 
 impl LivePresence {
@@ -253,6 +331,8 @@ impl LivePresence {
             ignored: PresenceIgnored::default(),
             max_gone: DEFAULT_MAX_GONE,
             forgotten: 0,
+            unread: 0,
+            reads: 0,
         }
     }
 
@@ -290,6 +370,36 @@ impl LivePresence {
     /// Records with nothing held forgotten under the bound.
     pub fn forgotten(&self) -> u64 {
         self.forgotten
+    }
+
+    /// Whether a read is owed (core §8.1, 0.37): a withdrawal heard live
+    /// since the last complete read left something with nothing held — an
+    /// address its instance tokens, an interface its tokens, a member its
+    /// epochs — and only a complete read says whether it went. A feed reads
+    /// again when this is so ([`crate::bus::presence::PresenceFeed`]).
+    pub fn awaits_read(&self) -> bool {
+        self.unread > 0
+    }
+
+    /// How many such withdrawals were heard since the last complete read.
+    pub fn withdrawals_unread(&self) -> u64 {
+        self.unread
+    }
+
+    /// How many complete reads were folded: a consumer that holds a
+    /// withdrawal until a complete read says whether it went compares this
+    /// with the count when it heard it.
+    pub fn complete_reads(&self) -> u64 {
+        self.reads
+    }
+
+    /// The addresses unobservable on a withdrawal heard live, awaiting the
+    /// read that decides them ([`LiveAddress::withdrawn`]), in order.
+    pub fn awaiting(&self) -> impl Iterator<Item = &Addr> {
+        self.addresses
+            .iter()
+            .filter(|(_, a)| a.withdrawn)
+            .map(|(addr, _)| addr)
     }
 
     /// An address's status, whether or not the projection holds a record of
@@ -399,6 +509,13 @@ impl LivePresence {
     /// none since the subscription began is the seed's. Folding them here
     /// rather than one by one keeps a delete the seed already reflects from
     /// reading as a token gone and back.
+    ///
+    /// A withdrawal among those events that leaves something with nothing
+    /// held is a withdrawal heard live (core §8.1, 0.37): the read may have
+    /// shown the token, so an address it leaves with no instance token is
+    /// unobservable, awaiting the next read, and that read is owed. A
+    /// complete seed decides every address it does not leave so: down,
+    /// with none shown, up with one.
     pub fn seed_then<'k>(
         &mut self,
         seed: &Observed,
@@ -420,9 +537,25 @@ impl LivePresence {
                 apply(entry(&mut next, &addr, at), &token, true, at);
             }
         }
+        // The events heard while the read was in flight, with each
+        // withdrawal that left something with nothing held.
+        let mut withdrawn: BTreeSet<Addr> = BTreeSet::new();
+        let mut unread = 0u64;
         for (wire, held) in then {
             if let Some((addr, token)) = self.classify_wire(wire) {
-                apply(entry(&mut next, &addr, at), &token, held, at);
+                let rec = entry(&mut next, &addr, at);
+                let before = Emptiness::of(rec, &token);
+                apply(rec, &token, held, at);
+                if held {
+                    if rec.holds_instance_token() {
+                        withdrawn.remove(&addr);
+                    }
+                } else if LiveAddress::emptied_by(&before, rec, &token) {
+                    unread += 1;
+                    if matches!(token, Token::Instance(_)) {
+                        withdrawn.insert(addr.clone());
+                    }
+                }
             }
         }
         next.retain(|_, a| a.holds_any());
@@ -431,9 +564,21 @@ impl LivePresence {
             (false, PresenceBasis::Lost { .. } | PresenceBasis::Complete) => prior,
             (false, _) => PresenceBasis::Incomplete,
         };
+        if seed.complete {
+            self.reads += 1;
+            self.unread = unread;
+        } else {
+            self.unread += unread;
+        }
 
         let mut out = Vec::new();
-        let every: BTreeSet<Addr> = self.addresses.keys().chain(next.keys()).cloned().collect();
+        let every: BTreeSet<Addr> = self
+            .addresses
+            .keys()
+            .chain(next.keys())
+            .chain(withdrawn.iter())
+            .cloned()
+            .collect();
         for addr in every {
             let unheard = self.unheard(prior, &addr);
             let record = self
@@ -465,6 +610,11 @@ impl LivePresence {
             }
             record.instances = instances;
             record.members = members;
+            // A complete read decides what it was asked about; one possibly
+            // incomplete leaves a withdrawal awaiting what it awaited.
+            let left_withdrawn = withdrawn.contains(&addr);
+            record.withdrawn = (left_withdrawn || (!seed.complete && record.withdrawn))
+                && !record.holds_instance_token();
             self.restatus(&addr, at, PresenceSource::Seed, &mut out);
         }
         self.bound();
@@ -475,6 +625,13 @@ impl LivePresence {
     /// subscription delivered it (under [`LivePresence::wire_namespace`]).
     /// A key that is not a presence token of the scope is counted and
     /// changes nothing.
+    ///
+    /// A delete is a withdrawal heard live, never absence (core §8.1,
+    /// 0.37): the token's move is told, and one that leaves the address with
+    /// no instance token moves it to unobservable
+    /// ([`PresenceSource::Withdrawn`]) until a complete read decides it. One
+    /// that leaves anything with nothing held owes that read
+    /// ([`LivePresence::awaits_read`]).
     pub fn token(&mut self, key: &str, held: bool, at: SystemTime) -> Vec<PresenceTransition> {
         let Some((addr, token)) = self.classify_wire(key) else {
             return Vec::new();
@@ -484,6 +641,7 @@ impl LivePresence {
             .addresses
             .entry(addr.clone())
             .or_insert_with(|| LiveAddress::new(unheard, at));
+        let before = Emptiness::of(record, &token);
         let mut out: Vec<PresenceTransition> = apply(record, &token, held, at)
             .into_iter()
             .map(|change| PresenceTransition {
@@ -493,6 +651,16 @@ impl LivePresence {
                 change,
             })
             .collect();
+        if held {
+            if record.holds_instance_token() {
+                record.withdrawn = false;
+            }
+        } else if LiveAddress::emptied_by(&before, record, &token) {
+            self.unread += 1;
+            if matches!(token, Token::Instance(_)) {
+                record.withdrawn = true;
+            }
+        }
         self.restatus(&addr, at, PresenceSource::Event, &mut out);
         self.bound();
         out
@@ -519,6 +687,24 @@ impl LivePresence {
         out
     }
 
+    /// Fold a read not made (core §8.1, 0.37): the session reaches no other
+    /// zenoh node, and zenoh would have answered it at once, complete and
+    /// empty. Every address is unobservable from here until a complete
+    /// read, each move a [`PresenceSource::CutOff`] transition; what is held
+    /// stays, as the last known. Folding it again moves nothing.
+    pub fn cut_off(&mut self, at: SystemTime) -> Vec<PresenceTransition> {
+        if self.basis == PresenceBasis::CutOff {
+            return Vec::new();
+        }
+        self.basis = PresenceBasis::CutOff;
+        let mut out = Vec::new();
+        let every: Vec<Addr> = self.addresses.keys().cloned().collect();
+        for addr in every {
+            self.restatus(&addr, at, PresenceSource::CutOff, &mut out);
+        }
+        out
+    }
+
     /// The status of an address with nothing held, under `basis`.
     fn unheard(&self, basis: PresenceBasis, address: &Addr) -> AddressStatus {
         if basis == PresenceBasis::Complete && self.scope.contains(address) {
@@ -541,12 +727,17 @@ impl LivePresence {
         let Some(record) = self.addresses.get_mut(address) else {
             return;
         };
-        let now = match basis {
-            _ if !in_scope => AddressStatus::Unobservable,
-            PresenceBasis::Lost { .. } => AddressStatus::Unobservable,
-            _ if record.holds_instance_token() => AddressStatus::Up,
-            PresenceBasis::Complete => AddressStatus::Down,
-            _ => AddressStatus::Unobservable,
+        let (now, source) = match basis {
+            _ if !in_scope => (AddressStatus::Unobservable, source),
+            PresenceBasis::Lost { .. } | PresenceBasis::CutOff => {
+                (AddressStatus::Unobservable, source)
+            }
+            _ if record.holds_instance_token() => (AddressStatus::Up, source),
+            // Heard withdrawn, and no complete read since: never down on
+            // the withdrawal alone (core §8.1, 0.37).
+            _ if record.withdrawn => (AddressStatus::Unobservable, PresenceSource::Withdrawn),
+            PresenceBasis::Complete => (AddressStatus::Down, source),
+            _ => (AddressStatus::Unobservable, source),
         };
         if now != record.status {
             out.push(PresenceTransition {
@@ -616,7 +807,10 @@ impl LivePresence {
             .addresses
             .iter()
             .filter(|(addr, a)| {
-                !a.tracked && !a.holds_any() && !patterns.iter().any(|p| p.matches(addr))
+                !a.tracked
+                    && !a.withdrawn
+                    && !a.holds_any()
+                    && !patterns.iter().any(|p| p.matches(addr))
             })
             .map(|(addr, a)| (a.since, addr.clone()))
             .collect();
@@ -643,6 +837,7 @@ fn holdings_of(a: &LiveAddress) -> LiveAddress {
         tracked: false,
         instances: a.instances.clone(),
         members: a.members.clone(),
+        withdrawn: false,
     }
 }
 
@@ -980,30 +1175,164 @@ mod tests {
         assert_eq!(p.status(&addr("h9/never")), Unobservable);
     }
 
-    /// The last instance token gone is down; a re-declare is up again.
+    /// The last instance token heard going is not absence (core §8.1,
+    /// 0.37): the token's move is told, the address is unobservable, a read
+    /// is owed, and the complete read that shows none says down. A
+    /// re-declare is up again.
     #[test]
-    fn the_last_instance_gone_is_down_and_a_redeclare_is_up() {
+    fn the_last_instance_gone_is_down_once_a_read_says_so() {
         let mut p = LivePresence::new(Scope::all());
         p.seed(&seed(&[instance("h1/tc", 1)], true), at(1));
+        assert!(!p.awaits_read());
         let t = p.token(&instance("h1/tc", 1), false, at(2));
         assert_eq!(
-            t.iter().map(|t| &t.change).collect::<Vec<_>>(),
+            t.iter().map(|t| (t.source, &t.change)).collect::<Vec<_>>(),
             [
-                &PresenceChange::InstanceGone { instance: inst(1) },
-                &PresenceChange::Status { from: Up, to: Down },
+                (
+                    PresenceSource::Event,
+                    &PresenceChange::InstanceGone { instance: inst(1) }
+                ),
+                (
+                    PresenceSource::Withdrawn,
+                    &PresenceChange::Status {
+                        from: Up,
+                        to: Unobservable
+                    }
+                ),
             ],
             "the token first, the status last"
         );
-        assert!(t.iter().all(|t| t.source == PresenceSource::Event));
+        assert!(p.awaits_read(), "a withdrawal heard live owes a read");
+        assert_eq!(p.awaiting().collect::<Vec<_>>(), [&addr("h1/tc")]);
         let a = p.address(&addr("h1/tc")).expect("a record");
-        assert_eq!((a.status, a.since), (Down, at(2)));
+        assert!(a.withdrawn);
+        assert_eq!((a.status, a.since), (Unobservable, at(2)));
+        assert_eq!(p.basis(), PresenceBasis::Complete, "the basis stands");
 
-        let t = p.token(&instance("h1/tc", 2), true, at(3));
+        let t = p.seed(&seed(&[], true), at(3));
+        assert_eq!(
+            t,
+            [PresenceTransition {
+                at: at(3),
+                source: PresenceSource::Seed,
+                address: addr("h1/tc"),
+                change: PresenceChange::Status {
+                    from: Unobservable,
+                    to: Down
+                },
+            }],
+            "the read decides, and says only the status: the token's move was told"
+        );
+        assert!(!p.awaits_read());
+        assert_eq!(p.complete_reads(), 2);
+        assert!(!p.address(&addr("h1/tc")).expect("a record").withdrawn);
+
+        let t = p.token(&instance("h1/tc", 2), true, at(4));
         assert_eq!(statuses(&t), [("h1/tc".into(), Down, Up)]);
         // A service that starts after the seed was down before it, not
         // unobservable: the complete seed covered it.
-        let t = p.token(&instance("h2/new", 1), true, at(4));
+        let t = p.token(&instance("h2/new", 1), true, at(5));
         assert_eq!(statuses(&t), [("h2/new".into(), Down, Up)]);
+    }
+
+    /// A router's restart (core §8.1, 0.37): every token heard withdrawn at
+    /// once, and back before the read the withdrawals owe. The addresses are
+    /// unobservable meanwhile, never down; a token heard again is up at
+    /// once, and the read that shows the rest restores them.
+    #[test]
+    fn a_router_restart_reads_nobody_down() {
+        let mut p = LivePresence::new(Scope::all());
+        p.seed(
+            &seed(&[instance("h1/tc", 1), instance("h2/tc", 2)], true),
+            at(1),
+        );
+        let mut moved = p.token(&instance("h1/tc", 1), false, at(2));
+        moved.extend(p.token(&instance("h2/tc", 2), false, at(2)));
+        assert_eq!(
+            statuses(&moved),
+            [
+                ("h1/tc".into(), Up, Unobservable),
+                ("h2/tc".into(), Up, Unobservable),
+            ]
+        );
+        assert!(!statuses(&moved).iter().any(|(_, _, to)| *to == Down));
+        assert_eq!(p.withdrawals_unread(), 2, "one read owed, for both");
+        // h1/tc's token is heard again: up, and no longer awaiting.
+        let t = p.token(&instance("h1/tc", 1), true, at(3));
+        assert_eq!(statuses(&t), [("h1/tc".into(), Unobservable, Up)]);
+        assert_eq!(p.awaiting().collect::<Vec<_>>(), [&addr("h2/tc")]);
+        // The read shows both: h2/tc up again, nothing down.
+        let t = p.seed(
+            &seed(&[instance("h1/tc", 1), instance("h2/tc", 2)], true),
+            at(4),
+        );
+        assert_eq!(statuses(&t), [("h2/tc".into(), Unobservable, Up)]);
+        assert!(!p.awaits_read());
+    }
+
+    /// A make-before-break re-mint leaves nothing empty: another instance
+    /// holds throughout, so the address stays up and no read is owed. An
+    /// interface the last of its instances withdraws does owe one, and
+    /// moves no status.
+    #[test]
+    fn a_handover_owes_no_read_and_an_emptied_interface_does() {
+        let mut p = LivePresence::new(Scope::all());
+        let tc = || "tc.v1";
+        p.seed(
+            &seed(&[instance("h1/tc", 1), alive("h1/tc", tc(), 1, 0xab)], true),
+            at(1),
+        );
+        p.token(&instance("h1/tc", 2), true, at(2));
+        p.token(&alive("h1/tc", tc(), 2, 0xab), true, at(2));
+        let mut t = p.token(&alive("h1/tc", tc(), 1, 0xab), false, at(3));
+        t.extend(p.token(&instance("h1/tc", 1), false, at(3)));
+        assert!(statuses(&t).is_empty(), "{t:?}");
+        assert!(!p.awaits_read(), "nothing was left empty");
+        let t = p.token(&alive("h1/tc", tc(), 2, 0xab), false, at(4));
+        assert!(statuses(&t).is_empty(), "{t:?}");
+        assert!(p.awaits_read(), "tc.v1 has no token left at h1/tc");
+        assert_eq!(p.status(&addr("h1/tc")), Up);
+        assert_eq!(p.awaiting().count(), 0, "the address still holds");
+    }
+
+    /// A read not made (core §8.1, 0.37): the session reaches nobody, and
+    /// every address is unobservable until a complete read, each move a
+    /// `cut_off` one; again, it moves nothing. A read possibly incomplete
+    /// after it restores nothing; a complete one does.
+    #[test]
+    fn a_read_not_made_is_unobservable_until_a_complete_one() {
+        let mut p = LivePresence::new(Scope::all());
+        p.track(&addr("h2/tc"), at(0));
+        p.seed(&seed(&[instance("h1/tc", 1)], true), at(1));
+        let t = p.cut_off(at(2));
+        assert_eq!(
+            statuses(&t),
+            [
+                ("h1/tc".into(), Up, Unobservable),
+                ("h2/tc".into(), Down, Unobservable),
+            ]
+        );
+        assert!(t.iter().all(|t| t.source == PresenceSource::CutOff));
+        assert_eq!(p.basis(), PresenceBasis::CutOff);
+        assert_eq!(p.status(&addr("h9/never")), Unobservable);
+        assert!(p.cut_off(at(3)).is_empty(), "said once");
+        // Heard while cut off: folded, unobservable still.
+        assert!(statuses(&p.token(&instance("h2/tc", 2), true, at(4))).is_empty());
+        // A read possibly incomplete: what it and the subscription hold is
+        // up, and nothing is down.
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], false), at(5));
+        assert_eq!(
+            statuses(&t),
+            [
+                ("h1/tc".into(), Unobservable, Up),
+                ("h2/tc".into(), Unobservable, Up),
+            ]
+        );
+        assert_eq!(p.basis(), PresenceBasis::Incomplete);
+        assert_eq!(p.status(&addr("h9/never")), Unobservable);
+        let t = p.seed(&seed(&[instance("h2/tc", 2)], true), at(6));
+        assert_eq!(statuses(&t), [("h1/tc".into(), Up, Down)]);
+        assert_eq!(p.basis(), PresenceBasis::Complete);
     }
 
     /// A `Dropped(n)` makes every address unobservable, up and down alike,
@@ -1307,10 +1636,17 @@ mod tests {
                     to: Up
                 },
             ],
-            "h2/tc came and went inside the read: no record, no move"
+            "h2/tc came and went inside the read: no token move"
         );
-        assert!(p.address(&addr("h2/tc")).is_none());
-        assert_eq!(p.status(&addr("h2/tc")), Down);
+        // Its going was heard live, and the read may have shown it: not
+        // absence, but a read owed (core §8.1, 0.37).
+        let h2 = p.address(&addr("h2/tc")).expect("a record awaiting a read");
+        assert!(h2.withdrawn && !h2.holds_any());
+        assert_eq!(p.status(&addr("h2/tc")), Unobservable);
+        assert!(p.awaits_read());
+        let t = p.seed(&seed(&[instance("h1/tc", 1), key.clone()], true), at(2));
+        assert_eq!(statuses(&t), [("h2/tc".into(), Unobservable, Down)]);
+        assert!(!p.awaits_read());
     }
 
     /// A seed possibly incomplete adds what it read and removes nothing,
@@ -1347,6 +1683,11 @@ mod tests {
             p.token(&instance(&a, i), true, at(i));
             p.token(&instance(&a, i), false, at(i));
         }
+        // Heard withdrawn, each awaits the read that decides it, and none is
+        // forgotten meanwhile: forgetting one would read it down.
+        assert_eq!(p.forgotten(), 0);
+        assert_eq!(p.awaiting().count(), 40);
+        p.seed(&seed(&[], true), at(41));
         assert!(p.forgotten() > 0);
         assert_eq!(p.addresses().count() as u64 + p.forgotten(), 41);
         assert!(p.address(&addr("h0/kept")).is_some(), "tracked: kept");
@@ -1379,9 +1720,12 @@ mod tests {
         let t = p.token(&instance("h2/tc", 2), true, at(2));
         assert_eq!(statuses(&t), [("h2/tc".into(), Down, Up)]);
         assert_eq!(names(&p, &tc), ["h1/tc", "h2/tc"]);
-        // It goes: its record moves to down, and stays.
+        // It goes: its record moves to unobservable as heard withdrawn, then
+        // to down as the read says, and stays.
         let t = p.token(&instance("h2/tc", 2), false, at(3));
-        assert_eq!(statuses(&t), [("h2/tc".into(), Up, Down)]);
+        assert_eq!(statuses(&t), [("h2/tc".into(), Up, Unobservable)]);
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], true), at(4));
+        assert_eq!(statuses(&t), [("h2/tc".into(), Unobservable, Down)]);
 
         // Forty other addresses come and go: the pattern's records are
         // kept, the others forgotten under the bound.
@@ -1390,6 +1734,7 @@ mod tests {
             p.token(&instance(&a, 100 + i), true, at(10 + i));
             p.token(&instance(&a, 100 + i), false, at(10 + i));
         }
+        p.seed(&seed(&[instance("h1/tc", 1)], true), at(55));
         assert!(p.forgotten() > 0);
         assert!(p.tracks(&addr("h2/tc")) && p.tracks(&addr("h7/tc")));
         assert!(!p.tracks(&addr("g0/gui")));

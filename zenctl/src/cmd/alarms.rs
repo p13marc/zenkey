@@ -61,6 +61,12 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
     ));
     spec.face = across_face.map(|f| f == FaceGrant::Granted);
     let session = ASKING.ask(dep.session().await);
+    // A window follows the owners' instance tokens, on a watch session of
+    // its own (#830, core §8.1, 0.37); the reads stay on `session`.
+    let watch = match window {
+        Some(_) => Some(ASKING.ask(dep.watch_session().await)),
+        None => None,
+    };
     // The line comes once the window opens (#819 TE, as zk2py round 47's
     // F-154 found of `telemetry`): the subscriptions declared and the first
     // refresh read after them, so a put once it is read is heard.
@@ -76,6 +82,7 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
     };
     let report = zenkey_fleet::run_alarms(
         &session,
+        watch.as_ref(),
         dep.namespace(),
         scope,
         spec,

@@ -250,9 +250,21 @@ pub struct MonitorSpec {
     ///
     /// **Callback subscribers** (spec §8.1, zenoh#2678): each one hands its
     /// sample straight to the broadcast on zenoh's thread, with no bounded
-    /// handler between them. A liveliness GET on the same session therefore
-    /// cannot be starved by a subscriber nobody drains, and a lagging
-    /// receiver is told by `Dropped(n)`, as for samples.
+    /// handler between them, and a lagging receiver is told by
+    /// `Dropped(n)`, as for samples.
+    ///
+    /// **A monitor that watches liveliness owns a watch session** (#830,
+    /// core §8.1, 0.37). On zenoh 1.10.1 a liveliness GET from a session
+    /// that holds a liveliness subscriber, history or not, can complete
+    /// without tokens that are live, so the subscribers are declared through
+    /// [`zenkey::presence::declare_subscriber`], which marks the session:
+    /// every liveliness read on it is refused from then on
+    /// ([`crate::Error::NotAsked`]). Seed on another session — the
+    /// deployment's — and give the reader this monitor, so it can refuse
+    /// one with the same zid ([`Monitor::zid`]). [`Monitor::start`] settles
+    /// the session before it returns ([`zenkey::presence::settle`]): its
+    /// routers have read every subscriber by then, and a token withdrawn
+    /// after a seed made on the other session is told here.
     pub liveliness: Vec<String>,
     /// Snapshot cadence.
     pub stats_tick: Duration,
@@ -673,6 +685,10 @@ struct WatchEntry {
     seed_task: Option<tokio::task::JoinHandle<()>>,
 }
 
+/// How long [`Monitor::start`] waits for its liveliness subscribers to
+/// settle at their routers (#830) before it returns anyway, saying so.
+pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The wired monitor: a runtime-mutable watch set + liveliness + tick task
 /// feeding a core.
 ///
@@ -685,6 +701,12 @@ struct WatchEntry {
 pub struct Monitor {
     core: Arc<MonitorCore>,
     session: Session,
+    /// The session's zid: a reader that seeds beside this monitor refuses a
+    /// session with the same one (#830).
+    zid: zenoh::session::ZenohId,
+    /// Whether the routers' final reply to the settling read came before
+    /// its timeout, when the monitor watches liveliness (#830).
+    settled: Option<bool>,
     watches: tokio::sync::Mutex<std::collections::HashMap<WatchId, WatchEntry>>,
     next_watch: AtomicU64,
     /// The liveliness subscribers, by selector: callbacks, so they need no
@@ -717,15 +739,16 @@ impl Monitor {
         //
         // A declaration that fails drops the ones before it, which
         // undeclares them; the spawned task used to keep each one alive.
+        //
+        // Declared through the runtime, which marks the session a watch
+        // session (#830): no liveliness read is made on it from now on.
         let mut liveliness = Vec::with_capacity(spec.liveliness.len());
         for liveliness_sel in &spec.liveliness {
             let core = Arc::clone(&core);
             let subscriber = crate::bus::teardown::declared(
                 "liveliness subscribe",
                 liveliness_sel,
-                session
-                    .liveliness()
-                    .declare_subscriber(liveliness_sel)
+                zenkey::presence::declare_subscriber(session, liveliness_sel)
                     .history(true)
                     .callback(move |sample| {
                         let key = sample.key_expr().as_str().to_string();
@@ -735,6 +758,30 @@ impl Monitor {
             .await?;
             liveliness.push((liveliness_sel.clone(), subscriber));
         }
+        // The barrier (#830): its final reply follows every declaration
+        // above on the session's link, so a reader that seeds on another
+        // session after this returns misses no withdrawal.
+        let settled = match spec.liveliness.first() {
+            None => None,
+            Some(sel) => Some(
+                match zenkey::presence::settle(session, sel, SETTLE_TIMEOUT).await {
+                    Ok(true) => true,
+                    Ok(false) => {
+                        tracing::warn!(
+                            selector = sel.as_str(),
+                            "the monitor's liveliness subscribers did not settle within {:?}: a \
+                             token withdrawn right after a seed may not be told",
+                            SETTLE_TIMEOUT
+                        );
+                        false
+                    }
+                    Err(e) => {
+                        tracing::warn!(selector = sel.as_str(), "the settling read failed: {e}");
+                        false
+                    }
+                },
+            ),
+        };
 
         {
             let core = Arc::clone(&core);
@@ -756,6 +803,8 @@ impl Monitor {
         let monitor = Monitor {
             core,
             session: session.clone(),
+            zid: session.zid(),
+            settled,
             watches: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             next_watch: AtomicU64::new(0),
             liveliness,
@@ -985,6 +1034,30 @@ impl Monitor {
 
     pub fn core(&self) -> &Arc<MonitorCore> {
         &self.core
+    }
+
+    /// The zid of the session this monitor runs on (#830): a reader that
+    /// seeds beside it refuses a session with the same one.
+    pub fn zid(&self) -> zenoh::session::ZenohId {
+        self.zid
+    }
+
+    /// The session this monitor runs on: a watch session when it watches
+    /// liveliness, which makes no liveliness read (#830).
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    /// Whether it watches liveliness.
+    pub fn watches_liveliness(&self) -> bool {
+        !self.liveliness.is_empty()
+    }
+
+    /// Whether its liveliness subscribers settled before [`Monitor::start`]
+    /// returned (#830): `None` when it watches no liveliness, `Some(false)`
+    /// when the settling read ran to its timeout or could not be made.
+    pub fn settled(&self) -> Option<bool> {
+        self.settled
     }
 
     pub fn events(&self) -> EventStream {

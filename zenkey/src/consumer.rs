@@ -571,34 +571,34 @@ impl Consumer {
 
     /// Waits until a bound provider holds this interface's token, or
     /// `timeout` passes (R5). Returns the first one seen.
+    ///
+    /// It reads presence again and again ([`Consumer::present`]), backing
+    /// off from 20 ms to 250 ms, and declares no liveliness subscriber: a
+    /// session that reads presence holds none (core §8.1, 0.37; #830),
+    /// and this consumer's session goes on reading it ([`Consumer::present`],
+    /// [`Consumer::liveness`]). A read through a session cut off from every
+    /// other zenoh node is not made, and the wait goes on.
     pub async fn wait_for_provider(&self, timeout: Duration) -> Result<Option<Addr>> {
-        let (tx, rx) = flume::unbounded::<Addr>();
-        let mut subs = Vec::new();
-        for p in &self.providers {
-            let (sys, svc) = p.chunks();
-            let sel = format!("zk2/{sys}/{svc}/@zk/alive/{}/**", self.contract.iface);
-            let tx = tx.clone();
-            subs.push(
-                self.session
-                    .liveliness()
-                    .declare_subscriber(sel)
-                    .history(true)
-                    .callback(move |s: Sample| {
-                        if s.kind() == zenoh::sample::SampleKind::Put
-                            && let Ok(ZkKey::Alive { addr, .. }) = parse(s.key_expr().as_str())
-                        {
-                            let _ = tx.send(addr);
-                        }
-                    })
-                    .await
-                    .map_err(zenoh)?,
-            );
+        let deadline = tokio::time::Instant::now() + timeout;
+        let mut pause = Duration::from_millis(20);
+        loop {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if left.is_zero() {
+                return Ok(None);
+            }
+            match self.present(left.min(Duration::from_secs(1))).await {
+                Ok(found) => {
+                    if let Some(first) = found.into_iter().next() {
+                        return Ok(Some(first));
+                    }
+                }
+                Err(Error::CutOff { .. }) => {}
+                Err(e) => return Err(e),
+            }
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            tokio::time::sleep(pause.min(left)).await;
+            pause = (pause * 2).min(Duration::from_millis(250));
         }
-        drop(tx);
-        Ok(tokio::time::timeout(timeout, rx.recv_async())
-            .await
-            .ok()
-            .and_then(Result::ok))
     }
 
     /// The horizon `resource` declares (`freshness.v1` §2.1–§2.3), as the

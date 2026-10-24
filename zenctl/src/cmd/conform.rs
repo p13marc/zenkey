@@ -71,10 +71,14 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
     };
     // The service is read in the deployment's namespace, and the admin
     // space in none, as the doctor reads them (S1, §4.2, 0.17).
+    // A window's owner is watched, and a telemetry reading follows its
+    // tokens, on a watch session of its own (#830): the reads stay on the
+    // deployment's.
     let bus = zenkey_fleet::DoctorBus {
         session: ASKING.ask(dep.session().await),
         raw: ASKING.ask(dep.link().session().await),
         namespace: dep.namespace().to_owned(),
+        watch: Some(ASKING.ask(dep.watch_session().await)),
     };
     let mut report = zenkey_fleet::run_conform(
         &bus,

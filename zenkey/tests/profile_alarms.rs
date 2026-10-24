@@ -1128,6 +1128,7 @@ async fn a_restart_adopts_from_an_archive_on_its_own_side() {
             }],
             peers: Vec::new(),
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await

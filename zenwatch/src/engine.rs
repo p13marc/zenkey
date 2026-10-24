@@ -360,8 +360,13 @@ pub struct Publish<'a> {
 /// Everything a run needs, with the sessions already open — the shape the
 /// bus tests drive directly.
 pub struct Engine<'a> {
-    /// The two sessions: in the deployment's namespace, and in none.
+    /// The two sessions: in the deployment's namespace, and in none; and
+    /// the namespaced watch session, when a rule follows presence live
+    /// (#830).
     pub bus: &'a DoctorBus,
+    /// The raw watch session the foreign-token ledger's monitor holds
+    /// (#830), when a `liveliness-gone` rule names a foreign token.
+    pub raw_watch: Option<&'a zenoh::Session>,
     /// The contract store, seeded with `contracts`: a revision held
     /// offline is never retrieved (spec §8.5).
     pub store: &'a BundleStore,
@@ -572,15 +577,19 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let mut presence_feed: Option<PresenceFeed> = None;
     if !presence_rules.is_empty() {
         let scope = PresenceScope::all();
-        let monitor = Monitor::start(
-            &e.bus.session,
-            liveliness_spec(Vec::new()).with_presence("", &scope),
-        )
-        .await?;
+        // Its liveliness subscribers on the namespaced watch session, its
+        // reads on the namespaced session (#830, core §8.1, 0.37).
+        let watch = e.bus.watch.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "the presence rules need a watch session in the namespace: no presence read \
+                 is made beside a liveliness subscriber (#830)"
+            )
+        })?;
+        let monitor =
+            Monitor::start(watch, liveliness_spec(Vec::new()).with_presence("", &scope)).await?;
         let mut live = LivePresence::new(scope);
         presence_rules.track(&mut live, SystemTime::now());
-        let (feed, _seeded) =
-            PresenceFeed::open(&e.bus.session, monitor.events(), live, e.timeout).await;
+        let (feed, _seeded) = PresenceFeed::open(&e.bus.session, &monitor, live, e.timeout).await?;
         tracing::info!(seed = ?feed.last_seed(), basis = ?feed.presence().basis(),
             "presence: the first look");
         let announced: BTreeMap<String, Vec<String>> = presence_rules
@@ -602,8 +611,16 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let mut token_feed: Option<TokenFeed> = None;
     if !token_rules.is_empty() {
         let selectors = token_rules.selectors();
-        let monitor = Monitor::start(&e.bus.raw, liveliness_spec(selectors.clone())).await?;
-        let feed = TokenFeed::open(&e.bus.raw, monitor.events(), selectors, e.timeout).await;
+        // Its monitor on the raw watch session, its reads on the raw
+        // session (#830, core §8.1, 0.37).
+        let watch = e.raw_watch.ok_or_else(|| {
+            anyhow::anyhow!(
+                "the foreign-token rules need a raw watch session: no liveliness read is made \
+                 beside a liveliness subscriber (#830)"
+            )
+        })?;
+        let monitor = Monitor::start(watch, liveliness_spec(selectors.clone())).await?;
+        let feed = TokenFeed::open(&e.bus.raw, &monitor, selectors, e.timeout).await?;
         let announced: BTreeMap<String, Vec<String>> = e
             .rules
             .iter()
@@ -623,7 +640,12 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let mut alarm_rules = AlarmRules::new(e.rules);
     if !alarm_rules.is_empty() {
         let initial = alarm_rules
-            .open(&e.bus.session, e.timeout, e.clocks_synced)
+            .open(
+                &e.bus.session,
+                e.bus.watch.as_ref(),
+                e.timeout,
+                e.clocks_synced,
+            )
             .await;
         let mut remembered: BTreeMap<String, Vec<Remembered>> = BTreeMap::new();
         for entry in discipline.announced() {
@@ -1045,6 +1067,28 @@ async fn stop_signal() {
     }
 }
 
+/// Which watch sessions `rules` need (#830, core §8.1, 0.37): one in the
+/// namespace when a rule follows the deployment's presence live — the
+/// presence rules, `alerts`, the engine's `alert-firing` and
+/// `instance-gone` — and one in none when a `liveliness-gone` rule names a
+/// foreign token.
+pub fn watches(rules: &[Rule], namespace: &str) -> crate::bus::Watches {
+    let engine = rules.iter().any(|r| match &r.kind {
+        RuleKind::Engine(c) => matches!(
+            c,
+            zenkey_fleet::Condition::InstanceGone { .. }
+                | zenkey_fleet::Condition::AlertFiring { .. }
+        ),
+        _ => false,
+    });
+    crate::bus::Watches {
+        namespaced: engine
+            || !PresenceRules::new(rules, namespace).is_empty()
+            || !AlarmRules::new(rules).is_empty(),
+        raw: !LivelinessRules::new(rules, namespace).is_empty(),
+    }
+}
+
 /// `zenwatch run`: load and refuse (the file, the deployment flags, the
 /// contracts, the state file), build the sinks (secrets resolved now), open
 /// the two sessions, and run until a signal.
@@ -1059,7 +1103,8 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
         .map_err(|e| unaskable!("{e}"))?;
     let sinks =
         Arc::new(crate::sinks::build_all(cfg, args.dry_run).map_err(|e| unaskable!("{e}"))?);
-    let bus = loaded.bus.sessions().await?;
+    let watches = watches(&rules, &loaded.bus.namespace);
+    let crate::bus::Sessions { bus, raw_watch } = loaded.bus.sessions(watches).await?;
     let store = BundleStore::new(loaded.bus.timeout);
     store.seed(&loaded.contracts);
     let tick = Duration::from_secs_f64(cfg.tick_s);
@@ -1111,6 +1156,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
     let summary = run_on(
         Engine {
             bus: &bus,
+            raw_watch: raw_watch.as_ref(),
             store: &store,
             contracts: &loaded.contracts,
             timeout: loaded.bus.timeout,
@@ -1203,6 +1249,31 @@ mod tests {
     use super::*;
     use crate::config::RuleConfig;
     use zenkey_fleet::{AddressStatus, PresenceChange, PresenceSource};
+
+    /// The watch sessions a run opens (#830): one in the namespace for the
+    /// rules that follow the deployment's presence live, one in none for a
+    /// foreign token's ledger, and none that no rule needs.
+    #[test]
+    fn a_run_opens_the_watch_sessions_its_rules_need() {
+        let w = |texts: &[&str]| {
+            let rules: Vec<Rule> = texts.iter().map(|t| rule("r", t, &[])).collect();
+            let w = watches(&rules, "site");
+            (w.namespaced, w.raw)
+        };
+        assert_eq!(w(&["silent-for site/zk2/**/stream/** 10"]), (false, false));
+        assert_eq!(w(&["instance-gone */tc"]), (true, false));
+        assert_eq!(
+            w(&["liveliness-gone site/zk2/*/tc/@zk/alive/tc.v1/**"]),
+            (true, false)
+        );
+        assert_eq!(w(&["alerts zk2/*/*/alarms.v1/**"]), (true, false));
+        assert_eq!(w(&["alert-firing zk2/*/*/alarms.v1/**"]), (true, false));
+        assert_eq!(w(&["liveliness-gone demo/held/*/alive"]), (false, true));
+        assert_eq!(
+            w(&["instance-gone */tc", "liveliness-gone demo/held/*/alive"]),
+            (true, true)
+        );
+    }
 
     fn rule(name: &str, text: &str, labels: &[(&str, &str)]) -> Rule {
         Rule::from_config(&RuleConfig {

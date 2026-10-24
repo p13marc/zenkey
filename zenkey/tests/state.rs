@@ -328,6 +328,9 @@ struct Sites {
     link: common::Link,
     ground: zenoh::Session,
     vehicle: zenoh::Session,
+    /// The vehicle archive's watch session (#830): where it learns the
+    /// owner came back, however short the outage was.
+    vehicle_watch: zenoh::Session,
     _routers: (zenoh::Session, zenoh::Session),
 }
 
@@ -338,6 +341,7 @@ async fn sites() -> Sites {
     Sites {
         ground: client(&ep1).await,
         vehicle: client(&ep2).await,
+        vehicle_watch: client(&ep2).await,
         link,
         _routers: (r1, r2),
     }
@@ -351,7 +355,9 @@ fn recorded(selector: &str) -> Recorded {
     }
 }
 
-async fn vehicle_archive(s: &zenoh::Session, peers: &[&str]) -> Archive {
+/// The vehicle's archive on `s`, its owners' appearances heard on `watch`
+/// (#830): a session of its own, since it reads their presence on `s`.
+async fn vehicle_archive(s: &zenoh::Session, watch: &zenoh::Session, peers: &[&str]) -> Archive {
     Archive::start(
         s,
         ArchiveConfig {
@@ -359,6 +365,7 @@ async fn vehicle_archive(s: &zenoh::Session, peers: &[&str]) -> Archive {
             records: vec![recorded(ORIGIN)],
             peers: peers.iter().map(|p| common::addr(p)).collect(),
             unconfirmed_horizon: None,
+            watch: Some(watch.clone()),
         },
     )
     .await
@@ -389,7 +396,7 @@ async fn wait_owner_seen(s: &zenoh::Session, present: bool) {
 async fn s4_last_known_from_an_archive() {
     let x = sites().await;
     let (_mgr, w) = fleet_mgr(&x.ground, None, &["vehicle-01"]).await;
-    let arch = vehicle_archive(&x.vehicle, &[]).await;
+    let arch = vehicle_archive(&x.vehicle, &x.vehicle_watch, &[]).await;
     let (_ex, c) = executor(&x.vehicle, true).await;
     wait_owner_seen(&x.vehicle, true).await;
     eventually("the archive records", || async {
@@ -459,7 +466,7 @@ async fn s5_alignment_after_reconnect() {
     {
         let x = sites().await;
         let (_mgr, w) = fleet_mgr(&x.ground, None, &["vehicle-01"]).await;
-        let arch = vehicle_archive(&x.vehicle, &[]).await;
+        let arch = vehicle_archive(&x.vehicle, &x.vehicle_watch, &[]).await;
         wait_owner_seen(&x.vehicle, true).await;
         eventually("recorded", || async {
             w["vehicle-01"].put("p").await.unwrap();
@@ -480,7 +487,7 @@ async fn s5_alignment_after_reconnect() {
     {
         let x = sites().await;
         let (_mgr, w) = fleet_mgr(&x.ground, None, &["vehicle-01"]).await;
-        let arch = vehicle_archive(&x.vehicle, &[]).await;
+        let arch = vehicle_archive(&x.vehicle, &x.vehicle_watch, &[]).await;
         wait_owner_seen(&x.vehicle, true).await;
         eventually("recorded", || async {
             w["vehicle-01"].put("p").await.unwrap();
@@ -514,11 +521,12 @@ async fn s5_alignment_after_reconnect() {
                 )],
                 peers: vec![],
                 unconfirmed_horizon: None,
+                watch: None,
             },
         )
         .await
         .unwrap();
-        let arch = vehicle_archive(&x.vehicle, &["ground/archive"]).await;
+        let arch = vehicle_archive(&x.vehicle, &x.vehicle_watch, &["ground/archive"]).await;
         wait_owner_seen(&x.vehicle, true).await;
         eventually("recorded", || async {
             w["vehicle-01"].put("p").await.unwrap();
@@ -545,7 +553,7 @@ async fn s6_a_window_shorter_than_the_outage() {
     for (window, dropped) in [(5u64, true), (1u64, false)] {
         let x = sites().await;
         let (_mgr, w) = fleet_mgr(&x.ground, Some(window), &["vehicle-01"]).await;
-        let arch = vehicle_archive(&x.vehicle, &[]).await;
+        let arch = vehicle_archive(&x.vehicle, &x.vehicle_watch, &[]).await;
         wait_owner_seen(&x.vehicle, true).await;
         eventually("recorded", || async {
             w["vehicle-01"].put("p").await.unwrap();
@@ -686,7 +694,8 @@ async fn s9_an_archives_backend_refuses_an_outdated_put() {
     let owner = client(&ep).await;
     let (_mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
     let arch_s = client(&ep).await;
-    let arch = vehicle_archive(&arch_s, &[]).await;
+    let arch_watch = client(&ep).await;
+    let arch = vehicle_archive(&arch_s, &arch_watch, &[]).await;
     let w = &w["vehicle-01"];
     let t1 = Arc::new(Mutex::new(None));
     eventually("recorded v1", || async {
@@ -802,6 +811,7 @@ async fn an_archive_is_never_tokenless() {
             records: vec![recorded(ORIGIN)],
             peers: Vec::new(),
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await;

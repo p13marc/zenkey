@@ -4,6 +4,19 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — presence reads where they can be complete (#830, #839, PS)
+
+A liveliness GET from a session that holds a liveliness subscriber, history
+or not, can complete without a token that is live (zenoh 1.10.1 and main,
+`docs/zk2/upstream/liveliness-get-misses-beside-liveliness-subscriber.md`).
+The presence link seeded beside its own monitor's subscribers.
+
+| Before | Now | Notes |
+|---|---|---|
+| the presence monitor on the session in the namespace, beside the link's reads | on a **watch session** of its own in the namespace, reopened with the others on a namespace switch | the lens, the seeds and every resolved question stay on the session in the namespace, which holds no liveliness subscriber; one more session per window |
+| an address heard withdrawn under a complete seed: down | unobservable, "heard withdrawn, awaiting a read — not down (§8.1)", until the read the withdrawal owes says down or up (core §8.1, 0.37) | a router's restart reads nobody down |
+| a presence read through a session cut off from every router: complete and empty, everything down | not made: every address unobservable, "no read made: this window reaches no router — not down", the strip saying so | the read is made again once a token is heard, or after a backoff |
+
 ## Unreleased (`main`, zk2) — zengui on zk2 (#614)
 
 zengui reads a zk2 deployment. v1's zengui, which the `v1` branch still

@@ -289,6 +289,9 @@ pub enum Observer {
     Complete,
     /// Events lost (the monitor's `Dropped(n)`) since the last complete read.
     Lost { dropped: u64 },
+    /// The last read was not made: the daemon's session, or its monitor's,
+    /// reaches no other zenoh node (core §8.1, 0.37).
+    CutOff,
     /// The monitor stopped: its rules see nothing more.
     Stopped,
 }
@@ -301,6 +304,7 @@ impl From<zenkey_fleet::PresenceBasis> for Observer {
             B::Incomplete => Observer::Incomplete,
             B::Complete => Observer::Complete,
             B::Lost { dropped } => Observer::Lost { dropped },
+            B::CutOff => Observer::CutOff,
         }
     }
 }
@@ -313,6 +317,7 @@ impl From<crate::liveliness::TokenBasis> for Observer {
             B::Incomplete => Observer::Incomplete,
             B::Complete => Observer::Complete,
             B::Lost { dropped } => Observer::Lost { dropped },
+            B::CutOff => Observer::CutOff,
         }
     }
 }
@@ -381,6 +386,14 @@ fn observer_check(name: &'static str, o: Observer, what: &str) -> Check {
             format!(
                 "{dropped} event(s) of {what} lost since the last complete read: every \
                  identity its rules watch is unobservable until a complete re-read (RFC 13 §3 O6)"
+            ),
+        ),
+        Observer::CutOff => (
+            Some(Level::Degraded),
+            format!(
+                "this daemon's session reaches no router and no peer, so no read of {what} is \
+                 made: every identity its rules watch is unobservable until a complete read \
+                 (core §8.1)"
             ),
         ),
         Observer::Stopped => (
@@ -1070,6 +1083,7 @@ mod tests {
             (Observer::Unseeded, None),
             (Observer::Incomplete, Some(Level::Degraded)),
             (Observer::Lost { dropped: 3 }, Some(Level::Degraded)),
+            (Observer::CutOff, Some(Level::Degraded)),
             (Observer::Stopped, Some(Level::Degraded)),
         ] {
             let cs = checks(&HealthInputs {

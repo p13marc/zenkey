@@ -10,7 +10,10 @@
 //!
 //! 1. a [`PresenceFeed`] is opened — the event stream taken *before* the
 //!    seed is read, so nothing between the two is missed — and its seed
-//!    lands as the first [`PresenceUpdate`];
+//!    lands as the first [`PresenceUpdate`]. The monitor runs on a watch
+//!    session of its own, and the feed reads through the session in the
+//!    namespace, which holds no liveliness subscriber (#830, core §8.1,
+//!    0.37): the feed refuses the monitor's own session;
 //! 2. a [`LensFeed`] is opened on the same session and store, and handed to
 //!    the app ([`LensHandle`]) for the nudges a decode makes;
 //! 3. every batch the feed hands out is folded into the lens in order
@@ -77,9 +80,10 @@ impl std::fmt::Debug for LensHandle {
 #[derive(Clone)]
 pub struct PresenceKey {
     pub epoch: u64,
-    /// The session in the deployment's namespace.
+    /// The session in the deployment's namespace: the link's reads.
     pub session: zenoh::Session,
-    /// The presence monitor, on that session.
+    /// The presence monitor, on a watch session of its own in that
+    /// namespace (#830).
     pub monitor: Arc<Monitor>,
     /// The contract store the lens retrieves into.
     pub store: BundleStore,
@@ -113,8 +117,24 @@ pub fn stream(key: PresenceKey) -> impl iced::futures::Stream<Item = Message> {
         // The monitor runs on the namespaced session, so its keys are
         // base-relative and the projection's wire namespace is empty.
         let live = LivePresence::new(PresenceScope::all());
-        let (mut feed, seeded) =
-            PresenceFeed::open(&session, monitor.events(), live, timeout).await;
+        let (mut feed, seeded) = match PresenceFeed::open(&session, &monitor, live, timeout).await
+        {
+            Ok(opened) => opened,
+            Err(e) => {
+                // A link wired with its reads beside its monitor (#830) reads
+                // nothing: presence stays unread, and says why.
+                let why = zenkey_fleet::one_line(&e);
+                tracing::warn!("the presence link was not opened: {why}");
+                yield Message::Bus(BusMsg::Presence(epoch, Arc::new(PresenceUpdate {
+                    presence: Arc::new(LivePresence::new(PresenceScope::all())),
+                    moved: Vec::new(),
+                    catalog: None,
+                    generation: 0,
+                    seed: SeedOutcome::Failed(why),
+                })));
+                return;
+            }
+        };
         let update = |feed: &PresenceFeed, moved, lens: Option<&LensFeed>| {
             Arc::new(PresenceUpdate {
                 presence: Arc::new(feed.presence().clone()),

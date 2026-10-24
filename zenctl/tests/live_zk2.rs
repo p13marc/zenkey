@@ -1516,6 +1516,7 @@ async fn get_state_reads_the_owner_then_an_archive_and_never_confuses_them() {
             }],
             peers: Vec::new(),
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await
@@ -4738,6 +4739,7 @@ async fn health_s6_an_absent_owner_is_not_asked_and_its_archive_last_known() {
             }],
             peers: Vec::new(),
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await
@@ -6243,6 +6245,7 @@ async fn alarms_s8_an_absent_owner_last_known_for_a_tool() {
             }],
             peers: Vec::new(),
             unconfirmed_horizon: None,
+            watch: None,
         },
     )
     .await

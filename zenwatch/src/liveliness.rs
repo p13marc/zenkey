@@ -17,6 +17,22 @@
 //! before the seed is read, and what it delivered while the read was in
 //! flight is folded into the seed in one step.
 //!
+//! **Two sessions** (#830, core §8.1, 0.37). The monitor holds its
+//! liveliness subscribers on a raw watch session of its own; the ledger is
+//! read through the daemon's raw session, which holds none, and
+//! [`TokenFeed::open`] refuses one with the monitor's zid. A read through
+//! either while it reaches no other zenoh node is not made
+//! ([`TokenBasis::CutOff`]): the observer is unobservable until a complete
+//! read.
+//!
+//! **A withdrawal heard live is not a token gone** (core §8.1, 0.37). A
+//! router's restart withdraws every token at once and its owners never
+//! left, so a delete moves the token to *withdrawn* and owes a read
+//! ([`zenkey_fleet::WITHDRAWAL_SETTLE`] later, a burst being one read): the
+//! complete read that does not show it says it went (a `seed` move), and
+//! one that shows it — or the token heard again first — says nothing at
+//! all, since it was never said gone.
+//!
 //! **A loss is unobservable, never ok.** A `Dropped(n)` from the monitor
 //! may have carried a token's going or its return, so every rule's observer
 //! goes `unobservable` and the ledger is read again; a token that went
@@ -53,6 +69,9 @@ pub enum TokenBasis {
     /// Events lost since the last complete read: what is held is the last
     /// known, and a token may have gone or come back unseen.
     Lost { dropped: u64 },
+    /// The last read was not made: the daemon's session, or the monitor's,
+    /// reaches no other zenoh node (core §8.1, 0.37).
+    CutOff,
 }
 
 /// One token's move, as the ledger folded it.
@@ -73,10 +92,17 @@ const RESEED_ATTEMPTS: usize = 3;
 /// `selectors` on a session in no namespace (see the module doc).
 pub struct TokenFeed {
     session: Session,
+    /// The monitor's session: a watch session, read only for whether it is
+    /// cut off (#830).
+    watch: Session,
     selectors: Vec<String>,
     timeout: Duration,
     events: EventStream,
     held: BTreeSet<String>,
+    /// Tokens heard withdrawn since the last complete read (core §8.1,
+    /// 0.37): not yet said gone, and owing the read that says whether they
+    /// went.
+    withdrawn: BTreeSet<String>,
     basis: TokenBasis,
     retry: Option<(tokio::time::Instant, Duration)>,
     pending: Vec<TokenMove>,
@@ -98,29 +124,42 @@ enum Wake {
 }
 
 impl TokenFeed {
-    /// Seed the ledger and start folding `events` (taken from the monitor
-    /// before this is called). Returns the feed; its first read's moves
-    /// are not news — [`TokenFeed::held`] and [`TokenFeed::basis`] are the
-    /// baseline.
+    /// Seed the ledger through `session` and start folding `monitor`'s
+    /// events, taken here before the read. Returns the feed; its first
+    /// read's moves are not news — [`TokenFeed::held`] and
+    /// [`TokenFeed::basis`] are the baseline.
+    ///
+    /// **Refused** (#830, core §8.1, 0.37), nothing read: a `session` that
+    /// is the monitor's, or any watch session
+    /// ([`zenkey_fleet::refuse_beside`]).
     pub async fn open(
         session: &Session,
-        events: EventStream,
+        monitor: &zenkey_fleet::Monitor,
         selectors: Vec<String>,
         timeout: Duration,
-    ) -> TokenFeed {
+    ) -> zenkey_fleet::Result<TokenFeed> {
+        zenkey_fleet::refuse_beside(session, monitor, "the token ledger's read")?;
         let mut feed = TokenFeed {
             session: session.clone(),
+            watch: monitor.session().clone(),
             selectors,
             timeout,
-            events,
+            events: monitor.events(),
             held: BTreeSet::new(),
+            withdrawn: BTreeSet::new(),
             basis: TokenBasis::Unseeded,
             retry: None,
             pending: Vec::new(),
         };
         feed.reseed().await;
         feed.pending.clear();
-        feed
+        Ok(feed)
+    }
+
+    /// Tokens heard withdrawn, awaiting the read that says whether they
+    /// went (core §8.1, 0.37).
+    pub fn withdrawn(&self) -> &BTreeSet<String> {
+        &self.withdrawn
     }
 
     /// The tokens held, by wire key.
@@ -148,13 +187,33 @@ impl TokenFeed {
                 None => Wake::Item(self.events.recv().await),
             };
             match wake {
-                Wake::Retry => self.reseed().await,
+                Wake::Retry => {
+                    // A basis change is a move too: hand it out, so the
+                    // rules' observers say so.
+                    let before = self.basis;
+                    self.reseed().await;
+                    if self.basis != before && self.pending.is_empty() {
+                        return Some(Vec::new());
+                    }
+                }
                 Wake::Item(None) => return None,
                 Wake::Item(Some(StreamItem::Event(FleetEvent::NodeUp(key)))) => {
-                    self.fold(key, true, PresenceSource::Event, SystemTime::now());
+                    // Heard again before the read: it was never said gone.
+                    if !self.withdrawn.remove(&key) {
+                        self.fold(key, true, PresenceSource::Event, SystemTime::now());
+                    } else {
+                        self.held.insert(key);
+                    }
+                    if self.basis == TokenBasis::CutOff {
+                        self.owe_within(Duration::ZERO);
+                    }
                 }
                 Wake::Item(Some(StreamItem::Event(FleetEvent::NodeDown(key)))) => {
-                    self.fold(key, false, PresenceSource::Event, SystemTime::now());
+                    // A withdrawal heard live is a reason to read again,
+                    // never a token gone by itself (core §8.1, 0.37).
+                    self.held.remove(&key);
+                    self.withdrawn.insert(key);
+                    self.owe_within(zenkey_fleet::WITHDRAWAL_SETTLE);
                 }
                 Wake::Item(Some(StreamItem::Event(_))) => {}
                 Wake::Item(Some(StreamItem::Dropped(n))) => {
@@ -181,9 +240,7 @@ impl TokenFeed {
         let changed = if held {
             self.held.insert(key.clone())
         } else {
-            // A delete for a token never seen held is still positive
-            // evidence that it went.
-            self.held.remove(&key) || source == PresenceSource::Event
+            self.held.remove(&key)
         };
         if changed {
             self.pending.push(TokenMove {
@@ -202,6 +259,18 @@ impl TokenFeed {
             self.owe_now();
         }
         for _ in 0..RESEED_ATTEMPTS {
+            // Not made through a session that reaches nobody, the monitor's
+            // included (core §8.1, 0.37).
+            let cut = match zenkey_fleet::cut_off(&self.session).await {
+                Some(why) => Some(why),
+                None => zenkey_fleet::cut_off(&self.watch).await,
+            };
+            if let Some(why) = cut {
+                tracing::warn!("the token ledger's read was not made: {why}");
+                self.basis = TokenBasis::CutOff;
+                self.back_off();
+                return;
+            }
             let mut keys = BTreeSet::new();
             let mut complete = true;
             for sel in &self.selectors {
@@ -235,27 +304,54 @@ impl TokenFeed {
                 continue;
             }
             let at = SystemTime::now();
-            let mut next: BTreeSet<String> = if complete {
-                keys
+            // What the rules were last told is held: the held tokens and
+            // those heard withdrawn, never said gone.
+            let told: BTreeSet<String> = self.held.union(&self.withdrawn).cloned().collect();
+            // Absence from a possibly incomplete read is not evidence: what
+            // is held stays, and a token withdrawn stays withdrawn unless
+            // the read shows it.
+            let (mut next, mut withdrawn): (BTreeSet<String>, BTreeSet<String>) = if complete {
+                (keys, BTreeSet::new())
             } else {
-                // Absence from a possibly incomplete read is not evidence.
-                self.held.iter().cloned().chain(keys).collect()
+                let withdrawn = self.withdrawn.difference(&keys).cloned().collect();
+                (self.held.iter().cloned().chain(keys).collect(), withdrawn)
             };
+            // A withdrawal heard while the read was in flight may follow
+            // it: withdrawn again, and the next read owed.
             for (key, held) in then {
                 if held {
+                    withdrawn.remove(&key);
                     next.insert(key);
-                } else {
-                    next.remove(&key);
+                } else if next.remove(&key) {
+                    withdrawn.insert(key);
                 }
             }
-            let gone: Vec<String> = self.held.difference(&next).cloned().collect();
-            let back: Vec<String> = next.difference(&self.held).cloned().collect();
+            let gone: Vec<String> = told
+                .difference(&next)
+                .filter(|k| !withdrawn.contains(*k))
+                .cloned()
+                .collect();
+            let back: Vec<String> = next.difference(&told).cloned().collect();
+            // A token heard withdrawn and never seen held is gone too, once
+            // a read says so: its delete was positive evidence it existed.
             for key in gone {
-                self.fold(key, false, PresenceSource::Seed, at);
+                self.pending.push(TokenMove {
+                    at,
+                    source: PresenceSource::Seed,
+                    key,
+                    held: false,
+                });
             }
             for key in back {
-                self.fold(key, true, PresenceSource::Seed, at);
+                self.pending.push(TokenMove {
+                    at,
+                    source: PresenceSource::Seed,
+                    key,
+                    held: true,
+                });
             }
+            self.held = next;
+            self.withdrawn = withdrawn;
             self.basis = match (complete, self.basis) {
                 (true, _) => TokenBasis::Complete,
                 (false, b @ (TokenBasis::Lost { .. } | TokenBasis::Complete)) => b,
@@ -263,12 +359,25 @@ impl TokenFeed {
             };
             if complete {
                 self.retry = None;
+                if !self.withdrawn.is_empty() {
+                    self.owe_within(zenkey_fleet::WITHDRAWAL_SETTLE);
+                }
             } else {
                 self.back_off();
             }
             return;
         }
         self.back_off();
+    }
+
+    /// Owe a re-read within `wait`: sooner than one already owed, never
+    /// later, so a burst of withdrawals is one read.
+    fn owe_within(&mut self, wait: Duration) {
+        let when = tokio::time::Instant::now() + wait;
+        self.retry = Some(match self.retry {
+            Some((owed, last)) => (owed.min(when), last),
+            None => (when, Duration::ZERO),
+        });
     }
 
     fn owe_now(&mut self) {
@@ -505,6 +614,10 @@ impl ForeignRule {
                  §8.1): a token it did not show is not known to be absent; re-reading"
             ),
             TokenBasis::Unseeded => format!("{sel} has not been read yet"),
+            TokenBasis::CutOff => format!(
+                "this daemon's session reaches no router and no peer, so no liveliness read of \
+                 {sel} is made: unobservable until a complete read (core §8.1)"
+            ),
         };
         RuleNotice {
             rule: self.name.clone(),

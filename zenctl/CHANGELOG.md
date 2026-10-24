@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — presence reads where they can be complete (#830, #839, PS)
+
+A liveliness GET from a session that holds a liveliness subscriber, history
+or not, can complete without a token that is live (zenoh 1.10.1 and main,
+`docs/zk2/upstream/liveliness-get-misses-beside-liveliness-subscriber.md`).
+Core 0.37 says what a complete presence read is, and the verbs that follow
+presence live now hold their subscribers on a session of their own.
+
+| Before | Now | Notes |
+|---|---|---|
+| `watchdog` and `record --on`: `instance-gone`'s monitor, and `alert-firing`'s owners' instance tokens, on the deployment's session, beside its presence reads | on a **watch session** of their own in the namespace, opened only when such a rule is given | one more session, with its router-side declarations; every read stays on the deployment's session, which holds no liveliness subscriber |
+| `alarms --for`, `telemetry` and `check conform`: their liveliness subscription on the session they read through | on a watch session of its own (`alarms` only with a window, `telemetry` not across a face, `check conform` always) | the reads are unchanged |
+| `instance-gone`: firing on an owner's token heard withdrawn, under a complete seed | firing once the read the withdrawal owes, made 0.1 s later, shows no instance token (core §8.1, 0.37) | a router's restart, or the tool's own link dropping, pages nobody; a crash is said one read's round trip later. The firing transition's evidence is the re-read's ("found by a re-read") |
+| a presence read through a session cut off from every router and peer: answered complete and empty, every owner absent | not made; the read is the verb's "not asked", with why, and a run that needed it is no verdict: exit 2 | `service list`, `doctor` and the other readers alike; a watch session never makes a presence read either |
+
 ## Unreleased (`main`, zk2) — `telemetry`'s line says what proved its window (#819, TH)
 
 zk2py round 50 confirmed TG's fix (20 of 20 samples put on the line

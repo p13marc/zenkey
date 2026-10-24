@@ -30,6 +30,7 @@
 //! | [`Bus`](Error::Bus) | retry, or check the fleet | 1, or 2 on a verdict verb or when the session never opened (#503) |
 //! | [`Io`](Error::Io) | check the path | 1, or 2 on a verdict verb |
 //! | [`Malformed`](Error::Malformed) | distrust the peer | 1 |
+//! | [`NotAsked`](Error::NotAsked) | read through another session, or wait for the bus | 2 — nothing was asked |
 //! | [`Internal`](Error::Internal) | file a bug against this crate | 1 |
 //!
 //! ## How these render
@@ -132,6 +133,18 @@ pub enum Error {
         source: Option<BoxedCause>,
     },
 
+    /// **A presence read this crate would not make** (core §8.1, 0.37):
+    /// nothing was asked of anyone, and nothing was concluded. Its session
+    /// holds a liveliness subscriber (#830), or reaches no other zenoh
+    /// node. Never absence: a reader that meets it is unobservable, with
+    /// [`NotAsked`]'s reason.
+    #[error("{what}: not asked: {why}")]
+    NotAsked {
+        /// The read refused — a selector, a reader.
+        what: String,
+        why: NotAsked,
+    },
+
     /// An invariant of *this crate* did not hold.
     ///
     /// Every construction site is a place the old code said "a bug in
@@ -145,6 +158,39 @@ pub enum Error {
 /// This crate's result type.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Why a presence read was not made (core §8.1, 0.37).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotAsked {
+    /// Its session holds a liveliness subscriber, history or not (#830): a
+    /// liveliness GET beside one can complete without tokens that are live
+    /// (zenoh 1.10.1, and main at 766b455). A reader holds its subscribers
+    /// on a watch session of its own.
+    BesideSubscriber {
+        /// The session's zid.
+        zid: String,
+    },
+    /// Its session reaches no other zenoh node: zenoh answers a read
+    /// through it at once, complete and empty, though nothing was asked of
+    /// anyone.
+    CutOff,
+}
+
+impl std::fmt::Display for NotAsked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NotAsked::BesideSubscriber { zid } => write!(
+                f,
+                "session {zid} holds a liveliness subscriber, beside which zenoh can complete a \
+                 liveliness read without a token that is live (#830, core §8.1)"
+            ),
+            NotAsked::CutOff => f.write_str(
+                "this session reaches no router and no peer, so a read would be answered at \
+                 once, complete and empty (core §8.1)",
+            ),
+        }
+    }
+}
+
 impl Error {
     /// The caller's input was refused and nothing was attempted — RFC 13
     /// §1's "the question could not be asked".
@@ -154,6 +200,39 @@ impl Error {
     /// [`judgement_exit_code`](crate::judgement_exit_code) does for verdicts.
     pub fn is_unaskable(&self) -> bool {
         matches!(self, Error::Unaskable { .. })
+    }
+
+    /// Why a presence read was not made, when this is one (core §8.1,
+    /// 0.37): the session holds a liveliness subscriber, or is cut off.
+    /// `zenctl` maps it onto its reserved exit 2, since nothing was asked.
+    pub fn not_asked(&self) -> Option<&NotAsked> {
+        match self {
+            Error::NotAsked { why, .. } => Some(why),
+            _ => None,
+        }
+    }
+
+    /// A presence read this crate would not make, and why.
+    pub fn not_asked_for(what: impl Into<String>, why: NotAsked) -> Error {
+        Error::NotAsked {
+            what: what.into(),
+            why,
+        }
+    }
+
+    /// The runtime's refusal of a liveliness read (core §8.1, 0.37), as
+    /// this crate's [`Error::NotAsked`]; `None` for any other runtime error.
+    pub fn from_runtime_refusal(e: &zenkey::Error) -> Option<Error> {
+        match e {
+            zenkey::Error::ReadBesideSubscriber { selector, zid } => Some(Error::not_asked_for(
+                selector.clone(),
+                NotAsked::BesideSubscriber { zid: zid.clone() },
+            )),
+            zenkey::Error::CutOff { selector } => {
+                Some(Error::not_asked_for(selector.clone(), NotAsked::CutOff))
+            }
+            _ => None,
+        }
     }
 
     /// An input this crate refuses.
@@ -261,6 +340,12 @@ mod tests {
         assert!(!Error::io("/tmp/x", std::io::Error::other("nope")).is_unaskable());
         assert!(!Error::malformed(".zrec", "is not a header").is_unaskable());
         assert!(!Error::Internal("a bug".into()).is_unaskable());
+        // A read not made (core §8.1, 0.37) is not the caller's input
+        // either: it says why it asked nothing, in a type of its own.
+        let cut = Error::not_asked_for("zk2/*/*/@zk/**", NotAsked::CutOff);
+        assert!(!cut.is_unaskable());
+        assert_eq!(cut.not_asked(), Some(&NotAsked::CutOff));
+        assert!(Error::Internal("a bug".into()).not_asked().is_none());
     }
 
     /// `Display` says what failed; `source` says why; `one_line` joins them.
@@ -281,6 +366,10 @@ mod tests {
             Error::bus("subscribe", "v1/**", "no route"),
             Error::unaskable_from("v1/$*/**", "`*` may only follow `/`"),
             Error::Internal("something".into()),
+            Error::not_asked_for(
+                "zk2/*/*/@zk/**",
+                NotAsked::BesideSubscriber { zid: "1a2b".into() },
+            ),
         ];
         for e in &cases {
             assert!(!e.to_string().is_empty(), "blank Display: {e:?}");

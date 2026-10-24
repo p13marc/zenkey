@@ -158,14 +158,19 @@ pub mod zk2 {
         client_ns(endpoint, None).await
     }
 
-    /// The daemon's two sessions for a deployment at `namespace` on the
-    /// router at `endpoint`: one in the namespace, one in none.
-    pub async fn daemon_bus(endpoint: &str, namespace: &str) -> zenkey_fleet::DoctorBus {
+    /// The daemon's sessions for a deployment at `namespace` on the router
+    /// at `endpoint`: one in the namespace, one in none, and a watch session
+    /// of each kind for the live readers' liveliness subscribers (#830).
+    pub async fn daemon_bus(endpoint: &str, namespace: &str) -> zenwatch::bus::Sessions {
         let ns = (!namespace.is_empty()).then_some(namespace);
-        zenkey_fleet::DoctorBus {
-            session: client_ns(endpoint, ns).await,
-            raw: client(endpoint).await,
-            namespace: namespace.to_string(),
+        zenwatch::bus::Sessions {
+            bus: zenkey_fleet::DoctorBus {
+                session: client_ns(endpoint, ns).await,
+                raw: client(endpoint).await,
+                namespace: namespace.to_string(),
+                watch: Some(client_ns(endpoint, ns).await),
+            },
+            raw_watch: Some(client(endpoint).await),
         }
     }
 
