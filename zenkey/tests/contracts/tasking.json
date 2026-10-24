@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tasking.json",
+  "$comment": "desired.v1's scenarios (spec/profiles/desired/scenarios.md): the author's document type. An open object: a worker refuses a document that holds a member named endpoint (reach), and one whose rate_hz is above what it supports (invalid).",
+  "$defs": {
+    "Task": {
+      "type": "object",
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0 },
+        "mode": { "type": "string", "enum": ["idle", "run", "halt"] },
+        "rate_hz": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      },
+      "required": ["revision", "mode", "rate_hz"]
+    }
+  }
+}

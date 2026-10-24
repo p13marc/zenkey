@@ -1,0 +1,25 @@
+# desired.v1's scenarios (#840), as `spec/profiles/desired/scenarios.md`
+# states the contract: what a worker runs, its report of its task role
+# (desired.v1.Report, the profile's schema listed by its path from here),
+# and the role, optional, so that a deployment can leave it unbound.
+[interface]
+name  = "worker"
+major = 1
+minor = 0
+uses  = ["desired.v1"]
+
+[schemas]
+jsonschema = ["../../../spec/profiles/desired/desired.v1.json", "tasking.json"]
+
+[resources.running]
+kind = "state"
+type = "json:Task"
+
+[resources."desired/task"]
+kind = "state"
+type = "json:desired.v1.Report"
+
+[requires.task]
+interface = "tasking.v1"
+resources = ["tasks/{system}/{service}"]
+optional  = true

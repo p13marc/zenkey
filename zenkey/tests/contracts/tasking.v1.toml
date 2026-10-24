@@ -1,0 +1,18 @@
+# desired.v1's scenarios (#840), as `spec/profiles/desired/scenarios.md`
+# states the contract: the author's tasks, one document per worker, state of
+# the author, keyed by the worker's system and service, never stale.
+[interface]
+name  = "tasking"
+major = 1
+minor = 0
+uses  = ["desired.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["tasking.json"]
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

@@ -24,6 +24,7 @@ use zenkey_model::config::{
     Facts, GroupDecl, LastFacts, Owner, PendingFacts, Refusal, Schema, SetReply, SetRequest, Start,
     Step, Time,
 };
+use zenkey_model::desired;
 use zenkey_model::freshness::{self, ClockTrust, Horizon, Last, Observation, Reply, StampAge};
 use zenkey_model::grammar::KindToken;
 use zenkey_model::health::{self, Judged, Level, Listing, Presence, Read, Reading};
@@ -60,6 +61,12 @@ const KNOWN: &[(&str, &str)] = &[
     ("telemetry", "declarations.json"),
     ("telemetry", "samples.json"),
     ("telemetry", "continuity.json"),
+    ("desired", "schema.json"),
+    ("desired", "declarations.json"),
+    ("desired", "bindings.json"),
+    ("desired", "order.json"),
+    ("desired", "reports.json"),
+    ("desired", "conclusions.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -2178,6 +2185,354 @@ fn telemetry_continuity() {
             "rate": p.rate.as_ref().ok().map(|r| r.per_s),
             "rate_unit": p.rate.as_ref().ok().and_then(|r| r.unit.clone()),
             "no_rate": p.rate.as_ref().err().map(|n| n.as_str()),
+        });
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+// --- desired.v1 ----------------------------------------------------------------
+
+/// `desired/conformance/schema.json`: the standard schema's published ids
+/// (desired.v1 §2.10, §3), as `telemetry_schema` reads telemetry.v1's.
+#[test]
+fn desired_schema() {
+    let path = profiles().join("desired/conformance/schema.json");
+    let mut doc = read_json(&path);
+    let file = read_json(
+        &profiles()
+            .join("desired")
+            .join(doc["file"].as_str().expect("file")),
+    );
+    assert_eq!(
+        json!(jcs_id(&file)),
+        doc["current"],
+        "the profile's file is the current revision; after an intended change, publish its id in v1.md §3, desired::PUBLISHED and this fixture"
+    );
+    let published: Vec<&str> = doc["published"]
+        .as_array()
+        .expect("published")
+        .iter()
+        .map(|p| p["id"].as_str().expect("id"))
+        .collect();
+    assert_eq!(published, desired::PUBLISHED, "desired::PUBLISHED");
+    assert_eq!(
+        published.last(),
+        doc["current"].as_str().as_ref(),
+        "the current id is the latest"
+    );
+    let defs = file["$defs"].as_object().expect("$defs");
+    let types: Vec<&str> = doc["types"]
+        .as_array()
+        .expect("types")
+        .iter()
+        .map(|t| t["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(types, [desired::REPORT, desired::VERSION, desired::REFUSAL]);
+    for t in &types {
+        assert!(defs.contains_key(*t), "{t} is defined in the current file");
+    }
+    let root = repo_root();
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let document = match case["path"].as_str() {
+            Some(p) => read_json(&root.join(p)),
+            None => case["document"].clone(),
+        };
+        let id = jcs_id(&document);
+        let got = json!({"id": id, "published": desired::is_published(&id)});
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A resource as `desired/conformance/` writes it: its kind, template and
+/// resolved annotations.
+fn desired_resource(r: &Value) -> (Kind, Template, BTreeMap<String, Value>) {
+    let kind = match r["kind"].as_str().expect("kind") {
+        "stream" => Kind::Stream,
+        "state" => Kind::State,
+        "event" => Kind::Event,
+        "operation" => Kind::Operation,
+        other => panic!("kind {other:?}"),
+    };
+    let template = Template::parse(r["template"].as_str().expect("template")).expect("a template");
+    (kind, template, annotations(&r["annotations"]))
+}
+
+fn desired_declaration_json(d: &desired::Declaration) -> Value {
+    match d {
+        desired::Declaration::Declared(t) => json!({
+            "declaration": d.as_str(),
+            "targets": t
+                .iter()
+                .map(|t| json!({"param": t.param, "binds": t.binds.as_str()}))
+                .collect::<Vec<_>>(),
+        }),
+        desired::Declaration::Invalid(r) => json!({
+            "declaration": d.as_str(),
+            "reasons": r.iter().map(|r| r.as_str()).collect::<Vec<_>>(),
+        }),
+        desired::Declaration::NotThisProfiles => json!({"declaration": d.as_str()}),
+    }
+}
+
+/// `desired/conformance/declarations.json`: a resolved resource → its
+/// declaration (desired.v1 §2.2).
+#[test]
+fn desired_declarations() {
+    let path = profiles().join("desired/conformance/declarations.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let (kind, template, ann) = desired_resource(&case["resource"]);
+        let got = desired_declaration_json(&desired::declaration(kind, &template, &ann));
+        let what = format!("{}: {}", case["note"], case["resource"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `desired/conformance/bindings.json`: a desired resource, its author's
+/// interface, the target's address and its requirement → the binding
+/// (desired.v1 §2.3).
+#[test]
+fn desired_bindings() {
+    use zenkey_model::grammar::{Addr, IfaceId};
+    let path = profiles().join("desired/conformance/bindings.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let (kind, template, ann) = desired_resource(&case["resource"]);
+        let decl = desired::declaration(kind, &template, &ann);
+        let targets = decl.targets().expect("a declared resource");
+        let iface: IfaceId = case["iface"].as_str().expect("iface").parse().expect("an interface id");
+        let token = if case["resource"]["explicit"] == json!(true) {
+            KindToken::ExplicitState
+        } else {
+            KindToken::State
+        };
+        let own: Addr = case["target"].as_str().expect("target").parse().expect("an address");
+        let req = &case["requirement"];
+        let bindings: Vec<String> = req["bindings"]
+            .as_array()
+            .expect("bindings")
+            .iter()
+            .map(|b| b.as_str().expect("a binding").to_owned())
+            .collect();
+        let params: BTreeMap<String, String> = req["params"]
+            .as_object()
+            .expect("params")
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_str().expect("a parameter binding").to_owned()))
+            .collect();
+        let slice = desired::Slice {
+            iface: &iface,
+            token,
+            template: &template,
+            targets,
+        };
+        let requirement = desired::Requirement {
+            bindings: &bindings,
+            params: &params,
+            optional: req["optional"] == json!(true),
+        };
+        let b = desired::binding(&slice, &requirement, &own);
+        let got = match &b {
+            desired::Binding::Unbound => json!({"binding": b.as_str()}),
+            desired::Binding::Invalid(p) => json!({
+                "binding": b.as_str(),
+                "reasons": p.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
+            }),
+            desired::Binding::Bound { key } => json!({"binding": b.as_str(), "key": key.as_str()}),
+        };
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn desired_stamp(v: &Value) -> Option<zenkey_model::seed::Stamp> {
+    if v.is_null() {
+        return None;
+    }
+    Some(
+        zenkey_model::seed::Stamp::parse(
+            v["time"].as_u64().expect("time"),
+            v["id"].as_str().expect("id"),
+        )
+        .expect("a stamp"),
+    )
+}
+
+fn desired_refusal(v: &Value) -> desired::Refusal {
+    serde_json::from_value(v.clone()).expect("a refusal")
+}
+
+/// `desired/conformance/order.json`: one target's steps → what each does,
+/// and its report after the last (desired.v1 §2.6 to §2.10).
+#[test]
+fn desired_order() {
+    let path = profiles().join("desired/conformance/order.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let key = case["key"].as_str().map(str::to_owned);
+        let mut t = desired::Target::new(key.clone());
+        let mut steps = Vec::new();
+        for step in case["steps"].as_array().expect("steps") {
+            let token = if let Some(s) = step.get("sample") {
+                let sample = desired::Sample {
+                    via: match s["from"].as_str().expect("from") {
+                        "owner" => desired::Via::Owner,
+                        "archive" => desired::Via::Archive,
+                        other => panic!("from {other:?}"),
+                    },
+                    mutation: match s["kind"].as_str().expect("kind") {
+                        "put" => desired::Mutation::Put,
+                        "delete" => desired::Mutation::Delete,
+                        other => panic!("kind {other:?}"),
+                    },
+                    stamp: desired_stamp(&s["stamp"]),
+                    revision: s.get("revision").and_then(Value::as_u64),
+                };
+                t.observe(sample).as_str()
+            } else if let Some(f) = step.get("finish") {
+                let ended = if f == "done" {
+                    desired::Ended::Done
+                } else if let Some(r) = f.get("refused") {
+                    desired::Ended::Refused(desired_refusal(r))
+                } else if let Some(r) = f.get("failed") {
+                    desired::Ended::Failed(desired_refusal(r))
+                } else {
+                    panic!("finish {f}")
+                };
+                t.finish(ended).as_str()
+            } else if step.get("call").is_some() {
+                t.call();
+                "called"
+            } else if step.get("restart").is_some() {
+                t = desired::Target::new(key.clone());
+                "restarted"
+            } else {
+                panic!("step {step}")
+            };
+            steps.push(token);
+        }
+        let got = json!({"steps": steps, "report": t.report().to_json()});
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A report as a reader reads one: from its text, or from its decoded
+/// JSON.
+fn desired_report(case: &Value) -> Result<desired::Report, desired::Unreadable> {
+    match case.get("text").and_then(Value::as_str) {
+        Some(t) => desired::decode(t.as_bytes()),
+        None => desired::Report::from_json(&case["document"]),
+    }
+}
+
+/// `desired/conformance/reports.json`: a report → whether it reads, and
+/// its findings (desired.v1 §2.4, §2.10).
+#[test]
+fn desired_reports() {
+    let path = profiles().join("desired/conformance/reports.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let got = match desired_report(case) {
+            Ok(r) => json!({
+                "readable": true,
+                "errors": r.check().iter().map(|f| f.as_str()).collect::<Vec<_>>(),
+            }),
+            Err(u) => json!({"readable": false, "errors": [u.as_str()]}),
+        };
+        let what = format!("{}", case["note"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+fn desired_seen(v: &Value) -> desired::Seen {
+    match v.as_str().expect("presence") {
+        "present" => desired::Seen::Present,
+        "absent" => desired::Seen::Absent,
+        "incomplete" => desired::Seen::Incomplete,
+        "across_face" => desired::Seen::AcrossFace,
+        other => panic!("presence {other:?}"),
+    }
+}
+
+fn desired_judged(j: desired::Judged) -> Value {
+    json!({"answer": j.answer.as_str(), "reason": j.reason.as_str()})
+}
+
+/// `desired/conformance/conclusions.json`: one reading of a target's role
+/// and its author's document → §5's four questions (desired.v1 §2.17).
+#[test]
+fn desired_conclusions() {
+    let path = profiles().join("desired/conformance/conclusions.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let t = &case["reading"]["target"];
+        let a = &case["reading"]["author"];
+        let report = match &t["report"] {
+            Value::Null => None,
+            Value::String(s) if s == "undecodable" => Some(Err(())),
+            r => Some(desired::Report::from_json(&r["document"]).map_err(|_| ())),
+        };
+        let target = desired::TargetReading {
+            presence: desired_seen(&t["presence"]),
+            descriptor: match &t["descriptor"] {
+                Value::Null => None,
+                d if d["lists"] == json!(false) => Some(desired::Listing::NotListed),
+                d => Some(desired::Listing::Listed {
+                    bound: d["bound"] == json!(true),
+                }),
+            },
+            report: match &report {
+                None => desired::ReportRead::NotRead,
+                Some(Err(())) => desired::ReportRead::Unreadable,
+                Some(Ok(r)) => desired::ReportRead::Read(r),
+            },
+            freshness: match t["report_freshness"].as_str().expect("report_freshness") {
+                "fresh" => freshness::Verdict::Fresh,
+                "stale" => freshness::Verdict::Stale,
+                "unobservable" => freshness::Verdict::Unobservable,
+                "not_asked" => freshness::Verdict::NotAsked,
+                other => panic!("report_freshness {other:?}"),
+            },
+        };
+        let author = desired::AuthorReading {
+            presence: desired_seen(&a["presence"]),
+            current: match &a["current"] {
+                Value::Null => desired::Current::NotRead,
+                Value::String(s) if s == "incomplete" => desired::Current::Incomplete,
+                Value::String(s) if s == "silent" => desired::Current::Silent,
+                c => match (c.get("put"), c.get("delete")) {
+                    (Some(s), _) => desired::Current::Put(desired_stamp(s).expect("a stamp")),
+                    (_, Some(s)) => desired::Current::Delete(desired_stamp(s).expect("a stamp")),
+                    _ => panic!("current {c}"),
+                },
+            },
+        };
+        let got = json!({
+            "converged": desired_judged(desired::converged(&target, &author)),
+            "refused": desired_judged(desired::refused(&target)),
+            "last_known": desired_judged(desired::last_known(&target)),
+            "in_force": desired_judged(desired::in_force(&target)),
         });
         let what = format!("{}", case["note"]);
         expect(case, got, &what);
