@@ -37,7 +37,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   key-tree snapshots, and live per-address presence (`model::presence_live`:
   up, down or unobservable, every token move a value; kept current from a
   `Monitor` by `bus::presence::PresenceFeed`, re-seeded after `Dropped(n)`,
-  #614 FL1; each instance's `since`, FL4). For zengui's tree (#614, FL4):
+  #614 FL1; each instance's `since`, FL4; down only on a complete read,
+  never on a withdrawal heard live, core 0.37: a withdrawal leaves an
+  address unobservable (`withdrawn`) and owes a re-read 0.1 s later, a read
+  through a session cut off is not made (`PresenceBasis::CutOff`), and the
+  monitor holds its liveliness subscribers on a watch session of its own
+  while the feed reads on the deployment's, refusing the monitor's zid,
+  #830). For zengui's tree (#614, FL4):
   `model::skeleton` (the declared keyspace from the lens, merged with the
   observed snapshot and the watch set into typed `NodeStatus`es),
   `model::identity::IdentityCache` (each key's resolution, bounded, dropped
@@ -68,7 +74,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   one path and the split can be re-cut without a call site moving.
   `alarms.v1` (#800, AC) runs through all four layers. `bus::alarms`'
   `AlarmFeed` is the live reader: a liveliness subscription to the owners'
-  instance tokens and one to the alarm keys feed one bounded queue whose
+  instance tokens on a watch session of its own (`DoctorBus::watch`, #830)
+  and one to the alarm keys feed one bounded queue whose
   refusals are a counted loss, a `bus::stall` watch covers its own receive
   path, then presence with descriptors, S4's GET and, when asked, every
   archive's last-known; its refresh is an owned `AlarmRefresh`, run beside
@@ -81,7 +88,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   key that GET left out reaches the judge as `left_out` and loses its
   sample once its owner is established, a reply dated by its GET's ask
   (text 0.5, F-136), and a receive path that could not be watched is a
-  loss at the refresh's start; the owners in scope with how each was known
+  loss at the refresh's start; an owner heard withdrawn possibly
+  incomplete until the next presence read (core 0.37); the owners in scope
+  with how each was known
   (F-131), and `scope_read` (the latest presence read complete and nothing
   lost since it was asked, text 0.6; an archive plays no part, F-137); and
   the `AlarmTransition`s a notifier routes. `judge::alarms` and
@@ -90,8 +99,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   selector (`RuleAlarms`, `SweepOutcome::alarms`), and the doctor's
   `alarm-key`/`alarm-stale` and `check conform`'s `alarm-key`/
   `alarm-document` read one GET through the same book. A session cut off
-  from every router and peer makes no read (`bus::alarms::cut_off`, #800
-  AD): zenoh answers its liveliness reads and GETs at once, complete and
+  from every router and peer makes no read (`bus::presence::cut_off`, #800
+  AD; core 0.37 for every reader): zenoh answers its liveliness reads and GETs at once, complete and
   empty, which would read every owner absent and heal a loss.
   `telemetry.v1` (#819, TC) runs through all four layers too.
   `bus::telemetry` reads presence, the descriptors and the metric
@@ -158,7 +167,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   them: `raw`, in no namespace, carries the data pump, wire selectors, the
   admin space and a foreign key's raw read; `session`, in the deployment's
   namespace, reads presence, descriptors and contracts and asks every
-  resolved question (S4 reads, health, why, calls). The namespace resolves
+  resolved question (S4 reads, health, why, calls); and the presence
+  monitor's watch session (#830), opened by `services::watch::start_presence`
+  and reopened on a namespace switch, which holds its liveliness subscribers
+  and makes no read. The namespace resolves
   `--namespace` (alias `--base`) > the one picked last (zengui's prefs) >
   `ZENGUI_BASE` > the context's `base` > empty; the location bar's picker
   is fed by `namespace_listing`, and a switch reopens the namespaced
@@ -167,7 +179,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   overlay, remembered in zengui's prefs, never the shared context;
   `--registry` is refused by name, exit 2, and a context's stored
   `registry` rides a save untouched. **Presence** runs on a monitor of its
-  own on the namespaced session (`presence_link.rs`, the zenwatch pattern,
+  own on a namespaced watch session of its own (`presence_link.rs`, the zenwatch pattern,
   coalesced to four snapshots a second), so the pump's `Dropped(n)` cannot
   knock it to lost, and its batches fold into the `LensFeed` in order.
   **The lens**: the feed's catalog and generation, the contract store
@@ -409,7 +421,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   version 3 (header `excluded`, rows `qos_axes`; 1 and 2 still read), and
   `record --on` refuses the rules that judge v1.
   FJ8b's observers and checks: the raw observers (`echo`, `rate`, `field`,
-  `timeline`, `snapshot`, `watchdog`, `record --on`) keep a wire selector in
+  `timeline`, `snapshot`, `watchdog`, `record --on`; `watchdog`, `record
+  --on`, `alarms --for`, `telemetry` and `check conform` hold their
+  liveliness subscribers on `Deployment::watch_session()`, #830) keep a wire selector in
   no namespace and resolve every key through one session-free **lens**
   (`zenkey_fleet::model::lens`, fed by `bus::lens`): presence in
   `--namespace`, the contract each descriptor names, the rung named where
@@ -529,7 +543,11 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (`bus.namespace`, alias `base`; `--namespace`/`--base`, resolved flag >
   config > env > context > empty) for presence, descriptors, contracts and
   the doctor, one in none for wire selectors, foreign tokens and the admin
-  space; contracts by `contracts` and `--contracts` (zenctl's loading),
+  space; plus a watch session of each kind a rule needs (`bus::Watches`,
+  #830): in the namespace for the presence projection's monitor and the
+  `alerts`/`alert-firing` readers' instance tokens, in none for the
+  foreign-token ledger's monitor — no session both holds a liveliness
+  subscriber and reads presence; contracts by `contracts` and `--contracts` (zenctl's loading),
   never a named context. **The write side since FL3**: the daemon is a zk2
   service on the namespaced session (`publish.rs`, `SelfService` over
   `ServiceBuilder`), `health.v1` through `zenkey::health` and its own
@@ -554,7 +572,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   per address, token or alarm. `presence.rs`
   reads FL1's live projection (a `PresenceFeed` on its own monitor; patterns
   tracked): an address up while an instance token is held, gone only under
-  a complete read; `liveliness-gone` on the deployment's zk2 tokens rides it
+  a complete read (a withdrawal heard live waits for the read it owes;
+  interface, member and foreign-token identities too, core 0.37);
+  `liveliness-gone` on the deployment's zk2 tokens rides it
   per address / address+iface / address+iface+member (a handover is no
   gap); on anything else `liveliness.rs` keeps the daemon's own ledger,
   seeded by liveliness reads that say when they ran to their timeout. Both
@@ -753,7 +773,14 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   wildcard-key discard, R5's presence wait, R7's *unobservable*; tools
   consume with `Consumer::for_tool` and read presence with
   `presence::liveliness_read`, which flags a GET that ran to its timeout as
-  possibly incomplete (§8.1). `state`
+  possibly incomplete (§8.1); every liveliness subscriber goes through
+  `presence::declare_subscriber`, which marks its session a watch session
+  for good, and `liveliness_read` refuses one (`Error::ReadBesideSubscriber`)
+  and a session cut off (`Error::CutOff`), with `presence::settle` a watch
+  session's one barrier GET (#830, core 0.37;
+  `scripts/check-liveliness-seam.sh` keeps the seam the only one). The
+  archive hears owners on `ArchiveConfig::watch` or reads presence every
+  500 ms, and R5's wait reads presence. `state`
   stamps every put and delete (the `Minter`: §4.3's minting, catch-up, a
   clock guard that stops writes when ahead) and answers GETs with
   `reply_del` within the window; `Consumer::get` is S4's owner-only
@@ -878,8 +905,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.36 is the current version
-    (changes go through `spec/CHANGELOG.md`):
+  - `spec/core.md` v0.1 is accepted, and v0.37 is the current version
+    (0.37: what a complete presence read is, #839/#830; changes go through
+    `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a
