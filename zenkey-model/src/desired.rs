@@ -15,6 +15,7 @@
 //! decode(bytes), Report::from_json(v)       ─▶ Report │ Unreadable{json, schema, stamp, revision_range}    §2.10
 //! Report::check()                           ─▶ the findings: keyless, key_form, observed_outcome, …        §2.10
 //! Content::of_payload(bytes, json)          ─▶ a put's document, JCS-equal by exact value for JSON, else byte-equal  §2.7
+//! revision_of_text(bytes) / revision_of_value(v) ─▶ a document's own revision, by its exact value          §2.4
 //! Target::observe(sample)                   ─▶ act │ revert │ adopted │ held │ unstamped │ same_version │ older │ confirmed  §2.6–§2.9
 //!   against the version held, every id remembered (16), then the one held waiting while an act runs
 //! Target::finish(ended)                     ─▶ the report updated; done, or the held version adopted or acted on  §2.7, §2.10
@@ -2428,6 +2429,71 @@ mod tests {
             decode(with(&big).as_bytes()),
             Err(Unreadable::Json(_))
         ));
+    }
+
+    /// Text 0.3, F-181: a revision reads by its exact value, in a report's
+    /// text and in a document's.
+    #[test]
+    fn a_revision_reads_by_its_exact_value() {
+        let rep = |r: &str| {
+            format!(
+                r#"{{"key":"zk2/a/b/i.v1/state/x","source":"desired","in_force":{{"stamp":"1/a","revision":{r}}},"observed":{{"stamp":"1/a","revision":{r}}},"outcome":"converged"}}"#
+            )
+        };
+        let observed = |r: &str| decode(rep(r).as_bytes()).map(|x| x.observed.unwrap().revision);
+        assert_eq!(observed("18446744073709551615.0"), Ok(Some(u64::MAX)));
+        assert_eq!(observed("30e-1"), Ok(Some(3)));
+        assert_eq!(observed("-0.0"), Ok(Some(0)));
+        assert_eq!(observed("1e19"), Ok(Some(10_000_000_000_000_000_000)));
+        assert!(matches!(
+            observed("18446744073709551616.0"),
+            Err(Unreadable::RevisionRange(_))
+        ));
+        assert!(matches!(observed("1e400"), Err(Unreadable::Json(_))));
+        assert!(matches!(observed("1.5"), Err(Unreadable::Schema(_))));
+        assert!(matches!(observed("-1"), Err(Unreadable::Schema(_))));
+        // A decoded value holds the double: 2^64 exactly.
+        let v: Value = serde_json::from_str(&rep("18446744073709551615.0")).unwrap();
+        assert!(matches!(
+            Report::from_json(&v),
+            Err(Unreadable::RevisionRange(_))
+        ));
+        assert_eq!(
+            revision_of_text(br#"{"revision": 3.0, "mode": "run"}"#),
+            Some(3)
+        );
+        assert_eq!(
+            revision_of_text(br#"{"revision": 18446744073709551615.0}"#),
+            Some(u64::MAX)
+        );
+        for none in [
+            &br#"{"revision": 1.5}"#[..],
+            br#"{"revision": "1"}"#,
+            br#"{"revision": 18446744073709551616}"#,
+            br#"[1]"#,
+            br#"{"rev": 1}"#,
+            b"not json",
+        ] {
+            assert_eq!(
+                revision_of_text(none),
+                None,
+                "{}",
+                String::from_utf8_lossy(none)
+            );
+        }
+        assert_eq!(
+            revision_of_value(&serde_json::json!({"revision": "18446744073709551615"})),
+            Some(u64::MAX),
+            "protobuf's JSON mapping writes a 64-bit field as a string"
+        );
+        assert_eq!(
+            revision_of_value(&serde_json::json!({"revision": 7})),
+            Some(7)
+        );
+        assert_eq!(
+            revision_of_value(&serde_json::json!({"revision": "x"})),
+            None
+        );
     }
 
     #[test]
