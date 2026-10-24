@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Fifty-two rounds.**
+**Fifty-three rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -128,10 +128,14 @@ where that was not enough, or where the spec said two things.
   work, rounds 45 to 51, is closed.
 - F-161 to F-180 were found against `desired.v1`'s text 0.1, the eighth
   profile, read cold with core 0.36 in round 52, its scenarios read for
-  sufficiency only (see "At desired.v1 0.1" at the end). F-161 to F-174
+  sufficiency only (see "At desired.v1 0.1"). F-161 to F-174
   are against the text, its schema and its CHANGELOG, F-175 to F-180
-  against `scenarios.md`. Nothing was found in core 0.36 itself. All
-  twenty are open.
+  against `scenarios.md`. Nothing was found in core 0.36 itself.
+  `desired.v1` 0.2 and `config.v1` 0.4 resolved all twenty, F-163, F-166
+  (partly), F-168 and F-170 against zk2py's reading.
+- F-181 to F-184 were found against `desired.v1` 0.2 and `config.v1` 0.4,
+  read cold in round 53 (see "At desired.v1 0.2" at the end). All four
+  are open, and minor.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -8527,6 +8531,12 @@ to the other `self`; a literal is `not_self`'s alone, and an unbound one
 target parameters, one bound to the other's `self`: the first to
 `self.service`, or the second to `self.system`".
 
+**Status at desired.v1 0.2:** resolved by 0.2, as zk2py read it. §2.3:
+"`wrong_self` (0.2): of two target parameters, one bound to the other's
+`self` … A literal is `not_self`'s alone, and an unbound parameter
+`target_unbound`'s alone." Four `bindings.json` cases pin it; zk2py passed
+them unchanged.
+
 ### F-162 · contradiction · desired.v1 0.1 §2.6 and §2.7 "One act at a time": which held version a sample is judged against while an act runs
 
 > §2.6: "It judges each version it receives against that one, or against
@@ -8561,6 +8571,11 @@ held-alone reading against the file, and every case passed.
 while an act runs, against the running act's and then the one it holds
 waiting (§2.7)", the same in the fixture's description, and an
 `order.json` case with two ids during one act.
+
+**Status at desired.v1 0.2:** resolved by 0.2, as zk2py read it. §2.6 now
+judges "against the running act's version and then against the one it holds
+waiting (§2.7)", and `order.json`'s description says so; cases 64 to 66 pin
+it, and zk2py passed them unchanged.
 
 ### F-163 · contradiction · desired.v1 0.1 §2.6 "Never an older version" against step 4
 
@@ -8599,6 +8614,13 @@ one id, a target never acts on a version older than the one it holds", or
 step 4 widened, "and never on a version older than one it acted on under
 that id", with an `order.json` case either way.
 
+**Status at desired.v1 0.2:** resolved by 0.2, against zk2py's reading.
+Step 4: "**But never an older version of an id it remembers**", per id,
+"for at least the 16 most recent ids", from whichever path. zk2py had
+judged against the held version alone; `TargetRole.remembered` now keeps
+exactly 16 ids, most recently acted on or adopted last. `order.json` cases
+67 to 72 pin it (case 72 fails with 15).
+
 ### F-164 · gap · desired.v1 0.1 §2.4 and §2.10: a stamp's id of 0
 
 > §2.4: "its NTP64 time in decimal, without leading zeros, then `/`, then
@@ -8621,6 +8643,10 @@ digits.
 **Wording that would remove the guess:** §2.4, "its id, never 0, in
 lowercase hexadecimal without leading zeros", and core Appendix B, "an id
 is never 0".
+
+**Status at desired.v1 0.2:** resolved by 0.2. §2.4: "The id is never 0,
+since a zenoh id is never zero". `reports.json` case 66 (`0/0`) passed
+unchanged.
 
 ### F-165 · ambiguity · desired.v1 0.1 §2.10 "A target's report MUST be consistent": an absent member
 
@@ -8646,6 +8672,11 @@ Each check names a member present. Two read otherwise in the fixture:
 **Wording that would remove the guess:** §2.10, "or, with `converged`
 and `desired`, no `in_force` or one that is not `observed`", and
 "`last_known` true with no `observed`".
+
+**Status at desired.v1 0.2:** resolved by 0.2, as zk2py read it: "with
+`converged` and `desired`, no `in_force`, or one that is not `observed`",
+and "`last_known` true with no `observed`". `reports.json` case 67 passed
+unchanged.
 
 ### F-166 · ambiguity · desired.v1 0.1 §2.7 "Equal is JCS-equal": an integer past 2^53
 
@@ -8683,6 +8714,15 @@ nothing, itself included: it costs an act, never skips one
 compared by its exact value: two documents that differ in an integer
 beyond 2^53 are two", or a revision bounded at 2^53 − 1 for a JSON type.
 
+**Status at desired.v1 0.2:** resolved by 0.2, partly against zk2py's
+reading. §2.7: "**Every number compares by its exact value** (0.2), the value its
+text denotes, never the double RFC 8785 reads it as". zk2py had compared
+JCS bytes inside RFC 8785's domain, which read `0.1` and
+`0.10000000000000000555` as one document; `order.json` case 76 pins two.
+zk2py now reads a payload's text with every non-integer number as its
+decimal (`strict_json(…, exact=True)`) and compares exact values
+structurally, and no longer uses `rfc8785` here.
+
 ### F-167 · ambiguity · desired.v1 0.1 §2.10 "How a reader reads one": "every number finite" for an integer's text
 
 > §2.10: "As `alarms.v1` §2.4 reads a document: strict JSON first (UTF-8,
@@ -8709,6 +8749,10 @@ pins the revision's case.
 **Wording that would remove the guess:** §2.10, "every number finite as
 `telemetry.v1` §2.6 reads it", or the rule stated in `alarms.v1` §2.4 for
 both.
+
+**Status at desired.v1 0.2:** resolved by 0.2, as zk2py read it:
+"**Finite** (0.2) is by rounding, as `telemetry.v1` §2.6 reads it".
+`reports.json` cases 68 to 71 and `order.json` case 77 passed unchanged.
 
 ### F-168 · ambiguity · desired.v1 0.1 §2.17 step 1: the kill switch across a constrained face
 
@@ -8737,6 +8781,13 @@ constrained face, the deployment's word answers step 2", with a
 `conclusions.json` input for it and a case of a role unbound across a
 face.
 
+**Status at desired.v1 0.2:** resolved by 0.2, against zk2py's reading.
+§2.17 step 2: "**Its descriptor,** or across a constrained face the
+deployment's word for what it would say, listed and bound (0.2): not read,
+or no word had, **unobservable**, `no_descriptor`". zk2py now reads
+`Reading.deployment` across a face; `conclusions.json` cases 31 to 34 pin
+it.
+
 ### F-169 · gap · desired.v1 0.1 §2.10 and §2.12: the kill switch's report among several roles
 
 > §2.10: "The report of a role is the one whose `key` is that role's slice
@@ -8761,6 +8812,10 @@ report resource an unbound role's report occupies (its role's name, or
 the slice it would have), or "a report with no key belongs to no role a
 reader asks about".
 
+**Status at desired.v1 0.2:** resolved by 0.2, stated: "A report with no
+key belongs to no role a reader asks about" (§2.10, §2.12). No fixture
+reads it, and zk2py reads no such report.
+
 ### F-170 · gap · desired.v1 0.1 §2.2 "A declaration is invalid": a target parameter's type
 
 > §2.2: "**Every parameter is a target parameter.** … **A declaration is
@@ -8782,6 +8837,11 @@ still resolves, with a value its type refuses.
 **Wording that would remove the guess:** a seventh reason, "`not_string`:
 a target parameter whose type is not `string`", or a sentence that the
 type plays no part here.
+
+**Status at desired.v1 0.2:** resolved by 0.2, against zk2py's reading: a
+seventh reason, `not_string`, read only of a name that is a single
+parameter. `declare` now takes the parameters' types; `declarations.json`'s
+six new cases pin it.
 
 ### F-171 · contradiction · desired.v1 0.1 §2.16 "One document type": acting once per revision against once per version
 
@@ -8809,6 +8869,12 @@ the two rules has to give way. No fixture has the case.
 **Wording that would remove the guess:** §2.16, which rule a `config.v1`
 owner fed through this profile keeps, and `config.v1` §2.18 saying the
 same, or a `DesiredConfig` whose values change requiring a new revision.
+
+**Status at desired.v1 0.2:** resolved by `desired.v1` 0.2 §2.16 and
+`config.v1` 0.4 §2.18: an owner fed through `desired.v1` acts by its §2.7,
+and "a `DesiredConfig`'s author MUST move `revision` whenever `values`
+change". zk2py's `config.v1` owner still reads no document through
+`desired.v1`.
 
 ### F-172 · gap · desired.v1 0.1 §2.16 "Its report is its own": the mapping's codes and pointer
 
@@ -8841,6 +8907,11 @@ and for `failed`, `busy` and `device-refused`", and "the pointer
 `/values/<group>`, then `/<parameter>` when the refusal names one, each
 escaped as RFC 6901 says".
 
+**Status at desired.v1 0.2:** resolved by `desired.v1` 0.2 §2.16 and
+`config.v1` 0.4 §2.18: `busy` and `device-refused` listed for `failed`, and
+"the pointer `/values/<group>`, then `/<parameter>` when the refusal names
+one … each name escaped as RFC 6901 says: `~` as `~0`, then `/` as `~1`".
+
 ### F-173 · contradiction · desired.v1 0.1 §3, `desired.v1.json`: `observed`'s description
 
 > `desired.v1.json`, `observed`: "The last version the target acted on in
@@ -8863,6 +8934,11 @@ the artifact's id, which §3 then publishes beside this one.
 **Wording that would remove the guess:** in the file's next revision,
 "The last version the target acted on or adopted in this instance".
 
+**Status at desired.v1 0.2:** resolved by 0.2: the schema's revision
+`sha256:43c95259…` says "acted on or adopted", published beside
+`sha256:8c5ffce3…`. zk2py's `PUBLISHED` lists both; `schema.json` passed
+with them.
+
 ### F-174 · contradiction · desired.v1 0.1 CHANGELOG "Stated", Evidence: `bindings.json`'s count
 
 > CHANGELOG 0.1: "**Evidence:** `conformance/declarations.json` (37
@@ -8874,6 +8950,9 @@ the artifact's id, which §3 then publishes beside this one.
 counts add to 221. The count is informative and decides nothing.
 
 **zk2py:** runs every case of the file.
+
+**Status at desired.v1 0.2:** resolved by 0.2: 0.1's evidence line is
+corrected as an erratum, and 0.2's counts (258) are the files'.
 
 ### F-175 · contradiction · desired.v1 0.1 scenarios.md §7 Expected 2 against §2.11: the restarted author's answer
 
@@ -8910,6 +8989,10 @@ report moves to that stamp without `last_known`". A section where the
 same author instance answers after an archive was read, its GET silent
 within the timeout or its link cut, would then show confirmation.
 
+**Status at desired.v1 0.2:** resolved by 0.2: §7 Expected 2 now adopts the
+restarted author's re-put under its new zid, and a new §10 shows
+confirmation by the same author instance after a heal.
+
 ### F-176 · gap · desired.v1 0.1 scenarios.md §5 Expected 1: the baseline report against the target's first act
 
 > scenarios §5 step 1: "G GETs `Rp` the moment S sees its new instance
@@ -8940,6 +9023,10 @@ accept either report.
 act until G has its reply, or §2.5 "a target seeds after its tokens",
 which the text would then have to state.
 
+**Status at desired.v1 0.2:** resolved by 0.2: §5's setup holds the
+target's act from its start until G has its reply; the drive's simulation
+can hold one. §2.5 keeps "at its start".
+
 ### F-177 · gap · desired.v1 0.1 scenarios.md "The contracts": `tasking.json` in prose
 
 > scenarios.md: "The reference keeps them as
@@ -8965,6 +9052,12 @@ author would hold two contracts of one name and minor.
 `meter.json` is, or both contracts and their schema published under
 `spec/profiles/desired/`.
 
+**Status at desired.v1 0.2:** resolved by 0.2: `tasking.json` is given byte
+for byte. zk2py's transcription of the three blocks loads with no finding
+(W107 included), and gives `tasking.json` `sha256:b3da756f…`, `tasking.v1`
+`sha256:a61f80ba…` and `worker.v1` `sha256:66e46fce…` ("At desired.v1
+0.2").
+
 ### F-178 · gap · desired.v1 0.1 scenarios.md §1 Expected 3: who sees the target during the cut
 
 > scenarios §1 step 3: "The test cuts the link between R2 and R1. The
@@ -8984,6 +9077,10 @@ holding a subscription to `Rp`.
 
 **Wording that would remove the guess:** §1's conventions, "S2, a client
 of R2, subscribes to `Rp`", and Expected 3 read through it.
+
+**Status at desired.v1 0.2:** resolved by 0.2: S2, a client of R2,
+subscribes to `Rp` and `Run` before anything starts, and §1 Expected 3 and
+§10 read through it.
 
 ### F-179 · ambiguity · desired.v1 0.1 §2.11 and scenarios.md §4 step 3: a re-mint in one session
 
@@ -9014,6 +9111,10 @@ either id.
 zid fresh, unless it re-mints in its own session (core §8.1), whose re-put
 carries its zid and a later time", and §4 step 3 saying which it runs.
 
+**Status at desired.v1 0.2:** resolved by 0.2: §2.11 "**Its zid** (0.2)"
+states both cases, and §4 step 3 re-mints in its own session, its Expected
+3 "a later stamp of the same id".
+
 ### F-180 · gap · desired.v1 0.1 scenarios.md §9 Expected: questions left unanswered
 
 > scenarios §9 Expected 2: "Converged: **no**, `refused`. Refused: **yes**,
@@ -9034,5 +9135,224 @@ text answers them.
 **Wording that would remove the guess:** §9 Expected 2 to 4 with the
 missing answers.
 
+**Status at desired.v1 0.2:** resolved by 0.2: §9 Expected 2 to 4 give all
+four answers.
+
 **Counts at desired.v1 0.1 and core 0.36:** 180 entries, F-161 to F-180
 open, every one before them resolved.
+
+## At desired.v1 0.2 (#609)
+
+`desired.v1` 0.2 answers round 52's twenty findings (its CHANGELOG says
+what each became), with `config.v1` 0.4, which takes F-171's and F-172's
+side of them. Core is 0.36, unchanged. zk2py read both texts cold and
+implemented each 0.2 rule from the text before running the fixtures:
+- **§2.6 step 4, "never an older version of an id it remembers"**:
+  `TargetRole.remembered`, per id the latest time acted on (recorded when
+  the act starts, §2.7) or adopted, for the 16 most recent such ids
+  (`REMEMBERED_IDS`), an id moved to the most recent at each act or
+  adoption, the oldest forgotten; a restart forgets every one. A sample
+  is judged against the version last acted on or adopted, then the
+  remembered ids, then the one held waiting.
+- **§2.7, every number by its exact value**: a payload's text read as
+  strict JSON with every non-integer number as the decimal its text
+  denotes, then compared structurally, members in any order, `int`,
+  `float` and `Decimal` by their exact values. RFC 8785's library is no
+  longer used for this.
+- **§2.10, finite by rounding and at most 256 deep**, for a report and a
+  document, counted as `telemetry.v1` counts it.
+- **§2.2, `not_string`**: `declare` takes the parameters' types and reads
+  the type of a name that is a single parameter.
+- **§2.17 step 2, the deployment's word** across a face, `no_descriptor`
+  without one; the descriptor is not read there.
+- **§3**: 0.2's id `sha256:43c95259…` published beside 0.1's.
+
+**`just py-conformance`: 2637 of 2637.** At the start of the round,
+round 52's code stopped the `desired` family with exit 2 at `order.json`'s
+new `text` input, which it did not read; its readings of F-163, F-166,
+F-168 and F-170 would have failed the cases 0.2 added for them.
+
+| Family | Before | After |
+|---|---|---|
+| desired | could not run (exit 2) | 341 of 341 |
+| readings | 246 of 246 | 261 of 261 |
+| the 21 others | 2035 of 2035 | 2035 of 2035 |
+
+The `desired` family's six files hold 258 cases: `schema.json` 3 (and
+five checks of its header against zk2py's tables), `declarations.json`
+43, `bindings.json` 25, `order.json` 78 (and 78 read-backs of its
+reports), `reports.json` 74, `conclusions.json` 35. Every count matches
+the CHANGELOG's. `order.json` case 72 fails with 15 ids remembered, so
+the memory's floor is pinned, and its ceiling is not, as the text says.
+
+The `readings` now hold 58 of `desired.v1`, fifteen new and three
+changed for 0.2: the archive's stale old-id version is older; the 17th id
+forgets the first, whose stale value is then acted on, the residual the
+text accepts; the 16 most recent are kept; a remembered id's latest time
+again is the same version; a restart forgets every id; `-0` and `0`,
+`1e1` and `10.0` and `100e-1` and `10` are one value each; two decimals
+apart at the 31st digit are two; 256 deep compares by value, 257 deep
+byte for byte; a report 300 deep is `json`; F-181's two and F-184's one
+(below); and the deployment's word against a descriptor read across a
+face, and ignored when present.
+
+**Round 52's findings at 0.2.** All twenty are resolved, each with a
+status line under its entry ("At desired.v1 0.1").
+
+| Finding | Status | zk2py |
+|---|---|---|
+| F-161 `wrong_self` | resolved, as zk2py read it | unchanged |
+| F-162 running act's version first | resolved, as zk2py read it | unchanged |
+| F-163 never older, per id | resolved, against zk2py's reading | 16 remembered ids |
+| F-164 the id 0 | resolved, stated | unchanged |
+| F-165 an absent member | resolved, as zk2py read it | unchanged |
+| F-166 numbers past 2^53 | resolved, partly against zk2py's reading | exact values everywhere |
+| F-167 finite by rounding | resolved, as zk2py read it | unchanged |
+| F-168 the kill switch across a face | resolved, against zk2py's reading | the deployment's word |
+| F-169 the keyless report | resolved, stated | nothing to implement |
+| F-170 a target parameter's type | resolved, against zk2py's reading | `not_string` |
+| F-171 once per revision | resolved by `config.v1` 0.4 | nothing to implement |
+| F-172 the mapping | resolved by both texts | nothing to implement |
+| F-173 the schema's description | resolved, a second id | both ids published |
+| F-174 the count | resolved, an erratum | unchanged |
+| F-175 §7's confirmation | resolved: adopted, and §10 | read for sufficiency |
+| F-176 §5's race | resolved: the act held | read for sufficiency |
+| F-177 `tasking.json` | resolved: given in full | transcribed, loads clean |
+| F-178 the cut's observer | resolved: S2 | read for sufficiency |
+| F-179 a re-mint's zid | resolved, both stated | read for sufficiency |
+| F-180 §9's answers | resolved: all four | read for sufficiency |
+
+**The scenarios, read again for sufficiency.** No harness was built:
+the runtime owner is #840's DC.
+- **`tasking.json` in full (F-177).** zk2py took the three blocks of
+  "The contracts", stripped the list's two-space indent, and placed the
+  files as the reference keeps them, with the profile's file at the path
+  `worker.v1` lists. Both contracts load with no finding, W107 included.
+  `worker.v1`'s `desired/task` is the profile's Report by type identity
+  (0.2's id), and `tasking.v1`'s template declares `[system, service]`.
+  The ids it computes: `tasking.json` `sha256:b3da756f…`, `tasking.v1`
+  `sha256:a61f80badbd990e20130f592c03038f0bdd3ab0e8ba3a855040560057b27a645`,
+  `worker.v1`
+  `sha256:66e46fce140ea39b8b939ca17c1a7d607108aee7147dc12a5608b6cdfd876454`.
+  The text gives none to compare with, as no profile's scenarios do; a
+  runner against the owner example's `--desired` would compare them
+  there.
+- **§5's hold (F-176)** is runnable: the drive holds an act from its
+  start, and G's GET then finds the baseline report. A black-box runner
+  arms the hold in the new process, which DC's `--desired` interface
+  will have to allow.
+- **§7 Expected 2 (F-175)** agrees with §2.11 and `order.json` case 59:
+  the restarted author's re-put under its new zid is adopted.
+- **§10** shows §2.9's confirmation: a target restarted during a cut
+  reads the archive on its side, then, after the heal, the same author
+  instance answers `s1`, confirmed. Its steps and observations need
+  nothing the text does not give, but no rule cites it (F-183).
+- **§1's S2, §4's re-mint in its own session and §9's four answers**
+  (F-178 to F-180) are runnable as written.
+
+### F-181 · ambiguity · desired.v1 0.2 §2.10 "How a reader reads one": a report's fractional number, exact or a double
+
+> §2.10: "Then the schema, an integral number read as an integer (`3.0` is
+> `3`), a member the schema does not name ignored; a stamp in the form of
+> §2.4, its time at most 2^64−1 and its id at most 128 bits; a revision
+> at most 2^64−1."
+
+> §2.7: "**Every number compares by its exact value** (0.2), the value its
+> text denotes, never the double RFC 8785 reads it as"
+
+> telemetry.v1 §2.6: "**A float** (JSON text with a fraction or an
+> exponent, a CBOR float) is the IEEE 754 double it denotes, the nearest
+> one for JSON text."
+
+0.2 says what a document's number is (its exact value) and when a
+report's number is finite (by rounding), but not what a report's number
+is once it reads. A revision written with a fraction or an exponent past
+2^53 differs by the reading:
+- `18446744073709551615.0` is 2^64 − 1 exactly, a revision in range, or
+  the double 2^64, `revision_range`;
+- `in_force`'s `9007199254740993` beside `observed`'s
+  `9007199254740993.0` is one revision exactly, and two by the double
+  (2^53): an `in_force` finding with `converged` and `desired`.
+
+`reports.json` has no such case, and zk2py read every case alike either
+way: it substituted an exact reader and ran the file again.
+
+**zk2py:** the double, as `telemetry.v1` §2.6 reads a float's text,
+which §2.10 already follows for finiteness. Two readings pin it.
+
+**Wording that would remove the guess:** §2.10, "a number with a
+fraction or an exponent is the double it denotes, as `telemetry.v1` §2.6
+reads it", or "its exact value, as §2.7 reads it", with a `reports.json`
+case.
+
+### F-182 · contradiction · config.v1 0.4 §2.18: "(text 0.4)" after `desired.v1`
+
+> config.v1 §2.18: "`config.v1` does not define desired state;
+> [`desired.v1`](../desired/v1.md) does (text 0.4), and its §2.16 states
+> this profile's rules as those of one document type."
+
+Placed after the link, "(text 0.4)" reads as `desired.v1`'s text 0.4,
+which does not exist: `desired.v1` is at 0.2. The marker is
+`config.v1`'s own (its 0.4 added the sentence), as its other markers are,
+"(text 0.3, F-114)", "(text 0.4, F-171)", but each of those follows the
+rule it dates, not another profile's name.
+
+**zk2py:** nothing to implement.
+
+**Wording that would remove the guess:** "`desired.v1` does, and its
+§2.16 (text 0.4 here) states …", or "(`desired.v1` text 0.2)".
+
+### F-183 · gap · desired.v1 0.2 §2.9 and core Appendix C: scenario §10 cited by no rule
+
+> scenarios.md §10: "Last-known confirmed by its author (§2.9, 0.2)"
+
+> §2.9: "**Confirmed by the author.** When its author's answer, or a live
+> sample, later carries the same version, the target holds it as its
+> author's: it does not act again, and its report's `last_known` goes.
+> `[F: order.json]`"
+
+> core Appendix C: "`profiles/desired/scenarios.md` §1, §3, §6, §7 | …
+> S5, S6 last-known from an archive, the owner absent (0.36)"
+
+§10 is the one scenario that shows §2.9's confirmation, F-175's answer,
+but no rule of the text tags it `[Sc: §10]`: §2.9's bullet cites
+`order.json` alone, and its "From an archive" and "Reported as
+last-known" cite §7. Core Appendix C's index lists §1, §3, §6 and §7,
+while §10 observes S6's other branch, an owner that gave no reply within
+the GET's timeout while it ran, and §4.2's seed when its instance token
+appears again after a cut. A reader following the tags, or the index,
+never reaches §10. Both are indexes, and decide nothing.
+
+**zk2py:** nothing to implement.
+
+**Wording that would remove the guess:** `[Sc: §10]` on §2.9's
+"Confirmed by the author" (and its "From an archive"), and §10 in core
+Appendix C's row, "S6 an owner silent within the timeout".
+
+### F-184 · ambiguity · desired.v1 0.2 §2.6 step 3: what "holds waiting" confirms
+
+> §2.6 step 3: "equal: **the same version** (`same_version`), received
+> again by another path or another seed, never acted on again; its
+> author's own sample of a version the target holds from an archive, or
+> holds waiting while an act runs, **confirms** it (`confirmed`, §2.9);"
+
+> `order.json`, description: "the author's own sample of a version held,
+> or held waiting, from an archive is confirmed instead"
+
+The text's "or holds waiting while an act runs" can be read without
+"from an archive": then the author's own sample of any version held
+waiting, the author's own included, confirms it. The description puts
+"from an archive" on both, and §2.9 confirms only a version read from an
+archive. `order.json` case 66 holds an archive's version waiting; no case
+re-delivers an author's version held waiting, which is `same_version` by
+the description and `confirmed` by the text read literally.
+
+**zk2py:** the description's: an author's version held waiting and
+delivered again is the same version. A reading pins it.
+
+**Wording that would remove the guess:** §2.6 step 3, "its author's own
+sample of a version the target holds from an archive, or holds waiting
+from an archive while an act runs, confirms it".
+
+**Counts at desired.v1 0.2, config.v1 0.4 and core 0.36:** 184 entries,
+F-181 to F-184 open, every one before them resolved.
