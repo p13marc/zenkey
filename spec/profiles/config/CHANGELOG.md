@@ -4,6 +4,53 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-24: a delete fed through `desired.v1` (#840, DC; #609)
+
+`desired.v1`'s runtime (#840, DC: `zenkey::desired`, whose
+`ServiceBuilder::desired_config` feeds an owner through `desired.v1`'s
+reading) settled what 0.4 left to it: what a delete reverts an owner to.
+`desired.v1` §2.16 (its text 0.3) states the rule; this text says what
+the owner's view and status carry after it. zk2py's round 53 (PR #845)
+read 0.4 cold, and filed F-182. Still written against core 0.28. Every
+fixture is unchanged: a delete is `desired.v1`'s `order.json`'s, and the
+revert is the runtime's test (`zenkey/tests/profile_desired.rs`,
+`config_v1_as_a_target`).
+
+**Changed.**
+- **A delete** (§2.18). An owner fed through `desired.v1` reverts, on a
+  delete it acts on, each parameter a document it acted on in this
+  instance named, a refused document's aside, to its startup value (the
+  persisted layer's, else the startup file's or the default, §2.12),
+  through one `set` without a window per group, as converging does. Its
+  view and its status carry no `desired` after it: no document is bound.
+  §5's "not asked" names the case.
+  - **Why the startup value.** The values a document converged are
+    runtime changes (§2.12), which a restart rolls back to exactly these:
+    a delete is the document's end, not the process's, so it undoes what
+    the documents did and nothing else. A value an operator's `set`
+    changed that no document named is not the delete's to undo, and a
+    persisted value is a startup value, so it stays.
+  - **Why no `desired` after it.** `DesiredReport` reports a document;
+    with none bound, the owner converges no desired state, which is what
+    an absent member says. Keeping the last document's report would show
+    a revision as converged whose values were just reverted. `desired.v1`'s
+    Report, where the owner's application puts one, says `reverted`.
+
+**Answered.**
+- **F-182, "(text 0.4)" read as `desired.v1`'s version** (§2.18). The
+  marker after the link to `desired.v1` was this text's, which reads as
+  the linked profile's. It now follows "config.v1 text 0.4", and so does
+  the one on the mapping (F-172). A wording fix: no rule changed by it.
+
+**Deliberately not changed.**
+- **`DesiredReport`'s outcomes.** No `reverted` is added: the type is the
+  standard contract's, and a new outcome would be a new revision of it for
+  a fact an absent member already states.
+- **A revert is never refused.** No startup value is a reach, contract or
+  sensitive one a document could name, since a refused document's
+  parameters are not reverted; a revert whose `set` is refused is
+  `failed` in `desired.v1`'s words, the groups before it restored.
+
 ## 0.4 — 2026-10-24: a document fed through `desired.v1` (#840, DB; #609)
 
 `desired.v1` exists now (its text 0.2), and states this profile's §2.18

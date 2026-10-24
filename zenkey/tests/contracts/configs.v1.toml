@@ -1,0 +1,19 @@
+# desired.v1 §2.16 (#840, DC): an author's config.v1 documents, one per
+# target, state of the author, keyed by the target's system and service,
+# never stale. Its type is config.v1's DesiredConfig, copied as author.v1's
+# is, since no config.v1 resource carries it.
+[interface]
+name  = "configs"
+major = 1
+minor = 0
+uses  = ["desired.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/desired.json"]
+
+[resources."configs/{system}/{service}"]
+kind        = "state"
+type        = "json:DesiredConfig"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

@@ -4,6 +4,137 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-24: the runtime, and round 53 (#840, DC; #609)
+
+Two sources. zk2py read 0.2 cold in round 53 (PR #845): every fixture
+passed, and it filed four findings, F-181 to F-184; round 54, reading core
+0.37 cold, filed F-187, whose `desired.v1` half is answered here (its
+`alarms.v1` half is not this text's). The answers are #840's
+coordinator's, posted on #840. And the reference's runtime was built
+(`zenkey::desired`: an author's writer and record, a target's reader,
+`config.v1` fed through it, and the owner example's `--desired-*`), which
+found what 0.2 did not say. Written against core 0.37: §2.5 and §2.9 now
+read presence as its §8.1 does.
+
+The evidence, counted from the files: `conformance/declarations.json` (43
+cases), `conformance/bindings.json` (25), `conformance/order.json` (80),
+`conformance/reports.json` (80), `conformance/conclusions.json` (35) and
+`conformance/schema.json` (3), 266 in all; and ten scenario sections, of
+which the reference runs §1 to §8 and §10 (`zenkey/tests/profile_desired.rs`,
+one test per section). No expectation of a case that existed changes: the
+eight new cases were written by hand and passed as written, and the two
+descriptions they extend say what they pin. The standard schema is
+unchanged, and so is its id.
+
+**Answered.**
+- **F-181, a report's number: exact, or a double** (§2.10, §2.4). 0.2
+  said when a report's number is finite, and what a document's number is
+  when two are compared, but not what a report's number is once it reads.
+  Now every number is read by its exact value, as §2.7 compares a
+  document's: a number with a zero fraction is that integer, so
+  `18446744073709551615.0` is 2^64−1, a revision in range, and `1.5` is no
+  integer. This is JSON Schema's reading of `integer`, which core §7.3 does
+  not narrow; a document's own revision (§2.4) is read the same way.
+  - The model read the double: `decode` now reads a revision from the
+    report's text (`zenkey_model::desired::decode`), and
+    `revision_of_text` a document's. `Report::from_json`, given a decoded
+    value, can only read the double it holds, and says so.
+  - zk2py's reading, the double, flips.
+  - `reports.json`: its description, and five text cases:
+    `18446744073709551615.0` in range, `18446744073709551616.0` past it,
+    `1.5` outside the schema, `9007199254740993` beside
+    `9007199254740993.0` one revision with no `in_force` finding, and
+    `30e-1` the integer 3; and, on review of PR #850,
+    `1e99999999999999999999`, an integer far past 2^64−1 by its exact
+    value and never finite, so `json`: strict JSON is read before the
+    schema. The model reads a huge positive exponent as too large, never
+    as a fraction, where it is ever asked.
+- **F-182** is `config.v1`'s: its text 0.5 moves the marker.
+- **F-183, scenario §10 cited by no rule** (§2.9; core Appendix C).
+  §2.9's "Confirmed by the author" and "From an archive" cite `[Sc: §10]`,
+  and core Appendix C's row lists §10 (an index entry, recorded under core
+  0.37's entry: the core's version does not move).
+- **F-184, what "holds waiting" confirms** (§2.6 step 3). The text, read
+  literally, confirmed the author's own version held waiting; the
+  fixture's description confirmed only a version from an archive. The
+  description is the rule: step 3 now says "holds waiting from an
+  archive", and that any other delivery of a version held waiting, the
+  author's own included, is the same version. The model already read it
+  so. `order.json`: its description, and two cases, the author's own
+  version held waiting received again from the author, and from an
+  archive, each the same version.
+- **F-187, "gone" against core 0.37** (§2.5, §2.9, §2.17). §2.5 let a
+  target read an archive "with its author's instance token gone"; core
+  0.37 §8.1 makes a withdrawal heard live a reason to read again, never
+  absence. Now the author is absent by a complete read without its
+  instance token, in §2.5, §2.9 and §2.17's steps 1 and 6, and §5's
+  table; a read through a session cut off is not made, and §2.17 counts
+  it beside the possibly incomplete. Every other "absent" or "gone" in the
+  text was read again: the rest are a report's absent member, or a
+  process gone.
+
+**Changed: what building the runtime showed.**
+- **Reading presence** (§2.5). A target that follows its author live
+  holds the liveliness subscriber on a watch session of its own, makes one
+  round trip there before its first seed, and reads presence on another
+  session (core §8.1, 0.37); one that does not reads on a period, and the
+  text says what that misses: an absence shorter than the period whose
+  author returns as the same instance, and any version put during it,
+  until the deployment's re-read. The reference's period is 500 ms. A
+  first version polled only after its first sleep missed a re-mint within
+  its first period, which §4's step 3 found: it reads at once.
+- **A seed at an appearance that draws nothing** MAY be made again: the
+  instance token can reach the target's router before the route to the
+  author's queryable, as an archive's alignment found (core §4.4). The
+  reference retries four times.
+- **The reference's last-known** (§2.5, §2.9). It reads an archive only
+  after a complete read shows the author absent, never on a silent GET
+  while the author is present: an archive can hold a document its author
+  deleted past its window (§2.8). The text's MAY on silence stands.
+- **`undecodable` and `invalid`** (§2.7). A document that decodes and
+  that its JSON Schema refuses is `invalid`, its pointer where the schema
+  refuses it: decoding is core §7.2's, which the schema is not.
+- **An act whose end is unknown** (§2.7) is `failed`, code `apply`: the
+  reference runs each act on a task of its own, and one that panics may
+  have applied anything.
+- **A re-mint is not a restart** (§2.7). A target re-minted in its own
+  process still runs what it applied, and keeps its acts and its report;
+  only a new process acts again.
+- **The author's restart** (§2.11). Its record holds each delete with
+  when it was made, and each entry's stamp for the clock's catch-up (core
+  §4.3); a delete made again is answered for what is left of its window,
+  not a window more, and drops from the record when that has passed; and
+  a paced re-put makes its deletes first, then its documents at a rate,
+  the MUST of "before a GET is answered" kept by the store answering only
+  what the new instance put, and a document the author puts meanwhile
+  never put over.
+- **`config.v1` as a target** (§2.16, Appendix B). What a delete reverts
+  an owner to, which 0.2 left to the runtime: each parameter a document
+  it acted on named, a refused one's aside, back at its startup value,
+  through one `set` per group as converging does, its view and status
+  then carrying no `desired` (`config.v1` text 0.5); a revert that fails
+  keeps the parameters it did not restore for the next delete (on review
+  of PR #850). And, fed through this profile, the owner acts on each act
+  it is given, whatever the revision; a wait on a pending change that
+  never ends is bounded in the reference (5 s past its deadline, or the
+  service's close), the act `failed`, `apply`, since one act at a time
+  would otherwise hold every later version.
+- **scenarios.md** names the owner example's options (`--desired-author`,
+  `--desired-target`, `--desired-unbound`), and §7 and §10 say that the
+  author's absence is a complete read's.
+
+**Deliberately not changed.**
+- **A lost delivery** (§2.5's SHOULD). zenoh 1.10.1's subscriber does not
+  say what it lost, so the reference cannot seed on it; the deployment's
+  period covers it, as the text already says for a face.
+- **No report member for a read not made.** The target's report says
+  what it did; what a seed found, a read not made included, is the
+  runtime's to log and expose (`zenkey::desired::Target::last_seed`),
+  never a field of `desired.v1.Report`, whose schema is unchanged.
+- **The MAY on a silent GET** (§2.5, core S6) stands for an
+  implementation that wants it; only "gone" is read as core 0.37 says.
+- **§9** is a tool's, and stays #840's DD.
+
 ## 0.2 — 2026-10-24: the cold reader's round 52 (#840, DB; #609)
 
 The spec-only implementation read 0.1 cold with core 0.36 (zk2py round

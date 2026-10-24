@@ -755,7 +755,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   reports and documents read strictly, finite by rounding and at most 256
   deep (`strict_json`, telemetry's reader); across a face the deployment's
   word answers step 2 (`TargetReading::deployment`); with config.v1 text
-  0.4, a `DesiredConfig`'s author moving `revision` with `values`).
+  0.4, a `DesiredConfig`'s author moving `revision` with `values`; text
+  0.3, F-181, F-183, F-184 and F-187, #840 DC: a report's and a document's
+  revision read by its exact value (`decode`, `revision_of_text`,
+  `revision_of_value`), the author absent only by a complete read (core
+  §8.1), and with config.v1 text 0.5 `config::Owner::baseline_document`,
+  what a delete reverts a config.v1 target to).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -875,6 +880,32 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   publisher or the session is unchecked, which is how a test writes what
   the text refuses. The owner example's `--telemetry` embeds `meter.v1`
   and drives it from stdin (`telemetry put|raw|new-epoch|instance`).
+  `desired` (#840, DC) is `desired.v1`'s runtime over
+  `zenkey_model::desired`'s state machine.
+  `ServiceBuilder::desired_author(iface, resource, AuthorStartup)` →
+  `Author` puts a target's document only on a content change within the
+  instance (`Written::Unchanged`), deletes on its own word, and keeps a
+  `Record` (`FileRecord`: each document and each delete within the window,
+  with stamps). At a restart it catches the minter up, makes each kept
+  delete again (its tombstone aged to what is left of its window,
+  `StateWriter::delete_aged`), then puts each document again before the
+  instance token, or paced (`Pace::Spread`), never from a GET of its own
+  keys; `new_epoch` re-puts them first. `ServiceBuilder::desired_target(
+  role, author, resource, ReportAt, Handler, TargetStartup)` → `Target`
+  reads the role's binding by `model::binding` (an optional role left
+  unbound is the kill switch: `{"source":"baseline"}`, nothing read) and
+  puts its baseline report before the tokens. From `start()` on it
+  subscribes to the slice and seeds by S4's GET at start, at each
+  appearance of the author's instance token (a watch session's subscriber,
+  else a 500 ms poll; retried while the author is present and silent) and
+  on `set_reread`. It reads the archive's last-known only after a complete
+  read shows the author absent (core §8.1, 0.37), checks each act against
+  the author's bundle (`undecodable`, `invalid`) and runs it on the
+  application's `Handler` on a task of its own, putting the report after
+  every change. `desired_config` is config.v1's owner as a target (a
+  delete reverts what the documents set to the startup values, and the
+  view drops `desired`). The owner example's `--desired-author` and
+  `--desired-target` drive it from stdin (`desired put|delete|report|…`).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.

@@ -5241,7 +5241,171 @@
           }
         }
       ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "held",
+          "same_version",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the author's own version held waiting, received again from the author: the same version, never confirmed (0.3, F-184)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "held",
+          "same_version",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the author's own version held waiting, received again from an archive: the same version, and not last-known (0.3, F-184)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "archive",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "finish": "done"
+        }
+      ]
     }
   ],
-  "description": "desired.v1 §2.6 to §2.10: one target's role, its slice's key (key; null for a role left unbound, §2.12), and the steps it takes, in order -> what each step does, and the report after the last. A step is one of: {sample: {from, kind, stamp, revision?, document? | text? | bytes?}}, a sample or a reply received from either path (§2.5), from \"owner\" (the author's own answer or put) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" or \"delete\" (a delete or a reply_del), its stamp {time, id} (time an NTP64 value, id lowercase hexadecimal without leading zeros, as core's seed/merge.json writes one) or null for an unstamped sample, revision the document type's own when it carries one (§2.4), and a put's document: a payload encoded as JSON, decoded (document), compared by JCS (RFC 8785) with every number by its exact value (0.2, F-166: 10 and 10.0 are one document, 2^53 and 2^53+1 two; a decoded float is a double); or its text (text, 0.2), read as strict JSON as reports.json reads a report, every number finite by rounding, and compared the same way, or byte for byte when it does not read; or the payload's bytes in hex (bytes), compared byte for byte (§2.7); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete reverted), refused whole, or failed partway (a refusal of a revert is read as a failure); {call: true}, the target's own operation changed what is in force; {restart: true}, a new instance of the target, holding nothing. The target starts holding nothing, its report {key, source: baseline} ({source: baseline} with no key). A sample is judged against the version last acted on or adopted (the running act's while one runs) and every id the target remembers, then, while an act runs, against the one held waiting (0.2, F-162); it is admitted when each admits it. The target remembers, per id, the latest time it acted on or adopted a version of that id in this instance, for at least the 16 most recent such ids (0.2, F-163); a case never names more than 16. expect.steps: for a sample, unstamped (no stamp), same_version (the stamp of the version last acted on or adopted, the running act's while one runs, or of the one held waiting, or a remembered id's latest time; the author's own sample of a version held, or held waiting, from an archive is confirmed instead, and the report's last_known goes), older (an earlier time of the held version's id, or of the one held waiting's, or of a remembered id's latest, whichever id is held), held (admitted while an act runs: it replaces any version held waiting), and, admitted otherwise (nothing held, or a later time of the held id, or another id, later than its latest if remembered): adopted, when the target has acted on or adopted a version in this instance and the last of them has the same document (two puts whose documents are equal, or two deletes), else act or revert, the act starting; for finish, done, or adopted, act or revert for a held version as it starts; called; restarted. expect.report is the Report after the last step, as §2.10 builds it: observed the last version acted on or adopted, its stamp written time/id (in decimal, then the id), and its revision for a put that has one; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline for a delete, no in_force; reverted: source baseline, no in_force; adopted: observed the adopted version, in_force too when it named the previous one, outcome, refusal and source kept; last_known true when the version acted on or adopted came from an archive and no author's sample of the same stamp confirmed it; call: source call, no in_force."
+  "description": "desired.v1 §2.6 to §2.10: one target's role, its slice's key (key; null for a role left unbound, §2.12), and the steps it takes, in order -> what each step does, and the report after the last. A step is one of: {sample: {from, kind, stamp, revision?, document? | text? | bytes?}}, a sample or a reply received from either path (§2.5), from \"owner\" (the author's own answer or put) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" or \"delete\" (a delete or a reply_del), its stamp {time, id} (time an NTP64 value, id lowercase hexadecimal without leading zeros, as core's seed/merge.json writes one) or null for an unstamped sample, revision the document type's own when it carries one (§2.4), and a put's document: a payload encoded as JSON, decoded (document), compared by JCS (RFC 8785) with every number by its exact value (0.2, F-166: 10 and 10.0 are one document, 2^53 and 2^53+1 two; a decoded float is a double); or its text (text, 0.2), read as strict JSON as reports.json reads a report, every number finite by rounding, and compared the same way, or byte for byte when it does not read; or the payload's bytes in hex (bytes), compared byte for byte (§2.7); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete reverted), refused whole, or failed partway (a refusal of a revert is read as a failure); {call: true}, the target's own operation changed what is in force; {restart: true}, a new instance of the target, holding nothing. The target starts holding nothing, its report {key, source: baseline} ({source: baseline} with no key). A sample is judged against the version last acted on or adopted (the running act's while one runs) and every id the target remembers, then, while an act runs, against the one held waiting (0.2, F-162); it is admitted when each admits it. The target remembers, per id, the latest time it acted on or adopted a version of that id in this instance, for at least the 16 most recent such ids (0.2, F-163); a case never names more than 16. expect.steps: for a sample, unstamped (no stamp), same_version (the stamp of the version last acted on or adopted, the running act's while one runs, or of the one held waiting, or a remembered id's latest time; the author's own sample of the version held, or of the one held waiting, when that version came from an archive, is confirmed instead, and the report's last_known goes; any other delivery of a version held waiting, the author's own version included, is the same version, 0.3, F-184), older (an earlier time of the held version's id, or of the one held waiting's, or of a remembered id's latest, whichever id is held), held (admitted while an act runs: it replaces any version held waiting), and, admitted otherwise (nothing held, or a later time of the held id, or another id, later than its latest if remembered): adopted, when the target has acted on or adopted a version in this instance and the last of them has the same document (two puts whose documents are equal, or two deletes), else act or revert, the act starting; for finish, done, or adopted, act or revert for a held version as it starts; called; restarted. expect.report is the Report after the last step, as §2.10 builds it: observed the last version acted on or adopted, its stamp written time/id (in decimal, then the id), and its revision for a put that has one; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline for a delete, no in_force; reverted: source baseline, no in_force; adopted: observed the adopted version, in_force too when it named the previous one, outcome, refusal and source kept; last_known true when the version acted on or adopted came from an archive and no author's sample of the same stamp confirmed it; call: source call, no in_force."
 }

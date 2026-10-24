@@ -24,6 +24,7 @@
 //! | [`health`]: `health.v1`'s owner, its standard contract embedded: the status, checks and faults; `clock_ahead` | `health.v1` §2.2–§2.6, §2.10; §4.3, §8.2 |
 //! | [`alarms`]: `alarms.v1`'s owner, its standard contract embedded: the acts keyed by the recipe, confirmations every 450 s, the bound, adoption at a restart from the owner's record or an archive | `alarms.v1` §2.1–§2.9; §2.7, §4.3, §4.4 |
 //! | [`config_v1`]: `config.v1`'s owner, its standard contract embedded: the five operations over a device, the view and the status, the change events, the deadline timer, the persisted layer, desired state | `config.v1` §2.1–§2.19; §2.6–§2.7, §5, §8.2 |
+//! | [`desired`]: `desired.v1`'s author and target: documents put only on a change and again at a restart from the author's record; the target's subscription, seeds, last-known read, acts on the application's handler and report; `config.v1` as a target | `desired.v1` §2.2–§2.16; §4.2, §4.4, §8.1 |
 //! | [`archive`]: last-known state, recorded and aligned; the explicit read | §4.4, S5–S6 |
 //! | [`codec`]: a Rust type and how it is carried; [`typed`]: the handles generated code is written against (#611) | §7.2 |
 //!
@@ -60,7 +61,13 @@
 //! checks each sample against its declaration, refuses a counter or
 //! histogram that goes down within its epoch, and writes the epoch a reader
 //! reads (the instance id, or a member's epoch) where the application left
-//! it out.
+//! it out; `desired.v1` is [`desired`] (#840): an author's documents,
+//! put on a content change only and again from its record at a restart,
+//! through [`ServiceBuilder::desired_author`], and a target's role,
+//! subscribed, seeded at start and whenever its author appears, read from
+//! an archive with its author absent, and acted on once per version through
+//! the application's handler, through [`ServiceBuilder::desired_target`]
+//! (`config.v1`'s owner through [`ServiceBuilder::desired_config`]).
 
 #[cfg(feature = "zenoh")]
 pub mod alarms;
@@ -78,6 +85,8 @@ pub mod config_v1;
 pub mod consumer;
 #[cfg(feature = "zenoh")]
 mod descriptor;
+#[cfg(feature = "zenoh")]
+pub mod desired;
 pub mod error;
 #[cfg(feature = "zenoh")]
 pub mod health;

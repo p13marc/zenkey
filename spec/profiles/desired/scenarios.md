@@ -125,8 +125,11 @@ runtime's: the reference runs them as tests of `zenkey`
   `source` `desired`, `in_force` and `observed` both `{stamp: s<n>,
   revision: n}`, `outcome` `converged`, and `Run` holds v*n*'s content.
 - **The owner example** (#840, DC). The reference's author and target are
-  `zenkey/examples/owner.rs` run with `--desired`, and `owner --help` is
-  the interface a black-box runner drives, as for `alarms.v1`.
+  `zenkey/examples/owner.rs` run with `--desired-author` and
+  `--desired-target lab/author` (`--desired-unbound` for §8), and
+  `owner --help` is the interface a black-box runner drives, as for
+  `alarms.v1`: its drive is the one above, `desired hold`, `release` and
+  `fail-next` its knobs (0.3).
 
 ## §1 Converge after an outage (§2.5, §2.6, §2.10, §2.15)
 
@@ -304,7 +307,8 @@ target converged on it, and the archive recorded it.
 2. The author restarts from its record.
 
 **Expected.**
-1. The target seeds: the author's token is absent, and its GET draws no
+1. The target seeds: a complete presence read shows no instance token of
+   the author's, which is absent (core §8.1, 0.3), and its GET draws no
    reply. The target reads `D`'s archive form,
    `zk2/lab/archive/archive.v1/@state/lab/author/tasking.v1/state/tasks/lab/worker`
    (core §4.4, S5), acts on v1 under `s1`, and its report is converged on
@@ -374,7 +378,9 @@ converged on it, and the archive recorded it.
 
 **Expected.**
 1. The target seeds: no instance token of the author's crosses the cut,
-   and its GET draws no reply within the timeout. The target reads `D`'s
+   so a complete presence read through R2 shows none, absence by core
+   §8.1 (0.3), and its GET draws no reply within the timeout. The target
+   reads `D`'s
    archive form,
    `zk2/lab/archive/archive.v1/@state/lab/author/tasking.v1/state/tasks/lab/worker`
    (core §4.4, S5), acts on v1 under `s1`, and, read through S2, its
