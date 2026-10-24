@@ -584,9 +584,10 @@ pub struct Present {
     /// The providers holding the token, sorted.
     pub providers: Vec<Addr>,
     /// `false` when any read behind it got an error reply, the timeout's
-    /// included: a provider missing from it may be there (§8.1, O5). A
-    /// complete read can still have been refused by access control, which
-    /// looks the same as absence (§8.1, 0.8).
+    /// included, or was cut off while it ran (core §8.1, 0.38): a provider
+    /// missing from it may be there (§8.1, O5). A complete read can still
+    /// have been refused by access control, which looks the same as absence
+    /// (§8.1, 0.8).
     pub complete: bool,
     /// Every error reply of those reads, as
     /// [`crate::presence::PresenceRead::errors`] spells them.
@@ -601,10 +602,12 @@ async fn present(
 ) -> Result<Present> {
     let mut out = Vec::new();
     let mut errors = Vec::new();
+    let mut complete = true;
     for p in providers {
         let (sys, svc) = p.chunks();
         let sel = format!("zk2/{sys}/{svc}/@zk/alive/{iface}/**");
         let read = crate::presence::liveliness_read(session, &sel, timeout).await?;
+        complete &= read.complete;
         errors.extend(read.errors);
         for key in &read.keys {
             if let Ok(ZkKey::Alive { addr, .. }) = parse(key)
@@ -617,7 +620,7 @@ async fn present(
     out.sort();
     Ok(Present {
         providers: out,
-        complete: errors.is_empty(),
+        complete,
         errors,
     })
 }

@@ -1805,11 +1805,19 @@ Liveliness tokens carry no payload; everything is in the key.
       MUST NOT conclude absence from it, and MUST NOT take it as healing a
       loss (§2.7).
     - A reader SHOULD NOT make it: before a read, and again when it ends,
-      it checks that its session holds a transport to another node (in
-      zenoh 1.10.1, `Session::info().transports()`, unstable, §0), and
+      it checks that its session holds a transport to another node, and
       reports a read not made, with that reason, as it reports one
       possibly incomplete. What a read not made would have established is
       unobservable.
+    - **What the check reads** (0.38). zenoh 1.10.1 closes a transport in
+      three steps: it drops the transport's links, then closes its routing
+      face, which answers every read in flight, then removes the transport
+      from the session's list. A check of that list made the moment a read
+      is answered at the cut can still find the closing transport. So a
+      reader checks the session's **links**: in zenoh 1.10.1,
+      `Session::info().links()`, unstable (§0), never `transports()`
+      (measured by the reference: `transports()` missed the cut in 4 of 10
+      runs of `presence.md` §7 step 5, and `links()` in none of 20).
     - **A read cut off while it runs** (0.38, F-185) is not complete
       either: one asked while a transport was held, and answered after the
       session's last transport closed, comes back at once with the final
@@ -1817,7 +1825,7 @@ Liveliness tokens carry no payload; everything is in the key.
       made, so it is **possibly incomplete** (above), with a reason that
       says the session was cut off during it: the tokens it returned were
       seen, and what it shows absent establishes nothing. A reader that
-      finds no transport when a read ends reads it so.
+      finds no link when a read ends reads it so.
     - **A profile's premise** (0.38, F-191). Where a profile names a
       presence read possibly incomplete or refused, a read not made is read
       as that premise reads it: unobservable. The profile's reason stands,

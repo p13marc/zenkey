@@ -24,7 +24,15 @@ scenario, since each is a fact about a bus.
   The tokens it returned were seen, and what it shows absent establishes
   nothing. §2.7 lists it among the incomplete readings.
 - **The reference.** `zenkey::presence::liveliness_read` checks the
-  transports after the read too.
+  session again after the read, and returns the read possibly incomplete,
+  `cut_off_during` set, with the tokens it got.
+- **What the check reads** (found building the reference). zenoh 1.10.1
+  drops a closing transport's links, then answers the reads in flight,
+  then removes the transport from `Session::info().transports()`. A check
+  of `transports()` made as the read is answered still found the transport
+  in 4 of 10 runs of §7 step 5; a check of `Session::info().links()` found
+  none in 20. §8.1 now names the links, for the check before a read as well
+  as after it.
 
 **Changed: a read not made in a profile's premise** (§8.1; F-191). Every
 profile names a presence read present, absent, or possibly incomplete or
