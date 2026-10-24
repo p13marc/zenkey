@@ -20,6 +20,10 @@ use zenkey_fleet::{BundleStore, DoctorBus, DoctorSpec, PresenceScope};
 #[path = "../examples/spray.rs"]
 mod spray;
 
+/// A panic whose unwind hangs ends in seconds, with stacks (#804).
+#[path = "../../zenkey/tests/common/panic_watchdog.rs"]
+mod panic_watchdog;
+
 const NAMESPACE: &str = "spray";
 
 /// How long a presence listing may take to show every address.
@@ -45,6 +49,7 @@ async fn client(endpoint: &str, namespace: Option<&str>) -> zenoh::Session {
 /// (`state-stamp-foreign`, asked under `deep`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_spray_is_a_deployment_and_the_doctor_finds_its_non_conformance() {
+    panic_watchdog::install();
     let args = spray::Args {
         connect: vec![],
         listen: vec!["tcp/127.0.0.1:0".into()],
@@ -167,6 +172,7 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
     use iced::futures::StreamExt as _;
     use zengui::message::{BusMsg, Message, Subject, SubjectMsg};
 
+    panic_watchdog::install();
     // The boot re-reads the shared context file: a scratch one, never the
     // user's.
     let home = std::env::temp_dir().join("zengui-spray-live");

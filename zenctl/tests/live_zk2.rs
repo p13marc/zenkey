@@ -57,6 +57,10 @@ use zenkey::model::template::Bindings;
 use zenkey::{Call, Implementation, OpError, Service, ServiceBuilder, ServiceConfig};
 use zenoh::qos::Priority;
 
+/// A panic whose unwind hangs ends in seconds, with stacks (#804).
+#[path = "../../zenkey/tests/common/panic_watchdog.rs"]
+mod panic_watchdog;
+
 /// The net a case waits under before calling a hang a hang.
 const SETTLE: Duration = Duration::from_secs(20);
 /// One `zenctl` run's limit: above any wait a case asks for.
@@ -91,6 +95,7 @@ fn fp16(fp: &str) -> &str {
 }
 
 fn base_config() -> zenoh::Config {
+    panic_watchdog::install();
     let mut c = zenoh::Config::default();
     c.insert_json5("scouting/multicast/enabled", "false")
         .expect("config");
@@ -192,13 +197,17 @@ async fn tcgui(owners: &zenoh::Session) -> Vec<Service> {
 /// One case's bus: the router, the owners and their services, and where
 /// zenctl connects. `keep` holds whatever else a case brings up and must
 /// outlive its runs: operation servers, an archive, a publishing task.
+///
+/// Fields drop in declaration order, so what a case kept goes first and
+/// the router last: every client closes while its router still answers
+/// (#804).
 struct Bus {
     endpoint: String,
     home: PathBuf,
-    _router: zenoh::Session,
-    owners: zenoh::Session,
-    services: Vec<Service>,
     keep: Vec<Box<dyn std::any::Any + Send>>,
+    services: Vec<Service>,
+    owners: zenoh::Session,
+    _router: zenoh::Session,
 }
 
 impl Drop for Bus {
@@ -247,10 +256,10 @@ impl Bus {
         Bus {
             endpoint,
             home,
-            _router: router,
-            owners,
-            services: Vec::new(),
             keep: Vec::new(),
+            services: Vec::new(),
+            owners,
+            _router: router,
         }
     }
 
@@ -5040,10 +5049,10 @@ async fn face_bus(deny_state: bool) -> (Bus, PathBuf) {
         Bus {
             endpoint,
             home,
-            _router: router,
-            owners,
-            services: Vec::new(),
             keep: Vec::new(),
+            services: Vec::new(),
+            owners,
+            _router: router,
         },
         ground,
     )
