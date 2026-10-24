@@ -33,11 +33,33 @@
 //!   answers it at once, complete and empty, though nothing was asked of
 //!   anyone, so every owner would read absent. [`Error::CutOff`].
 //!
+//! **A read cut off while it runs** (core §8.1, 0.38, F-185) was made, and
+//! is possibly incomplete. Asked while a transport was held, and in flight
+//! when the session's last one closed, it comes back at the cut with the
+//! final reply alone, which the check before it could not see. So the
+//! session is checked again when the read ends, and a read that finds
+//! nothing there is [`PresenceRead::cut_off_during`]: `complete` false, its
+//! tokens seen, its absences establishing nothing.
+//!
+//! **What "cut off" reads** ([`cut_off`]): a session with no link to
+//! another zenoh node. zenoh 1.10.1 closes a transport in this order: its
+//! links, then the routing face, which answers every read in flight, then
+//! the transport's entry, which `Session::info().transports()` lists until
+//! the end. A check of `transports()` made the moment a read is answered at
+//! the cut still finds the closing transport; `Session::info().links()` no
+//! longer does.
+//!
 //! [`settle`] is the one liveliness GET a watch session makes, and its
 //! answer is discarded: a barrier, so a reader knows its router has read the
 //! subscribers it declared before it reads presence on its other session.
+//!
+//! **Every liveliness GET of the runtime, the fleet and the tools goes
+//! through this module** (`scripts/check-liveliness-seam.sh`), and each is
+//! counted per session ([`liveliness_gets`]): what a scenario observes when
+//! it asks which session a reader made its reads on
+//! (`spec/scenarios/presence.md` §9, 0.38).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -53,14 +75,44 @@ pub struct PresenceRead {
     /// The token keys, sorted.
     pub keys: Vec<String>,
     /// `false` when the GET ended at its timeout, or with any other error
-    /// reply: it may have missed tokens, and a tool reports the result as
-    /// possibly incomplete (§8.1), never as absence (O5).
+    /// reply, or with its session cut off ([`PresenceRead::cut_off_during`]):
+    /// it may have missed tokens, and a tool reports the result as possibly
+    /// incomplete (§8.1), never as absence (O5).
     pub complete: bool,
     /// The GET's error replies, in arrival order, each
     /// `<encoding>: <payload>`: `zenoh/string: Timeout` for one that ended
-    /// at its timeout.
+    /// at its timeout. Only what zenoh replied: a read cut off while it ran
+    /// has none, and says so in [`PresenceRead::cut_off_during`].
     pub errors: Vec<String>,
+    /// The session held no link to another zenoh node when the read ended
+    /// (core §8.1, 0.38, F-185): its last transport closed while the read
+    /// ran, and zenoh answered it at the cut, with the final reply alone.
+    /// The read was made, so it is possibly incomplete (`complete` is
+    /// false), never a read not made: the keys it returned were seen, and
+    /// what it shows absent establishes nothing.
+    pub cut_off_during: bool,
 }
+
+impl PresenceRead {
+    /// Why the read is possibly incomplete, in a phrase a tool can put
+    /// after "the presence read …"; `None` when it is complete.
+    #[must_use]
+    pub fn incomplete_reason(&self) -> Option<&'static str> {
+        if self.complete {
+            None
+        } else if self.cut_off_during {
+            Some(CUT_OFF_DURING)
+        } else if self.errors.iter().any(|e| e.ends_with(": Timeout")) {
+            Some("ended at its timeout")
+        } else {
+            Some("ended with an error reply")
+        }
+    }
+}
+
+/// [`PresenceRead::incomplete_reason`] for a read cut off while it ran.
+pub const CUT_OFF_DURING: &str =
+    "was cut off while it ran: zenoh answered it as the session's last link closed (core §8.1)";
 
 /// The keys of every liveliness token matching `selector`, sorted.
 pub async fn liveliness_keys(
@@ -72,11 +124,12 @@ pub async fn liveliness_keys(
 }
 
 /// [`liveliness_keys`], saying whether the GET completed before `timeout`,
-/// with its error replies. A GET that runs to its timeout, or gets any
-/// error reply, is read as possibly incomplete (§8.1).
+/// with its error replies. A GET that runs to its timeout, gets any error
+/// reply, or ends with its session cut off ([`PresenceRead::cut_off_during`],
+/// core §8.1, 0.38) is read as possibly incomplete (§8.1).
 ///
 /// Refused before anything is asked (core §8.1, 0.37; see the module doc):
-/// on a session that holds a liveliness subscriber ([`watching`]),
+/// on a session that has ever held a liveliness subscriber ([`watching`]),
 /// [`Error::ReadBesideSubscriber`]; through a session cut off from every
 /// other zenoh node ([`cut_off`]), [`Error::CutOff`].
 pub async fn liveliness_read(
@@ -95,12 +148,33 @@ pub async fn liveliness_read(
             selector: selector.to_owned(),
         });
     }
-    get(session, selector, timeout).await
+    get(session, selector, timeout, Kind::Read).await
+}
+
+/// Which of the module's two GETs one is, for [`liveliness_gets`].
+#[derive(Clone, Copy)]
+enum Kind {
+    Read,
+    Settle,
 }
 
 /// The GET itself, on the unbounded handler: [`liveliness_read`]'s, and the
-/// barrier's ([`settle`]).
-async fn get(session: &zenoh::Session, selector: &str, timeout: Duration) -> Result<PresenceRead> {
+/// barrier's ([`settle`]). Counted once it is asked ([`liveliness_gets`]);
+/// the session is checked again when it ends (core §8.1, 0.38).
+async fn get(
+    session: &zenoh::Session,
+    selector: &str,
+    timeout: Duration,
+    kind: Kind,
+) -> Result<PresenceRead> {
+    {
+        let mut counts = get_counts();
+        let c = counts.entry(session.zid()).or_default();
+        match kind {
+            Kind::Read => c.reads += 1,
+            Kind::Settle => c.settles += 1,
+        }
+    }
     let rx = session
         .liveliness()
         .get(selector)
@@ -123,13 +197,53 @@ async fn get(session: &zenoh::Session, selector: &str, timeout: Duration) -> Res
     keys.sort();
     keys.dedup();
     // The flume sender drops when the query finalizes, at the routers' final
-    // reply or at the timeout; zenoh sends an error reply at the timeout.
-    let complete = errors.is_empty();
+    // reply or at the timeout; zenoh sends an error reply at the timeout. A
+    // session whose last link closed while the read ran had it finalized at
+    // the cut, with the final reply alone (core §8.1, 0.38, F-185).
+    let cut_off_during = cut_off(session).await;
+    let complete = errors.is_empty() && !cut_off_during;
     Ok(PresenceRead {
         keys,
         complete,
         errors,
+        cut_off_during,
     })
+}
+
+/// The liveliness GETs this module made through one session (#849): what
+/// `spec/scenarios/presence.md` §9 observes of a reader (0.38, F-189).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LivelinessGets {
+    /// Reads asked through [`liveliness_read`] and the functions over it;
+    /// one refused before anything was asked is not counted.
+    pub reads: u64,
+    /// Barriers asked through [`settle`].
+    pub settles: u64,
+}
+
+fn get_counts() -> std::sync::MutexGuard<'static, HashMap<zenoh::session::ZenohId, LivelinessGets>>
+{
+    static COUNTS: OnceLock<Mutex<HashMap<zenoh::session::ZenohId, LivelinessGets>>> =
+        OnceLock::new();
+    COUNTS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// How many liveliness GETs this process has made through `session`, each
+/// counted when it was asked. Every liveliness GET of the runtime, the
+/// fleet and the tools goes through this module
+/// (`scripts/check-liveliness-seam.sh`), so a watch session's count is the
+/// evidence that it made its round trip and no read (core §8.1, 0.37;
+/// `spec/scenarios/presence.md` §9). A count is kept for the life of the
+/// process, as a watch session's mark is.
+#[must_use]
+pub fn liveliness_gets(session: &zenoh::Session) -> LivelinessGets {
+    get_counts()
+        .get(&session.zid())
+        .copied()
+        .unwrap_or_default()
 }
 
 // ─── watch sessions (#830) ──────────────────────────────────────────────────
@@ -190,8 +304,14 @@ pub fn watching(session: &zenoh::Session) -> bool {
 /// alone. zenoh answers a read through it at once, complete and empty,
 /// though nothing was asked of anyone (measured, #800 AD), so such a read
 /// is not complete, whatever its replies say.
+///
+/// Read from the session's **links** (`Session::info().links()`), not its
+/// transports: zenoh 1.10.1 drops a closing transport's links first, then
+/// answers the reads in flight, and removes the transport from
+/// `transports()` last (the module doc). A read answered at the cut finds
+/// no link here; it could still find the transport (0.38, F-185).
 pub async fn cut_off(session: &zenoh::Session) -> bool {
-    session.info().transports().await.next().is_none()
+    session.info().links().await.next().is_none()
 }
 
 /// A barrier for a watch session (#830): one liveliness GET of `selector`
@@ -205,13 +325,16 @@ pub async fn cut_off(session: &zenoh::Session) -> bool {
 /// not refuse it.
 ///
 /// Returns whether the routers' final reply came before `timeout`: `false`
-/// when the GET ran to its timeout, or when the session is cut off, and the
-/// barrier is then not established.
+/// when the GET ran to its timeout, when the session is cut off, or when it
+/// was cut off while the GET ran (zenoh's reply at the cut follows no
+/// declaration), and the barrier is then not established.
 pub async fn settle(session: &zenoh::Session, selector: &str, timeout: Duration) -> Result<bool> {
     if cut_off(session).await {
         return Ok(false);
     }
-    Ok(get(session, selector, timeout).await?.complete)
+    Ok(get(session, selector, timeout, Kind::Settle)
+        .await?
+        .complete)
 }
 
 /// The zk2 tokens matching `selector`, parsed (§1.1). Keys that are not

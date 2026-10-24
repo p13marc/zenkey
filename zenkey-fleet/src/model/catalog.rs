@@ -55,6 +55,23 @@ use crate::report::{
 
 // ─── what presence brought back ─────────────────────────────────────────────
 
+/// Why a presence read is possibly incomplete (core §8.1), as a phrase after
+/// "the presence read …": [`crate::bus::presence::CUT_OFF_DURING`] when its
+/// session was cut off while it ran (0.38, F-185), else `timeout`, the
+/// caller's own words for one that ended at its timeout. `None` when it is
+/// complete. Every report that carries a read's `complete` and
+/// `cut_off_during` says why through this, so the two are never told apart
+/// by a guess.
+pub fn incomplete_reason(complete: bool, cut_off_during: bool, timeout: &str) -> Option<&str> {
+    if complete {
+        None
+    } else if cut_off_during {
+        Some(crate::bus::presence::CUT_OFF_DURING)
+    } else {
+        Some(timeout)
+    }
+}
+
 /// One presence read (§8.1), and the descriptors of the instances it named
 /// (§3.3), as values.
 #[derive(Debug, Clone, Default)]
@@ -64,6 +81,12 @@ pub struct Observed {
     /// Whether the liveliness GET completed before its timeout. `false` is
     /// "possibly incomplete": what is missing here may still be up (O5).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38,
+    /// F-185): zenoh answered it at the cut, so `complete` is false, the
+    /// tokens here were seen, and what it shows absent establishes nothing.
+    /// `false` for a read that ended at its timeout, or one patched from
+    /// presence ([`Observed::with_token`]).
+    pub cut_off_during: bool,
     /// The zk2 tokens read: instance, interface and member tokens.
     pub tokens: Vec<ZkKey>,
     /// Keys the selector matched that are not zk2 tokens, verbatim.
@@ -91,10 +114,33 @@ impl Observed {
         Observed {
             selector: selector.into(),
             complete,
+            cut_off_during: false,
             tokens,
             unparsed,
             descriptors: None,
         }
+    }
+
+    /// One liveliness read's tokens, parsed as [`Observed::from_keys`]
+    /// parses them, with its completeness and whether its session was cut
+    /// off while it ran (core §8.1, 0.38).
+    pub fn from_read(
+        selector: impl Into<String>,
+        read: &zenkey::presence::PresenceRead,
+    ) -> Observed {
+        Observed {
+            cut_off_during: read.cut_off_during,
+            ..Observed::from_keys(selector, &read.keys, read.complete)
+        }
+    }
+
+    /// Why the read is possibly incomplete, as a phrase after "the presence
+    /// read …" (core §8.1): it was cut off while it ran
+    /// ([`crate::bus::presence::CUT_OFF_DURING`], 0.38), else `timeout`, the
+    /// caller's words for a read that ended at its timeout or with an error
+    /// reply. `None` when it is complete.
+    pub fn incomplete_reason<'a>(&self, timeout: &'a str) -> Option<&'a str> {
+        incomplete_reason(self.complete, self.cut_off_during, timeout)
     }
 
     /// Every instance a token names: by its instance token, or by an
@@ -1053,6 +1099,7 @@ struct Instance {
 pub struct Catalog {
     selector: String,
     complete: bool,
+    cut_off_during: bool,
     unparsed: Vec<String>,
     services: BTreeMap<Addr, BTreeMap<InstanceId, Instance>>,
     /// Member tokens, by service: `(iface, member, epoch)`. A member's epoch
@@ -1121,6 +1168,7 @@ impl Catalog {
         Catalog {
             selector: observed.selector.clone(),
             complete: observed.complete,
+            cut_off_during: observed.cut_off_during,
             unparsed: observed.unparsed.clone(),
             services,
             members,
@@ -1131,6 +1179,12 @@ impl Catalog {
     /// Whether the presence read completed before its timeout (§8.1).
     pub fn complete(&self) -> bool {
         self.complete
+    }
+
+    /// Whether the presence read's session was cut off while it ran (core
+    /// §8.1, 0.38): [`Observed::cut_off_during`].
+    pub fn cut_off_during(&self) -> bool {
+        self.cut_off_during
     }
 
     /// The liveliness selector the read was made with, base-relative.
@@ -1321,6 +1375,7 @@ impl Catalog {
         ServiceListing {
             selector: self.selector.clone(),
             complete: self.complete,
+            cut_off_during: self.cut_off_during,
             services,
             unparsed: self.unparsed.clone(),
         }
@@ -1341,6 +1396,7 @@ impl Catalog {
             address: want,
             selector: self.selector.clone(),
             complete: self.complete,
+            cut_off_during: self.cut_off_during,
             instances,
             members,
             unparsed: self.unparsed.clone(),
@@ -1384,6 +1440,7 @@ impl Catalog {
         IfaceListing {
             selector: self.selector.clone(),
             complete: self.complete,
+            cut_off_during: self.cut_off_during,
             interfaces: by
                 .into_iter()
                 .map(|(iface, s)| IfaceSummary {
@@ -1516,6 +1573,7 @@ impl Catalog {
         IfaceView {
             iface: want,
             complete: self.complete,
+            cut_off_during: self.cut_off_during,
             providers,
             consumers,
             revisions,
@@ -1580,6 +1638,7 @@ impl Catalog {
         edges.sort();
         BindingGraph {
             complete: self.complete,
+            cut_off_during: self.cut_off_during,
             nodes,
             edges,
             undescribed: self.undescribed(),
@@ -1613,6 +1672,24 @@ pub fn namespaces(
     keys: &[String],
     complete: bool,
 ) -> NamespaceListing {
+    namespaces_of(selector, keys, complete, false)
+}
+
+/// [`namespaces`], from one read: its completeness, and whether its session
+/// was cut off while it ran (core §8.1, 0.38).
+pub fn namespaces_read(
+    selector: impl Into<String>,
+    read: &zenkey::presence::PresenceRead,
+) -> NamespaceListing {
+    namespaces_of(selector, &read.keys, read.complete, read.cut_off_during)
+}
+
+fn namespaces_of(
+    selector: impl Into<String>,
+    keys: &[String],
+    complete: bool,
+    cut_off_during: bool,
+) -> NamespaceListing {
     let mut by: BTreeMap<String, (BTreeSet<String>, usize)> = BTreeMap::new();
     let mut unparsed = Vec::new();
     for key in keys {
@@ -1639,6 +1716,7 @@ pub fn namespaces(
     NamespaceListing {
         selector: selector.into(),
         complete,
+        cut_off_during,
         namespaces: by
             .into_iter()
             .map(|(namespace, (services, instances))| NamespaceSighting {

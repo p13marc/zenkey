@@ -20,6 +20,10 @@ use crate::report::InstanceRef;
 pub struct BindingGraph {
     /// Whether the presence read completed before its timeout (§8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// By address. Every instance holds an instance token, consumers
     /// included, so a pure consumer is a node too (§8.1).
     pub nodes: Vec<GraphNode>,
@@ -78,6 +82,7 @@ mod tests {
     fn binding_graph_json_shape_is_pinned() {
         let graph = BindingGraph {
             complete: true,
+            cut_off_during: false,
             nodes: vec![
                 GraphNode {
                     address: "vehicle-01/cam-front".into(),

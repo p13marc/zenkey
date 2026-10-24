@@ -159,8 +159,11 @@ pub enum ConfigPremise {
     DescriptorUnread,
     /// No instance token in a complete read: not asked, presence's word.
     Absent,
-    /// The presence read ended at its timeout without the service: possibly
-    /// incomplete, so unobservable (core §8.1).
+    /// The presence read did not show the service and is possibly
+    /// incomplete — it ended at its timeout, or its session was cut off
+    /// while it ran — or it was not made: unobservable (core §8.1; 0.38,
+    /// F-191, for a read not made, whose own reason the report keeps in
+    /// `unobservable`).
     Incomplete,
     /// Across a constrained face: the deployment's word stands for the
     /// descriptor (§2.19, core R7).
@@ -188,6 +191,10 @@ pub struct ConfigPresenceRead {
     pub selector: String,
     /// Whether the read ended at the routers' final reply (core §8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// The instances of the service it saw.
     pub instances: Vec<String>,
 }
@@ -492,6 +499,7 @@ mod tests {
             presence: Some(ConfigPresenceRead {
                 selector: "zk2/lab/rf0/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 instances: vec!["i1".into()],
             }),
             window_s: None,

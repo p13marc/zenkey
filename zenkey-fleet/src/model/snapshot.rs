@@ -124,8 +124,15 @@ pub fn holder_of(lens: &Lens<'_>, identity: &KeyIdentity, replier: Replier) -> H
             answered_by: answered_by(lens, address, replier),
         },
         _ if !catalog.complete() => Holder::Unattributed {
-            reason: "the presence read ended at its timeout, and saw no instance of the address"
-                .into(),
+            reason: format!(
+                "the presence read {}, and saw no instance of the address",
+                crate::model::catalog::incomplete_reason(
+                    false,
+                    catalog.cut_off_during(),
+                    "ended at its timeout"
+                )
+                .unwrap_or_default()
+            ),
         },
         _ => Holder::NoInstance {
             address: address.to_owned(),

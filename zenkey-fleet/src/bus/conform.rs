@@ -199,6 +199,8 @@ pub struct WindowPresence {
     pub held: BTreeSet<String>,
     /// Whether that read ran to the routers' final reply (§8.1).
     pub complete: bool,
+    /// That read's session was cut off while it ran (core §8.1, 0.38).
+    pub cut_off_during: bool,
     /// Those tokens a liveliness subscriber, declared before the read, saw
     /// deleted by the time it was read: the window's end and [`Self::tail`].
     pub gone: BTreeSet<String>,
@@ -795,8 +797,9 @@ async fn watch_instances(
         .map_err(|e| format!("the read of `{selector}`: {e}"))?;
     Ok((
         WindowPresence {
-            held: read.keys.into_iter().collect(),
             complete: read.complete,
+            cut_off_during: read.cut_off_during,
+            held: read.keys.into_iter().collect(),
             gone: BTreeSet::new(),
             tail: Duration::ZERO,
         },

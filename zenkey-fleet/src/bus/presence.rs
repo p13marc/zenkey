@@ -26,6 +26,14 @@
 //!   ([`cut_off`]): zenoh answers it at once, complete and empty, though
 //!   nothing was asked of anyone.
 //!
+//! **A read cut off while it runs was made** (core §8.1, 0.38, F-185): the
+//! runtime checks the session again when the read ends, and one answered at
+//! the cut comes back possibly incomplete, `cut_off_during` set. Every view
+//! here carries it beside `complete` ([`Observed::cut_off_during`]), and
+//! says why in one phrase ([`CUT_OFF_DURING`]): its tokens were seen, and
+//! what it shows absent establishes nothing. A [`PresenceFeed`] reads it as
+//! any seed possibly incomplete.
+//!
 //! **zk2's services** (§8.1, §3.3) are read in two steps: one liveliness GET
 //! for the tokens in a [`Scope`] ([`read_tokens`]), then the descriptor of
 //! every instance they name ([`describe`]), which is how a tokenless
@@ -65,8 +73,10 @@ use crate::{Error, Result};
 ///
 /// A read that ran to its timeout comes back with `complete: false`: it may
 /// have missed tokens, and a caller reports it as possibly incomplete,
-/// never as absence (§8.1, O5). Reply errors are skipped; a token carries
-/// no payload, so a reply without a key has nothing to say.
+/// never as absence (§8.1, O5). So does one whose session was cut off while
+/// it ran, `cut_off_during` set (core §8.1, 0.38): it was made, and its
+/// tokens were seen. Reply errors are skipped; a token carries no payload,
+/// so a reply without a key has nothing to say.
 ///
 /// Not made, and [`Error::NotAsked`] (core §8.1, 0.37): on a watch session,
 /// which holds a liveliness subscriber (#830), or through a session cut off
@@ -98,6 +108,11 @@ pub async fn cut_off(session: &Session) -> Option<String> {
         .await
         .then(|| crate::error::NotAsked::CutOff.to_string())
 }
+
+/// Why a read is possibly incomplete when its session was cut off while it
+/// ran (core §8.1, 0.38, F-185), as a phrase after "the presence read …":
+/// the runtime's own words.
+pub const CUT_OFF_DURING: &str = zenkey::presence::CUT_OFF_DURING;
 
 /// How many descriptor GETs [`describe`] keeps in flight at once.
 pub const DESCRIBE_CONCURRENCY: usize = 64;
@@ -179,7 +194,7 @@ impl Scope {
 pub async fn read_tokens(session: &Session, scope: &Scope, timeout: Duration) -> Result<Observed> {
     let selector = scope.selector();
     let read = liveliness_read(session, &selector, timeout).await?;
-    Ok(Observed::from_keys(selector, &read.keys, read.complete))
+    Ok(Observed::from_read(selector, &read))
 }
 
 /// GETs the descriptor of every instance `observed` names (§3.3), at most
@@ -265,10 +280,9 @@ pub const NAMESPACE_SELECTOR: &str = "**/zk2/*/*/@zk/instance/*";
 /// namespace but its own invisible.
 pub async fn namespace_listing(session: &Session, timeout: Duration) -> Result<NamespaceListing> {
     let read = liveliness_read(session, NAMESPACE_SELECTOR, timeout).await?;
-    Ok(crate::model::catalog::namespaces(
+    Ok(crate::model::catalog::namespaces_read(
         NAMESPACE_SELECTOR,
-        &read.keys,
-        read.complete,
+        &read,
     ))
 }
 
@@ -321,10 +335,11 @@ pub const WITHDRAWAL_SETTLE: Duration = Duration::from_millis(100);
 pub enum SeedOutcome {
     /// Complete: the basis stands (§8.1).
     Complete,
-    /// Ended at its timeout, or with an error reply: possibly incomplete.
-    /// What it read was folded; what it did not is unobservable, and the
-    /// feed reads again.
-    Incomplete,
+    /// Ended at its timeout, or with an error reply, or with its session cut
+    /// off while it ran (core §8.1, 0.38): possibly incomplete, and why, as
+    /// a phrase after "the read …". What it read was folded; what it did not
+    /// is unobservable, and the feed reads again.
+    Incomplete(String),
     /// The subscription lost events while the seed was read, so the seed
     /// could not stand and the feed reads again.
     Overrun { dropped: u64 },
@@ -392,6 +407,9 @@ pub struct PresenceFeed {
     events: EventStream,
     presence: LivePresence,
     last_seed: SeedOutcome,
+    /// Reads made: liveliness GETs asked of the bus, whatever they found.
+    /// A read not made is not one.
+    reads: u64,
     /// The next re-seed's time and the backoff that set it, while one is
     /// owed. Set before a re-seed is read and cleared only by a complete
     /// one, so a read that was cancelled is still owed.
@@ -452,6 +470,7 @@ impl PresenceFeed {
             events,
             presence,
             last_seed: SeedOutcome::Failed("not read yet".to_owned()),
+            reads: 0,
             retry: None,
             pending: Vec::new(),
         };
@@ -472,6 +491,15 @@ impl PresenceFeed {
     /// What the last seed found.
     pub fn last_seed(&self) -> &SeedOutcome {
         &self.last_seed
+    }
+
+    /// How many presence reads the feed has made, its first seed's
+    /// included: liveliness GETs asked of the bus, whatever they found. A
+    /// read not made (core §8.1, 0.37) is not counted. What
+    /// `spec/scenarios/presence.md` §8 observes: one read for a burst of
+    /// withdrawals, none for a make-before-break re-mint.
+    pub fn reads(&self) -> u64 {
+        self.reads
     }
 
     /// The next transitions: waits for an event that moves something, or
@@ -574,6 +602,9 @@ impl PresenceFeed {
                         _ => NotRead::Failed(crate::one_line(&e)),
                     }),
             };
+            if read.is_ok() {
+                self.reads += 1;
+            }
             let observed = match read {
                 Ok(observed) => observed,
                 Err(NotRead::CutOff(why)) => {
@@ -623,7 +654,10 @@ impl PresenceFeed {
                     self.owe_within(WITHDRAWAL_SETTLE);
                 }
             } else {
-                self.last_seed = SeedOutcome::Incomplete;
+                let why = observed
+                    .incomplete_reason("ended at its timeout, or with an error reply")
+                    .unwrap_or_default();
+                self.last_seed = SeedOutcome::Incomplete(why.to_owned());
                 self.back_off();
             }
             return;

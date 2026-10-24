@@ -161,10 +161,11 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// Why a presence read was not made (core §8.1, 0.37).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotAsked {
-    /// Its session holds a liveliness subscriber, history or not (#830): a
-    /// liveliness GET beside one can complete without tokens that are live
-    /// (zenoh 1.10.1, and main at 766b455). A reader holds its subscribers
-    /// on a watch session of its own.
+    /// Its session holds a liveliness subscriber, history or not, or has
+    /// held one (#830; 0.38, F-190): a liveliness GET beside one can
+    /// complete without tokens that are live (zenoh 1.10.1, and main at
+    /// 766b455), and one undeclared leaves its session exposed. A reader
+    /// holds its subscribers on a watch session of its own.
     BesideSubscriber {
         /// The session's zid.
         zid: String,
@@ -180,8 +181,8 @@ impl std::fmt::Display for NotAsked {
         match self {
             NotAsked::BesideSubscriber { zid } => write!(
                 f,
-                "session {zid} holds a liveliness subscriber, beside which zenoh can complete a \
-                 liveliness read without a token that is live (#830, core §8.1)"
+                "session {zid} has held a liveliness subscriber, beside which zenoh can complete \
+                 a liveliness read without a token that is live (#830, core §8.1)"
             ),
             NotAsked::CutOff => f.write_str(
                 "this session reaches no router and no peer, so a read would be answered at \

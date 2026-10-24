@@ -4,6 +4,16 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8, read against core 0.38 (2026-10-24, #849): one wording fix
+
+The second implementation read core 0.37 cold (zk2py round 54) and found
+§2.7's "with its tokens gone" read as a withdrawal heard live, which core
+0.37 §8.1 says is never absence by itself (F-187). §2.7 now says absent as
+§2.14 step 1 already did: a complete read without the owner's instance
+token. The text keeps its version, as config.v1 0.4 kept its for F-182:
+the rule was core 0.37's already, and §2.14's verdict never read otherwise.
+No fixture and no model change.
+
 ## 0.8, read against core 0.37 (2026-10-24, #839): no change
 
 Core 0.37 (§8.1) says what 0.4 and 0.6 left to it, for every profile's

@@ -329,6 +329,7 @@ mod tests {
             presence: Some(crate::report::LensPresence {
                 selector: "zk2/*/*/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 services: 1,
             }),
             contracts: 1,

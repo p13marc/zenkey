@@ -726,6 +726,7 @@ fn a_probe_names_its_verdict_and_attributes_its_silence() {
         presence: Some(ExpectPresence {
             holders: vec![],
             complete: false,
+            cut_off_during: false,
             ..silent.presence.clone().unwrap()
         }),
         ..silent.clone()

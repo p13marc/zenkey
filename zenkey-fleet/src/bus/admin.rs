@@ -1072,6 +1072,7 @@ mod tests {
             namespace: String::new(),
             selector: "zk2/*/*/@zk/**".into(),
             complete: true,
+            cut_off_during: false,
             verified: vec!["aaa".into()],
             unverified: vec![],
             unobservable: None,

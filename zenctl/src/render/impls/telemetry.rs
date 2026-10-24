@@ -248,13 +248,16 @@ impl Render for TelemetryReport {
                     ))
                     .cite("telemetry.v1 §2.9"),
                 );
-                if !p.complete {
+                if let Some(why) = zenkey_fleet::model::catalog::incomplete_reason(
+                    p.complete,
+                    p.cut_off_during,
+                    "ran to its timeout",
+                ) {
                     notes.push(
-                        Note::coverage(
-                            "the presence seed ran to its timeout, so it is possibly \
-                             incomplete: no pair has presence, and a counter's epoch is \
-                             established in-band or assumed",
-                        )
+                        Note::coverage(format!(
+                            "the presence seed {why}, so it is possibly incomplete: no pair has \
+                             presence, and a counter's epoch is established in-band or assumed"
+                        ))
                         .cite("spec §8.1"),
                     );
                 }

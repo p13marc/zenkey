@@ -123,9 +123,29 @@ pub struct ExpectPresence {
     /// `false` when the read ended at its timeout: a holder it did not see
     /// may be there. A read access control refused is complete and empty.
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// Why the read could not be made, when it could not.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+impl ExpectPresence {
+    /// Why the read is possibly incomplete, after "the presence read …",
+    /// when it was made and is (core §8.1); `None` when it is complete or
+    /// was not made (`error`).
+    pub fn incomplete_reason(&self) -> Option<&'static str> {
+        if self.error.is_some() {
+            return None;
+        }
+        crate::model::catalog::incomplete_reason(
+            self.complete,
+            self.cut_off_during,
+            "ended at its timeout",
+        )
+    }
 }
 
 /// The `zenctl check probe` report (#59; zk2's since #612, FJ8b): one
@@ -247,6 +267,7 @@ mod tests {
                 selector: "zk2/host-a/tc/@zk/alive/tc.netif.v1/**".into(),
                 holders: vec![],
                 complete: true,
+                cut_off_during: false,
                 error: None,
             }),
             violations: vec!["k: invalid — /x: expected string".into()],
@@ -290,6 +311,7 @@ mod tests {
                 selector: "zk2/host-a/tc/@zk/alive/tc.netif.v1/**".into(),
                 holders: vec!["host-a/tc".into()],
                 complete: true,
+                cut_off_during: false,
                 error: None,
             }),
             verdict: crate::report::Judgement::Established,

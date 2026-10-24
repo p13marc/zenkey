@@ -166,8 +166,22 @@ pub struct ReadLog {
 pub struct PresenceSeen {
     pub selector: String,
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38).
+    pub cut_off_during: bool,
     pub services: usize,
     pub listing: usize,
+}
+
+impl PresenceSeen {
+    /// Why the read is possibly incomplete, after "the presence read …";
+    /// `None` when it is complete.
+    pub fn incomplete_reason(&self) -> Option<&'static str> {
+        crate::model::catalog::incomplete_reason(
+            self.complete,
+            self.cut_off_during,
+            "ran to its timeout",
+        )
+    }
 }
 
 /// A refresh's reads, owned: presence, S4's GET, the archives. Run it
@@ -555,6 +569,7 @@ impl AlarmFeed {
                 self.log.presence = Some(Ok(PresenceSeen {
                     selector: o.selector.clone(),
                     complete: o.complete,
+                    cut_off_during: o.cut_off_during,
                     services: present.len(),
                     listing,
                 }));

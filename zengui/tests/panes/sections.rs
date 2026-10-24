@@ -235,6 +235,7 @@ fn the_consumers_section_says_r3_from_descriptors_and_never_matching_status() {
     // A landed answer: R3, from descriptors; each role a card.
     let graph = BindingGraph {
         complete: true,
+        cut_off_during: false,
         nodes: Vec::new(),
         edges: vec![
             GraphEdge {

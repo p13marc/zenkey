@@ -106,10 +106,13 @@ impl Render for DoctorReport {
             );
             if !p.complete {
                 notes.push(
+                    // The doctor's report pins its presence shape (zenwatch.v1
+                    // carries it), so the cause is said both ways (core §8.1,
+                    // 0.38).
                     Note::coverage(
-                        "a presence read ran to its timeout, so it is possibly incomplete: \
-                         an absence it would claim is left unjudged — raise --timeout to \
-                         ask again",
+                        "a presence read ran to its timeout, or its session was cut off while \
+                         it ran, so it is possibly incomplete: an absence it would claim is \
+                         left unjudged — raise --timeout, or reconnect, to ask again",
                     )
                     .cite("spec §8.1"),
                 );
@@ -639,12 +642,16 @@ impl Render for zenkey_fleet::HealthReport {
                     ))
                     .cite("health.v1 §2.7"),
                 );
-                if !p.complete {
+                if let Some(why) = zenkey_fleet::model::catalog::incomplete_reason(
+                    p.complete,
+                    p.cut_off_during,
+                    "ran to its timeout",
+                ) {
                     notes.push(
-                        Note::coverage(
-                            "the presence read ran to its timeout, so it is possibly incomplete: \
-                             a service unseen is unobservable, never absent",
-                        )
+                        Note::coverage(format!(
+                            "the presence read {why}, so it is possibly incomplete: a service \
+                             unseen is unobservable, never absent"
+                        ))
                         .cite("spec §8.1"),
                     );
                 }

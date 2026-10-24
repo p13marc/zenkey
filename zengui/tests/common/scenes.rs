@@ -957,6 +957,7 @@ fn workbench_admin(theme: ThemeChoice) -> Zengui {
                 namespace: String::new(),
                 selector: "zk2/*/*/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 verified: vec!["z1".into()],
                 unverified: vec![],
                 unobservable: None,

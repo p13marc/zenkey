@@ -231,12 +231,14 @@ pub async fn run_expect(
                             .into_iter()
                             .collect(),
                         complete: r.complete,
+                        cut_off_during: r.cut_off_during,
                         error: None,
                     },
                     Err(e) => ExpectPresence {
                         selector: alive.clone(),
                         holders: Vec::new(),
                         complete: false,
+                        cut_off_during: false,
                         error: Some(crate::one_line(&e)),
                     },
                 });
@@ -299,9 +301,10 @@ pub async fn run_expect(
             }
             Some(p) => impaired.push(match &p.error {
                 Some(e) => format!("the presence read could not be made: {e}"),
-                None => {
-                    "the presence read ended at its timeout: possibly incomplete (§8.1)".to_owned()
-                }
+                None => format!(
+                    "the presence read {}: possibly incomplete (§8.1)",
+                    p.incomplete_reason().unwrap_or_default()
+                ),
             }),
             None => impaired.push("presence was not read within the window".to_owned()),
         }

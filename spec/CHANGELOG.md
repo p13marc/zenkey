@@ -3,6 +3,103 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.38 — 2026-10-24: the second implementation's findings against 0.37 (#849)
+
+The spec-only implementation read 0.37 cold (zk2py round 54, PR #848):
+2665 of 2665 fixture checks, and `scenarios/presence.md` §7–§9 run from
+their text. It filed seven findings, F-185 to F-191. Each is answered
+here, except F-187's desired.v1 half, which desired.v1's text 0.3 answers
+(#840). No fixture case changed, and none is added: each rule is a
+scenario, since each is a fact about a bus.
+
+**Changed: a read cut off while it runs** (§8.1, §2.7; F-185).
+`[Sc: presence.md §7]`
+- **The gap.** 0.37's check came before the read only. A read asked while
+  a transport was held, and in flight when the session's last transport
+  closed, came back at the cut, complete and empty (measured 4 of 4 by the
+  second implementation). The check before had passed it.
+- **The rule.** A reader checks again when the read ends. A read whose
+  session holds no transport then was made, so it is possibly incomplete,
+  never a read not made. Its reason says the session was cut off during it.
+  The tokens it returned were seen, and what it shows absent establishes
+  nothing. §2.7 lists it among the incomplete readings.
+- **The reference.** `zenkey::presence::liveliness_read` checks the
+  session again after the read, and returns the read possibly incomplete,
+  `cut_off_during` set, with the tokens it got.
+- **What the check reads** (found building the reference). zenoh 1.10.1
+  drops a closing transport's links, then answers the reads in flight,
+  then removes the transport from `Session::info().transports()`. A check
+  of `transports()` made as the read is answered still found the transport
+  in 4 of 10 runs of §7 step 5; a check of `Session::info().links()` found
+  none in 20. §8.1 now names the links, for the check before a read as well
+  as after it.
+
+**Changed: a read not made in a profile's premise** (§8.1; F-191). Every
+profile names a presence read present, absent, or possibly incomplete or
+refused. None names a read not made, so a tool had only "possibly
+incomplete" to give one, which 0.37's CHANGELOG seemed to forbid. The
+rule: a read not made is read as a profile's possibly-incomplete premise
+reads it, unobservable. The profile's reason stands, and the tool reports
+the read's own reason beside it. 0.37's "never folded into either" is
+about the read's kind, which the tool keeps apart. It is not about a
+profile's answer. No profile text changes. The reference's readers of
+alarms, health, config and telemetry each read a read not made as their
+possibly incomplete premise, and keep its reason in the report beside the
+profile's: alarms' now in its scope answer's words too, and config's
+beside the GET's when both failed, where it was dropped.
+
+**Changed: "has never held"** (§8.1; F-190). 0.37 said a read goes on a
+session that "holds no liveliness subscriber". One undeclared leaves its
+session exposed, as the sentence before said, so the rule now reads "has
+never held". This is how the reference marks a session: for its life.
+`scenarios/presence.md` §9 says so too, and the reference's refusals name
+a session that has held one.
+
+**Changed: the scenarios observe the reader** (`scenarios/presence.md`
+§4, §8, §9; F-186, F-188, F-189).
+- **§4** expected a GET beside a liveliness subscriber to hold every token,
+  which Appendix B measures failing (F-186). It is now the watch session's
+  round trip: the handler rule, a GET that completes, and its answer
+  discarded.
+- **§8** observed zenoh only, so a reader that concluded absence from the
+  withdrawal passed (F-188). Each Expected now asks the reader under test:
+  - while the link is cut, the address unobservable and the re-read not
+    made;
+  - up on the heal;
+  - down only from a complete re-read;
+  - one read for a burst;
+  - none for a re-mint.
+- **§9** observed the test's own GETs (F-189). Now:
+  - the reader under test makes no liveliness read on its watch session
+    except the round trip;
+  - a read asked there is refused;
+  - a token withdrawn as soon as the seed is answered is heard going in
+    every run.
+
+**Changed while building the reference** (`scenarios/presence.md` §4, §9).
+- **§4's population.** 10,000 tokens became "at least 1,200", past the 996
+  from which spike S2 measured the hang. The handler rule needs no more,
+  and at 10,000 the reference's own run, in a debug build, took 24 s to
+  set up. Its GETs wait 5 s, stated, where the scenarios' 1 s would have
+  applied. Its pairings with a bounded subscriber nobody drains are left
+  to zenoh's measurements: the reference declares every liveliness
+  subscriber with a callback, and those pairings wedge zenoh's threads in
+  process.
+- **§9 step 5 stalls the watch session's link** while a fresh reader
+  starts. Without the stall, a reader that skips the round trip missed the
+  withdrawal in 0 of 200 runs on one router in process: the race the step
+  names is too narrow to catch it, so "in some runs" was a guess. With
+  the link stalled, the declarations reach the router late, and such a
+  reader misses in every run, while a reader whose round trip waits for
+  the link hears the token go in every run. The Setup gains the link.
+- **What the check reads**, §8.1 above.
+
+**Unchanged.** desired.v1 §2.5's "token gone" (F-187) is desired's text
+0.3. alarms.v1 §2.7 gets the same wording as a fix, and its text stays 0.8
+(its CHANGELOG). The four profiles whose presence premises are complete
+reads (alarms §2.14, health §2.11, config §5, desired §2.17) keep their
+words, as do telemetry's and alarms' reading of a withdrawal as a gap.
+
 ## 0.37 — 2026-10-24: what a complete presence read is (#839, #830)
 
 §8.1 said when a liveliness read is possibly incomplete (it ended at its

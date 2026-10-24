@@ -265,6 +265,10 @@ pub struct HealthPresence {
     pub selector: String,
     /// Whether the read ended at the routers' final reply (core §8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// Services holding an instance token in it.
     pub services: usize,
 }
@@ -423,6 +427,7 @@ mod tests {
             presence: Some(HealthPresence {
                 selector: "zk2/*/*/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 services: services.len(),
             }),
             face: None,

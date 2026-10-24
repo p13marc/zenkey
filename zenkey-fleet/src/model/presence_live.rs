@@ -125,9 +125,15 @@ pub enum PresenceBasis {
     /// No seed yet: what is held came from the subscription alone, whose
     /// history has no end mark. Nothing can be down.
     Unseeded,
-    /// The last seed ended at its timeout, or with an error reply, and no
-    /// complete seed stands: an address it did not show may be up (§8.1).
-    Incomplete,
+    /// The last seed ended at its timeout, or with an error reply, or with
+    /// its session cut off while it ran (core §8.1, 0.38), and no complete
+    /// seed stands: an address it did not show may be up (§8.1).
+    Incomplete {
+        /// The seed's session was cut off while it ran
+        /// ([`Observed::cut_off_during`]): it was made, and is possibly
+        /// incomplete as one that ended at its timeout is.
+        cut_off_during: bool,
+    },
     /// A complete seed stands, and nothing was lost since.
     Complete,
     /// Events were lost (`Dropped`) since the last complete seed: every
@@ -562,7 +568,9 @@ impl LivePresence {
         self.basis = match (seed.complete, prior) {
             (true, _) => PresenceBasis::Complete,
             (false, PresenceBasis::Lost { .. } | PresenceBasis::Complete) => prior,
-            (false, _) => PresenceBasis::Incomplete,
+            (false, _) => PresenceBasis::Incomplete {
+                cut_off_during: seed.cut_off_during,
+            },
         };
         if seed.complete {
             self.reads += 1;
@@ -1169,10 +1177,48 @@ mod tests {
         p.track(&addr("h2/tc"), at(0));
         let t = p.seed(&seed(&[instance("h1/tc", 1)], false), at(1));
         assert_eq!(statuses(&t), [("h1/tc".into(), Unobservable, Up)]);
-        assert_eq!(p.basis(), PresenceBasis::Incomplete);
+        assert!(matches!(p.basis(), PresenceBasis::Incomplete { .. }));
         assert_eq!(p.status(&addr("h1/tc")), Up);
         assert_eq!(p.status(&addr("h2/tc")), Unobservable);
         assert_eq!(p.status(&addr("h9/never")), Unobservable);
+    }
+
+    /// A seed whose session was cut off while it ran (core §8.1, 0.38,
+    /// F-185) was made: it is possibly incomplete, as one that ended at its
+    /// timeout is, and says why. What it read is up, and what it shows
+    /// absent is unobservable, never down; after a complete seed, a re-read
+    /// cut off removes nothing, and a withdrawal it was owed for stays
+    /// unconfirmed.
+    #[test]
+    fn a_seed_cut_off_while_it_ran_is_possibly_incomplete() {
+        let cut = |keys: &[String]| Observed {
+            cut_off_during: true,
+            ..seed(keys, false)
+        };
+        let mut p = LivePresence::new(Scope::all());
+        p.track(&addr("h2/tc"), at(0));
+        let t = p.seed(&cut(&[instance("h1/tc", 1)]), at(1));
+        assert_eq!(statuses(&t), [("h1/tc".into(), Unobservable, Up)]);
+        assert_eq!(
+            p.basis(),
+            PresenceBasis::Incomplete {
+                cut_off_during: true
+            }
+        );
+        assert_eq!(p.status(&addr("h2/tc")), Unobservable, "never down");
+
+        let mut p = LivePresence::new(Scope::all());
+        p.seed(
+            &seed(&[instance("h1/tc", 1), instance("h2/tc", 2)], true),
+            at(1),
+        );
+        p.token(&instance("h2/tc", 2), false, at(2));
+        assert!(p.awaits_read());
+        let t = p.seed(&cut(&[]), at(3));
+        assert!(statuses(&t).is_empty(), "nothing moves: {t:#?}");
+        assert_eq!(p.status(&addr("h1/tc")), Up, "held, and not removed");
+        assert_eq!(p.status(&addr("h2/tc")), Unobservable, "still withdrawn");
+        assert!(p.awaits_read(), "the read it owed is still owed");
     }
 
     /// The last instance token heard going is not absence (core §8.1,
@@ -1328,7 +1374,7 @@ mod tests {
                 ("h2/tc".into(), Unobservable, Up),
             ]
         );
-        assert_eq!(p.basis(), PresenceBasis::Incomplete);
+        assert!(matches!(p.basis(), PresenceBasis::Incomplete { .. }));
         assert_eq!(p.status(&addr("h9/never")), Unobservable);
         let t = p.seed(&seed(&[instance("h2/tc", 2)], true), at(6));
         assert_eq!(statuses(&t), [("h1/tc".into(), Up, Down)]);

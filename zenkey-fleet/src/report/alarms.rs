@@ -242,6 +242,10 @@ pub struct AlarmsPresence {
     pub selector: String,
     /// Whether the read ended at the routers' final reply (core §8.1).
     pub complete: bool,
+    /// The read's session was cut off while it ran (core §8.1, 0.38): zenoh
+    /// answered it at the cut, so `complete` is false. Absent otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_off_during: bool,
     /// Services holding an instance token in it, in scope.
     pub services: usize,
     /// Of which, a descriptor lists `alarms.v1` (§2.13).
@@ -445,6 +449,7 @@ mod tests {
             presence: Some(AlarmsPresence {
                 selector: "zk2/lab/*/@zk/**".into(),
                 complete: true,
+                cut_off_during: false,
                 services: 1,
                 listing: 1,
             }),

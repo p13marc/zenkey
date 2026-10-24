@@ -447,10 +447,11 @@ pub fn judge(obs: &TelemetryObservation) -> TelemetryReport {
         Some(Ok(s)) => Some(TelemetryPresence {
             selector: s.selector.clone(),
             complete: s.complete,
+            cut_off_during: s.cut_off_during,
             services: s.services,
             basis: match book.presence_basis() {
                 Some(PresenceBasis::Complete) => "complete",
-                Some(PresenceBasis::Incomplete) => "incomplete",
+                Some(PresenceBasis::Incomplete { .. }) => "incomplete",
                 Some(PresenceBasis::Lost { .. }) => "lost",
                 Some(PresenceBasis::CutOff) => "cut_off",
                 Some(PresenceBasis::Unseeded) | None => "unseeded",

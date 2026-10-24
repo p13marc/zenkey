@@ -1,5 +1,8 @@
 //! `spec/scenarios/presence.md` §1–§9 (spec §1.5, §3.3, §8.1–§8.2; §7–§9,
-//! what a complete presence read is, core 0.37).
+//! what a complete presence read is, core 0.37 and 0.38). §8's and §9's
+//! reader under test is `zenkey-fleet`'s `PresenceFeed`, in that crate's
+//! `tests/presence_scenarios.rs`: this crate cannot depend on it, so its
+//! `s8_*` and `s9_*` observe zenoh and the runtime's own reads.
 
 mod common;
 
@@ -232,11 +235,13 @@ async fn s1_bring_up_order_and_tokens() {
     let viewer = b.start().await.unwrap();
 
     let inst = svc.instance().to_string();
-    eventually("both instances and the one interface token", || async {
-        keys(&tool, "zk2/p1/*/@zk/**").await.len() == 3
+    // The read the poll found, never a second one: under load a second
+    // read can come back without a token the first saw.
+    let all = common::eventually_some("both instances and the one interface token", || async {
+        let all = keys(&tool, "zk2/p1/*/@zk/**").await;
+        (all.len() == 3).then_some(all)
     })
     .await;
-    let all = keys(&tool, "zk2/p1/*/@zk/**").await;
     let fp16 = zenkey::Implementation::new(contract("nav.v2"))
         .fingerprint()
         .hex()
@@ -792,6 +797,12 @@ async fn raw_read(s: &zenoh::Session, sel: &str) -> (bool, Vec<String>) {
 /// §7 (core §8.1, 0.37): a read through a session cut off from every other
 /// zenoh node is answered at once, complete and empty, though the owner
 /// never left; the reference makes no such read, and says why.
+///
+/// Step 5 (0.38, F-185): a read asked while the link is stalled, its
+/// transport still held, and cut while it is in flight, is answered at the
+/// cut with the final reply alone. The check before it passed; the one
+/// after it finds no link, and the read is possibly incomplete, cut off
+/// during it, never the owner absent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s7_a_read_through_a_session_cut_off() {
     let (r1, ep) = router(None).await;
@@ -831,6 +842,44 @@ async fn s7_a_read_through_a_session_cut_off() {
             .is_ok_and(|r| r.complete && r.keys.contains(&key))
     })
     .await;
+
+    // 5. A read in flight when the link is cut (0.38, F-185). Its timeout
+    // is long, so an answer at the cut cannot be the timeout's.
+    let long = std::time::Duration::from_secs(10);
+    link.stall();
+    assert!(!presence::cut_off(&tool).await, "stalled, the link is held");
+    let reader = tool.clone();
+    let asked =
+        tokio::spawn(
+            async move { presence::liveliness_read(&reader, "zk2/*/*/@zk/**", long).await },
+        );
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!asked.is_finished(), "held by the stall, in flight");
+    let cut_at = std::time::Instant::now();
+    link.cut();
+    let read = asked
+        .await
+        .unwrap()
+        .expect("made: the check before it passed");
+    let answered = cut_at.elapsed();
+    assert!(
+        answered < long / 2,
+        "answered at the cut, not at its timeout: {answered:?}"
+    );
+    assert!(
+        read.errors.is_empty() && read.keys.is_empty(),
+        "the final reply alone, no token and no error reply: {read:?}"
+    );
+    assert!(
+        read.cut_off_during && !read.complete,
+        "possibly incomplete, cut off during it: {read:?}"
+    );
+    assert_eq!(read.incomplete_reason(), Some(presence::CUT_OFF_DURING));
+    assert!(
+        keys(&r1, "zk2/*/*/@zk/instance/*").await.contains(&key),
+        "the owner never left"
+    );
+    link.heal();
 }
 
 /// §8 (core §8.1, 0.37): a withdrawal heard live is not absence. The
@@ -838,6 +887,12 @@ async fn s7_a_read_through_a_session_cut_off() {
 /// withdrawn though the owner never left, and hears it again on the heal;
 /// the owner stopping is withdrawn too, and the read after it, complete and
 /// without the token, is what establishes absence.
+///
+/// This is zenoh's half of §8. Its Expected observes the reader under test
+/// (0.38, F-188), which is the fleet's `PresenceFeed`: that half is
+/// `zenkey-fleet/tests/presence_scenarios.rs`'s
+/// `s8_a_withdrawal_heard_live`, since this crate cannot depend on the
+/// fleet.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s8_a_withdrawal_heard_live() {
     let (r1, ep) = router(None).await;
@@ -912,6 +967,10 @@ async fn s8_a_withdrawal_heard_live() {
 /// liveliness subscriber holds it. The reference refuses a read on a
 /// session that holds a subscriber it declared, and its barrier there
 /// returns.
+///
+/// Steps 1 to 3. Steps 4 and 5 observe the reader under test (0.38,
+/// F-189), the fleet's `PresenceFeed`: `zenkey-fleet/tests/presence_scenarios.rs`'s
+/// `s9_a_read_beside_a_liveliness_subscriber`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s9_a_read_beside_a_liveliness_subscriber() {
     let (_r1, ep) = router(None).await;

@@ -686,11 +686,17 @@ pub fn presence_observer(basis: PresenceBasis, pattern: &str) -> Eval {
                  §3 O6)"
             ),
         ),
-        PresenceBasis::Incomplete => (
+        PresenceBasis::Incomplete { cut_off_during } => (
             CondState::Unobservable,
             format!(
-                "the presence read ended at its timeout, possibly incomplete (spec §8.1): an \
-                 address under {pattern} it did not show is unobservable, not gone; re-reading"
+                "the presence read {}, possibly incomplete (spec §8.1): an address under \
+                 {pattern} it did not show is unobservable, not gone; re-reading",
+                crate::model::catalog::incomplete_reason(
+                    false,
+                    cut_off_during,
+                    "ended at its timeout"
+                )
+                .unwrap_or_default()
             ),
         ),
         PresenceBasis::Unseeded => (

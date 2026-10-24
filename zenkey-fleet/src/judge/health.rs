@@ -70,6 +70,7 @@ pub fn judge(obs: &HealthObservation) -> HealthReport {
             presence_doc = Some(HealthPresence {
                 selector: o.selector.clone(),
                 complete: o.complete,
+                cut_off_during: o.cut_off_during,
                 services: catalog
                     .addresses()
                     .filter(|a| catalog.has_instance(a))
@@ -96,11 +97,9 @@ pub fn judge(obs: &HealthObservation) -> HealthReport {
                      empty scope judged nothing, which is not a healthy deployment",
                     namespace_words(&obs.namespace),
                     o.selector,
-                    if o.complete {
-                        ""
-                    } else {
-                        " (and the read ended at its timeout)"
-                    }
+                    o.incomplete_reason("ended at its timeout")
+                        .map(|why| format!(" (and the read {why})"))
+                        .unwrap_or_default()
                 ));
             }
         }

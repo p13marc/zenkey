@@ -196,12 +196,18 @@ impl Render for TimelineReport {
                 )
                 .cite("tooling guide O7"),
             );
-        } else if self.lens.presence.as_ref().is_some_and(|p| !p.complete) {
+        } else if let Some(why) = self.lens.presence.as_ref().and_then(|p| {
+            zenkey_fleet::model::catalog::incomplete_reason(
+                p.complete,
+                p.cut_off_during,
+                "ended at its timeout",
+            )
+        }) {
             notes.push(
-                Note::coverage(
-                    "the presence read ended at its timeout: an owner it did not see \
-                     leaves its stamps unattributable",
-                )
+                Note::coverage(format!(
+                    "the presence read {why}: an owner it did not see leaves its stamps \
+                     unattributable"
+                ))
                 .cite("spec §8.1"),
             );
         }

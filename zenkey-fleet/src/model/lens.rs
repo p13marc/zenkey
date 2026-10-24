@@ -175,6 +175,7 @@ impl<'a> Lens<'a> {
             presence: self.catalog.map(|c| LensPresence {
                 selector: c.selector().to_owned(),
                 complete: c.complete(),
+                cut_off_during: c.cut_off_during(),
                 services: c.service_count(),
             }),
             contracts: self.held,
