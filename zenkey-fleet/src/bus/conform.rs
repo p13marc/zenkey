@@ -403,6 +403,12 @@ pub async fn observe(
 ) -> ConformObservation {
     let t = spec.timeout;
     let session = &bus.session;
+    // The run's store of revisions, seeded with --contracts: the telemetry
+    // reader's and the desired.v1 reading's, so one retrieves what the other
+    // already holds. The suite's served bundle has a store of its own, so
+    // its holders are asked whatever --contracts holds.
+    let store = BundleStore::new(t);
+    store.seed(offline);
     let scope = Scope::service(&address);
     let (presence, admin) = tokio::join!(
         crate::bus::presence::observe(session, &scope, t),
@@ -477,8 +483,6 @@ pub async fn observe(
         if presence.is_err() {
             return None;
         }
-        let store = BundleStore::new(t);
-        store.seed(offline);
         let mut tspec = crate::bus::telemetry::TelemetrySpec::new(t, spec.window);
         tspec.lease = spec.lease;
         tspec.wait_before_close = spec.wait_before_close;
@@ -520,8 +524,6 @@ pub async fn observe(
             || !crate::model::desired::report_resources(r.contract()).is_empty()
     });
     if obs.presence.is_ok() && target {
-        let store = BundleStore::new(t);
-        store.seed(offline);
         let mut ds = crate::bus::desired::DesiredSpec::new(t);
         // No case reads an archive's last-known.
         ds.archives = false;

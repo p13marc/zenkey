@@ -3219,8 +3219,9 @@ pub(crate) struct DesiredArgs {
     /// seconds (desired.v1 §2.17, text 0.4): the reading is made again
     /// every 500 ms while an answer may still move, until this has passed,
     /// and a target "not yet" on one version of its author's for all of it
-    /// is behind, the finding. Omitted, one reading, and "not yet" is never
-    /// a finding.
+    /// is behind, the finding. A positive number: 0 is refused, since
+    /// leaving --for out already makes one reading, in which "not yet" is
+    /// never a finding.
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
     /// This host's clock and the owners' agree within the HLC delta (500

@@ -24,7 +24,7 @@ Options:
           Only this role, as the target's descriptor lists it
 
       --for <SECS>
-          The longest a target may be behind its author's current version, seconds (desired.v1 §2.17, text 0.4): the reading is made again every 500 ms while an answer may still move, until this has passed, and a target "not yet" on one version of its author's for all of it is behind, the finding. Omitted, one reading, and "not yet" is never a finding
+          The longest a target may be behind its author's current version, seconds (desired.v1 §2.17, text 0.4): the reading is made again every 500 ms while an answer may still move, until this has passed, and a target "not yet" on one version of its author's for all of it is behind, the finding. A positive number: 0 is refused, since leaving --for out already makes one reading, in which "not yet" is never a finding
 
       --clocks-synced
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a report's stamp is aged against this clock (freshness.v1 §2.6), and with --for an author's version stamped longer ago than the window and the delta is one a target "not yet" on it is behind, at once. Without it, a report whose resource declares a horizon has an unobservable age
