@@ -212,6 +212,22 @@ async fn pump(
     let _ = to.shutdown().await;
 }
 
+/// A client of `endpoint` that retries fast after losing it (100 ms, at
+/// most 500 ms between attempts): a tool behind a [`Link`] a test cuts and
+/// heals.
+pub async fn retrying_client(endpoint: &str) -> zenoh::Session {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"client\"").unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .unwrap();
+    c.insert_json5(
+        "connect/retry",
+        "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
+    )
+    .unwrap();
+    zenoh::open(c).await.expect("client")
+}
+
 /// A [`Link`] forwarding to `upstream` (`tcp/127.0.0.1:<port>`).
 pub async fn link_to(upstream: &str) -> Link {
     use std::sync::atomic::Ordering;
