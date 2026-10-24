@@ -196,6 +196,14 @@ liveliness subscriber** (§8.1, Appendix B). `[Sc: presence.md §9]`
   already "a complete read without its instance token"; its text stays 0.8
   (its CHANGELOG points here). `telemetry.v1` reads a withdrawal as a gap
   in presence between two samples, which it is: no absence is concluded.
+  `desired.v1` reads its author's absence so from its text 0.3 (F-187).
+
+**Indexed after the merge** (#840, DC; zk2py round 53's F-183). Appendix
+C's `desired.v1` row lists `scenarios.md` §10 beside §1, §3, §6 and §7:
+S6's other branch, an owner silent within the GET's timeout across a cut,
+then its own answer to the seed when its instance token appears again.
+An index entry, not a rule: the version stays 0.37, and no rule, fixture
+or scenario of the core changes with it.
 
 ## 0.36 — 2026-10-24: what `desired.v1` needed of the core (#840)
 

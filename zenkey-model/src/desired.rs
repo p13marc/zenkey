@@ -1800,9 +1800,11 @@ impl Target {
 pub enum Seen {
     /// Its instance token was seen.
     Present,
-    /// A complete read held no instance token of it.
+    /// A complete read held no instance token of it: absence (core §8.1,
+    /// 0.37), never a withdrawal heard live (text 0.3, F-187).
     Absent,
-    /// Not seen, in a read possibly incomplete or refused.
+    /// Not seen, in a read possibly incomplete or refused, or a read not
+    /// made through a session cut off (core §8.1, 0.37).
     Incomplete,
     /// Across a constrained face, where presence does not cross and the
     /// deployment's word stands for the descriptor (§2.17, text 0.2,

@@ -3366,7 +3366,7 @@ reader, clients, some under CPU load:
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
 | `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
-| `profiles/desired/scenarios.md` §1, §3, §6, §7 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.36) |
+| `profiles/desired/scenarios.md` §1, §3, §6, §7, §10 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.36), and an owner silent within the timeout across a cut, its own answer after the heal (§10, 0.37) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)
