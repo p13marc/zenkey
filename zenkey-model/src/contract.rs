@@ -554,15 +554,17 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// and so does `link.v1` (`link::VOCABULARY`, core 0.29, which drops the
 /// interim `downsample_ms`), `alarms.v1` an empty one
 /// (`alarms::VOCABULARY`, core 0.34, which drops the interim
-/// `severity_default`), and `telemetry.v1` the interim row's four keys
-/// (`telemetry::VOCABULARY`, core 0.35).
+/// `severity_default`), `telemetry.v1` the interim row's four keys
+/// (`telemetry::VOCABULARY`, core 0.35), and `desired.v1` `target_param`
+/// alone (`desired::VOCABULARY`, core 0.37, which retires the interim
+/// `target`).
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),
     ("timing", &["period_ms", "deadline_ms", "lifespan_ms"]),
     (crate::telemetry::NAME, crate::telemetry::VOCABULARY),
     (crate::link::NAME, crate::link::VOCABULARY),
     ("arbitration", &["policy"]),
-    ("desired", &["target_param", "target"]),
+    (crate::desired::NAME, crate::desired::VOCABULARY),
     (crate::alarms::NAME, crate::alarms::VOCABULARY),
     (
         "media",

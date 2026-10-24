@@ -83,6 +83,14 @@
 //!   with the member's kind and unit, and a pair's continuity and rate, its
 //!   epoch in-band or from presence (`spec/profiles/telemetry/v1.md`,
 //!   #819). The owner's in-band epoch is the runtime's.
+//! - [`desired`]: `desired.v1`'s vocabulary and standard schema, the
+//!   declaration read from a resolved resource, a requirement's binding and
+//!   its slice's key, the standard `Report` with its reading and its
+//!   consistency, a target's pure two-phase state machine (each version
+//!   ordered by its author's stamp, acted on once, refused whole or
+//!   reverted), and §5's four questions (`spec/profiles/desired/v1.md`,
+//!   #840). The author's writes and record, and the target's subscription,
+//!   seed and archive read, are the runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -98,6 +106,7 @@ pub mod config;
 pub mod contract;
 pub mod decode;
 pub mod descriptor;
+pub mod desired;
 pub mod diag;
 pub mod envelope;
 pub mod freshness;
