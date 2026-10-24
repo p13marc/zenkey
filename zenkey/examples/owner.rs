@@ -350,6 +350,7 @@
 //! desired delete <target>                   author: its delete
 //! desired documents                         author: the documents held
 //! desired adoption                          author: what the start took over (§2.11)
+//! desired gets <target>                     author: the GETs that reached <target>'s document key
 //! desired new-epoch                         a re-mint in this session (core §8.1): the author puts again what it keeps
 //! desired report                            target: its report (§2.10)
 //! desired running                           target: what the drive runs
@@ -358,10 +359,13 @@
 //! desired hold | release                    target: the drive's next act waits at its start | goes on
 //! desired reread <ms>|off                   target: the re-read period (§2.5)
 //! desired acts                              target: the acts and seeds so far
+//! desired seeds                             target: what its last seed found (§2.5, §2.9)
 //! ```
 //!
-//! `put` is answered `desired put <key> <stamp>`, the stamp as a report
-//! writes it (`<time>/<id>`, §2.4), or `desired unchanged <key>` when the
+//! `put` puts the rest of the line byte for byte, once it reads as strict
+//! JSON (§2.10's reading), so every number keeps its exact value (text
+//! 0.4, F-194); it is answered `desired put <key> <stamp>`, the stamp as a
+//! report writes it (`<time>/<id>`, §2.4), or `desired unchanged <key>` when the
 //! document is the one held (nothing put); a put past the bound is
 //! refused, naming it (§2.13). `delete` is answered `desired deleted <key>
 //! <stamp>`, or `desired none <key>` when no document is held. `documents`
@@ -371,8 +375,16 @@
 //! each list comma-separated, `-` when empty; `new-epoch` `desired new-epoch
 //! zk2/<system>/<service>/@zk/instance/<id>`; `report` `desired report
 //! <json>`, the `desired.v1.Report` as held now; `running` `desired running
-//! <json>`; `acts` `desired acts <n> seeds=<n> held=<true|false>`; every
-//! other command as it was asked.
+//! <json>`; `acts` `desired acts <n> seeds=<n> held=<true|false>`; `gets`
+//! `desired gets <key> <n>`, the GETs the author's state queryables
+//! answered whose selector reaches the key, a document held or not
+//! (`scenarios.md` §8); `seeds` `desired seeds <n> answered=<n>
+//! author=<present|absent|incomplete|not-read|not-made> archive=<-|answered|nothing>`,
+//! with ` because <why>` after a read not made, or `desired seeds 0 none`
+//! before the first (text 0.4, F-197: the replies the GET drew, the
+//! author's presence, read only when the GET drew nothing and it decides
+//! something, and the archive, read only on a complete read showing the
+//! author absent); every other command as it was asked.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -647,11 +659,14 @@ desired.v1 (spec/profiles/desired/v1.md)
   worker.v1's state/running; a delete puts the baseline
   {\"revision\": 0, \"mode\": \"idle\", \"rate_hz\": 1}.
 
-  desired put <target> <json>     author: <target> (<system>/<service>)'s document, the
-                                  rest of the line as written
+  desired put <target> <json>     author: <target> (<system>/<service>)'s document: the
+                                  rest of the line, put byte for byte once it reads as
+                                  strict JSON, so every number keeps its exact value
   desired delete <target>         author: its delete
   desired documents               author: the documents held
   desired adoption                author: what the start took over
+  desired gets <target>           author: the GETs its state queryables answered whose
+                                  selector reaches <target>'s document key
   desired new-epoch               a re-mint in this session: the author puts again what
                                   it keeps, before the new tokens
   desired report                  target: its desired.v1.Report
@@ -663,6 +678,7 @@ desired.v1 (spec/profiles/desired/v1.md)
   desired release                 target: a held act goes on
   desired reread <ms>|off         target: the re-read period
   desired acts                    target: the acts and seeds so far
+  desired seeds                   target: what its last seed found
 
   Answers, one line each:
     desired put <key> <stamp>     the stamp as a report writes it, <time>/<id>
@@ -676,6 +692,15 @@ desired.v1 (spec/profiles/desired/v1.md)
     desired report <json>
     desired running <json>
     desired acts <n> seeds=<n> held=<true|false>
+    desired gets <key> <n>
+    desired seeds <n> answered=<n> author=<present|absent|incomplete|not-read|not-made>
+      archive=<-|answered|nothing> [because <why>]
+                                  the replies the last seed's GET drew; the author's
+                                  presence, read when the GET drew nothing and it decides
+                                  the archive or a retry (not-read otherwise; not-made,
+                                  and why, for a read not made); the archive, read only
+                                  when a complete read shows the author absent;
+                                  desired seeds 0 none before the first
     desired fail-next|refuse-next <code>|hold|release|reread <ms>|off
     refused <line>: <why>
 
@@ -1944,6 +1969,34 @@ fn desired_listed(items: &[String]) -> String {
     }
 }
 
+/// `desired seeds`' answer: the seeds made, and what the last one found
+/// (§2.5, §2.9; text 0.4, F-197).
+fn desired_seeds(seeds: u64, last: Option<&desired::Seeded>) -> String {
+    let Some(s) = last else {
+        return format!("desired seeds {seeds} none");
+    };
+    let (author, why) = match &s.author {
+        desired::AuthorSeen::NotRead => ("not-read", None),
+        desired::AuthorSeen::Present => ("present", None),
+        desired::AuthorSeen::Absent => ("absent", None),
+        desired::AuthorSeen::Incomplete => ("incomplete", None),
+        desired::AuthorSeen::NotMade(why) => ("not-made", Some(why)),
+    };
+    let archive = match s.archive {
+        None => "-",
+        Some(true) => "answered",
+        Some(false) => "nothing",
+    };
+    let mut out = format!(
+        "desired seeds {seeds} answered={} author={author} archive={archive}",
+        s.answered
+    );
+    if let Some(why) = why {
+        out.push_str(&format!(" because {why}"));
+    }
+    out
+}
+
 /// The `desired` commands (the module doc's), each answered by one line.
 async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<String, String> {
     let author = || {
@@ -1966,11 +2019,18 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
     match words {
         ["desired", "put", t, _, ..] => {
             let a = author()?;
-            let doc: serde_json::Value =
-                serde_json::from_str(rest).map_err(|e| format!("the document is not JSON: {e}"))?;
+            // The line as written, byte for byte, once it reads as strict
+            // JSON (§2.10's reading): every number keeps its exact value
+            // (text 0.4, F-194).
+            if zenkey::model::desired::strict_json(rest.as_bytes()).is_none() {
+                return Err(
+                    "the document is not strict JSON (desired.v1 §2.10's reading): UTF-8, \
+                     RFC 8259, no duplicate member, every number finite, at most 256 deep"
+                        .to_owned(),
+                );
+            }
             let key = a.key(t).map_err(err)?;
-            let bytes = serde_json::to_vec(&doc).map_err(|e| e.to_string())?;
-            match a.put(t, bytes).await.map_err(err)? {
+            match a.put(t, rest.as_bytes().to_vec()).await.map_err(err)? {
                 Written::Put(ts) => Ok(format!("desired put {key} {}", stamp(&ts))),
                 _ => Ok(format!("desired unchanged {key}")),
             }
@@ -1982,6 +2042,11 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
                 Written::Deleted(ts) => Ok(format!("desired deleted {key} {}", stamp(&ts))),
                 _ => Ok(format!("desired none {key}")),
             }
+        }
+        ["desired", "gets", t] => {
+            let a = author()?;
+            let key = a.key(t).map_err(err)?;
+            Ok(format!("desired gets {key} {}", a.gets(t).map_err(err)?))
         }
         ["desired", "documents"] => {
             let docs = author()?.documents().await;
@@ -2059,6 +2124,10 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
             }
             Ok(format!("desired reread {period}"))
         }
+        ["desired", "seeds"] => {
+            let t = target()?;
+            Ok(desired_seeds(t.seeds(), t.last_seed().as_ref()))
+        }
         ["desired", "acts"] => {
             let t = target()?;
             let held = drive()?.with(|s| s.held);
@@ -2070,8 +2139,8 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
         }
         _ => Err(
             "usage: desired put <target> <json> | delete <target> | documents | adoption | \
-             new-epoch | report | running | fail-next | refuse-next <code> [<pointer>] | hold | \
-             release | reread <ms>|off | acts"
+             gets <target> | new-epoch | report | running | fail-next | refuse-next <code> \
+             [<pointer>] | hold | release | reread <ms>|off | acts | seeds"
                 .to_owned(),
         ),
     }
