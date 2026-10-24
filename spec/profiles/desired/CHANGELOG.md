@@ -78,7 +78,7 @@ reopened here).
   (§2.15), **`config.v1` as a target** (§2.16), and **what a tool
   concludes of one target** (§2.17).
 - **The standard schema,** `desired.v1.json` (§3), artifact
-  `sha256:0b249e71…`: `desired.v1.Report`, `desired.v1.Version` and
+  `sha256:8c5ffce3…`: `desired.v1.Report`, `desired.v1.Version` and
   `desired.v1.Refusal`, every object open.
 - **What a tool may conclude** (§5): has the target converged on its
   author's current document; is its last act refused or failed; is what

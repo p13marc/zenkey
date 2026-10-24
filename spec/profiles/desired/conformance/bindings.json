@@ -175,6 +175,37 @@
     {
       "expect": {
         "binding": "bound",
+        "key": "zk2/lab/author/tasking.v1/@state/tasks/lab/x-x-worker"
+      },
+      "iface": "tasking.v1",
+      "note": "a service starting x- is slugged as any value too (core §1.4)",
+      "requirement": {
+        "bindings": [
+          "lab/author"
+        ],
+        "optional": true,
+        "params": {
+          "service": "self.service",
+          "system": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "explicit": true,
+        "kind": "state",
+        "template": "tasks/{system}/{service}"
+      },
+      "target": "lab/x-worker"
+    },
+    {
+      "expect": {
+        "binding": "bound",
         "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
       },
       "iface": "mission_plan.v1",

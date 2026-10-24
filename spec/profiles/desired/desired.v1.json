@@ -56,7 +56,7 @@
       "required": ["stamp"]
     },
     "desired.v1.Refusal": {
-      "description": "Why a target refused a document, or failed to apply it (§2.10): a code, the profile's (undecodable, reach, secret, invalid, apply) or the type's own, where in the document as a JSON Pointer (RFC 6901), and a line for a person.",
+      "description": "Why a target refused a document, or failed to apply it (§2.10): a code, the profile's (undecodable, reach, sensitive, invalid, apply) or the type's own, where in the document as a JSON Pointer (RFC 6901), and a line for a person.",
       "type": "object",
       "properties": {
         "code": {

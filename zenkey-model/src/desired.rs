@@ -69,7 +69,7 @@ pub const REFUSAL: &str = "desired.v1.Refusal";
 /// The standard schema's artifact ids the profile publishes (§3), oldest
 /// first. A type of one of these artifacts is the profile's.
 pub const PUBLISHED: &[&str] =
-    &["sha256:0b249e71ab1b20cad122aecda2ef02c62e97a6e7db13a47e33ef0cf4f89856cd"];
+    &["sha256:8c5ffce35fadeb6196233a46e163ee3b15cbd2bd8339a05de2cf8fe22b52e9ef"];
 
 /// Whether `id` is one of the standard schema's published artifact ids.
 #[must_use]
