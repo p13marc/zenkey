@@ -108,19 +108,23 @@ re-minted service always had 1 or 2 live instance tokens.*
 
 ## §4 Reading presence at scale (§8.1)
 
-**Setup.** 10,000 tokens.
+**Setup.** 10,000 tokens. A reader's watch session holds a liveliness
+subscriber to every one of them (core §8.1, "The read that establishes
+absence").
 
-**Steps.** A session that holds a liveliness subscriber issues a liveliness
-GET, under each pairing of the GET's handler and the subscriber's.
+**Steps.** The watch session makes its one liveliness GET, the round trip
+core §8.1 asks of it before a seed, under each pairing of the GET's
+handler and the subscriber's.
 
 **Expected.**
-- With callbacks for both, the GET completes with every token. So it does
-  with a GET handler drained as replies arrive, beside a callback
-  subscriber.
+- With callbacks for both, the GET completes: it ends at the routers' final
+  reply, before its timeout. So it does with a GET handler drained as
+  replies arrive, beside a callback subscriber. Its answer is discarded:
+  a GET beside a liveliness subscriber can complete without live tokens
+  (core §8.1, Appendix B), so this section counts no token (0.38, F-186).
 - With a bounded subscriber handler that nobody drains, a callback GET ends
-  at its timeout with a fraction of the tokens, silently, and a GET on a
-  bounded handler hangs. This is why the rule binds the subscribers too
-  (core §8.1).
+  at its timeout, silently, and a GET on a bounded handler hangs. This is
+  why the rule binds the subscribers too (core §8.1).
 - A tool that sees a GET end at its timeout reports the result as possibly
   incomplete.
 
@@ -189,6 +193,9 @@ through a link the test can cut and heal, and retries its connection.
 3. The tool makes a liveliness GET of `zk2/*/*/@zk/**`, and R1's own
    session reads the owner's instance token.
 4. Heal the link, and the tool reads `zk2/*/*/@zk/**` again.
+5. (0.38, F-185) Stall the link so that it delivers nothing, while the
+   tool's session still holds its transport. The reader under test asks a
+   presence read of `zk2/*/*/@zk/**`. While it is in flight, cut the link.
 
 **Expected.**
 1. The tool reads the token.
@@ -199,9 +206,16 @@ through a link the test can cut and heal, and retries its connection.
    through a session cut off"): the reference makes no such read, and
    reports it not made, with its reason.
 4. The tool's read holds the owner's instance token.
+5. The GET is answered at the cut: a final reply, no token and no error
+   reply. A check made before the read passed it, since a transport was
+   held. The reader finds no transport when the read ends, and reports the
+   read possibly incomplete, cut off during it, never the owner absent
+   (core §8.1, "A read cut off while it runs").
 
 *Measured (0.37) on zenoh 1.10.1, with the reference runtime: as above.
-alarms.v1 0.4 first measured the cut-off read, and its reader made none.*
+alarms.v1 0.4 first measured the cut-off read, and its reader made none.
+Step 5 measured (0.38) with zenoh-python 1.10.1 by the second
+implementation (#609, round 54): answered at the cut, 4 of 4.*
 
 ## §8 A withdrawal heard live (§8.1, 0.37)
 
@@ -209,26 +223,44 @@ alarms.v1 0.4 first measured the cut-off read, and its reader made none.*
 — on the same link, holding a liveliness subscriber with history to
 `zk2/*/*/@zk/instance/*`.
 
+A **reader under test** follows presence live as core §8.1 asks: its
+subscribers on the watch session, its reads on the tool's session. Every
+Expected below that names the reader observes the reader's own verdict, not
+zenoh (0.38, F-188).
+
 **Steps.**
 1. The owner starts. Wait until the subscriber hears its instance token,
    and the tool reads it.
-2. Cut the link, then heal it.
+2. Cut the link. While it is cut, ask the reader for the owner's address.
+   Then heal it, and ask again.
 3. The owner stops, cleanly.
+4. Three owners start, on three addresses. Wait until the reader reads each
+   up. Stop all three at once.
+5. One owner re-mints make-before-break (core §8.1, "Re-minting is
+   make-before-break").
 
 **Expected.**
 1. –
 2. On the cut, the subscriber hears the owner's instance token withdrawn,
-   and R1's own session still reads it: the owner never left. On the heal,
-   the subscriber hears it again, and the tool's read holds it. A reader
-   that concluded absence from the withdrawal would have read a live owner
-   down (core §8.1, "Absence is established only by a complete read").
-3. The subscriber hears the token withdrawn, and the tool's read after it
-   is complete and holds no instance token of the owner: absence, as a read
+   and R1's own session still reads it: the owner never left. While the
+   link is cut, the reader reports the address unobservable, withdrawn,
+   **never down**, and its re-read **not made** (cut off). On the heal,
+   the subscriber hears it again, the tool's read holds it, and the reader
+   reports the address up. A reader that concluded absence from the
+   withdrawal would have read a live owner down (core §8.1, "Absence is
+   established only by a complete read").
+3. The subscriber hears the token withdrawn. The reader reports the address
+   unobservable until its re-read, and down only once that read is
+   complete and holds no instance token of the owner: absence, as a read
    establishes it.
+4. The reader makes **one** read for the three withdrawals, and reports all
+   three addresses down from it.
+5. The reader makes **no** read, and the address stays up throughout.
 
 *Measured (0.37) on zenoh 1.10.1, with the reference runtime: as above.
 A reader whose router restarts sees the same, every token at once
-(`zenkey-fleet`'s `a_reader_whose_link_is_cut_reads_nobody_down`).*
+(`zenkey-fleet`'s `a_reader_whose_link_is_cut_reads_nobody_down`). The
+reference's reader under test is `zenkey-fleet`'s `PresenceFeed`.*
 
 ## §9 A read beside a liveliness subscriber (§8.1, 0.37; Appendix B)
 
@@ -242,6 +274,12 @@ opens a second session, its watch session.
    `zk2/*/*/@zk/**`.
 3. The tool, whose session holds no liveliness subscriber, makes the same
    GET.
+4. (0.38, F-189) A reader under test, as §8's, starts following presence:
+   it declares its subscribers on its watch session, then seeds through
+   the tool's session. Observe the liveliness GETs each of its sessions
+   makes. Then ask it for a liveliness read on its watch session.
+5. Repeat, many times: a fresh reader starts as in step 4, and the owner's
+   instance token is withdrawn as soon as the reader's seed is answered.
 
 **Expected.**
 1. –
@@ -253,6 +291,15 @@ opens a second session, its watch session.
    "The read that establishes absence"): the reference refuses a liveliness
    read on a session that holds a liveliness subscriber it declared, and
    reports it not made.
+4. The watch session makes one liveliness GET, the round trip, after its
+   subscribers and before the seed, and no other. The seed and every
+   re-read go through the tool's session. The read asked on the watch
+   session is not made, beside a liveliness subscriber.
+5. In every run, the reader hears the token withdrawn and, after its
+   re-read, reports the owner down. A reader that skips the round trip can
+   miss the withdrawal: the token went between the seed's answer and the
+   router's reading of the subscriber. Such a reader goes on reading the
+   owner up, in some runs.
 
 *Measured (0.37, #830) on zenoh 1.10.1 and zenoh main at 766b455: step 2's
 GET missed the token in 720 of 720 fresh processes, and in none with the

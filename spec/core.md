@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.37** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.38** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -37,9 +37,12 @@ of name, in 0.34 what `alarms.v1` needed: its vocabulary
 published empty, without the interim `severity_default`, in 0.35
 what `telemetry.v1` needed: a standard schema as a profile's first
 point, and its vocabulary published, in 0.36 what `desired.v1`
-needed: its vocabulary published without the interim `target`, and in
+needed: its vocabulary published without the interim `target`, in
 0.37 what a complete presence read is: one through a session cut off, a
-withdrawal heard live, and a read beside a liveliness subscriber).
+withdrawal heard live, and a read beside a liveliness subscriber, and in
+0.38 the second implementation's findings against 0.37: a read cut off
+while it runs, a read not made in a profile's premise, and scenarios that
+observe the reader).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -619,7 +622,8 @@ presence budget (§8.3) is another. `[F: budget/]`
   - A GET that ended at its timeout, or with an error reply.
   - A GET made through a session that reaches no other zenoh node, which
     zenoh answers at once, complete and empty, though nothing was asked of
-    anyone (§8.1, 0.37). It heals no loss.
+    anyone (§8.1, 0.37), or one whose session's last transport closed
+    while it ran (0.38). It heals no loss.
   - A window shorter than one span, one not shown to have lost no
     delivery, or one over which the owner was not present throughout.
   - An archive's answer, which is last-known (S6).
@@ -1800,11 +1804,26 @@ Liveliness tokens carry no payload; everything is in the key.
     - Such a read is **not complete, whatever its replies say.** A reader
       MUST NOT conclude absence from it, and MUST NOT take it as healing a
       loss (§2.7).
-    - A reader SHOULD NOT make it: before a read, it checks that its
-      session holds a transport to another node (in zenoh 1.10.1,
-      `Session::info().transports()`, unstable, §0), and reports a read
-      not made, with that reason, as it reports one possibly incomplete.
-      What a read not made would have established is unobservable.
+    - A reader SHOULD NOT make it: before a read, and again when it ends,
+      it checks that its session holds a transport to another node (in
+      zenoh 1.10.1, `Session::info().transports()`, unstable, §0), and
+      reports a read not made, with that reason, as it reports one
+      possibly incomplete. What a read not made would have established is
+      unobservable.
+    - **A read cut off while it runs** (0.38, F-185) is not complete
+      either: one asked while a transport was held, and answered after the
+      session's last transport closed, comes back at once with the final
+      reply alone, as one through a session already cut off does. It was
+      made, so it is **possibly incomplete** (above), with a reason that
+      says the session was cut off during it: the tokens it returned were
+      seen, and what it shows absent establishes nothing. A reader that
+      finds no transport when a read ends reads it so.
+    - **A profile's premise** (0.38, F-191). Where a profile names a
+      presence read possibly incomplete or refused, a read not made is read
+      as that premise reads it: unobservable. The profile's reason stands,
+      and a tool reports the read's own reason beside it (not made: cut
+      off, or beside a liveliness subscriber). The kinds stay apart in the
+      tool's report; the profile's answer does not change.
 
     `[Sc: presence.md §7]`
   - **Absence is established only by a complete read** (0.37, #839). An
@@ -1838,7 +1857,8 @@ Liveliness tokens carry no payload; everything is in the key.
     subscriber is undeclared (Appendix B).
     - A reader SHOULD make every liveliness read it may conclude absence
       from — a seed, a re-read, a tool's presence read — on a session that
-      holds no liveliness subscriber of any kind, and hold its liveliness
+      has never held a liveliness subscriber of any kind (0.38, F-190: one
+      undeclared leaves its session exposed), and hold its liveliness
       subscribers on another session of its own: a **watch session**.
     - zenoh orders one session's messages at its router, never two
       sessions'. A reader that seeds on one session and follows
@@ -3327,7 +3347,7 @@ reader, clients, some under CPU load:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27) |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §7–§9 what a complete presence read is (0.37): a session cut off, a withdrawal heard live, a read beside a liveliness subscriber; Appendix B |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); Appendix B |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
