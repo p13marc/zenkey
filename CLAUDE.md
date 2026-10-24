@@ -710,7 +710,18 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   JSON and CBOR, and §2.9's presence only from a complete seed; text 0.4,
   F-152, #819 TE: a counter or histogram read with no pair could not tell;
   text 0.5, F-156 to F-158, #819 TF: a bignum read exactly, an unreadable
-  sample could not tell, the scenarios' R on a complete liveliness read).
+  sample could not tell, the scenarios' R on a complete liveliness read),
+  and `desired.v1`'s (`desired`, #840 DA: the declaration,
+  `target_param` naming one or two template parameters, the first bound to
+  `self.system` and the second to `self.service`; a requirement's binding
+  and its slice's key; the standard `Report` (`desired.v1.json`, by
+  artifact id) with its strict reading and eight consistency findings; a
+  target's pure two-phase state machine, ordered by its author's stamp by
+  core §4.3's rule, each version acted on once, a version carrying the
+  same document as its last act adopted without an act (JCS-equal for
+  JSON, else byte-equal), refused whole or reverted, last-known confirmed
+  by the author; and §5's four questions with `not_yet`; text 0.1, core
+  0.36 publishing its vocabulary and retiring `target`).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -856,7 +867,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.35 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.36 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
