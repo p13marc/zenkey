@@ -625,4 +625,3 @@ def conclude(r: Reading) -> dict[str, Any]:
     named = list(dict.fromkeys(r.first.ids() + r.second.ids()))
     return {"one_incumbent": one_incumbent(r), "vacancy": vacancy(r), "standbys": standbys(r),
             "twins": {x: twin(r, x) for x in named}}
-

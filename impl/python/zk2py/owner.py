@@ -778,7 +778,7 @@ class Owner:
         again without the mark; the interface token last. False when it was
         not standing by on it."""
         with self._writes:
-            if iface not in self.standing_by or self.session is None:
+            if iface not in self.standing_by or self.session is None or self._stop.is_set():
                 return False
             c = self._contract(iface)
             self._iface_entities[iface] = self._declare_resources(c, self._plan_made[iface])
@@ -803,7 +803,7 @@ class Owner:
         of the interface's keys (``redundancy.v1`` §2.4, §2.9). False when it
         was not serving it."""
         with self._writes:
-            if iface in self.standing_by or self.session is None:
+            if iface in self.standing_by or self.session is None or self._stop.is_set():
                 return False
             c = self._contract(iface)
             gone: list[Any] = []
@@ -1363,14 +1363,19 @@ class Owner:
             refresher = self._refresher
         if refresher is not None and refresher is not threading.current_thread():
             refresher.join(timeout=2.0)
+        # Under _writes (an RLock, which take_over's and step_down's own
+        # puts re-enter): a write, a takeover or a step-down in flight ends
+        # first, and none begins after, since each checks _stop under it.
+        # The lists are taken whole, so no other thread mutates what is
+        # undeclared here.
         with self._writes:
-            pass
-        for e in reversed(self._entities):
+            entities, self._entities = list(self._entities), []
+            self._instance_entities, self._iface_entities, self._iface_tokens = [], {}, {}
+        for e in reversed(entities):
             try:
                 e.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
-        self._entities.clear()
         if self.session is not None:
             self.session.close()
             self.session = None

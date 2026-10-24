@@ -107,7 +107,7 @@ def descriptor_reading(session: zenoh.Session, address: str, instance: str, ifac
         return rd.UNREAD, None
     for e in doc.get("interfaces") or []:
         if isinstance(e, dict) and e.get("iface") == iface:
-            m, findings = rd.mark(e, "no_contract")
+            m, _ = rd.mark(e, "no_contract")
             return (rd.UNREAD if m is None else m), doc
     return rd.NOT_LISTED, doc
 
@@ -233,6 +233,7 @@ class Candidate:
         self._timer_gen = 0
         self._stop = threading.Event()
         self._fd: int | None = None
+        self._lock_thread: threading.Thread | None = None
         self._hold_heal = threading.Event()
         if not hold_heal:
             self._hold_heal.set()
@@ -269,20 +270,28 @@ class Candidate:
         if self._fd is not None and self.machine_lock:
             self.post({"lock": True})
         elif self._fd is not None:
-            threading.Thread(target=self._take_lock, daemon=True).start()
+            self._lock_thread = threading.Thread(target=self._take_lock, daemon=True)
+            self._lock_thread.start()
         self.post(rd.START)
         return self.instance
 
     def _take_lock(self) -> None:
         """§10: "each standing by while it cannot take the lock"; the kernel
-        releases a dead holder's."""
-        assert self._fd is not None
-        try:
-            fcntl.flock(self._fd, fcntl.LOCK_EX)
-        except OSError:
-            return
-        if not self._stop.is_set():
+        releases a dead holder's. A non-blocking try every 20 ms until it
+        holds it or the candidate closes: :meth:`close` closes the fd only
+        once this thread is gone, so it never locks a reused fd."""
+        fd = self._fd
+        assert fd is not None
+        while not self._stop.is_set():
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                self._stop.wait(0.02)
+                continue
+            except OSError:
+                return
             self.post({"lock": True})
+            return
 
     def unlock(self) -> None:
         """The lock lost (a test's hand on it): §2.11 "It steps down … when it
@@ -469,9 +478,14 @@ class Candidate:
 
     def close(self) -> None:
         """A clean stop (§2.8): the owner's close undeclares its tokens
-        first, then everything else; it puts and deletes nothing."""
+        first, then everything else; it puts and deletes nothing. The worker
+        and the lock's thread are joined first, so no step in flight runs
+        against an owner or a session being closed."""
         self._stop.set()
         self._hold_heal.set()
+        for t in (self._worker, self._lock_thread):
+            if t is not None and t is not threading.current_thread():
+                t.join(timeout=10.0)
         for e in self._entities:
             try:
                 e.undeclare()
