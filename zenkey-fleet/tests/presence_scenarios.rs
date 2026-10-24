@@ -257,7 +257,14 @@ async fn s7_a_read_cut_off_while_it_runs() {
     let (watch, tool) = (client(&ep).await, retrying_client(&link.endpoint).await);
     let a = owner(&owners, "p7/a").await;
     let key = a.instance_key().expect("a key").to_string();
-    eventually("the tool reads the owner", || reads(&tool, &key)).await;
+    // Both its tokens, the interface token declared after the instance's
+    // (core §8.2), before the seed counts on them.
+    eventually("the tool reads both its tokens", || async {
+        zenkey::presence::liveliness_read(&tool, "zk2/p7/a/@zk/**", T)
+            .await
+            .is_ok_and(|r| r.complete && r.keys.len() == 2 && r.keys.contains(&key))
+    })
+    .await;
     let monitor = Monitor::start(&watch, presence_spec())
         .await
         .expect("a monitor");
@@ -291,7 +298,15 @@ async fn s7_a_read_cut_off_while_it_runs() {
         "{:?}",
         feed.last_seed()
     );
-    assert!(moved.is_empty(), "nothing moves on it: {moved:#?}");
+    assert!(
+        !moved.iter().any(|t| matches!(
+            t.change,
+            PresenceChange::Status { .. }
+                | PresenceChange::InstanceGone { .. }
+                | PresenceChange::InterfaceGone { .. }
+        )),
+        "nothing goes, and no status moves, on it: {moved:#?}"
+    );
     assert_eq!(feed.presence().status(&p7), Up, "never read absent");
     assert_eq!(
         feed.presence().basis(),

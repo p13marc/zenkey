@@ -61,12 +61,13 @@ pub enum Error {
         reason: Box<crate::telemetry::Reason>,
     },
     /// A liveliness read refused before anything was asked (core §8.1,
-    /// 0.37; #830): its session holds a liveliness subscriber, beside which
-    /// zenoh 1.10.1 can complete a liveliness GET without tokens that are
-    /// live. A reader holds its subscribers on a session of its own
-    /// (`presence::declare_subscriber`), and reads on another.
+    /// 0.37; #830): its session holds, or has held, a liveliness
+    /// subscriber (0.38, F-190), beside which zenoh 1.10.1 can complete a
+    /// liveliness GET without tokens that are live. A reader holds its
+    /// subscribers on a session of its own (`presence::declare_subscriber`),
+    /// and reads on another.
     #[error(
-        "liveliness read {selector}: refused on session {zid}, a watch session that holds a \
+        "liveliness read {selector}: refused on session {zid}, a watch session that has held a \
          liveliness subscriber, beside which zenoh can complete a read without a live token \
          (#830, core §8.1)"
     )]

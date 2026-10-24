@@ -235,11 +235,13 @@ async fn s1_bring_up_order_and_tokens() {
     let viewer = b.start().await.unwrap();
 
     let inst = svc.instance().to_string();
-    eventually("both instances and the one interface token", || async {
-        keys(&tool, "zk2/p1/*/@zk/**").await.len() == 3
+    // The read the poll found, never a second one: under load a second
+    // read can come back without a token the first saw.
+    let all = common::eventually_some("both instances and the one interface token", || async {
+        let all = keys(&tool, "zk2/p1/*/@zk/**").await;
+        (all.len() == 3).then_some(all)
     })
     .await;
-    let all = keys(&tool, "zk2/p1/*/@zk/**").await;
     let fp16 = zenkey::Implementation::new(contract("nav.v2"))
         .fingerprint()
         .hex()
