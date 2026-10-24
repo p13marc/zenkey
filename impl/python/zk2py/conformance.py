@@ -1946,6 +1946,12 @@ def _desired_adopters(root: Path) -> list[tuple[str, Any, Any]]:
                    "optional": True})
     out.append(("desired.v1 scenarios.md, \"The contracts\": tasking.v1's slice for lab/worker is D", got.expect(),
                 {"binding": "bound", "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker"}))
+    for bad in ("lab", "lab/worker/x", "lab/", "Lab/worker", "*/worker"):
+        got = ds.bind(task, "tasks/{system}/{service}", False, "tasking.v1", bad,
+                      {"bindings": ["lab/author"], "params": {"system": "self.system", "service": "self.service"},
+                       "optional": True})
+        out.append((f"desired.v1 §2.3, zk2py's own refusal: a target address {bad!r} is not <system>/<service>",
+                    got.expect(), {"binding": "invalid", "reasons": ["target_address"]}))
     return out
 
 
@@ -1997,6 +2003,21 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
     out.append((f"{lab}: 10^16 written as an integer and as 1e16 are one document",
                 ds.jcs_equal({"n": 10**16}, {"n": 1e16}), True))
     out.append((f"{lab}: a boolean is never a number", ds.jcs_equal({"n": True}, {"n": 1}), False))
+    out.append((f"{lab}: past 2^53 on both sides and otherwise equal, one document",
+                ds.jcs_equal({"revision": 2**64 - 1, "b": [1.5]}, {"b": [1.5], "revision": 2**64 - 1}), True))
+    lab = "desired.v1 0.1 §2.7: a value RFC 8785 refuses for any other reason equals nothing, itself included"
+    inf, nan = float("inf"), float("nan")
+    out += [
+        (f"{lab}: a non-finite float (FloatDomainError)", ds.jcs_equal({"n": inf}, {"n": inf}), False),
+        (f"{lab}: NaN", ds.jcs_equal({"n": nan}, {"n": nan}), False),
+        (f"{lab}: a string with no UTF-8 form", ds.jcs_equal({"s": "\ud800"}, {"s": "\ud800"}), False),
+        (f"{lab}: a key that is not a string", ds.jcs_equal({1: 2}, {1: 2}), False),
+        (f"{lab}: a value that is not JSON", ds.jcs_equal({"b": b"x"}, {"b": b"x"}), False),
+        (f"{lab}: an integer past 2^53 beside a non-finite float: the exact fallback refuses it too",
+         ds.jcs_equal({"r": 2**53, "n": inf}, {"r": 2**53, "n": inf}), False),
+        (f"{lab}: such a document is acted on, never adopted",
+         run([put(100, 0xa1, {"n": inf}), "done", put(200, 0xa1, {"n": inf})])[0], ["act", "done", "act"]),
+    ]
     out.append((f"{lab}: a revision moved above 2^53 is acted on, not adopted",
                 run([put(100, 0xa1, {"revision": 2**53}), "done", put(200, 0xa1, {"revision": 2**53 + 1})])[0],
                 ["act", "done", "act"]))

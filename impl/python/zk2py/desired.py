@@ -36,6 +36,7 @@ from typing import Any
 import rfc8785
 
 from . import alarms, jcs, keys, slug, templates
+from .lexical import is_plain_chunk
 from . import freshness as fr
 
 PROFILE = "desired.v1"
@@ -189,6 +190,9 @@ def declare(kind: str, template: str, annotations: dict[str, Any]) -> Declaratio
 BOUND, UNBOUND = "bound", "unbound"
 #: §2.3's findings, in their order.
 BINDING_REASONS = ("required_unbound", "not_one_author", "target_unbound", "not_self", "wrong_self")
+#: zk2py's own refusal, outside §2.3's list: a target address that is not
+#: ``<system>/<service>``.
+TARGET_ADDRESS = "target_address"
 
 
 @dataclass(frozen=True)
@@ -223,6 +227,12 @@ def bind(decl: Declaration, template: str, explicit: bool, iface: str, target: s
     ``params``, the parameter bindings as configured; ``optional``)."""
     if decl.declaration != DECLARED:
         raise ValueError("§2.3 binds a declared resource only")
+    # The target's own address is the premise of every check: one that is
+    # not <system>/<service>, each a plain chunk (core §1.1, §1.5), fills no
+    # slice. zk2py's own refusal, checked alone, outside §2.3's list.
+    tparts = target.split("/") if isinstance(target, str) else []
+    if len(tparts) != 2 or not all(is_plain_chunk(x) for x in tparts):
+        return Binding(INVALID, (TARGET_ADDRESS,))
     providers = list(requirement.get("bindings") or [])
     params = dict(requirement.get("params") or {})
     if not providers:
@@ -252,7 +262,7 @@ def bind(decl: Declaration, template: str, explicit: bool, iface: str, target: s
         reasons.append("wrong_self")
     if reasons:
         return Binding(INVALID, tuple(reasons))
-    system, service = target.split("/")
+    system, service = tparts
     identities = {t.param: system if params[t.param] == SELF_SYSTEM else service for t in decl.targets}
     return Binding(BOUND, (), slice_key(providers[0], iface, explicit, template, identities))
 
@@ -321,6 +331,24 @@ class Payload:
         return cls(data=bytes(data))
 
 
+def _in_strict_domain(v: Any) -> bool:
+    """Whether ``v`` is a value strict JSON reading can yield (§2.10, as
+    :func:`strict_json` reads): null, a boolean, an integer, a finite float,
+    a string with a UTF-8 form, and arrays and objects of them, every key a
+    string with a UTF-8 form."""
+    if v is None or isinstance(v, (bool, int)):
+        return True
+    if isinstance(v, float):
+        return math.isfinite(v)
+    if isinstance(v, str):
+        return _utf8(v)
+    if isinstance(v, list):
+        return all(_in_strict_domain(x) for x in v)
+    if isinstance(v, dict):
+        return all(isinstance(k, str) and _utf8(k) and _in_strict_domain(x) for k, x in v.items())
+    return False
+
+
 def _exactly_equal(a: Any, b: Any) -> bool:
     """JSON values equal by value, a number's exactly (``10`` is ``10.0``),
     a boolean never a number."""
@@ -342,12 +370,20 @@ def jcs_equal(a: Any, b: Any) -> bool:
     compared. A document with an integer beyond ±(2^53−1), which RFC 8785
     does not canonicalize (and a double could not tell from its neighbour),
     is compared by exact value instead, so that two documents whose
-    revisions differ above 2^53 are two documents, never one (F-166). That
-    is §2.7's "conservative" direction: it can cost an act, never skip one."""
+    revisions differ above 2^53 are two documents, never one (F-166).
+
+    That fallback is for ``IntegerDomainError`` alone, and only over two
+    values strict JSON reading can yield. Any other value RFC 8785 refuses
+    (a non-finite float, a string with no UTF-8 form, a key that is not a
+    string, anything that is not JSON) is no document read as strict JSON,
+    so it equals nothing, itself included, and costs an act. Both ways keep
+    §2.7's "conservative" direction: an act may be spent, never skipped."""
     try:
         return rfc8785.dumps(a) == rfc8785.dumps(b)
+    except rfc8785.IntegerDomainError:
+        return _in_strict_domain(a) and _in_strict_domain(b) and _exactly_equal(a, b)
     except rfc8785.CanonicalizationError:
-        return _exactly_equal(a, b)
+        return False
 
 
 def same_document(a: Payload | None, b: Payload | None) -> bool:

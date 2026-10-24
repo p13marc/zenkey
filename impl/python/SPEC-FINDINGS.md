@@ -8445,7 +8445,7 @@ write `target_param` alone and still load with no finding. §10's and
 §4.4's pointers and Appendix C's row change nothing zk2py reads. Nothing
 was found in core 0.36 itself.
 
-**`just py-conformance`: 2559 of 2559.** At the start of the round, 2236
+**`just py-conformance`: 2572 of 2572.** At the start of the round, 2236
 passed and 2 failed: `layout`, since the profile's `conformance/` was
 unread, and `contracts/w105-desired-target`.
 
@@ -8454,7 +8454,7 @@ unread, and `contracts/w105-desired-target`.
 | layout | 20 of 21 | 21 of 21 |
 | contracts | 102 of 103 | 103 of 103 |
 | desired | (none) | 291 of 291 |
-| readings | 203 of 203 | 233 of 233 |
+| readings | 203 of 203 | 246 of 246 |
 | the 19 others | 1911 of 1911 | 1911 of 1911 |
 
 The `desired` family covers six files, 222 cases, every one passing the
@@ -8470,7 +8470,7 @@ first time it ran:
 - `reports.json`: 66;
 - `conclusions.json`: 31.
 
-Of the 30 new `readings`, ten read Appendix B and §2.3 over the adopters'
+Of the 43 new `readings`, ten read Appendix B and §2.3 over the adopters'
 real contracts and bindings, which the fixtures give already resolved:
 - the examples' desired resources are the walkthrough's `plans/{vehicle}`
   and `zs.desired.v1`'s seven templates, none invalid;
@@ -8483,10 +8483,13 @@ real contracts and bindings, which the fixtures give already resolved:
   typed `desired.v1.Report`, as Appendix B says;
 - the scenarios' `tasking.v1` gives `D` for `lab/worker`.
 
-The other twenty read the open findings' readings (F-162, F-163, F-166,
-F-167, F-168), §2.7's equality over a payload's bytes, §2.10's report puts,
-and a report's bytes no fixture gives (nested 100,000 deep, read as `json`
-and never a crash; 300 deep, read; a byte-order mark; a lone surrogate).
+Five read zk2py's own refusal of a target address that is not
+`<system>/<service>`, each a plain chunk (`target_address`, outside §2.3's
+list, checked alone). The other 28 read the open findings' readings
+(F-162, F-163, F-166, F-167, F-168), §2.7's equality over a payload's
+bytes and over values RFC 8785 refuses, §2.10's report puts, and a
+report's bytes no fixture gives (nested 100,000 deep, read as `json` and
+never a crash; 300 deep, read; a byte-order mark; a lone surrogate).
 
 **Passing is not deriving.** Three fixture expectations decide what the
 text leaves open or says otherwise (F-161, F-164, F-165). Two more
@@ -8667,9 +8670,14 @@ strict JSON, so it is not "JSON that does not read". A `DesiredConfig`'s
 revision and `tasking.v1`'s are JSON integers from 0, bounded by nothing
 below 2^64. No fixture has one past 2^53.
 
-**zk2py:** JCS bytes where both documents are in RFC 8785's domain, and
-otherwise equality by exact value, a boolean never a number
-(`desired.jcs_equal`). Four readings pin it.
+**zk2py:** JCS bytes where both documents are in RFC 8785's domain.
+Where it refuses an integer past ±(2^53−1) (`IntegerDomainError`), and
+only then, equality by exact value, a boolean never a number, over two
+values strict JSON reading can yield. Any other value RFC 8785 refuses (a
+non-finite float, a string with no UTF-8 form, a key that is not a string,
+a value that is not JSON) is no document read as strict JSON, and equals
+nothing, itself included: it costs an act, never skips one
+(`desired.jcs_equal`). Twelve readings pin both (review of PR #843).
 
 **Wording that would remove the guess:** §2.7, "JCS-equal, a number
 compared by its exact value: two documents that differ in an integer
