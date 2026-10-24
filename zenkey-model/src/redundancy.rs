@@ -253,7 +253,11 @@ where
 /// deployment's tokenless set names its interface.
 #[must_use]
 pub fn declaration_of(c: &Contract, tokenless: bool) -> Declaration {
-    declaration(&c.uses, c.resources.iter().map(|r| &r.annotations), tokenless)
+    declaration(
+        &c.uses,
+        c.resources.iter().map(|r| &r.annotations),
+        tokenless,
+    )
 }
 
 /// Whether a contract governs its interface: its `uses` lists
@@ -474,7 +478,11 @@ pub fn read_mark(entry: &Value, governance: Governance) -> MarkRead {
         findings.push(MarkFinding::NotGoverned);
     }
     MarkRead {
-        mark: Some(if standby { Mark::Standby } else { Mark::Serving }),
+        mark: Some(if standby {
+            Mark::Standby
+        } else {
+            Mark::Serving
+        }),
         findings,
     }
 }
@@ -640,7 +648,12 @@ pub enum Heal {
 /// shows a holder lower than itself. A read's completeness plays no part: a
 /// read cannot invent a holder.
 #[must_use]
-pub fn heal(own: &InstanceId, election: Election, first: &[InstanceId], second: &[InstanceId]) -> Heal {
+pub fn heal(
+    own: &InstanceId,
+    election: Election,
+    first: &[InstanceId],
+    second: &[InstanceId],
+) -> Heal {
     if election == Election::External {
         return Heal::Stay(Stay::External);
     }
@@ -1187,11 +1200,17 @@ fn no_candidate(read: &Read) -> Option<Judged> {
     if read.instances.iter().any(|s| s.descriptor.lists()) {
         return None;
     }
-    Some(if read.instances.iter().any(|s| s.descriptor == Listing::Unread) {
-        Judged::new(Answer::Unobservable, Reason::NoDescriptor)
-    } else {
-        Judged::new(Answer::NotAsked, Reason::NoCandidate)
-    })
+    Some(
+        if read
+            .instances
+            .iter()
+            .any(|s| s.descriptor == Listing::Unread)
+        {
+            Judged::new(Answer::Unobservable, Reason::NoDescriptor)
+        } else {
+            Judged::new(Answer::NotAsked, Reason::NoCandidate)
+        },
+    )
 }
 
 /// §5's first question, "is the address served by exactly one
@@ -1275,7 +1294,10 @@ pub fn standbys(r: &Reading) -> (Judged, Count) {
         .iter()
         .filter(|s| !s.token && s.descriptor == Listing::Listed { standby: true })
         .count();
-    let unread = read.instances.iter().any(|s| s.descriptor == Listing::Unread);
+    let unread = read
+        .instances
+        .iter()
+        .any(|s| s.descriptor == Listing::Unread);
     if n >= 1 {
         return (
             Judged::new(Yes, Reason::StandingBy),
@@ -1286,7 +1308,10 @@ pub fn standbys(r: &Reading) -> (Judged, Count) {
         );
     }
     if !read.complete {
-        return (Judged::new(Unobservable, Reason::PresenceIncomplete), unknown);
+        return (
+            Judged::new(Unobservable, Reason::PresenceIncomplete),
+            unknown,
+        );
     }
     if unread {
         return (Judged::new(Unobservable, Reason::NoDescriptor), unknown);
@@ -1414,7 +1439,10 @@ mod tests {
                 seen(5, false, STANDBY),
             ],
         );
-        assert_eq!(elect(&own, &r), Decision::StandBy(Why::LowerCandidate(id(3))));
+        assert_eq!(
+            elect(&own, &r),
+            Decision::StandBy(Why::LowerCandidate(id(3)))
+        );
         let r = read(true, vec![seen(3, false, STANDBY)]);
         assert_eq!(elect(&own, &r), Decision::StandBy(Why::OwnClaimMissing));
     }
@@ -1422,10 +1450,22 @@ mod tests {
     #[test]
     fn a_split_leaves_the_lowest() {
         let two = [id(2), id(8)];
-        assert_eq!(heal(&id(8), Election::Claim, &two, &two), Heal::StepDown(id(2)));
-        assert_eq!(heal(&id(2), Election::Claim, &two, &two), Heal::Stay(Stay::Lowest));
-        assert_eq!(heal(&id(8), Election::External, &two, &two), Heal::Stay(Stay::External));
-        assert_eq!(heal(&id(8), Election::Claim, &[id(8)], &two), Heal::Stay(Stay::NoSplit));
+        assert_eq!(
+            heal(&id(8), Election::Claim, &two, &two),
+            Heal::StepDown(id(2))
+        );
+        assert_eq!(
+            heal(&id(2), Election::Claim, &two, &two),
+            Heal::Stay(Stay::Lowest)
+        );
+        assert_eq!(
+            heal(&id(8), Election::External, &two, &two),
+            Heal::Stay(Stay::External)
+        );
+        assert_eq!(
+            heal(&id(8), Election::Claim, &[id(8)], &two),
+            Heal::Stay(Stay::NoSplit)
+        );
     }
 
     #[test]
@@ -1494,7 +1534,13 @@ mod tests {
         };
         assert_eq!(one_incumbent(&r).reason, Reason::One);
         assert_eq!(vacancy(&r).reason, Reason::Held);
-        assert_eq!(standbys(&r).1, Count { count: 1, exact: true });
+        assert_eq!(
+            standbys(&r).1,
+            Count {
+                count: 1,
+                exact: true
+            }
+        );
         assert_eq!(twin(&r, &id(4)).reason, Reason::Incumbent);
         assert_eq!(twin(&r, &id(8)).reason, Reason::Standby);
         let split = read(false, vec![seen(4, true, SERVING), seen(8, true, SERVING)]);

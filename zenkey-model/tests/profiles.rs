@@ -2647,7 +2647,12 @@ fn redundancy_declarations() {
             .as_array()
             .expect("uses")
             .iter()
-            .map(|u| u.as_str().expect("a profile").parse().expect("a profile id"))
+            .map(|u| {
+                u.as_str()
+                    .expect("a profile")
+                    .parse()
+                    .expect("a profile id")
+            })
             .collect();
         let anns: Vec<BTreeMap<String, Value>> = case["contract"]["resources"]
             .as_array()
@@ -2689,7 +2694,9 @@ fn redundancy_elections() {
         };
         let got = match &decision {
             redundancy::Decision::TakeOver => json!({"decision": decision.as_str()}),
-            redundancy::Decision::StandBy(why) => rd_why(why, json!({"decision": decision.as_str()})),
+            redundancy::Decision::StandBy(why) => {
+                rd_why(why, json!({"decision": decision.as_str()}))
+            }
         };
         let what = format!("{}", case["note"]);
         expect(case, got, &what);
@@ -2739,8 +2746,9 @@ fn redundancy_descriptors() {
     let path = profiles().join("redundancy/conformance/descriptors.json");
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
-        let governance = redundancy::Governance::parse(case["governance"].as_str().expect("governance"))
-            .expect("a governance");
+        let governance =
+            redundancy::Governance::parse(case["governance"].as_str().expect("governance"))
+                .expect("a governance");
         let m = redundancy::read_mark(&case["entry"], governance);
         let got = json!({
             "mark": m.mark.map(redundancy::Mark::as_str),
@@ -2826,8 +2834,10 @@ fn redundancy_conclusions() {
         let r = &case["reading"];
         let reading = redundancy::Reading {
             across_face: r["across_face"] == json!(true),
-            governance: redundancy::Governance::parse(r["governance"].as_str().expect("governance"))
-                .expect("a governance"),
+            governance: redundancy::Governance::parse(
+                r["governance"].as_str().expect("governance"),
+            )
+            .expect("a governance"),
             first: rd_read(&r["first"]),
             second: rd_read(&r["second"]),
         };
@@ -2871,10 +2881,22 @@ fn redundancy_examples_are_governed() {
     use zenkey_model::contract::load_path;
     let root = repo_root();
     for (file, election) in [
-        ("examples/zk2/zensight/zs.catalog.v1.toml", redundancy::Election::Claim),
-        ("examples/zk2/zensight/zs.desired.v1.toml", redundancy::Election::Claim),
-        ("zenkey/tests/contracts/ledger.v1.toml", redundancy::Election::Claim),
-        ("zenkey/tests/contracts/valve.v1.toml", redundancy::Election::External),
+        (
+            "examples/zk2/zensight/zs.catalog.v1.toml",
+            redundancy::Election::Claim,
+        ),
+        (
+            "examples/zk2/zensight/zs.desired.v1.toml",
+            redundancy::Election::Claim,
+        ),
+        (
+            "zenkey/tests/contracts/ledger.v1.toml",
+            redundancy::Election::Claim,
+        ),
+        (
+            "zenkey/tests/contracts/valve.v1.toml",
+            redundancy::Election::External,
+        ),
     ] {
         let l = load_path(&root.join(file));
         assert!(l.report.0.is_empty(), "{file}:\n{}", l.report);
