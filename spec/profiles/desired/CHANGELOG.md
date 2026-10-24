@@ -82,6 +82,49 @@ schema is unchanged, and so is its id.
   without it, and a tool reads `author_silent` for that target, never
   behind. Core S2 is unchanged.
 
+**Changed: what building the tools showed.**
+- **The slice without its author's contract** (§2.17). The slice's kind
+  token and target parameters are the author's declaration, and an author
+  absent (§9's step 4) has no descriptor naming its revision; nobody else
+  serves its bundle. 0.3 did not say how a tool finds the report then. A
+  tool MAY take the slice from the target alone: its requirement's
+  template, its binding's parameters, the kind token the report's key
+  carries. The reference does, and says where each slice came from
+  (`slice_from`: the author's contract, one held offline, or the
+  requirement).
+- **Which reply is the report** (§2.10). Two readable reports claiming one
+  slice and differing are unreadable; with none readable claiming it, one
+  that does not read is unreadable too, since it may be the slice's.
+  Otherwise none was read. 0.3 said only "the one whose key is its key".
+- **No slice, no report** (§2.17). A binding §2.3 refuses, or a
+  declaration §2.2 refuses, gives no slice: `no_report`, the problems
+  beside, never a guessed key.
+- **An unstamped reply of the author's** carries no version (core S1):
+  `author_read_incomplete`. **A standby author** (core §6, 0.39) answers
+  no GET: `author_silent`.
+- **How long behind** (§2.17, `scenarios.md` §9 step 6). "A tool MAY
+  report a target behind for longer than it expects" now says how: never
+  from one reading alone; from readings that long apart, the author's same
+  version current and the target not yet on it; or, on a clock trusted to
+  the HLC delta, from that version's stamp. §5's answer stays not yet.
+  The reference's `zenctl desired --for` reads again every 500 ms and
+  exits 1 on such a target; the doctor's `desired-behind`, one reading,
+  finds one only on `--clocks-synced`.
+- **`scenarios.md` §9** names the reference's T and its exits, the slice
+  taken from the target when the author is absent, and a sixth step: one
+  reading not yet, a window behind.
+
+**Deliberately not changed.**
+- **The fixtures.** Each rule above is one of the reading, before §2.17
+  answers: its outcome is an input `conclusions.json` already has (no
+  report, `undecodable`, `incomplete`, `silent`), and every one of its 35
+  cases reads through the reference's projection as written
+  (`zenkey_fleet::judge::desired`'s test). "Behind past a window" is a
+  tool's finding beside §5, not one of its answers.
+- **§5's four questions** and their tokens.
+- **No report member for the window** or the slice's source: the report
+  is the target's; what a tool read is its own.
+
 ## 0.3 — 2026-10-24: the runtime, and round 53 (#840, DC; #609)
 
 Two sources. zk2py read 0.2 cold in round 53 (PR #845): every fixture

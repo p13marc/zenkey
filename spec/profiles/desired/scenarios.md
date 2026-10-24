@@ -6,8 +6,8 @@ a setup, steps, and expected observations. §1 to §8 and §10 are the
 runtime's: the reference runs them as tests of `zenkey`
 (`zenkey/tests/profile_desired.rs`, one test per section, named after it;
 #840, DC). §9 is a tool's: the reference tool runs it as a test of zenctl
-(`zenctl/tests/live_zk2.rs`, `desired_s9_…`, T being `zenctl desired`;
-#840, DD).
+(`zenctl/tests/live_zk2.rs`, `desired_s9_…`, T being `zenctl desired`,
+the doctor's `desired-*` checks beside it; #840, DD).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v1.md's rules; core
@@ -350,7 +350,12 @@ holds v1 on `D`.
 
 **Setup.** §1's bus. T reads the target's descriptor and contracts, finds
 its reports by type identity (§2.10), takes the one whose `key` is `D`,
-GETs `D` from the author (core S4), and asks §5's four questions.
+GETs `D` from the author (core S4), and asks §5's four questions. With its
+author absent, T has no descriptor of the author's to read its contract
+by, and takes `D` from the target's requirement and binding (§2.17, 0.4).
+The reference's T is `zenctl desired`, a judgement: exit 0 every role
+asked converged on its author's current document, 1 a refused or failed
+act or a target behind past its window, 2 no verdict.
 
 **Steps.**
 1. After §1's step 4, T asks.
@@ -358,6 +363,10 @@ GETs `D` from the author (core S4), and asks §5's four questions.
 3. After §4's step 5, T asks.
 4. After §7's step 1, T asks.
 5. Against §8's target, T asks.
+6. (0.4.) After step 3, the author puts v5, and the target converges on
+   it. The test holds the target's next act from its start, and the
+   author puts v6. T asks once; then T asks again over a window of 2 s,
+   reading as often as it likes.
 
 **Expected.**
 1. Converged: **yes**, `converged`. Refused: **no**, `converged`.
@@ -371,6 +380,13 @@ GETs `D` from the author (core S4), and asks §5's four questions.
    `desired`. T shows the archive's v1 as last-known, never current.
 5. Converged, refused and last-known: **not asked**, `unbound`. In force:
    **no**, `unbound`.
+6. Once: converged **not yet**, `behind`, the report's `observed` v5's
+   stamp and the author's v6's; refused **no**, `converged`. No verdict: a
+   reading alone never finds a target behind. Over the window, every
+   reading is not yet on v6: T finds the target behind v6 for at least
+   2 s (§2.17, 0.4), its finding, §5's answer still **not yet**. With a
+   clock trusted to the HLC delta, T may find it at the first reading of
+   a window once v6 is older than the window.
 
 ## §10 Last-known confirmed by its author; a present author's silence (§2.5, §2.9, 0.2)
 
