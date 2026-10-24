@@ -3133,3 +3133,128 @@ pub fn config_act_silent() -> ConfigActReport {
         },
     )
 }
+
+/// `zenctl desired` (#840, DD): five targets' `task` roles, judged by the
+/// engine from values a reading would have read, so every word is the
+/// judge's — one converged, one refused, one behind its author's version
+/// past the window by a trusted clock, one whose author is absent beside an
+/// archive's last-known, and one the kill switch disarms.
+pub fn desired_report() -> DesiredReport {
+    use std::time::{Duration, Instant, SystemTime};
+    use zenkey_fleet::model::desired::{
+        Archived, DesiredRead, ReportReply, ReportsGet, RoleRead, RoleResolution, SliceFrom,
+        SliceGet, SliceReply, TargetRead,
+    };
+    use zenkey_model::desired::{self as dm, Listing, Seen};
+    use zenkey_model::seed::Stamp;
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_761_264_000);
+    let st = |t: u64| Stamp::parse(t, "a1").expect("a stamp");
+    let target =
+        |name: &str, seen_author: Seen, report: &str, current: Option<(u64, SystemTime)>| {
+            let addr: zenkey_model::grammar::Addr =
+                format!("lab/{name}").parse().expect("an address");
+            let slice = format!("zk2/lab/author/tasking.v1/state/tasks/lab/{name}");
+            let rp = format!("zk2/lab/{name}/worker.v1/state/desired/task");
+            let mut res = RoleResolution::bare("task", Some(Listing::Listed { bound: true }));
+            res.interface = Some("tasking.v1".parse().expect("an interface"));
+            res.author = Some("lab/author".parse().expect("an address"));
+            res.resource = Some("state/tasks/{system}/{service}".into());
+            res.slice = vec![slice.clone()];
+            res.slice_from = Some(SliceFrom::AuthorContract);
+            let report = report.replace("$D", &slice);
+            TargetRead {
+                addr: addr.clone(),
+                seen: Seen::Present,
+                seen_why: None,
+                word: None,
+                descriptor: Ok(Some(
+                    serde_json::from_value(serde_json::json!({
+                        "format": "zk2-descriptor/0.1", "service": addr.to_string(),
+                        "instance": "0123456789abcdef", "interfaces": []
+                    }))
+                    .expect("a descriptor"),
+                )),
+                roles: vec![RoleRead {
+                    resolution: res,
+                    author_seen: Some((seen_author, None)),
+                    current: current.map(|(t, at)| {
+                        Ok(SliceGet {
+                            selector: slice.clone(),
+                            complete: true,
+                            replies: vec![SliceReply {
+                                key: slice.clone(),
+                                delete: false,
+                                stamp: Some((st(t), at)),
+                            }],
+                            at: now,
+                        })
+                    }),
+                    archived: (seen_author == Seen::Absent).then(|| {
+                        Ok(vec![Archived {
+                            archive: "lab/archive".parse().expect("an address"),
+                            deleted: false,
+                            stamp: Some(st(100)),
+                            revision: Some(1),
+                            confirmed: true,
+                        }])
+                    }),
+                }],
+                reports: Some(Ok(ReportsGet {
+                    selectors: vec![rp.clone()],
+                    complete: true,
+                    replies: vec![ReportReply {
+                        key: rp,
+                        read: dm::decode(report.as_bytes()),
+                        stamp: None,
+                        horizon: zenkey_model::freshness::Horizon::Undeclared,
+                    }],
+                    at: now,
+                })),
+            }
+        };
+    let converged = r#"{"key":"$D","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"100/a1","revision":1},"outcome":"converged"}"#;
+    let refused = r#"{"key":"$D","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"200/a1","revision":2},"outcome":"refused","refusal":{"code":"reach","pointer":"/endpoint","detail":"the worker's endpoint is what it reaches the bus by"}}"#;
+    let last_known = r#"{"key":"$D","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"100/a1","revision":1},"outcome":"converged","last_known":true}"#;
+    let mut unbound = target("spare", Seen::Present, r#"{"source":"baseline"}"#, None);
+    let r = &mut unbound.roles[0].resolution;
+    r.listing = Some(Listing::Listed { bound: false });
+    r.author = None;
+    r.slice.clear();
+    r.slice_from = None;
+    unbound.roles[0].author_seen = None;
+    let read = DesiredRead {
+        began: Instant::now(),
+        at: now,
+        cut_off: None,
+        presence: None,
+        targets: vec![
+            target("worker", Seen::Present, converged, Some((100, now))),
+            target("w2", Seen::Present, refused, Some((200, now))),
+            target(
+                "w3",
+                Seen::Present,
+                converged,
+                Some((300, now - Duration::from_secs(60))),
+            ),
+            target("w4", Seen::Absent, last_known, None),
+            unbound,
+        ],
+        asked: vec![
+            "zk2/*/*/@zk/**".into(),
+            "zk2/lab/worker/worker.v1/state/desired/task".into(),
+            "zk2/lab/author/tasking.v1/state/tasks/lab/worker".into(),
+        ],
+    };
+    let mut spec = zenkey_fleet::DesiredSpec::new(Duration::from_secs(1));
+    spec.window = Some(Duration::from_secs(10));
+    spec.clocks_synced = true;
+    let mut behind = zenkey_fleet::DesiredBehindTracker::default();
+    let mut report = zenkey_fleet::judge_desired("acme", None, &spec, &read, &mut behind, 1);
+    report.presence = Some(DesiredPresence {
+        selector: "zk2/*/*/@zk/**".into(),
+        complete: true,
+        cut_off_during: false,
+        services: 7,
+    });
+    report
+}

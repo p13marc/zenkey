@@ -23,6 +23,7 @@ pub mod call;
 pub mod compat;
 pub mod config;
 pub mod conform;
+pub mod desired;
 pub mod doctor;
 pub mod echo;
 pub mod expect;

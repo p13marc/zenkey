@@ -335,6 +335,42 @@ fn an_alarms_report_keeps_every_answer_apart() {
     assert_eq!(judgement_exit_code(&r.judgement()), 1);
 }
 
+/// `desired.v1` (#840, DD): §5's four answers per role in the fixture's
+/// tokens, a target behind past the window and a refusal the findings, an
+/// absent author's slice shown from an archive and never as current.
+#[test]
+fn a_desired_report_keeps_every_answer_apart() {
+    let r = fx::desired_report();
+    let v = serde_json::to_value(&r).unwrap();
+    let converged: std::collections::BTreeSet<&str> = v["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["answers"]["converged"]["answer"].as_str().unwrap())
+        .collect();
+    assert_eq!(converged, ["no", "not_asked", "not_yet", "yes"].into());
+    let absent = v["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["answers"]["converged"]["reason"] == "author_absent")
+        .expect("an absent author's role");
+    assert_eq!(absent["archived"][0]["archive"], "lab/archive");
+    assert!(
+        absent.get("author").unwrap().get("stamp").is_none(),
+        "never current"
+    );
+    let behind = v["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["behind"].is_object())
+        .expect("a role behind");
+    assert_eq!(behind["behind"]["by"], "clock");
+    assert_eq!(behind["answers"]["converged"]["answer"], "not_yet");
+    assert_eq!(judgement_exit_code(&r.judgement()), 1);
+}
+
 /// Every enum in this surface, its wire spelling, behind an exhaustive
 /// `match`.
 ///
@@ -443,6 +479,68 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         AlarmChange::Judged,
     ] {
         assert_eq!(wire(&v, ""), change(&v));
+    }
+    // desired.v1 (#840, DD): the fixture's tokens, snake_case.
+    fn desired_answer(v: &DesiredAnswerToken) -> &'static str {
+        match v {
+            DesiredAnswerToken::Yes => "yes",
+            DesiredAnswerToken::No => "no",
+            DesiredAnswerToken::NotYet => "not_yet",
+            DesiredAnswerToken::Unobservable => "unobservable",
+            DesiredAnswerToken::NotAsked => "not_asked",
+        }
+    }
+    fn desired_listing(v: &DesiredListing) -> &'static str {
+        match v {
+            DesiredListing::Bound => "bound",
+            DesiredListing::Unbound => "unbound",
+            DesiredListing::NotListed => "not_listed",
+            DesiredListing::Unread => "unread",
+        }
+    }
+    fn desired_current(v: &DesiredCurrentState) -> &'static str {
+        match v {
+            DesiredCurrentState::NotRead => "not_read",
+            DesiredCurrentState::Incomplete => "incomplete",
+            DesiredCurrentState::Silent => "silent",
+            DesiredCurrentState::Put => "put",
+            DesiredCurrentState::Delete => "delete",
+        }
+    }
+    fn desired_behind(v: &DesiredBehindBy) -> &'static str {
+        match v {
+            DesiredBehindBy::Window => "window",
+            DesiredBehindBy::Clock => "clock",
+        }
+    }
+    for v in [
+        DesiredAnswerToken::Yes,
+        DesiredAnswerToken::No,
+        DesiredAnswerToken::NotYet,
+        DesiredAnswerToken::Unobservable,
+        DesiredAnswerToken::NotAsked,
+    ] {
+        assert_eq!(wire(&v, ""), desired_answer(&v));
+    }
+    for v in [
+        DesiredListing::Bound,
+        DesiredListing::Unbound,
+        DesiredListing::NotListed,
+        DesiredListing::Unread,
+    ] {
+        assert_eq!(wire(&v, ""), desired_listing(&v));
+    }
+    for v in [
+        DesiredCurrentState::NotRead,
+        DesiredCurrentState::Incomplete,
+        DesiredCurrentState::Silent,
+        DesiredCurrentState::Put,
+        DesiredCurrentState::Delete,
+    ] {
+        assert_eq!(wire(&v, ""), desired_current(&v));
+    }
+    for v in [DesiredBehindBy::Window, DesiredBehindBy::Clock] {
+        assert_eq!(wire(&v, ""), desired_behind(&v));
     }
     for v in [
         AlarmLatest::Firing,

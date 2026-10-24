@@ -589,6 +589,91 @@ alarms under zk2/lab/*/alarms.v1/state/alarms/* in namespace "acme" — anything
     assert!(said.contains("(scope_incomplete)"), "{said}");
 }
 
+/// `zenctl desired` (#840, DD): one row per target's role, §5's four
+/// answers spelled apart in every medium — "has it converged?" as a mark
+/// and a word in the table, the other three as lines, the fixture's tokens
+/// in each `desired` row — an archive's last-known shown and never current,
+/// a target behind past the window named with how it was found, and the
+/// run's judgement leading the envelope.
+#[test]
+fn a_desired_reading_spells_every_answer_apart_in_every_medium() {
+    let report = fx::desired_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+desired.v1 in namespace "acme" — 5 role(s), 1 reading(s)
+✓  lab/worker task  converged: yes (converged) — its report's observed 100/a1 is its author lab/author's current version, converged
+    role bound, requiring tasking.v1, its author lab/author
+    slice zk2/lab/author/tasking.v1/state/tasks/lab/worker (from the author contract)
+    report zk2/lab/worker/worker.v1/state/desired/task {"key":"zk2/lab/author/tasking.v1/state/tasks/lab/worker","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"100/a1","revision":1},"outcome":"converged"}
+    its author's current version: put 100/a1
+    refused: no (converged) — its last act, on 100/a1, converged
+    last-known: no (current) — what it acted on, 100/a1, is its author's own
+    in force: yes (desired) — 100/a1 is wholly in force
+✗  lab/w2 task      converged: no (refused) — its author lab/author's current version, 200/a1, was refused by the target: code reach at "/endpoint": the worker's endpoint is what it reaches the bus by
+    role bound, requiring tasking.v1, its author lab/author
+    slice zk2/lab/author/tasking.v1/state/tasks/lab/w2 (from the author contract)
+    report zk2/lab/w2/worker.v1/state/desired/task {"key":"zk2/lab/author/tasking.v1/state/tasks/lab/w2","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"200/a1","revision":2},"outcome":"refused","refusal":{"code":"reach","pointer":"/endpoint","detail":"the worker's endpoint is what it reaches the bus by"}}
+    its author's current version: put 200/a1
+    refused: yes (refused) — its last act, on 200/a1, was refused: code reach at "/endpoint": the worker's endpoint is what it reaches the bus by
+    last-known: no (current) — what it acted on, 200/a1, is its author's own
+    in force: yes (desired) — 100/a1 is wholly in force
+✗  lab/w3 task      converged: not yet (behind) — its report's observed 100/a1 is earlier than its author lab/author's current version, its put 300/a1, the same id: not yet
+    role bound, requiring tasking.v1, its author lab/author
+    slice zk2/lab/author/tasking.v1/state/tasks/lab/w3 (from the author contract)
+    report zk2/lab/w3/worker.v1/state/desired/task {"key":"zk2/lab/author/tasking.v1/state/tasks/lab/w3","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"100/a1","revision":1},"outcome":"converged"}
+    its author's current version: put 300/a1
+    refused: no (converged) — its last act, on 100/a1, converged
+    last-known: no (current) — what it acted on, 100/a1, is its author's own
+    in force: yes (desired) — 100/a1 is wholly in force
+    behind 300/a1 for at least 60.0s, by a clock trusted to the HLC delta (text 0.4)
+—  lab/w4 task      converged: not asked (author_absent) — its author lab/author is absent by a complete presence read: whether the target converged on a current document is not asked (§2.17 step 6); an archive's last-known is shown beside, never current
+    role bound, requiring tasking.v1, its author lab/author
+    slice zk2/lab/author/tasking.v1/state/tasks/lab/w4 (from the author contract)
+    report zk2/lab/w4/worker.v1/state/desired/task {"key":"zk2/lab/author/tasking.v1/state/tasks/lab/w4","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"100/a1","revision":1},"outcome":"converged","last_known":true}
+    last-known at lab/archive: 100/a1 (confirmed by alignment) — last-known, never current
+    refused: no (converged) — its last act, on 100/a1, converged
+    last-known: yes (last_known) — what it acted on, 100/a1, came from an archive: last-known, its author did not answer for it (§2.9)
+    in force: yes (desired) — 100/a1 is wholly in force
+—  lab/spare task   converged: not asked (unbound) — its descriptor lists role task with no binding: the kill switch, its baseline in force (§2.12)
+    role unbound: the kill switch, requiring tasking.v1
+    refused: not asked (unbound) — its descriptor lists role task with no binding: the kill switch, its baseline in force (§2.12)
+    last-known: not asked (unbound) — its descriptor lists role task with no binding: the kill switch, its baseline in force (§2.12)
+    in force: no (unbound) — its descriptor lists role task with no binding: the kill switch, its baseline in force (§2.12)
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "desired");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert!(envelope.get("rows").is_none(), "roles are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.rows.len());
+    let converged: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .map(|r| {
+            r["answers"]["converged"]["answer"]
+                .as_str()
+                .expect("an answer")
+        })
+        .collect();
+    assert_eq!(
+        converged,
+        ["no", "not_asked", "not_yet", "yes"].into(),
+        "four answers, four spellings"
+    );
+    let said = notes(&report);
+    assert!(
+        said.contains("never as its author's current document"),
+        "{said}"
+    );
+    assert!(said.contains("is behind"), "{said}");
+}
+
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -614,6 +699,7 @@ fn no_family_emits_trailing_whitespace() {
         table(&fx::conform_report()),
         table(&fx::health_report()),
         table(&fx::alarms_report()),
+        table(&fx::desired_report()),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -2007,6 +2093,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "context",
         "context-action",
         "context-list",
+        "desired",
         "doctor",
         "expect",
         "face-check",
@@ -2182,6 +2269,11 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::conform_report());
     assert_eq!(s.asked.len(), 3);
     assert_eq!(s.window_s, Some(5.0));
+    // `desired` (#840, DD): presence, the reports and the slices, over the
+    // window a target may be behind for.
+    let s = scoped(&fx::desired_report());
+    assert_eq!(s.asked.len(), 3);
+    assert_eq!(s.window_s, Some(10.0));
     // `why` (#702): what the ladder put to the bus — presence, the key, the
     // archives after a silence — and no window unless a stream was heard.
     let s = scoped(&fx::why_report_silent());

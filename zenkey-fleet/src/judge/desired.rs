@@ -65,8 +65,8 @@ fn says(j: Judged, r: &RoleRead, t: &TargetRead, rr: &RoleReading<'_>) -> String
         .map(|o| o.stamp.to_string())
         .unwrap_or_default();
     let current = match rr.author.current {
-        Current::Put(s) => format!("its put {s}"),
-        Current::Delete(s) => format!("its delete {s}"),
+        Current::Put(s) => format!("put {s}"),
+        Current::Delete(s) => format!("delete {s}"),
         _ => String::new(),
     };
     let author = res
@@ -136,7 +136,8 @@ fn says(j: Judged, r: &RoleRead, t: &TargetRead, rr: &RoleReading<'_>) -> String
             "the target has acted on nothing in this run (§2.7)".to_owned()
         }
         Reason::NotActed => format!(
-            "the target has acted on nothing in this run, and {author} holds {current}: not yet"
+            "the target has acted on nothing in this run; {author}'s current version is its \
+             {current}: not yet"
         ),
         Reason::Converged | Reason::Reverted if j.answer == Answer::Yes && !current.is_empty() => {
             format!(
@@ -206,16 +207,16 @@ fn says(j: Judged, r: &RoleRead, t: &TargetRead, rr: &RoleReading<'_>) -> String
              restart reads so until it has put the document again (§2.11, text 0.4)"
         ),
         Reason::Behind => format!(
-            "its report's observed {observed} is earlier than {author}'s {current}, the same \
-             id: not yet"
+            "its report's observed {observed} is earlier than {author}'s current version, its \
+             {current}, the same id: not yet"
         ),
         Reason::Ahead => format!(
-            "its report's observed {observed} is later than {author}'s answer, {current}: the \
-             reads raced"
+            "its report's observed {observed} is later than {author}'s answer, its {current}: \
+             the reads raced"
         ),
         Reason::OtherEpoch => format!(
-            "{author}'s {current} is of another id than its observed {observed}: a new epoch \
-             the target has not acted on yet (§2.6)"
+            "{author}'s current version, its {current}, is of another id than its observed \
+             {observed}: a new epoch the target has not acted on yet (§2.6)"
         ),
     }
 }
