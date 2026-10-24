@@ -2021,7 +2021,7 @@ def run_python_hostid(report: Report, exe: Path) -> None:
                      bool(rraw) and not any(s in rraw.lower() for s in (M1.encode(), uuid.encode())),
                      f"{len(rraw)} bytes read")
         answer, why, reads = live.hostid_collision(tool, f"{want}/echo")
-        firsts = [first for _, rows in reads for _, _, first in rows]
+        firsts = [first for _, rows in reads for _, _, first, _ in rows]
         report.check(run, "§2.12 on its address: §5's first question is yes for it (its contracts' uses, "
                           "retrieved by fingerprint, do not list hostid.v1), and the answer is no",
                      answer == "no" and firsts == ["yes", "yes"], f"{answer}: {why}; first {firsts}")

@@ -63,17 +63,20 @@ PUBLISHED_VOCABULARY = {
     # desired.target is retired: R2's binding already says which identity
     # fills each target parameter, so desired.target draws W105.
     "desired": {"target_param"},
+    # profiles/redundancy/v1.md §4 (core 0.39): the interim row's one key,
+    # published unchanged; any other redundancy.<key>, a fencing epoch
+    # among them, draws W105.
+    "redundancy": {"election"},
 }
 
 #: Appendix D, interim annotation vocabularies (W105 outside them, until each
-#: profile publishes its own). freshness's, link's, alarms's, telemetry's and
-#: desired's rows moved to the published table.
+#: profile publishes its own). freshness's, link's, alarms's, telemetry's,
+#: desired's and redundancy's rows moved to the published table.
 INTERIM_VOCABULARY = {
     "timing": {"period_ms", "deadline_ms", "lifespan_ms"},
     "arbitration": {"policy"},
     "media": {"tiers", "tier_param", "frame_clock", "control", "receiver_report"},
     "views": {"document"},
-    "redundancy": {"election"},
 }
 
 #: W105's table for a profile: "the table the profile publishes, else its

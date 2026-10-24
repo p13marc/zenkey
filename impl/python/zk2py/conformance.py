@@ -1050,6 +1050,82 @@ def _desired_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _redundancy_declarations(path: Path) -> list[Result]:
+    """redundancy.v1 §2.2: a contract's uses, each resource's resolved
+    annotations, and the tokenless set -> its declaration."""
+    from . import redundancy as rd
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = rd.declaration(c["contract"]["uses"], [r["annotations"] for r in c["contract"]["resources"]],
+                             c["tokenless"]).as_json()
+        out.append(_check(f"declarations #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _redundancy_descriptors(path: Path) -> list[Result]:
+    """redundancy.v1 §2.4, §2.14, core §3.3 (0.39): one interface entry and
+    what the reader knows of its governance -> its mark and findings."""
+    from . import redundancy as rd
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        m, findings = rd.mark(c["entry"], c["governance"])
+        out.append(_check(f"descriptors #{i}: {c['note']}", {"mark": m, "findings": findings}, c["expect"]))
+    return out
+
+
+def _redundancy_elections(path: Path) -> list[Result]:
+    """redundancy.v1 §2.5, §2.11: one read from own's view -> what it does."""
+    from . import redundancy as rd
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = rd.elect(c["own"], rd.Read.of(c["read"]), c.get("election", rd.CLAIM)).as_json()
+        out.append(_check(f"elections #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _redundancy_heals(path: Path) -> list[Result]:
+    """redundancy.v1 §2.9: an incumbent, its election, and two reads'
+    holders -> whether it steps down."""
+    from . import redundancy as rd
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        down, what = rd.heal(c["own"], c["election"], c["first"]["holders"], c["second"]["holders"])
+        got = {"step_down": True, "lower": what} if down else {"step_down": False, "why": what}
+        out.append(_check(f"heals #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _redundancy_lifecycle(path: Path) -> list[Result]:
+    """redundancy.v1 §2.5 to §2.11: one candidate's events -> each step,
+    and its role after the last."""
+    from . import redundancy as rd
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        m = rd.Machine(c["own"], c["election"])
+        steps = [m.step(e) for e in c["events"]]
+        out.append(_check(f"lifecycle #{i}: {c['note']}", {"steps": steps, "role": m.role}, c["expect"]))
+    return out
+
+
+def _redundancy_conclusions(path: Path) -> list[Result]:
+    """redundancy.v1 §2.15, §5: two reads of one address -> §5's four
+    questions."""
+    from . import redundancy as rd
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = rd.conclude(rd.Reading.of(c["reading"]))
+        got = {"one_incumbent": got["one_incumbent"].as_json(), "vacancy": got["vacancy"].as_json(),
+               "standbys": got["standbys"].as_json(), "twins": {k: v.as_json() for k, v in got["twins"].items()}}
+        out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -1070,6 +1146,9 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "desired": {"schema.json": _desired_schema, "declarations.json": _desired_declarations,
                 "bindings.json": _desired_bindings, "order.json": _desired_order, "reports.json": _desired_reports,
                 "conclusions.json": _desired_conclusions},
+    "redundancy": {"declarations.json": _redundancy_declarations, "descriptors.json": _redundancy_descriptors,
+                   "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
+                   "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions},
 }
 
 
@@ -2259,24 +2338,107 @@ def _presence_view() -> list[tuple[str, Any, Any]]:
           live.Presence(complete=True).kind, live.Presence().kind,
           live.Presence(complete=False, cut_off_during=True).kind],
          [live.NOT_MADE, live.NOT_MADE, live.COMPLETE, live.POSSIBLY_INCOMPLETE, live.POSSIBLY_INCOMPLETE]),
-    ] + _live_guards()
+    ] + _live_guards() + _redundancy_readings()
+
+
+def _redundancy_readings() -> list[tuple[str, Any, Any]]:
+    """redundancy.v1 0.1's machine (``lifecycle.json``) on the two orders
+    of events a bus can hand it while a read is in flight (F-199), and the
+    events zk2py's runtime gives back from what its watch holds."""
+    from . import redundancy as rd
+
+    a, b = "000000000000000a", "000000000000000b"
+
+    def run(events: list[Any], heard: set[str] | None = None) -> tuple[list[str], str]:
+        m = rd.Machine(b)
+        steps = []
+        queue = list(events)
+        while queue:
+            st = m.step(queue.pop(0))
+            steps.append(st["step"])
+            if heard is not None:
+                queue[0:0] = [e for e in rd.given_back(st, heard) if e != rd.FINISH]
+        return steps, m.state
+
+    label = "redundancy.v1 0.1 §2.5–§2.9 (F-199)"
+    alone = {"read": {"complete": True, "instances": [{"id": b, "token": False, "descriptor": "standby"}]}}
+    held = {"read": {"complete": True, "instances": [{"id": a, "token": True, "descriptor": "serving"},
+                                                     {"id": b, "token": False, "descriptor": "standby"}]}}
+    return [
+        (f"{label}: an appearance heard while its read runs is dropped, and the read that missed it takes over: "
+         "the fixture's machine never reads for the heal", run(["start", "finish", {"appeared": a}, alone, "finish"]),
+         (["claim", "read", "nothing", "take_over", "nothing"], rd.SERVING_STATE)),
+        (f"{label}: given back from the watch, it reads for the heal once it serves",
+         run(["start", "finish", {"appeared": a}, alone, "finish"], heard={a}),
+         (["claim", "read", "nothing", "take_over", "nothing", "read"], rd.HEAL_FIRST)),
+        (f"{label}: a withdrawal heard while its read runs is dropped, and the read that predates it stands it by "
+         "on an incumbent gone, no retry armed", run(["start", "finish", rd.WITHDRAWN, held, rd.TIMER]),
+         (["claim", "read", "nothing", "stand_by", "nothing"], rd.STANDING_BY)),
+        (f"{label}: given back from a watch hearing no holder, it campaigns again",
+         run(["start", "finish", rd.WITHDRAWN, held], heard=set()),
+         (["claim", "read", "nothing", "stand_by", "read"], rd.CAMPAIGNING)),
+        (f"{label}: a watch still hearing the incumbent gives nothing back", rd.given_back(
+            {"step": "stand_by", "why": "incumbent", "retry": False, "instance": a}, {a}), []),
+        (f"{label}: a heal's first read not made shows none, and the fixture's machine goes back to serving: the "
+         "split let go", run(["start", "finish", alone, "finish", {"appeared": a},
+                              {"read": {"complete": False, "instances": []}}]),
+         (["claim", "read", "take_over", "nothing", "read", "nothing"], rd.SERVING_STATE)),
+        (f"{label}: given back after the retry interval while the watch still hears the other holder",
+         rd.given_back({"step": "nothing"}, {a}, incomplete_heal=True), [{"appeared": a}]),
+    ] + _remint_readings()
+
+
+def _remint_readings() -> list[tuple[str, Any, Any]]:
+    """F-209: an incumbent's own re-mint (core §8.1), its new id lower than
+    its old, through the fixture's machine and through zk2py's."""
+    from . import redundancy as rd
+
+    old, new = "000000000000000b", "000000000000000a"
+
+    def read(*ids: str) -> dict[str, Any]:
+        return {"read": {"complete": True, "instances": [{"id": i, "token": True, "descriptor": "serving"}
+                                                         for i in ids]}}
+
+    serve = ["start", "finish", {"read": {"complete": True, "instances": [
+        {"id": old, "token": False, "descriptor": "standby"}]}}, "finish"]
+    overlap = [{"appeared": new}, read(new, old), "timer", read(new)]
+    m = rd.Machine(old)
+    plain = [m.step(e)["step"] for e in serve + overlap]
+    m2 = rd.Machine(old)
+    for e in serve:
+        m2.step(e)
+    m2.remint(new)
+    told = [m2.step(e)["step"] for e in overlap]
+    label = "redundancy.v1 0.1, an incumbent's own re-mint (F-209)"
+    return [
+        (f"{label}: the fixture's machine hears its new id's token as another holder's, reads its overlap as a "
+         "split, and steps down to itself", (plain[4:], m.why, m.named),
+         (["read", "grace", "read", "step_down"], "lower_holder", new)),
+        (f"{label}: told of the re-mint, zk2py's machine hears nothing to heal, and serves on under its new id",
+         (told[0], m2.state, m2.own), ("nothing", rd.SERVING_STATE, new)),
+    ]
 
 
 class _FakeSession:
     """A session for :func:`zk2py.live.list_presence` alone: its liveliness
-    GET answers ``tokens`` and its final reply at once; ``transports`` is
-    what its info says before and after, or raises."""
+    GET answers ``tokens`` and its final reply at once; ``links`` is what
+    its info's links say before and after, or raises; its transports say
+    ``transports`` throughout (core 0.38: never what the check reads)."""
 
-    def __init__(self, tokens: list[str], transports: list[Any]) -> None:
-        self.tokens, self.transports, self.closed = tokens, list(transports), False
+    def __init__(self, tokens: list[str], links: list[Any], transports: list[Any] | None = None) -> None:
+        self.tokens, self.links, self.closed = tokens, list(links), False
+        self.held_transports = [object()] if transports is None else transports
         outer = self
 
         class _Info:
-            def transports(self) -> list[Any]:
-                t = outer.transports.pop(0) if len(outer.transports) > 1 else outer.transports[0]
+            def links(self) -> list[Any]:
+                t = outer.links.pop(0) if len(outer.links) > 1 else outer.links[0]
                 if isinstance(t, Exception):
                     raise t
                 return t
+
+            def transports(self) -> list[Any]:
+                return outer.held_transports
 
         class _Ok:
             def __init__(self, key: str) -> None:
@@ -2302,33 +2464,39 @@ class _FakeSession:
 
 
 def _live_guards() -> list[tuple[str, Any, Any]]:
-    """Core 0.37 §8.1 in :func:`zk2py.live.list_presence`, on fake sessions
-    (review of PR #848): a read whose session's transports cannot be read,
-    before or after, is possibly incomplete with that reason, never
-    complete; one whose transports close during it is not complete; a
+    """Core 0.37 and 0.38 §8.1 in :func:`zk2py.live.list_presence`, on fake
+    sessions (review of PR #848): a read whose session's links cannot be
+    read, before or after, is possibly incomplete with that reason, never
+    complete; one whose links are gone at its end is possibly incomplete,
+    cut off while it ran (0.38, F-185), whatever its transports list; a
     closed watch session is never handed back."""
     from . import live
 
     tok = "zk2/lab/o/@zk/instance/" + "a" * 16
     up = [object()]
 
-    def read(transports: list[Any]) -> tuple[str, int]:
-        p = live.list_presence(_FakeSession([tok], transports))  # type: ignore[arg-type]
+    def read(links: list[Any], transports: list[Any] | None = None) -> tuple[str, int]:
+        p = live.list_presence(_FakeSession([tok], links, transports))  # type: ignore[arg-type]
         return p.kind, len(p.instances)
 
-    label = "core 0.37 §8.1, zk2py's guarded read"
+    label = "core 0.38 §8.1, zk2py's guarded read"
     out = [
-        (f"{label}: transports held before and after: complete", read([up, up]), (live.COMPLETE, 1)),
+        (f"{label}: links held before and after: complete", read([up, up]), (live.COMPLETE, 1)),
         (f"{label}: none before: not made, cut off", read([[]]), (live.NOT_MADE, 0)),
-        (f"{label}: none at its end (F-185): not complete, its tokens kept as seen",
+        (f"{label}: none at its end (F-185): possibly incomplete, its tokens kept as seen",
          read([up, []]), (live.POSSIBLY_INCOMPLETE, 1)),
         (f"{label}: the accessor raises before: possibly incomplete, never complete",
-         read([RuntimeError("no transports"), up]), (live.POSSIBLY_INCOMPLETE, 1)),
+         read([RuntimeError("no links"), up]), (live.POSSIBLY_INCOMPLETE, 1)),
         (f"{label}: the accessor raises at its end: possibly incomplete",
-         read([up, RuntimeError("no transports")]), (live.POSSIBLY_INCOMPLETE, 1)),
+         read([up, RuntimeError("no links")]), (live.POSSIBLY_INCOMPLETE, 1)),
+        (f"{label}: what the check reads: no link at its end while the closing transport is still listed, "
+         "possibly incomplete", read([up, []], [object()]), (live.POSSIBLY_INCOMPLETE, 1)),
+        (f"{label}: no link before, a transport still listed: not made", read([[]], [object()]), (live.NOT_MADE, 0)),
     ]
     p = live.list_presence(_FakeSession([tok], [RuntimeError("x")]))  # type: ignore[arg-type]
-    out.append((f"{label}: and says why", live.TRANSPORTS_UNREADABLE in p.reading, True))
+    out.append((f"{label}: and says why", live.LINKS_UNREADABLE in p.reading, True))
+    p = live.list_presence(_FakeSession([tok], [up, []]))  # type: ignore[arg-type]
+    out.append((f"{label}: a read cut off while it ran says so", live.CUT_OFF_DURING in p.reading, True))
     # the registry: a closed watch session is dropped, never handed back
     reader, old = _FakeSession([], [up]), _FakeSession([], [up])
     live._OPENED[id(reader)] = (reader, "tcp/127.0.0.1:1", None)

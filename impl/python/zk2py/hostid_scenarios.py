@@ -720,7 +720,7 @@ def section6(report: Report, base: str) -> None:
 
         a, b = host(M1, "host-a"), host(M1, "host-b")
         answer, why, reads = live.hostid_collision(bus.tool, f"{SYSTEM[M1]}/sysinfo", grace_s=2.0)
-        hosts = sorted({(d or {}).get("meta", {}).get("host") for _, rows in reads for _, d, _ in rows} - {None})
+        hosts = sorted({(d or {}).get("meta", {}).get("host") for _, rows in reads for _, d, _, _ in rows} - {None})
         report.check(sec, "step 1: two hosts from one image with M1: two instances of h-bbd1aa1db10b/sysinfo with "
                           "different meta.zid in both reads: the finding, its cause undecided, naming none",
                      a.system == b.system == SYSTEM[M1] and answer == "finding" and "undecided" in why,
@@ -745,10 +745,24 @@ def section6(report: Report, base: str) -> None:
         host(M1, "host-a", contracts=x, tokenless={"zk2py_sysinfo_x.v1"})
         host(M1, "host-b", contracts=x, tokenless={"zk2py_sysinfo_x.v1"})
         answer, why, reads = live.hostid_collision(bus.tool, f"{SYSTEM[M1]}/sysinfo", grace_s=2.0)
-        firsts = sorted({first for _, rows in reads for _, _, first in rows})
+        firsts = sorted({first for _, rows in reads for _, _, first, _ in rows})
         report.check(sec, "step 5 (0.2): both list hostid.v1, but a contract each implements does too: neither is "
                           "counted, and the address is unobservable, never clean and never the finding",
                      answer == "unobservable" and firsts == ["unobservable"], f"{answer}: {why}; first {firsts}")
+        stop_all()
+        # Step 6 (0.6): as step 1, each service implementing ledger.v1 of
+        # redundancy.v1's scenarios and nothing else, A serving, B standing
+        # by, its descriptor marking ledger.v1 "standby": true.
+        from .redundancy_live import contract_at
+        ledger = [contract_at("ledger.v1")]
+        host(M1, "host-a", contracts=ledger)
+        host(M1, "host-b", contracts=ledger, standby={"ledger.v1"})
+        answer, why, reads = live.hostid_collision(bus.tool, f"{SYSTEM[M1]}/sysinfo", grace_s=2.0)
+        recognised = sorted({sb for _, rows in reads for _, _, first, sb in rows if first == "yes"}, key=str)
+        report.check(sec, "step 6 (0.6): an incumbent and a standby of a governed ledger.v1 on one minted address: "
+                          "no finding, B a recognised standby (redundancy.v1 §2.15), not counted, and said so",
+                     answer == "no" and "recognised standby" in why and recognised == [False, True],
+                     f"{answer}: {why}; standby readings {recognised}")
         stop_all()
         rt = hostid.Runtime(make_root(base, {ETC: M1 + "\n"}))
         logger = bus.owner("h-504c6767c349/logger", rt, contracts=[])

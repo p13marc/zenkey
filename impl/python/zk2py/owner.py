@@ -296,7 +296,7 @@ class Owner:
                  initial: dict[str, bytes] | None = None, hlc: bool = True,
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
                  tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
-                 params: dict[str, dict[str, str]] | None = None):
+                 params: dict[str, dict[str, str]] | None = None, standby: set[str] | None = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -361,6 +361,15 @@ class Owner:
           held at start are put, before step 3: a restart's own puts and
           deletes (``alarms.v1`` §2.9: "before it answers a GET with it, and
           SHOULD before its new instance token").
+        - ``standby``: the interfaces it stands by on at start (core §6,
+          0.39; ``redundancy.v1`` §2.4): validated by step 2 as if exposed,
+          none of their resources declared, their entries marked
+          ``"standby": true``, none of their tokens held. :meth:`take_over`
+          serves one in §8.2's order, :meth:`step_down` undoes it in the
+          reverse. A standby on a tokenless interface is refused (core
+          D012), and so is an interface whose ``redundancy.v1`` declaration
+          is invalid, a governed one in the tokenless set included
+          (``redundancy.v1`` §2.2, §2.14; core §8.2 step 2, 0.39).
 
         Every state member whose resource has a ``freshness.ttl_s`` above 0,
         a templated one's members included from their first put, is re-put,
@@ -453,6 +462,14 @@ class Owner:
         self._plan_made: dict[str, list[tuple[dict[str, Any], str]]] = {}
         #: the current instance's descriptor queryable and tokens
         self._instance_entities: list[Any] = []
+        #: core §6 (0.39): the interfaces it stands by on now
+        self.standing_by: set[str] = set(standby or ())
+        #: step 1's entities, per interface (a step-down undeclares them)
+        self._iface_entities: dict[str, list[Any]] = {}
+        #: the current instance's interface token, per interface
+        self._iface_tokens: dict[str, Any] = {}
+        #: each instance's current descriptor, which its queryable answers
+        self._docs: dict[str, bytes] = {}
 
     # -- keys -------------------------------------------------------------
 
@@ -524,6 +541,21 @@ class Owner:
         # names archive.v1, whether or not the owner implements it (§4.4)".
         if "archive.v1" in self.tokenless:
             raise OwnerRefused("archive.v1 is never in the tokenless set: an archive is found by its token (§4.4)")
+        # §8.2 step 2 (0.39), redundancy.v1 §2.2 and §2.14: "A runtime MUST
+        # refuse to start an instance whose interface's declaration is
+        # invalid", a governed interface in the tokenless set among them.
+        from . import redundancy
+        for c in self.contracts:
+            d = redundancy.declaration_of(c.canonical, tokenless=c.interface in self.tokenless)
+            if d.declaration == "invalid":
+                raise OwnerRefused(f"{c.interface}: its redundancy.v1 declaration is invalid "
+                                   f"({', '.join(d.reasons)}): §2.2, core §8.2 step 2")
+        known = {c.interface for c in self.contracts}
+        for iface in sorted(self.standing_by):
+            if iface not in known:
+                raise OwnerRefused(f"{iface}: a standby on an interface it does not implement (core §6)")
+            if iface in self.tokenless:
+                raise OwnerRefused(f"{iface}: an interface with a standby is never tokenless (core §3.3 D012)")
         return plan
 
     # -- bring-up (§8.2) --------------------------------------------------
@@ -583,87 +615,114 @@ class Owner:
             # Core §4.3: "a reference it holds for the purpose, such as a
             # subscription to a router-stamped heartbeat key".
             self._entities.append(s.declare_subscriber(self.heartbeat, zenoh.handlers.Callback(self._beat)))
-        # Step 1: resources, publishers and queryables.
+        # Step 1: resources, publishers and queryables; none of an interface
+        # it stands by on (core §8.2, 0.39: "step 2 does not refuse it").
         for c in self.contracts:
-            for r, status in plan[c.interface]:
-                key = f"{self.prefix(c)}/{r['token']}/{r['template']}"
-                rid = f"{r['token']}/{r['template']}"
-                if r["kind"] == "operation" and status == "exposed" and rid in self.members:
-                    # §5.1 "Over a template": "One with a queryable per
-                    # member answers for each it holds."
-                    for values in self.members[rid]:
-                        mkey = member_key(self.prefix(c), r, values)
-                        self._entities.append(s.declare_queryable(
-                            mkey, zenoh.handlers.Callback(self._op_handler(self.prefix(c), r, values)),
-                            complete=True))
-                elif r["kind"] == "operation":
-                    if status == "exposed":
-                        handler = self._op_handler(self.prefix(c), r)
-                    else:
-                        cause = "capability" if status == "implied" else self.unavailable[rid]
-                        handler = self._unavailable_handler(r, cause)
+            if c.interface not in self.standing_by:
+                self._iface_entities[c.interface] = self._declare_resources(c, plan[c.interface])
+        self._put_held(plan)
+        if self.before_tokens is not None:
+            self.before_tokens(self)
+        # Step 3: the descriptor's queryable and its first put (§3.3), then a
+        # contract queryable per interface.
+        self._plan_made = plan
+        self._instance_entities, self.descriptor, self._iface_tokens = self._declare_instance(
+            plan, self.instance, bundles=True)
+        # Step 4 is the second half of _declare_instance.
+        if self.horizons:
+            self._ensure_refresher()
+
+    def _declare_resources(self, c: Contract, rows: list[tuple[dict[str, Any], str]]) -> list[Any]:
+        """§8.2 step 1 for one interface: its publishers and queryables, the
+        entities returned (and kept in ``_entities`` for :meth:`close`)."""
+        s = self.session
+        assert s is not None
+        start = len(self._entities)
+        for r, status in rows:
+            key = f"{self.prefix(c)}/{r['token']}/{r['template']}"
+            rid = f"{r['token']}/{r['template']}"
+            if r["kind"] == "operation" and status == "exposed" and rid in self.members:
+                # §5.1 "Over a template": "One with a queryable per
+                # member answers for each it holds."
+                for values in self.members[rid]:
+                    mkey = member_key(self.prefix(c), r, values)
                     self._entities.append(s.declare_queryable(
-                        _template_key(key), zenoh.handlers.Callback(handler), complete=True))
-                elif status == "exposed" and r["kind"] in ("state", "stream") and not r["params"]:
-                    enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
-                        "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
-                        if r["type"]["kind"] == "jsonschema" else "application/protobuf"
-                    pub = s.declare_publisher(
-                        key, encoding=enc,
-                        congestion_control=getattr(zenoh.CongestionControl, _CONGESTION[r["congestion"]]),
-                        priority=getattr(zenoh.Priority, _PRIORITY[r["priority"]]),
-                        express=r["express"])
-                    self._entities.append(pub)
-                    self._publishers[key] = pub
-                    self._encodings[key] = enc
-                    h = freshness.horizon(r["kind"], r["annotations"])
-                    if r["kind"] == "state" and h.horizon == "within":
-                        self.horizons[key] = h
-            for token in ("state", "@state"):
+                        mkey, zenoh.handlers.Callback(self._op_handler(self.prefix(c), r, values)),
+                        complete=True))
+            elif r["kind"] == "operation":
+                if status == "exposed":
+                    handler = self._op_handler(self.prefix(c), r)
+                else:
+                    cause = "capability" if status == "implied" else self.unavailable[rid]
+                    handler = self._unavailable_handler(r, cause)
                 self._entities.append(s.declare_queryable(
-                    f"{self.prefix(c)}/{token}/**", zenoh.handlers.Callback(self._state_handler),
-                    complete=False))
-        # The state values held at start, put before the tokens (§8.2 "State
-        # values").
+                    _template_key(key), zenoh.handlers.Callback(handler), complete=True))
+            elif status == "exposed" and r["kind"] in ("state", "stream") and not r["params"]:
+                enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
+                    "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
+                    if r["type"]["kind"] == "jsonschema" else "application/protobuf"
+                pub = s.declare_publisher(
+                    key, encoding=enc,
+                    congestion_control=getattr(zenoh.CongestionControl, _CONGESTION[r["congestion"]]),
+                    priority=getattr(zenoh.Priority, _PRIORITY[r["priority"]]),
+                    express=r["express"])
+                self._entities.append(pub)
+                self._publishers[key] = pub
+                self._encodings[key] = enc
+                h = freshness.horizon(r["kind"], r["annotations"])
+                if r["kind"] == "state" and h.horizon == "within":
+                    self.horizons[key] = h
+        for token in ("state", "@state"):
+            self._entities.append(s.declare_queryable(
+                f"{self.prefix(c)}/{token}/**", zenoh.handlers.Callback(self._state_handler),
+                complete=False))
+        return self._entities[start:]
+
+    def _put_held(self, plan: dict[str, list[tuple[dict[str, Any], str]]], only: str | None = None) -> None:
+        """The state values held at start, put before the tokens (§8.2
+        "State values"), of every interface it serves, or of ``only``."""
         for c in self.contracts:
+            if c.interface in self.standing_by or (only is not None and c.interface != only):
+                continue
             for r, status in plan[c.interface]:
                 key = f"{self.prefix(c)}/{r['token']}/{r['template']}"
                 if status == "exposed" and r["kind"] == "state" and not r["params"] \
                         and r["type"]["kind"] == "raw":
                     self.set_state(key, b"ok")
         for rel, payload in self.initial.items():
-            self.set_state(f"zk2/{self.system}/{self.service}/{rel}", payload)
-        if self.before_tokens is not None:
-            self.before_tokens(self)
-        # Step 3: the descriptor's queryable and its first put (§3.3), then a
-        # contract queryable per interface.
-        self._plan_made = plan
-        self._instance_entities, self.descriptor = self._declare_instance(plan, self.instance, bundles=True)
-        # Step 4 is the second half of _declare_instance.
-        if self.horizons:
-            self._ensure_refresher()
+            key = f"zk2/{self.system}/{self.service}/{rel}"
+            iface = rel.split("/", 1)[0]
+            if iface in self.standing_by or (only is not None and iface != only):
+                continue
+            self.set_state(key, payload)
 
     def _declare_instance(self, plan: dict[str, list[tuple[dict[str, Any], str]]], instance: str,
-                          bundles: bool = False) -> tuple[list[Any], bytes]:
+                          bundles: bool = False) -> tuple[list[Any], bytes, dict[str, Any]]:
         """§8.2 steps 3 and 4 for ``instance``: the descriptor's queryable and
         its first put, the contracts' queryables (once, at start: they are
         location-free, §8.4), then the instance token and the interface
         tokens. Returns the entities that belong to this instance, which
-        :meth:`new_epoch` undeclares, and its descriptor. It assigns nothing
-        of the owner's: on a failure it undeclares what it declared for the
-        instance and raises, so the caller keeps its id and entities."""
+        :meth:`new_epoch` undeclares, its descriptor, and its interface
+        tokens by interface (none for one it stands by on). It assigns
+        nothing of the owner's but the instance's descriptor in ``_docs``:
+        on a failure it undeclares what it declared for the instance and
+        raises, so the caller keeps its id and entities."""
         s = self.session
         assert s is not None
         mine: list[Any] = []
+        tokens: dict[str, Any] = {}
         key = f"zk2/{self.system}/{self.service}/@zk/instance/{instance}"
         doc = self._descriptor(plan, instance)
+        self._docs[instance] = doc
         try:
             # §3.3 "The GET": one reply, application/json, no attachment and
             # no timestamp. Each instance's queryable answers with its own
-            # record, so the old one still answers truly during a re-mint's
-            # overlap.
+            # current record, so the old one still answers truly during a
+            # re-mint's overlap, and a takeover's or step-down's put is what
+            # a GET reads after it.
             mine.append(s.declare_queryable(key, zenoh.handlers.Callback(
-                lambda q, key=key, doc=doc: q.reply(key, doc, encoding="application/json")), complete=True))
+                lambda q, key=key, instance=instance: q.reply(key, self._docs.get(instance, doc),
+                                                              encoding="application/json")), complete=True))
             s.put(key, doc, encoding="application/json", timestamp=self.mint())
             if bundles:
                 for c in self.contracts:
@@ -676,10 +735,10 @@ class Owner:
             lv = s.liveliness()
             mine.append(lv.declare_token(key))
             for c in self.contracts:
-                if c.interface not in self.tokenless and any(status == "exposed" for _, status in plan[c.interface]):
-                    fp16 = c.fingerprint.removeprefix("sha256:")[:16]
-                    mine.append(lv.declare_token(
-                        f"zk2/{self.system}/{self.service}/@zk/alive/{c.interface}/{instance}/{fp16}"))
+                if c.interface not in self.tokenless and c.interface not in self.standing_by \
+                        and any(status == "exposed" for _, status in plan[c.interface]):
+                    tokens[c.interface] = lv.declare_token(self._alive_key(c, instance))
+                    mine.append(tokens[c.interface])
         except Exception:
             for e in reversed(mine):
                 try:
@@ -688,22 +747,121 @@ class Owner:
                     pass
             raise
         self._entities.extend(mine)
-        return mine, doc
+        return mine, doc, tokens
 
-    def new_epoch(self) -> str:
+    def _alive_key(self, c: Contract, instance: str | None = None) -> str:
+        fp16 = c.fingerprint.removeprefix("sha256:")[:16]
+        return f"zk2/{self.system}/{self.service}/@zk/alive/{c.interface}/{instance or self.instance}/{fp16}"
+
+    def _contract(self, iface: str) -> Contract:
+        for c in self.contracts:
+            if c.interface == iface:
+                return c
+        raise KeyError(f"{iface}: not an interface this owner implements")
+
+    def _put_descriptor(self) -> None:
+        """The current instance's descriptor put again (§3.3 "Updates"), and
+        answered by its queryable from now on."""
+        assert self.session is not None
+        doc = self._descriptor(self._plan_made, self.instance)
+        self._docs[self.instance] = self.descriptor = doc
+        self.session.put(f"zk2/{self.system}/{self.service}/@zk/instance/{self.instance}", doc,
+                         encoding="application/json", timestamp=self.mint())
+
+    # -- core §6, §8.2 (0.39): serving later, and stopping --------------------
+
+    def take_over(self, iface: str, puts: Any = None) -> bool:
+        """Core §8.2 (0.39), "Serving later": steps 1 to 4 for ``iface``, in
+        their order: its resources; step 2 passed at the start; the state
+        values held (§8.2's SHOULD, and ``puts`` called with the owner: the
+        application's own, ``redundancy.v1`` §2.6), then the descriptor put
+        again without the mark; the interface token last. False when it was
+        not standing by on it."""
+        with self._writes:
+            if iface not in self.standing_by or self.session is None:
+                return False
+            c = self._contract(iface)
+            self._iface_entities[iface] = self._declare_resources(c, self._plan_made[iface])
+            self.standing_by.discard(iface)
+            if puts is not None:
+                puts(self)
+            else:
+                self._put_held(self._plan_made, only=iface)
+            self._put_descriptor()
+            tok = self.session.liveliness().declare_token(self._alive_key(c))
+            self._iface_tokens[iface] = tok
+            self._instance_entities.append(tok)
+            self._entities.append(tok)
+            if self.horizons:
+                self._ensure_refresher()
+            return True
+
+    def step_down(self, iface: str) -> bool:
+        """Core §8.2 (0.39), "stopping": the reverse order: the interface's
+        tokens first, then its resources (publishers and queryables, members'
+        included), then the descriptor put marked. It puts and deletes none
+        of the interface's keys (``redundancy.v1`` §2.4, §2.9). False when it
+        was not serving it."""
+        with self._writes:
+            if iface in self.standing_by or self.session is None:
+                return False
+            c = self._contract(iface)
+            gone: list[Any] = []
+            tok = self._iface_tokens.pop(iface, None)
+            if tok is not None:
+                gone.append(tok)
+                if tok in self._instance_entities:
+                    self._instance_entities.remove(tok)
+            self._undeclare(gone)
+            prefix = self.prefix(c) + "/"
+            pubs = [k for k in self._publishers if k.startswith(prefix)]
+            self._undeclare(self._iface_entities.pop(iface, []) + [self._publishers[k] for k in pubs])
+            for k in pubs:
+                self._publishers.pop(k, None)
+                self.horizons.pop(k, None)
+            self.standing_by.add(iface)
+            self._put_descriptor()
+            return True
+
+    def _undeclare(self, entities: list[Any]) -> None:
+        for e in entities:
+            try:
+                e.undeclare()
+            except Exception:  # noqa: BLE001 - withdrawn anyway when the session closes
+                pass
+            if e in self._entities:
+                self._entities.remove(e)
+
+    def _standing_on(self, key: str) -> str | None:
+        """The interface ``key`` belongs to when it stands by on it."""
+        for c in self.contracts:
+            if c.interface in self.standing_by and key.startswith(self.prefix(c) + "/"):
+                return c.interface
+        return None
+
+    def _refuse_standby_write(self, key: str) -> None:
+        iface = self._standing_on(key)
+        if iface is not None:
+            raise OwnerRefused(f"{key}: it stands by on {iface}, and a standby puts and deletes none of its "
+                               "keys (redundancy.v1 §2.4)")
+
+    def new_epoch(self, new: str | None = None) -> str:
         """Core §1.5 and §8.1: a new instance id while running, "make-before-
         break": the new descriptor's queryable and first put, then its
         tokens, in §8.2's order, and only then the old ones undeclared, "an
         overlap, never a gap". The session is kept (core §1.5's SHOULD of a
         new session is not taken: ``telemetry.v1`` scenarios §2, "the process
-        unchanged"), so the stamps' id stays. Returns the old instance id."""
+        unchanged"), so the stamps' id stays. ``new`` is the new id, a test's
+        choice, else 64 random bits. Returns the old instance id."""
         assert self.session is not None
         old, old_entities = self.instance, self._instance_entities
-        new = secrets.token_hex(8)
+        new = new or secrets.token_hex(8)
         # Declared first, assigned after: a declaration that raises leaves
         # the owner on its old id, with nothing of the new one declared.
-        entities, doc = self._declare_instance(self._plan_made, new)
-        self.instance, self._instance_entities, self.descriptor = new, entities, doc
+        with self._writes:
+            entities, doc, tokens = self._declare_instance(self._plan_made, new)
+            self.instance, self._instance_entities, self.descriptor = new, entities, doc
+            self._iface_tokens = tokens
         for e in old_entities:
             try:
                 e.undeclare()
@@ -735,6 +893,8 @@ class Owner:
             "interfaces": [{
                 "iface": c.interface, "contract": c.fingerprint, "minor": c.minor or 0,
                 "token": c.interface not in self.tokenless,
+                # core §3.3 (0.39): "Absent is serving"
+                **({"standby": True} if c.interface in self.standing_by else {}),
                 "unavailable": [{"resource": f"{r['token']}/{r['template']}",
                                  "cause": self.unavailable[f"{r['token']}/{r['template']}"]}
                                 for r, status in plan[c.interface] if status == "listed"],
@@ -768,6 +928,7 @@ class Owner:
         the re-put interval again (freshness.v1 §2.4). A put after
         :meth:`close_writer` is a new writer's."""
         with self._writes:
+            self._refuse_standby_write(key)
             if self.ahead:
                 raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
@@ -792,6 +953,7 @@ class Owner:
         for what is left of the window counted from the delete it repeats
         (desired.v1 §2.11, 0.3, "not a window more")."""
         with self._writes:
+            self._refuse_standby_write(key)
             if self.ahead:
                 raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
@@ -1004,6 +1166,7 @@ class Owner:
         resource's Encoding (§7.2), stamped ``timestamp`` when given (else
         by the session, core §4.1), and with ``attachment`` when given (its
         bytes as the resource's attachment encoding writes them, §7.2)."""
+        self._refuse_standby_write(key)
         if key not in self._publishers:
             self._member_publisher(key)
         if key in self._member_of:
