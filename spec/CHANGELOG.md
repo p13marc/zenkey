@@ -3,6 +3,143 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.39 — 2026-10-24: what `redundancy.v1` needed of the core (#841)
+
+`redundancy.v1`'s first text (#841, RA) is the profile the core has left
+exclusivity to since 0.1: "election and fencing belong to
+`redundancy.v1`" (§6), and O1's at most once holds only while one
+instance serves (spike S6). The core already had a standby, without a
+mark: §6 said it "exposes no exclusive resource, and declares no
+interface token for an interface it exposes nothing of", and O3 that it
+declares no operation queryable. Its descriptor listed every interface
+the instance implements, exposure is compact (§3.3), and so a standby's
+listing claimed the interface's resources exposed: the shape §8.1 calls
+"an exposed interface with no token", which the reference doctor's
+`token-missing` reports, and the standby that `hostid.v1` §2.12 cannot
+tell from a twin. No fixture case changed; six are added, five
+descriptors and one contract. The number follows 0.38, which answers the
+second implementation's round 54 on 0.37's presence reads; 0.39 changes
+none of 0.37's or 0.38's reading rules.
+
+**Changed: the standby mark (§3.3, §6).**
+- **The rule.** An interface entry of the descriptor MAY carry
+  `"standby": true`: the instance implements the interface, lists it, and
+  serves none of it now. Absent is serving, and `false` written out the
+  same, as a role's `optional` is (0.10). §6 defines the standby by it:
+  it exposes none of the interface's resources, declares none of its
+  operation queryables, `unavailable` ones included, and holds none of
+  its interface or member tokens; it holds its instance token, serves its
+  descriptor, and still holds the interface's bundle, which is not one of
+  its resources. `[F: descriptors/ok-standby, ok-standby-false]`
+- **Its `unavailable` and `cardinality`** state what the instance will
+  expose once it serves, checked as any entry's (D005–D007), and are never
+  read as exposure: a standby entry exposes nothing, whatever else it
+  says. A runtime then flips one member to take over, and a tool sees a
+  standby's readiness (a capability it lacks) before a takeover.
+- **Only as a profile says.** The core defines what a standby is, holds
+  and exposes, and no election: when an instance stands by, and when it
+  serves, is `redundancy.v1`'s for an interface whose contract uses it.
+  The mark is the core's own member, not a fifth extension point (§10).
+- **The type.** A `standby` that is not a boolean is not the record's
+  shape: D000. `[F: descriptors/d000-standby-type]`
+
+**Changed: a standby holds no interface token and exposes nothing (§8.1,
+§8.2).** §8.1's interface token says a standby holds none, nor a member
+token. §8.2 says a standby exposes none of the interface's resources,
+required ones included, which step 2 does not refuse, and that it
+validates at its start what it will expose once it serves, so that a
+takeover cannot fail step 2. `[Sc: profiles/redundancy/scenarios.md §1]`
+
+**Changed: serving later, and stopping (§8.2).** An instance that starts
+to serve an interface while it runs, a standby taking over, does steps 1
+to 4 for that interface in their order: its resources, then its
+descriptor put again without the mark, then the interface's token. One
+that stops serving undoes them in the reverse order: the tokens first,
+then the resources, then the descriptor put marked. Alive ⇒ callable holds
+at every step, as at a start. `[Sc: profiles/redundancy/scenarios.md §1,
+§7]`
+
+**Changed: an interface with a standby is never tokenless (§3.3 D012,
+§8.1, §8.2).**
+- **The gap.** The incumbent of an interface is the instance holding its
+  token (`redundancy.v1` §2.3), and a tokenless interface has none, so an
+  election over one has nothing to elect by, and the split-brain check
+  (§6) does not cover it.
+- **D012**: an entry marked both `"standby": true` and `"token": false`.
+  It reads `standby` and `token` alone, as D011 reads `iface` and `token`
+  (cascade 7, new): a malformed `contract` does not suppress it, and an
+  `archive.v1` entry so marked gives D011 and D012.
+  `[F: descriptors/d012-standby-tokenless, d012-bad-fingerprint]` The old
+  cascade 7 ("not checked") is now 8, and §3.3's one reference to it moved.
+- **The tokenless set** never names an interface whose contract uses
+  `redundancy.v1` (§8.1), as it never names `archive.v1`, and §8.2 step 2
+  refuses an owner whose set names one it implements.
+  `[Sc: profiles/redundancy/scenarios.md §11]`
+
+**Changed: the split-brain check reads the mark (§6).**
+- **A holder is an incumbent, whatever its mark.** The check counts the
+  instances holding the token, as before; one whose descriptor marks the
+  interface standby is counted, and its descriptor disagrees with its
+  tokens besides (§8.1's "a token for an interface it exposes nothing
+  of").
+- **Reading the mark.** An instance listing the interface marked, holding
+  no token of it in a complete read, is a standby: no finding of the
+  check, nor of §8.1's shapes, since its listing claims nothing exposed.
+  One listing it unmarked, outside its tokenless set, holding no token of
+  it in two complete reads a grace apart, claims an exposure no token
+  covers. `redundancy.v1` §5 states the questions a tool answers of an
+  address and of one instance. `[Sc: profiles/redundancy/scenarios.md
+  §12]` `operations.md` §8's step 3 says its standby is marked.
+- **Not fencing.** The runtime still fences nothing, but for an interface
+  whose contract uses `redundancy.v1`, whose holders step down as its
+  §2.9 says; writes already in flight still land, so that is no fence
+  either.
+
+**Changed: `redundancy.v1`'s vocabulary published (Appendix D, §10).**
+- **The rule.** `redundancy.v1` §4 publishes the interim row's one key
+  unchanged, `election` (`claim`, the default, or `external`), which a
+  contract writes once on `[defaults]` (its §2.2). Appendix D's published
+  table gains `redundancy`, and the interim row is gone. W105 reads it as
+  it reads any other (0.21): a contract writing `redundancy.election`
+  draws nothing, and one writing another `redundancy.<key>`, a fencing
+  epoch among them, draws W105. `[F: contracts/w105-redundancy-epoch]`
+- **§10** names `redundancy.v1` among the profiles the core names, for
+  exclusivity, and its vocabulary beside the published ones (point 2).
+  Appendix C lists the profile's scenarios that observe core rules: the
+  mark, a standby's tokens and exposure, the order of a takeover and a
+  step-down, the tokenless refusal, a call finding no standby, and a tool
+  reading the mark.
+
+**Deliberately not changed.**
+- **No election in the core, and no role beyond the mark.** Standing by
+  and serving are the two states a tool reads; an election, a preferred
+  instance or a priority would be a profile's, and `redundancy.v1` has
+  none of the last two at 1.0.
+- **The descriptor's format** stays `zk2-descriptor/0.1`. The member is
+  optional, absent meaning serving, as 0.10's `optional` was added: an
+  instance that never stands by writes the record it wrote before, and a
+  checker built before 0.39 reads a marked entry as D000, an unknown
+  member, which is the checker behind, not the record changed.
+- **No D-check of a governed interface marked tokenless,** nor of a mark
+  on an interface no profile governs. Each needs the contract's `uses`,
+  the descriptor fixtures are checked against one contract, `nav.v2`,
+  which uses no profile, and a checker reads `profiles` for its form only
+  (cascade 8). The owner's start refuses the first (§8.2); a tool given
+  the contract reports both (`redundancy.v1` §2.14, its
+  `descriptors.json`).
+- **O1** keeps its words: at most once only while one instance serves. A
+  split still runs a call on each side, which `redundancy.v1` §2.10
+  states, and a standby is reached by no call because it declares no
+  queryable (O3), which is unchanged.
+- **The split-brain check's reads and grace** (§6, 0.10) are unchanged.
+  The profile's heal (its §2.9) takes them as its own rule.
+- **§8.1's reading rules,** 0.37's and 0.38's, are unchanged and are not
+  restated: the profile's election reads presence and follows it by them
+  (its §2.5, §2.7, §2.8).
+- **`hostid.v1` §2.12** keeps its words here: its standby "until
+  `redundancy.v1` says how a tool recognises a standby" is answered by
+  that profile's §5, and its own text moves with the tools (#841, RC).
+
 ## 0.38 — 2026-10-24: the second implementation's findings against 0.37 (#849)
 
 The spec-only implementation read 0.37 cold (zk2py round 54, PR #848):

@@ -166,7 +166,9 @@ any of them.
 1. Two instances of one service hold an interface token for one interface
    for longer than the grace period.
 2. One instance re-mints (core §8.1).
-3. A standby holds its instance token only.
+3. A standby holds its instance token only, and its descriptor marks
+   the interface `"standby": true` (core 0.39; the profile's scenarios,
+   `profiles/redundancy/scenarios.md` §12, run the mark's other shapes).
 4. Two instances of one service expose an interface whose only resources
    are replicated operations.
 5. One instance exposes an interface's exclusive resources and its

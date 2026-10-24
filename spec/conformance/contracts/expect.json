@@ -484,6 +484,12 @@
       ],
       "fingerprint": "sha256:7a318a8996803cbdabf0f2f08c5a451774ccd08e7e9444ca2b11739b7317ba9a"
     },
+    "w105-redundancy-epoch": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:2fa4909975cb88c06a5c5da5bd59e504f37c6d159ce9b93ce4b88773082eafc2"
+    },
     "w105-vocabulary": {
       "codes": [
         "W105"

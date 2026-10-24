@@ -15,6 +15,11 @@
         "D000"
       ]
     },
+    "d000-standby-type": {
+      "codes": [
+        "D000"
+      ]
+    },
     "d000-unknown-field": {
       "codes": [
         "D000"
@@ -161,6 +166,19 @@
         "D011"
       ]
     },
+    "d012-bad-fingerprint": {
+      "codes": [
+        "D003",
+        "D011",
+        "D012",
+        "D012"
+      ]
+    },
+    "d012-standby-tokenless": {
+      "codes": [
+        "D012"
+      ]
+    },
     "not-json": {
       "codes": [
         "D000"
@@ -185,6 +203,12 @@
       "codes": []
     },
     "ok-optional-unchecked": {
+      "codes": []
+    },
+    "ok-standby": {
+      "codes": []
+    },
+    "ok-standby-false": {
       "codes": []
     },
     "ok-tokenless": {

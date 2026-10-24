@@ -1,0 +1,21 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "vehicle-01/navigation",
+ "instance": "3fa9c2d41b7e0017",
+ "interfaces": [
+  {
+   "iface": "nav.v2",
+   "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+   "minor": 1,
+   "token": false,
+   "standby": true
+  }
+ ],
+ "capabilities": [
+  "gnss",
+  "imu"
+ ],
+ "meta": {
+  "note": "a standby on a tokenless interface: an interface with a standby is never tokenless (core §3.3, §6, 0.39)"
+ }
+}

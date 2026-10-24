@@ -1,0 +1,33 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "vehicle-01/navigation",
+ "instance": "3fa9c2d41b7e0015",
+ "interfaces": [
+  {
+   "iface": "nav.v2",
+   "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+   "minor": 1,
+   "token": true,
+   "standby": true,
+   "unavailable": [
+    {
+     "resource": "state/diagnostics",
+     "cause": "config",
+     "reason": "diagnostics disabled"
+    }
+   ],
+   "cardinality": {
+    "state/tracks/{track}": 20
+   }
+  }
+ ],
+ "capabilities": [
+  "gnss"
+ ],
+ "profiles": [
+  "redundancy.v1"
+ ],
+ "meta": {
+  "note": "a standby on nav.v2 (core §3.3, §6, 0.39): it exposes nothing, and its unavailable and cardinality say what it will expose once it serves, checked as any entry's; that nav.v2's contract does not use redundancy.v1 is not checked (cascade 8)"
+ }
+}

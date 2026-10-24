@@ -1,0 +1,18 @@
+# `redundancy.v1` publishes its vocabulary (core 0.39): `election`, the
+# interim row's one key, written once on `[defaults]`, where it reaches
+# every resource. A fencing epoch is not at 1.0 (redundancy.v1 §2.16), so
+# `redundancy.epoch` is outside the table and draws W105, once, where it is
+# written; the defaulted `election` draws nothing.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "external" }
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "redundancy.epoch" = 1 }
