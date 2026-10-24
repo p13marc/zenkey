@@ -154,8 +154,11 @@ class Bus:
                 e.close()
             except Exception:  # noqa: BLE001
                 pass
+        from . import live
+
+        # live.close: each session with the watch session zk2py opened for it
         for x in (self.s_session, self.g_session, self.t_session, self.router):
-            x.close()
+            live.close(x)
 
 
 def _status(payload: bytes) -> dict[str, Any] | None:
@@ -186,8 +189,8 @@ def section1(report: Report) -> None:
     try:
         s = bus.subscriber("lab/svc")
         seen: queue.Queue = queue.Queue()
-        lv = bus.t_session.liveliness().declare_subscriber(
-            "zk2/lab/*/@zk/**", h_callback(seen), history=True)
+        # Core §8.1 (0.37): on T's watch session, never beside T's reads.
+        lv, _ = live.watch_or_beside(bus.t_session, "zk2/lab/*/@zk/**", h_callback(seen), history=True)
         bus.extra.append(lv)
         answers: dict[str, list] = {}
 

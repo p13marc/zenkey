@@ -378,10 +378,14 @@ class Window:
         self.stamps: dict[str, list[tuple[str | None, int | None, int]]] = {}
         self.token_events: list[tuple[str, int]] = []
         prefix = f"zk2/{owner_address}/@zk/instance/"
-        self.lv = session.liveliness().declare_subscriber(f"{prefix}*", zenoh.handlers.Callback(
+        # Core §8.1 (0.37): the subscriber on the reader's watch session, one
+        # round trip there, and the reads on its own session.
+        self.lv, placed = live.watch_or_beside(session, f"{prefix}*", zenoh.handlers.Callback(
             lambda s: self.token_events.append((str(s.kind), time.monotonic_ns()))))
         pres = live.list_presence(session, f"{prefix}*")
-        self.present_at_start = bool(pres.instances) and pres.complete
+        # a round trip that did not come back cannot show the start's read
+        # ordered against the subscriber
+        self.present_at_start = bool(pres.instances) and pres.complete and placed.settled is not False
         self.session, self.prefix = session, prefix
         self.declared_ns = time.monotonic_ns()
         #: "counted from when its subscription reached the owner": the

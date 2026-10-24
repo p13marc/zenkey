@@ -27,6 +27,26 @@ zenoh-python has no unbounded channel: its default handler and
   refusal by access control (:attr:`Presence.reading`);
 - presence is polled with GETs, never inferred from silence (§3.2 R7, O5).
 
+**What a complete presence read is (§8.1, 0.37).**
+- **A read through a session cut off is not complete**, "whatever its
+  replies say", and "a reader SHOULD NOT make it": :func:`list_presence`
+  checks ``Session.info.transports()`` (zenoh-python 1.10.1 exposes it, and
+  its stub does not mark it unstable) and makes no read through a session
+  that holds none, reporting it **not made**, a third kind beside complete
+  and possibly incomplete. It checks again when the read ends: a read in
+  flight when the session's last transport closes is answered at once,
+  complete and empty, which zk2py measured (F-185), and it is not complete.
+- **The read that establishes absence goes on a session with no
+  liveliness subscriber**: every liveliness subscriber zk2py's readers
+  declare goes through :func:`declare_liveliness_subscriber`, which marks
+  its session for its life, and :func:`list_presence` makes no read on a
+  marked session (not made, beside a subscriber). :func:`watch_session`
+  opens a reader's **watch session** beside a session :func:`open_client`
+  opened, and :func:`settle` is the one round trip on it before a seed.
+- **Absence is established only by a complete read**:
+  :mod:`zk2py.presence` follows tokens live and keeps a withdrawal
+  unconfirmed until a read.
+
 **Timeouts are the caller's (§8.1).** The defaults here are the 1 s that
 "the scenarios, and so a conformance run, use".
 """
@@ -52,10 +72,92 @@ GET_TIMEOUT_S = 1.0
 _DONE = object()
 
 
+#: How each session :func:`open_client` opened was opened, by ``id``, so that
+#: :func:`watch_session` can open its watch session the same way. A zenoh-python
+#: session takes no attribute and no weak reference, so the registry holds
+#: the session itself, which keeps its id from being reused while it lives.
+#: An entry goes with :func:`forget` (or :func:`close`), and every entry of
+#: a session found closed is dropped as the registry is next touched
+#: (:func:`_prune`), so a long-lived tool neither leaks nor hands back a
+#: closed watch session.
+_OPENED: dict[int, tuple[Any, str, tuple[str, str] | None]] = {}
+#: Sessions that hold a liveliness subscriber zk2py declared (§8.1, 0.37):
+#: "marked for its life", since the router keeps the declarations after the
+#: subscriber is undeclared (Appendix B).
+_MARKED: dict[int, Any] = {}
+#: Each reading session's watch session: (the reading session, its watch).
+#: Every lookup checks the stored session *is* the one asked about, since a
+#: pruned entry's id may belong to another session later.
+_WATCHES: dict[int, tuple[Any, Any]] = {}
+
+
+def _is_closed(session: Any) -> bool:
+    try:
+        return bool(session.is_closed())
+    except Exception:  # noqa: BLE001 - a binding without is_closed: taken as open
+        return False
+
+
+def _prune() -> None:
+    """Drop every registry entry whose session is closed: a reading
+    session closed takes its watch session with it (closed too), and a
+    watch session closed is dropped, so that another is opened."""
+    for k, (reader, w) in list(_WATCHES.items()):
+        if _is_closed(reader):
+            del _WATCHES[k]
+            try:
+                w.close()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+        elif _is_closed(w):
+            del _WATCHES[k]
+    for k in [k for k, v in _OPENED.items() if _is_closed(v[0])]:
+        del _OPENED[k]
+    for k in [k for k, v in _MARKED.items() if _is_closed(v)]:
+        del _MARKED[k]
+
+
+def forget(session: Any) -> None:
+    """Drop the registry's entries for ``session`` (opened, marked, its watch
+    session), closing the watch session zk2py opened for it."""
+    if _OPENED.get(id(session), (None,))[0] is session:
+        del _OPENED[id(session)]
+    if _MARKED.get(id(session)) is session:
+        del _MARKED[id(session)]
+    entry = _WATCHES.get(id(session))
+    w = None
+    if entry is not None and entry[0] is session:
+        del _WATCHES[id(session)]
+        w = entry[1]
+    if w is not None:
+        _OPENED.pop(id(w), None)
+        _MARKED.pop(id(w), None)
+        try:
+            w.close()
+        except Exception:  # noqa: BLE001 - closing anyway
+            pass
+
+
+def close(session: Any) -> None:
+    """Close a session zk2py opened, with its watch session, and forget both."""
+    forget(session)
+    try:
+        session.close()
+    except Exception:  # noqa: BLE001 - closing anyway
+        pass
+
+
 def open_client(endpoint: str, auth: tuple[str, str] | None = None) -> zenoh.Session:
     """A *client* session to one router endpoint, multicast scouting off: a
     tool that sees exactly the router it is pointed at. ``auth`` is a
     usrpwd (user, password), the principal's binding (§11.3)."""
+    _prune()
+    s = _open_client(endpoint, auth)
+    _OPENED[id(s)] = (s, endpoint, auth)
+    return s
+
+
+def _open_client(endpoint: str, auth: tuple[str, str] | None = None) -> zenoh.Session:
     conf = zenoh.Config()
     conf.insert_json5("mode", json.dumps("client"))
     conf.insert_json5("connect/endpoints", json.dumps([endpoint]))
@@ -66,6 +168,110 @@ def open_client(endpoint: str, auth: tuple[str, str] | None = None) -> zenoh.Ses
 
 
 # -- §8.1 presence -------------------------------------------------------------
+
+#: Why a read was not made (§8.1, 0.37).
+CUT_OFF = "cut off: the session holds no transport to another zenoh node (core §8.1, 0.37)"
+BESIDE_SUBSCRIBER = ("beside a liveliness subscriber: the session holds one, and a read there can complete "
+                     "without the tokens it covers (core §8.1, 0.37; Appendix B)")
+#: Why a read cannot be shown complete: this binding's transports accessor
+#: failed, so §8.1's check could not be made (never a pass).
+TRANSPORTS_UNREADABLE = ("the session's transports could not be read (Session.info.transports() failed), so the "
+                         "read cannot be shown complete (core §8.1, 0.37)")
+#: The three kinds of a read (§8.1, 0.37: "A read not made is a third kind,
+#: never folded into either").
+COMPLETE, POSSIBLY_INCOMPLETE, NOT_MADE = "complete", "possibly incomplete", "not made"
+
+
+def transports_held(session: Any) -> bool | None:
+    """§8.1 (0.37): whether the session "holds a transport to another node",
+    by ``Session.info.transports()``; None when this binding cannot say,
+    which is then this reader's premise, never a pass."""
+    try:
+        info = session.info() if callable(getattr(session, "info", None)) else session.info
+        return bool(info.transports())
+    except Exception:  # noqa: BLE001 - an accessor this binding lacks says nothing
+        return None
+
+
+def marked(session: Any) -> bool:
+    """Whether the session holds a liveliness subscriber zk2py declared."""
+    return _MARKED.get(id(session)) is session
+
+
+def declare_liveliness_subscriber(session: Any, selector: str, callback: Any, *, history: bool = False) -> Any:
+    """A liveliness subscriber, callback-driven (§8.1's handler rule), that
+    marks its session (§8.1, 0.37): no presence read is made there after."""
+    _MARKED[id(session)] = session
+    handler = callback if isinstance(callback, zenoh.handlers.Callback) else zenoh.handlers.Callback(callback)
+    return session.liveliness().declare_subscriber(selector, handler, history=history)
+
+
+@dataclass(frozen=True)
+class Placement:
+    """Where :func:`watch_or_beside` put a reader's subscriber: on a watch
+    session or beside the reads, and whether the round trip there came back
+    (None beside the reads, where none is made). A reader whose round trip
+    did not come back cannot show its seed complete (§8.1, 0.37)."""
+
+    watch: bool
+    settled: bool | None
+
+    def __bool__(self) -> bool:
+        return self.watch
+
+
+#: How many times :func:`watch_or_beside` tries the round trip.
+SETTLE_TRIES = 3
+
+
+def watch_or_beside(session: Any, selector: str, callback: Any, *, history: bool = False) -> tuple[Any, Placement]:
+    """A reader's liveliness subscriber on its watch session (§8.1, 0.37),
+    then the round trip there (tried :data:`SETTLE_TRIES` times), so the
+    reading session holds none. For a session :func:`open_client` did not
+    open, no watch session can be had: the subscriber goes beside the
+    reads, unmarked, as before 0.37, and the placement says so."""
+    w = watch_session(session)
+    if w is None:
+        handler = callback if isinstance(callback, zenoh.handlers.Callback) else zenoh.handlers.Callback(callback)
+        return session.liveliness().declare_subscriber(selector, handler, history=history), Placement(False, None)
+    sub = declare_liveliness_subscriber(w, selector, callback, history=history)
+    settled = any(settle(w) for _ in range(SETTLE_TRIES))
+    return sub, Placement(True, settled)
+
+
+def watch_session(session: Any) -> Any | None:
+    """§8.1 (0.37): the **watch session** of a reader whose reading session
+    :func:`open_client` opened, opened the same way on first use, else
+    None (a session zk2py cannot open again)."""
+    _prune()
+    entry = _WATCHES.get(id(session))
+    if entry is not None and entry[0] is session:
+        return entry[1]
+    opened = _OPENED.get(id(session))
+    if opened is None or opened[0] is not session:
+        return None
+    _, endpoint, auth = opened
+    w = open_client(endpoint, auth)
+    _WATCHES[id(session)] = (session, w)
+    return w
+
+
+def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S) -> bool:
+    """§8.1 (0.37): "one round trip on the watch session after declaring its
+    subscribers, and before the seed: a liveliness GET there whose answer it
+    discards serves, since its final reply follows the declarations".
+    True when its final reply came."""
+    done = threading.Event()
+    errors: list[Any] = []
+    try:
+        watch.liveliness().get("zk2/@zk/settle", zenoh.handlers.Callback(
+            lambda r: errors.append(r) if r.ok is None else None, done.set), timeout=timeout)
+    except Exception:  # noqa: BLE001 - a closed or broken session makes no round trip
+        return False
+    # a round trip that ended at its timeout (an error reply) did not show
+    # the declarations ordered
+    return done.wait(timeout + 5.0) and not errors
+
 
 @dataclass
 class Presence:
@@ -81,6 +287,22 @@ class Presence:
     #: its error replies, "<encoding>: <payload>" (``zenoh/string: Timeout``)
     errors: list[str] = field(default_factory=list)
     elapsed_s: float = 0.0
+    #: §8.1 (0.37): why the read was not made (:data:`CUT_OFF`,
+    #: :data:`BESIDE_SUBSCRIBER`), else None
+    not_made: str | None = None
+    #: the session's last transport closed while the read ran: its answer
+    #: came through a session cut off, so it is not complete (F-185)
+    cut_off_during: bool = False
+    #: whether the session's transports could be read, before the read and
+    #: at its end; when not, the read cannot be shown complete
+    transports_checked: bool = True
+
+    @property
+    def kind(self) -> str:
+        """§8.1 (0.37): complete, possibly incomplete, or not made."""
+        if self.not_made is not None:
+            return NOT_MADE
+        return COMPLETE if self.complete else POSSIBLY_INCOMPLETE
 
     @property
     def count(self) -> int:
@@ -93,6 +315,13 @@ class Presence:
         SHOULD say so, as it says a read is possibly incomplete." A reader
         can never rule one out from the read itself (the CHANGELOG's "No
         probe that tells a refusal from absence")."""
+        if self.not_made is not None:
+            return f"not made ({self.not_made}): what it would establish is unobservable"
+        if self.cut_off_during:
+            return (f"not complete: the session's last transport closed while it ran (core §8.1, 0.37): "
+                    f"{self.count} tokens, silence is not a verdict")
+        if not self.transports_checked:
+            return f"possibly incomplete ({TRANSPORTS_UNREADABLE}): {self.count} tokens, silence is not a verdict"
         if not self.complete:
             why = "; ".join(self.errors) or "no final reply"
             return f"possibly incomplete ({why}): {self.count} tokens, silence is not a verdict"
@@ -111,6 +340,11 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     tokens, and ``zk2/*/*/@zk/alive/nav.v2/**`` is "who implements nav.v2"
     (§8.1).
     """
+    if marked(session):
+        return Presence(not_made=BESIDE_SUBSCRIBER)
+    held = transports_held(session)
+    if held is False:
+        return Presence(not_made=CUT_OFF)
     replies: list[Any] = []
     done = threading.Event()
     t0 = time.monotonic()
@@ -136,6 +370,17 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     # §8.1 (0.8): ended by the routers' final reply, and no error reply. A
     # GET whose drop never came is incomplete too.
     p.complete = finished and not p.errors
+    # §8.1 (0.37): a session that reaches no node answers at once, complete
+    # and empty; a read in flight when its last transport closes is answered
+    # so too. Checked again at the read's end (F-185). A check that cannot
+    # be made, before or after, leaves the read possibly incomplete: a
+    # broken accessor never weakens the rule.
+    after = transports_held(session)
+    p.transports_checked = held is not None and after is not None
+    if after is False:
+        p.cut_off_during, p.complete = True, False
+    if not p.transports_checked:
+        p.complete = False
     return p
 
 
