@@ -988,6 +988,84 @@ mod tests {
         assert!(matches!(report_of(&[], &[D.to_owned()]), ReportFound::None));
     }
 
+    /// Text 0.5, F-210: with the slice from the target alone, every
+    /// template the requirement names, under either kind token, is a
+    /// candidate; the one a readable report claims is the slice, and with
+    /// none claimed none was read.
+    #[test]
+    fn the_reports_key_chooses_among_the_requirements_candidates() {
+        let own: Addr = "lab/worker".parse().unwrap();
+        let templates = vec![
+            "plans/{system}/{service}".to_owned(),
+            "tasks/{system}/{service}".to_owned(),
+        ];
+        let r = resolve_role(&own, &entry(&["lab/author"]), Some(&templates), None).unwrap();
+        assert_eq!(r.slice_from, Some(SliceFrom::Requirement));
+        assert_eq!(
+            r.slice,
+            [
+                "zk2/lab/author/tasking.v1/state/plans/lab/worker",
+                "zk2/lab/author/tasking.v1/@state/plans/lab/worker",
+                D,
+                "zk2/lab/author/tasking.v1/@state/tasks/lab/worker",
+            ]
+        );
+        let rp = "zk2/lab/worker/worker.v1/state/desired/task";
+        let plans = "zk2/lab/author/tasking.v1/@state/plans/lab/worker";
+        let claimed = vec![reply(
+            rp,
+            &format!(r#"{{"key": "{plans}", "source": "baseline"}}"#),
+        )];
+        match report_of(&claimed, &r.slice) {
+            ReportFound::One(x) => {
+                assert_eq!(x.read.as_ref().unwrap().key.as_deref(), Some(plans));
+            }
+            other => panic!("{other:?}"),
+        }
+        let none = vec![reply(
+            rp,
+            r#"{"key": "zk2/lab/author/tasking.v1/state/other/lab/worker", "source": "baseline"}"#,
+        )];
+        assert!(matches!(report_of(&none, &r.slice), ReportFound::None));
+    }
+
+    /// Text 0.5, F-213: a revision held offline gives the slice, the
+    /// contract's kind token winning over the report's: a report keyed under
+    /// the other kind token is none.
+    #[test]
+    fn a_held_revisions_kind_token_wins_over_the_reports() {
+        let own: Addr = "lab/worker".parse().unwrap();
+        let mut offline = ContractSet::new();
+        offline.insert(Revision::from_contract(
+            tasking(),
+            crate::report::ContractSource::File,
+        ));
+        let templates = vec!["tasks/{system}/{service}".to_owned()];
+        let iface: IfaceId = "tasking.v1".parse().unwrap();
+        let author: Addr = "lab/author".parse().unwrap();
+        let none = Contracts::new();
+        let held = author_contract(
+            None,
+            Some(&author),
+            &iface,
+            Some(&templates),
+            &none,
+            &offline,
+        );
+        assert!(matches!(held, Some((_, SliceFrom::OfflineContract))));
+        let r = resolve_role(&own, &entry(&["lab/author"]), Some(&templates), held).unwrap();
+        assert_eq!(r.slice, [D]);
+        let rp = "zk2/lab/worker/worker.v1/state/desired/task";
+        let explicit = vec![reply(
+            rp,
+            r#"{"key": "zk2/lab/author/tasking.v1/@state/tasks/lab/worker", "source": "baseline"}"#,
+        )];
+        assert!(matches!(
+            report_of(&explicit, &r.slice),
+            ReportFound::None
+        ));
+    }
+
     fn st(time: u64, id: &str) -> Stamp {
         Stamp::parse(time, id).unwrap()
     }
