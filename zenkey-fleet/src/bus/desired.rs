@@ -151,6 +151,50 @@ pub async fn observe(
     store: &BundleStore,
     offline: &ContractSet,
 ) -> DesiredRead {
+    observe_with(
+        session,
+        target,
+        spec,
+        store,
+        offline,
+        None,
+        Contracts::new(),
+    )
+    .await
+}
+
+/// [`observe`] of every target, over a presence read a caller already made
+/// of every service, its descriptors described, and the revisions it
+/// already retrieved: the doctor's (#840, DD). Nothing is read again.
+pub async fn observe_in(
+    session: &Session,
+    observed: Observed,
+    contracts: Contracts,
+    spec: &DesiredSpec,
+    store: &BundleStore,
+    offline: &ContractSet,
+) -> DesiredRead {
+    observe_with(
+        session,
+        None,
+        spec,
+        store,
+        offline,
+        Some(observed),
+        contracts,
+    )
+    .await
+}
+
+async fn observe_with(
+    session: &Session,
+    target: Option<&Addr>,
+    spec: &DesiredSpec,
+    store: &BundleStore,
+    offline: &ContractSet,
+    given: Option<Observed>,
+    contracts: Contracts,
+) -> DesiredRead {
     let began = Instant::now();
     let mut read = DesiredRead {
         began,
@@ -169,16 +213,20 @@ pub async fn observe(
         return read;
     }
     let t = spec.timeout;
-    let mut contracts = Contracts::new();
+    let mut contracts = contracts;
     if let (Some(word), Some(a)) = (&spec.face, target) {
         read.targets.push(across_face(a, word, spec, offline));
     } else {
-        let selector = presence_selector(target);
-        read.asked.push(selector);
-        let scope = target.map_or_else(Scope::all, Scope::service);
-        let presence = crate::bus::presence::observe(session, &scope, t)
-            .await
-            .map_err(|e| crate::one_line(&e));
+        let presence = match given {
+            Some(o) => Ok(o),
+            None => {
+                read.asked.push(presence_selector(target));
+                let scope = target.map_or_else(Scope::all, Scope::service);
+                crate::bus::presence::observe(session, &scope, t)
+                    .await
+                    .map_err(|e| crate::one_line(&e))
+            }
+        };
         read.presence = Some(presence);
         let observed = read.presence.as_ref().and_then(|p| p.as_ref().ok());
         // The targets: the one asked of, or every service with an instance.

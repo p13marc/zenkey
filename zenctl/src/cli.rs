@@ -394,6 +394,14 @@ pub(crate) struct DoctorArgs {
     /// service implementing health.v1 are unobservable.
     #[arg(long)]
     pub(crate) clocks_synced: bool,
+    /// How long a desired.v1 target may be "not yet" converged on a version
+    /// its author stamped before desired-behind finds it, seconds, by a
+    /// clock --clocks-synced trusts (desired.v1 §2.17): the doctor makes one
+    /// reading, and one reading without a trusted clock never finds a target
+    /// behind.
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_fleet::judge::doctor::DEFAULT_DESIRED_BEHIND.as_secs_f64())]
+    pub(crate) desired_behind: f64,
     /// Ask only this check (repeatable); every other is not asked.
     #[arg(long = "check", value_name = "CHECK-ID", value_parser = check_id,
           conflicts_with = "skip", add = ArgValueCandidates::new(completion::check_ids))]
@@ -832,7 +840,7 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Twenty-seven checks, each a question whose finding is the yes: split-brain
+    /// Thirty checks, each a question whose finding is the yes: split-brain
     /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
     /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
     /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
@@ -859,7 +867,13 @@ pub(crate) enum Command {
     /// whose declaration is invalid, so no reader reads its members) and
     /// telemetry-sample (with --deep: a state metric member's reply that does
     /// not conform; one that does not decode, or under an invalid
-    /// declaration, leaves it unobservable). The deployment is read through a
+    /// declaration, leaves it unobservable); and desired.v1's desired-refused
+    /// (a target whose last act on its author's document was refused or
+    /// failed), desired-behind (a target not yet converged on a version its
+    /// author stamped longer ago than --desired-behind, read only with
+    /// --clocks-synced: one reading never finds a target behind) and
+    /// desired-last-known (info: a target running a document read from an
+    /// archive). The deployment is read through a
     /// session in its namespace; the routers' admin space and the presence
     /// domain through one in no namespace. A check whose input could not be
     /// had is unobservable, with the reason — never clean — and so is every
