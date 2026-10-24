@@ -3,6 +3,72 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.36 — 2026-10-24: what `desired.v1` needed of the core (#840)
+
+`desired.v1`'s first text (#840, DA) states the profile three adopters
+had each defined on its own (`config.v1` §2.18, the walkthrough's
+`mission_plan.v1`, ZenSight's `zs.desired.v1`), and publishes the interim
+`desired` row of Appendix D. No fixture case changed; one is added.
+
+**Changed: `desired.v1`'s vocabulary published, without `target`
+(Appendix D, §10).**
+- **The gap.** Appendix D's interim tables gave `desired` two keys,
+  `target_param` and `target`, from architecture D19's list, and nothing
+  said what either meant. `target_param` is what the walkthrough and
+  ZenSight write; `target` no contract under `examples/zk2/` or `spec/`
+  wrote, and R2's `self.system` and `self.service` (0.20) already say
+  which identity fills each target parameter.
+- **The rule.** `desired.v1` §4 publishes `target_param` alone. Appendix
+  D's published table gains `desired`, and the interim row is gone. W105
+  reads the published table as it reads any other (0.21), so a contract
+  that writes `desired.target` draws W105, and `desired.target_param`
+  draws none. `[F: contracts/w105-desired-target]`
+- **What the value means** is the profile's (§10): its §2.2 reads it, one
+  template parameter or two, the first bound to `self.system` and the
+  second to `self.service`.
+- **§10** names `desired.v1` among the profiles the core names, for
+  store-and-forward (§4.4), its standard schema beside `telemetry.v1`'s
+  (point 1), and its vocabulary beside the published ones (point 2).
+  Appendix C lists the profile's scenarios that observe core rules: a late
+  joiner's seed (§4.2), a window covering an outage (S3), a new instance's
+  re-puts (§4.3), last-known (S5, S6).
+
+**Changed: a pointer (§4.4).** "Store-and-forward (`desired.v1`) uses
+both" cites `desired.v1` §2.9.
+
+**Deliberately not changed.**
+- **Instance identity (§1.5): no zid is reused.** Considered on review
+  and not adopted: letting an owner restarting from its record keep its
+  session's zid, so that `desired.v1`'s author could answer its targets' seeds under
+  the stamps its record held, and a tool's S1 check (§4.2) would read them
+  as its own. It was dropped on review: the instance id is a continuity
+  epoch, a new session takes a fresh zid, and zenoh may refuse or confuse
+  a zid reused within the old session's lease. `desired.v1` solves the
+  restart itself: its author puts each document it keeps again from its
+  new instance, as `alarms.v1` §2.9's owner does, and a target adopts,
+  without an act, a version whose document equals the one it last acted
+  on (`desired.v1` §2.7, §2.11). The core gains nothing for it.
+- **The order of versions.** `desired.v1` §2.6 is §4.3's consumer rule:
+  by time within one id, the first value under another id accepted. Two
+  ids within one seed stay §4.3's residual risk, as 0.26 left them; the
+  profile names the case and adds no rule of the core's.
+- **S1–S7.** A document is state, and its version the owner's stamp
+  (S1, S2): nothing new is needed to carry it. That a version with the
+  same document is adopted without an act is the profile's rule for what a
+  target does, not a change to what a re-put is (0.21: a mutation like any
+  other). The author's tombstone window covering the outage to its
+  targets is S3's rule, extended by the profile to targets, as `link.v1`
+  §2.11 extends it to every state behind a face.
+- **A late joiner's seed** (§4.2) is the target's reading, unchanged, and
+  silence is still no verdict (O5): a target reverts only on a delete or
+  a `reply_del`.
+- **No core lint reads `target_param`'s value.** A declaration
+  `desired.v1` §2.2 reads as invalid (a stream, a name that is no
+  parameter, a parameter left out) still loads, as `freshness.ttl_s` and
+  `telemetry.*` values do (0.21, 0.35). A linter SHOULD warn.
+- **§8.1 and Appendix B** are untouched: a target watches its author's
+  instance token, which the tokenless set never removes.
+
 ## 0.35 — 2026-10-21: what `telemetry.v1` needed of the core (#819)
 
 `telemetry.v1`'s first text (#819, TA) states what a metric is, moves

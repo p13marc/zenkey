@@ -1,0 +1,607 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "binding": "bound",
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+      },
+      "iface": "mission_plan.v1",
+      "note": "the walkthrough: {vehicle} = self.system (core bindings.md §2)",
+      "requirement": {
+        "bindings": [
+          "ground/fleet-mgr"
+        ],
+        "optional": true,
+        "params": {
+          "vehicle": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      },
+      "target": "vehicle-01/executor"
+    },
+    {
+      "expect": {
+        "binding": "bound",
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/executor"
+      },
+      "iface": "mission_plan.v1",
+      "note": "one target parameter may bind self.service: a document per service name",
+      "requirement": {
+        "bindings": [
+          "ground/fleet-mgr"
+        ],
+        "optional": true,
+        "params": {
+          "vehicle": "self.service"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      },
+      "target": "vehicle-01/executor"
+    },
+    {
+      "expect": {
+        "binding": "bound",
+        "key": "zk2/fleet/desired/zs.desired.v1/state/desired/h-3fa9c2d41b7e/sysinfo/thresholds"
+      },
+      "iface": "zs.desired.v1",
+      "note": "ZenSight's sysinfo sensor and its thresholds",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "self.system",
+          "service": "self.service"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "bound",
+        "key": "zk2/fleet/desired/zs.desired.v1/state/desired/h-3fa9c2d41b7e/snmp.router01/targets.snmp"
+      },
+      "iface": "zs.desired.v1",
+      "note": "a dotted device service is one chunk",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "self.system",
+          "service": "self.service"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/targets.snmp"
+      },
+      "target": "h-3fa9c2d41b7e/snmp.router01"
+    },
+    {
+      "expect": {
+        "binding": "bound",
+        "key": "zk2/lab/author/tasking.v1/@state/tasks/lab/worker"
+      },
+      "iface": "tasking.v1",
+      "note": "explicit state: the slice under @state",
+      "requirement": {
+        "bindings": [
+          "lab/author"
+        ],
+        "optional": true,
+        "params": {
+          "service": "self.service",
+          "system": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "explicit": true,
+        "kind": "state",
+        "template": "tasks/{system}/{service}"
+      },
+      "target": "lab/worker"
+    },
+    {
+      "expect": {
+        "binding": "bound",
+        "key": "zk2/lab/author/tasking.v1/@state/tasks/x-x-lab/worker"
+      },
+      "iface": "tasking.v1",
+      "note": "a system starting x- is slugged as any value (core §1.4)",
+      "requirement": {
+        "bindings": [
+          "lab/author"
+        ],
+        "optional": true,
+        "params": {
+          "service": "self.service",
+          "system": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "explicit": true,
+        "kind": "state",
+        "template": "tasks/{system}/{service}"
+      },
+      "target": "x-lab/worker"
+    },
+    {
+      "expect": {
+        "binding": "bound",
+        "key": "zk2/lab/author/tasking.v1/@state/tasks/lab/x-x-worker"
+      },
+      "iface": "tasking.v1",
+      "note": "a service starting x- is slugged as any value too (core §1.4)",
+      "requirement": {
+        "bindings": [
+          "lab/author"
+        ],
+        "optional": true,
+        "params": {
+          "service": "self.service",
+          "system": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "explicit": true,
+        "kind": "state",
+        "template": "tasks/{system}/{service}"
+      },
+      "target": "lab/x-worker"
+    },
+    {
+      "expect": {
+        "binding": "bound",
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+      },
+      "iface": "mission_plan.v1",
+      "note": "a parameter the template lacks is ignored here (core D-checks are the descriptor's)",
+      "requirement": {
+        "bindings": [
+          "ground/fleet-mgr"
+        ],
+        "optional": true,
+        "params": {
+          "vehicle": "self.system",
+          "zone": "north"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      },
+      "target": "vehicle-01/executor"
+    },
+    {
+      "expect": {
+        "binding": "unbound"
+      },
+      "iface": "zs.desired.v1",
+      "note": "unbound and optional: the kill switch (§2.12)",
+      "requirement": {
+        "bindings": [],
+        "optional": true,
+        "params": {}
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "required_unbound"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "unbound and required: the owner should not have started (core §3.2)",
+      "requirement": {
+        "bindings": [],
+        "optional": false,
+        "params": {}
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "unbound"
+      },
+      "iface": "zs.desired.v1",
+      "note": "unbound with parameters left: still the kill switch",
+      "requirement": {
+        "bindings": [],
+        "optional": true,
+        "params": {
+          "host": "self.system",
+          "service": "self.service"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_one_author"
+        ]
+      },
+      "iface": "mission_plan.v1",
+      "note": "two authors",
+      "requirement": {
+        "bindings": [
+          "ground/fleet-mgr",
+          "ground/backup"
+        ],
+        "optional": true,
+        "params": {
+          "vehicle": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      },
+      "target": "vehicle-01/executor"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_one_author"
+        ]
+      },
+      "iface": "mission_plan.v1",
+      "note": "a wildcard service is every author on a system",
+      "requirement": {
+        "bindings": [
+          "ground/*"
+        ],
+        "optional": true,
+        "params": {
+          "vehicle": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      },
+      "target": "vehicle-01/executor"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_one_author"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "a wildcard system",
+      "requirement": {
+        "bindings": [
+          "*/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "self.system",
+          "service": "self.service"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "target_unbound"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "the service parameter not bound",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "target_unbound"
+        ]
+      },
+      "iface": "mission_plan.v1",
+      "note": "no parameter bound: the whole collection",
+      "requirement": {
+        "bindings": [
+          "ground/fleet-mgr"
+        ],
+        "optional": true,
+        "params": {}
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      },
+      "target": "vehicle-01/executor"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_self"
+        ]
+      },
+      "iface": "mission_plan.v1",
+      "note": "bound to a literal: another vehicle's plan",
+      "requirement": {
+        "bindings": [
+          "ground/fleet-mgr"
+        ],
+        "optional": true,
+        "params": {
+          "vehicle": "vehicle-02"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      },
+      "target": "vehicle-01/executor"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_self"
+        ]
+      },
+      "iface": "mission_plan.v1",
+      "note": "R2 spells self.system, never self",
+      "requirement": {
+        "bindings": [
+          "ground/fleet-mgr"
+        ],
+        "optional": true,
+        "params": {
+          "vehicle": "self"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      },
+      "target": "vehicle-01/executor"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "wrong_self"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "swapped: the host bound to the service",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "self.service",
+          "service": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "wrong_self"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "both to self.system",
+      "requirement": {
+        "bindings": [
+          "fleet/desired"
+        ],
+        "optional": true,
+        "params": {
+          "host": "self.system",
+          "service": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "not_one_author",
+          "target_unbound",
+          "not_self"
+        ]
+      },
+      "iface": "zs.desired.v1",
+      "note": "each finding alone: two authors, one literal, one unbound",
+      "requirement": {
+        "bindings": [
+          "fleet/desired",
+          "fleet/backup"
+        ],
+        "optional": true,
+        "params": {
+          "host": "h-0000"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      },
+      "target": "h-3fa9c2d41b7e/sysinfo"
+    }
+  ],
+  "description": "desired.v1 §2.3: a desired resource (as declarations.json writes it, its declaration declared), its author's interface id (iface), the target's own address (target, <system>/<service>), and the target's requirement as its descriptor lists it (core §3.3: bindings, the provider addresses; params, the parameter bindings as configured; optional) -> expect.binding: \"unbound\" (no binding, and optional: the kill switch, §2.12); \"invalid\", with reasons in this order: required_unbound (no binding, and required; checked alone), not_one_author (more than one binding, or one with * at either position), target_unbound (a target parameter params does not bind), not_self (a target parameter bound to anything but self.system or self.service), wrong_self (of two target parameters, one bound to a self other than its own: the first is self.system's, the second self.service's); or \"bound\", with key: zk2/<author system>/<author service>/<iface>/<state, or @state for an explicit resource>/<the template's chunks, each target parameter's the target's own system or service as its binding says, slugged as core §1.4 slugs a value>."
+}

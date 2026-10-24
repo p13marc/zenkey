@@ -193,7 +193,7 @@ profile must be listed in `uses`.
 | `telemetry.v1` | `kind` (`counter` \| `gauge` \| `histogram` \| `text` \| `boolean` \| `binary`), `unit` (UCUM SHOULD, compared byte for byte), `buckets` (iff `histogram`), `semantic`: published by [`telemetry.v1`](../../spec/profiles/telemetry/v1.md) §4 (core 0.35), which also holds the standard schema, `telemetry.v1.Point` among it |
 | `link.v1` | `exposure` (`host` \| `link`, default `host`): published by [`link.v1`](../../spec/profiles/link/v1.md) §4 (core 0.29), which dropped `downsample_ms`, a face's rate being its face policy's `interval_s` |
 | `arbitration.v1` | `policy` (`priority` \| `freshest` \| `lease`) |
-| `desired.v1` | `target_param` (template parameter naming the target), `target` (`self.system` \| `self.service`) |
+| `desired.v1` | `target_param` (one template parameter, or two, the first bound to `self.system` and the second to `self.service`; every parameter of the template named): published by [`desired.v1`](../../spec/profiles/desired/v1.md) §4 (core 0.36), which retired `target`, the binding saying which identity fills each, and which also holds the standard schema, `desired.v1.Report` among it |
 | `alarms.v1` | none: published empty by [`alarms.v1`](../../spec/profiles/alarms/v1.md) §4 (core 0.34), which dropped `severity_default`, every document carrying its severity. The key recipe is fixed by the profile (§2.2), not annotated |
 | `media.v1` | `tiers` (list), `tier_param` (template parameter naming the tier), `frame_clock` (`capture` \| `encode`, or the FrameMeta clock field), `control` and `receiver_report` (bool: mark the stream-control and receiver-feedback operations) |
 | `views.v1` | `document` (`sha256:…` of a presentation artifact carried in the bundle's `extras`) |

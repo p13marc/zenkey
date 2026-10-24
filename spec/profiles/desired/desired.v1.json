@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "desired.v1.json",
+  "$comment": "desired.v1's standard schema (spec/profiles/desired/v1.md §2.10, §3; core §10 point 1). A target's contract lists this file, or a copy whose JCS bytes are equal, and types its report desired.v1.Report: a type is the profile's by this artifact's id, never by its name alone. Objects are open: a later minor may add a member, and a reader ignores one it does not know. Descriptions and comments are annotations (core §7.3).",
+  "$defs": {
+    "desired.v1.Report": {
+      "description": "What a target holds of one desired document, put by the target as its own state (§2.10): what is in force, and the last version it acted on with that act's outcome.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "The document's key, base-relative (core §1.6): the target's slice of its author's template (§2.3). Absent only for a requirement left unbound, the kill switch (§2.12).",
+          "type": "string"
+        },
+        "source": {
+          "description": "What is in force (§2.10): baseline, the target's own configuration with no document; desired, a document the target acted on; call, a change the target's own operation made since.",
+          "type": "string",
+          "enum": ["baseline", "desired", "call"]
+        },
+        "in_force": {
+          "description": "The version wholly in force, with source desired only. Absent after a failed act, when no one version is.",
+          "$ref": "#/$defs/desired.v1.Version"
+        },
+        "observed": {
+          "description": "The last version the target acted on in this instance, whatever the outcome (§2.7). Absent before its first act.",
+          "$ref": "#/$defs/desired.v1.Version"
+        },
+        "outcome": {
+          "description": "What that act did (§2.7, §2.8): converged, the document in force; refused, nothing of it applied and what was in force kept; failed, applied in part; reverted, a delete acted on and the baseline back in force.",
+          "type": "string",
+          "enum": ["converged", "refused", "failed", "reverted"]
+        },
+        "refusal": {
+          "description": "Why, with refused or failed only.",
+          "$ref": "#/$defs/desired.v1.Refusal"
+        },
+        "last_known": {
+          "description": "true when the observed version was read from an archive, its author absent or silent (§2.9). Absent is false.",
+          "type": "boolean"
+        }
+      },
+      "required": ["source"]
+    },
+    "desired.v1.Version": {
+      "description": "One version of a document (§2.4): its author's stamp, as zenoh writes a timestamp (the NTP64 time in decimal, a slash, the id in lowercase hexadecimal without leading zeros), and the document's own revision when its type carries one. A delete's version has no revision.",
+      "type": "object",
+      "properties": {
+        "stamp": {
+          "type": "string",
+          "minLength": 3
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["stamp"]
+    },
+    "desired.v1.Refusal": {
+      "description": "Why a target refused a document, or failed to apply it (§2.10): a code, the profile's (undecodable, reach, sensitive, invalid, apply) or the type's own, where in the document as a JSON Pointer (RFC 6901), and a line for a person.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "pointer": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": ["code"]
+    }
+  }
+}

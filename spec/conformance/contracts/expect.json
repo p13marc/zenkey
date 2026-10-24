@@ -472,6 +472,12 @@
       ],
       "fingerprint": "sha256:d14962adf71bc5a6da2de2474ca463ede40991ae514476025a9195f5bfcd50ce"
     },
+    "w105-desired-target": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:b7bd6bd86797a424f0f90fb03c13150276839dd9ac8461d63935d3457488e588"
+    },
     "w105-link-downsample": {
       "codes": [
         "W105"

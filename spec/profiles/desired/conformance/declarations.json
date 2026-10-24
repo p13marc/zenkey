@@ -1,0 +1,699 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
+        ]
+      },
+      "note": "the walkthrough's mission plan: one target parameter, either identity (§2.2)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
+        ]
+      },
+      "note": "a one-element array is the string",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "vehicle"
+          ]
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "self.system",
+            "param": "host"
+          },
+          {
+            "binds": "self.service",
+            "param": "service"
+          }
+        ]
+      },
+      "note": "ZenSight's thresholds: the first binds self.system, the second self.service, never stale",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "self.system",
+            "param": "host"
+          },
+          {
+            "binds": "self.service",
+            "param": "service"
+          }
+        ]
+      },
+      "note": "ZenSight's SNMP targets: the literal chunk names the document type (D22)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/targets.snmp"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "self.system",
+            "param": "system"
+          },
+          {
+            "binds": "self.service",
+            "param": "service"
+          }
+        ]
+      },
+      "note": "explicit state for a large population (§2.13)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ],
+          "freshness.ttl_s": 0
+        },
+        "explicit": true,
+        "kind": "state",
+        "template": "tasks/{system}/{service}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "self.system",
+            "param": "service"
+          },
+          {
+            "binds": "self.service",
+            "param": "host"
+          }
+        ]
+      },
+      "note": "the list's order says which binds to which, not the template's",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "service",
+            "host"
+          ]
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
+        ]
+      },
+      "note": "an integral float horizon of 0 is 0: never stale",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle",
+          "freshness.ttl_s": 0.0
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
+        ]
+      },
+      "note": "-0.0 is 0 (freshness.v1 §2.1)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle",
+          "freshness.ttl_s": -0.0
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
+        ]
+      },
+      "note": "a value that is no horizon is not one above 0: freshness.v1 reads it unobservable, a linter warns",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle",
+          "freshness.ttl_s": "60"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
+        ]
+      },
+      "note": "a fraction is no horizon (freshness.v1 §2.1)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle",
+          "freshness.ttl_s": 1.5
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "no desired.target_param: not this profile's",
+      "resource": {
+        "annotations": {},
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "the retired desired.target alone: not this profile's, and W105's (§4)",
+      "resource": {
+        "annotations": {
+          "desired.target": "system"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "config.v1's test author, one document and no key of the vocabulary",
+      "resource": {
+        "annotations": {},
+        "kind": "state",
+        "template": "desired"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_state"
+        ]
+      },
+      "note": "a stream is no document (§2.2)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "stream",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_state"
+        ]
+      },
+      "note": "an event is no document",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "event",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_state"
+        ]
+      },
+      "note": "an operation is no document",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "operation",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_state"
+        ]
+      },
+      "note": "a stream with a horizon: a stream is no document, whatever its horizon",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle",
+          "freshness.ttl_s": 60
+        },
+        "kind": "stream",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_state"
+        ]
+      },
+      "note": "an event's horizon is ignored (freshness.v1 §2.2)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle",
+          "freshness.ttl_s": 60
+        },
+        "kind": "event",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "a number is no value; the checks that need one are skipped",
+      "resource": {
+        "annotations": {
+          "desired.target_param": 3
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "an empty array",
+      "resource": {
+        "annotations": {
+          "desired.target_param": []
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "three names: a target is at most a system and a service",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "a",
+            "b",
+            "c"
+          ]
+        },
+        "kind": "state",
+        "template": "x/{a}/{b}/{c}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "an array holding a non-string",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            1
+          ]
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/t"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "a table",
+      "resource": {
+        "annotations": {
+          "desired.target_param": {
+            "param": "vehicle"
+          }
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "value"
+        ]
+      },
+      "note": "a boolean",
+      "resource": {
+        "annotations": {
+          "desired.target_param": true
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "repeated"
+        ]
+      },
+      "note": "a name twice",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "host"
+          ]
+        },
+        "kind": "state",
+        "template": "desired/{host}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_param",
+          "param_not_target"
+        ]
+      },
+      "note": "a misspelt name: no parameter, and the template's left unnamed",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicel"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_param",
+          "param_not_target"
+        ]
+      },
+      "note": "the empty name",
+      "resource": {
+        "annotations": {
+          "desired.target_param": ""
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_a_param",
+          "param_not_target"
+        ]
+      },
+      "note": "a literal chunk is no parameter",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "plans"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "rest_param"
+        ]
+      },
+      "note": "a rest parameter: no single identity fills it",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "path"
+        },
+        "kind": "state",
+        "template": "files/{path...}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "rest_param"
+        ]
+      },
+      "note": "a rest parameter beside a system",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "path"
+          ]
+        },
+        "kind": "state",
+        "template": "t/{host}/{path...}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "param_not_target"
+        ]
+      },
+      "note": "the service left out: a collection per target, not one document",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "host"
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "param_not_target"
+        ]
+      },
+      "note": "a parameter that is no target: a collection of plans per vehicle",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle"
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}/{slot}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
+        ]
+      },
+      "note": "a horizon above 0 is allowed: its re-puts are the same document, adopted without an act (§2.2, §2.7)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle",
+          "freshness.ttl_s": 900
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
+        ]
+      },
+      "note": "an integral float horizon above 0, allowed too",
+      "resource": {
+        "annotations": {
+          "desired.target_param": "vehicle",
+          "freshness.ttl_s": 1.0
+        },
+        "kind": "state",
+        "template": "plans/{vehicle}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "self.system",
+            "param": "host"
+          },
+          {
+            "binds": "self.service",
+            "param": "service"
+          }
+        ]
+      },
+      "note": "ZenSight's shape with a horizon, the author's liveness across a face (§2.2)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 3600
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_state",
+          "repeated",
+          "param_not_target"
+        ]
+      },
+      "note": "every check alone: a stream, a repeat, a parameter left out",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "a",
+            "a"
+          ],
+          "freshness.ttl_s": 30
+        },
+        "kind": "stream",
+        "template": "x/{a}/{b}"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          "not_state",
+          "value"
+        ]
+      },
+      "note": "a value that is wrong, on a stream: the value's checks skipped",
+      "resource": {
+        "annotations": {
+          "desired.target_param": 7,
+          "freshness.ttl_s": 30
+        },
+        "kind": "stream",
+        "template": "plans/{vehicle}"
+      }
+    }
+  ],
+  "description": "desired.v1 §2.2: a resolved resource -> its declaration. resource.kind is the authoring kind (stream, state, event, operation), resource.explicit is true for an explicit resource (@state, @stream), resource.template its template, resource.annotations its resolved annotations (core §9.3). expect.declaration is one of: \"not_this_profiles\" (no desired.target_param, whatever else under desired. it holds, which is W105's); \"invalid\", with reasons, in this order, each checked alone and a check that needs a value an earlier one found wrong skipped: not_state (the kind is not state), value (not a string, nor an array of one or two strings; a string is a one-element array), repeated (a name twice), not_a_param (a name that is no parameter of the template), rest_param (a name of a rest parameter), param_not_target (a parameter of the template the value does not name); a freshness.ttl_s, whatever its value, makes no declaration invalid (§2.2); or \"declared\", with targets, in the value's order, each {param, binds}: one target parameter binds \"either\" (self.system or self.service, the deployment's choice), two bind \"self.system\" then \"self.service\"."
+}

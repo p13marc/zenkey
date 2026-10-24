@@ -1,0 +1,16 @@
+# `desired.v1` publishes its vocabulary (core 0.36): `target_param`, and
+# nothing else. The interim `target` left with it: the binding already says
+# which identity fills each target parameter (core R2), and no contract
+# wrote it. `target_param` is in the table, `target` draws W105.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["desired.v1"]
+
+[resources."plans/{vehicle}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { vehicle = "string" }
+cardinality = 100
+annotations = { "desired.target_param" = "vehicle", "desired.target" = "system" }
