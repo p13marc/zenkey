@@ -2146,17 +2146,17 @@ def _desired_readings() -> list[tuple[str, Any, Any]]:
         (f"{lab} (0.2): nested 300 deep there is past 256: not read",
          ds.read_report_bytes(b'{"source":"baseline","x":' + b"[" * 300 + b"]" * 300 + b"}").expect(),
          {"readable": False, "errors": ["json"]}),
-        (f"{lab} (F-181): a revision 18446744073709551615.0 is read as its double, 2^64: revision_range",
+        (f"{lab} (0.3, F-181): a revision 18446744073709551615.0 is read by its exact value, 2^64-1: in range",
          ds.read_report_bytes(('{"key":"%s","source":"desired","observed":{"stamp":"1/1",'
                                '"revision":18446744073709551615.0},"in_force":{"stamp":"1/1",'
                                '"revision":18446744073709551615},"outcome":"converged"}' % K).encode()).expect(),
-         {"readable": False, "errors": ["revision_range"]}),
-        (f"{lab} (F-181): in_force's 9007199254740993 and observed's 9007199254740993.0, its double 2^53: "
-         "not observed",
+         {"readable": True, "errors": []}),
+        (f"{lab} (0.3, F-181): in_force's 9007199254740993 and observed's 9007199254740993.0, one revision "
+         "exactly",
          ds.read_report_bytes(('{"key":"%s","source":"desired","observed":{"stamp":"1/1",'
                                '"revision":9007199254740993.0},"in_force":{"stamp":"1/1",'
                                '"revision":9007199254740993},"outcome":"converged"}' % K).encode()).expect(),
-         {"readable": True, "errors": ["in_force"]}),
+         {"readable": True, "errors": []}),
         (f"{lab}: a byte-order mark before the value is not RFC 8259's whitespace",
          ds.read_report_bytes(b'\xef\xbb\xbf{"source":"baseline"}').expect(), {"readable": False, "errors": ["json"]}),
         (f"{lab}: a lone surrogate escape has no UTF-8 form",

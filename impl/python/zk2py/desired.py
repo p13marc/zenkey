@@ -426,6 +426,57 @@ class Exact:
         return cls(_form(sign, whole + frac, exponent), float(text))
 
 
+class NonInteger(float):
+    """A number that is no integer, carried as its double for a schema's
+    ``type``, ``minimum`` and ``maximum`` (§2.10, 0.3): its double may be
+    integral (``1e-400`` reads as 0.0), so ``is_integer`` says what its
+    exact value is."""
+
+    def is_integer(self) -> bool:  # type: ignore[override]
+        return False
+
+
+def exact_value(x: Exact) -> int | NonInteger:
+    """§2.10 (0.3, F-181): "every number read by its exact value … a number
+    with a zero fraction is that integer, so 3.0 is 3 and
+    18446744073709551615.0 is 2^64−1 … and 1.5 is no integer". A finite
+    number's exponent is at most about 308, so the integer is cheap."""
+    sign, digits, exponent = x.form
+    if not digits:
+        return 0
+    if isinstance(exponent, tuple) or exponent < 0:
+        return NonInteger(x.double)
+    value = int(digits) * 10 ** exponent
+    return -value if sign else value
+
+
+def exact_json(value: Any) -> Any:
+    """A value :func:`strict_json` read with ``exact``, every :class:`Exact`
+    replaced by :func:`exact_value`."""
+    if isinstance(value, Exact):
+        return exact_value(value)
+    if isinstance(value, list):
+        return [exact_json(v) for v in value]
+    if isinstance(value, dict):
+        return {k: exact_json(v) for k, v in value.items()}
+    return value
+
+
+def revision_of(payload: bytes) -> int | None:
+    """§2.4 (0.3): a document's own revision, "a top-level member named
+    revision … an integer from 0 to 2^64−1, read by its exact value as a
+    report's is: 3.0 is 3, 1.5 is no revision". None for a document that
+    does not read, or carries none."""
+    try:
+        doc = exact_json(strict_json(payload, exact=True))
+    except NotStrict:
+        return None
+    r = doc.get("revision") if isinstance(doc, dict) else None
+    if isinstance(r, int) and not isinstance(r, bool) and 0 <= r <= U64_MAX:
+        return r
+    return None
+
+
 def number_form(x: Any) -> tuple[int, str, Any]:
     """The exact value of a JSON number as ``_form`` writes it: an integer's
     from its decimal digits (at most 4300, Python's own bound, and at most
@@ -820,9 +871,10 @@ def strict_json(payload: bytes, exact: bool = False) -> Any:
     Python's recursion limit is not read either, never a crash.
 
     ``exact`` reads a number that is not an integer as an :class:`Exact`,
-    its text's value, for §2.7's equality (0.2, F-166); otherwise as its double, as
-    ``telemetry.v1`` §2.6 reads a float, which is how zk2py reads a report
-    (F-181). An integer is exact either way. Raises :class:`NotStrict`."""
+    its text's value: for §2.7's equality (0.2, F-166), and for a report and
+    a document's revision (0.3, F-181, through :func:`exact_json`);
+    otherwise as its double. An integer is exact either way. Raises
+    :class:`NotStrict`."""
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as e:
@@ -881,9 +933,10 @@ class ReportReading:
 
 
 def read_report_bytes(payload: bytes) -> ReportReading:
-    """§2.10 over a report's bytes: strict JSON first."""
+    """§2.10 over a report's bytes: strict JSON first, every number then read
+    by its exact value (0.3, F-181)."""
     try:
-        value = strict_json(payload)
+        value = exact_json(strict_json(payload, exact=True))
     except NotStrict:
         return ReportReading(False, ("json",))
     return read_report(value)
