@@ -339,6 +339,15 @@ async fn a_telemetry_reading_needs_a_watch_session_of_its_own() {
         let _ = b.expose(&meter.iface, &zenkey::implementation::resource_name(r));
     }
     let _svc = b.start().await.expect("the owner");
+    // The owner's tokens travel on its own session, ordered against none
+    // of the tool's: wait until the tool's router holds them (an instance
+    // and an interface token) before a read counts on them.
+    eventually("the tool sees the meter's tokens", || async {
+        let (_, keys) = raw_get(&tool, "zk2/lab/meter/@zk/**").await;
+        keys.iter().any(|k| k.contains("/@zk/instance/"))
+            && keys.iter().any(|k| k.contains("/@zk/alive/"))
+    })
+    .await;
     let store = zenkey_fleet::BundleStore::new(T);
     let offline = zenkey_fleet::ContractSet::new();
     let mut spec = zenkey_fleet::TelemetrySpec::new(T, Duration::from_millis(200));
