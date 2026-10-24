@@ -4,6 +4,84 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-24: round 55, and the tools (#840, DD; #609)
+
+Two sources. zk2py ran 0.3 live in round 55 (PR #853), every pairing of
+it and the reference as author and as target passing §1 to §8 and §10,
+and filed seven findings, F-192 to F-198, each accepted by #840's
+coordinator (posted on #840). And the reference's tools were built
+(`zenkey_fleet`'s `desired` reading, `zenctl desired`, the doctor's
+`desired-*` checks and `check conform`'s `desired-*` cases), which ran
+§9 for the first time. Written against core 0.39: 0.38's read cut off
+while it runs is possibly incomplete (§2.5, §2.17), and 0.39's standby
+changes none of this text's rules.
+
+The evidence, counted from the files: `conformance/declarations.json` (43
+cases), `conformance/bindings.json` (25), `conformance/order.json` (88),
+`conformance/reports.json` (80), `conformance/conclusions.json` (35) and
+`conformance/schema.json` (3), 274 in all; and ten scenario sections, §10
+two steps longer. No expectation of a case that existed changes: the
+eight new cases of `order.json` were written by hand and passed as
+written, and its description gains the input they need. The standard
+schema is unchanged, and so is its id.
+
+**Answered.**
+- **F-192, "in an instance" against "a re-mint is not a restart"**
+  (§0, §2.6, §2.7, §2.10, §2.16, §5). 0.3 kept a target's acts "in an
+  instance", and said a re-mint, which changes the instance, keeps them.
+  §0 now defines a **run**, one process of the target: its acts, the ids
+  it remembers and its last act are kept in one run; a re-mint keeps the
+  run, a restart begins another. Every "in an instance" that meant this
+  reads "in a run", and "a restart acts again" reads "a new run". The
+  author's "instance" (§2.11) is unchanged: a re-mint is a new instance of
+  an author, and puts again what it keeps. `order.json`'s description
+  says "run", and `{restart: true}` is a new run.
+- **F-193, the pointer of a refusal no member carries** (§2.7). Stated,
+  as JSON Schema's output places an error: a keyword of a member's own
+  schema at the member; a required member missing at the object that
+  holds it, `""` at the top; a value of the wrong type at that value. A
+  document the schema refuses in more than one place is refused at one of
+  them, the target's choice.
+  - `order.json` gains its input, `{"finish": "check"}`: the running act's
+    put ends as the fixture's own type judges its document (a top-level
+    `schema`, `$defs.Task`: `tasking.json`'s `Task` and a member object
+    `limits` with a required `max_hz`), `invalid` at that pointer. Eight
+    cases: one admitted, and one per rule, each breaking the schema in one
+    place (`""` for a missing `rate_hz`, `/rate_hz`, `/mode`, `/limits`
+    missing `max_hz`, `/limits/max_hz`, `/limits` of the wrong type, `""`
+    for an array).
+  - The runtime already placed them so (`zenkey_model::validate`, the
+    first violation's pointer); zk2py's runner needs the new input.
+- **F-194, the owner example's `desired put` is not "as written"** (the
+  example). The line is put byte for byte once it reads as strict JSON
+  (§2.10's reading), so every number keeps its exact value (F-166,
+  `order.json`'s case of 2^53 + 1); the help says so, and
+  `owner_example.rs` puts a number past a double's precision.
+- **F-195, "(core §8.1, 0.3)"** (`scenarios.md` §7, §10): "(core §8.1,
+  0.37; this text 0.3)". F-182's slip again.
+- **F-196, "the timestamp s2, exactly"** (`scenarios.md` §2). X builds
+  every timestamp from the one S received with `s2`: a binding may not
+  build every NTP64 time from its text, and `s2`'s fraction must survive.
+- **F-197, an archive read only on absence is never observed** (§2.5,
+  `scenarios.md` §10).
+  - §10 gains steps 3 and 4: the link cut, the author puts v2, X holds an
+    instance token at the author's address on the target's side and no
+    queryable, and the target restarts: its author present, its GET
+    silent, the archive holding v1. The reference reads no archive and
+    acts on nothing; a target taking §2.5's MAY on a silent GET acts on
+    the archive's v1, which its author replaced, and the text names that
+    as what the reference avoids. Then the heal, and v2 converged.
+  - The owner example says what a seed found (`desired seeds`: the replies
+    its GET drew, the author's presence or why the read was not made, the
+    archive), so §2.5's "says what its seed found" is observable from
+    standard input; and an author how many GETs reached a target's slice
+    (`desired gets`), for §8's "the author's queryable receives none".
+- **F-198, a paced author's kept document and core S2's "live"** (§2.11).
+  A document the new instance keeps is live from its put by that
+  instance: until a paced author has put it again, its GET answers
+  without it, and a tool reads `author_silent` for that target, never
+  behind. Core S2 is unchanged.
+
 ## 0.3 — 2026-10-24: the runtime, and round 53 (#840, DC; #609)
 
 Two sources. zk2py read 0.2 cold in round 53 (PR #845): every fixture

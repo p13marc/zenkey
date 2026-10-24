@@ -129,7 +129,10 @@ runtime's: the reference runs them as tests of `zenkey`
   `--desired-target lab/author` (`--desired-unbound` for §8), and
   `owner --help` is the interface a black-box runner drives, as for
   `alarms.v1`: its drive is the one above, `desired hold`, `release` and
-  `fail-next` its knobs (0.3).
+  `fail-next` its knobs (0.3). A target says what its last seed found
+  (`desired seeds`: the replies its GET drew, the author's presence or a
+  read not made, the archive), and an author how many GETs reached a
+  target's slice (`desired gets`), which §8 and §10 observe (0.4, F-197).
 
 ## §1 Converge after an outage (§2.5, §2.6, §2.10, §2.15)
 
@@ -163,12 +166,16 @@ holds `tasking.v1` in its tokenless set (core §8.1): it holds no
 ## §2 Never an older version (§2.6, §2.7)
 
 **Setup.** The target converged on v2, `s2` its stamp. A test session X,
-a client of R1, can put on `D` with a timestamp it sets.
+a client of R1, can put on `D` with a timestamp it sets. X takes `s2` as S
+received it, the timestamp of the author's put of v2, and builds each
+timestamp below from that one (0.4, F-196): a binding may not build every
+NTP64 time from its text, and `s2`'s fraction must survive exactly.
 
 **Steps.**
 1. X puts v1's content on `D` with the timestamp `s2`'s time less 1 s,
    under `s2`'s id.
-2. X puts v3's content on `D` with the timestamp `s2`, exactly.
+2. X puts v3's content on `D` with the timestamp S received with `s2`,
+   exactly.
 3. The target re-reads on its deployment's period, which the test sets
    to 2 s for this step (§2.5).
 
@@ -244,19 +251,19 @@ v1.
 
 **Setup.** The target converged on v1. The test holds the target's next
 act from its start (0.2): the author holds v1 throughout, so the new
-instance's first seed draws it at once, and an act left to run could put
+run's first seed draws it at once, and an act left to run could put
 a converged report before G's GET reaches the target.
 
 **Steps.**
-1. The target's process ends without closing. It restarts, a new
-   instance. G GETs `Rp` the moment S sees its new instance token. When
-   G has its reply, the test releases the held act.
+1. The target's process ends without closing. It restarts, a new run
+   (§0, 0.4) with a new instance. G GETs `Rp` the moment S sees its new
+   instance token. When G has its reply, the test releases the held act.
 
 **Expected.**
 1. G's reply holds `{key: D, source: baseline}` under the new instance's
-   stamp (§2.10): the new instance holds nothing of its previous one's
-   acts. The target seeds, acts on v1 again, and its report is converged
-   on v1, under `s1`, the version its previous instance acted on (§2.7).
+   stamp (§2.10): the new run holds nothing of the previous run's acts.
+   The target seeds, acts on v1 again, and its report is converged on v1,
+   under `s1`, the version its previous run acted on (§2.7).
    S receives a put on `Run` holding v1's content from the new instance.
 
 ## §6 The author's restart moves no target to act again (§2.7, §2.11)
@@ -308,7 +315,7 @@ target converged on it, and the archive recorded it.
 
 **Expected.**
 1. The target seeds: a complete presence read shows no instance token of
-   the author's, which is absent (core §8.1, 0.3), and its GET draws no
+   the author's, which is absent (core §8.1, 0.37; this text 0.3), and its GET draws no
    reply. The target reads `D`'s archive form,
    `zk2/lab/archive/archive.v1/@state/lab/author/tasking.v1/state/tasks/lab/worker`
    (core §4.4, S5), acts on v1 under `s1`, and its report is converged on
@@ -336,7 +343,8 @@ holds v1 on `D`.
 1. The descriptor lists `task` with `"bindings": []` and `"params": {}`
    (core §3.2). `Rp` holds `{source: baseline}`, with no key (§2.10,
    §2.12). `Run` holds the baseline, and stays so: the target makes no
-   GET of `D` (the author's queryable receives none) and acts on nothing.
+   GET of `D` (the author's queryable receives none: the owner example's
+   `desired gets lab/worker` counts them, 0.4) and acts on nothing.
 
 ## §9 A tool's questions (§2.17, §5)
 
@@ -364,7 +372,7 @@ GETs `D` from the author (core S4), and asks §5's four questions.
 5. Converged, refused and last-known: **not asked**, `unbound`. In force:
    **no**, `unbound`.
 
-## §10 Last-known confirmed by its author (§2.9, 0.2)
+## §10 Last-known confirmed by its author; a present author's silence (§2.5, §2.9, 0.2)
 
 **Setup.** An archive, `lab/archive` (core §4.4), on the target's side,
 a client of R2, records `zk2/lab/author/tasking.v1/state/**`. The author
@@ -373,15 +381,22 @@ converged on it, and the archive recorded it.
 
 **Steps.**
 1. The test cuts the link between R2 and R1. The target's process ends
-   without closing, and restarts, a new instance.
+   without closing, and restarts, a new run.
 2. The test heals the link.
+3. (0.4, F-197.) The test cuts the link again. The author puts v2, which
+   neither the target nor the archive receives. X, a client of R2,
+   declares an instance token at the author's address,
+   `zk2/lab/author/@zk/instance/<an id of its own>`, and no queryable: the
+   author present on R2, its queryable silent there. The target's process
+   ends without closing, and restarts, a new run.
+4. The test heals the link. Once the author's own instance token is on R2,
+   X withdraws its token.
 
 **Expected.**
 1. The target seeds: no instance token of the author's crosses the cut,
    so a complete presence read through R2 shows none, absence by core
-   §8.1 (0.3), and its GET draws no reply within the timeout. The target
-   reads `D`'s
-   archive form,
+   §8.1 (0.37; this text 0.3), and its GET draws no reply within the
+   timeout. The target reads `D`'s archive form,
    `zk2/lab/archive/archive.v1/@state/lab/author/tasking.v1/state/tasks/lab/worker`
    (core §4.4, S5), acts on v1 under `s1`, and, read through S2, its
    report is converged on v1 with `last_known: true` (§2.9).
@@ -391,3 +406,17 @@ converged on it, and the archive recorded it.
    3, §2.9). The target acts on nothing (`Run` receives nothing), and puts
    its report again without `last_known`, `observed` and `in_force` still
    `{stamp: s1, revision: 1}` (§2.10).
+3. The target seeds: a complete presence read through R2 shows an
+   instance token at the author's address, X's, so the author is present,
+   and its GET draws nothing within the timeout: silent, no verdict
+   (§2.5). The archive holds v1, older than the author's v2. The target
+   reads no archive while its author is present, as the reference does
+   (§2.5), and says so (`desired seeds`: no reply, the author present, no
+   archive read); it acts on nothing, and, read through S2, its report
+   stays `{key: D, source: baseline}` and `Run` the baseline. A target
+   that takes §2.5's MAY on a silent GET acts on the archive's v1 instead,
+   `last_known: true`, a version its author has replaced: what the
+   reference's choice avoids.
+4. The author's instance token appears on R2; the target seeds, the
+   author answers v2 under `s2`, and the target acts on it: its report is
+   converged on v2, without `last_known`. X's withdrawal moves nothing.
