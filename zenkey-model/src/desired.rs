@@ -14,8 +14,9 @@
 //! parse_stamp(text) / Stamp's Display       ─▶ <time>/<id>, as zenoh writes a timestamp                    §2.4
 //! decode(bytes), Report::from_json(v)       ─▶ Report │ Unreadable{json, schema, stamp, revision_range}    §2.10
 //! Report::check()                           ─▶ the findings: keyless, key_form, observed_outcome, …        §2.10
-//! Target::observe(sample)                   ─▶ act │ revert │ held │ unstamped │ same_version │ older │ confirmed  §2.6–§2.9
-//! Target::finish(ended)                     ─▶ the report updated; done, or the held version's act         §2.7, §2.10
+//! Content::of_payload(bytes, json)          ─▶ a put's document, JCS-equal for JSON, else byte-equal       §2.7
+//! Target::observe(sample)                   ─▶ act │ revert │ adopted │ held │ unstamped │ same_version │ older │ confirmed  §2.6–§2.9
+//! Target::finish(ended)                     ─▶ the report updated; done, or the held version adopted or acted on  §2.7, §2.10
 //! Target::call()                            ─▶ source call                                                 §2.7
 //! converged(target, author)                 ─▶ §5 "has the target converged on its author's current document?"
 //! refused(target) / last_known(target) / in_force(target) ─▶ §5's other three questions              §2.17
@@ -37,7 +38,7 @@ use serde_json::Value;
 
 use crate::authoring::Kind;
 use crate::contract::Resource;
-use crate::freshness::{self, Horizon};
+use crate::freshness;
 use crate::grammar::{self, Addr, IfaceId, Key, KindToken, ZkKey};
 use crate::seed::Stamp;
 use crate::template::{Bindings, Template};
@@ -89,8 +90,9 @@ pub const MAX_CODE: usize = 64;
 pub const UNDECODABLE: &str = "undecodable";
 /// It names what the target needs to reach the bus.
 pub const REACH: &str = "reach";
-/// It carries a secret.
-pub const SECRET: &str = "secret";
+/// It carries a sensitive value: a secret, a credential, a key
+/// (`config.v1`'s word).
+pub const SENSITIVE: &str = "sensitive";
 /// Its type, or the target's own validation of it, refuses it.
 pub const INVALID: &str = "invalid";
 /// An act that could not finish.
@@ -154,8 +156,6 @@ pub enum Invalid {
     RestParam,
     /// A template parameter the value does not name.
     ParamNotTarget,
-    /// A horizon above 0 (`freshness.v1` §2.1).
-    Horizon,
 }
 
 impl Invalid {
@@ -169,7 +169,6 @@ impl Invalid {
             Self::NotAParam => "not_a_param",
             Self::RestParam => "rest_param",
             Self::ParamNotTarget => "param_not_target",
-            Self::Horizon => "horizon",
         }
     }
 
@@ -184,9 +183,6 @@ impl Invalid {
             Self::RestParam => "a rest parameter cannot be a target parameter",
             Self::ParamNotTarget => {
                 "every template parameter must be a target parameter: one document per target"
-            }
-            Self::Horizon => {
-                "a horizon above 0 makes the author re-put every document, a version each target acts on again"
             }
         }
     }
@@ -232,7 +228,9 @@ impl Declaration {
 
 /// Reads the declaration of a resource of `kind` and `template` from its
 /// resolved annotations (§2.2, core §9.3). Each check runs alone, and a
-/// check that needs a value an earlier one found wrong is skipped.
+/// check that needs a value an earlier one found wrong is skipped. A
+/// horizon, whatever its value, makes no declaration invalid: its re-puts
+/// are the same document, which a target adopts (§2.7).
 #[must_use]
 pub fn declaration(
     kind: Kind,
@@ -273,9 +271,6 @@ pub fn declaration(
                 why.push(Invalid::ParamNotTarget);
             }
         }
-    }
-    if matches!(freshness::horizon(kind, annotations), Horizon::Within(_)) {
-        why.push(Invalid::Horizon);
     }
     match names {
         Some(names) if why.is_empty() => Declaration::Declared(match names.as_slice() {
@@ -569,7 +564,7 @@ pub struct Version {
 /// `desired.v1.Refusal`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Refusal {
-    /// The profile's code ([`UNDECODABLE`], [`REACH`], [`SECRET`],
+    /// The profile's code ([`UNDECODABLE`], [`REACH`], [`SENSITIVE`],
     /// [`INVALID`], [`APPLY`]) or the type's own, 1 to 64 characters.
     pub code: String,
     /// Where in the document, a JSON Pointer (RFC 6901).
@@ -947,6 +942,48 @@ pub enum Mutation {
     Delete,
 }
 
+/// A put's document, as a target compares two (§2.7): the SHA-256 of its
+/// JCS bytes (RFC 8785) for a payload encoded as JSON that reads as strict
+/// JSON, else of its bytes. Equal digests are the same document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Content([u8; 32]);
+
+impl Content {
+    fn digest(bytes: &[u8]) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut d = [0u8; 32];
+        d.copy_from_slice(&Sha256::digest(bytes));
+        Self(d)
+    }
+
+    /// A decoded JSON document, compared by its JCS bytes.
+    #[must_use]
+    pub fn of_json(v: &Value) -> Self {
+        Self::digest(&crate::schema::jcs(v))
+    }
+
+    /// A payload compared byte for byte: CBOR, protobuf, raw.
+    #[must_use]
+    pub fn of_bytes(bytes: &[u8]) -> Self {
+        Self::digest(bytes)
+    }
+
+    /// A payload as a target compares it (§2.7): one encoded as JSON
+    /// (`json`) by its JCS bytes when it reads as strict JSON, and every
+    /// other payload, or JSON that does not read, byte for byte.
+    #[must_use]
+    pub fn of_payload(bytes: &[u8], json: bool) -> Self {
+        let read = json
+            .then(|| std::str::from_utf8(bytes).ok())
+            .flatten()
+            .and_then(|t| crate::strict::parse_json(t).ok());
+        match read {
+            Some(v) => Self::of_json(&v),
+            None => Self::of_bytes(bytes),
+        }
+    }
+}
+
 /// One sample or reply of a target's slice, as its runtime received it
 /// (§2.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -958,6 +995,10 @@ pub struct Sample {
     /// The document type's own revision, when it carries one (§2.4). A
     /// delete has none.
     pub revision: Option<u64>,
+    /// A put's document ([`Content`]); `None` for a delete, and for a put
+    /// whose runtime did not compare it, which is then never the same
+    /// document as another.
+    pub content: Option<Content>,
 }
 
 /// What an act does (§2.7, §2.8).
@@ -977,6 +1018,7 @@ pub struct Act {
     pub stamp: Stamp,
     pub revision: Option<u64>,
     pub via: Via,
+    pub content: Option<Content>,
 }
 
 impl Act {
@@ -992,6 +1034,23 @@ impl Act {
                 Mutation::Delete => None,
             },
             via: s.via,
+            content: match s.mutation {
+                Mutation::Put => s.content,
+                Mutation::Delete => None,
+            },
+        }
+    }
+
+    /// Whether `next` carries the same document as this act (§2.7): two
+    /// puts whose documents compare equal, or two deletes.
+    #[must_use]
+    pub fn same_document(&self, next: &Act) -> bool {
+        match (self.kind, next.kind) {
+            (ActKind::Revert, ActKind::Revert) => true,
+            (ActKind::Apply, ActKind::Apply) => {
+                self.content.is_some() && self.content == next.content
+            }
+            _ => false,
         }
     }
 
@@ -1022,6 +1081,9 @@ pub enum Ended {
 pub enum Step {
     /// Start this act now.
     Act(Act),
+    /// Admitted, and the same document as the last version acted on or
+    /// adopted: no act, and the report moved (§2.7).
+    Adopted,
     /// Admitted while an act runs: held, replacing any version held before.
     Held,
     /// No stamp: never acted on (§2.6 step 1).
@@ -1050,6 +1112,7 @@ impl Step {
                 kind: ActKind::Revert,
                 ..
             }) => "revert",
+            Self::Adopted => "adopted",
             Self::Held => "held",
             Self::Unstamped => "unstamped",
             Self::SameVersion => "same_version",
@@ -1075,8 +1138,8 @@ fn admits(held: &Stamp, incoming: &Stamp) -> Result<(), Step> {
 }
 
 /// One instance of a target's role (§2.6–§2.10): the version it last acted
-/// on, the one it holds while an act runs, and its report. A restart is a
-/// new `Target`, holding nothing (§2.7).
+/// on or adopted, the one it holds while an act runs, and its report. A
+/// restart is a new `Target`, holding nothing (§2.7).
 #[derive(Debug, Clone)]
 pub struct Target {
     acted: Option<Act>,
@@ -1111,8 +1174,9 @@ impl Target {
     }
 
     /// Judges a sample (§2.6) against the version held waiting, else the
-    /// last acted on: an act to start, held while one runs, or ignored with
-    /// why.
+    /// last acted on or adopted: an act to start, adopted, held while one
+    /// runs, or ignored with why. After [`Step::Adopted`] the report
+    /// changed.
     pub fn observe(&mut self, s: Sample) -> Step {
         let Some(stamp) = s.stamp else {
             return Step::Unstamped;
@@ -1145,14 +1209,27 @@ impl Target {
     }
 
     fn start(&mut self, act: Act) -> Step {
+        if let Some(prev) = self.acted
+            && prev.same_document(&act)
+        {
+            let r = &mut self.report;
+            if r.in_force == Some(prev.version()) {
+                r.in_force = Some(act.version());
+            }
+            r.observed = Some(act.version());
+            r.last_known = act.via == Via::Archive;
+            self.acted = Some(act);
+            return Step::Adopted;
+        }
         self.acted = Some(act);
         self.running = true;
         Step::Act(act)
     }
 
     /// Ends the running act (§2.7, §2.10): the report updated, then the
-    /// held version's act, if one is held, else [`Step::Done`]. With no act
-    /// running, nothing changes, and it is [`Step::Done`].
+    /// held version, if one is held, adopted or its act started, else
+    /// [`Step::Done`]. With no act running, nothing changes, and it is
+    /// [`Step::Done`].
     pub fn finish(&mut self, ended: Ended) -> Step {
         let Some(act) = self.acted.filter(|_| self.running) else {
             return Step::Done;
@@ -1551,6 +1628,7 @@ mod tests {
             mutation: Mutation::Put,
             stamp: Some(st(time, id)),
             revision: Some(time),
+            content: Some(Content::of_json(&serde_json::json!({"revision": time}))),
         }
     }
 
@@ -1612,13 +1690,19 @@ mod tests {
             },
         ];
         for (i, s) in steps.into_iter().enumerate() {
-            t.observe(s);
+            assert!(matches!(t.observe(s), Step::Act(_)), "a new document is acted on");
+            // The same document again, under a later stamp, while the act runs.
+            let again = Sample {
+                stamp: s.stamp.map(|x| Stamp { time: x.time + 1, ..x }),
+                ..s
+            };
+            assert_eq!(t.observe(again), Step::Held);
             let ended = match i % 3 {
                 0 => Ended::Done,
                 1 => Ended::Refused(Refusal::new(REACH)),
                 _ => Ended::Failed(Refusal::new(APPLY)),
             };
-            t.finish(ended);
+            assert_eq!(t.finish(ended), Step::Adopted, "the held re-put is the same document");
             seen.push(t.report().clone());
             t.call();
             seen.push(t.report().clone());

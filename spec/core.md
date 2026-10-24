@@ -37,8 +37,7 @@ of name, in 0.34 what `alarms.v1` needed: its vocabulary
 published empty, without the interim `severity_default`, in 0.35
 what `telemetry.v1` needed: a standard schema as a profile's first
 point, and its vocabulary published, and in 0.37 what `desired.v1`
-needed: its vocabulary published without the interim `target`, and an
-owner restarting from its record keeping its zid).
+needed: its vocabulary published without the interim `target`).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -227,14 +226,6 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
   - It SHOULD do so in a new session, so that its timestamps' id changes
     too (§4.3). That change, and presence, are how a consumer sees the
     discontinuity.
-  - **An owner restarting from its record** (0.37) has no discontinuity to
-    show: its catch-up keeps its state's ordering (§4.3), and it answers a
-    member it has not changed since under the stamp its record holds for
-    it (S2). It still mints a new instance id, and MAY keep its session's
-    zid, so that a tool's S1 check (§4.2) reads those stamps as its own.
-    [`desired.v1`](profiles/desired/v1.md)'s author does (its §2.11): it
-    puts nothing unchanged, since every put of a document is a version its
-    targets act on again.
   - A counter that crosses a face where neither is visible SHOULD carry
     its epoch in-band, in its value or its attachment, as
     [`telemetry.v1`](profiles/telemetry/v1.md)'s counter does (its §2.9,
@@ -2773,8 +2764,7 @@ here names a profile ([`health.v1`](profiles/health/v1.md) for reporting,
 [`link.v1`](profiles/link/v1.md) for face configuration, `archive.v1` for archives,
 [`freshness.v1`](profiles/freshness/v1.md) for a value's age,
 [`telemetry.v1`](profiles/telemetry/v1.md) for a counter's epoch,
-[`desired.v1`](profiles/desired/v1.md) for store-and-forward and an owner
-restarting from its record), it names
+[`desired.v1`](profiles/desired/v1.md) for store-and-forward), it names
 the standard way to meet the rule, which the core states in its own
 terms. A profile contributes through these four points, and through no
 other:
@@ -3241,7 +3231,7 @@ Appendix B. These are the ones the rules above cite:
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
 | `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
-| `profiles/desired/scenarios.md` §6 | §1.5 an owner restarting from its record, answering with its recorded stamps under the zid it kept (0.37) |
+| `profiles/desired/scenarios.md` §1, §3, §6, §7 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.37) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)

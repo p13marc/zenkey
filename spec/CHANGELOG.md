@@ -28,54 +28,44 @@ is). No fixture case changed; one is added.
   template parameter or two, the first bound to `self.system` and the
   second to `self.service`.
 - **§10** names `desired.v1` among the profiles the core names, for
-  store-and-forward (§4.4) and an owner restarting from its record
-  (§1.5), its standard schema beside `telemetry.v1`'s (point 1), and its
-  vocabulary beside the published ones (point 2).
-
-**Changed: an owner restarting from its record may keep its zid (§1.5).**
-- **The gap.** §1.5 has an owner mint a new instance id whenever its
-  state's ordering restarts, and SHOULD do so in a new session, so that
-  its timestamps' id changes and a consumer sees the discontinuity. An
-  owner that restarts from its persistent record has none to show: §4.3's
-  catch-up keeps its ordering. `desired.v1`'s author must then answer its
-  targets' seeds with the versions they acted on, each document under the
-  stamp its record holds (S2: a reply carries the stamp of the mutation
-  it represents), because a re-put of an unchanged document is a new
-  version, which every target acts on again (`desired.v1` §2.6, §2.11).
-  Under a new zid, a tool's S1 check (§4.2) reads those stamps as
-  foreign, since it attributes a stamp by `meta.zid`.
-- **The rule.** §1.5 says that such an owner still mints a new instance
-  id, and MAY keep its session's zid, so that the stamps it answers with
-  stay its own. `desired.v1` §2.11 makes it a SHOULD for its authors. No
-  MUST is added, so no evidence is owed; `desired.v1`'s scenarios §6
-  observes it, and Appendix C lists it.
-- **Why not re-put, as `alarms.v1` does.** `alarms.v1` §2.9 puts every
-  alarm again from a new instance, so that its GET answers carry its own
-  stamps: an alarm re-put is a confirmation, which no reader acts on. A
-  desired document re-put is a version, which its target applies again: a
-  mission plan restarted, a fleet reconverging at every restart of its
-  author (ZenSight's `zensight-desired` writes nothing on a restart for
-  that reason).
+  store-and-forward (§4.4), its standard schema beside `telemetry.v1`'s
+  (point 1), and its vocabulary beside the published ones (point 2).
+  Appendix C lists the profile's scenarios that observe core rules: a late
+  joiner's seed (§4.2), a window covering an outage (S3), a new instance's
+  re-puts (§4.3), last-known (S5, S6).
 
 **Changed: a pointer (§4.4).** "Store-and-forward (`desired.v1`) uses
 both" cites `desired.v1` §2.9.
 
 **Deliberately not changed.**
+- **Instance identity (§1.5): no zid is reused.** Considered on review
+  and not adopted: letting an owner restarting from its record keep its
+  session's zid, so that `desired.v1`'s author could answer its targets' seeds under
+  the stamps its record held, and a tool's S1 check (§4.2) would read them
+  as its own. It was dropped on review: the instance id is a continuity
+  epoch, a new session takes a fresh zid, and zenoh may refuse or confuse
+  a zid reused within the old session's lease. `desired.v1` solves the
+  restart itself: its author puts each document it keeps again from its
+  new instance, as `alarms.v1` §2.9's owner does, and a target adopts,
+  without an act, a version whose document equals the one it last acted
+  on (`desired.v1` §2.7, §2.11). The core gains nothing for it.
 - **The order of versions.** `desired.v1` §2.6 is §4.3's consumer rule:
   by time within one id, the first value under another id accepted. Two
   ids within one seed stay §4.3's residual risk, as 0.26 left them; the
   profile names the case and adds no rule of the core's.
 - **S1–S7.** A document is state, and its version the owner's stamp
-  (S1, S2): nothing new is needed to carry it. The author's tombstone
-  window covering the outage to its targets is S3's rule, extended by the
-  profile to targets, as `link.v1` §2.11 extends it to every state behind
-  a face.
+  (S1, S2): nothing new is needed to carry it. That a version with the
+  same document is adopted without an act is the profile's rule for what a
+  target does, not a change to what a re-put is (0.21: a mutation like any
+  other). The author's tombstone window covering the outage to its
+  targets is S3's rule, extended by the profile to targets, as `link.v1`
+  §2.11 extends it to every state behind a face.
 - **A late joiner's seed** (§4.2) is the target's reading, unchanged, and
   silence is still no verdict (O5): a target reverts only on a delete or
   a `reply_del`.
 - **No core lint reads `target_param`'s value.** A declaration
   `desired.v1` §2.2 reads as invalid (a stream, a name that is no
-  parameter, a horizon above 0) still loads, as `freshness.ttl_s` and
+  parameter, a parameter left out) still loads, as `freshness.ttl_s` and
   `telemetry.*` values do (0.21, 0.35). A linter SHOULD warn.
 - **§8.1 and Appendix B** are untouched: a target watches its author's
   instance token, which the tokenless set never removes.

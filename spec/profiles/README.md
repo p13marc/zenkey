@@ -127,9 +127,10 @@ thing in the same place.
   profile's first point can be a standard schema, a file whose types are
   the profile's by their artifact's id, and so that Appendix D publishes
   its vocabulary. `desired.v1` needed 0.37, so that Appendix D publishes
-  its vocabulary, `target_param`, and retires the interim `target`, and so
-  that an owner restarting from its record may keep its zid, the stamps it
-  answers with staying its own.
+  its vocabulary, `target_param`, and retires the interim `target`. Its
+  author's restart needed no core change: it puts its documents again from
+  its new instance, as `alarms.v1`'s owner does, and its targets adopt
+  them without an act.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in

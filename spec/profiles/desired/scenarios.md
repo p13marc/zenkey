@@ -134,15 +134,15 @@ a client of R1, can put on `D` with a timestamp it sets.
 1. X puts v1's content on `D` with the timestamp `s2`'s time less 1 s,
    under `s2`'s id.
 2. X puts v3's content on `D` with the timestamp `s2`, exactly.
-3. The author's instance token is undeclared and declared again by a
-   re-mint of its instance (core §8.1), so the target seeds.
+3. The target re-reads on its deployment's period, which the test sets
+   to 2 s for this step (§2.5).
 
 **Expected.**
 1. The target acts on nothing: an earlier time of the held id is older
    (§2.6). `Rp` and `Run` receive nothing. A GET of `Rp` holds the report
    converged on v2.
 2. Nothing: an equal stamp is the same version, never acted on again.
-3. The author answers its seed with v2 under `s2` (core S2): the same
+3. The author answers the re-read with v2 under `s2` (core S2): the same
    version, nothing acted on, nothing put on `Rp`.
 
 ## §3 A delete reverts, within the window (§2.8)
@@ -179,7 +179,8 @@ v1.
 **Steps.**
 1. The author puts v2 with a member `"endpoint": "tcp/10.0.0.9:7447"`.
 2. The author puts v3 with `rate_hz` 500.
-3. The author's instance is re-minted, so the target seeds again.
+3. The author's instance is re-minted (core §1.5), so it puts v3's
+   content again from its new instance (§2.11), and the target seeds.
 4. The author puts v4.
 5. The test sets the target's drive to fail its next act. The author puts
    v5 with `rate_hz` 20 and `mode` `halt`.
@@ -191,9 +192,11 @@ v1.
    reach, pointer: /endpoint, …}}`.
 2. The same, with `observed` v3 and `refusal` `{code: invalid, pointer:
    /rate_hz, …}`.
-3. The seed answers v3 under `s3`: the same version. The target acts on
-   nothing, and puts no report: a version is acted on once in an
-   instance, whatever the outcome (§2.7).
+3. The re-put carries v3's document under a later stamp: adopted, never
+   refused again (§2.7). The target applies nothing, and its report moves
+   `observed` to the re-put's stamp, `revision` 3, still `refused` with
+   the same refusal, `in_force` still v1. The seed's answer is that
+   re-put: the same version, nothing more.
 4. The report is converged on v4.
 5. `Run` holds `rate_hz` 20 and `mode` `run`, and the report is
    `{key: D, source: desired, observed: {stamp: s5, revision: 5},
@@ -215,31 +218,42 @@ v1.
    on v1, under `s1`, the version its previous instance acted on (§2.7).
    S receives a put on `Run` holding v1's content from the new instance.
 
-## §6 The author's restart writes nothing unchanged (§2.11)
+## §6 The author's restart moves no target to act again (§2.7, §2.11)
 
-**Setup.** The target converged on v1.
+**Setup.** The target converged on v1. A second slice of the author's,
+`D2 = zk2/lab/author/tasking.v1/state/tasks/lab/spare`, held a document
+the author deleted 5 s before step 1, inside its 60 s window, and its
+record holds that delete.
 
 **Steps.**
 1. The author's process ends without closing. It restarts from its
-   record, keeping its session's zid (§2.11, a SHOULD; the reference
-   pins it). S listens 3 s after the author's new instance token appears.
+   record, a new instance in a new session with a fresh zid (core §1.5).
+   G GETs `D` and `D2` the moment S sees the author's new instance token.
+   S listens 3 s.
 2. The author changes its document: it puts v2.
-3. The author's process ends without closing, and its record is
-   removed. It restarts with no record: a new epoch, a fresh zid (core
-   §4.3). It authors v2's content again.
+3. The author's process ends without closing, and its record is removed.
+   It restarts with no record: a new epoch, a fresh zid (core §4.3). Its
+   source yields v2's content again, which it puts.
+4. The author changes its document again: it puts v3.
 
 **Expected.**
-1. S receives no put on `D` (§2.11). A GET of `D` holds v1 under `s1`,
-   whose id is the author's new descriptor's `meta.zid`. The target sees
-   the author's instance token appear, seeds, receives v1 under `s1`, the
-   same version, and acts on nothing; its report is unchanged, and S
-   receives nothing on `Rp`.
-2. `s2` is later than `s1` (core §4.3's catch-up), and the report is
-   converged on v2.
+1. Before its new instance token (a SHOULD; before G's GET, a MUST), S
+   receives a put on `D` holding v1's content, unchanged, under a stamp
+   whose id is the author's new zid, and a delete of `D2` under the same
+   id (§2.11). G's GET holds that put for `D` and a `reply_del` for `D2`,
+   each stamped by the new instance, whose `meta.zid` is their id. The
+   target adopts the re-put without an act: `Run` receives nothing, and S
+   receives on `Rp` a report with `observed` and `in_force` the re-put's
+   stamp, `revision` 1, still `converged` (§2.7). The target acted on
+   nothing.
+2. `s2` is later than the re-put's stamp, and the report is converged on
+   v2, which the target acted on.
 3. S receives a put on `D` holding v2's content under a stamp of the new
-   zid. The target acts on it, another id (§2.6), and its report is
-   converged on that stamp, `revision` 2. Every target acts again on an
-   author's new epoch: the cost of no record.
+   zid: another id (§2.6), the same document, adopted. `Run` receives
+   nothing, and the report moves to that stamp, still `converged`, still
+   `revision` 2. A GET of `D2` draws nothing: its delete was lost with the
+   record (§2.11).
+4. The report is converged on v3, which the target acted on.
 
 ## §7 Last-known from an archive, the author absent (§2.9)
 

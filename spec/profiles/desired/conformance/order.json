@@ -25,6 +25,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -66,6 +71,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -80,6 +90,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -120,6 +135,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -134,6 +154,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -171,6 +196,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -185,6 +215,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -223,6 +258,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 9
+            },
             "from": "owner",
             "kind": "put",
             "revision": 9,
@@ -237,6 +277,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 3
+            },
             "from": "owner",
             "kind": "put",
             "revision": 3,
@@ -266,6 +311,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -300,6 +350,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -314,6 +369,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -348,6 +408,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -391,6 +456,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -444,6 +514,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -530,6 +605,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -557,6 +637,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -603,6 +688,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -617,6 +707,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -669,6 +764,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -683,6 +783,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -702,6 +807,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -737,6 +847,10 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10
+            },
             "from": "owner",
             "kind": "put",
             "stamp": {
@@ -782,6 +896,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -794,13 +913,18 @@
         {
           "finish": {
             "refused": {
-              "code": "secret",
+              "code": "sensitive",
               "pointer": "/token"
             }
           }
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -843,6 +967,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -857,6 +986,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -902,6 +1036,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -958,6 +1097,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1013,6 +1157,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1027,6 +1176,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -1085,6 +1239,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 7
+            },
             "from": "owner",
             "kind": "put",
             "revision": 7,
@@ -1099,6 +1258,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 8
+            },
             "from": "owner",
             "kind": "put",
             "revision": 8,
@@ -1141,6 +1305,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 7
+            },
             "from": "owner",
             "kind": "put",
             "revision": 7,
@@ -1155,6 +1324,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 8
+            },
             "from": "owner",
             "kind": "put",
             "revision": 8,
@@ -1169,6 +1343,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 9
+            },
             "from": "owner",
             "kind": "put",
             "revision": 9,
@@ -1209,6 +1388,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 7
+            },
             "from": "owner",
             "kind": "put",
             "revision": 7,
@@ -1223,6 +1407,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 8
+            },
             "from": "owner",
             "kind": "put",
             "revision": 8,
@@ -1237,6 +1426,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 9
+            },
             "from": "owner",
             "kind": "put",
             "revision": 9,
@@ -1255,10 +1449,12 @@
       "expect": {
         "report": {
           "in_force": {
+            "revision": 2,
             "stamp": "100/a2"
           },
           "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
           "observed": {
+            "revision": 2,
             "stamp": "100/a2"
           },
           "outcome": "converged",
@@ -1276,8 +1472,14 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
+            "revision": 1,
             "stamp": {
               "id": "a1",
               "time": 100
@@ -1289,8 +1491,14 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
+            "revision": 2,
             "stamp": {
               "id": "a2",
               "time": 100
@@ -1329,6 +1537,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1340,6 +1553,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -1385,6 +1603,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1396,6 +1619,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -1407,6 +1635,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 3
+            },
             "from": "owner",
             "kind": "put",
             "revision": 3,
@@ -1452,6 +1685,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1463,6 +1701,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 3
+            },
             "from": "owner",
             "kind": "put",
             "revision": 3,
@@ -1474,6 +1717,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -1517,6 +1765,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1528,6 +1781,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1564,6 +1822,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1617,6 +1880,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "archive",
             "kind": "put",
             "revision": 1,
@@ -1657,6 +1925,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "archive",
             "kind": "put",
             "revision": 1,
@@ -1671,6 +1944,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1708,6 +1986,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "archive",
             "kind": "put",
             "revision": 1,
@@ -1719,6 +2002,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1759,6 +2047,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -1773,6 +2066,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "archive",
             "kind": "put",
             "revision": 1,
@@ -1807,6 +2105,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1862,6 +2165,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -1876,6 +2184,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "archive",
             "kind": "put",
             "revision": 2,
@@ -1915,6 +2228,10 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10
+            },
             "from": "archive",
             "kind": "put",
             "stamp": {
@@ -1928,6 +2245,10 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10
+            },
             "from": "archive",
             "kind": "put",
             "stamp": {
@@ -1960,6 +2281,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -2000,6 +2326,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -2017,6 +2348,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -2056,6 +2392,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -2073,6 +2414,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
             "from": "owner",
             "kind": "put",
             "revision": 2,
@@ -2133,6 +2479,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -2150,6 +2501,11 @@
         },
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -2181,6 +2537,11 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
             "from": "owner",
             "kind": "put",
             "revision": 1,
@@ -2221,11 +2582,1281 @@
       "steps": [
         {
           "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10
+            },
             "from": "owner",
             "kind": "put",
             "stamp": {
               "id": "a1",
               "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the same document under a later stamp of the same id, a freshness re-put: adopted, no act (§2.6 step 5, §2.7)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "50/b2"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "50/b2"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the same document under another id, an author's restart or failover: adopted, quiet",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "b2",
+              "time": 50
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "300/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "300/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "adopted, then a different document is acted on",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 300
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "JCS-equal: an integral float and its integer are one document",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10.0,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a member more is another document",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "note": "x",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a type with no revision re-issued unchanged is adopted: one that should act again carries a revision",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10
+            },
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10
+            },
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "bytes compared byte for byte: equal, adopted",
+      "steps": [
+        {
+          "sample": {
+            "bytes": "0a0b0c",
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "bytes": "0a0b0c",
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "bytes compared byte for byte: one byte differs, acted on",
+      "steps": [
+        {
+          "sample": {
+            "bytes": "0a0b0c",
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "bytes": "0a0b0d",
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "300/b2"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "reach",
+            "pointer": "/endpoint"
+          },
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a refused document put again is adopted refused, never refused again",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "reach",
+              "pointer": "/endpoint"
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "b2",
+              "time": 300
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "200/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "undecodable"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an undecodable payload put again, byte for byte, is adopted refused",
+      "steps": [
+        {
+          "sample": {
+            "bytes": "7b",
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "undecodable"
+            }
+          }
+        },
+        {
+          "sample": {
+            "bytes": "7b",
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "300/a1"
+          },
+          "outcome": "failed",
+          "refusal": {
+            "code": "apply"
+          },
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a failed document put again is adopted failed",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": {
+            "failed": {
+              "code": "apply"
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 300
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "call"
+        },
+        "steps": [
+          "act",
+          "done",
+          "called",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the same document after a call is adopted: the call stands",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "call": true
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "300/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "300/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "equal to the last act's document, not to the one in force: after a refusal, the document in force again is acted on",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 2
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "invalid"
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 300
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "160/b2"
+          },
+          "outcome": "reverted",
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done",
+          "revert",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a delete after a delete is adopted",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "b2",
+              "time": 160
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "revert",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a put after a delete is acted on, whatever it equals",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "held",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a version held while an act runs, the same document, is adopted when the act ends",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "50/b2"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "50/b2"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the author's re-put after an archive's last-known: adopted, no longer last-known",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "archive",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "b2",
+              "time": 50
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "last_known": true,
+          "observed": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "adopted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an archive's later version of the same document: adopted, last-known",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "archive",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "50/b2"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "50/b2"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "restarted",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a restart acts again, though the document is the one its previous instance acted on",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "restart": true
+        },
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "b2",
+              "time": 50
             }
           }
         },
@@ -2258,5 +3889,5 @@
       "steps": []
     }
   ],
-  "description": "desired.v1 §2.6 to §2.10: one target's role, its slice's key (key; null for a role left unbound, §2.12), and the steps it takes, in order -> what each step does, and the report after the last. A step is one of: {sample: {from, kind, stamp, revision?}}, a sample or a reply received from either path (§2.5), from \"owner\" (the author's own answer or put) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" or \"delete\" (a delete or a reply_del), its stamp {time, id} (time an NTP64 value, id lowercase hexadecimal without leading zeros, as core's seed/merge.json writes one) or null for an unstamped sample, and revision the document type's own when it carries one (§2.4); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete reverted), refused whole, or failed partway (a refusal of a revert is read as a failure); {call: true}, the target's own operation changed what is in force; {restart: true}, a new instance of the target, holding nothing. The target starts holding nothing, its report {key, source: baseline} ({source: baseline} with no key). expect.steps: for a sample, unstamped (no stamp), same_version (the stamp of the version held: the running or last act's, or the one held waiting; the author's own sample of a version held from an archive is confirmed instead, and the report's last_known goes), older (the held version's id, an earlier time), held (admitted while an act runs: it replaces any version held waiting), act or revert (admitted, and the act starts: nothing held, or a later time of the held id, or another id); for finish, done, or act or revert when a held version starts; called; restarted. A version is admitted against the one held waiting if there is one, else the last acted on. expect.report is the Report after the last step, as §2.10 builds it: observed the last version acted on, its stamp written time/id (in decimal, then the id), and its revision for a put that has one; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline for a delete, no in_force; reverted: source baseline, no in_force; last_known true when the act's version came from an archive and no author's sample confirmed it; call: source call, no in_force."
+  "description": "desired.v1 §2.6 to §2.10: one target's role, its slice's key (key; null for a role left unbound, §2.12), and the steps it takes, in order -> what each step does, and the report after the last. A step is one of: {sample: {from, kind, stamp, revision?, document? | bytes?}}, a sample or a reply received from either path (§2.5), from \"owner\" (the author's own answer or put) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" or \"delete\" (a delete or a reply_del), its stamp {time, id} (time an NTP64 value, id lowercase hexadecimal without leading zeros, as core's seed/merge.json writes one) or null for an unstamped sample, revision the document type's own when it carries one (§2.4), and a put's document: a payload encoded as JSON, decoded (document), compared by its JCS bytes (RFC 8785), or the payload's bytes in hex (bytes), compared byte for byte (§2.7); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete reverted), refused whole, or failed partway (a refusal of a revert is read as a failure); {call: true}, the target's own operation changed what is in force; {restart: true}, a new instance of the target, holding nothing. The target starts holding nothing, its report {key, source: baseline} ({source: baseline} with no key). expect.steps: for a sample, unstamped (no stamp), same_version (the stamp of the version held: the running or last act's, or the one held waiting; the author's own sample of a version held from an archive is confirmed instead, and the report's last_known goes), older (the held version's id, an earlier time), held (admitted while an act runs: it replaces any version held waiting), and, admitted otherwise (nothing held, or a later time of the held id, or another id): adopted, when the target has acted on or adopted a version in this instance and the last of them has the same document (two puts whose documents are equal, or two deletes), else act or revert, the act starting; for finish, done, or adopted, act or revert for a held version as it starts; called; restarted. A version is admitted against the one held waiting if there is one, else the last acted on. expect.report is the Report after the last step, as §2.10 builds it: observed the last version acted on, its stamp written time/id (in decimal, then the id), and its revision for a put that has one; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline for a delete, no in_force; reverted: source baseline, no in_force; adopted: observed the adopted version, in_force too when it named the previous one, outcome, refusal and source kept; last_known true when the version acted on or adopted came from an archive and no author's sample of the same stamp confirmed it; call: source call, no in_force."
 }

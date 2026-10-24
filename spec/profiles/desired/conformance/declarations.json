@@ -315,11 +315,10 @@
       "expect": {
         "declaration": "invalid",
         "reasons": [
-          "not_state",
-          "horizon"
+          "not_state"
         ]
       },
-      "note": "a stream with a horizon: both, each alone",
+      "note": "a stream with a horizon: a stream is no document, whatever its horizon",
       "resource": {
         "annotations": {
           "desired.target_param": "vehicle",
@@ -590,12 +589,15 @@
     },
     {
       "expect": {
-        "declaration": "invalid",
-        "reasons": [
-          "horizon"
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
         ]
       },
-      "note": "a horizon above 0: every re-put would be a version (§2.2, freshness.v1 §2.4)",
+      "note": "a horizon above 0 is allowed: its re-puts are the same document, adopted without an act (§2.2, §2.7)",
       "resource": {
         "annotations": {
           "desired.target_param": "vehicle",
@@ -607,12 +609,15 @@
     },
     {
       "expect": {
-        "declaration": "invalid",
-        "reasons": [
-          "horizon"
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "either",
+            "param": "vehicle"
+          }
         ]
       },
-      "note": "an integral float horizon is that integer",
+      "note": "an integral float horizon above 0, allowed too",
       "resource": {
         "annotations": {
           "desired.target_param": "vehicle",
@@ -624,15 +629,41 @@
     },
     {
       "expect": {
+        "declaration": "declared",
+        "targets": [
+          {
+            "binds": "self.system",
+            "param": "host"
+          },
+          {
+            "binds": "self.service",
+            "param": "service"
+          }
+        ]
+      },
+      "note": "ZenSight's shape with a horizon, the author's liveness across a face (§2.2)",
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "host",
+            "service"
+          ],
+          "freshness.ttl_s": 3600
+        },
+        "kind": "state",
+        "template": "desired/{host}/{service}/thresholds"
+      }
+    },
+    {
+      "expect": {
         "declaration": "invalid",
         "reasons": [
           "not_state",
           "repeated",
-          "param_not_target",
-          "horizon"
+          "param_not_target"
         ]
       },
-      "note": "every check alone: a stream, a repeat, a parameter left out, a horizon",
+      "note": "every check alone: a stream, a repeat, a parameter left out",
       "resource": {
         "annotations": {
           "desired.target_param": [
@@ -650,11 +681,10 @@
         "declaration": "invalid",
         "reasons": [
           "not_state",
-          "value",
-          "horizon"
+          "value"
         ]
       },
-      "note": "a value that is wrong, on a stream: the value's checks skipped, the horizon read",
+      "note": "a value that is wrong, on a stream: the value's checks skipped",
       "resource": {
         "annotations": {
           "desired.target_param": 7,
@@ -665,5 +695,5 @@
       }
     }
   ],
-  "description": "desired.v1 §2.2: a resolved resource -> its declaration. resource.kind is the authoring kind (stream, state, event, operation), resource.explicit is true for an explicit resource (@state, @stream), resource.template its template, resource.annotations its resolved annotations (core §9.3). expect.declaration is one of: \"not_this_profiles\" (no desired.target_param, whatever else under desired. it holds, which is W105's); \"invalid\", with reasons, in this order, each checked alone and a check that needs a value an earlier one found wrong skipped: not_state (the kind is not state), value (not a string, nor an array of one or two strings; a string is a one-element array), repeated (a name twice), not_a_param (a name that is no parameter of the template), rest_param (a name of a rest parameter), param_not_target (a parameter of the template the value does not name), horizon (a freshness.ttl_s that freshness.v1 §2.1 reads as a horizon above 0: a whole number, or an integral float, from 1 to 2^53-1; on an event or an operation it is ignored, freshness.v1 §2.2; any other value is no horizon); or \"declared\", with targets, in the value's order, each {param, binds}: one target parameter binds \"either\" (self.system or self.service, the deployment's choice), two bind \"self.system\" then \"self.service\"."
+  "description": "desired.v1 §2.2: a resolved resource -> its declaration. resource.kind is the authoring kind (stream, state, event, operation), resource.explicit is true for an explicit resource (@state, @stream), resource.template its template, resource.annotations its resolved annotations (core §9.3). expect.declaration is one of: \"not_this_profiles\" (no desired.target_param, whatever else under desired. it holds, which is W105's); \"invalid\", with reasons, in this order, each checked alone and a check that needs a value an earlier one found wrong skipped: not_state (the kind is not state), value (not a string, nor an array of one or two strings; a string is a one-element array), repeated (a name twice), not_a_param (a name that is no parameter of the template), rest_param (a name of a rest parameter), param_not_target (a parameter of the template the value does not name); a freshness.ttl_s, whatever its value, makes no declaration invalid (§2.2); or \"declared\", with targets, in the value's order, each {param, binds}: one target parameter binds \"either\" (self.system or self.service, the deployment's choice), two bind \"self.system\" then \"self.service\"."
 }

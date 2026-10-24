@@ -14,7 +14,7 @@ measurement; and ZenSight's `zs.desired.v1`, whose v1 implementation
 (`zensight-sensor-core/src/desired.rs`, `zensight-desired`) is the target.
 Core Appendix D's interim row (`desired | target_param, target`) was all
 the core said. This text is written against core 0.37, which publishes the
-vocabulary and lets an author's restart keep its zid.
+vocabulary.
 
 **Decided on #840, before the text** (the maintainer's defaults, not
 reopened here).
@@ -70,8 +70,8 @@ reopened here).
 - **Who implements it** (§2.1), **the declaration** with a closed list of
   reasons (§2.2), **the binding** with a closed list of findings and the
   slice's key (§2.3), **the document and its version** (§2.4),
-  **reading** (§2.5), **the order of versions** (§2.6), **acting**
-  (§2.7), **absence, deletes and cancellation** (§2.8), **last-known**
+  **reading** (§2.5), **the order of versions** (§2.6), **acting**,
+  the same document adopted without an act (§2.7), **absence, deletes and cancellation** (§2.8), **last-known**
   (§2.9), **the report** with its consistency rules (§2.10), **the
   author** (§2.11), **the kill switch** (§2.12), **population** (§2.13),
   **constrained faces** (§2.14), **the tokenless set and access control**
@@ -85,8 +85,8 @@ reopened here).
   it acted on last-known; is a desired document in force. The changes
   against v1's `@desired` plane (Appendix A), and the adopters' mappings
   (Appendix B).
-- **Evidence:** `conformance/declarations.json` (36 cases),
-  `conformance/bindings.json` (20), `conformance/order.json` (45),
+- **Evidence:** `conformance/declarations.json` (37 cases),
+  `conformance/bindings.json` (20), `conformance/order.json` (64),
   `conformance/reports.json` (66), `conformance/conclusions.json` (31),
   `conformance/schema.json` (3), each expectation computed twice, by
   `zenkey_model::desired` and by an independent transcription of the
@@ -111,12 +111,6 @@ reopened here).
   is one key and one document per document type. A template with a
   parameter that is no target's would make each target's slice a
   collection, with no rule here for its members' deletes and reverts.
-- **A horizon above 0 makes a declaration invalid.** `freshness.v1` §2.4
-  would have the author re-put every document within half of it, and a
-  re-put is a new stamp, which every target acts on again. D16's
-  `ttl_s = 0` is a SHOULD, not a MUST: the walkthrough's contract declares
-  no horizon, which `freshness.v1` §2.3 reads as "not asked" and which
-  asks no re-put either.
 - **One exact author per role.** Two authors' documents for one target
   would contend, and a wildcard binding (core R1) names every implementer
   on a system. A `redundancy.v1` standby holds only its instance token, at
@@ -129,16 +123,22 @@ reopened here).
   (`ts <= last`), would ignore that epoch until its clock passed the old
   one's. Within one id the two agree, and agree with core §4.2's merge;
   across ids the case is the core's residual risk, as core 0.26 left it.
+  With adoption (on review, below), a new id carrying the documents the
+  targets already acted on moves none of them: ZenSight's v1 sensor, given
+  a new author's re-put of an unchanged document under a later stamp,
+  applied it again; here a failover, like a restart, is quiet.
 - **When an act is recorded.** A version is acted on once from the
   moment its act starts, so a re-delivery while it runs is the same
   version. While an act runs, the target holds the latest admitted
   version, the latest replacing an earlier one held, and acts on it next:
   the target converges on the latest, and a version passed over while it
   waited was never acted on, which is not "older".
-- **A rejected version is not tried again.** ZenSight's v1 sensor left a
-  rejected sample's timestamp unapplied, so every re-GET re-rejected it;
-  here the act is recorded, whatever its outcome, as `config.v1` §2.18
-  does. The next version is the author's to make.
+- **A rejected version is not tried again,** nor the same document put
+  again. ZenSight's v1 sensor left a rejected sample's timestamp
+  unapplied, so every re-GET re-rejected it; here the act is recorded,
+  whatever its outcome, as `config.v1` §2.18 does, and a later version of
+  the same document is adopted refused. The next document is the author's
+  to make.
 - **Refused or failed.** `refused` means nothing of the document applied
   and what was in force stays; `failed` means it applied in part. A target
   that undoes a partial act reports `refused`. After `failed`, no one
@@ -165,12 +165,13 @@ reopened here).
   `revision`: the two adopters' and `config.v1`'s spelling. It orders
   nothing.
 - **Refusal codes.** The profile's own are `undecodable`, `reach`,
-  `secret` and `invalid`, and `apply` for a failure; a type MAY use its
+  `sensitive` and `invalid`, and `apply` for a failure; a type MAY use its
   own, as `config.v1`'s are, and a reader shows a code it does not know.
-  `secret` is added beside reach: a document is published to every reader
-  granted it and kept by archives, which `config.v1`'s `sensitive` and
-  ZenSight's never-list both refuse. A `pointer`, a JSON Pointer, says
-  where, which `config.v1`'s group and parameter map onto.
+  `sensitive` is added beside reach, `config.v1`'s word (on review): a
+  document is published to every reader granted it and kept by archives,
+  which `config.v1`'s `sensitive` and ZenSight's never-list both refuse. A
+  `pointer`, a JSON Pointer, says where, which `config.v1`'s group and
+  parameter map onto.
 - **A delete reverts only on positive evidence.** A target reverts on a
   delete or a `reply_del`, never on a GET that drew nothing for its key:
   that is how core §4.4's archive drops a key, and an empty reply set is
@@ -180,15 +181,32 @@ reopened here).
 - **Last-known is confirmed by the author.** When the author's answer
   later carries the version the target acted on from an archive, the
   target holds it as the author's and reports so, without acting again.
-- **The author's restart answers with its recorded stamps.** The issue's
-  "writes nothing unchanged" needs the restarted author to answer its
-  targets' seeds with the versions they acted on: each document under the
-  stamp its record holds, which core S2 allows (a reply carries the stamp
-  of the mutation it represents). A tool's S1 check (core §4.2) reads a
-  stamp as the owner's by `meta.zid`, so the author SHOULD keep its zid
-  across such a restart; core 0.37 says that core §1.5's new session is
-  for an owner whose state's ordering restarts. `alarms.v1` §2.9 re-puts
-  instead, which a desired document cannot: a re-put is a version.
+  When it carries the same document under another stamp, as a restarted
+  author's re-put does, the target adopts it, and its report says the
+  author's.
+- **Equal documents** (the coordinator asked for the rule to be decided
+  and pinned). JCS-equal (RFC 8785) for a payload encoded as JSON, read as
+  strict JSON; byte-equal for anything else (CBOR, protobuf, raw) and for
+  JSON that does not read. Decoding CBOR or protobuf to compare values
+  would need the type, and two encoders' bytes of one value can differ;
+  byte equality can only cost an act, never skip one. A delete equals a
+  delete. `order.json` pins each.
+- **Equal to the last act's document, not to the one in force.** A
+  refused document put again is then adopted refused, never refused again
+  at each restart of its author; a document put again after a call is
+  adopted, so that the author's restart never undoes an operator's call;
+  and a document equal to an earlier one in force, after a different one
+  was refused, is acted on, which is harmless. The comparison needs no
+  memory beyond the last act.
+- **An adoption moves the report:** `observed` to the adopted version,
+  and `in_force` with it when it named the previous one; `outcome`,
+  `refusal` and `source` stay; `last_known` says where the adopted version
+  came from. A tool comparing the author's current stamp with `observed`
+  so finds a target that adopted a re-put converged, never behind.
+- **An author's restart deletes again** each key its record holds a
+  delete of within its window, so that a target cut off across the delete
+  still finds a `reply_del` stamped by the author's present instance; a
+  target that had reverted adopts it.
 - **Positive evidence for an author's delete** is its own source no
   longer yielding a document for a target it still knows, or the
   deployment's inventory removing the target: ZenSight's author deletes
@@ -215,6 +233,41 @@ reopened here).
 - **`@state` for large populations** is a SHOULD (§2.13), after
   ZenSight's G7. `zs.desired.v1` declares plain state, which it may keep.
 
+**Decided on review** (2026-10-24, #840's coordinator, after the first
+draft of this text).
+1. **No zid reuse, and no core change for it.** The first draft had the
+   restarted author answer under its record's stamps, keeping its zid, and
+   softened core §1.5 to let it. Dropped: the instance id is a continuity
+   epoch, and zenoh may refuse or confuse a zid reused within the old
+   lease. Instead, a target **adopts without an act** an admitted version
+   whose document equals that of the last version it acted on or adopted
+   (§2.6 step 5, §2.7), and an author whose instance changes puts each
+   document it keeps again from its new instance, before it answers a GET
+   with it, as `alarms.v1` §2.9's owner does (§2.11). Its restart moves no
+   target to act again (`scenarios.md` §6). "Writes nothing unchanged"
+   becomes the author's rule within one instance's life, a SHOULD: a
+   re-put now costs messages, never an act. A type that wants the same
+   content acted on again carries a `revision`, or changes any member.
+2. **Horizons.** A horizon above 0 no longer makes a declaration invalid:
+   its re-puts are equal documents, adopted. `freshness.ttl_s = 0` stays a
+   SHOULD (D16): an author that hangs leaves its documents in force at
+   their targets, which is what desired state is for. A horizon above 0
+   means what `freshness.v1` says: the author re-puts, each target adopts
+   (a put and a report put per target every ttl/2), a stale document stays
+   in force and a tool MAY say it is stale; and across a constrained face
+   it is the author's liveness evidence, which a horizon of 0 never is
+   (§2.2).
+3. **`secret` is `sensitive`,** `config.v1`'s word.
+4. **Deletes on positive evidence** as the first draft read #840: the
+   author's own source no longer yields the document, or the inventory
+   removes the target; never because the target is absent from presence.
+5. **Version order** as the first draft had it, core §4.3's rule, with
+   adoption making a failover quiet (§2.6).
+6. **The rest stands:** the binding order, one author per role,
+   `in_force` and `key`, stamps as strings, the eight consistency checks,
+   `not_yet`, a revert only on a delete or a `reply_del`, and last-known
+   cleared on the author's confirmation.
+
 **Deliberately not stated.**
 - **No drift.** A tool that wants to know whether a converged document
   still holds compares it with what the target runs; `source` `call` says
@@ -229,6 +282,9 @@ reopened here).
   either, so §2.2's invalid declaration is a linter's warning.
 - **No `history`.** S4's GET at each seed converges; v1's
   AdvancedSubscriber was an accelerator.
+- **No core change for the author's restart.** Core 0.37 publishes the
+  vocabulary, and nothing else: the restart's re-put is `alarms.v1` §2.9's
+  precedent, and adoption is the target's rule (on review, above).
 - **No new core rule for ordering.** §2.6 is core §4.3's consumer rule;
   the residual risk of two ids is the core's, unchanged.
 - **`config.v1`'s text is unchanged.** Its §2.18 keeps its own words, and

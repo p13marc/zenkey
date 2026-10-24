@@ -2401,6 +2401,11 @@ fn desired_order() {
                     },
                     stamp: desired_stamp(&s["stamp"]),
                     revision: s.get("revision").and_then(Value::as_u64),
+                    content: match (s.get("document"), s.get("bytes").and_then(Value::as_str)) {
+                        (Some(d), _) => Some(desired::Content::of_json(d)),
+                        (None, Some(h)) => Some(desired::Content::of_bytes(&unhex(h))),
+                        (None, None) => None,
+                    },
                 };
                 t.observe(sample).as_str()
             } else if let Some(f) = step.get("finish") {
