@@ -1,0 +1,1551 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "converged": {
+          "answer": "yes",
+          "reason": "converged"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "converged: the report's version is the author's current",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "yes",
+          "reason": "reverted"
+        },
+        "in_force": {
+          "answer": "no",
+          "reason": "baseline"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "reverted"
+        }
+      },
+      "note": "reverted on the author's delete",
+      "reading": {
+        "author": {
+          "current": {
+            "delete": {
+              "id": "a1",
+              "time": 150
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "stamp": "150/a1"
+              },
+              "outcome": "reverted",
+              "source": "baseline"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "no",
+          "reason": "refused"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "yes",
+          "reason": "refused"
+        }
+      },
+      "note": "refused, the previous in force",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 200
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 2,
+                "stamp": "200/a1"
+              },
+              "outcome": "refused",
+              "refusal": {
+                "code": "reach"
+              },
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "no",
+          "reason": "refused"
+        },
+        "in_force": {
+          "answer": "no",
+          "reason": "baseline"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "yes",
+          "reason": "refused"
+        }
+      },
+      "note": "refused with the baseline in force",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "refused",
+              "refusal": {
+                "code": "undecodable"
+              },
+              "source": "baseline"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "no",
+          "reason": "failed"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "partial"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "yes",
+          "reason": "failed"
+        }
+      },
+      "note": "failed partway",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 200
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 2,
+                "stamp": "200/a1"
+              },
+              "outcome": "failed",
+              "refusal": {
+                "code": "apply"
+              },
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_yet",
+          "reason": "behind"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "behind: an earlier time of the author's id",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 200
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "ahead"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "ahead: the reads raced",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 2,
+                "stamp": "200/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 2,
+                "stamp": "200/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_yet",
+          "reason": "other_epoch"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "another id: the author's new epoch, not acted on yet",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "b2",
+              "time": 50
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_yet",
+          "reason": "not_acted"
+        },
+        "in_force": {
+          "answer": "no",
+          "reason": "baseline"
+        },
+        "last_known": {
+          "answer": "not_asked",
+          "reason": "not_acted"
+        },
+        "refused": {
+          "answer": "not_asked",
+          "reason": "not_acted"
+        }
+      },
+      "note": "no act yet",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "source": "baseline"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "yes",
+          "reason": "converged"
+        },
+        "in_force": {
+          "answer": "no",
+          "reason": "call"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "a call since the converged act",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "call"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_asked",
+          "reason": "author_absent"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "yes",
+          "reason": "last_known"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "last-known, its author absent",
+      "reading": {
+        "author": {
+          "current": null,
+          "presence": "absent"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "last_known": true,
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "author_presence_incomplete"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "the author's presence possibly incomplete",
+      "reading": {
+        "author": {
+          "current": null,
+          "presence": "incomplete"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "author_not_read"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "the author not read",
+      "reading": {
+        "author": {
+          "current": null,
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "author_read_incomplete"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "the author's GET ended at its timeout",
+      "reading": {
+        "author": {
+          "current": "incomplete",
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "author_silent"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "the author's GET drew nothing for the key: no verdict (core O5)",
+      "reading": {
+        "author": {
+          "current": "silent",
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "yes",
+          "reason": "converged"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "the author across a face, read by grant",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "across_face"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_asked",
+          "reason": "target_absent"
+        },
+        "in_force": {
+          "answer": "not_asked",
+          "reason": "target_absent"
+        },
+        "last_known": {
+          "answer": "not_asked",
+          "reason": "target_absent"
+        },
+        "refused": {
+          "answer": "not_asked",
+          "reason": "target_absent"
+        }
+      },
+      "note": "the target absent",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": null,
+          "presence": "absent",
+          "report": null,
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "presence_incomplete"
+        }
+      },
+      "note": "the target's presence possibly incomplete",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": null,
+          "presence": "incomplete",
+          "report": null,
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "no_descriptor"
+        }
+      },
+      "note": "its descriptor not read",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": null,
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_asked",
+          "reason": "not_a_target"
+        },
+        "in_force": {
+          "answer": "not_asked",
+          "reason": "not_a_target"
+        },
+        "last_known": {
+          "answer": "not_asked",
+          "reason": "not_a_target"
+        },
+        "refused": {
+          "answer": "not_asked",
+          "reason": "not_a_target"
+        }
+      },
+      "note": "not a target of the role",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": false,
+            "lists": false
+          },
+          "presence": "present",
+          "report": null,
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        },
+        "in_force": {
+          "answer": "no",
+          "reason": "unbound"
+        },
+        "last_known": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        },
+        "refused": {
+          "answer": "not_asked",
+          "reason": "unbound"
+        }
+      },
+      "note": "the kill switch: the role unbound",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": false,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "source": "baseline"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "no_report"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "no_report"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "no_report"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "no_report"
+        }
+      },
+      "note": "no report of the slice",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": null,
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "nothing_crossed"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "nothing_crossed"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "nothing_crossed"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "nothing_crossed"
+        }
+      },
+      "note": "across a face, nothing crossed",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "across_face"
+        },
+        "target": {
+          "descriptor": null,
+          "presence": "across_face",
+          "report": null,
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "yes",
+          "reason": "converged"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "across a face, the report crossed",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "across_face"
+        },
+        "target": {
+          "descriptor": null,
+          "presence": "across_face",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        }
+      },
+      "note": "a report that does not decode",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": "undecodable",
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        }
+      },
+      "note": "an unreadable report",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "source": "file"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "report_invalid"
+        }
+      },
+      "note": "a malformed report: refused with no refusal",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 200
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 2,
+                "stamp": "200/a1"
+              },
+              "outcome": "refused",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "report_stale"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "report_stale"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "report_stale"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "report_stale"
+        }
+      },
+      "note": "a stale report (freshness.v1)",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "stale"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "unobservable",
+          "reason": "report_unobservable"
+        },
+        "in_force": {
+          "answer": "unobservable",
+          "reason": "report_unobservable"
+        },
+        "last_known": {
+          "answer": "unobservable",
+          "reason": "report_unobservable"
+        },
+        "refused": {
+          "answer": "unobservable",
+          "reason": "report_unobservable"
+        }
+      },
+      "note": "its age unobservable",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "unobservable"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "yes",
+          "reason": "converged"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "a fresh report",
+      "reading": {
+        "author": {
+          "current": {
+            "put": {
+              "id": "a1",
+              "time": 100
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "fresh"
+        }
+      }
+    },
+    {
+      "expect": {
+        "converged": {
+          "answer": "not_yet",
+          "reason": "behind"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged"
+        }
+      },
+      "note": "the author's delete, the target still on its put: behind",
+      "reading": {
+        "author": {
+          "current": {
+            "delete": {
+              "id": "a1",
+              "time": 150
+            }
+          },
+          "presence": "present"
+        },
+        "target": {
+          "descriptor": {
+            "bound": true,
+            "lists": true
+          },
+          "presence": "present",
+          "report": {
+            "document": {
+              "in_force": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+              "observed": {
+                "revision": 1,
+                "stamp": "100/a1"
+              },
+              "outcome": "converged",
+              "source": "desired"
+            }
+          },
+          "report_freshness": "not_asked"
+        }
+      }
+    }
+  ],
+  "description": "desired.v1 §2.17, §5: one reading of one target's role against its author's document -> §5's four questions, each an answer (yes, no, not_yet, unobservable, not_asked) and a reason. reading.target: its presence (present, absent: a complete read without its instance token, incomplete: not seen in a read possibly incomplete or refused, across_face: across a constrained face, where the deployment's word stands for its descriptor); its descriptor ({lists: whether its requires list the role, bound: whether its bindings are not empty}, or null when not read; not read across a face); its report of the role's slice, the one whose key is that slice's (null when none was read, \"undecodable\" for bytes that are not strict JSON, or {document}, read as reports.json reads one: unreadable or with any finding, it is invalid); report_freshness, its freshness.v1 verdict (fresh, stale, unobservable; not_asked when its resource declares no horizon). reading.author: its presence (as the target's), and current, its latest version of the slice by S4's GET (null when no GET was made, \"incomplete\" for one that ended at its timeout or with an error reply, \"silent\" for one that drew nothing for the key, or {put: stamp} or {delete: stamp}, the stamp {time, id}). The questions: converged (has the target converged on its author's current document?), refused (is its last act refused or failed?), last_known (is what it acted on last-known?), in_force (is a desired document in force?). Steps 1 to 4 of §2.17 answer every question alike, but in_force for an unbound role, no, unbound; then each question as §2.17 step 5 says, converged by steps 6 and 7: observed compared with the author's stamp by value (time, then the id as a 128-bit value)."
+}

@@ -1,0 +1,2262 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a first put, acted on and converged (§2.6 step 2, §2.7)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a later stamp of the same id is acted on (§2.6 step 3)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "older"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an earlier stamp of the same id is older, never acted on",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "same_version"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the same version from another path, or a second seed, is not acted on again",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 3,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 3,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a revision that disagrees orders nothing: the stamp does (§2.4)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 9,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 3,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "source": "baseline"
+        },
+        "steps": [
+          "unstamped"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an unstamped sample is never acted on (§2.6 step 1)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": null
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "unstamped"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an unstamped sample changes nothing held",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": null
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "unstamped"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an unstamped delete is ignored too",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": null
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "150/a1"
+          },
+          "outcome": "reverted",
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done",
+          "revert",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a delete reverts to the baseline (§2.8)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "older"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a delete older than the acted put is older",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "150/a1"
+          },
+          "outcome": "reverted",
+          "source": "baseline"
+        },
+        "steps": [
+          "revert",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a reply_del at the first seed: a revert, though the baseline already runs",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "revert",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a put after a delete converges again",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "reach",
+            "detail": "names the endpoint the worker reaches the bus by",
+            "pointer": "/endpoint"
+          },
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a refused document keeps the previous in force (§2.7)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "reach",
+              "detail": "names the endpoint the worker reaches the bus by",
+              "pointer": "/endpoint"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "invalid",
+            "pointer": "/rate_hz"
+          },
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done",
+          "same_version"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a refused version is acted on once: its re-seed is the same version",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "invalid",
+              "pointer": "/rate_hz"
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "100/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "undecodable",
+            "detail": "not a tasking.v1.Task"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "refused before any document converged: the baseline stays in force",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "undecodable",
+              "detail": "not a tasking.v1.Task"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the next version after a refusal is acted on",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "secret",
+              "pointer": "/token"
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "failed",
+          "refusal": {
+            "code": "apply",
+            "detail": "the drive refused halt",
+            "pointer": "/mode"
+          },
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "failed: applied in part, no one version wholly in force",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": {
+            "failed": {
+              "code": "apply",
+              "detail": "the drive refused halt",
+              "pointer": "/mode"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "150/a1"
+          },
+          "outcome": "failed",
+          "refusal": {
+            "code": "apply"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done",
+          "revert",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a failed revert: the move to the baseline began",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": {
+            "failed": {
+              "code": "apply"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "150/a1"
+          },
+          "outcome": "failed",
+          "refusal": {
+            "code": "invalid"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done",
+          "revert",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a revert is never refused: a refusal of one is read as a failure",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "invalid"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "250/a1"
+          },
+          "outcome": "reverted",
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done",
+          "revert",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a delete after a refusal reverts",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": {
+            "refused": {
+              "code": "reach"
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 250
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 8,
+            "stamp": "100/b2"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 8,
+            "stamp": "100/b2"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "another id is a new epoch, acted on whatever its time (§2.6 step 4, core §4.3)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 7,
+            "stamp": {
+              "id": "a1",
+              "time": 500
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 8,
+            "stamp": {
+              "id": "b2",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 8,
+            "stamp": "100/b2"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 8,
+            "stamp": "100/b2"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done",
+          "older"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "within the new id, by time",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 7,
+            "stamp": {
+              "id": "a1",
+              "time": 500
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 8,
+            "stamp": {
+              "id": "b2",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 9,
+            "stamp": {
+              "id": "b2",
+              "time": 90
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 9,
+            "stamp": "501/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 9,
+            "stamp": "501/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an old epoch's value in transit after the new epoch's first is another id: core §4.3's residual risk",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 7,
+            "stamp": {
+              "id": "a1",
+              "time": 500
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 8,
+            "stamp": {
+              "id": "b2",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 9,
+            "stamp": {
+              "id": "a1",
+              "time": 501
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "stamp": "100/a2"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "100/a2"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "equal times under two ids are two versions",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a2",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "held",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a version that arrives while an act runs is held, then acted on (§2.7)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 3,
+            "stamp": "300/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 3,
+            "stamp": "300/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "held",
+          "held",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the latest replaces the held; the one it replaced is passed over",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 3,
+            "stamp": {
+              "id": "a1",
+              "time": 300
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 3,
+            "stamp": "300/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 3,
+            "stamp": "300/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "held",
+          "older",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "older than the held one is older",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 3,
+            "stamp": {
+              "id": "a1",
+              "time": 300
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "same_version",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the running act's own version again is the same version",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "150/a1"
+          },
+          "outcome": "reverted",
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "held",
+          "revert",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a delete held while a put runs",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "last_known": true,
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an archive's version, its author absent: last-known (§2.9)",
+      "steps": [
+        {
+          "sample": {
+            "from": "archive",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "confirmed"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the author's answer later carries it: confirmed, not acted again",
+      "steps": [
+        {
+          "sample": {
+            "from": "archive",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "confirmed",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "confirmed while the act runs",
+      "steps": [
+        {
+          "sample": {
+            "from": "archive",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "older"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an archive older than the acted version changes nothing",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "archive",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "last_known": true,
+          "observed": {
+            "stamp": "150/a1"
+          },
+          "outcome": "reverted",
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done",
+          "revert",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "an archive's reply_del: the author's delete, kept",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "archive",
+            "kind": "delete",
+            "stamp": {
+              "id": "a1",
+              "time": 150
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "last_known": true,
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a newer archive version is acted on, last-known: S12's plan written while the vehicle was offline",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "archive",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "last_known": true,
+          "observed": {
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "same_version"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "the same archive version twice is the same version",
+      "steps": [
+        {
+          "sample": {
+            "from": "archive",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "sample": {
+            "from": "archive",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "call"
+        },
+        "steps": [
+          "act",
+          "done",
+          "called"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a call: the target's own change since (§2.7, not a lock)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "call": true
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "call"
+        },
+        "steps": [
+          "act",
+          "done",
+          "called",
+          "same_version"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "after a call, the same version re-seeded is not acted on again",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "call": true
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 2,
+            "stamp": "200/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "called",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "after a call, the next version is acted on",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "call": true
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 2,
+            "stamp": {
+              "id": "a1",
+              "time": 200
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "source": "call"
+        },
+        "steps": [
+          "called"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a call before any document",
+      "steps": [
+        {
+          "call": true
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done",
+          "restarted",
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a restart acts again on the version its previous instance acted on (§2.7)",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "restart": true
+        },
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done",
+          "restarted"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a restart's first report is the baseline's",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        },
+        {
+          "restart": true
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "a type with no revision",
+      "steps": [
+        {
+          "sample": {
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "done"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "source": "baseline"
+        },
+        "steps": []
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "nothing received",
+      "steps": []
+    },
+    {
+      "expect": {
+        "report": {
+          "source": "baseline"
+        },
+        "steps": []
+      },
+      "key": null,
+      "note": "an unbound role reads nothing: its report has no key (§2.12)",
+      "steps": []
+    }
+  ],
+  "description": "desired.v1 §2.6 to §2.10: one target's role, its slice's key (key; null for a role left unbound, §2.12), and the steps it takes, in order -> what each step does, and the report after the last. A step is one of: {sample: {from, kind, stamp, revision?}}, a sample or a reply received from either path (§2.5), from \"owner\" (the author's own answer or put) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" or \"delete\" (a delete or a reply_del), its stamp {time, id} (time an NTP64 value, id lowercase hexadecimal without leading zeros, as core's seed/merge.json writes one) or null for an unstamped sample, and revision the document type's own when it carries one (§2.4); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete reverted), refused whole, or failed partway (a refusal of a revert is read as a failure); {call: true}, the target's own operation changed what is in force; {restart: true}, a new instance of the target, holding nothing. The target starts holding nothing, its report {key, source: baseline} ({source: baseline} with no key). expect.steps: for a sample, unstamped (no stamp), same_version (the stamp of the version held: the running or last act's, or the one held waiting; the author's own sample of a version held from an archive is confirmed instead, and the report's last_known goes), older (the held version's id, an earlier time), held (admitted while an act runs: it replaces any version held waiting), act or revert (admitted, and the act starts: nothing held, or a later time of the held id, or another id); for finish, done, or act or revert when a held version starts; called; restarted. A version is admitted against the one held waiting if there is one, else the last acted on. expect.report is the Report after the last step, as §2.10 builds it: observed the last version acted on, its stamp written time/id (in decimal, then the id), and its revision for a put that has one; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline for a delete, no in_force; reverted: source baseline, no in_force; last_known true when the act's version came from an archive and no author's sample confirmed it; call: source call, no in_force."
+}

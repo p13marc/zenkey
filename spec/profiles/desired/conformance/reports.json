@@ -1,0 +1,1203 @@
+{
+  "cases": [
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "a target's first report (§2.10)"
+    },
+    {
+      "document": {
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "the kill switch's report: no key (§2.12)"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "converged"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "converged, a type with no revision"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 2,
+          "stamp": "200/a1"
+        },
+        "outcome": "refused",
+        "refusal": {
+          "code": "reach",
+          "detail": "names the endpoint",
+          "pointer": "/endpoint"
+        },
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "refused: the previous version still in force"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "refused",
+        "refusal": {
+          "code": "undecodable"
+        },
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "refused with the baseline in force"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 2,
+          "stamp": "200/a1"
+        },
+        "outcome": "failed",
+        "refusal": {
+          "code": "apply"
+        },
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "failed: in force in part"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "150/a1"
+        },
+        "outcome": "reverted",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "reverted"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "last_known": true,
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "converged on an archive's version"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "last_known": false,
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "last_known false written out is absent"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "call"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "a call since the act"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "source": "call"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "a call before any document"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "refused",
+        "refusal": {
+          "code": "not_found",
+          "pointer": "/values/duty/fraction"
+        },
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "a type's own code, config.v1's, with its pointer"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1.0,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "an integral float revision is that integer"
+    },
+    {
+      "document": {
+        "effective_json": "{\"mode\":\"run\"}",
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "a member the schema does not name is ignored"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/@state/tasks/lab/worker",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "a report on explicit state"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "18446744073709551615/ffffffffffffffffffffffffffffffff"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "18446744073709551615/ffffffffffffffffffffffffffffffff"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "the largest stamp: 2^64-1, a 128-bit id"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 18446744073709551615,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 18446744073709551615,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "the largest revision: 2^64-1"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "0/1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "0/1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "a stamp of time 0"
+    },
+    {
+      "expect": {
+        "errors": [],
+        "readable": true
+      },
+      "note": "as bytes, with a trailing newline",
+      "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}\n"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false
+      },
+      "note": "not JSON",
+      "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": "
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false
+      },
+      "note": "a duplicate member",
+      "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\", \"source\": \"desired\"}"
+    },
+    {
+      "expect": {
+        "errors": [
+          "json"
+        ],
+        "readable": false
+      },
+      "note": "text after the value",
+      "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"} x"
+    },
+    {
+      "document": [
+        "baseline"
+      ],
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "not an object"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "no source"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "source": "file"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "v1's file is no source"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "applied",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "an outcome outside the four"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "a version with no stamp"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": 100
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "a stamp as a number"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": -1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "a negative revision"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1.5,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "a fractional revision"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": "1",
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "a revision as a string"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "refused",
+        "refusal": {
+          "detail": "no"
+        },
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "a refusal with no code"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "refused",
+        "refusal": {
+          "code": ""
+        },
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "an empty code"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "refused",
+        "refusal": {
+          "code": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "a code of 65 characters"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "last_known": "yes",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "last_known as a string"
+    },
+    {
+      "document": {
+        "key": 7,
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "schema"
+        ],
+        "readable": false
+      },
+      "note": "a key that is a number"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "100"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "stamp"
+        ],
+        "readable": false
+      },
+      "note": "a stamp with no id"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "0100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "0100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "stamp"
+        ],
+        "readable": false
+      },
+      "note": "a time with a leading zero"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "100/A1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "100/A1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "stamp"
+        ],
+        "readable": false
+      },
+      "note": "an id in capitals, which zenoh never writes"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "100/0a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "100/0a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "stamp"
+        ],
+        "readable": false
+      },
+      "note": "an id with a leading zero"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "100/0"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "100/0"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "stamp"
+        ],
+        "readable": false
+      },
+      "note": "the id 0"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "18446744073709551616/1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "18446744073709551616/1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "stamp"
+        ],
+        "readable": false
+      },
+      "note": "a time of 2^64"
+    },
+    {
+      "document": {
+        "in_force": {
+          "stamp": "100/100000000000000000000000000000000"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "100/100000000000000000000000000000000"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "stamp"
+        ],
+        "readable": false
+      },
+      "note": "an id of 33 hex digits"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 18446744073709551616,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 18446744073709551616,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "revision_range"
+        ],
+        "readable": false
+      },
+      "note": "a revision of 2^64"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "keyless"
+        ],
+        "readable": true
+      },
+      "note": "no key, with a document in force"
+    },
+    {
+      "document": {
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "refused",
+        "refusal": {
+          "code": "reach"
+        },
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "keyless"
+        ],
+        "readable": true
+      },
+      "note": "no key, with an act"
+    },
+    {
+      "document": {
+        "key": "plans/vehicle-01",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "key_form"
+        ],
+        "readable": true
+      },
+      "note": "a key with no zk2"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/stream/tasks/lab/worker",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "key_form"
+        ],
+        "readable": true
+      },
+      "note": "a stream's key"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/*/worker",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "key_form"
+        ],
+        "readable": true
+      },
+      "note": "a selector is no key"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/@op/tasks",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "key_form"
+        ],
+        "readable": true
+      },
+      "note": "an operation's key"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "observed_outcome"
+        ],
+        "readable": true
+      },
+      "note": "observed with no outcome"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "observed_outcome",
+          "source",
+          "in_force"
+        ],
+        "readable": true
+      },
+      "note": "an outcome with no observed"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "refusal": {
+          "code": "reach"
+        },
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "refusal"
+        ],
+        "readable": true
+      },
+      "note": "a refusal on a converged act"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 2,
+          "stamp": "200/a1"
+        },
+        "outcome": "refused",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "refusal"
+        ],
+        "readable": true
+      },
+      "note": "refused with no refusal"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 2,
+          "stamp": "200/a1"
+        },
+        "outcome": "failed",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "refusal"
+        ],
+        "readable": true
+      },
+      "note": "failed with no refusal"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "source"
+        ],
+        "readable": true
+      },
+      "note": "desired before any act"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "source"
+        ],
+        "readable": true
+      },
+      "note": "converged with the baseline in force"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "stamp": "150/a1"
+        },
+        "outcome": "reverted",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "source"
+        ],
+        "readable": true
+      },
+      "note": "reverted with a document in force"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 2,
+          "stamp": "200/a1"
+        },
+        "outcome": "refused",
+        "refusal": {
+          "code": "reach"
+        },
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "in_force"
+        ],
+        "readable": true
+      },
+      "note": "in_force with the baseline"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 2,
+          "stamp": "200/a1"
+        },
+        "outcome": "failed",
+        "refusal": {
+          "code": "apply"
+        },
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "in_force"
+        ],
+        "readable": true
+      },
+      "note": "in_force after a failure"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 2,
+          "stamp": "200/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "in_force"
+        ],
+        "readable": true
+      },
+      "note": "converged, in force another version"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "outcome": "converged",
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "in_force"
+        ],
+        "readable": true
+      },
+      "note": "converged, nothing said in force"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "observed": {
+          "revision": 1,
+          "stamp": "150/a1"
+        },
+        "outcome": "reverted",
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "revision_on_revert"
+        ],
+        "readable": true
+      },
+      "note": "reverted with a revision"
+    },
+    {
+      "document": {
+        "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+        "last_known": true,
+        "source": "baseline"
+      },
+      "expect": {
+        "errors": [
+          "last_known"
+        ],
+        "readable": true
+      },
+      "note": "last_known before any act"
+    },
+    {
+      "document": {
+        "in_force": {
+          "revision": 1,
+          "stamp": "100/a1"
+        },
+        "last_known": true,
+        "observed": {
+          "revision": 1,
+          "stamp": "150/a1"
+        },
+        "outcome": "reverted",
+        "refusal": {
+          "code": "x"
+        },
+        "source": "desired"
+      },
+      "expect": {
+        "errors": [
+          "keyless",
+          "refusal",
+          "source",
+          "revision_on_revert"
+        ],
+        "readable": true
+      },
+      "note": "every finding at once, in order"
+    }
+  ],
+  "description": "desired.v1 §2.4, §2.10: a target's report, decoded as JSON (document), or as its bytes' text (text, read as strict JSON: UTF-8, RFC 8259, nothing after the value but RFC 8259's whitespace, no duplicate member at any depth, every number finite) -> whether a reader reads it (readable), and its findings (errors), in the order checked. Unreadable, the first only: json (text that is not strict JSON); schema (outside desired.v1.json's desired.v1.Report: source required and one of baseline, desired, call; key a string; in_force and observed objects, each with stamp a string of at least 3 characters and revision, if present, an integer from 0, an integral number read as an integer; outcome one of converged, refused, failed, reverted; refusal an object with code a string of 1 to 64 characters, pointer and detail strings; last_known a boolean; a member the schema does not name ignored); stamp (a stamp not in zenoh's form: the time in decimal, 0 or without a leading zero, at most 2^64-1, a slash, the id in lowercase hexadecimal, without a leading zero, at most 32 digits); revision_range (a revision above 2^64-1). Readable, every finding that applies, in this order: keyless (no key, with a source other than baseline, or with observed); key_form (a key that is not a concrete zk2 data key, core §1.1, of kind token state or @state); observed_outcome (observed without outcome, or outcome without observed); refusal (a refusal with an outcome other than refused or failed, or refused or failed without one); source (desired without observed; converged with baseline; reverted with desired); in_force (in_force with a source other than desired, or with failed; or converged with desired and an in_force that is not observed, its revision compared as an integer); revision_on_revert (reverted with a revision in observed); last_known (last_known true without observed)."
+}
