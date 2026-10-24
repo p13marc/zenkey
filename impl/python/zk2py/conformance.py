@@ -943,6 +943,113 @@ def _telemetry_continuity(path: Path) -> list[Result]:
     return out
 
 
+def _desired_schema(path: Path) -> list[Result]:
+    """desired.v1 §3: the standard schema's published ids. The file's header
+    first (its ``file``, ``current``, ``published`` and ``types`` against
+    zk2py's tables), then each case's document, by path from the
+    repository's root or inline -> its artifact id (sha256 over its JCS
+    bytes) and whether the profile publishes it."""
+    from . import desired as ds, jcs
+
+    data = _load_json(path)
+    repo = path.parents[4]
+    out = [
+        _check("schema: the profile's file is the current revision",
+               ds.artifact_id(jcs.loads((path.parents[1] / data["file"]).read_bytes())), data["current"]),
+        _check("schema: zk2py's current id is the file's", ds.CURRENT, data["current"]),
+        _check("schema: zk2py's published ids are §3's, oldest first",
+               [[i, r] for i, r in ds.PUBLISHED], [[x["id"], x["revision"]] for x in data["published"]]),
+        _check("schema: zk2py's three types, each with its first revision",
+               sorted(ds.TYPES.items()), sorted((t["name"], t["since"]) for t in data["types"])),
+        _check("schema: each type a $defs member of the current file",
+               sorted(ds.load_schema()["$defs"]), sorted(ds.TYPES)),
+    ]
+    for i, c in enumerate(data["cases"]):
+        doc = jcs.loads((repo / c["path"]).read_bytes()) if "path" in c else c["document"]
+        got = ds.artifact_id(doc)
+        out.append(_check(f"schema #{i}: {c['note']}", {"id": got, "published": ds.is_published(got)}, c["expect"]))
+    return out
+
+
+def _desired_declarations(path: Path) -> list[Result]:
+    """desired.v1 §2.2: a resolved resource -> its declaration. An explicit
+    state is read as its kind token, ``@state``."""
+    from . import desired as ds
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        r = c["resource"]
+        kind = "@state" if r.get("explicit") and r["kind"] == "state" else r["kind"]
+        out.append(_check(f"declarations #{i}: {c['note']}",
+                          ds.declare(kind, r["template"], r["annotations"]).expect(), c["expect"]))
+    return out
+
+
+def _desired_bindings(path: Path) -> list[Result]:
+    """desired.v1 §2.3: a declared resource, its author's interface, the
+    target's address and its requirement as its descriptor lists it -> the
+    binding: the slice's key, the kill switch, or its findings."""
+    from . import desired as ds
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        r = c["resource"]
+        decl = ds.declare(r["kind"], r["template"], r["annotations"])
+        if decl.declaration != ds.DECLARED:
+            out.append((f"bindings #{i}: {c['note']}", False, f"the resource is not declared: {decl.expect()}"))
+            continue
+        got = ds.bind(decl, r["template"], bool(r.get("explicit")), c["iface"], c["target"], c["requirement"])
+        out.append(_check(f"bindings #{i}: {c['note']}", got.expect(), c["expect"]))
+    return out
+
+
+def _desired_order(path: Path) -> list[Result]:
+    """desired.v1 §2.6 to §2.10: one role's steps -> what each does, and the
+    report after the last. Each report the machine builds must also read
+    with no finding (§2.10: the findings are "each one the state machine
+    never produces")."""
+    from . import desired as ds
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        name = f"order #{i}: {c['note']}"
+        if len(c["steps"]) != len(c["expect"]["steps"]):
+            out.append((name, False, "the case's steps and expected words differ in number"))
+            continue
+        words, report = ds.run_steps(c["key"], c["steps"])
+        out.append(_check(name, {"steps": words, "report": report}, c["expect"]))
+        out.append(_check(f"{name} (its report reads, with no finding)", ds.read_report(report).expect(),
+                          {"readable": True, "errors": []}))
+    return out
+
+
+def _desired_reports(path: Path) -> list[Result]:
+    """desired.v1 §2.4, §2.10: a report, decoded or as its bytes' text ->
+    whether a reader reads it, and its findings in order."""
+    from . import desired as ds
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        if "text" in c:
+            got = ds.read_report_bytes(c["text"].encode("utf-8", "surrogatepass"))
+        else:
+            got = ds.read_report(c["document"])
+        out.append(_check(f"reports #{i}: {c['note']}", got.expect(), c["expect"]))
+    return out
+
+
+def _desired_conclusions(path: Path) -> list[Result]:
+    """desired.v1 §2.17, §5: one reading of one target's role -> §5's four
+    questions, each an answer and a reason."""
+    from . import desired as ds
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = {q: a.pair() for q, a in ds.conclude(ds.reading_of(c["reading"])).items()}
+        out.append(_check(f"conclusions #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -960,6 +1067,9 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
     "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,
                   "samples.json": _telemetry_samples, "continuity.json": _telemetry_continuity},
+    "desired": {"schema.json": _desired_schema, "declarations.json": _desired_declarations,
+                "bindings.json": _desired_bindings, "order.json": _desired_order, "reports.json": _desired_reports,
+                "conclusions.json": _desired_conclusions},
 }
 
 
@@ -1750,6 +1860,203 @@ def _presence_fold() -> list[tuple[str, Any, Any]]:
     ]
 
 
+def _desired_adopters(root: Path) -> list[tuple[str, Any, Any]]:
+    """desired.v1 Appendix B and §2.3, read over the adopters' real
+    contracts and bindings, where the fixtures give resources already
+    resolved:
+    - the walkthrough: ``plans/{vehicle}`` one target parameter, and the
+      executor's binding (``acl/walkthrough.enrollment.toml``, core
+      ``bindings.md`` §2) to its own plan, ``…/plans/vehicle-01``;
+    - ZenSight: ``zs.desired.v1``'s seven templates, ``["host",
+      "service"]``, never stale; ``zs.thresholds.v1``'s requirement bound
+      for the sysinfo sensor to §2.3's example key; and its
+      ``applied/{topic}``, still ``AppliedConfig``, no Report (Appendix B:
+      "a tool's §5 finds no report of it");
+    - every other resource under ``examples/zk2/`` not this profile's, and
+      none invalid;
+    - the scenarios' ``tasking.v1`` (scenarios.md, "The contracts"), its
+      slice ``D`` for ``lab/worker``."""
+    from . import desired as ds, freshness as fr
+    from .contract import load_contract
+
+    ex = root.parent.parent / "examples" / "zk2"
+    spec = root.parent
+    label = "desired.v1 Appendix B"
+    out: list[tuple[str, Any, Any]] = []
+    decls: dict[str, ds.Declaration] = {}
+    contracts: dict[str, Any] = {}
+    for f in sorted(ex.rglob("*.v*.toml")):
+        c = load_contract(f, spec_dir=spec)
+        contracts[f.stem] = c
+        for r in c.canonical["resources"]:
+            decls[f"{f.stem}:{r['template']}"] = ds.declare(r["token"] if r["kind"] == "state" else r["kind"],
+                                                            r["template"], r["annotations"])
+    mine = {k: d for k, d in decls.items() if d.declaration != ds.NOT_THIS}
+    out.append((f"{label}: the examples' desired resources are the walkthrough's one and zs.desired.v1's seven, "
+                "none invalid",
+                (sorted({k.split(":")[0] for k in mine}), len(mine), sorted(k for k, d in mine.items()
+                                                                            if d.declaration != ds.DECLARED)),
+                (["mission_plan.v1", "zs.desired.v1"], 8, [])))
+    plan = decls.get("mission_plan.v1:plans/{vehicle}")
+    out.append((f"{label}: the walkthrough's plans/{{vehicle}}, one target parameter, either identity, no horizon",
+                None if plan is None else (plan.expect(), plan.horizon), (
+                    {"declaration": "declared", "targets": [{"param": "vehicle", "binds": "either"}]}, None)))
+    if plan is not None:
+        got = ds.bind(plan, "plans/{vehicle}", False, "mission_plan.v1", "vehicle-01/executor",
+                      {"bindings": ["ground/fleet-mgr"], "params": {"vehicle": "self.system"}, "optional": False})
+        out.append((f"{label}: the executor's binding (acl/walkthrough.enrollment.toml) is its own plan "
+                    "(core bindings.md §2)", got.expect(),
+                    {"binding": "bound", "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"}))
+    zs = {k: d for k, d in mine.items() if k.startswith("zs.desired.v1:")}
+    out.append((f"{label}: zs.desired.v1's seven templates, each [host, service] bound self.system then "
+                "self.service, never stale",
+                sorted({(json.dumps(d.expect(), sort_keys=True), d.horizon.horizon if d.horizon else None)
+                        for d in zs.values()}),
+                [(json.dumps({"declaration": "declared", "targets": [
+                    {"param": "host", "binds": "self.system"}, {"param": "service", "binds": "self.service"}]},
+                    sort_keys=True), "never")]))
+    th = zs.get("zs.desired.v1:desired/{host}/{service}/thresholds")
+    req = contracts["zs.thresholds.v1"].canonical["requires"].get("desired")
+    if th is not None and req is not None:
+        got = ds.bind(th, "desired/{host}/{service}/thresholds", False, req["interface"], "h-3fa9c2d41b7e/sysinfo",
+                      {"bindings": ["fleet/desired"], "params": {"host": "self.system", "service": "self.service"},
+                       "optional": req["optional"]})
+        out.append((f"{label}: zs.thresholds.v1's requirement, bound for the sysinfo sensor, is §2.3's example key",
+                    (req["resources"], got.expect()),
+                    (["desired/{host}/{service}/thresholds"], {
+                        "binding": "bound",
+                        "key": "zk2/fleet/desired/zs.desired.v1/state/desired/h-3fa9c2d41b7e/sysinfo/thresholds"})))
+        got = ds.bind(th, "desired/{host}/{service}/thresholds", False, req["interface"], "h-3fa9c2d41b7e/sysinfo",
+                      {"bindings": [], "params": {}, "optional": req["optional"]})
+        out.append((f"{label}: zs.thresholds.v1's requirement is optional, so unbound it is the kill switch (§2.12)",
+                    got.expect(), {"binding": "unbound"}))
+    applied = next((r for r in contracts["zs.thresholds.v1"].canonical["resources"]
+                    if r["template"] == "applied/{topic}"), None)
+    reports = [f"{s}:{r['template']}" for s, c in contracts.items() for r in c.canonical["resources"]
+               if ds.is_profile_type(r.get("type"))]
+    out.append((f"{label}: zs.thresholds.v1's applied/{{topic}} is AppliedConfig, not the Report, and no example "
+                "resource is typed desired.v1.Report", (None if applied is None else
+                                                        (applied["type"].get("name"), fr.horizon("state",
+                                                         applied["annotations"]).ttl_s), reports),
+                (("AppliedConfig", 900), [])))
+    task = ds.declare("state", "tasks/{system}/{service}",
+                      {"desired.target_param": ["system", "service"], "freshness.ttl_s": 0})
+    got = ds.bind(task, "tasks/{system}/{service}", False, "tasking.v1", "lab/worker",
+                  {"bindings": ["lab/author"], "params": {"system": "self.system", "service": "self.service"},
+                   "optional": True})
+    out.append(("desired.v1 scenarios.md, \"The contracts\": tasking.v1's slice for lab/worker is D", got.expect(),
+                {"binding": "bound", "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker"}))
+    return out
+
+
+def _desired_readings() -> list[tuple[str, Any, Any]]:
+    """zk2py's readings of desired.v1 0.1 beyond its fixtures: the open
+    findings' readings (F-162, F-163, F-166, F-167, F-168), §2.7's equality
+    over a payload's bytes, §2.10's report puts, and a report's bytes that
+    no fixture gives."""
+    from . import desired as ds
+
+    K = "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+
+    def put(time: int, sid: int, doc: Any, origin: str = ds.OWNER) -> ds.Sample:
+        rev = doc.get("revision") if isinstance(doc, dict) else None
+        return ds.Sample(origin, False, ds.Stamp(time, sid), ds.Payload(value=doc), rev)
+
+    def run(steps: list[Any]) -> tuple[list[str], dict[str, Any], int]:
+        t = ds.TargetRole(K)
+        words = []
+        for s in steps:
+            if isinstance(s, ds.Sample):
+                words.append(t.receive(s))
+            elif s == "done":
+                words.append(t.finish(ds.Finish(ds.DONE)))
+            elif s == "call":
+                words.append(t.call())
+            else:
+                words.append(t.finish(s))
+        return words, t.report(), t.report_puts
+
+    v = {"mode": "run", "rate_hz": 10, "revision": 1}
+    w = {"mode": "run", "rate_hz": 10, "revision": 2}
+    out: list[tuple[str, Any, Any]] = []
+    lab = "desired.v1 0.1 §2.7 (F-162): judged against the running act's, then the held one"
+    out.append((f"{lab}: the running act's version again, another id held, is the same version, never held",
+                run([put(100, 0xa1, v), put(50, 0xb2, w), put(100, 0xa1, v), "done", "done"])[0],
+                ["act", "held", "same_version", "act", "done"]))
+    out.append((f"{lab}: older than the running act's, another id held, is older",
+                run([put(100, 0xa1, v), put(50, 0xb2, w), put(90, 0xa1, v)])[0], ["act", "held", "older"]))
+    lab = "desired.v1 0.1 §2.6 (F-163): judged against the last version alone, as step 4 says"
+    words, rep, _ = run([put(500, 0xa1, v), "done", put(100, 0xb2, w), "done",
+                         put(400, 0xa1, {"mode": "halt", "rate_hz": 1, "revision": 0}, ds.ARCHIVE), "done"])
+    out.append((f"{lab}: an archive's older version of the old id, after the new id's first, is acted on",
+                (words, rep["observed"], rep.get("last_known")),
+                (["act", "done", "act", "done", "act", "done"], {"stamp": "400/a1", "revision": 0}, True)))
+    lab = "desired.v1 0.1 §2.7 (F-166): JCS-equal where RFC 8785 is defined, exact value beyond it"
+    out.append((f"{lab}: revisions 2^53 and 2^53+1 are two documents",
+                ds.jcs_equal({"revision": 2**53}, {"revision": 2**53 + 1}), False))
+    out.append((f"{lab}: 10^16 written as an integer and as 1e16 are one document",
+                ds.jcs_equal({"n": 10**16}, {"n": 1e16}), True))
+    out.append((f"{lab}: a boolean is never a number", ds.jcs_equal({"n": True}, {"n": 1}), False))
+    out.append((f"{lab}: a revision moved above 2^53 is acted on, not adopted",
+                run([put(100, 0xa1, {"revision": 2**53}), "done", put(200, 0xa1, {"revision": 2**53 + 1})])[0],
+                ["act", "done", "act"]))
+    lab = "desired.v1 0.1 §2.7: a JSON payload's bytes read as strict JSON, else compared byte for byte"
+    j = lambda text: ds.Payload.of_bytes(text.encode(), True)  # noqa: E731
+    out += [
+        (f"{lab}: members in another order and 10.0 for 10 are one document",
+         ds.same_document(j('{"rate_hz": 10, "mode": "run"}'), j('{"mode":"run","rate_hz":10.0}')), True),
+        (f"{lab}: a trailing newline is RFC 8259's whitespace", ds.same_document(j('{"a":1}'), j('{"a":1}\n')),
+         True),
+        (f"{lab}: two equal bytes that do not read are one document", ds.same_document(j('{"a":'), j('{"a":')),
+         True),
+        (f"{lab}: one that reads and one that does not are two",
+         ds.same_document(j('{"a":1}'), j('{"a":1,"a":1}')), False),
+        (f"{lab}: CBOR, protobuf or raw: byte for byte, so one value's two encodings are two documents",
+         ds.same_document(ds.Payload.of_bytes(b"\x18\x0a", False), ds.Payload.of_bytes(b"\x0a", False)), False),
+        (f"{lab}: a put is never a delete", ds.same_document(j("null"), None), False),
+    ]
+    lab = "desired.v1 0.1 §2.10 \"put it again whenever\""
+    out += [
+        (f"{lab}: the first report, then an act's end, an adoption, a call: four puts",
+         run([put(100, 0xa1, v), "done", put(200, 0xa1, v), "call"])[2], 4),
+        (f"{lab}: the same version, an older one, an unstamped one and a held one put nothing",
+         run([put(200, 0xa1, v), put(200, 0xa1, v), put(100, 0xa1, v),
+              ds.Sample(ds.OWNER, False, None, ds.Payload(value=v)), put(300, 0xa1, w)])[2], 1),
+        (f"{lab}: the author's confirmation of a last-known version is a put",
+         run([put(100, 0xa1, v, ds.ARCHIVE), "done", put(100, 0xa1, v)])[1:], (
+             {"key": K, "source": "desired", "in_force": {"stamp": "100/a1", "revision": 1},
+              "observed": {"stamp": "100/a1", "revision": 1}, "outcome": "converged"}, 3)),
+    ]
+    lab = "desired.v1 0.1 §2.10, a report's bytes"
+    deep = b'{"source":"baseline","x":' + b"[" * 100_000 + b"]" * 100_000 + b"}"
+    out += [
+        (f"{lab}: nested 100,000 deep under a member the schema does not name: not read, never a crash",
+         ds.read_report_bytes(deep).expect(), {"readable": False, "errors": ["json"]}),
+        (f"{lab}: nested 300 deep there reads: no depth rule here",
+         ds.read_report_bytes(b'{"source":"baseline","x":' + b"[" * 300 + b"]" * 300 + b"}").expect(),
+         {"readable": True, "errors": []}),
+        (f"{lab}: a byte-order mark before the value is not RFC 8259's whitespace",
+         ds.read_report_bytes(b'\xef\xbb\xbf{"source":"baseline"}').expect(), {"readable": False, "errors": ["json"]}),
+        (f"{lab}: a lone surrogate escape has no UTF-8 form",
+         ds.read_report_bytes(b'{"source":"baseline","detail":"\\ud800"}').expect(),
+         {"readable": False, "errors": ["json"]}),
+        (f"{lab} (F-167): a revision of 10^400 written out is not finite, as telemetry.v1 §2.6 reads it",
+         ds.read_report_bytes(('{"key":"%s","source":"desired","observed":{"stamp":"1/1","revision":1%s},'
+                               '"in_force":{"stamp":"1/1"},"outcome":"converged"}' % (K, "0" * 400)).encode()).expect(),
+         {"readable": False, "errors": ["json"]}),
+    ]
+    lab = "desired.v1 0.1 §2.17 step 1 (F-168): across a face, step 2 is the deployment's word, not read"
+
+    def across(report: Any) -> dict[str, Any]:
+        r = ds.Reading(ds.ACROSS_FACE, None, None if report is None else ds.read_report(report), "not_asked",
+                       ds.ACROSS_FACE, ("put", ds.Stamp(100, 0xa1)))
+        return {q: a.pair() for q, a in ds.conclude(r).items()}
+
+    out.append((f"{lab}: a role unbound across a face has no keyed report: nothing crossed, never unbound",
+                across(None)[ds.Q_IN_FORCE], {"answer": "unobservable", "reason": "nothing_crossed"}))
+    return out
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -1760,7 +2067,8 @@ def family_readings(root: Path) -> list[Result]:
         + _reporter_loss() + _reporter_first_answers() + _reporter_gone() + _presence_dating_cases() \
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
-        + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold()
+        + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
+        + _desired_readings()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
