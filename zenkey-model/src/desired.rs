@@ -1063,8 +1063,7 @@ impl Content {
         let read = json
             .then(|| std::str::from_utf8(bytes).ok())
             .flatten()
-            .filter(|t| crate::telemetry::decode::json(t.as_bytes()).is_some())
-            .and_then(Exact::of_text);
+            .and_then(Exact::of_strict_text);
         match read {
             Some(e) => {
                 let mut out = Vec::new();
@@ -1164,9 +1163,14 @@ impl Exact {
         }
     }
 
-    /// A text that already read as strict JSON, its numbers exact. `None`
-    /// when a number's exponent does not fit (see [`exact_number`]).
-    fn of_text(text: &str) -> Option<Self> {
+    /// A text read as strict JSON (§2.10, [`strict_json`]), its numbers
+    /// exact. `None` when it is not strict JSON, or a number's exponent does
+    /// not fit (see [`exact_number`]). The strict read comes first, here,
+    /// because [`ExactReader`] trusts what it accepted; this is the only
+    /// way to it, and it is private to the module ([`Content::of_payload`]
+    /// calls it).
+    fn of_strict_text(text: &str) -> Option<Self> {
+        crate::telemetry::decode::json(text.as_bytes())?;
         let mut r = ExactReader {
             text,
             s: text.as_bytes(),
@@ -1220,6 +1224,13 @@ fn write_string(s: &str, out: &mut Vec<u8>) {
 /// Reads a text [`strict_json`] already accepted, so that its numbers keep
 /// their text: no duplicate, nothing after the value, and at most
 /// [`MAX_DEPTH`] deep, which bounds its recursion.
+///
+/// **Precondition:** the text read as strict JSON. Only
+/// [`Exact::of_strict_text`] builds one, after that read. The reader then
+/// skips a string's escapes blindly (a `\` and the byte after it) and slices
+/// the string's token by byte offsets, both right only for strict JSON;
+/// every access is `get`, so text outside the precondition reads `None`,
+/// never a panic.
 struct ExactReader<'a> {
     text: &'a str,
     s: &'a [u8],
@@ -1535,6 +1546,10 @@ impl Target {
         self.ids.iter().find(|(i, _)| *i == id).map(|(_, t)| *t)
     }
 
+    /// Records a version acted on or adopted (§2.6 step 4). Called from
+    /// `start`, as an act starts and as a version is adopted, so an
+    /// adoption counts as an act does; a version held waiting counts only
+    /// once its act starts or it is adopted, and one passed over never.
     fn remember(&mut self, stamp: Stamp) {
         let time = match self.ids.iter().position(|(i, _)| *i == stamp.id) {
             Some(at) => self.ids.remove(at).1.max(stamp.time),
@@ -1570,7 +1585,9 @@ impl Target {
             } else if let Some(time) = remembered {
                 // Another id than the held one, acted on or adopted before
                 // in this instance: never an older version of it (F-163),
-                // nor one acted on again.
+                // nor one acted on again. A version is its stamp (§2.4), so
+                // an equal (time, id) is the same version whatever document
+                // it carries.
                 match stamp.time.cmp(&time) {
                     std::cmp::Ordering::Greater => {}
                     std::cmp::Ordering::Equal => return Step::SameVersion,
@@ -2201,6 +2218,64 @@ mod tests {
             Content::of_payload(b"{ }", false),
             "a payload that is not JSON compares byte for byte"
         );
+    }
+
+    #[test]
+    fn a_decoded_value_and_its_text_agree_where_the_text_says() {
+        let of_json = |v: Value| Content::of_json(&serde_json::json!({ "x": v }));
+        let of_text = |t: &str| Content::of_payload(format!(r#"{{"x":{t}}}"#).as_bytes(), true);
+        // One value: a large integral float and its integer's text.
+        assert_eq!(
+            of_json(serde_json::json!(1e20)),
+            of_text("100000000000000000000")
+        );
+        assert_eq!(of_json(serde_json::json!(1e20)), of_text("1e20"));
+        assert_eq!(of_json(serde_json::json!(1e300)), of_text("1e300"));
+        assert_eq!(
+            of_json(serde_json::json!(1e300)),
+            of_text(&format!("1{}", "0".repeat(300)))
+        );
+        assert_eq!(of_json(serde_json::json!(-0.0)), of_text("0"));
+        assert_eq!(of_json(serde_json::json!(0)), of_text("-0.0"));
+        assert_eq!(of_json(serde_json::json!(0.1)), of_text("0.1"));
+        assert_eq!(
+            of_json(serde_json::json!(9_007_199_254_740_993_u64)),
+            of_text("9007199254740993")
+        );
+        // Two values: the text's exact value, never its double's.
+        assert_ne!(
+            of_json(serde_json::json!(0.1)),
+            of_text("0.10000000000000000555")
+        );
+        assert_ne!(
+            of_json(serde_json::json!(9_007_199_254_740_992_u64)),
+            of_text("9007199254740993")
+        );
+        assert_ne!(
+            of_json(serde_json::json!(1e20)),
+            of_text("100000000000000000001")
+        );
+    }
+
+    #[test]
+    fn a_held_version_is_remembered_only_once_it_starts() {
+        let mut t = Target::new(Some("zk2/a/b/i.v1/state/x".into()));
+        assert!(matches!(t.observe(put(100, "a1")), Step::Act(_)));
+        assert_eq!(t.observe(put(50, "b2")), Step::Held);
+        assert_eq!(t.remembered(0xb2), None, "held waiting, not acted on");
+        assert_eq!(t.remembered(0xa1), Some(100), "the running act counts");
+        assert!(matches!(t.finish(Ended::Done), Step::Act(_)));
+        assert_eq!(t.remembered(0xb2), Some(50));
+        t.finish(Ended::Done);
+        // An adoption counts as an act does.
+        let again = Sample {
+            content: put(50, "b2").content,
+            revision: Some(50),
+            ..put(70, "b2")
+        };
+        assert_eq!(t.observe(again), Step::Adopted);
+        assert_eq!(t.remembered(0xb2), Some(70));
+        assert_eq!(t.observe(put(60, "b2")), Step::Older);
     }
 
     #[test]
