@@ -238,7 +238,7 @@ async fn wb_a_tool_sessions_read_of_ten_thousand_tokens_is_whole() {
                 .expect("a token"),
         );
     }
-    let tool = zenkey_fleet::open_reporting(None, &[ep.clone()], &[], Some(false))
+    let tool = zenkey_fleet::open_reporting(None, std::slice::from_ref(&ep), &[], Some(false))
         .await
         .expect("a tool session");
     assert_eq!(
