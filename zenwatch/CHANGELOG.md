@@ -7,6 +7,12 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — a reopen beside a large population (#882, WF)
+
+| Before | Now | Notes |
+|---|---|---|
+| presence rules, `liveliness-gone` on foreign tokens and the engine's `instance-gone`: a re-read dropped whenever another branch of the daemon's loop won, and asked again from the start, so beside a population whose read outlasts the loop's wakes no re-read was folded after a link's cut and heal, and every dropped read was answered in full | a re-read's round trip and read run on tasks of their own and are taken up by the next call; complete again after the reopen once the round trip stands and one read is | core §8.1, 0.44, F-239; a read not made through a session cut off is asked again a second later, never on a doubling backoff |
+
 ## Unreleased (`main`, zk2) — the doctor reads `redundancy.v1` (#841, RC)
 
 | Before | Now | Notes |
