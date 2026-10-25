@@ -319,3 +319,33 @@ pub async fn router_with(
     let ep = bound(&r).await;
     (r, ep)
 }
+
+/// A peer whose only endpoint is `endpoint`, retrying fast after losing it
+/// (100 ms, at most 500 ms between attempts: `redundancy.v1`'s scenarios
+/// §5, text 0.2, F-205). With `listen`, it listens on an ephemeral loopback
+/// port too; with `gossip`, it takes part in zenoh's gossip scouting, its
+/// default, by which peers that listen learn of each other through a
+/// router.
+pub async fn peer(endpoint: &str, listen: bool, gossip: bool) -> zenoh::Session {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"peer\"").unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .unwrap();
+    c.insert_json5(
+        "connect/retry",
+        "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
+    )
+    .unwrap();
+    let listen = if listen {
+        "[\"tcp/127.0.0.1:0\"]"
+    } else {
+        "[]"
+    };
+    c.insert_json5("listen/endpoints", listen).unwrap();
+    c.insert_json5(
+        "scouting/gossip/enabled",
+        if gossip { "true" } else { "false" },
+    )
+    .unwrap();
+    zenoh::open(c).await.expect("peer")
+}

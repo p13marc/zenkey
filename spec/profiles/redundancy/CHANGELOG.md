@@ -4,6 +4,177 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.2 — 2026-10-25: what the runtime showed, and round 56's answers (#841, RB)
+
+The reference runtime is built (#841, RB): `zenkey::redundancy`, through
+`ServiceBuilder::redundancy`, driven by `zenkey_model::redundancy`'s
+`Elector`, the owner example's `--standby`, and `scenarios.md` §1 to §11
+as `zenkey/tests/profile_redundancy.rs`, one test per section. The second
+implementation read 0.1 and core 0.39 cold (zk2py round 56, PR #855) and
+filed F-199 to F-209, all accepted on #841. This text writes those
+answers, with what building the runtime showed the text did not say. Core
+goes to 0.40 (two zenoh facts, measured in Rust first) and `hostid.v1` to
+0.7 (F-208).
+
+**Changed: round 56's answers.**
+- **What is heard while a read runs** (§2.5, §2.9; F-199). An appearance
+  or a withdrawal heard while a read is asked is kept, as one heard while
+  an act runs already was, and decided at that read's decision, in the
+  state it leaves. A heal's read not complete that shows fewer than two
+  holders ends nothing: it is made again after the retry interval, and only
+  a complete read showing one holder ends a heal. `[F: lifecycle.json]`
+- **`external` never heals, shown** (§2.9, §2.11; F-200). §10's step 4,
+  two lock files and a sequential start, now expects what §2.11 says: the
+  later instance reads the earlier's token and stands by on it. A new step
+  5 starts both behind two routers whose link is cut: both serve, and once
+  it is restored neither steps down within 10 s, and G's two reads read a
+  split. §2.11 gains "Two locks". `[Sc: §10]`
+- **A crash seen at once, or at the lease** (§2.8; F-201). A crash whose
+  host's kernel closes its links is seen at once; a lost host, or a
+  partition, at the lease. §1 and §10 step 3 make the links silent before
+  the kill, with a short lease, so that "no read before the withdrawal" is
+  tested at all, and run again without the silence. Core Appendix B
+  already said both. `[Sc: §1, §10]`
+- **"Before the token" observed by a GET** (scenarios; F-202). zenoh
+  carries a token's declaration and a put on two priorities, so a
+  subscriber's receipt order is not the owner's. The scenarios observe the
+  order as core `presence.md` §1 does, by a GET of the descriptor the
+  moment S hears each token, and never judge receipt order: the
+  Conventions, §1 Expected 1, 2 and 4, §3, and §7 Expected 4, whose
+  step-down order is observed by the stamps of what B put.
+- **§3's third outcome** (F-203). One serves and the other stands by: A,
+  unless B took over before A's read, A then standing by on B, as §2.5
+  step 2 says. `[Sc: §3]`
+- **The read on a session of its own** (§2.5 step 1, §0; F-204). The read
+  goes on a session that holds neither a liveliness subscriber nor the
+  claim, after one round trip on the claim's session: a session answers
+  its own tokens itself, even through a router that refuses the read
+  (core 0.40 §8.1, measured), so a read on the claim's session never
+  shows the refusal step 3's own-claim check is for. A candidate runs
+  three sessions: the claim's, the watch and the reader, which may be
+  shared with the application's other reads. `[Sc: §5]`
+- **§5's reconnect** (F-205). The Setup holds A's connect retry period at
+  1 s at most, and Expected 2's bound adds its reconnect. `[Sc: §5]`
+- **Where a candidate's sessions are** (§2.5 step 1, §0, §2.15; F-206).
+  A complete read covers only what its routers' clients and its linked
+  peers hold (core 0.40 §8.1, measured: a router gives a peer no other
+  peer's token, and `peers_failover_brokering` has no effect in zenoh
+  1.10.1). So a candidate's sessions, and a tool's, MUST be clients of a
+  router, or peers linked to every other candidate's. §5's peers listen
+  and gossip. `[Sc: §5]`
+- **A withdrawal kept through a step-down under `external`** (§2.11;
+  F-207) campaigns only with the lock, else nothing; the lock's return
+  campaigns in any case. `[F: lifecycle.json]`
+- **`hostid.v1` §2.12's reads** (F-208) are of the address's `@zk/**`,
+  instance and interface tokens together: its text 0.7.
+- **Its own re-mint is no appearance** (§2.9; F-209). The machine gains
+  the event `{"reminted": id}`: the new id is its own from then on, and
+  every former id is its own, never another holder or candidate. A
+  runtime tells its election before declaring the new id's tokens, in
+  every state. `[F: lifecycle.json]`
+
+**Changed: what building the runtime showed.**
+- **A standby's writes refused, not dropped** (§2.4). A runtime SHOULD
+  refuse its application's write of the interface's keys while it stands
+  by, saying so: the reference's writers return `Error::Standby`, nothing
+  published, so the application is never left guessing its role.
+  `[Sc: §7]`
+- **A takeover after an earlier incumbency** (§2.6). An instance taking
+  over again SHOULD hold nothing of the interface's state that it does not
+  put again: the other incumbent may have written since. The reference
+  forgets, at each step-down, the values its owner GET answers and its
+  refreshers keep. `[Sc: §7]`
+- **A poll where no watch session can be held** (§2.7). 0.1's MUST of a
+  liveliness subscriber is now "MUST follow the address, SHOULD by a
+  subscriber": the runtime's brief asked for a poll beside the watch
+  session a caller hands in, and ZenSight's guard polls. The poll's rule,
+  its misses (what comes and goes within one period) and its cost (a
+  presence read per period) are stated; the reference polls every 500 ms.
+  The scenarios run the subscriber, and §1 still checks that B never
+  polled.
+- **Writes stop before a step-down's step 1** (§2.9), so that nothing of
+  the interface is put once the token is withdrawn, which §7 Expected 4
+  observes. §2.9's four steps keep their numbers.
+
+**The fixtures.** `lifecycle.json` gains 13 cases (43 in all): nine for
+F-199 (an appearance kept while campaigning, the read taking over or
+standing by on its holder; a withdrawal kept while campaigning, the read
+standing by on the incumbent or taking over; a heal's first read not
+made, and its second read not complete, each made again; only a complete
+read ending a heal; an appearance kept through a heal read that ends it; a
+withdrawal kept through the heal read that steps down), one for F-207, and
+three for F-209 (an incumbent's own new id, a heal read showing both of its
+ids, a standby's former claim). Its description states the `reminted` event, the `retry` step,
+and the rule for what is kept. Each new expectation was written by hand
+from the answers before `zenkey_model::redundancy` ran it; none of the 30
+earlier cases changed, nor any other fixture.
+
+**Decided here, where the record was silent.**
+- **One call elects every governed interface** the service implements:
+  `ServiceBuilder::redundancy(RedundancyStartup)`. Governance is a
+  contract's (§2.2), and the sessions, timers and lock are the process's.
+  Each interface has its own election (§2.3). A governed interface whose
+  service takes part in no election is refused at start, as an invalid
+  declaration is: an instance of one MUST elect (§2.5), and serving it
+  outside the election would break that silently. So is the election
+  configured where nothing is governed.
+- **A governed interface's resources are born standing by.** Every
+  publisher, state queryable, operation and `unavailable` queryable and
+  member token the application declares for it, before the start or
+  after, is declared only while the instance serves: at the takeover's
+  step 1, and undeclared at the step-down's step 2. A raw zenoh publisher
+  or queryable on a governed interface is refused, since the runtime could
+  not undeclare it.
+- **The application's takeover** is a hook between §2.6's step 1 and
+  its descriptor's put, where it puts what the new incumbent holds, so
+  that a GET at the token finds it. Its role is a watch it can await
+  (`unclaimed`, `standby`, `serving`, with why it stands by).
+- **The lock** is a trait the runtime asks at the start, every lock
+  period (1 s by default), and when the application says it changed; the
+  reference gives a `flock` and a lock the application sets. An interface
+  elected by `external` with no lock to ask is refused at start.
+- **The round trips** (core §8.1, #851): the claim's is a liveliness GET
+  of the instance's own key, a population of one; the watch's, of the
+  address's `@zk/**`, whose few tokens cost nothing that matters.
+- **An act that fails.** zenoh refuses a declaration, a put or an
+  undeclaration only when its session is closing or broken. A takeover
+  whose step fails is undone at once, every step it made reversed in
+  §2.9's order (writes stopped, any token withdrawn, the resources
+  undeclared and their state forgotten, the descriptor put marked); a
+  step-down makes every step whatever one before it gave. Either way the
+  instance stands by and elects no more, and its standing says why
+  (`Standing::fault`). The text says nothing of a failed act, and the
+  election's machine has no event for one: a retry through it would ask
+  the same session to declare again, and would flap, so the reference
+  stops and leaves the restart to the application.
+- **No write gets around the fence.** Every publication of a governed
+  interface's keys goes through its gate: a writer's put, a stamped put or
+  delete (which takes the gate's admission as a proof), a state member's
+  refresh, an event. A profile's owner the runtime implements whose writes
+  go outside the gate or before any election (a desired.v1 author, a
+  desired.v1 target's report, alarms.v1's owner on a revision that lists
+  `redundancy.v1`) is refused on a governed interface at this version;
+  `health.v1` and `config.v1` are the standard contracts, never governed.
+- **One read at a time.** The election's machine never asks a read while
+  one it asked is unanswered, so a runtime never aborts one, and no phase
+  waiting on a read is stranded: `zenkey_model::redundancy`'s
+  `a_read_asked_is_never_asked_again_before_its_answer` explores every
+  state it reaches, under both elections.
+- **A test's hooks**: an instance's id chosen (`ServiceBuilder::set_instance_id`),
+  and a heal's reads held (`Redundancy::hold_heal`, for §9 and §12).
+- **The owner example's surface**: `--standby` and its options, and its
+  `redundancy` commands answered by one JSON line each, documented in
+  its `--help`.
+
+**Deliberately not changed.**
+- **No consumer in the runtime.** §2.10's follower is the application's;
+  §9's K is the test's. A helper may come with the tools (#841, RC).
+- **`elections.json`, `heals.json`, `declarations.json`,
+  `descriptors.json`, `conclusions.json`**: the decisions over one read and
+  two, the declaration, the mark and §5's answers are unchanged.
+- **§12**, a tool's, is RC's.
+- **No fence and no epoch** (§2.16).
+
 ## 0.1 — 2026-10-24: the first text, draft (#841, RA)
 
 `redundancy.v1` is the profile the core has left exclusivity to since its

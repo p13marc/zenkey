@@ -1928,7 +1928,999 @@
       },
       "note": "external: a lower candidate is no reason to wait, the lock decided",
       "own": "000000000000000c"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "appeared": "000000000000000a"
+        },
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "grace"
+          }
+        ]
+      },
+      "note": "an appearance heard while it campaigns is kept: the takeover then reads for a heal (text 0.2, F-199)",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        "withdrawn",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish"
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          }
+        ]
+      },
+      "note": "a withdrawal heard while it campaigns is kept: the read that stands it by on the incumbent reads again (text 0.2, F-199)",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "appeared": "000000000000000a"
+        },
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "timer"
+      ],
+      "expect": {
+        "role": "standby",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "instance": "000000000000000a",
+            "retry": false,
+            "step": "stand_by",
+            "why": "incumbent"
+          },
+          {
+            "step": "nothing"
+          }
+        ]
+      },
+      "note": "an appearance kept while it campaigns, the read showing that holder: stand by on it, the appearance spent",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        "withdrawn",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish"
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          }
+        ]
+      },
+      "note": "a withdrawal kept while it campaigns, the read taking over: the withdrawal spent",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "appeared": "000000000000000a"
+        },
+        {
+          "read": {
+            "complete": false,
+            "instances": []
+          }
+        },
+        "timer",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        },
+        "timer",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        },
+        "finish"
+      ],
+      "expect": {
+        "role": "standby",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "retry"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "grace"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "instance": "000000000000000a",
+            "step": "step_down",
+            "why": "lower_holder"
+          },
+          {
+            "step": "nothing"
+          }
+        ]
+      },
+      "note": "a heal's first read not made shows one holder, which ends nothing: it reads again after the retry interval (text 0.2, F-199)",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "appeared": "000000000000000a"
+        },
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        },
+        "timer",
+        {
+          "read": {
+            "complete": false,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        },
+        "timer",
+        {
+          "read": {
+            "complete": false,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "grace"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "retry"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "instance": "000000000000000a",
+            "step": "step_down",
+            "why": "lower_holder"
+          }
+        ]
+      },
+      "note": "a heal's second read not complete showing one holder: the second read again after the retry interval, the first kept (text 0.2, F-199)",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "appeared": "000000000000000a"
+        },
+        {
+          "read": {
+            "complete": false,
+            "instances": []
+          }
+        },
+        {
+          "appeared": "000000000000000a"
+        },
+        "timer",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "retry"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "nothing"
+          }
+        ]
+      },
+      "note": "only a complete read showing one holder ends a heal (text 0.2, F-199)",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "appeared": "000000000000000a"
+        },
+        {
+          "appeared": "0000000000000009"
+        },
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        },
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "0000000000000009",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "grace"
+          }
+        ]
+      },
+      "note": "an appearance heard while a heal's read runs, the read ending the heal: it reads again (text 0.2, F-199)",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "appeared": "000000000000000a"
+        },
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        },
+        "timer",
+        "withdrawn",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "role": "standby",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "grace"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "instance": "000000000000000a",
+            "step": "step_down",
+            "why": "lower_holder"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          }
+        ]
+      },
+      "note": "a withdrawal heard while a heal's second read runs, the heal stepping down: it campaigns once it stands by (text 0.2, F-199)",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "external",
+      "events": [
+        "start",
+        {
+          "lock": true
+        },
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000a",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "lock": false
+        },
+        "withdrawn",
+        "finish",
+        {
+          "lock": true
+        }
+      ],
+      "expect": {
+        "role": "standby",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "step_down",
+            "why": "lock_lost"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          }
+        ]
+      },
+      "note": "external: a withdrawal kept while it steps down for the lock it lost is nothing; the lock's return campaigns (text 0.2, F-207)",
+      "own": "000000000000000a"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000a",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "reminted": "0000000000000005"
+        },
+        {
+          "appeared": "0000000000000005"
+        },
+        {
+          "appeared": "000000000000000a"
+        }
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "nothing"
+          }
+        ]
+      },
+      "note": "its own re-mint is no appearance: the new id is its own from then on, and so is the former one (text 0.2, F-209)",
+      "own": "000000000000000a"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish",
+        {
+          "reminted": "000000000000000c"
+        },
+        {
+          "appeared": "000000000000000d"
+        },
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000b",
+                "token": true
+              },
+              {
+                "descriptor": "serving",
+                "id": "000000000000000c",
+                "token": true
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "nothing"
+          }
+        ]
+      },
+      "note": "after its re-mint, a heal read counts its former id as its own: the overlap is one holder (text 0.2, F-209)",
+      "own": "000000000000000b"
+    },
+    {
+      "election": "claim",
+      "events": [
+        "start",
+        "finish",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "serving",
+                "id": "000000000000000a",
+                "token": true
+              },
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              }
+            ]
+          }
+        },
+        {
+          "reminted": "000000000000000c"
+        },
+        "withdrawn",
+        {
+          "read": {
+            "complete": true,
+            "instances": [
+              {
+                "descriptor": "standby",
+                "id": "000000000000000b",
+                "token": false
+              },
+              {
+                "descriptor": "standby",
+                "id": "000000000000000c",
+                "token": false
+              }
+            ]
+          }
+        },
+        "finish"
+      ],
+      "expect": {
+        "role": "serving",
+        "steps": [
+          {
+            "step": "claim"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "instance": "000000000000000a",
+            "retry": false,
+            "step": "stand_by",
+            "why": "incumbent"
+          },
+          {
+            "step": "nothing"
+          },
+          {
+            "step": "read"
+          },
+          {
+            "step": "take_over"
+          },
+          {
+            "step": "nothing"
+          }
+        ]
+      },
+      "note": "a standby's re-mint: its claim under its former id is its own, never a lower candidate (text 0.2, F-209)",
+      "own": "000000000000000b"
     }
   ],
-  "description": "redundancy.v1 §2.5 to §2.11: one candidate own of a governed interface, its election, and the events its runtime hands it in order -> the step each returns, and its role after the last. Events: \"start\" (begin: claim before reading); \"finish\" (the act the last claim, take_over or step_down asked for is done); {\"read\": R} (the read a read step asked for, R as elections.json writes one); {\"appeared\": id} (its watch heard that instance's interface token appear); \"withdrawn\" (its watch heard the address's interface tokens withdrawn, none left held); \"timer\" (the timer the last step armed fired: the retry interval, or the grace); {\"lock\": bool} (under external, the lock taken or lost). Steps: {\"step\": \"claim\"} (put the descriptor marked standby, declare the instance token and the watch, then finish); {\"step\": \"read\"}; {\"step\": \"grace\"} (arm the grace timer); {\"step\": \"stand_by\", \"why\", \"instance\"?, \"retry\"} (stand by; arm the retry timer when retry; why as elections.json's, or no_lock; retry is false for incumbent and no_lock, true otherwise); {\"step\": \"take_over\"} (core §8.2's order, then finish); {\"step\": \"step_down\", \"why\": \"lower_holder\" with instance, or \"lock_lost\"} (the reverse order, then finish); {\"step\": \"nothing\"}. The machine: start, once, is claim; finish of the claim campaigns (a read, or under external without the lock stand_by no_lock); a read while campaigning decides as elections.json (under external without the lock, stand_by no_lock), take_over or stand_by; finish of a take_over serves, then under external without the lock steps down lock_lost, under claim with an appearance heard while taking over reads (the heal's first read), else nothing; while serving under claim, another instance's appearance reads; that read's holders, own counted whether it shows own or not, two or more arm the grace, else back to serving; the timer reads again; that read's holders, own counted, decide as heals.json with the first read's: step down lower_holder, or back to serving; finish of a step_down stands by, and campaigns when a withdrawal was heard while stepping down, else nothing; while standing by, a withdrawal campaigns (under external only with the lock), a timer campaigns only when the stand_by armed retry; under external, a lock taken while standing by campaigns, a lock lost while serving steps down lock_lost, otherwise it is only remembered. Every other event in every other state is nothing, and changes nothing. role: \"unclaimed\" before the claim's finish, \"standby\" while campaigning, standing by or taking over, \"serving\" while serving, healing or stepping down."
+  "description": "redundancy.v1 §2.5 to §2.11: one candidate own of a governed interface, its election, and the events its runtime hands it in order -> the step each returns, and its role after the last. Events: \"start\" (begin: claim before reading); \"finish\" (the act the last claim, take_over or step_down asked for is done); {\"read\": R} (the read a read step asked for, R as elections.json writes one); {\"appeared\": id} (its watch heard that instance's interface token appear); \"withdrawn\" (its watch heard the address's interface tokens withdrawn, none left held); \"timer\" (the timer the last step armed fired: the retry interval, or the grace); {\"lock\": bool} (under external, the lock taken or lost); {\"reminted\": id} (its own re-mint: id is own from then on, and every former id is own too, never another holder or candidate; text 0.2, F-209). Steps: {\"step\": \"claim\"} (put the descriptor marked standby, declare the instance token and the watch, then finish); {\"step\": \"read\"}; {\"step\": \"grace\"} (arm the grace timer); {\"step\": \"retry\"} (serving, arm the retry timer: a heal read not complete showing fewer than two holders; text 0.2, F-199); {\"step\": \"stand_by\", \"why\", \"instance\"?, \"retry\"} (stand by; arm the retry timer when retry; why as elections.json's, or no_lock; retry is false for incumbent and no_lock, true otherwise); {\"step\": \"take_over\"} (core §8.2's order, then finish); {\"step\": \"step_down\", \"why\": \"lower_holder\" with instance, or \"lock_lost\"} (the reverse order, then finish); {\"step\": \"nothing\"}. The machine: a read is first read with every former id of own as own (F-209); start, once, is claim; finish of the claim campaigns (a read, or under external without the lock stand_by no_lock); a read while campaigning decides as elections.json (under external without the lock, stand_by no_lock), take_over or stand_by; finish of a take_over serves, then under external without the lock steps down lock_lost, under claim with an appearance heard while taking over reads (the heal's first read), else nothing; while serving under claim, another instance's appearance reads; that read's holders, own counted whether it shows own or not, two or more arm the grace, one from a complete read back to serving, one from a read not complete retry (text 0.2, F-199); the grace timer reads again; that read's holders, own counted, decide as heals.json with the first read's: step down lower_holder; no split from a read not complete, retry; else back to serving; the retry timer reads again, the second read again when a first is held; finish of a step_down stands by; while standing by, a withdrawal campaigns (under external only with the lock), a timer campaigns only when the stand_by armed retry; under external, a lock taken while standing by campaigns, a lock lost while serving steps down lock_lost, otherwise it is only remembered. What is heard meanwhile is kept (text 0.2, F-199): an appearance of another instance's token while campaigning, taking over or a heal read is asked, and a withdrawal while campaigning, stepping down or a heal read is asked; at that read's decision, or that act's finish, each kept event is decided as if heard then, in the state the decision leaves (an appearance first, then a withdrawal), and the first that asks something replaces a stand_by or a nothing, while an act's own phase keeps what it keeps: so an appearance kept through a take_over reads for a heal once it serves, a withdrawal kept past a stand_by reads again, one kept through a step_down campaigns once it stands by, under external only with the lock, else nothing (F-207). Its own token heard appearing, or a former id's, is nothing (F-209). Every other event in every other state is nothing, and changes nothing. role: \"unclaimed\" before the claim's finish, \"standby\" while campaigning, standing by or taking over, \"serving\" while serving, healing or stepping down."
 }

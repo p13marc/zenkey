@@ -61,6 +61,7 @@ use zenoh::query::{Query, Queryable};
 pub use crate::call::{CallMetadata, OpError, cause_name};
 use crate::client::Client;
 use crate::error::{Error, Result, zenoh};
+use crate::gate::{Gate, QSlot};
 use crate::implementation::{missing_capability, resource_name};
 use crate::service::{ImplState, Service, ServiceBuilder, exposes_any};
 use crate::writer::{encode_value, wire_encoding};
@@ -403,6 +404,10 @@ impl Availability {
 pub(crate) struct Ops {
     pub(crate) availability: Arc<Availability>,
     fallbacks: Vec<Queryable<()>>,
+    /// A governed interface's `unavailable` queryables, declared only while
+    /// the instance serves it (`redundancy.v1` §2.4, §2.6 step 1): held
+    /// here, declared and undeclared by its gate.
+    _gated: Vec<Arc<QSlot>>,
 }
 
 /// Whether an operation resource is `serving = "replicated"` (§6).
@@ -441,6 +446,7 @@ impl Ops {
         let held = &b.config().capabilities;
         availability.refresh(b.impls(), held);
         let mut fallbacks = Vec::new();
+        let mut gated = Vec::new();
         for s in b.impls().iter().filter(|s| exposes_any(s, held)) {
             let replica = replica_only(s, held);
             for r in &s.imp.contract().resources {
@@ -455,31 +461,40 @@ impl Ops {
                 let spec = Arc::new(OpSpec::new(b.address()?, s.imp.iface(), r)?);
                 let avail = Arc::clone(&availability);
                 let ke = pattern_of(b.address()?, s.imp.iface(), r)?;
-                let q = b
-                    .session()
-                    .declare_queryable(ke)
-                    .complete(true)
-                    .callback(move |q: Query| {
-                        let e = spec.gate(&q, &avail).unwrap_or_else(|| {
-                            // Neither gated nor listed, yet not served:
-                            // start refuses that (§8.2 step 2), so only a
-                            // later `set_unavailable(.., None)` gets here.
-                            OpError::unavailable(Cause::Config, "not served by this instance")
-                        });
-                        spec.refuse_now(&q, &e);
-                    })
-                    .await
-                    .map_err(zenoh)?;
-                fallbacks.push(q);
+                let callback = move |q: Query| {
+                    let e = spec.gate(&q, &avail).unwrap_or_else(|| {
+                        // Neither gated nor listed, yet not served: start
+                        // refuses that (§8.2 step 2), so only a later
+                        // `set_unavailable(.., None)` gets here.
+                        OpError::unavailable(Cause::Config, "not served by this instance")
+                    });
+                    spec.refuse_now(&q, &e);
+                };
+                match &s.gate {
+                    // redundancy.v1 §2.4: a standby declares none of them.
+                    Some(g) => gated.push(
+                        QSlot::declare(b.session(), ke, true, Arc::new(callback), Some(g)).await?,
+                    ),
+                    None => fallbacks.push(
+                        b.session()
+                            .declare_queryable(ke)
+                            .complete(true)
+                            .callback(callback)
+                            .await
+                            .map_err(zenoh)?,
+                    ),
+                }
             }
         }
         Ok(Self {
             availability,
             fallbacks,
+            _gated: gated,
         })
     }
 
-    /// The `unavailable` queryables declared at start.
+    /// The `unavailable` queryables declared at start, a governed
+    /// interface's aside.
     pub(crate) fn fallbacks(&self) -> &[Queryable<()>] {
         &self.fallbacks
     }
@@ -487,9 +502,12 @@ impl Ops {
 
 /// An operation's server: its `complete` queryable (O1). Dropping it
 /// undeclares it.
+///
+/// On a governed interface (`redundancy.v1`, [`crate::redundancy`]) the
+/// queryable is declared only while the instance serves the interface: a
+/// standby declares none, so a call finds no standby (§2.4, O3).
 pub struct OperationServer {
-    queryable: Queryable<()>,
-    key_expr: OwnedKeyExpr,
+    slot: Arc<QSlot>,
 }
 
 impl OperationServer {
@@ -497,17 +515,18 @@ impl OperationServer {
     /// pattern.
     #[must_use]
     pub fn key_expr(&self) -> &OwnedKeyExpr {
-        &self.key_expr
+        self.slot.key_expr()
     }
 
-    /// The zenoh queryable.
+    /// Whether its queryable is declared now: always, on an interface that
+    /// is not governed; while the instance serves, on one that is.
     #[must_use]
-    pub fn queryable(&self) -> &Queryable<()> {
-        &self.queryable
+    pub fn is_declared(&self) -> bool {
+        self.slot.is_declared()
     }
 
     pub async fn undeclare(self) -> Result<()> {
-        self.queryable.undeclare().await.map_err(zenoh)
+        self.slot.undeclare().await
     }
 }
 
@@ -797,12 +816,14 @@ impl Call {
     }
 }
 
-/// Declares an operation server on `ke`.
+/// Declares an operation server on `ke`: at once, or only while `gate`'s
+/// governed interface serves (`redundancy.v1` §2.4).
 async fn declare<H, Fut>(
     session: &zenoh::Session,
     spec: OpSpec,
     ke: OwnedKeyExpr,
     availability: Arc<Availability>,
+    gate: Option<&Arc<Gate>>,
     handler: H,
 ) -> Result<OperationServer>
 where
@@ -814,69 +835,62 @@ where
     let spec = Arc::new(spec);
     let handler = Arc::new(handler);
     let declared: Option<KeyExpr<'static>> = (!ke.is_wild()).then(|| KeyExpr::from(ke.clone()));
-    let queryable = session
-        .declare_queryable(ke.clone())
-        .complete(true)
-        .callback(move |q: Query| {
-            if let Some(e) = spec.gate(&q, &availability) {
-                spec.refuse_now(&q, &e);
-                return;
-            }
-            let not_a_member = |why: &str| {
-                OpError::invalid_request(format!(
-                    "{} names no member of {:?}: {why} (§5.1)",
-                    q.key_expr(),
-                    spec.name
-                ))
-            };
-            let (bound, member) = if q.key_expr().is_wild() {
-                // A fan-out (O2): what the key binds, and the member it
-                // answers for, when it is known before the handler runs.
-                let bound = match spec.bound(q.key_expr()) {
-                    Ok(b) => b,
-                    Err(why) => {
-                        spec.refuse_now(&q, &not_a_member(&why));
-                        return;
-                    }
-                };
-                let member = match &declared {
-                    Some(k) => {
-                        values_of(&spec.iface, &spec.resource, k.as_str()).map(|(_, v)| Member {
-                            key: k.clone(),
-                            values: v,
-                        })
-                    }
-                    None => spec.named_by_key(&bound, q.key_expr()),
-                };
-                (bound, member)
-            } else {
-                match values_of(&spec.iface, &spec.resource, q.key_expr().as_str()) {
-                    Some((_, v)) => (
-                        v.clone(),
-                        Some(Member {
-                            key: q.key_expr().clone(),
-                            values: v,
-                        }),
-                    ),
-                    None => {
-                        spec.refuse_now(&q, &not_a_member("a chunk is not a canonical slug"));
-                        return;
-                    }
+    let callback: Arc<dyn Fn(Query) + Send + Sync> = Arc::new(move |q: Query| {
+        if let Some(e) = spec.gate(&q, &availability) {
+            spec.refuse_now(&q, &e);
+            return;
+        }
+        let not_a_member = |why: &str| {
+            OpError::invalid_request(format!(
+                "{} names no member of {:?}: {why} (§5.1)",
+                q.key_expr(),
+                spec.name
+            ))
+        };
+        let (bound, member) = if q.key_expr().is_wild() {
+            // A fan-out (O2): what the key binds, and the member it
+            // answers for, when it is known before the handler runs.
+            let bound = match spec.bound(q.key_expr()) {
+                Ok(b) => b,
+                Err(why) => {
+                    spec.refuse_now(&q, &not_a_member(&why));
+                    return;
                 }
             };
-            let call = Call::new(q, Arc::clone(&spec), bound, member);
-            let h = Arc::clone(&handler);
-            rt.spawn(async move {
-                let outcome = h(call.clone()).await;
-                call.finish(outcome).await;
-            });
-        })
-        .await
-        .map_err(zenoh)?;
-    Ok(OperationServer {
-        queryable,
-        key_expr: ke,
-    })
+            let member = match &declared {
+                Some(k) => {
+                    values_of(&spec.iface, &spec.resource, k.as_str()).map(|(_, v)| Member {
+                        key: k.clone(),
+                        values: v,
+                    })
+                }
+                None => spec.named_by_key(&bound, q.key_expr()),
+            };
+            (bound, member)
+        } else {
+            match values_of(&spec.iface, &spec.resource, q.key_expr().as_str()) {
+                Some((_, v)) => (
+                    v.clone(),
+                    Some(Member {
+                        key: q.key_expr().clone(),
+                        values: v,
+                    }),
+                ),
+                None => {
+                    spec.refuse_now(&q, &not_a_member("a chunk is not a canonical slug"));
+                    return;
+                }
+            }
+        };
+        let call = Call::new(q, Arc::clone(&spec), bound, member);
+        let h = Arc::clone(&handler);
+        rt.spawn(async move {
+            let outcome = h(call.clone()).await;
+            call.finish(outcome).await;
+        });
+    });
+    let slot = QSlot::declare(session, ke, true, callback, gate).await?;
+    Ok(OperationServer { slot })
 }
 
 /// Wraps a typed one-reply handler: decode, call, encode.
@@ -944,7 +958,16 @@ impl ServiceBuilder {
         };
         self.expose(iface, resource)?;
         let availability = Arc::clone(self.availability());
-        declare(self.session(), spec, ke, availability, handler).await
+        let gate = self.gate_of(iface);
+        declare(
+            self.session(),
+            spec,
+            ke,
+            availability,
+            gate.as_ref(),
+            handler,
+        )
+        .await
     }
 
     /// Serves a one-reply operation of JSON Schema types: the request is
@@ -999,7 +1022,16 @@ impl Service {
             None => pattern_of(self.address(), iface, &r)?,
         };
         let availability = Arc::clone(&self.ops().availability);
-        declare(self.session(), spec, ke, availability, handler).await
+        let gate = self.gate_of(iface);
+        declare(
+            self.session(),
+            spec,
+            ke,
+            availability,
+            gate.as_ref(),
+            handler,
+        )
+        .await
     }
 
     /// [`ServiceBuilder::serve_value`], after start.

@@ -16,8 +16,9 @@
 //! | §2.4, §2.14 the standby mark and its checks | [`Mark`], [`mark`], [`read_mark`], [`MarkFinding`] |
 //! | §2.5 the election under `claim` | [`elect`], [`Decision`], [`Why`] |
 //! | §2.6, §2.8 taking over, a vacancy | [`Elector`], [`Step::TakeOver`], [`Event::Withdrawn`] |
-//! | §2.7 following the address | [`Event::Appeared`], [`Event::Withdrawn`] (the runtime's watch) |
-//! | §2.9 healing a split | [`heal`], [`Heal`], [`Step::StepDown`] |
+//! | §2.7 following the address, what is heard while a read runs (0.2) | [`Event::Appeared`], [`Event::Withdrawn`] (the runtime's watch), kept by the [`Elector`] |
+//! | §2.9 healing a split, a heal read not complete (0.2) | [`heal`], [`Heal`], [`Step::StepDown`], [`Step::Retry`] |
+//! | §2.9 a candidate's own re-mint (0.2) | [`Event::Reminted`], [`Elector::is_own`] |
 //! | §2.11 `election = "external"` | [`Election::External`], [`Event::Lock`] |
 //! | §2.15, §5 what a tool concludes | [`one_incumbent`], [`vacancy`], [`standbys`], [`twin`] |
 //!
@@ -28,16 +29,17 @@
 //!                                               descriptor unread, lower candidate}                      §2.5
 //! heal(own, election, first, second)       ─▶ step down {lower holder} │ stay {external, not holding,
 //!                                               no split, lowest}                                        §2.9
-//! Elector::start / observe(event) / finish ─▶ claim │ read │ grace │ stand by │ take over │ step down │ nothing
+//! Elector::start / observe(event) / finish ─▶ claim │ read │ grace │ retry │ stand by │ take over │ step down │ nothing
 //! one_incumbent / vacancy / standbys / twin ─▶ §5's questions, in five states                            §2.15
 //! ```
 //!
 //! There is no I/O and no clock here. A candidate's runtime declares what
 //! [`Step::Claim`] says, makes each read [`Step::Read`] asks for and hands
 //! it back as [`Event::Read`], arms the retry timer when a
-//! [`Step::StandBy`] says `retry` and the grace timer on [`Step::Grace`],
-//! hands each to [`Elector::observe`] as [`Event::Timer`], tells it what
-//! its watch hears ([`Event::Appeared`], [`Event::Withdrawn`]) and, under
+//! [`Step::StandBy`] says `retry` or on a [`Step::Retry`], and the grace
+//! timer on [`Step::Grace`], hands each to [`Elector::observe`] as
+//! [`Event::Timer`], tells it what its watch hears ([`Event::Appeared`],
+//! [`Event::Withdrawn`]), its own re-mint ([`Event::Reminted`]) and, under
 //! `external`, its lock ([`Event::Lock`]); after a [`Step::Claim`], a
 //! [`Step::TakeOver`] or a [`Step::StepDown`] it acts, in core §8.2's order
 //! or its reverse, then calls [`Elector::finish`].
@@ -689,6 +691,11 @@ pub enum Event {
     Timer,
     /// `external`: the deployment's lock taken (`true`) or lost (§2.11).
     Lock(bool),
+    /// The candidate's own re-mint (core §1.5, §8.1; text 0.2, F-209): the
+    /// new id is its own from then on, and every former id is its own,
+    /// never another holder or another candidate. The runtime tells it
+    /// before the new id's token is declared, in every state.
+    Reminted(InstanceId),
 }
 
 /// Why an incumbent steps down (§2.9, §2.11).
@@ -726,6 +733,10 @@ pub enum Step {
     /// Stand by (§2.4), following the address; arm the retry timer when
     /// `retry` (§2.5).
     StandBy { why: Why, retry: bool },
+    /// Serving, arm the retry timer, then hand it back as [`Event::Timer`]:
+    /// a heal's read not complete showing fewer than two holders, which
+    /// ends nothing (§2.9; text 0.2, F-199).
+    Retry,
     /// Take over in core §8.2's order (§2.6), then call
     /// [`Elector::finish`].
     TakeOver,
@@ -745,6 +756,7 @@ impl Step {
             Self::Read => "read",
             Self::Grace => "grace",
             Self::StandBy { .. } => "stand_by",
+            Self::Retry => "retry",
             Self::TakeOver => "take_over",
             Self::StepDown(_) => "step_down",
             Self::Nothing => "nothing",
@@ -780,32 +792,52 @@ enum Phase {
     New,
     Claiming,
     Campaigning,
-    Standby { retry: bool },
+    Standby {
+        retry: bool,
+    },
     TakingOver,
     Serving,
     HealFirst,
     HealGrace(Vec<InstanceId>),
     HealSecond(Vec<InstanceId>),
+    /// A heal read not complete showing fewer than two holders: read again
+    /// after the retry interval, the second read again when the first is
+    /// held (F-199).
+    HealRetry(Option<Vec<InstanceId>>),
     SteppingDown(StepDownWhy),
+}
+
+/// What the watch heard while a read was asked or an act ran, kept to be
+/// decided once it ends (text 0.2, F-199).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Kept {
+    appeared: bool,
+    withdrawn: bool,
 }
 
 /// One candidate's election on one governed interface (§2.5 to §2.11): a
 /// pure state machine, two-phase like [`crate::config::Owner`]. A restart
-/// is a new `Elector`, and a new instance id.
+/// is a new `Elector`, and a new instance id; a re-mint in the same run is
+/// [`Event::Reminted`].
 ///
-/// Events that arrive while an act runs are kept for its end: a token
-/// appearing while it takes over starts a heal once it serves, a
-/// withdrawal while it steps down a campaign once it stands by, and a lock
-/// lost while it takes over a step-down. A timer or a read nothing waits
-/// for is ignored.
+/// **What is heard meanwhile is kept** (text 0.2, F-199). An appearance of
+/// another holder's token, or a withdrawal, heard while a read is asked
+/// (campaigning or healing) or while an act runs (taking over or stepping
+/// down) is kept, and decided once the read's decision or the act's finish
+/// is made, as if heard then, in the state it leaves: an appearance kept
+/// through a takeover reads for a heal once it serves, a withdrawal kept
+/// past a stand-by on an incumbent reads again, one kept through a
+/// step-down campaigns once it stands by (under `external`, only with the
+/// lock, F-207). A timer or a read nothing waits for is ignored.
 #[derive(Debug, Clone)]
 pub struct Elector {
     own: InstanceId,
+    /// Its own former ids, after a re-mint (F-209).
+    former: BTreeSet<InstanceId>,
     election: Election,
     phase: Phase,
     lock: bool,
-    appeared: bool,
-    withdrawn: bool,
+    kept: Kept,
 }
 
 impl Elector {
@@ -815,18 +847,25 @@ impl Elector {
     pub fn new(own: InstanceId, election: Election) -> Self {
         Self {
             own,
+            former: BTreeSet::new(),
             election,
             phase: Phase::New,
             lock: false,
-            appeared: false,
-            withdrawn: false,
+            kept: Kept::default(),
         }
     }
 
-    /// This instance's id.
+    /// This instance's id: the last one it was told of (F-209).
     #[must_use]
     pub fn own(&self) -> &InstanceId {
         &self.own
+    }
+
+    /// Whether `id` is this instance's: its id, or one it held before a
+    /// re-mint (F-209).
+    #[must_use]
+    pub fn is_own(&self, id: &InstanceId) -> bool {
+        *id == self.own || self.former.contains(id)
     }
 
     /// The interface's election.
@@ -845,6 +884,7 @@ impl Elector {
             | Phase::HealFirst
             | Phase::HealGrace(_)
             | Phase::HealSecond(_)
+            | Phase::HealRetry(_)
             | Phase::SteppingDown(_) => Role::Serving,
         }
     }
@@ -853,6 +893,12 @@ impl Elector {
     #[must_use]
     pub fn serving(&self) -> bool {
         self.role() == Role::Serving
+    }
+
+    /// Whether it holds the lock, as last told (`external`).
+    #[must_use]
+    pub fn lock(&self) -> bool {
+        self.lock
     }
 
     /// Starts: claim before reading (§2.5 step 1). Called once.
@@ -867,45 +913,122 @@ impl Elector {
     /// The act a [`Step::Claim`], a [`Step::TakeOver`] or a
     /// [`Step::StepDown`] asked for is done: the next step.
     pub fn finish(&mut self) -> Step {
-        let appeared = std::mem::take(&mut self.appeared);
-        let withdrawn = std::mem::take(&mut self.withdrawn);
-        match std::mem::replace(&mut self.phase, Phase::New) {
-            Phase::Claiming => self.campaign(),
+        let step = match std::mem::replace(&mut self.phase, Phase::New) {
+            Phase::Claiming => {
+                // Nothing is kept before the claim's end: the first read
+                // asks the bus whole.
+                self.kept = Kept::default();
+                return self.campaign();
+            }
             Phase::TakingOver => {
                 self.phase = Phase::Serving;
                 match self.election {
-                    Election::External if !self.lock => self.step_down(StepDownWhy::LockLost),
-                    Election::Claim if appeared => {
-                        self.phase = Phase::HealFirst;
-                        Step::Read
+                    Election::External if !self.lock => {
+                        self.kept = Kept::default();
+                        return self.step_down(StepDownWhy::LockLost);
                     }
                     _ => Step::Nothing,
                 }
             }
             Phase::SteppingDown(_) => {
                 self.phase = Phase::Standby { retry: false };
-                if withdrawn {
-                    self.campaign()
-                } else {
-                    Step::Nothing
-                }
+                Step::Nothing
             }
             other => {
                 self.phase = other;
-                Step::Nothing
+                return Step::Nothing;
             }
-        }
+        };
+        self.decide_kept(step)
     }
 
     /// Hands it an event: the next step.
     pub fn observe(&mut self, event: Event) -> Step {
         match event {
-            Event::Read(r) => self.on_read(&r),
-            Event::Appeared(id) => self.on_appeared(&id),
+            Event::Read(r) => {
+                let r = self.normalized(&r);
+                self.on_read(&r)
+            }
+            Event::Appeared(id) => {
+                if self.is_own(&id) {
+                    return Step::Nothing;
+                }
+                self.on_appeared()
+            }
             Event::Withdrawn => self.on_withdrawn(),
             Event::Timer => self.on_timer(),
             Event::Lock(held) => self.on_lock(held),
+            Event::Reminted(id) => {
+                // F-209: no appearance, no step; the new id is its own from
+                // here on, the old one too.
+                if id != self.own {
+                    let old = std::mem::replace(&mut self.own, id);
+                    self.former.insert(old);
+                    // A re-mint back to a former id: that id is its own
+                    // again, never a former one beside itself.
+                    self.former.remove(&self.own);
+                }
+                Step::Nothing
+            }
         }
+    }
+
+    /// A read with every former id of its own read as its own (F-209): one
+    /// entry, holding the token when any of them does.
+    fn normalized(&self, r: &Read) -> Read {
+        if self.former.is_empty() {
+            return r.clone();
+        }
+        let mut instances = Vec::with_capacity(r.instances.len());
+        let mut own: Option<Seen> = None;
+        for s in &r.instances {
+            if !self.is_own(&s.id) {
+                instances.push(s.clone());
+                continue;
+            }
+            match &mut own {
+                None => {
+                    own = Some(Seen {
+                        id: self.own.clone(),
+                        token: s.token,
+                        descriptor: s.descriptor,
+                    });
+                }
+                Some(o) => {
+                    o.token |= s.token;
+                    if s.id == self.own {
+                        o.descriptor = s.descriptor;
+                    }
+                }
+            }
+        }
+        instances.extend(own);
+        Read {
+            complete: r.complete,
+            instances,
+        }
+    }
+
+    /// Decides what was kept, in the state `step` leaves (F-199): the
+    /// first kept event that asks something replaces a step that is no act
+    /// (a stand-by, nothing); an act keeps what its own phase keeps.
+    fn decide_kept(&mut self, step: Step) -> Step {
+        fn replace(step: &mut Step, next: Step) {
+            if next != Step::Nothing && matches!(step, Step::Nothing | Step::StandBy { .. }) {
+                *step = next;
+            }
+        }
+        let kept = std::mem::take(&mut self.kept);
+        let mut step = step;
+        if kept.appeared {
+            let next = self.on_appeared();
+            replace(&mut step, next);
+        }
+        if kept.withdrawn {
+            let next = self.on_withdrawn();
+            replace(&mut step, next);
+        }
+        step
     }
 
     /// A campaign: a read, but under `external` without the lock.
@@ -939,7 +1062,7 @@ impl Elector {
     }
 
     fn on_read(&mut self, r: &Read) -> Step {
-        match self.phase.clone() {
+        let step = match self.phase.clone() {
             Phase::Campaigning => {
                 let decision = match self.election {
                     Election::Claim => elect(&self.own, r),
@@ -959,27 +1082,39 @@ impl Elector {
                 if holders.len() >= 2 {
                     self.phase = Phase::HealGrace(holders);
                     Step::Grace
-                } else {
+                } else if r.complete {
                     self.phase = Phase::Serving;
                     Step::Nothing
+                } else {
+                    // F-199: a read not complete showing one holder ends
+                    // nothing.
+                    self.phase = Phase::HealRetry(None);
+                    Step::Retry
                 }
             }
             Phase::HealSecond(first) => {
                 let second = self.holding(r);
                 match heal(&self.own, self.election, &first, &second) {
                     Heal::StepDown(low) => self.step_down(StepDownWhy::LowerHolder(low)),
+                    Heal::Stay(Stay::NoSplit) if !r.complete => {
+                        self.phase = Phase::HealRetry(Some(first));
+                        Step::Retry
+                    }
                     Heal::Stay(_) => {
                         self.phase = Phase::Serving;
                         Step::Nothing
                     }
                 }
             }
-            _ => Step::Nothing,
-        }
+            _ => return Step::Nothing,
+        };
+        self.decide_kept(step)
     }
 
-    fn on_appeared(&mut self, id: &InstanceId) -> Step {
-        if id == &self.own || self.election != Election::Claim {
+    /// Another instance's interface token appeared (after the own-id
+    /// filter).
+    fn on_appeared(&mut self) -> Step {
+        if self.election != Election::Claim {
             return Step::Nothing;
         }
         match self.phase {
@@ -987,8 +1122,8 @@ impl Elector {
                 self.phase = Phase::HealFirst;
                 Step::Read
             }
-            Phase::TakingOver => {
-                self.appeared = true;
+            Phase::Campaigning | Phase::TakingOver | Phase::HealFirst | Phase::HealSecond(_) => {
+                self.kept.appeared = true;
                 Step::Nothing
             }
             _ => Step::Nothing,
@@ -1004,8 +1139,11 @@ impl Elector {
                     self.campaign()
                 }
             }
-            Phase::SteppingDown(_) => {
-                self.withdrawn = true;
+            Phase::Campaigning
+            | Phase::SteppingDown(_)
+            | Phase::HealFirst
+            | Phase::HealSecond(_) => {
+                self.kept.withdrawn = true;
                 Step::Nothing
             }
             _ => Step::Nothing,
@@ -1017,6 +1155,13 @@ impl Elector {
             Phase::Standby { retry: true } => self.campaign(),
             Phase::HealGrace(first) => {
                 self.phase = Phase::HealSecond(first);
+                Step::Read
+            }
+            Phase::HealRetry(first) => {
+                self.phase = match first {
+                    None => Phase::HealFirst,
+                    Some(first) => Phase::HealSecond(first),
+                };
                 Step::Read
             }
             _ => Step::Nothing,
@@ -1521,6 +1666,105 @@ mod tests {
             e.observe(Event::Lock(false)),
             Step::StepDown(StepDownWhy::LockLost)
         );
+    }
+
+    /// A read asked is never asked again, nor dropped, before its answer
+    /// (#841 RB's review): from every state the machine reaches, while a
+    /// read it asked is unanswered, every event but that read's answer
+    /// returns `nothing`, so a runtime never holds two reads at once and no
+    /// phase waiting on a read (campaigning, a heal's first or second read)
+    /// is stranded. Explored breadth-first over every reachable state, for
+    /// both elections; after an act (a claim, a takeover, a step-down) the
+    /// runtime's next call is `finish`, as the reference's loop makes it.
+    #[test]
+    fn a_read_asked_is_never_asked_again_before_its_answer() {
+        use std::collections::{HashSet, VecDeque};
+        let own = id(0xb);
+        let reads = [
+            read(true, vec![seen(0xb, false, STANDBY)]),
+            read(
+                true,
+                vec![seen(0xa, true, SERVING), seen(0xb, false, STANDBY)],
+            ),
+            read(false, vec![]),
+            read(
+                true,
+                vec![seen(0xa, true, SERVING), seen(0xb, true, SERVING)],
+            ),
+            read(false, vec![seen(0xb, true, SERVING)]),
+            read(
+                true,
+                vec![seen(0x1, false, STANDBY), seen(0xb, false, STANDBY)],
+            ),
+            read(true, vec![seen(0xb, true, SERVING)]),
+        ];
+        let others = [
+            Event::Appeared(id(0xa)),
+            Event::Appeared(own.clone()),
+            Event::Withdrawn,
+            Event::Timer,
+            Event::Lock(true),
+            Event::Lock(false),
+            Event::Reminted(id(0xc)),
+        ];
+        for election in [Election::Claim, Election::External] {
+            let mut e = Elector::new(own.clone(), election);
+            assert_eq!(e.start(), Step::Claim);
+            // (machine, a read asked and unanswered, an act to finish)
+            let mut queue = VecDeque::from([(e.clone(), false, true)]);
+            let mut seen_states = HashSet::new();
+            let mut asked_states = 0;
+            while let Some((e, asked, acting)) = queue.pop_front() {
+                if !seen_states.insert(format!("{e:?} {asked} {acting}")) {
+                    continue;
+                }
+                let mut next = |e: Elector, step: Step, was_asked: bool| {
+                    let act = matches!(step, Step::Claim | Step::TakeOver | Step::StepDown(_));
+                    let asks = step == Step::Read;
+                    assert!(
+                        !(was_asked && asks),
+                        "{election}: a second read asked while one runs: {e:?}"
+                    );
+                    queue.push_back((e, was_asked || asks, act));
+                };
+                if acting {
+                    let mut e2 = e.clone();
+                    let step = e2.finish();
+                    next(e2, step, asked);
+                    continue;
+                }
+                if asked {
+                    asked_states += 1;
+                    for ev in &others {
+                        let mut e2 = e.clone();
+                        let step = e2.observe(ev.clone());
+                        assert_eq!(
+                            step,
+                            Step::Nothing,
+                            "{election}: {ev:?} while a read runs, in {e:?}"
+                        );
+                        assert_eq!(e2.finish(), Step::Nothing, "no act runs while a read does");
+                        next(e2, Step::Nothing, true);
+                    }
+                    for r in &reads {
+                        let mut e2 = e.clone();
+                        let step = e2.observe(Event::Read(r.clone()));
+                        // The answer is taken: a phase waiting on it moves on.
+                        next(e2, step, false);
+                    }
+                } else {
+                    for ev in &others {
+                        let mut e2 = e.clone();
+                        let step = e2.observe(ev.clone());
+                        next(e2, step, false);
+                    }
+                }
+            }
+            assert!(
+                asked_states > 0,
+                "{election}: the exploration reached reads asked"
+            );
+        }
     }
 
     #[test]

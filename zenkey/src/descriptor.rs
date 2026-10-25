@@ -77,8 +77,10 @@ pub(crate) fn build(
                 iface: s.imp.iface().to_string(),
                 contract: s.imp.fingerprint().to_string(),
                 minor: u64::from(s.imp.contract().minor.unwrap_or(0)),
-                // A standby's mark is redundancy.v1's runtime (#841, RB).
-                standby: false,
+                // redundancy.v1 §2.4 (#841): a governed interface is marked
+                // until its takeover's step 3, and again from its
+                // step-down's.
+                standby: s.gate.as_ref().is_some_and(|g| g.is_marked()),
                 token: !config.tokenless.contains(s.imp.iface()),
                 unavailable,
                 cardinality: s.cardinality.clone(),

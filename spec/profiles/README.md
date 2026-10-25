@@ -9,7 +9,7 @@ and `examples/zk2/`.
 
 | Profile | Text | Status | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|
-| [`hostid.v1`](hostid/v1.md) | 0.6 | draft | 0.39 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
+| [`hostid.v1`](hostid/v1.md) | 0.7 | draft | 0.40 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
 | [`freshness.v1`](freshness/v1.md) | 0.3 | draft | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
 | [`health.v1`](health/v1.md) | 0.4 | draft | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
 | [`config.v1`](config/v1.md) | 0.4 | draft | 0.28 | 1: [`config.v1.toml`](config/config.v1.toml); 4 through `uses` (`freshness.v1`) | Changing a running service's configuration without locking it out: groups with classes, a change that can cut the link applied only under a window and undone once unless confirmed, persistence as a separate act, and the compact status a constrained face can afford (core §5, §6, O7) |
@@ -17,7 +17,7 @@ and `examples/zk2/`.
 | [`alarms.v1`](alarms/v1.md) | 0.8 | draft | 0.34 | 1: [`alarms.v1.toml`](alarms/alarms.v1.toml); 2: published empty; 4 through `uses` (`freshness.v1`) | The active alarms of one service, one state key per alarm, keyed from its document by ZenSight's recipe: raised, escalated, refreshed and resolved, the state read from the document; confirmed every 450 s while firing, so a hung owner's alarms read stale and an absent one's last-known, and "nothing fires" only from an owner's alarms known whole (core S2, S6, O5) |
 | [`telemetry.v1`](telemetry/v1.md) | 0.5 | draft | 0.35 | 1: a standard schema, [`telemetry.v1.json`](telemetry/telemetry.v1.json); 2: `kind`, `unit`, `buckets`, `semantic`; 4 through `uses` | What a metric is: a member's kind and unit, declared or carried by the Point, whose types are the profile's by their artifact's id; whether a sample conforms; a counter's or a histogram's epoch, in-band or from presence, a decrease within an established one the finding and one without evidence a reset; a counter's rate over one epoch; absent is not zero (core §1.5, §7.1, O5) |
 | [`desired.v1`](desired/v1.md) | 0.4 | draft | 0.39 | 1: a standard schema, [`desired.v1.json`](desired/desired.v1.json); 2: `target_param`; 4 through `uses` | A document an author keeps as its own state, keyed by its target: the target binds its own slice by R2, orders versions by its author's stamp, acts on each once per run and never on an older one, refuses whole what it cannot take with the previous kept in force, reverts on a delete and never on silence, and reports what is in force and what it last did in the standard `Report`; the author writes only on a change, and restarts from its record (core S1–S7, §4.2, §4.4, R2) |
-| [`redundancy.v1`](redundancy/v1.md) | 0.1 | draft | 0.39 | 2: `election`; 4 through `uses` | One instance serves a governed interface, the others stand by: a candidate's claim is its instance token, the incumbent the holder of the interface's token, a standby marked in its descriptor and exposing nothing, so a call finds none; a live incumbent wins, the lowest id of a complete read breaks a tie, a vacancy is a withdrawal confirmed by a complete read, and a healed split leaves the lower id; consumers follow the incumbent's stamps; `external` names an actuator's own lock; eventual single writer, never a fence (core §5.1 O1, §6, §8.1, §8.2) |
+| [`redundancy.v1`](redundancy/v1.md) | 0.2 | draft | 0.40 | 2: `election`; 4 through `uses` | One instance serves a governed interface, the others stand by: a candidate's claim is its instance token, the incumbent the holder of the interface's token, a standby marked in its descriptor and exposing nothing, so a call finds none; a live incumbent wins, the lowest id of a complete read breaks a tie, a vacancy is a withdrawal confirmed by a complete read, and a healed split leaves the lower id; consumers follow the incumbent's stamps; `external` names an actuator's own lock; eventual single writer, never a fence (core §5.1 O1, §6, §8.1, §8.2) |
 
 ## Layout
 
@@ -138,7 +138,11 @@ thing in the same place.
   over and an incumbent stepping down follow §8.2's steps and their
   reverse, the tokenless set never names a governed interface, the
   split-brain check reads the mark, and Appendix D publishes its
-  vocabulary, the interim `election` unchanged.
+  vocabulary, the interim `election` unchanged. Its text 0.2 needed 0.40,
+  so that §8.1 says what its runtime measured: a session's read answers its
+  own tokens itself, even through a router that refuses the read, and a
+  complete read covers only what its routers' clients and its linked peers
+  hold.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in

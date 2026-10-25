@@ -3,6 +3,83 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.40 — 2026-10-25: what `redundancy.v1`'s runtime measured (#841, RB)
+
+The second implementation read `redundancy.v1` 0.1 and core 0.39 cold
+(zk2py round 56, PR #855) and filed F-199 to F-209, all accepted on #841.
+Two of them are facts about zenoh that the profile's election rests on, and
+the maintainer asked that the reference measure each in Rust before the
+core states it (#841's answers). Both reproduced. They are §8.1's, as
+reading presence is, and change no rule a reader already follows: the
+first is an implementation note, the second says what a complete read
+covers. No fixture case changed, and none is added: each is a fact about a
+bus.
+
+**Changed: a read on a token's own session answers that token itself**
+(§8.1, Appendix B; F-204).
+- **The gap.** `redundancy.v1` 0.1 let a candidate read the claim set on
+  the session holding its claim. zk2py measured that a session's
+  liveliness read returns the session's own tokens even through a router
+  that refuses the read, so the candidate's check that the read holds its
+  own claim, the one thing that tells a refused read from a lone
+  candidate's, never sees a refusal there. §5 step 3 of its scenarios
+  failed that way, the instance serving through the refusing router.
+- **Measured** by the reference on zenoh 1.10.1: through a router whose
+  access control denies `liveliness_query` on ingress, the holder's read
+  was complete and held its token, and another session's the same read
+  complete and empty, five times of five
+  (`zenkey/tests/presence.rs`,
+  `a_refused_read_on_a_tokens_own_session_still_returns_it`).
+- **The note.** A read on a token's own session says nothing about the
+  bus for that token; a reader that must see its own token as the bus holds
+  it reads on a session that does not hold it. `redundancy.v1` 0.2 makes
+  that a MUST of its candidates (its §2.5 step 1).
+
+**Changed: what a complete read covers** (§8.1, Appendix B; F-206).
+- **The gap.** A complete read was defined by how it ended and by its
+  session, never by what it can reach. zk2py measured two peers behind one
+  router, neither listening: one's read of the other's token was complete
+  and empty every time for 15 s, while a client of the router read it. A
+  candidate that is such a peer reads a vacancy beside a live incumbent.
+- **Measured** by the reference on zenoh 1.10.1, against its source: a
+  router's `auto` gateway puts its peers in one region, whose members it
+  expects to be linked to each other, and propagates no token from one of
+  them to another (`hat/peer/token.rs`, `propagate_token`). The answer's
+  `routing.router.peers_failover_brokering` is deprecated in 1.10.1, read
+  and ignored (`zenoh-config`), so its default changes nothing. Two peers,
+  neither listening, with gossip on and with it off: the reader's read was
+  complete and empty in six reads over 3 s, while a client of the same
+  router read the token. Both listening, and gossiping through a router
+  that gossips (zenoh's default): they linked, and the token was read
+  (`a_peers_read_through_a_router_misses_an_unlinked_peers_token`).
+- **The rule.** A read is complete only for the tokens its routers'
+  clients and its linked peers hold. A peer that other peers cannot link
+  to reads none of theirs, and its complete read establishes no absence of
+  them. A reader that concludes absence of a peer's token SHOULD be a
+  client of a router, or a peer linked to that peer; `redundancy.v1` 0.2
+  makes it a MUST of its candidates and the tools that read them.
+- **Appendix C** lists `profiles/redundancy/scenarios.md` §5, whose peers
+  link (step 1) and whose reads go on a session apart from the claim
+  (step 3).
+
+**Deliberately not changed.**
+- **"Complete" keeps its definition** (0.37, 0.38): how a read ended, its
+  session never having held a liveliness subscriber, its links held before
+  and after. The new bullet says what such a read covers; it adds no check
+  a reader can make of its own read, since nothing on the session says
+  which peers it is linked to.
+- **No MUST for the core's readers.** Which sessions a reader runs, and
+  whether a deployment's peers link, are a deployment's, and the profile
+  that elects by presence states its own MUST. The SHOULD is for every
+  other reader.
+- **F-201** (a crash seen at once when its kernel closes the links) needs
+  no core change: Appendix B already says both a link that closes and one
+  that goes silent. `redundancy.v1` 0.2 cites it.
+- **F-202** (a put's and a token's order at a subscriber) needs none
+  either: §8.2's order is observed by a GET at the token, as
+  `presence.md` §1 already observes it, and `redundancy.v1`'s scenarios
+  now say so.
+
 ## 0.39 — 2026-10-24: what `redundancy.v1` needed of the core (#841)
 
 `redundancy.v1`'s first text (#841, RA) is the profile the core has left

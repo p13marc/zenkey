@@ -907,15 +907,22 @@ async fn s6_the_authors_restart_moves_no_target_to_act_again() {
     // a put and a token reach it on two subscriptions, at two priorities,
     // with no order kept between them (as `profile_alarms.rs`'s
     // `at_new_token` says).
+    // The re-put and the re-delete are found by the new zid, never by
+    // arrival: the old instance's own delete of D2, made before its kill,
+    // can still reach S after `mark` under load, for the same reason.
     tokio::time::sleep(Duration::from_secs(3)).await;
     let log: Vec<Rec> = s.all().into_iter().skip(mark).collect();
-    let put_at = log.iter().position(|r| !r.token && r.key == D).unwrap();
-    let del_at = log
+    let new_id = |r: &Rec| r.stamp.is_some_and(|t| t.get_id().to_string() == zid);
+    let put_at = log
         .iter()
-        .position(|r| !r.token && r.key == D2 && r.delete)
-        .unwrap();
+        .position(|r| !r.token && r.key == D && new_id(r))
+        .expect("the re-put, under the new zid");
+    assert!(
+        log.iter()
+            .any(|r| !r.token && r.key == D2 && r.delete && new_id(r)),
+        "the re-delete, under the new zid"
+    );
     let reput = log[put_at].stamp.unwrap();
-    assert_eq!(log[del_at].stamp.unwrap().get_id(), reput.get_id());
     assert!(s.on(RUN, mark).is_empty(), "Run receives nothing");
     let adopted = s.on(RP, mark);
     assert!(converged_on(&adopted.last().unwrap().report(), &reput, 1));

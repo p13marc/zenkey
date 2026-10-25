@@ -34,9 +34,14 @@
 //! again there what its record keeps (`desired.v1` §2.11), and a target
 //! through [`ServiceBuilder::desired_target`] puts its baseline report
 //! there, then reads from step 4 on, after the tokens ([`crate::desired`]).
+//! One electing its governed interfaces through
+//! [`ServiceBuilder::redundancy`] claims at steps 3 and 4, each governed
+//! interface marked standby and holding no token, then elects; it takes
+//! over in steps 1 to 4's order and steps down in their reverse
+//! ([`crate::redundancy`]).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use zenkey_model::descriptor::Cause;
 use zenkey_model::grammar::{
@@ -57,6 +62,7 @@ use crate::config::ServiceConfig;
 use crate::consumer::Consumer;
 use crate::descriptor;
 use crate::error::{Error, Result, zenoh};
+use crate::gate::{Gate, QSlot};
 use crate::hostid::{HostIdError, HostIdMinter, Minted};
 use crate::implementation::{Implementation, missing_capability, resource_name};
 use crate::qos;
@@ -80,6 +86,9 @@ pub(crate) struct ImplState {
     /// Each metric resource's declaration (`telemetry.v1`, #819), keyed as
     /// `cardinality`: what every writer of it checks.
     pub(crate) metrics: BTreeMap<String, Arc<Metric>>,
+    /// A governed interface's gate (`redundancy.v1` §2.4, #841): every
+    /// resource of it declared only while the instance serves it.
+    pub(crate) gate: Option<Arc<Gate>>,
 }
 
 impl ImplState {
@@ -158,6 +167,20 @@ pub struct ServiceBuilder {
     pub(crate) desired_authors: Vec<crate::desired::Author>,
     /// `desired.v1`'s roles this service holds as a target.
     pub(crate) desired_targets: Vec<crate::desired::Target>,
+    /// `redundancy.v1`, once [`ServiceBuilder::redundancy`] configured it.
+    redundancy: Option<crate::redundancy::Redundancy>,
+}
+
+/// Why a profile's owner the runtime implements is refused on a governed
+/// interface (`redundancy.v1` §2.4, #841): it writes its keys before the
+/// instance is elected, at its start or its re-mint, and outside the gate a
+/// standby's writes go through, so a standby would write them.
+fn not_elected(what: &str, iface: &IfaceId) -> String {
+    format!(
+        "{what} on {iface}, which redundancy.v1 governs: it writes the interface's keys before \
+         any election and outside its gate, so a standby would write them; not at this version \
+         (redundancy.v1 §2.4)"
+    )
 }
 
 fn mint() -> InstanceId {
@@ -264,7 +287,66 @@ impl ServiceBuilder {
             alarms: None,
             desired_authors: Vec::new(),
             desired_targets: Vec::new(),
+            redundancy: None,
         }
+    }
+
+    /// Takes part in `redundancy.v1`'s election for every governed
+    /// interface this service implements, now or later
+    /// ([`crate::redundancy`], #841): an interface whose contract lists
+    /// `redundancy.v1` in `uses`. [`ServiceBuilder::start`] then claims
+    /// (its descriptor marks each governed interface standby, its instance
+    /// token), and elects on `startup`'s sessions: the instance serves an
+    /// interface only once elected, and stands by otherwise, declaring
+    /// none of its resources and writing none of its keys. The handle
+    /// returned says each interface's role.
+    ///
+    /// Refused when it is configured already, when `startup`'s reader is
+    /// this service's session or a watch session, or its watch is the
+    /// service's session or the reader (§2.5 step 1, §2.7; text 0.2,
+    /// F-204). A governed interface without it is refused at start.
+    pub fn redundancy(
+        &mut self,
+        startup: crate::redundancy::RedundancyStartup,
+    ) -> Result<crate::redundancy::Redundancy> {
+        if self.redundancy.is_some() {
+            return Err(Error::Contract(
+                "redundancy.v1 is configured twice on this service".to_owned(),
+            ));
+        }
+        let r = crate::redundancy::Redundancy::new(&self.session, startup)?;
+        self.redundancy = Some(r.clone());
+        Ok(r)
+    }
+
+    /// A test's hook: the instance id this service comes up with, in place
+    /// of the one minted (core §1.5 mints one at every start, which a
+    /// deployment never chooses). `redundancy.v1`'s scenarios order their
+    /// instances by it (`spec/profiles/redundancy/scenarios.md`).
+    #[doc(hidden)]
+    pub fn set_instance_id(&mut self, id: InstanceId) -> &mut Self {
+        self.epochs.set_instance(id.clone());
+        self.instance = id;
+        self
+    }
+
+    /// A governed interface's gate, when `iface` is governed and
+    /// implemented.
+    pub(crate) fn gate_of(&self, iface: &IfaceId) -> Option<Arc<Gate>> {
+        find(&self.impls, iface).ok().and_then(|s| s.gate.clone())
+    }
+
+    /// Refuses a raw zenoh declaration on a governed interface, which the
+    /// runtime could not undeclare while it stands by (`redundancy.v1`
+    /// §2.4).
+    fn not_governed(&self, iface: &IfaceId, what: &str) -> Result<()> {
+        if self.gate_of(iface).is_some() {
+            return Err(Error::Contract(format!(
+                "{iface} is governed by redundancy.v1: declare its {what} through the runtime's \
+                 writers and servers, which a standby holds undeclared (redundancy.v1 §2.4)"
+            )));
+        }
+        Ok(())
     }
 
     /// Implements `health.v1`, its standard contract embedded
@@ -338,6 +420,9 @@ impl ServiceBuilder {
         if self.alarms.is_some() || self.implements(&iface) {
             return Err(Error::Duplicate(iface));
         }
+        if zenkey_model::redundancy::is_governed(imp.contract()) {
+            return Err(Error::Contract(not_elected("alarms.v1's owner", &iface)));
+        }
         crate::alarms::Alarms::declare(self, imp, startup).await
     }
 
@@ -365,6 +450,9 @@ impl ServiceBuilder {
                 "{iface} {resource:?} is authored twice (desired.v1 §2.11)"
             )));
         }
+        if self.gate_of(iface).is_some() {
+            return Err(Error::Contract(not_elected("a desired.v1 author", iface)));
+        }
         crate::desired::Author::declare(self, iface, resource, startup).await
     }
 
@@ -389,6 +477,12 @@ impl ServiceBuilder {
         startup: crate::desired::TargetStartup,
     ) -> Result<crate::desired::Target> {
         self.no_target_yet(role)?;
+        if self.gate_of(&report.iface).is_some() {
+            return Err(Error::Contract(not_elected(
+                "a desired.v1 target's report",
+                &report.iface,
+            )));
+        }
         crate::desired::Target::declare(
             self,
             role,
@@ -420,6 +514,14 @@ impl ServiceBuilder {
         startup: crate::desired::TargetStartup,
     ) -> Result<crate::desired::Target> {
         self.no_target_yet(role)?;
+        if let Some(r) = &report
+            && self.gate_of(&r.iface).is_some()
+        {
+            return Err(Error::Contract(not_elected(
+                "a desired.v1 target's report",
+                &r.iface,
+            )));
+        }
         let Some(cfg) = self.config_v1.clone() else {
             return Err(Error::Contract(
                 "desired.v1 §2.16: implement config.v1 (ServiceBuilder::config_v1) first"
@@ -471,7 +573,8 @@ impl ServiceBuilder {
         }
         self.expose(iface, resource)?;
         self.state_ifaces.insert(iface.clone());
-        let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values)
+        let gate = self.gate_of(iface);
+        let w = Writer::declare_gated(&self.session, key.into_keyexpr(), &r, values, gate)
             .await?
             .bounded(budget)
             .metered(meter);
@@ -536,6 +639,10 @@ impl ServiceBuilder {
             .iter()
             .filter_map(|r| Some((resource_name(r), Arc::new(Metric::of(imp.contract(), r)?))))
             .collect();
+        // redundancy.v1 §2.2: a contract listing the profile in `uses`
+        // governs its interface, whose resources are born standing by.
+        let gate = zenkey_model::redundancy::is_governed(imp.contract())
+            .then(|| Gate::new(imp.iface().clone()));
         self.impls.push(ImplState {
             imp,
             exposed: BTreeSet::new(),
@@ -543,6 +650,7 @@ impl ServiceBuilder {
             cardinality: BTreeMap::new(),
             budgets,
             metrics,
+            gate,
         });
         Ok(self)
     }
@@ -692,6 +800,7 @@ impl ServiceBuilder {
                 "{iface} {resource:?} is an operation: it is served by a queryable"
             )));
         };
+        self.not_governed(iface, "publishers")?;
         self.expose(iface, resource)?;
         self.session
             .declare_publisher(key.into_keyexpr())
@@ -727,6 +836,7 @@ impl ServiceBuilder {
             Some(v) => self.key(iface, resource, v)?.into_keyexpr(),
             None => self.pattern(iface, resource)?,
         };
+        self.not_governed(iface, "queryables")?;
         self.expose(iface, resource)?;
         self.session
             .declare_queryable(ke)
@@ -749,9 +859,10 @@ impl ServiceBuilder {
         let r = s.imp.resource(resource)?.clone();
         let budget = s.budget(&r);
         let meter = s.meter(&r, values, &self.epochs);
+        let gate = s.gate.clone();
         self.expose(iface, resource)?;
         Ok(
-            Writer::declare(&self.session, key.into_keyexpr(), &r, values)
+            Writer::declare_gated(&self.session, key.into_keyexpr(), &r, values, gate)
                 .await?
                 .bounded(budget)
                 .metered(meter),
@@ -769,8 +880,13 @@ impl ServiceBuilder {
         let s = find(&self.impls, iface)?;
         let r = s.imp.resource(resource)?.clone();
         let budget = s.budget(&r);
+        let gate = s.gate.clone();
         self.expose(iface, resource)?;
-        Ok(EventWriter::new(&self.session, key.to_string(), &r, values)?.bounded(budget))
+        Ok(
+            EventWriter::new(&self.session, key.to_string(), &r, values)?
+                .bounded(budget)
+                .gated(gate),
+        )
     }
 
     /// Brings the service up in the order of §8.2. On any refusal, nothing
@@ -791,6 +907,34 @@ impl ServiceBuilder {
                     .to_owned(),
             ));
         }
+        // redundancy.v1 §2.2, §2.14 (#841): every governed interface's
+        // declaration valid, and taking part in an election; under
+        // `external`, a lock to ask, and with `refuse_without_lock` the lock
+        // held (§2.11). Nothing is declared before.
+        let governed = crate::redundancy::elections(
+            &self.impls,
+            &self.config.tokenless,
+            self.redundancy.is_some(),
+        )?;
+        if let Some(r) = &self.redundancy {
+            let external = governed
+                .iter()
+                .any(|(_, e, ..)| *e == crate::redundancy::Election::External);
+            if external && r.startup().lock.is_none() {
+                return Err(Error::NotExposed(
+                    "redundancy.v1 §2.11: an interface's election is external, and \
+                     RedundancyStartup gives no lock to ask"
+                        .to_owned(),
+                ));
+            }
+            if external && !r.may_start().await {
+                return Err(Error::NotExposed(
+                    "redundancy.v1 §2.11: the deployment's lock is not held, and this instance \
+                     refuses to start without it"
+                        .to_owned(),
+                ));
+            }
+        }
         for r in &self.roles {
             let bound = self
                 .config
@@ -806,7 +950,22 @@ impl ServiceBuilder {
         }
         // O3: `unavailable` answered for the optional operations not served.
         let ops = crate::operation::Ops::start(&self).await?;
+        let served = Arc::new(Served {
+            session: self.session.clone(),
+            inputs: Mutex::new(Inputs {
+                addr: addr.clone(),
+                minted: self.minted.is_some(),
+                host: self.host.clone(),
+                instance: self.instance.clone(),
+                impls: self.impls.clone(),
+                roles: self.roles.clone(),
+                config: self.config.clone(),
+            }),
+            current: Mutex::new(Arc::new(RwLock::new(Arc::from(Vec::new())))),
+            putting: Mutex::new(()),
+        });
         let mut svc = Service {
+            _guard: self.redundancy.clone().map(RedundancyGuard),
             alive: BTreeMap::new(),
             instance_token: None,
             members: BTreeMap::new(),
@@ -820,12 +979,12 @@ impl ServiceBuilder {
             alarms: self.alarms,
             desired_authors: self.desired_authors,
             desired_targets: self.desired_targets,
-            descriptor: Arc::new(RwLock::new(Arc::from(Vec::new()))),
+            redundancy: self.redundancy,
+            served,
             session: self.session,
             config: self.config,
             addr,
             minted: self.minted,
-            host: self.host,
             instance: self.instance,
             epochs: self.epochs,
             impls: self.impls,
@@ -852,7 +1011,7 @@ impl ServiceBuilder {
         }
         // 3. The descriptor, then the contracts.
         let (q, current) = svc.serve_descriptor(&svc.instance.clone()).await?;
-        svc.descriptor = current;
+        svc.served.set_current(current);
         svc.descriptor_q = Some(q);
         for s in &svc.impls {
             let key = contract_key(s.imp.iface(), s.imp.fingerprint().hex())?;
@@ -876,6 +1035,12 @@ impl ServiceBuilder {
         let instance = svc.instance.clone();
         svc.instance_token = Some(svc.token(instance_key(&svc.addr, &instance)?).await?);
         svc.alive = svc.declare_alive(&instance).await?;
+        // redundancy.v1 §2.5 (#841): the claim is made (the descriptor
+        // marks each governed interface standby, the instance token); its
+        // watch and round trips, then the election.
+        if let Some(r) = svc.redundancy.clone() {
+            r.start(&svc, governed).await?;
+        }
         // desired.v1 §2.5: each target reads from here on, after the tokens,
         // its baseline report put before them (§2.10).
         for t in &svc.desired_targets {
@@ -957,14 +1122,16 @@ fn resource_key(
 /// A running service. Dropping it undeclares its tokens first, then its
 /// queryables; [`Service::close`] does the same and waits for it.
 pub struct Service {
-    // Tokens first: fields drop in declaration order.
+    // Tokens first: fields drop in declaration order. The elections' guard
+    // before them: a governed interface's token goes first.
+    _guard: Option<RedundancyGuard>,
     alive: BTreeMap<IfaceId, LivelinessToken>,
     instance_token: Option<LivelinessToken>,
     members: BTreeMap<(IfaceId, String), (InstanceId, LivelinessToken)>,
     descriptor_q: Option<Queryable<()>>,
     contract_qs: Vec<Queryable<()>>,
     ops: crate::operation::Ops,
-    state_qs: BTreeMap<IfaceId, Vec<Queryable<()>>>,
+    state_qs: BTreeMap<IfaceId, Vec<Arc<QSlot>>>,
     clock: Option<ClockGuard>,
     /// `health.v1`, when the builder implemented it (`health.v1` §2.3).
     health: Option<crate::health::Health>,
@@ -975,14 +1142,16 @@ pub struct Service {
     /// `desired.v1`'s authored resources and target roles.
     desired_authors: Vec<crate::desired::Author>,
     desired_targets: Vec<crate::desired::Target>,
-    descriptor: Arc<RwLock<Arc<[u8]>>>,
+    /// `redundancy.v1`, when the builder configured it.
+    redundancy: Option<crate::redundancy::Redundancy>,
+    /// The descriptor as served, shared with `redundancy.v1`'s elections.
+    served: Arc<Served>,
     session: zenoh::Session,
     config: ServiceConfig,
     /// Resolved once at start, and kept across every re-mint (`hostid.v1`
     /// §2.7).
     addr: Addr,
     minted: Option<Minted>,
-    host: Option<String>,
     instance: InstanceId,
     /// The epochs its metric writers write (`telemetry.v1` §2.9).
     epochs: Arc<Epochs>,
@@ -1023,7 +1192,19 @@ impl Service {
     /// The descriptor currently served, as JSON bytes.
     #[must_use]
     pub fn descriptor_bytes(&self) -> Arc<[u8]> {
-        Arc::clone(&self.descriptor.read().expect("not poisoned"))
+        self.served.bytes()
+    }
+
+    /// Its `redundancy.v1` elections, when [`ServiceBuilder::redundancy`]
+    /// configured them: the handle the builder returned.
+    #[must_use]
+    pub fn redundancy(&self) -> Option<&crate::redundancy::Redundancy> {
+        self.redundancy.as_ref()
+    }
+
+    /// A governed interface's gate, when `iface` is governed.
+    pub(crate) fn gate_of(&self, iface: &IfaceId) -> Option<Arc<Gate>> {
+        find(&self.impls, iface).ok().and_then(|s| s.gate.clone())
     }
 
     /// The concrete key of a resource member (see [`ServiceBuilder::key`]).
@@ -1044,12 +1225,16 @@ impl Service {
         let key = self.key(iface, resource, values)?;
         let s = find(&self.impls, iface)?;
         let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
-        Ok(
-            Writer::declare(&self.session, key.into_keyexpr(), &r, values)
-                .await?
-                .bounded(budget)
-                .metered(meter),
+        Ok(Writer::declare_gated(
+            &self.session,
+            key.into_keyexpr(),
+            &r,
+            values,
+            s.gate.clone(),
         )
+        .await?
+        .bounded(budget)
+        .metered(meter))
     }
 
     /// A [`StateWriter`] on a member of an exposed state resource, for
@@ -1072,10 +1257,16 @@ impl Service {
         let key = self.key(iface, resource, values)?;
         let s = find(&self.impls, iface)?;
         let (budget, meter) = (s.budget(&r), s.meter(&r, values, &self.epochs));
-        let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values)
-            .await?
-            .bounded(budget)
-            .metered(meter);
+        let w = Writer::declare_gated(
+            &self.session,
+            key.into_keyexpr(),
+            &r,
+            values,
+            s.gate.clone(),
+        )
+        .await?
+        .bounded(budget)
+        .metered(meter);
         Ok(StateWriter::new(
             w,
             Arc::clone(&self.store),
@@ -1139,6 +1330,7 @@ impl Service {
             return Ok(());
         }
         let s = find(&self.impls, iface)?;
+        let gate = s.gate.clone();
         let mut qs = Vec::new();
         for token in [KindToken::State, KindToken::ExplicitState] {
             if !s.imp.contract().resources.iter().any(|r| r.token == token) {
@@ -1150,12 +1342,17 @@ impl Service {
             ))
             .map_err(zenoh)?;
             let store = Arc::clone(&self.store);
+            // redundancy.v1 §2.4: a governed interface's, only while it
+            // serves.
             qs.push(
-                self.session
-                    .declare_queryable(ke)
-                    .callback(move |q| store.answer(&q))
-                    .await
-                    .map_err(zenoh)?,
+                QSlot::declare(
+                    &self.session,
+                    ke,
+                    false,
+                    Arc::new(move |q| store.answer(&q)),
+                    gate.as_ref(),
+                )
+                .await?,
             );
         }
         self.state_qs.insert(iface.clone(), qs);
@@ -1171,8 +1368,12 @@ impl Service {
     ) -> Result<EventWriter> {
         let r = self.exposed(iface, resource)?;
         let key = self.key(iface, resource, values)?;
-        let budget = find(&self.impls, iface)?.budget(&r);
-        Ok(EventWriter::new(&self.session, key.to_string(), &r, values)?.bounded(budget))
+        let s = find(&self.impls, iface)?;
+        Ok(
+            EventWriter::new(&self.session, key.to_string(), &r, values)?
+                .bounded(s.budget(&r))
+                .gated(s.gate.clone()),
+        )
     }
 
     /// The members of `resource` its writers hold live now, and its bound
@@ -1232,10 +1433,16 @@ impl Service {
         Ok(r.clone())
     }
 
-    /// The interfaces for which this instance holds an interface token now.
+    /// The interfaces for which this instance holds an interface token now:
+    /// a governed one's only while it serves (`redundancy.v1` §2.4).
     #[must_use]
     pub fn tokens_held(&self) -> Vec<IfaceId> {
-        self.alive.keys().cloned().collect()
+        let mut held: Vec<IfaceId> = self.alive.keys().cloned().collect();
+        if let Some(r) = &self.redundancy {
+            held.extend(r.tokens_held());
+            held.sort();
+        }
+        held
     }
 
     /// Replaces the held capabilities (§3.3). The descriptor is put again,
@@ -1250,6 +1457,7 @@ impl Service {
         self.ops
             .availability
             .refresh(&self.impls, &self.config.capabilities);
+        self.sync_served();
         self.publish_descriptor()?;
         let instance = self.instance.clone();
         let want: BTreeSet<IfaceId> = self.wanted_tokens();
@@ -1296,6 +1504,7 @@ impl Service {
         self.ops
             .availability
             .refresh(&self.impls, &self.config.capabilities);
+        self.sync_served();
         self.publish_descriptor()
     }
 
@@ -1337,18 +1546,39 @@ impl Service {
             a.reput_all().await?;
         }
         let next = mint();
+        // redundancy.v1 §2.9 (text 0.2, F-209): every elector told of the
+        // new id before its tokens, a standby's included, and held, so that
+        // no takeover or step-down runs through the re-mint.
+        let remints = match &self.redundancy {
+            Some(r) => r.remint(&next).await,
+            None => Vec::new(),
+        };
         let (q, current) = self.serve_descriptor(&next).await?;
         let token = self.token(instance_key(&self.addr, &next)?).await?;
         let alive = self.declare_alive(&next).await?;
+        // A serving governed interface's token, make-before-break too.
+        let mut governed = Vec::with_capacity(remints.len());
+        for r in &remints {
+            governed.push(r.make(&next).await?);
+        }
         // Break: the old tokens, then the old descriptor queryable.
         let old_alive = std::mem::replace(&mut self.alive, alive);
         let old_token = self.instance_token.replace(token);
         let old_q = self.descriptor_q.replace(q);
-        self.descriptor = current;
+        self.served.set_current(current);
         self.instance = next.clone();
+        self.sync_served();
         // telemetry.v1 §2.9: every metric writer's epoch moves with it.
         self.epochs.set_instance(next.clone());
+        let old_governed: Vec<LivelinessToken> = remints
+            .iter()
+            .zip(governed)
+            .filter_map(|(r, t)| r.swap(t))
+            .collect();
         for (_, t) in old_alive {
+            t.undeclare().await.map_err(zenoh)?;
+        }
+        for t in old_governed {
             t.undeclare().await.map_err(zenoh)?;
         }
         if let Some(t) = old_token {
@@ -1357,6 +1587,7 @@ impl Service {
         if let Some(q) = old_q {
             q.undeclare().await.map_err(zenoh)?;
         }
+        drop(remints);
         Ok(next)
     }
 
@@ -1367,20 +1598,37 @@ impl Service {
     /// on it, if one did (`telemetry.v1` §2.9: a member exists from its first
     /// value, core §8.1); a token declared again is cycled, with a new
     /// epoch, which every metric writer of the member writes from then on.
+    ///
+    /// On a governed interface, only while the instance serves it
+    /// (`redundancy.v1` §2.12): [`Error::Standby`] otherwise, and a
+    /// step-down withdraws every member token, which the application
+    /// declares again as each member appears after a later takeover (§2.6
+    /// step 4).
     pub async fn declare_member(&mut self, iface: &IfaceId, value: &str) -> Result<InstanceId> {
         self.member_template(iface)?;
+        let gate = self.gate_of(iface);
+        if let Some(g) = &gate {
+            g.admit()?;
+        }
         let member = chunk_slug(value);
-        let epoch = if self.members.contains_key(&(iface.clone(), member.clone())) {
+        let held = match &gate {
+            Some(g) => g.holds_member(&member),
+            None => self.members.contains_key(&(iface.clone(), member.clone())),
+        };
+        let epoch = if held {
             self.epochs.cycled(iface, &member)
         } else {
             self.epochs.first_token(iface, &member)
         };
         let key = member_key(&self.addr, iface, &member, &epoch)?;
         let token = self.token(key).await?;
-        if let Some((_, old)) = self
-            .members
-            .insert((iface.clone(), member), (epoch.clone(), token))
-        {
+        let old = match &gate {
+            Some(g) => g.hold_member(member, epoch.clone(), token)?,
+            None => self
+                .members
+                .insert((iface.clone(), member), (epoch.clone(), token)),
+        };
+        if let Some((_, old)) = old {
             old.undeclare().await.map_err(zenoh)?;
         }
         Ok(epoch)
@@ -1395,7 +1643,11 @@ impl Service {
     /// Withdraws a member's token.
     pub async fn remove_member(&mut self, iface: &IfaceId, value: &str) -> Result<()> {
         let member = chunk_slug(value);
-        if let Some((_, t)) = self.members.remove(&(iface.clone(), member.clone())) {
+        let held = match self.gate_of(iface) {
+            Some(g) => g.take_member(&member),
+            None => self.members.remove(&(iface.clone(), member.clone())),
+        };
+        if let Some((_, t)) = held {
             self.epochs.removed(iface, &member);
             t.undeclare().await.map_err(zenoh)?;
         }
@@ -1406,6 +1658,11 @@ impl Service {
     /// undeclares the tokens, then the queryables, and waits for each.
     pub async fn close(mut self) -> Result<()> {
         self.closed.send_replace(true);
+        // redundancy.v1 (#841): every election stopped, its writes, then
+        // each governed interface's tokens, before the rest.
+        if let Some(r) = &self.redundancy {
+            r.shutdown().await?;
+        }
         for (_, t) in std::mem::take(&mut self.alive) {
             t.undeclare().await.map_err(zenoh)?;
         }
@@ -1414,6 +1671,9 @@ impl Service {
         }
         if let Some(t) = self.instance_token.take() {
             t.undeclare().await.map_err(zenoh)?;
+        }
+        if let Some(r) = &self.redundancy {
+            r.unexpose_all().await?;
         }
         // config.v1: its operations go with the tokens, so a restarted
         // instance never shares a key with this one (§2.12).
@@ -1444,6 +1704,9 @@ impl Service {
         self.impls
             .iter()
             .filter(|s| !self.config.tokenless.contains(s.imp.iface()))
+            // redundancy.v1 §2.6: a governed interface's token is its
+            // election's, declared last at a takeover.
+            .filter(|s| s.gate.is_none())
             .filter(|s| exposes_any(s, &self.config.capabilities))
             .map(|s| s.imp.iface().clone())
             .collect()
@@ -1475,16 +1738,14 @@ impl Service {
             .map_err(zenoh)
     }
 
-    fn encode_descriptor(&self, instance: &InstanceId) -> Result<Vec<u8>> {
-        let zid = self.session.zid().to_string();
-        let id = descriptor::Identity {
-            addr: &self.addr,
-            minted: self.minted.is_some(),
-            host: self.host.as_deref(),
-            zid: &zid,
-        };
-        let d = descriptor::build(&id, instance, &self.impls, &self.roles, &self.config);
-        descriptor::encode_checked(&d, &self.impls)
+    /// Copies what the descriptor is made of into [`Served`], after a
+    /// change of it.
+    fn sync_served(&self) {
+        let mut i = self.served.inputs.lock().expect("not poisoned");
+        i.instance = self.instance.clone();
+        i.impls = self.impls.clone();
+        i.roles = self.roles.clone();
+        i.config = self.config.clone();
     }
 
     /// Declares the descriptor's queryable on `instance`'s key and puts the
@@ -1493,7 +1754,7 @@ impl Service {
         &self,
         instance: &InstanceId,
     ) -> Result<(Queryable<()>, Arc<RwLock<Arc<[u8]>>>)> {
-        let bytes: Arc<[u8]> = self.encode_descriptor(instance)?.into();
+        let bytes: Arc<[u8]> = self.served.encode(instance)?.into();
         let key = instance_key(&self.addr, instance)?.into_keyexpr();
         let current = Arc::new(RwLock::new(Arc::clone(&bytes)));
         let shared = Arc::clone(&current);
@@ -1523,15 +1784,89 @@ impl Service {
     /// Re-encodes the descriptor, swaps it into the queryable and puts it
     /// (§3.3: put on every change).
     fn publish_descriptor(&mut self) -> Result<()> {
-        let bytes: Arc<[u8]> = self.encode_descriptor(&self.instance)?.into();
-        *self.descriptor.write().expect("not poisoned") = Arc::clone(&bytes);
-        let key = instance_key(&self.addr, &self.instance)?.into_keyexpr();
+        self.served.publish()
+    }
+}
+
+/// What the descriptor is made of (§3.3), as [`Served`] keeps it.
+struct Inputs {
+    addr: Addr,
+    minted: bool,
+    host: Option<String>,
+    instance: InstanceId,
+    impls: Vec<ImplState>,
+    roles: Vec<Role>,
+    config: ServiceConfig,
+}
+
+/// The descriptor as served (§3.3), and what it is made of: the service's,
+/// shared with `redundancy.v1`'s elections, which put it again at a
+/// takeover and a step-down, each governed interface's mark read from its
+/// gate (§2.6 step 3, §2.9 step 3).
+pub(crate) struct Served {
+    session: zenoh::Session,
+    inputs: Mutex<Inputs>,
+    /// What the current descriptor queryable answers.
+    current: Mutex<Arc<RwLock<Arc<[u8]>>>>,
+    /// One encode-and-put at a time, so that puts go out in order.
+    putting: Mutex<()>,
+}
+
+impl Served {
+    /// The descriptor of `instance`, encoded and checked.
+    fn encode(&self, instance: &InstanceId) -> Result<Vec<u8>> {
+        let i = self.inputs.lock().expect("not poisoned");
+        let zid = self.session.zid().to_string();
+        let id = descriptor::Identity {
+            addr: &i.addr,
+            minted: i.minted,
+            host: i.host.as_deref(),
+            zid: &zid,
+        };
+        let d = descriptor::build(&id, instance, &i.impls, &i.roles, &i.config);
+        descriptor::encode_checked(&d, &i.impls)
+    }
+
+    /// The bytes the current queryable answers.
+    fn bytes(&self) -> Arc<[u8]> {
+        let current = self.current.lock().expect("not poisoned");
+        Arc::clone(&current.read().expect("not poisoned"))
+    }
+
+    fn set_current(&self, current: Arc<RwLock<Arc<[u8]>>>) {
+        *self.current.lock().expect("not poisoned") = current;
+    }
+
+    /// Re-encodes the descriptor, swaps it into the queryable and puts it
+    /// (§3.3: put on every change).
+    pub(crate) fn publish(&self) -> Result<()> {
+        let _putting = self.putting.lock().expect("not poisoned");
+        let (instance, addr) = {
+            let i = self.inputs.lock().expect("not poisoned");
+            (i.instance.clone(), i.addr.clone())
+        };
+        let bytes: Arc<[u8]> = self.encode(&instance)?.into();
+        {
+            let current = self.current.lock().expect("not poisoned");
+            *current.write().expect("not poisoned") = Arc::clone(&bytes);
+        }
+        let key = instance_key(&addr, &instance)?.into_keyexpr();
         self.session
             .put(key, bytes.to_vec())
             .encoding(Encoding::APPLICATION_JSON)
             .timestamp(self.session.new_timestamp())
             .wait()
             .map_err(zenoh)
+    }
+}
+
+/// Stops a service's elections and drops their tokens first when the
+/// service drops without [`Service::close`].
+struct RedundancyGuard(crate::redundancy::Redundancy);
+
+impl Drop for RedundancyGuard {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -1597,6 +1932,14 @@ impl ServiceBuilder {
 impl Service {
     pub(crate) fn session(&self) -> &zenoh::Session {
         &self.session
+    }
+
+    pub(crate) fn served(&self) -> Arc<Served> {
+        Arc::clone(&self.served)
+    }
+
+    pub(crate) fn store(&self) -> Arc<Store> {
+        Arc::clone(&self.store)
     }
 
     pub(crate) fn config(&self) -> &ServiceConfig {

@@ -20,7 +20,9 @@ use zenoh::qos::{CongestionControl, Priority, Reliability};
 use zenoh_ext::{AdvancedPublisher, AdvancedPublisherBuilderExt, CacheConfig, MissDetectionConfig};
 
 use crate::budget::Budget;
+use crate::call::BoxFuture;
 use crate::error::{Error, Result, zenoh};
+use crate::gate::{Gate, Slot};
 use crate::qos;
 use crate::telemetry::{Meter, Pending, Reason};
 
@@ -68,6 +70,93 @@ enum Inner {
     Advanced(AdvancedPublisher<'static>),
 }
 
+impl Inner {
+    async fn undeclare(self) -> Result<()> {
+        match self {
+            Self::Plain(p) => p.undeclare().await,
+            Self::Advanced(p) => p.undeclare().await,
+        }
+        .map_err(zenoh)
+    }
+}
+
+/// A write admitted by its writer's gate ([`Writer::serving`]), held until
+/// it is published: the proof every stamped put and delete takes, so that
+/// none reaches a governed interface's keys outside its gate
+/// (`redundancy.v1` §2.4, §2.9).
+pub(crate) struct Admitted<'a>(#[allow(dead_code)] Option<tokio::sync::RwLockReadGuard<'a, ()>>);
+
+/// A member's publisher, declared at once, or only while its governed
+/// interface serves ([`crate::gate`], `redundancy.v1` §2.4): a slot of its
+/// gate. Puts hold it for reading, so that undeclaring it waits for the
+/// puts in flight.
+pub(crate) struct PubSlot {
+    session: zenoh::Session,
+    key: OwnedKeyExpr,
+    encoding: Encoding,
+    data: Data,
+    inner: tokio::sync::RwLock<Option<Inner>>,
+}
+
+impl PubSlot {
+    async fn declare_now(&self) -> Result<()> {
+        let mut held = self.inner.write().await;
+        if held.is_some() {
+            return Ok(());
+        }
+        let d = &self.data;
+        let key = self.key.clone();
+        *held = Some(match &d.history {
+            None => Inner::Plain(
+                self.session
+                    .declare_publisher(key)
+                    .encoding(self.encoding.clone())
+                    .reliability(qos::reliability(d.reliability))
+                    .congestion_control(qos::congestion(d.congestion))
+                    .priority(qos::priority(d.priority))
+                    .express(d.express)
+                    .await
+                    .map_err(zenoh)?,
+            ),
+            Some(h) => {
+                let mut b = self
+                    .session
+                    .declare_publisher(key)
+                    .encoding(self.encoding.clone())
+                    .reliability(qos::reliability(d.reliability))
+                    .congestion_control(qos::congestion(d.congestion))
+                    .priority(qos::priority(d.priority))
+                    .express(d.express)
+                    .cache(CacheConfig::default().max_samples(h.depth as usize))
+                    .publisher_detection();
+                if let Some(ms) = h.miss_detection_ms {
+                    b = b.sample_miss_detection(
+                        MissDetectionConfig::default().heartbeat(Duration::from_millis(ms)),
+                    );
+                }
+                Inner::Advanced(b.await.map_err(zenoh)?)
+            }
+        });
+        Ok(())
+    }
+}
+
+impl Slot for PubSlot {
+    fn expose(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(self.declare_now())
+    }
+
+    fn unexpose(&self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            let inner = self.inner.write().await.take();
+            match inner {
+                Some(i) => i.undeclare().await,
+                None => Ok(()),
+            }
+        })
+    }
+}
+
 /// A publisher on one stream or state member, with the contract's QoS and
 /// `Encoding` (§2.4, §7.2). With `history` in the contract it is zenoh-ext's
 /// advanced publisher (§2.5): a cache of that depth, publisher detection,
@@ -83,8 +172,15 @@ enum Inner {
 /// writer put in its epoch, or an in-band epoch other than the owner's is
 /// refused, [`Error::Telemetry`], and nothing is published; a counter's or
 /// histogram's epoch the application left out is written in.
+///
+/// On a governed interface (`redundancy.v1`, [`crate::redundancy`]), its
+/// publisher is declared only while the instance serves the interface, and
+/// a put while it stands by is refused, [`Error::Standby`], with nothing
+/// published (§2.4).
 pub struct Writer {
-    inner: Inner,
+    key: zenoh::key_expr::KeyExpr<'static>,
+    slot: Arc<PubSlot>,
+    gate: Option<Arc<Gate>>,
     encoding: Encoding,
     wire: Option<WireEncoding>,
     json_typed: bool,
@@ -99,6 +195,18 @@ impl Writer {
         r: &Resource,
         values: &Bindings,
     ) -> Result<Self> {
+        Self::declare_gated(session, key, r, values, None).await
+    }
+
+    /// [`Writer::declare`] on a governed interface's `gate`: its publisher
+    /// declared only while the gate is open.
+    pub(crate) async fn declare_gated(
+        session: &zenoh::Session,
+        key: OwnedKeyExpr,
+        r: &Resource,
+        values: &Bindings,
+        gate: Option<Arc<Gate>>,
+    ) -> Result<Self> {
         let d = data(r)?;
         if r.kind == Kind::Event {
             return Err(Error::Contract(format!(
@@ -107,41 +215,24 @@ impl Writer {
             )));
         }
         let encoding = wire_encoding(&d.type_, d.encoding, values);
-        let inner = match &d.history {
-            None => Inner::Plain(
-                session
-                    .declare_publisher(key)
-                    .encoding(encoding.clone())
-                    .reliability(qos::reliability(d.reliability))
-                    .congestion_control(qos::congestion(d.congestion))
-                    .priority(qos::priority(d.priority))
-                    .express(d.express)
-                    .await
-                    .map_err(zenoh)?,
-            ),
-            Some(h) => {
-                let mut b = session
-                    .declare_publisher(key)
-                    .encoding(encoding.clone())
-                    .reliability(qos::reliability(d.reliability))
-                    .congestion_control(qos::congestion(d.congestion))
-                    .priority(qos::priority(d.priority))
-                    .express(d.express)
-                    .cache(CacheConfig::default().max_samples(h.depth as usize))
-                    .publisher_detection();
-                if let Some(ms) = h.miss_detection_ms {
-                    b = b.sample_miss_detection(
-                        MissDetectionConfig::default().heartbeat(Duration::from_millis(ms)),
-                    );
-                }
-                Inner::Advanced(b.await.map_err(zenoh)?)
-            }
-        };
+        let slot = Arc::new(PubSlot {
+            session: session.clone(),
+            key: key.clone(),
+            encoding: encoding.clone(),
+            data: d.clone(),
+            inner: tokio::sync::RwLock::new(None),
+        });
+        match &gate {
+            None => slot.declare_now().await?,
+            Some(g) => g.join(Arc::clone(&slot) as Arc<dyn Slot>).await?,
+        }
         if r.token == zenkey_model::grammar::KindToken::ExplicitStream {
             crate::shm::warn_if_memlock_low();
         }
         Ok(Self {
-            inner,
+            key: zenoh::key_expr::KeyExpr::from(key),
+            slot,
+            gate,
             encoding,
             wire: d.encoding,
             json_typed: matches!(d.type_, TypeId::JsonSchema { .. }),
@@ -161,6 +252,26 @@ impl Writer {
     pub(crate) fn metered(mut self, meter: Option<Meter>) -> Self {
         self.meter = meter;
         self
+    }
+
+    /// The governed interface's gate, when its interface is one
+    /// (`redundancy.v1`).
+    pub(crate) fn gate(&self) -> Option<&Arc<Gate>> {
+        self.gate.as_ref()
+    }
+
+    /// A write admitted by the governed interface's gate, held until it is
+    /// published: always, on an interface that is not governed; while it
+    /// serves, on one that is (`redundancy.v1` §2.4). Every publication of
+    /// the writer takes one: [`Writer::put_with`] itself, and the stamped
+    /// puts and deletes ([`Writer::put_stamped`], [`Writer::delete_stamped`])
+    /// from their caller, which needs it to call them. A step-down's
+    /// [`Gate::close_writes`] waits for every one held.
+    pub(crate) async fn serving(&self) -> Result<Admitted<'_>> {
+        match &self.gate {
+            Some(g) => Ok(Admitted(Some(g.write().await?))),
+            None => Ok(Admitted(None)),
+        }
     }
 
     /// The resource's `telemetry.v1` declaration, when it is a metric
@@ -231,26 +342,22 @@ impl Writer {
     /// The member's key expression.
     #[must_use]
     pub fn key_expr(&self) -> &zenoh::key_expr::KeyExpr<'static> {
-        match &self.inner {
-            Inner::Plain(p) => p.key_expr(),
-            Inner::Advanced(p) => p.key_expr(),
-        }
+        &self.key
     }
 
-    /// The plain zenoh publisher, when the resource has no `history`.
-    #[must_use]
-    pub fn publisher(&self) -> Option<&Publisher<'static>> {
-        match &self.inner {
-            Inner::Plain(p) => Some(p),
-            Inner::Advanced(_) => None,
-        }
+    /// Whether its publisher is declared now: always, on an interface that
+    /// is not governed; while the instance serves, on one that is.
+    pub async fn is_declared(&self) -> bool {
+        self.slot.inner.read().await.is_some()
     }
 
-    /// Whether a subscriber matches (zenoh's matching status).
+    /// Whether a subscriber matches (zenoh's matching status); `false`
+    /// while its governed interface stands by, with no publisher declared.
     pub async fn matching(&self) -> Result<bool> {
-        Ok(match &self.inner {
-            Inner::Plain(p) => p.matching_status().await.map_err(zenoh)?.matching(),
-            Inner::Advanced(p) => p.matching_status().await.map_err(zenoh)?.matching(),
+        Ok(match &*self.slot.inner.read().await {
+            None => false,
+            Some(Inner::Plain(p)) => p.matching_status().await.map_err(zenoh)?.matching(),
+            Some(Inner::Advanced(p)) => p.matching_status().await.map_err(zenoh)?.matching(),
         })
     }
 
@@ -264,48 +371,81 @@ impl Writer {
     /// contract's `attachment` type and `attachment_encoding` (§2.3, §7.2).
     /// Refused, nothing published, when the member would be a new live one
     /// at the bound (§2.7), or, on a metric resource, when `telemetry.v1`
-    /// forbids the sample ([`crate::telemetry`]).
+    /// forbids the sample ([`crate::telemetry`]), or on a governed
+    /// interface the instance stands by on ([`Error::Standby`]).
     pub async fn put_with(
         &self,
         payload: impl Into<ZBytes>,
         attachment: Option<impl Into<ZBytes>>,
     ) -> Result<()> {
+        let _write = self.serving().await?;
         let (payload, attachment, pending) = self
             .meter(payload.into(), attachment.map(Into::into))
             .await?;
+        let held = self.slot.inner.read().await;
+        let Some(inner) = &*held else {
+            return Err(self.standby());
+        };
         self.admit()?;
-        match &self.inner {
+        match inner {
             Inner::Plain(p) => p.put(payload).attachment(attachment).await,
             Inner::Advanced(p) => p.put(payload).attachment(attachment).await,
         }
         .map_err(zenoh)?;
+        drop(held);
         if let Some(p) = pending {
             p.commit();
         }
         Ok(())
     }
 
-    /// Puts with the owner's stamp (state, S1).
+    fn standby(&self) -> Error {
+        match &self.gate {
+            Some(g) => Error::Standby(g.iface().clone()),
+            None => Error::Zenoh(format!("{}: no publisher declared", self.key)),
+        }
+    }
+
+    /// Puts with the owner's stamp (state, S1), under the write `admitted`
+    /// by [`Writer::serving`], held from the stamp's minting to here.
     pub(crate) async fn put_stamped(
         &self,
+        _admitted: &Admitted<'_>,
         payload: ZBytes,
         attachment: Option<ZBytes>,
         ts: zenoh::time::Timestamp,
     ) -> Result<()> {
-        match &self.inner {
-            Inner::Plain(p) => p.put(payload).attachment(attachment).timestamp(ts).await,
-            Inner::Advanced(p) => p.put(payload).attachment(attachment).timestamp(ts).await,
+        let held = self.slot.inner.read().await;
+        match &*held {
+            None => Err(self.standby()),
+            Some(Inner::Plain(p)) => p
+                .put(payload)
+                .attachment(attachment)
+                .timestamp(ts)
+                .await
+                .map_err(zenoh),
+            Some(Inner::Advanced(p)) => p
+                .put(payload)
+                .attachment(attachment)
+                .timestamp(ts)
+                .await
+                .map_err(zenoh),
         }
-        .map_err(zenoh)
     }
 
-    /// Deletes with the owner's stamp (state, S1).
-    pub(crate) async fn delete_stamped(&self, ts: zenoh::time::Timestamp) -> Result<()> {
-        match &self.inner {
-            Inner::Plain(p) => p.delete().timestamp(ts).await,
-            Inner::Advanced(p) => p.delete().timestamp(ts).await,
+    /// Deletes with the owner's stamp (state, S1), under the write
+    /// `admitted` as [`Writer::put_stamped`].
+    pub(crate) async fn delete_stamped(
+        &self,
+        _admitted: &Admitted<'_>,
+        ts: zenoh::time::Timestamp,
+    ) -> Result<()> {
+        let held = self.slot.inner.read().await;
+        match &*held {
+            None => Err(self.standby()),
+            Some(Inner::Plain(p)) => p.delete().timestamp(ts).await.map_err(zenoh),
+            Some(Inner::Advanced(p)) => p.delete().timestamp(ts).await.map_err(zenoh),
         }
-        .map_err(zenoh)
     }
 
     /// A value of this resource's JSON Schema type, in its wire encoding.
@@ -351,6 +491,7 @@ pub struct EventWriter {
     priority: Priority,
     express: bool,
     budget: Option<Arc<Budget>>,
+    gate: Option<Arc<Gate>>,
 }
 
 impl EventWriter {
@@ -373,12 +514,20 @@ impl EventWriter {
             priority: qos::priority(d.priority),
             express: d.express,
             budget: None,
+            gate: None,
         })
     }
 
     /// Keeps `budget`, its resource's in its service (§2.7).
     pub(crate) fn bounded(mut self, budget: Option<Arc<Budget>>) -> Self {
         self.budget = budget;
+        self
+    }
+
+    /// Writes only while its governed interface serves (`redundancy.v1`
+    /// §2.4): refused, [`Error::Standby`], while it stands by.
+    pub(crate) fn gated(mut self, gate: Option<Arc<Gate>>) -> Self {
+        self.gate = gate;
         self
     }
 
@@ -412,6 +561,10 @@ impl EventWriter {
         attachment: Option<impl Into<ZBytes>>,
         at: SystemTime,
     ) -> Result<String> {
+        let _write = match &self.gate {
+            Some(g) => Some(g.write().await?),
+            None => None,
+        };
         if let Some(b) = &self.budget {
             b.admit(&self.prefix, Instant::now())?;
         }

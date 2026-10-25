@@ -66,8 +66,8 @@
 //! check until it is published, so two puts on one writer reach the bus in
 //! the order they were checked. A second writer of the same member keeps
 //! its own, and a raw publisher ([`crate::ServiceBuilder::declare_publisher`],
-//! [`crate::writer::Writer::publisher`], the session) checks nothing:
-//! keeping the text with either is its caller's.
+//! the session) checks nothing: keeping the text with either is its
+//! caller's.
 //!
 //! **No off switch.** A writer of a metric resource always checks: an
 //! owner the text does not allow is what a test writes from its session,

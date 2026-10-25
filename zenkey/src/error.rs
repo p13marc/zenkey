@@ -80,6 +80,14 @@ pub enum Error {
          zenoh would answer it at once, complete and empty (core §8.1)"
     )]
     CutOff { selector: String },
+    /// A write of a governed interface's keys, or a member token of it,
+    /// while this instance stands by on it (`redundancy.v1` §2.4, #841):
+    /// refused, with nothing published. Its keys are the incumbent's.
+    #[error(
+        "{0} stands by: this instance does not serve it, and writes none of its keys \
+         (redundancy.v1 §2.4)"
+    )]
+    Standby(IfaceId),
     /// A payload does not encode or decode as its declared type (§7.2): a
     /// value reply or a sample that is not what the contract says, or a
     /// value its codec cannot write.
