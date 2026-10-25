@@ -804,10 +804,10 @@ def section10(ctx: Ctx) -> None:
         bus.close()
 
 
-#: the Rust tool (§9): ``--zenctl`` or ``ZK2PY_ZENCTL``, else this path;
-#: ``--no-zenctl`` runs zk2py's tool alone, said loudly. A path that is not
-#: a file fails §9, never a quiet pass.
-ZENCTL = Path(os.environ.get("ZK2PY_ZENCTL", "/srv/dev/repos/zenkey-wt/.s840/bin/zenctl-dd"))
+#: the Rust tool (§9): ``--zenctl`` or ``ZK2PY_ZENCTL``, and no default;
+#: ``--no-zenctl`` runs zk2py's tool alone, said loudly. Neither given, or a
+#: path that is not a file, fails §9 and the shapes, never a quiet pass.
+ZENCTL: Path | None = Path(os.environ["ZK2PY_ZENCTL"]) if os.environ.get("ZK2PY_ZENCTL") else None
 #: set by --no-zenctl
 ZENCTL_OFF = False
 
@@ -817,6 +817,10 @@ def _zenctl_ready(rp: Report, sec: str, checks: int) -> bool:
     --no-zenctl, a NOT RUN line counting its checks; else a failure."""
     if ZENCTL_OFF:
         rp.cannot(sec, f"zenctl not asked (--no-zenctl): {checks} of the section's checks not run")
+        return False
+    if ZENCTL is None:
+        rp.check(sec, "the Rust tool is given (--zenctl or ZK2PY_ZENCTL; --no-zenctl to run without it)",
+                 False, "neither given")
         return False
     if not ZENCTL.is_file():
         rp.check(sec, f"the Rust tool is at {ZENCTL} (--zenctl, ZK2PY_ZENCTL; --no-zenctl to run without it)",
@@ -1057,6 +1061,34 @@ def section9(ctx: Ctx) -> None:
         rp.note(sec, "the two tools agree on every step")
 
 
+def _row_of_mine(r: Any) -> dict[str, Any]:
+    """zk2py's row, in the members zenctl's ``desired`` row shows."""
+    from . import desired as ds
+
+    if r is None:
+        return {}
+    rep = r.report_reply
+    return {"listing": r.listing, "slice": r.slice, "slice_from": r.slice_from, "author": r.author,
+            "author_presence": r.author_presence, "author_current": r.author_current,
+            "report": "unreadable" if rep and rep.startswith("unreadable:") else rep,
+            "binding_invalid": [x for x in r.problems if x in ds.BINDING_REASONS],
+            "declaration_invalid": [y for x in r.problems if x.startswith("declaration_invalid:")
+                                    for y in x.split(":", 1)[1].split(",")]}
+
+
+def _row_of_zenctl(z: Any) -> dict[str, Any]:
+    """zenctl's ``desired`` row (``--format json``), in the same members."""
+    if not isinstance(z, dict):
+        return {}
+    a = z.get("author") or {}
+    rep = z.get("report") or {}
+    return {"listing": z.get("listing"), "slice": z.get("slice"), "slice_from": z.get("slice_from"),
+            "author": a.get("address"), "author_presence": a.get("presence"), "author_current": a.get("current"),
+            "report": "unreadable" if rep.get("unreadable") else rep.get("key"),
+            "binding_invalid": list(z.get("binding_invalid") or []),
+            "declaration_invalid": list(z.get("declaration_invalid") or [])}
+
+
 class Fake:
     """A test session standing in for a target or an author (§9's shapes no
     scenario makes): an instance token, a descriptor it writes, and state
@@ -1103,12 +1135,13 @@ def section_tool_shapes(ctx: Ctx) -> None:
     makes, built by test sessions, asked of both tools with the contracts
     held offline (core §8.5), each against the text."""
     from . import desired_tool as dt
+    from .contract import load_contract
     from .desired_live import contract
 
-    sec, rp = "§9 beyond: the tool's 0.4 readings", ctx.report
+    sec, rp = "§9 beyond: the tool's 0.4 and 0.5 readings", ctx.report
     if ctx.author_impl != "zk2py" or ctx.target_impl != "zk2py":
         return  # no party runs here: once is enough
-    use_z = _zenctl_ready(rp, sec, 11)
+    use_z = _zenctl_ready(rp, sec, 46)
     worker, tasking, two = contract("worker.v1"), contract("tasking.v1"), contract("zk2py_worker2.v1")
     offline = str(REPO / "impl" / "python" / "interop" / "desired")
 
@@ -1186,7 +1219,108 @@ def section_tool_shapes(ctx: Ctx) -> None:
          target_doc([AUTHOR]), {rp_prefix: [(conv, True)]}, author_doc(), {d_prefix: [(doc, True)]},
          {q: ("unobservable", "no_report") for q in ("converged", "refused", "last_known", "in_force")}),
     ]
-    disagree = []
+    # 0.5's shapes (F-210, F-213): a role naming two templates, read from the
+    # target alone (four candidates); a held revision declaring the resource
+    # explicit. Each with the contracts zk2py's tool and zenctl hold.
+    three = contract("zk2py_worker3.v1")
+    explicit = load_contract(REPO / "impl/python/interop/desired-explicit/tasking.v1.toml", spec_dir=REPO / "spec")
+    three_a = f"zk2/{TARGET}/zk2py_worker3.v1/state/desired/task"
+    three_b = f"zk2/{TARGET}/zk2py_worker3.v1/state/desired/again"
+
+    def claim(k: str, stamp: str = "100/a1") -> bytes:
+        return json.dumps({"key": k, "source": "desired", "in_force": {"stamp": stamp, "revision": 1},
+                           "observed": {"stamp": stamp, "revision": 1}, "outcome": "converged"}).encode()
+
+    p3 = str(REPO / "impl/python/interop/desired/zk2py_worker3.v1.toml")
+    p1 = str(REPO / "impl/python/interop/desired/worker.v1.toml")
+    px = str(REPO / "impl/python/interop/desired-explicit/tasking.v1.toml")
+    plans_at = "zk2/lab/author/tasking.v1/@state/plans/lab/worker"
+    absent_answers = {"converged": ("not_asked", "author_absent"), "refused": ("no", "converged"),
+                      "last_known": ("no", "current"), "in_force": ("yes", "desired")}
+    no_report = {q: ("unobservable", "no_report") for q in ("converged", "refused", "last_known", "in_force")}
+    invalid = {q: ("unobservable", "report_invalid") for q in ("converged", "refused", "last_known", "in_force")}
+    #: each shape's contracts by its name: (zk2py's, zenctl's --contracts,
+    #: the role asked); a shape not named here holds round 57's
+    extra: dict[str, tuple[list[Any], list[str], str]] = {}
+    from_three, held_explicit = ([three], [p3], "task"), ([worker, explicit], [p1, px], "task")
+    rules05 = [
+        ("two templates, the author absent, none of its interface in hand: four candidates, the report claiming "
+         "@state plans is the slice (0.5, F-210)", target_doc([AUTHOR], three), {three_a: [(claim(plans_at), True)]},
+         absent, {}, absent_answers, from_three),
+        ("two templates, no report claiming a candidate: no_report (0.5, F-210)", target_doc([AUTHOR], three),
+         {three_a: [(claim("zk2/lab/author/tasking.v1/state/other/lab/worker"), True)]}, absent, {}, no_report,
+         from_three),
+        ("two templates, two reports claiming two candidates and differing: report_invalid (0.5, F-210, §2.10)",
+         target_doc([AUTHOR], three), {three_a: [(claim(D), True)], three_b: [(claim(plans_at), True)]}, absent, {},
+         invalid, from_three),
+        ("the author absent, a held revision declaring the resource explicit, the report under state: the "
+         "held @state slice, which no report claims: no_report (0.5, F-213)", target_doc([AUTHOR]),
+         {rp_prefix: [(conv, True)]}, absent, {}, no_report, held_explicit),
+        ("the author absent, a held revision declaring the resource explicit, the report under @state: the "
+         "report (0.5, F-213)", target_doc([AUTHOR]), {rp_prefix: [(at_conv, True)]}, absent, {}, absent_answers,
+         held_explicit),
+    ]
+    for name, tdoc, tans, adoc, aans, want, how in rules05:
+        shapes.append((name, tdoc, tans, adoc, aans, want))
+        extra[name] = how
+    # Shapes the text does not state (F-217, F-218), and a role naming every
+    # resource: each answered as zk2py reads it, which the reference shares.
+    watcher, everything = contract("zk2py_watcher.v1"), contract("zk2py_workerall.v1")
+    tasking2, four = contract("zk2py_tasking2.v1"), contract("zk2py_worker4.v1")
+    pd = REPO / "impl/python/interop/desired"
+    pw, pall, pt2, p4 = (str(pd / f"{n}.toml") for n in ("zk2py_watcher.v1", "zk2py_workerall.v1",
+                                                         "zk2py_tasking2.v1", "zk2py_worker4.v1"))
+    pt = str(pd / "tasking.v1.toml")
+
+    def doc_of(c: Any, role: str, iface: str, params: dict[str, str]) -> dict[str, Any]:
+        return {"format": "zk2-descriptor/0.1", "service": TARGET, "instance": "7" * 16,
+                "interfaces": [{"iface": c.interface, "contract": c.fingerprint, "minor": 0}],
+                "requires": [{"role": role, "interface": iface, "declared_by": c.interface, "bindings": [AUTHOR],
+                              "params": params, "optional": True}],
+                "profiles": ["desired.v1"]}
+
+    selfs = {"system": "self.system", "service": "self.service"}
+    a_worker = {"format": "zk2-descriptor/0.1", "service": AUTHOR, "instance": "8" * 16,
+                "interfaces": [{"iface": "worker.v1", "contract": worker.fingerprint, "minor": 0}],
+                "profiles": ["desired.v1"]}
+    a_t2 = {"format": "zk2-descriptor/0.1", "service": AUTHOR, "instance": "8" * 16,
+            "interfaces": [{"iface": "zk2py_tasking2.v1", "contract": tasking2.fingerprint, "minor": 0}],
+            "profiles": ["desired.v1"]}
+    t2_key = "zk2/lab/author/zk2py_tasking2.v1/state/{}/lab/worker"
+    four_rp = f"zk2/{TARGET}/zk2py_worker4.v1/state/desired/task"
+    all_rp = f"zk2/{TARGET}/zk2py_workerall.v1/state/desired/task"
+    not_a_target = {q: ("not_asked", "not_a_target") for q in ("converged", "refused", "last_known", "in_force")}
+    unstated = [
+        ("a role on no desired resource, its author's revision in hand: not a target (F-217)",
+         doc_of(watcher, "watch", "worker.v1", {}), {}, a_worker,
+         {"zk2/lab/author/worker.v1/state/running": [(doc, True)]}, not_a_target,
+         ([watcher, worker], [pw, p1], "watch")),
+        ("a role on no desired resource, its author absent, its revision held: the slice from the requirement, "
+         "no report (F-217)", doc_of(watcher, "watch", "worker.v1", {}), {}, absent, {}, no_report,
+         ([watcher, worker], [pw, p1], "watch")),
+        ("a role naming two desired resources, the author absent, none held: the report's claim of tasks is the "
+         "slice (F-218)", doc_of(four, "task", "zk2py_tasking2.v1", selfs),
+         {four_rp: [(claim(t2_key.format("tasks")), True)]}, absent, {}, absent_answers, ([four], [p4], "task")),
+        ("a role naming two desired resources, the author absent, its revision held: the slice its first, plans, "
+         "and the report of tasks none (F-218)", doc_of(four, "task", "zk2py_tasking2.v1", selfs),
+         {four_rp: [(claim(t2_key.format("tasks")), True)]}, absent, {}, no_report,
+         ([four, tasking2], [p4, pt2], "task")),
+        ("a role naming two desired resources, the author present: the slice plans, the report of tasks none "
+         "(F-218)", doc_of(four, "task", "zk2py_tasking2.v1", selfs),
+         {four_rp: [(claim(t2_key.format("tasks")), True)]}, a_t2,
+         {t2_key.format(w): [(doc, True)] for w in ("plans", "tasks")}, no_report, ([four, tasking2], [p4, pt2], "task")),
+        ("a role naming every resource, the author absent, none held: no template named, no candidate, no report",
+         doc_of(everything, "task", "tasking.v1", selfs), {all_rp: [(conv, True)]}, absent, {}, no_report,
+         ([everything], [pall], "task")),
+        ("a role naming every resource, the author absent, tasking.v1 held: its desired resource gives the slice "
+         "(F-213)", doc_of(everything, "task", "tasking.v1", selfs), {all_rp: [(conv, True)]}, absent, {},
+         absent_answers, ([everything, tasking], [pall, pt], "task")),
+    ]
+    for name, tdoc, tans, adoc, aans, want, how in unstated:
+        shapes.append((name, tdoc, tans, adoc, aans, want))
+        extra[name] = how
+    disagree: list[str] = []
+    row_notes: list[str] = []
     for name, tdoc, tans, adoc, aans, want in shapes:
         bus = Bus()
         fakes = []
@@ -1195,26 +1329,46 @@ def section_tool_shapes(ctx: Ctx) -> None:
             if adoc is not absent:
                 fakes.append(Fake(bus.ep1, AUTHOR, adoc, aans))
             time.sleep(0.5)
-            held = [tasking] if "not in hand" in name else [worker, two] if "no contract of its interface" in name \
-                else [worker, tasking, two]
-            mine = dt.read(bus.g1, TARGET, "task", contracts=held)
+            role = "task"
+            if name in extra:
+                held, paths, role = extra[name]
+            else:
+                held = [tasking] if "not in hand" in name else [worker, two] if "no contract of its interface" in \
+                    name else [worker, tasking, two]
+                paths = [str(REPO / "impl/python/interop/desired/tasking.v1.toml") if "not in hand" in name
+                         else p1 if "no contract of its interface" in name else offline]
+            mine = dt.read(bus.g1, TARGET, role, contracts=held)
             m = mine[0].pairs() if mine else None
-            rp.check(sec, f"zk2py's tool: {name}", m == want, f"{m}; problems {mine[0].problems if mine else None}")
+            rp.check(sec, f"zk2py's tool: {name}", m == want, f"{m}; problems {mine[0].problems if mine else None}; "
+                     f"slice {mine[0].slice if mine else None} from {mine[0].slice_from if mine else None}")
             if use_z:
-                path = (str(REPO / "impl/python/interop/desired/tasking.v1.toml") if "not in hand" in name
-                        else str(REPO / "impl/python/interop/desired/worker.v1.toml")
-                        if "no contract of its interface" in name else offline)
-                rc, zdoc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", "--contracts", path])
-                z = _z_answers(_z_row(zdoc))
+                cargs = [x for q in paths for x in ("--contracts", q)] + (["--role", role] if role != "task" else [])
+                rc, zdoc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *cargs])
+                z = _z_answers(_z_row(zdoc, role))
                 rp.check(sec, f"zenctl desired: {name}", z == want, f"{z}, exit {rc}{(' ' + err[-200:]) if z is None else ''}")
                 if z != m:
                     disagree.append(f"{name}: zk2py {m}, zenctl {z}")
+                # the whole row, beside the answers: what each tool says it read
+                mr, zr = _row_of_mine(mine[0] if mine else None), _row_of_zenctl(_z_row(zdoc, role))
+                differ = {k: (mr.get(k), zr.get(k)) for k in sorted(set(mr) | set(zr)) if mr.get(k) != zr.get(k)}
+                # Known, in the rows alone: for two reports that claim the slice
+                # and differ, zenctl's row carries no report, where §2.10 calls
+                # the two unreadable (zk2py's row); both answer report_invalid
+                known = bool(mine) and mine[0].report_reply == "unreadable:two_differ" and \
+                    differ == {"report": ("unreadable", None)}
+                if known:
+                    row_notes.append(name)
+                rp.check(sec, f"the two rows agree: {name}", not differ or known,
+                         f"differing (zk2py, zenctl): {differ}" + (" (known: two that differ)" if known else ""))
         finally:
             for f in fakes:
                 f.close()
             bus.close()
     rp.note(sec, ("the two tools disagree: " + "; ".join(disagree)) if disagree
             else "the two tools agree on every shape" if use_z else "zk2py's tool alone")
+    if row_notes:
+        rp.note(sec, f"their rows differ only where two reports claim the slice and differ ({len(row_notes)} "
+                     "shapes): zenctl's row carries no report, zk2py's says unreadable, as §2.10 does")
 
 
 #: zk2py's own, beyond scenarios.md: a document text each target reads as
@@ -1310,7 +1464,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--only", action="append", choices=list(SECTIONS), help="run only these sections (edges: "
                     "zk2py's own documents beyond scenarios.md)")
     ap.add_argument("--poll", action="store_true", help="targets read their author's presence on a period")
-    ap.add_argument("--zenctl", type=Path, help="§9's Rust tool (default: $ZK2PY_ZENCTL, else the round's build)")
+    ap.add_argument("--zenctl", type=Path, help="§9's Rust tool (else $ZK2PY_ZENCTL; no default: without either, "
+                    "§9 and the shapes fail unless --no-zenctl)")
     ap.add_argument("--no-zenctl", action="store_true", help="run §9 with zk2py's tool alone, its other checks "
                     "counted as not run")
     args = ap.parse_args(argv)

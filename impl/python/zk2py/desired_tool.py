@@ -1,7 +1,7 @@
-"""``desired.v1``'s tool on a bus (#609, round 57): §2.17's reading of a
-target's roles, and §5's four questions over it (:func:`zk2py.desired.conclude`).
+"""``desired.v1``'s tool on a bus (#609, rounds 57 and 59): §2.17's reading
+of a target's roles, and §5's four questions over it (:func:`zk2py.desired.conclude`).
 
-Written from ``spec/profiles/desired/v1.md`` (text 0.4), "What a tool reads
+Written from ``spec/profiles/desired/v1.md`` (text 0.5), "What a tool reads
 to answer", on core 0.39's presence rules: every presence read on a
 session that has never held a liveliness subscriber, a read not made read
 as one not complete, and an author absent only by a complete read.
@@ -9,24 +9,27 @@ as one not complete, and an author absent only by a complete read.
 Per role, in §2.17's order:
 1. the target's presence, and its descriptor;
 2. the role in the descriptor's ``requires``, and its binding (§2.3);
-3. the slice: from the author's contract, the revision its descriptor
-   names (held offline, else retrieved, core §8.4), else, with no
-   descriptor naming one, a revision of its interface held offline (the
-   reference's reading, F-213: one major's revisions declare the same
-   keys); or, with no contract of the author's in hand, from the target
-   alone, its requirement's template, its binding's parameters and the
-   kind token its report's key carries (0.4) — ``slice_from`` says which;
+3. the slice (:func:`zk2py.desired.take_slice`): from the author's
+   contract, the revision its descriptor names (held offline, else
+   retrieved, core §8.4); else, with none in hand, a revision of its
+   interface held offline that declares a desired resource the
+   requirement names (0.5, F-213); else from the target alone, each
+   template its requirement names under either kind token a candidate
+   (0.5, F-210) — ``slice_from`` says which;
 4. its report, found by type identity among the target's report
-   resources (§2.10), picked as 0.4 says;
+   resources, the reply chosen as §2.10 says
+   (:func:`zk2py.desired.which_report`: a candidate's readable claim, two
+   differing unreadable, F-212);
 5. the author's presence and its current version by S4's GET, the latest
    by stamp; an unstamped reply reads ``incomplete`` (0.4), a GET drawing
    nothing ``silent``; an absent author's archived last-known read beside,
    never current.
 
 :func:`watch` reads again every 500 ms over a window, and finds a target
-behind (0.4) only when every reading of it is not yet on one version of
-its author's for the whole window, or, on a clock trusted to the HLC
-delta, when that version is older than the window: never from one reading.
+behind only when every reading of it is not yet on one version of its
+author's for the whole window, or, on a clock trusted to the HLC delta,
+when that version was older than the window at its GET's answer (0.5):
+never from one reading.
 """
 
 from __future__ import annotations
@@ -59,6 +62,18 @@ class Row:
     author: str | None = None
     #: the author's current version's stamp, text (None when there is none)
     author_stamp: str | None = None
+    #: when the author's GET of the slice was answered, on the host's wall
+    #: clock (0.5: a version's age is taken then, never at the reading's end)
+    author_at: float | None = None
+    #: the author's presence (present, absent, incomplete) and what its GET
+    #: of the slice gave: put, delete, silent, incomplete, or not_read
+    author_presence: str | None = None
+    author_current: str | None = None
+    #: the slices the role was read through (one from a contract, the
+    #: candidates from the target alone), and the report found: the reply's
+    #: key, "unreadable" with why, or None
+    candidates: list[str] = field(default_factory=list)
+    report_reply: str | None = None
     #: an absent author's slice from an archive: (archive address, stamp,
     #: document), never current
     archived: list[tuple[str, str | None, Any]] = field(default_factory=list)
@@ -137,43 +152,22 @@ def _template_selector(template: str) -> str:
 
 
 def pick_report(replies: Iterable[tuple[str, bytes]], key: str) -> ds.ReportReading | None:
-    """§2.10 (0.4, "Which reply is the report"), among the replies of every
-    report resource of the target: the readable one whose ``key`` is the
-    slice's; two readable ones that claim it and differ, unreadable; with
-    none readable claiming it, one that does not read, unreadable too;
-    otherwise none (None)."""
-    claiming: list[ds.ReportReading] = []
-    unreadable = False
-    for _, payload in replies:
-        r = ds.read_report_bytes(payload)
-        if not r.readable:
-            unreadable = True
-            continue
-        if (r.report or {}).get("key") == key:
-            if all(x.report != r.report for x in claiming):
-                claiming.append(r)
-    if len(claiming) == 1:
-        return claiming[0]
-    if len(claiming) > 1:
-        return ds.ReportReading(False, ("schema",))  # the target says two things of one role
-    if unreadable:
-        return ds.ReportReading(False, ("json",))
-    return None
+    """§2.10 among the replies of every report resource of the target, for
+    one slice: :func:`zk2py.desired.which_report`, read as §2.17 step 3
+    reads it."""
+    return ds.which_report(replies, [key]).as_reading()
 
 
-def _slice_from_requirement(target: str, requirement: dict[str, Any], template: str, author: str,
-                            iface: str, explicit: bool) -> ds.Binding:
-    """0.4: "the template its requirement names (core §3.1), each parameter
-    filled as its binding says, and the kind token the report's key
-    carries". Each template parameter is a target parameter bound to its
-    ``self``; §2.3's checks are made over them."""
-    t = templates.parse_template(template)
-    params = dict(requirement.get("params") or {})
-    names = [p for p in t.param_names]
-    targets = tuple(ds.Target(p, params[p] if params.get(p) in (ds.SELF_SYSTEM, ds.SELF_SERVICE) else ds.EITHER)
-                    for p in names)
-    decl = ds.Declaration(ds.DECLARED, (), targets)
-    return ds.bind(decl, template, explicit, iface, target, {**requirement, "bindings": [author]})
+def _resource_shape(r: dict[str, Any]) -> dict[str, Any]:
+    """A canonical resource as declarations.json gives one: its kind, its
+    template, its parameters' types, its resolved annotations, explicit for
+    ``@state``."""
+    return {"kind": r.get("kind"), "template": r.get("template"), "params": dict(r.get("params") or {}),
+            "annotations": dict(r.get("annotations") or {}), "explicit": str(r.get("token", "")).startswith("@")}
+
+
+def _revision(canonical: dict[str, Any]) -> dict[str, Any]:
+    return {"resources": [_resource_shape(r) for r in canonical.get("resources") or [] if isinstance(r, dict)]}
 
 
 def read(session: zenoh.Session, target: str, role: str | None = None, *, contracts: Iterable[Any] = (),
@@ -182,12 +176,13 @@ def read(session: zenoh.Session, target: str, role: str | None = None, *, contra
     ``role``): §2.17's premises and §5's answers."""
     contracts = list(contracts)
     offline = {c.fingerprint: c.canonical for c in contracts}
-    # by interface, the latest minor held: with no descriptor naming the
-    # author's revision, one of its interface held offline gives the slice,
-    # every revision of one major declaring the same keys (F-213)
-    by_iface: dict[str, dict[str, Any]] = {}
-    for c in sorted(contracts, key=lambda c: c.minor or 0):
-        by_iface[c.interface] = c.canonical
+    # by interface, every revision held offline, the latest minor first:
+    # with no revision its descriptor names in hand, one of them that
+    # declares a desired resource the requirement names gives the slice
+    # (0.5, F-213: "any such revision gives the same slice")
+    by_iface: dict[str, list[dict[str, Any]]] = {}
+    for c in sorted(contracts, key=lambda c: -(c.minor or 0)):
+        by_iface.setdefault(c.interface, []).append(c.canonical)
     reads: list[tuple[str, str, str]] = []
     t_presence, instances = _presence(session, target, timeout, reads)
     if t_presence != ds.PRESENT:
@@ -210,8 +205,13 @@ def read(session: zenoh.Session, target: str, role: str | None = None, *, contra
         return [Row(target, role, "not_listed", r, ds.conclude(r), reads=reads)]
     for req in asked:
         try:
-            rows.append(_read_role(session, target, doc, req, offline, by_iface, timeout, clocks_synced, archives,
-                                   list(reads)))
+            got = _read_role(session, target, doc, req, offline, by_iface, timeout, clocks_synced, archives,
+                             list(reads))
+            # a role on no desired resource, its author's contract in hand
+            # saying so, is not this profile's: left out when no role was
+            # named, not a target of it when one was (§2.1)
+            if got is not None and (role is not None or "not_desired" not in got.problems):
+                rows.append(got)
         except (KeyError, IndexError, TypeError, AttributeError, ValueError) as e:
             # a descriptor or a contract of a shape no rule reads: unobservable
             r = ds.Reading(t_presence, None, None, "not_asked", ds.INCOMPLETE, None)
@@ -221,7 +221,7 @@ def read(session: zenoh.Session, target: str, role: str | None = None, *, contra
 
 
 def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: dict[str, Any],
-               offline: dict[str, dict[str, Any]], by_iface: dict[str, dict[str, Any]], timeout: float,
+               offline: dict[str, dict[str, Any]], by_iface: dict[str, list[dict[str, Any]]], timeout: float,
                clocks_synced: bool, archives: Iterable[str], reads: list) -> Row | None:
     name, iface = str(req.get("role")), str(req.get("interface"))
     bound = bool(req.get("bindings"))
@@ -231,8 +231,6 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
     problems: list[str] = []
     requires = t_canon.get("requires") if isinstance(t_canon, dict) else None
     rr = requires.get(name) if isinstance(requires, dict) else None
-    template = _first(rr.get("resources")) if isinstance(rr, dict) else None
-    template = template if isinstance(template, str) else None
 
     def row(r: ds.Reading, **kw: Any) -> Row:
         return Row(target, name, "bound" if bound else "unbound", r, ds.conclude(r), problems=problems,
@@ -248,30 +246,38 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
         problems.append("not_one_author")
         r = ds.Reading(ds.PRESENT, (True, True), None, "not_asked", ds.INCOMPLETE, None)
         return row(r)
-    # the author's contract, by its descriptor's revision
+    # the author's contract: the revision its descriptor names, held
+    # offline, else retrieved; else the revisions of its interface held
     a_presence, a_instances = _presence(session, author, timeout, reads)
     a_inst = _id_of(a_instances)
     a_doc = _descriptor(session, author, a_inst, timeout) if a_inst is not None else None
     a_entry = _entry(a_doc, iface)
-    a_canon, how = _contract(session, iface, None if a_entry is None else a_entry.get("contract"), offline, timeout)
-    if a_canon is None and a_entry is None:
-        held = by_iface.get(iface)
-        if held is not None:
-            a_canon, how = held, "offline"
-    binding, slice_from = None, None
-    if a_canon is not None and template is not None:
-        res = next((x for x in a_canon.get("resources") or [] if x.get("template") == template
-                    and x.get("token") in ("state", "@state")), None)
-        if res is not None:
-            decl = ds.declare(res["token"], res["template"], res.get("annotations") or {},
-                              dict(res.get("params") or {}))
-            if decl.declaration == ds.DECLARED:
-                binding = ds.bind(decl, template, res["token"] == "@state", iface, target, req)
-                slice_from = "offline_contract" if how == "offline" else "author_contract"
-            else:
-                problems.append("declaration_invalid:" + ",".join(decl.reasons))
+    a_canon, _ = _contract(session, iface, None if a_entry is None else a_entry.get("contract"), offline, timeout)
+    named = _revision(a_canon) if isinstance(a_canon, dict) else None
+    held = [_revision(c) for c in by_iface.get(iface, [])] if named is None else []
+    # the requirement as the target's contract declares it (core §3.1): its
+    # resources (None for every one), with the descriptor's binding
+    if not isinstance(rr, dict):
+        # the target's own contract not in hand, nor served: its requirement's
+        # resources unknown, read as every resource, as the reference reads
+        # it; the target's other interfaces may still carry the report
+        problems.append("requirement_unread")
+        rr = {}
+    resources = rr.get("resources")
+    requirement = {"resources": [x for x in resources if isinstance(x, str)] if isinstance(resources, list) else None,
+                   "bindings": req.get("bindings"), "params": req.get("params") or {},
+                   "optional": req.get("optional")}
+    taken = ds.take_slice(target, iface, requirement, named, held)
+    if not taken.desired:
+        # not this profile's role: not listed as one (F-217)
+        problems.append("not_desired")
+        r = ds.Reading(ds.PRESENT, (False, False), None, "not_asked", a_presence, None)
+        return Row(target, name, "not_listed", r, ds.conclude(r), problems=problems, reads=reads)
+    problems += list(taken.binding)
+    if taken.declaration:
+        problems.append("declaration_invalid:" + ",".join(taken.declaration))
     # the target's reports, by type identity, among "every report resource
-    # of the target" (§2.10, 0.4): of every contract its descriptor lists
+    # of the target" (§2.10): of every contract its descriptor lists
     replies: list[tuple[str, bytes]] = []
     horizons: dict[str, tuple[float, str | None]] = {}
     for e in doc.get("interfaces") or []:
@@ -288,30 +294,34 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
                     ttl = (res.get("annotations") or {}).get("freshness.ttl_s")
                     if isinstance(ttl, (int, float)) and ttl > 0:
                         horizons[x.key] = (float(ttl), x.stamp)
-    if binding is None and template is not None and not problems:
-        # 0.4: the slice from the target alone, the kind token its report's
-        # key carries
-        tokens = []
-        for _, payload in replies:
-            k = ((ds.read_report_bytes(payload).report or {}).get("key") or "")
-            tokens += [tok for tok in ("state", "@state") if f"/{iface}/{tok}/" in k]
-        explicit = "@state" in tokens and "state" not in tokens
-        binding = _slice_from_requirement(target, req, template, author, iface, explicit)
-        slice_from = "requirement"
-    if binding is None or binding.binding != ds.BOUND:
-        if binding is not None:
-            problems += list(binding.reasons)
-        r = ds.Reading(ds.PRESENT, (True, True), None, "not_asked", a_presence, None)
-        return row(r, author=author, slice_from=slice_from)
-    key = binding.key
-    assert key is not None
-    report = pick_report(replies, key)
-    freshness = _freshness(replies, horizons, key, clocks_synced)
+    found = ds.which_report(replies, taken.candidates)
+    report = found.as_reading()
+    # the slice the row shows: the one a report claims, else the first
+    # candidate, as the reference's row does (with none claimed from the
+    # target alone, every candidate is listed beside it)
+    key = found.claims if found.found == ds.FOUND_ONE else (taken.candidates[0] if taken.candidates else None)
+    reply = found.reply if found.found == ds.FOUND_ONE else (
+        f"unreadable:{found.why}" if found.found == ds.FOUND_UNREADABLE else None)
+    shown: dict[str, Any] = {"candidates": list(taken.candidates), "report_reply": reply,
+                             "author_presence": a_presence}
+    if key is None:
+        # no slice: §2.17 step 3 answers, and no author's version is asked;
+        # with more than one author, none is the role's (§2.3)
+        r = ds.Reading(ds.PRESENT, (True, True), report, "not_asked", a_presence, None)
+        if "not_one_author" in taken.binding:
+            shown["author_presence"] = None
+            return row(r, slice=None, slice_from=taken.source, **shown)
+        return row(r, slice=None, slice_from=taken.source, author=author, author_current="not_read", **shown)
+    freshness = _freshness(replies, horizons, key, clocks_synced) if found.found == ds.FOUND_ONE else "not_asked"
     current: Any = None
     stamp_text = None
     archived = []
+    author_at = None
+    # the author's version is read whatever step 3 answers, as the
+    # reference reads it: shown beside, answered only past step 3
     if a_presence == ds.PRESENT:
         st = live.get_state(session, key, timeout)
+        author_at = time.time()
         mine = [x for x in st.replies if x.key == key]
         if st.errors:
             current = "incomplete"  # ended at its timeout, or an error reply
@@ -325,14 +335,17 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
     elif a_presence == ds.ABSENT:
         if not archives:
             # core §4.4: "An archive MUST hold its archive.v1 interface token"
-            found = live.list_presence(session, "zk2/*/*/@zk/alive/archive.v1/**", timeout)
-            archives = sorted({f"{x['system']}/{x['service']}" for x in found.alive})
+            found_a = live.list_presence(session, "zk2/*/*/@zk/alive/archive.v1/**", timeout)
+            archives = sorted({f"{x['system']}/{x['service']}" for x in found_a.alive})
         for arch in archives:
             st = live.get_state(session, alarms.archive_form(arch, key), timeout)
             for x in st.replies:
                 archived.append((arch, x.stamp, None if x.deleted else x.payload))
     r = ds.Reading(ds.PRESENT, (True, True), report, freshness, a_presence, current)
-    return row(r, slice=key, slice_from=slice_from, author=author, author_stamp=stamp_text, archived=archived)
+    shown["author_current"] = (current[0] if isinstance(current, tuple) else current) if current is not None \
+        else "not_read"
+    return row(r, slice=key, slice_from=taken.source, author=author, author_stamp=stamp_text, author_at=author_at,
+               archived=archived, **shown)
 
 
 def _freshness(replies: list[tuple[str, bytes]], horizons: dict[str, tuple[float, str | None]], key: str,
@@ -368,17 +381,20 @@ class Window:
 
 def watch(session: zenoh.Session, target: str, for_s: float, role: str | None = None, *,
           clocks_synced: bool = False, every_s: float = 0.5, reader: Any = None, **kw: Any) -> Window:
-    """§2.17 (0.4): "never from one reading alone: the author's same version
-    current, and the target not yet on it, in readings that long apart; or,
-    with a clock trusted to the HLC delta, that version stamped more than
-    that long and the delta before the reading". The answers stay not yet;
+    """§2.17 (0.5): "never from one reading alone: the author's same version
+    current, and the target not yet on it, in every reading over that long,
+    the first and the last that long apart, any other answer between them,
+    an unobservable one included, starting the window again; or, with a
+    clock trusted to the HLC delta, that version stamped more than that long
+    and the delta before its GET was answered". The answers stay not yet;
     ``behind`` is the tool's own finding beside them.
 
-    - **By the window** (F-211, answered on #840): every reading over the
-      window not yet on one version of the author's; any other answer, or
-      another version, starts it again.
+    - **By the window** (F-211): every reading over the window not yet on
+      one version of the author's; any other answer, or another version,
+      starts it again.
     - **By the clock**, with ``clocks_synced``: one reading may find it, the
-      author's version stamped longer ago than the window and the delta.
+      author's version stamped longer ago than the window and the delta at
+      its GET's answer.
 
     The finding follows the latest reading: a later reading that is not
     not yet on that version clears it, so ``behind`` holds only what the
@@ -415,8 +431,11 @@ def watch(session: zenoh.Session, target: str, for_s: float, role: str | None = 
                 first_seen[r.role] = (seen[0], seen[1], seen[2] + 1)
             seen = first_seen[r.role]
             if clocks_synced and r.role not in behind:
+                # 0.5: the version's age at its GET's answer, never the
+                # reading's end, which is later
                 st = ds.Stamp.parse(r.author_stamp)
-                age = time.time() - (st.time >> 32) - (st.time & 0xFFFFFFFF) / 2 ** 32 if st else 0
+                at = r.author_at if r.author_at is not None else time.time()
+                age = at - (st.time >> 32) - (st.time & 0xFFFFFFFF) / 2 ** 32 if st else 0
                 if age > for_s + HLC_DELTA_S:
                     behind[r.role] = (r.author_stamp, "clock")
             # "never from one reading alone": two readings at least

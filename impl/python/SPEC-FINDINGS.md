@@ -10675,6 +10675,16 @@ lists one resource.
 names, of the desired resource; a requirement on a desired resource names
 it alone (or: the one whose slice a report of the target claims)".
 
+**Status at desired.v1 0.5:** resolved, the other way from zk2py's
+guess: "every template it names under either kind token" is a candidate,
+the report's key choosing among them, and with none claimed the answer is
+`no_report`. zk2py took the first template. Its `take_slice` now makes
+every candidate, and `slices.json`'s three cases for it (#8 to #10) pass.
+Live, both tools answer the three shapes alike (four candidates, none
+claimed, two claiming two candidates and differing). A requirement
+naming two desired resources with the author's contract in hand is
+F-218.
+
 ### F-211 · ambiguity · desired.v1 0.4 §2.17 "How long behind": readings that long apart, or every reading
 
 > §2.17 (0.4): "never from one reading alone: the author's same version
@@ -10696,6 +10706,13 @@ the window again.
 **Wording that would remove the guess:** "in every reading over that
 long, the first and the last that long apart".
 
+**Status at desired.v1 0.5:** resolved, as zk2py read it: "in every
+reading over that long, the first and the last that long apart, any
+other answer between them, an unobservable one included, starting the
+window again". 0.5 also dates a version's age on a trusted clock at its
+GET's answer, which zk2py now does too (`Row.author_at`). §9 step 6
+passes in all eight runs, with both tools.
+
 ### F-212 · minor · desired.v1 0.4 §2.10 "Which reply is the report": two reports on one key
 
 > §2.10 (0.4): "two readable ones that claim it and differ are
@@ -10715,6 +10732,11 @@ returns.
 **Wording that would remove the guess:** "two readable ones, of two
 report resources, that claim it and differ …; two instances' reports on
 one key are one reply to S4's GET, the later (core §4.1)".
+
+**Status at desired.v1 0.5:** resolved, as proposed: "two readable
+ones, of two report resources", and two instances' reports on one key are
+one reply to S4's GET, the later. `slices.json` #11 to #13 pass, and both
+tools answer the shape of two differing reports on one key with the later.
 
 ### F-213 · ambiguity · desired.v1 0.4 §2.17 "The slice": a revision held offline when no descriptor names one
 
@@ -10748,6 +10770,18 @@ minor of the interface held offline, before the target alone.
 one, a revision of its interface held offline: one major's revisions
 declare the same keys", and "the slice so taken is the slice: a report
 whose key is not it is none".
+
+**Status at desired.v1 0.5:** resolved, as the reference read it: with
+no revision the author's descriptor names in hand, "a revision of its
+interface held offline that declares a desired resource the requirement
+names", any such revision giving the same slice, and "the slice so taken
+is the slice: a report whose key is not it is none". zk2py now takes the
+first held revision that declares one, the latest minor first, where it
+took the latest minor whatever it declared. `slices.json` #1 to #5 pass.
+Live, both tools answer alike the shapes of a held revision declaring the
+resource explicit, a report under `state` none and one under `@state` the
+report. A revision in hand that declares the resource without the key is
+F-217.
 
 **Counts at desired.v1 0.4:** 213 entries. Open:
 - F-199 to F-209, against redundancy.v1 0.1 (being answered on #841);
@@ -10933,5 +10967,161 @@ apart, and the owner example given a start hold.
 **Counts at redundancy.v1 0.2 and core 0.40:** 216 entries. Open:
 - F-210 to F-213, against desired.v1 0.4, F-212 minor;
 - F-214 to F-216, F-214 and F-216 minor.
+
+Every other entry is resolved.
+
+## At desired.v1 0.5 (#609)
+
+Round 59 read `desired.v1` text 0.5 cold, from `main` after PR #859, end
+to end, with its new fixture `slices.json`. zk2py wrote a tool's reading
+before §2.17 answers from §2.10 and §2.17 alone, as two session-free
+functions in `zk2py.desired`:
+- `take_slice`: the candidate slices and where they came from;
+- `which_report`: which reply is the report.
+
+Only then did it run the file. Its tool reads through both, and dates a
+version's age on a trusted clock at its GET's answer. It reran §9 and the
+tool's shapes with both tools: zk2py's, and zenctl built from that head
+(`desired … --format json`, `doctor`, `check conform`), against zk2py's
+parties and the owner example built from the same head.
+
+**Round 57's findings at 0.5:** F-210 to F-213 are all resolved. F-210
+went the other way from zk2py's guess. Each entry has its status line.
+
+**`just py-conformance`: 2959 of 2959.** `desired` passes 389: the 22
+`slices.json` cases, passed the first time they ran, beside 367 as
+before. `readings` passes 354: round 57's three readings of the slice
+from the target alone now read 0.5's candidates.
+
+**Live:** every check passes.
+- **§9:** 29 of 29 in each of the eight runs: the four pairs of parties,
+  targets on a watch session and polling.
+- **The shapes:** 69 of 69, twenty-three each asked of both tools, and
+  their two rows compared member by member:
+  - eleven from round 57;
+  - five of 0.5's rules (F-210's three, F-213's two);
+  - seven the text does not state: F-217's two, F-218's three, and a
+    role naming every resource, without and with its author's interface
+    held.
+
+**Where the two tools disagree:** nowhere in an answer. They agree on
+every §9 step, on every shape, and on the seven unstated ones. Their rows
+differ in one member, on the two shapes where two reports claim the
+slice and differ. zenctl's row carries no report there, though it says
+`unreadable` of one reply that does not read. zk2py's says `unreadable`
+of both, as §2.10 does. The reference reads a reading's reads at once,
+and zk2py one after another; no answer moved by it.
+
+**The text, read end to end.** It holds together. Beyond the findings
+below:
+- The header says "Written against core 0.39". Core 0.40's two §8.1 notes
+  change nothing here. Its SHOULD, that a reader concluding absence be a
+  client of a router or a linked peer, covers a target reading its author
+  absent (§2.5, §2.9) and a tool (§2.17 steps 1 and 6).
+- F-211's window and its clock now read alike in the text, §9 and both
+  tools.
+
+### F-217 · gap · desired.v1 0.5 §2.1, §2.17 "What a tool reads": a role on no desired resource
+
+> §2.1: "**A target** implements it for each requirement it holds on a
+> desired resource"
+
+> §2.17 (0.5): "with no revision its descriptor names in hand, a revision
+> of its interface held offline that declares a desired resource the
+> requirement names … so with no revision of its interface in hand a tool
+> MAY take the slice from the target alone"
+
+A target's roles are not all on desired resources: a worker may also
+consume its author's plain state. The text never says what a tool
+answers for such a role. Two cases are not stated:
+- **The revision its author's descriptor names, in hand, declares no
+  desired resource the requirement names.** No rule gives a slice, nor
+  an answer. Both tools answer **not asked**, `not_a_target` (zenctl lists
+  the role `not_listed`).
+- **The author absent, a revision of its interface held that declares the
+  resource without `desired.target_param`, and none declaring a desired
+  one.** The held-revision rule does not apply, since no desired resource
+  is declared. Nor does the target-alone rule, since a revision is in hand.
+  Both tools take the slice from the requirement anyway, as `slices.json`'s
+  description reads ("else from the requirement alone"), and answer
+  **unobservable**, `no_report`. So a role the held revision shows is not
+  desired is asked as if it were. It is unobservable where the first case
+  is not asked.
+
+With no revision in hand at all, the target alone cannot tell a desired
+role from another. Every role then reads as a candidate, each
+`no_report`: honest, and the MAY's cost.
+
+**zk2py:** as the reference, in both cases (`take_slice`'s `desired`).
+Live: `zk2py_watcher.v1`, whose one role names `worker.v1`'s `running`.
+
+**Wording that would remove the guess:** "a role whose author's
+revision in hand, named or held, declares no desired resource the
+requirement names is not this profile's: **not asked**, `not_a_target`";
+and the target-alone rule only "with no revision of the interface in hand
+that declares the resource".
+
+### F-218 · contradiction · desired.v1 0.5 §2.17: a requirement naming two desired resources
+
+> §2.17 (0.5): "The kind token and the target parameters are the author's
+> declaration" … "the slice from the target alone … each template its
+> requirement names … under either kind token … is a candidate, and the
+> one a readable report of the target claims is the slice (0.5, F-210)"
+
+> §2.1: "one role per document type"
+
+F-210's answer lets a requirement name several templates. From the
+target alone, each is a candidate, and the report chooses. With the
+author's contract in hand, the slice is one resource's. Which one, the
+text does not say: `slices.json`'s description says "named's first
+desired resource the requirement names", the revision's order. So one
+report reads two ways.
+
+The shape is `zk2py_tasking2.v1`, declaring `plans/{system}/{service}`
+and `tasks/{system}/{service}`, both desired, and `zk2py_worker4.v1`,
+whose role names both. Its report claims the `tasks` slice. Both tools
+answered alike:
+- **the author absent, no revision held:** the `tasks` slice, from the
+  requirement; the report is found, and answers;
+- **the revision held, or the author present:** the `plans` slice; the
+  report of `tasks` is none, `no_report`.
+
+So the same report of the same target answers, or answers nothing,
+depending on whether the tool holds the author's contract. The slice the
+contract gives depends on an order no rule states.
+
+**zk2py:** as the reference, the revision's first.
+
+**Wording that would remove the guess:** either "a requirement on a
+desired resource names one (§2.1); one naming two is a finding of the
+target's contract, and gives no slice", or "with the author's contract
+in hand, each desired resource the requirement names is a candidate, as
+from the target alone, the report's key choosing".
+
+### F-219 · minor · the reference tool's help: `zenctl desired --help` says 0.4's rules
+
+> `zenctl desired --help` (built from `main` after PR #859): "The slice
+> is the author's declaration and the target's binding; with no contract
+> of the author's in hand, the target's requirement and binding, the kind
+> token its report's key carries." … "behind (the finding, text 0.4), and
+> with --clocks-synced one behind a version stamped longer ago than the
+> window is at once." `--for`: "(desired.v1 §2.17, text 0.4)".
+
+The behaviour is 0.5's: the four-candidate shapes pass. The help still
+says 0.4's rules:
+- the slice from the target alone is "each template its requirement
+  names, under either kind token" (F-210), not one kind token from the
+  report's key;
+- the clock reads "and the delta before its GET was answered".
+
+**zk2py:** nothing to do; its own driver documents neither.
+
+**Wording that would remove the guess:** the help in 0.5's words.
+
+**Counts at desired.v1 0.5:** 219 entries. Open:
+- F-214 to F-216, against redundancy.v1 0.2, F-214 and F-216 minor
+  (answered on #841, for its text 0.3);
+- F-217 to F-219, against desired.v1 0.5, F-219 minor (answered on #840,
+  for its text 0.6).
 
 Every other entry is resolved.

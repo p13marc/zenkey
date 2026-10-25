@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from . import alarms, jcs, keys, slug, telemetry, templates
 from .lexical import is_plain_chunk
@@ -1228,6 +1228,190 @@ def reading_of(x: dict[str, Any]) -> Reading:
     return Reading(t["presence"], None if d is None else (bool(d["lists"]), bool(d["bound"])), report,
                    t["report_freshness"], a["presence"], cur,
                    None if w is None else (bool(w["lists"]), bool(w["bound"])))
+
+
+# -- §2.10, §2.17: the slice a tool reads, and which reply is the report (0.5) -------------------
+
+#: §2.17 (0.5) "What a tool reads to answer": where a slice came from.
+AUTHOR_CONTRACT, OFFLINE_CONTRACT, REQUIREMENT = "author_contract", "offline_contract", "requirement"
+#: §2.10 "Which reply is the report": found one, unreadable, none, or no slice.
+FOUND_ONE, FOUND_UNREADABLE, FOUND_NONE, NO_SLICE = "one", "unreadable", "none", "no_slice"
+TWO_DIFFER, UNREADABLE_REPLY = "two_differ", "unreadable_reply"
+
+
+@dataclass(frozen=True)
+class SliceTaken:
+    """The slices a tool reads one role through, before its report is
+    found: one from a contract, the candidates from the target alone, none
+    when §2.3 finds the binding invalid or §2.2 the declaration."""
+
+    candidates: tuple[str, ...]
+    source: str | None
+    binding: tuple[str, ...] = ()
+    declaration: tuple[str, ...] = ()
+    #: False when the author's contract in hand declares no desired
+    #: resource the requirement names: the role is not this profile's (§2.1)
+    desired: bool = True
+
+
+@dataclass(frozen=True)
+class ReportFound:
+    """§2.10's choice among the replies of a target's report resources."""
+
+    found: str
+    claims: str | None = None
+    why: str | None = None
+    reading: ReportReading | None = None
+    #: the key of the reply found, the report resource's member
+    reply: str | None = None
+
+    def expect(self) -> dict[str, Any]:
+        if self.found == FOUND_ONE:
+            return {"found": FOUND_ONE, "claims": self.claims}
+        if self.found == FOUND_UNREADABLE:
+            return {"found": FOUND_UNREADABLE, "why": self.why}
+        return {"found": self.found}
+
+    def as_reading(self) -> ReportReading | None:
+        """What §2.17 step 3 reads: the report found, an unreadable one, or
+        none (``no_report``)."""
+        if self.found == FOUND_ONE:
+            return self.reading
+        if self.found == FOUND_UNREADABLE:
+            return ReportReading(False, (self.why or UNREADABLE_REPLY,))
+        return None
+
+
+def _names_resource(requirement: dict[str, Any], template: str) -> bool:
+    """Core §3.1: a requirement names the resources it consumes, every one
+    when it lists none."""
+    names = requirement.get("resources")
+    return names is None or template in names
+
+
+def _kind_of(r: dict[str, Any]) -> tuple[str, bool]:
+    """A resource as declarations.json gives one: its kind, read as its kind
+    token (``@state`` for an explicit state), and whether its slice is under
+    ``@state``. ``explicit`` on a kind that is not state changes neither: such
+    a resource is no document's (§2.2 ``not_state``), and gives no slice."""
+    kind = str(r.get("kind"))
+    explicit = kind == "@state" or (kind == "state" and bool(r.get("explicit")))
+    return ("@state" if explicit else kind), explicit
+
+
+def _desired_named(resources: Iterable[dict[str, Any]], requirement: dict[str, Any]) -> dict[str, Any] | None:
+    """The revision's first desired resource the requirement names: a
+    resource "whose resolved annotations hold desired.target_param" (§0),
+    whatever its declaration then says (§2.2)."""
+    for r in resources:
+        if KEY in (r.get("annotations") or {}) and _names_resource(requirement, str(r.get("template"))):
+            return r
+    return None
+
+
+def _from_contract(res: dict[str, Any], iface: str, target: str, requirement: dict[str, Any],
+                   source: str) -> SliceTaken:
+    """§2.3 over the author's declaration: "The kind token and the target
+    parameters are the author's declaration"."""
+    kind, explicit = _kind_of(res)
+    decl = declare(kind, str(res["template"]), dict(res.get("annotations") or {}), dict(res.get("params") or {}))
+    if decl.declaration != DECLARED:
+        return SliceTaken((), None, (), decl.reasons)
+    b = bind(decl, str(res["template"]), explicit, iface, target, requirement)
+    if b.binding != BOUND:
+        return SliceTaken((), None, b.reasons)
+    assert b.key is not None
+    return SliceTaken((b.key,), source)
+
+
+def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict[str, Any] | None,
+               held: Iterable[dict[str, Any]] = ()) -> SliceTaken:
+    """§2.17 (0.5) "What a tool reads to answer", the slice:
+    - from the author's contract, the revision its descriptor names, in
+      hand (``named``: its resources);
+    - else, with no revision its descriptor names in hand, from a revision
+      of its interface held offline that declares a desired resource the
+      requirement names (F-213): "any such revision gives the same slice,
+      and the slice so taken is the slice";
+    - else from the target alone (F-210): "each template its requirement
+      names … each parameter filled as its binding says, under either kind
+      token, state or @state, is a candidate", each in the requirement's
+      order, ``state`` first.
+    "A binding §2.3 finds invalid, or a declaration §2.2 does, gives no
+    slice"."""
+    if named is not None:
+        res = _desired_named(named.get("resources") or [], requirement)
+        if res is not None:
+            return _from_contract(res, iface, target, requirement, AUTHOR_CONTRACT)
+        # The revision its descriptor names decides, whatever held revisions
+        # declare: one in hand that declares no desired resource the
+        # requirement names makes the role not this profile's, not_a_target
+        # (F-217, answered on #840, issuecomment-35724, for text 0.6).
+        return SliceTaken((), None, desired=False)
+    for rev in held:
+        res = _desired_named(rev.get("resources") or [], requirement)
+        if res is not None:
+            return _from_contract(res, iface, target, requirement, OFFLINE_CONTRACT)
+    # From the target alone. Every parameter of a desired template is a
+    # target parameter (§2.2); which identity each takes is its binding's,
+    # the declaration's order unknown, so wrong_self cannot be found here.
+    params = dict(requirement.get("params") or {})
+    candidates: list[str] = []
+    reasons: set[str] = set()
+    for template in requirement.get("resources") or []:
+        t = templates.parse_template(template)
+        targets = tuple(Target(n, params[n] if params.get(n) in (SELF_SYSTEM, SELF_SERVICE) else EITHER)
+                        for n in t.param_names)
+        decl = Declaration(DECLARED, (), targets)
+        for explicit in (False, True):
+            b = bind(decl, template, explicit, iface, target, requirement)
+            if b.binding == BOUND:
+                assert b.key is not None
+                if b.key not in candidates:
+                    candidates.append(b.key)
+            else:
+                reasons |= set(b.reasons)
+    if reasons:
+        order = (*BINDING_REASONS, TARGET_ADDRESS)
+        return SliceTaken((), None, tuple(x for x in order if x in reasons))
+    if not requirement.get("bindings"):
+        return SliceTaken((), None)  # unbound: the kill switch, §2.17 step 2's
+    return SliceTaken(tuple(candidates), REQUIREMENT if candidates else None)
+
+
+def which_report(replies: Iterable[tuple[str, bytes]], candidates: Iterable[str]) -> ReportFound:
+    """§2.10 (0.5) "A tool finds a target's reports", among the replies of
+    every report resource of the target to S4's GET (each its key and its
+    payload), each read as §2.10 reads a report:
+    - the readable one whose ``key`` is a candidate is the report, two
+      such that are equal being one; two readable ones that claim
+      candidates and differ are unreadable (F-212, and F-210's "§2.10's
+      two"). One key is one reply: S4's GET answers the later (core §4.1);
+    - with none readable claiming one, one that does not read is
+      unreadable too: it may be the slice's;
+    - otherwise none was read.
+    A report that reads with a §2.10 finding is found, and §2.17 step 3 then
+    answers ``report_invalid``."""
+    wanted = list(candidates)
+    if not wanted:
+        return ReportFound(NO_SLICE)
+    claiming: list[tuple[str, ReportReading]] = []
+    unreadable = False
+    for rkey, payload in replies:
+        r = read_report_bytes(payload)
+        if not r.readable:
+            unreadable = True
+            continue
+        if (r.report or {}).get("key") in wanted and all(x.report != r.report for _, x in claiming):
+            claiming.append((rkey, r))
+    if len(claiming) == 1:
+        rkey, r = claiming[0]
+        return ReportFound(FOUND_ONE, str((r.report or {})["key"]), reading=r, reply=rkey)
+    if claiming:
+        return ReportFound(FOUND_UNREADABLE, why=TWO_DIFFER)
+    if unreadable:
+        return ReportFound(FOUND_UNREADABLE, why=UNREADABLE_REPLY)
+    return ReportFound(FOUND_NONE)
 
 
 # -- §2.7 where a refusal points (0.4, F-193) -------------------------------------------------------

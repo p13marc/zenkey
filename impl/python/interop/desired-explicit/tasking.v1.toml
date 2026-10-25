@@ -1,0 +1,21 @@
+# desired-explicit/tasking.v1.toml: tasking.v1 as another deployment could
+# have authored it, its tasks explicit (@state, core §1.3), held offline by
+# zk2py's tool shapes in place of interop/desired's, never beside it: a
+# held revision's kind token wins over a report's (desired.v1 §2.17, 0.5,
+# F-213). zk2py's own; it must load with no finding at all.
+[interface]
+name  = "tasking"
+major = 1
+minor = 0
+uses  = ["desired.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["../desired/tasking.json"]
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+explicit    = true
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

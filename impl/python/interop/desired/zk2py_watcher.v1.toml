@@ -1,0 +1,20 @@
+# zk2py_watcher.v1.toml: a target whose one role is on no desired resource,
+# worker.v1's running (desired.v1 §2.1, F-217). zk2py's own, for its tool's
+# shapes; it must load with no finding at all.
+[interface]
+name  = "zk2py_watcher"
+major = 1
+minor = 0
+uses  = ["desired.v1"]
+
+[schemas]
+jsonschema = ["../../../../spec/profiles/desired/desired.v1.json"]
+
+[resources."desired/task"]
+kind = "state"
+type = "json:desired.v1.Report"
+
+[requires.watch]
+interface = "worker.v1"
+resources = ["running"]
+optional  = true
