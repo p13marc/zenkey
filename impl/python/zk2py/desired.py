@@ -1262,6 +1262,8 @@ class ReportFound:
     claims: str | None = None
     why: str | None = None
     reading: ReportReading | None = None
+    #: the key of the reply found, the report resource's member
+    reply: str | None = None
 
     def expect(self) -> dict[str, Any]:
         if self.found == FOUND_ONE:
@@ -1289,10 +1291,12 @@ def _names_resource(requirement: dict[str, Any], template: str) -> bool:
 
 def _kind_of(r: dict[str, Any]) -> tuple[str, bool]:
     """A resource as declarations.json gives one: its kind, read as its kind
-    token (``@state`` for an explicit state), and whether it is explicit."""
-    explicit = bool(r.get("explicit")) or r.get("kind") == "@state"
-    kind = "@state" if explicit and r.get("kind") in ("state", "@state") else str(r.get("kind"))
-    return kind, explicit
+    token (``@state`` for an explicit state), and whether its slice is under
+    ``@state``. ``explicit`` on a kind that is not state changes neither: such
+    a resource is no document's (§2.2 ``not_state``), and gives no slice."""
+    kind = str(r.get("kind"))
+    explicit = kind == "@state" or (kind == "state" and bool(r.get("explicit")))
+    return ("@state" if explicit else kind), explicit
 
 
 def _desired_named(resources: Iterable[dict[str, Any]], requirement: dict[str, Any]) -> dict[str, Any] | None:
@@ -1339,15 +1343,15 @@ def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict
         res = _desired_named(named.get("resources") or [], requirement)
         if res is not None:
             return _from_contract(res, iface, target, requirement, AUTHOR_CONTRACT)
-        # the revision its descriptor names declares no desired resource the
-        # requirement names: no document of this profile's (§2.1, zk2py's
-        # reading; the text says nothing, F-217)
+        # The revision its descriptor names decides, whatever held revisions
+        # declare: one in hand that declares no desired resource the
+        # requirement names makes the role not this profile's, not_a_target
+        # (F-217, answered on #840, issuecomment-35724, for text 0.6).
         return SliceTaken((), None, desired=False)
-    else:
-        for rev in held:
-            res = _desired_named(rev.get("resources") or [], requirement)
-            if res is not None:
-                return _from_contract(res, iface, target, requirement, OFFLINE_CONTRACT)
+    for rev in held:
+        res = _desired_named(rev.get("resources") or [], requirement)
+        if res is not None:
+            return _from_contract(res, iface, target, requirement, OFFLINE_CONTRACT)
     # From the target alone. Every parameter of a desired template is a
     # target parameter (§2.2); which identity each takes is its binding's,
     # the declaration's order unknown, so wrong_self cannot be found here.
@@ -1391,17 +1395,18 @@ def which_report(replies: Iterable[tuple[str, bytes]], candidates: Iterable[str]
     wanted = list(candidates)
     if not wanted:
         return ReportFound(NO_SLICE)
-    claiming: list[ReportReading] = []
+    claiming: list[tuple[str, ReportReading]] = []
     unreadable = False
-    for _, payload in replies:
+    for rkey, payload in replies:
         r = read_report_bytes(payload)
         if not r.readable:
             unreadable = True
             continue
-        if (r.report or {}).get("key") in wanted and all(x.report != r.report for x in claiming):
-            claiming.append(r)
+        if (r.report or {}).get("key") in wanted and all(x.report != r.report for _, x in claiming):
+            claiming.append((rkey, r))
     if len(claiming) == 1:
-        return ReportFound(FOUND_ONE, str(claiming[0].report["key"]), reading=claiming[0])  # type: ignore[index]
+        rkey, r = claiming[0]
+        return ReportFound(FOUND_ONE, str((r.report or {})["key"]), reading=r, reply=rkey)
     if claiming:
         return ReportFound(FOUND_UNREADABLE, why=TWO_DIFFER)
     if unreadable:

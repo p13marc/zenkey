@@ -10996,17 +10996,21 @@ from the target alone now read 0.5's candidates.
 **Live:** every check passes.
 - **§9:** 29 of 29 in each of the eight runs: the four pairs of parties,
   targets on a watch session and polling.
-- **The shapes:** 46 of 46, twenty-three each asked of both tools:
+- **The shapes:** 69 of 69, twenty-three each asked of both tools, and
+  their two rows compared member by member:
   - eleven from round 57;
   - five of 0.5's rules (F-210's three, F-213's two);
   - seven the text does not state: F-217's two, F-218's three, and a
     role naming every resource, without and with its author's interface
     held.
 
-**Where the two tools disagree:** nowhere. They agree on every §9 step,
-on every shape, and on the seven unstated ones. The reference reads a
-reading's reads at once, and zk2py one after another; no answer moved
-by it.
+**Where the two tools disagree:** nowhere in an answer. They agree on
+every §9 step, on every shape, and on the seven unstated ones. Their rows
+differ in one member, on the two shapes where two reports claim the
+slice and differ. zenctl's row carries no report there, though it says
+`unreadable` of one reply that does not read. zk2py's says `unreadable`
+of both, as §2.10 does. The reference reads a reading's reads at once,
+and zk2py one after another; no answer moved by it.
 
 **The text, read end to end.** It holds together. Beyond the findings
 below:
@@ -11117,6 +11121,7 @@ says 0.4's rules:
 **Counts at desired.v1 0.5:** 219 entries. Open:
 - F-214 to F-216, against redundancy.v1 0.2, F-214 and F-216 minor
   (answered on #841, for its text 0.3);
-- F-217 to F-219, against desired.v1 0.5, F-219 minor.
+- F-217 to F-219, against desired.v1 0.5, F-219 minor (answered on #840,
+  for its text 0.6).
 
 Every other entry is resolved.

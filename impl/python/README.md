@@ -1459,8 +1459,14 @@ round 52's twenty findings, with `config.v1` 0.4, in round 53.
 
 ```bash
 PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.desired_scenarios \
-  [--author zk2py|<owner>] [--target zk2py|<owner>] [--owner <owner>] [--only N]... [--poll]
+  [--author zk2py|<owner-example>] [--target zk2py|<owner-example>] [--owner <owner-example>] \
+  [--only N]... [--poll] [--zenctl <zenctl> | --no-zenctl]
 ```
+
+The Rust tool has no default: `--zenctl <zenctl>` or `ZK2PY_ZENCTL`.
+Without either, §9 and the shapes fail, unless `--no-zenctl` runs
+zk2py's tool alone, its other checks counted as not run. Each party is
+zk2py's unless a path to the owner example is given.
 
 - **`zk2py.desired_live`.**
   - **The author.** It owns `tasking.v1`'s `tasks/{system}/{service}`,
@@ -1513,7 +1519,7 @@ PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.desired_scenarios \
   and §9 is the tool's section: zk2py's tool and the Rust one,
   `zenctl desired`, the doctor's `desired-*` checks and
   `check conform`'s `desired-*` cases, as black boxes
-  (`ZK2PY_ZENCTL`). It adds zk2py's edge documents, a target's re-mint,
+  (`--zenctl` or `ZK2PY_ZENCTL`). It adds zk2py's edge documents, a target's re-mint,
   and twenty-three §2.17 shapes no scenario makes, built by test sessions
   and asked of both tools.
 - **The scenarios' contracts**, transcribed from `scenarios.md` into
@@ -1565,7 +1571,10 @@ owner example and zenctl built from main after PR #859
 (`<owner-example>`, `<zenctl>`). Every check passes:
 - §9, 29 of 29 in each of the eight runs: the four pairs of parties,
   targets on a watch session and polling;
-- the shapes, 46 of 46: twenty-three, each asked of both tools.
+- the shapes, 69 of 69: twenty-three, each asked of both tools, and
+  the two tools' rows compared member by member (listing, slice and
+  where it came from, the author's presence and GET, the report found,
+  the binding's and declaration's problems).
   - Five are 0.5's rules. Four candidates from two templates, the report
     choosing. None claimed, `no_report`. Two claiming two candidates and
     differing, `report_invalid` (F-210). A held revision declaring the
@@ -1577,7 +1586,10 @@ owner example and zenctl built from main after PR #859
     the author's interface held.
 
 The two tools agree on every §9 step and every shape, the seven the text
-does not state included.
+does not state included. Their rows differ in one member, on the two
+shapes where two reports claim the slice and differ. There zenctl's row
+carries no report, and zk2py's says `unreadable`, as §2.10 does. Both
+answer `report_invalid`.
 
 ## redundancy.v1 (profile text 0.2, core 0.40)
 

@@ -65,6 +65,15 @@ class Row:
     #: when the author's GET of the slice was answered, on the host's wall
     #: clock (0.5: a version's age is taken then, never at the reading's end)
     author_at: float | None = None
+    #: the author's presence (present, absent, incomplete) and what its GET
+    #: of the slice gave: put, delete, silent, incomplete, or not_read
+    author_presence: str | None = None
+    author_current: str | None = None
+    #: the slices the role was read through (one from a contract, the
+    #: candidates from the target alone), and the report found: the reply's
+    #: key, "unreadable" with why, or None
+    candidates: list[str] = field(default_factory=list)
+    report_reply: str | None = None
     #: an absent author's slice from an archive: (archive address, stamp,
     #: document), never current
     archived: list[tuple[str, str | None, Any]] = field(default_factory=list)
@@ -249,18 +258,21 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
     # the requirement as the target's contract declares it (core §3.1): its
     # resources (None for every one), with the descriptor's binding
     if not isinstance(rr, dict):
-        problems.append("requirement_unread")  # the target's own contract not in hand, nor served
-        r = ds.Reading(ds.PRESENT, (True, True), None, "not_asked", a_presence, None)
-        return row(r, author=author)
+        # the target's own contract not in hand, nor served: its requirement's
+        # resources unknown, read as every resource, as the reference reads
+        # it; the target's other interfaces may still carry the report
+        problems.append("requirement_unread")
+        rr = {}
     resources = rr.get("resources")
     requirement = {"resources": [x for x in resources if isinstance(x, str)] if isinstance(resources, list) else None,
                    "bindings": req.get("bindings"), "params": req.get("params") or {},
                    "optional": req.get("optional")}
     taken = ds.take_slice(target, iface, requirement, named, held)
     if not taken.desired:
+        # not this profile's role: not listed as one (F-217)
         problems.append("not_desired")
         r = ds.Reading(ds.PRESENT, (False, False), None, "not_asked", a_presence, None)
-        return row(r, author=author)
+        return Row(target, name, "not_listed", r, ds.conclude(r), problems=problems, reads=reads)
     problems += list(taken.binding)
     if taken.declaration:
         problems.append("declaration_invalid:" + ",".join(taken.declaration))
@@ -284,17 +296,29 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
                         horizons[x.key] = (float(ttl), x.stamp)
     found = ds.which_report(replies, taken.candidates)
     report = found.as_reading()
-    key = found.claims if found.found == ds.FOUND_ONE else (taken.candidates[0] if len(taken.candidates) == 1
-                                                           else None)
-    if found.found in (ds.NO_SLICE, ds.FOUND_NONE) or key is None or report is None or not report.readable:
-        # §2.17 step 3 answers: no slice, no report, or an unreadable one
+    # the slice the row shows: the one a report claims, else the first
+    # candidate, as the reference's row does (with none claimed from the
+    # target alone, every candidate is listed beside it)
+    key = found.claims if found.found == ds.FOUND_ONE else (taken.candidates[0] if taken.candidates else None)
+    reply = found.reply if found.found == ds.FOUND_ONE else (
+        f"unreadable:{found.why}" if found.found == ds.FOUND_UNREADABLE else None)
+    shown: dict[str, Any] = {"candidates": list(taken.candidates), "report_reply": reply,
+                             "author_presence": a_presence}
+    if key is None:
+        # no slice: §2.17 step 3 answers, and no author's version is asked;
+        # with more than one author, none is the role's (§2.3)
         r = ds.Reading(ds.PRESENT, (True, True), report, "not_asked", a_presence, None)
-        return row(r, slice=key, slice_from=taken.source, author=author)
-    freshness = _freshness(replies, horizons, key, clocks_synced)
+        if "not_one_author" in taken.binding:
+            shown["author_presence"] = None
+            return row(r, slice=None, slice_from=taken.source, **shown)
+        return row(r, slice=None, slice_from=taken.source, author=author, author_current="not_read", **shown)
+    freshness = _freshness(replies, horizons, key, clocks_synced) if found.found == ds.FOUND_ONE else "not_asked"
     current: Any = None
     stamp_text = None
     archived = []
     author_at = None
+    # the author's version is read whatever step 3 answers, as the
+    # reference reads it: shown beside, answered only past step 3
     if a_presence == ds.PRESENT:
         st = live.get_state(session, key, timeout)
         author_at = time.time()
@@ -318,8 +342,10 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
             for x in st.replies:
                 archived.append((arch, x.stamp, None if x.deleted else x.payload))
     r = ds.Reading(ds.PRESENT, (True, True), report, freshness, a_presence, current)
+    shown["author_current"] = (current[0] if isinstance(current, tuple) else current) if current is not None \
+        else "not_read"
     return row(r, slice=key, slice_from=taken.source, author=author, author_stamp=stamp_text, author_at=author_at,
-               archived=archived)
+               archived=archived, **shown)
 
 
 def _freshness(replies: list[tuple[str, bytes]], horizons: dict[str, tuple[float, str | None]], key: str,
