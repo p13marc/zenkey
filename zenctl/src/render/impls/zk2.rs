@@ -30,8 +30,9 @@ use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelop
 // ── shared pieces ──────────────────────────────────────────────────────────
 
 /// The note every presence read owes when it is possibly incomplete: it
-/// ran to its timeout, or its session was cut off while it ran (core §8.1,
-/// 0.38), each with what to do about it.
+/// ran to its timeout or to its session's interests timeout, which these
+/// reports do not tell apart (core §8.1, 0.41; #882), or its session was cut
+/// off while it ran (0.38), each with what to do about it.
 fn incomplete(cut_off_during: bool) -> Note {
     Note::coverage(if cut_off_during {
         format!(
@@ -40,9 +41,11 @@ fn incomplete(cut_off_during: bool) -> Note {
             zenkey_fleet::CUT_OFF_DURING
         )
     } else {
-        "the presence read ran to its timeout, so it is possibly incomplete: \
-         anything missing here may still be up — raise --timeout to ask again"
-            .to_owned()
+        format!(
+            "the presence read {}, so it is possibly incomplete: anything missing here may \
+             still be up — raise --timeout, and the interests timeout above it, to ask again",
+            zenkey_fleet::model::catalog::RAN_OUT
+        )
     })
     .cite("spec §8.1")
 }
@@ -1180,7 +1183,8 @@ pub fn graph_dot(g: &BindingGraph) -> String {
         out.push_str(if g.cut_off_during {
             "  label=\"possibly incomplete: the presence read was cut off while it ran\";\n"
         } else {
-            "  label=\"possibly incomplete: the presence read ran to its timeout\";\n"
+            "  label=\"possibly incomplete: the presence read ran to its timeout or to its \
+             session's interests timeout\";\n"
         });
     }
     out.push_str("}\n");

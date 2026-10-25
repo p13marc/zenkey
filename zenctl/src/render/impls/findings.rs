@@ -110,9 +110,11 @@ impl Render for DoctorReport {
                     // carries it), so the cause is said both ways (core §8.1,
                     // 0.38).
                     Note::coverage(
-                        "a presence read ran to its timeout, or its session was cut off while \
+                        "a presence read ran to its timeout or to its session's interests \
+                         timeout (routing/interests/timeout), or its session was cut off while \
                          it ran, so it is possibly incomplete: an absence it would claim is \
-                         left unjudged — raise --timeout, or reconnect, to ask again",
+                         left unjudged — raise --timeout and the interests timeout above it, \
+                         or reconnect, to ask again",
                     )
                     .cite("spec §8.1"),
                 );
@@ -645,7 +647,7 @@ impl Render for zenkey_fleet::HealthReport {
                 if let Some(why) = zenkey_fleet::model::catalog::incomplete_reason(
                     p.complete,
                     p.cut_off_during,
-                    "ran to its timeout",
+                    zenkey_fleet::model::catalog::RAN_OUT,
                 ) {
                     notes.push(
                         Note::coverage(format!(

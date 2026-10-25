@@ -196,7 +196,7 @@ impl PresenceSeen {
         crate::model::catalog::incomplete_reason(
             self.complete,
             self.cut_off_during,
-            "ran to its timeout",
+            crate::model::catalog::RAN_OUT,
         )
     }
 }

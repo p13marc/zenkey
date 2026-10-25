@@ -30,7 +30,7 @@ Options:
 $ zenctl service list --help
 Every running service: instances, interfaces, descriptors.
 
-One liveliness read of `zk2/*/*/@zk/**` in the deployment's namespace (spec §8.1), then every instance's descriptor (§3.3). Each interface row keeps its two sources apart — the token's fingerprint prefix beside the descriptor's full fingerprint — and an interface in the tokenless set (U22) is known from the descriptor alone. A pure consumer is listed too: every instance holds an instance token. A read that ran to its timeout is possibly incomplete, and says so: a service missing from it may still be up.
+One liveliness read of `zk2/*/*/@zk/**` in the deployment's namespace (spec §8.1), then every instance's descriptor (§3.3). Each interface row keeps its two sources apart — the token's fingerprint prefix beside the descriptor's full fingerprint — and an interface in the tokenless set (U22) is known from the descriptor alone. A pure consumer is listed too: every instance holds an instance token. A read that ran to its timeout, or to its session's interests timeout (`routing/interests/timeout`), is possibly incomplete, and says so: a service missing from it may still be up.
 
 Usage: zenctl service list [OPTIONS]
 

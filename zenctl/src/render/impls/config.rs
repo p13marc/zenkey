@@ -371,7 +371,8 @@ impl Render for ConfigReport {
                                 "the read was cut off while it ran, without it: possibly \
                                  incomplete",
                             ConfigPremise::Incomplete =>
-                                "the read ran to its timeout without it: possibly incomplete",
+                                "the read ran to its timeout or to its session's interests \
+                                 timeout without it: possibly incomplete",
                             ConfigPremise::AcrossFace => "",
                         }
                     ))

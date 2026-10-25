@@ -350,6 +350,13 @@ impl<'o> Ladder<'o> {
                             o.selector,
                             crate::bus::presence::CUT_OFF_DURING
                         )
+                    } else if o.at_interests_timeout {
+                        format!(
+                            "the read of `{}` {} with no token: possibly incomplete, never \
+                             absence — raise the interests timeout above --timeout",
+                            o.selector,
+                            zenkey::presence::AT_INTERESTS_TIMEOUT
+                        )
                     } else {
                         format!(
                             "the read of `{}` ended at its timeout with no token: possibly \

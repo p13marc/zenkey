@@ -1509,7 +1509,8 @@ pub(crate) enum IfaceCmd {
     /// From one presence read and every instance's descriptor: providers by
     /// interface token or, for the tokenless set, by descriptor; consumers
     /// by the roles descriptors declare; the revisions providers name. A read
-    /// that ran to its timeout is possibly incomplete, and says so.
+    /// that ran to its timeout, or to its session's interests timeout
+    /// (`routing/interests/timeout`), is possibly incomplete, and says so.
     List(IfaceListArgs),
     /// One interface: providers, consumers, and each revision's contract.
     ///
@@ -1818,8 +1819,9 @@ pub(crate) enum ServiceCmd {
     /// beside the descriptor's full fingerprint — and an interface in the
     /// tokenless set (U22) is known from the descriptor alone. A pure
     /// consumer is listed too: every instance holds an instance token. A read
-    /// that ran to its timeout is possibly incomplete, and says so: a service
-    /// missing from it may still be up.
+    /// that ran to its timeout, or to its session's interests timeout
+    /// (`routing/interests/timeout`), is possibly incomplete, and says so: a
+    /// service missing from it may still be up.
     List(ServiceListArgs),
     /// One service: each instance's tokens and the descriptor it serves.
     ///

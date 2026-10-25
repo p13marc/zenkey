@@ -3272,6 +3272,22 @@ fn an_incomplete_presence_read_says_so_in_every_format() {
     listing.complete = false;
     let n = notes(&listing);
     assert!(n.contains("possibly incomplete"), "{n}");
+    // Its time may have run out at either bound, and the listing does not
+    // keep which, so both are named, the interests timeout by its key
+    // (core §8.1, 0.41; #882).
+    assert!(
+        n.contains("ran to its timeout or to its session's interests timeout")
+            && n.contains("routing/interests/timeout")
+            && n.contains("raise --timeout, and the interests timeout above it"),
+        "{n}"
+    );
+    listing.cut_off_during = true;
+    let n = notes(&listing);
+    assert!(
+        n.contains(zenkey_fleet::CUT_OFF_DURING) && !n.contains("interests timeout"),
+        "a cut is said as a cut: {n}"
+    );
+    listing.cut_off_during = false;
     let out = ndjson(&listing);
     let envelope: serde_json::Value =
         serde_json::from_str(out.lines().next().expect("an envelope")).expect("json");
@@ -3286,7 +3302,9 @@ fn an_incomplete_presence_read_says_so_in_every_format() {
     );
     let mut graph = zk2fx::catalog().graph();
     graph.complete = false;
-    assert!(zenctl::render::graph_dot(&graph).contains("possibly incomplete"));
+    let dot = zenctl::render::graph_dot(&graph);
+    assert!(dot.contains("possibly incomplete"), "{dot}");
+    assert!(dot.contains("interests timeout"), "{dot}");
 }
 
 // ── zk2's acts and reads (#612, FJ5) ─────────────────────────────────────────
