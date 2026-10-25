@@ -336,6 +336,11 @@ pub struct Requirement<'a> {
     pub params: &'a BTreeMap<String, String>,
     /// Whether the role is optional (core §3.1).
     pub optional: bool,
+    /// How many desired resources of the author's declaration the
+    /// requirement names (text 0.6, F-218): one for a requirement §2.1
+    /// allows, one role per document type; two or more is
+    /// [`BindingProblem::TwoDocuments`].
+    pub documents: usize,
 }
 
 /// The desired resource a requirement binds (§2.3): its interface, kind
@@ -353,6 +358,10 @@ pub struct Slice<'a> {
 pub enum BindingProblem {
     /// No binding, and the role is required.
     RequiredUnbound,
+    /// The requirement names two or more desired resources of the author's
+    /// declaration (text 0.6, F-218): one role per document type (§2.1),
+    /// so there is no one slice to bind. Checked alone.
+    TwoDocuments,
     /// More than one binding, or one with `*`, or one that is no address.
     NotOneAuthor,
     /// A target parameter `params` does not bind.
@@ -370,6 +379,7 @@ impl BindingProblem {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::RequiredUnbound => "required_unbound",
+            Self::TwoDocuments => "two_documents",
             Self::NotOneAuthor => "not_one_author",
             Self::TargetUnbound => "target_unbound",
             Self::NotSelf => "not_self",
@@ -416,7 +426,9 @@ fn one_author(bindings: &[String]) -> Option<Addr> {
 /// switch, a binding's problems, or the target's slice, built from the
 /// author's address and the target's own address `own`, each target
 /// parameter's value the target's system or service as its binding says,
-/// slugged (core §1.4).
+/// slugged (core §1.4). The problems in §2.3's order: `required_unbound`
+/// alone; `two_documents` alone (text 0.6); then `not_one_author`,
+/// `target_unbound`, `not_self` and `wrong_self`, each that applies.
 #[must_use]
 pub fn binding(slice: &Slice<'_>, req: &Requirement<'_>, own: &Addr) -> Binding {
     if req.bindings.is_empty() {
@@ -425,6 +437,12 @@ pub fn binding(slice: &Slice<'_>, req: &Requirement<'_>, own: &Addr) -> Binding 
         } else {
             Binding::Invalid(vec![BindingProblem::RequiredUnbound])
         };
+    }
+    // One role per document type (§2.1; text 0.6, F-218): checked after
+    // the binding's absence, which reads nothing, and alone, since every
+    // check after it binds the one slice there is not.
+    if req.documents > 1 {
+        return Binding::Invalid(vec![BindingProblem::TwoDocuments]);
     }
     let mut why = Vec::new();
     let author = one_author(req.bindings);

@@ -821,7 +821,205 @@
         "template": "desired/{host}/{service}/thresholds"
       },
       "target": "h-3fa9c2d41b7e/sysinfo"
+    },
+    {
+      "also": [
+        {
+          "annotations": {
+            "desired.target_param": [
+              "system",
+              "service"
+            ]
+          },
+          "kind": "state",
+          "params": {
+            "service": "string",
+            "system": "string"
+          },
+          "template": "plans/{system}/{service}"
+        }
+      ],
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "two_documents"
+        ]
+      },
+      "iface": "tasking.v1",
+      "note": "a requirement naming two desired resources: one role per document type (0.6, F-218)",
+      "requirement": {
+        "bindings": [
+          "lab/author"
+        ],
+        "optional": true,
+        "params": {
+          "service": "self.service",
+          "system": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ]
+        },
+        "kind": "state",
+        "params": {
+          "service": "string",
+          "system": "string"
+        },
+        "template": "tasks/{system}/{service}"
+      },
+      "target": "lab/worker"
+    },
+    {
+      "also": [
+        {
+          "annotations": {
+            "desired.target_param": [
+              "system",
+              "service"
+            ]
+          },
+          "kind": "state",
+          "params": {
+            "service": "string",
+            "system": "string"
+          },
+          "template": "plans/{system}/{service}"
+        }
+      ],
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "two_documents"
+        ]
+      },
+      "iface": "tasking.v1",
+      "note": "two documents beside a binding of two authors: two_documents alone, the binding's other checks not read (0.6, F-218)",
+      "requirement": {
+        "bindings": [
+          "lab/author",
+          "lab/other"
+        ],
+        "optional": true,
+        "params": {
+          "service": "self.service",
+          "system": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ]
+        },
+        "kind": "state",
+        "params": {
+          "service": "string",
+          "system": "string"
+        },
+        "template": "tasks/{system}/{service}"
+      },
+      "target": "lab/worker"
+    },
+    {
+      "also": [
+        {
+          "annotations": {
+            "desired.target_param": [
+              "system",
+              "service"
+            ]
+          },
+          "kind": "state",
+          "params": {
+            "service": "string",
+            "system": "string"
+          },
+          "template": "plans/{system}/{service}"
+        }
+      ],
+      "expect": {
+        "binding": "invalid",
+        "reasons": [
+          "required_unbound"
+        ]
+      },
+      "iface": "tasking.v1",
+      "note": "two documents, the role required and unbound: required_unbound, checked first and alone (0.6, F-218)",
+      "requirement": {
+        "bindings": [],
+        "optional": false,
+        "params": {
+          "service": "self.service",
+          "system": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ]
+        },
+        "kind": "state",
+        "params": {
+          "service": "string",
+          "system": "string"
+        },
+        "template": "tasks/{system}/{service}"
+      },
+      "target": "lab/worker"
+    },
+    {
+      "also": [
+        {
+          "annotations": {
+            "desired.target_param": [
+              "system",
+              "service"
+            ]
+          },
+          "kind": "state",
+          "params": {
+            "service": "string",
+            "system": "string"
+          },
+          "template": "plans/{system}/{service}"
+        }
+      ],
+      "expect": {
+        "binding": "unbound"
+      },
+      "iface": "tasking.v1",
+      "note": "two documents, the role optional and unbound: the kill switch, which reads nothing (0.6, F-218)",
+      "requirement": {
+        "bindings": [],
+        "optional": true,
+        "params": {
+          "service": "self.service",
+          "system": "self.system"
+        }
+      },
+      "resource": {
+        "annotations": {
+          "desired.target_param": [
+            "system",
+            "service"
+          ]
+        },
+        "kind": "state",
+        "params": {
+          "service": "string",
+          "system": "string"
+        },
+        "template": "tasks/{system}/{service}"
+      },
+      "target": "lab/worker"
     }
   ],
-  "description": "desired.v1 §2.3: a desired resource (as declarations.json writes it, its declaration declared), its author's interface id (iface), the target's own address (target, <system>/<service>), and the target's requirement as its descriptor lists it (core §3.3: bindings, the provider addresses; params, the parameter bindings as configured; optional) -> expect.binding: \"unbound\" (no binding, and optional: the kill switch, §2.12); \"invalid\", with reasons in this order: required_unbound (no binding, and required; checked alone), not_one_author (more than one binding, or one with * at either position), target_unbound (a target parameter params does not bind), not_self (a target parameter bound to anything but self.system or self.service), wrong_self (0.2, F-161: of two target parameters, one bound to the other's self, the first to self.service or the second to self.system; a literal is not_self's alone, and an unbound parameter target_unbound's); or \"bound\", with key: zk2/<author system>/<author service>/<iface>/<state, or @state for an explicit resource>/<the template's chunks, each target parameter's the target's own system or service as its binding says, slugged as core §1.4 slugs a value>."
+  "description": "desired.v1 §2.3: a desired resource (as declarations.json writes it, its declaration declared), its author's interface id (iface), the target's own address (target, <system>/<service>), also (0.6, F-218: the other desired resources of the author's declaration the requirement names, each as resource is written; absent for none), and the target's requirement as its descriptor lists it (core §3.3: bindings, the provider addresses; params, the parameter bindings as configured; optional) -> expect.binding: \"unbound\" (no binding, and optional: the kill switch, §2.12); \"invalid\", with reasons in this order: required_unbound (no binding, and required; checked alone), two_documents (0.6, F-218: the requirement names two or more desired resources, also not empty; one role per document type, §2.1; checked after the binding's absence, which reads nothing, and alone, since every later check binds the one slice there is not), not_one_author (more than one binding, or one with * at either position), target_unbound (a target parameter params does not bind), not_self (a target parameter bound to anything but self.system or self.service), wrong_self (0.2, F-161: of two target parameters, one bound to the other's self, the first to self.service or the second to self.system; a literal is not_self's alone, and an unbound parameter target_unbound's); or \"bound\", with key: zk2/<author system>/<author service>/<iface>/<state, or @state for an explicit resource>/<the template's chunks, each target parameter's the target's own system or service as its binding says, slugged as core §1.4 slugs a value>."
 }

@@ -1428,10 +1428,25 @@ impl Target {
             template: &r.template,
             targets: &targets,
         };
+        // One role per document type (§2.1, text 0.6, F-218): the
+        // requirement names one desired resource of the author's
+        // declaration; two or more refuse the role, nothing declared.
+        let names = b.role_resources(role);
+        let documents = contract
+            .resources
+            .iter()
+            .filter(|x| {
+                names
+                    .as_ref()
+                    .is_none_or(|n| n.iter().any(|t| t == x.template.as_str()))
+            })
+            .filter(|x| model::declaration_of(x) != model::Declaration::NotThisProfiles)
+            .count();
         let req = model::Requirement {
             bindings: &binding.providers,
             params: &binding.params,
             optional,
+            documents,
         };
         let key = match model::binding(&slice, &req, &own) {
             model::Binding::Bound { key } => Some(key.to_string()),

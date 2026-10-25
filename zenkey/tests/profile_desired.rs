@@ -1646,3 +1646,82 @@ fn the_examples_contracts_are_the_scenarios() {
         imp("worker.v1").fingerprint()
     );
 }
+
+/// One role per document type (desired.v1 §2.1, §2.3, text 0.6, F-218):
+/// `worker_two.v1`'s role `task` names two desired resources of
+/// `tasking_two.v1`, `plans/…` and `tasks/…`, and the target refuses
+/// the role at its declaration, `two_documents`, nothing declared: no
+/// report is put, and the service never starts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_role_on_two_documents_is_refused() {
+    struct Never;
+    impl desired::Handler for Never {
+        fn apply<'a>(
+            &'a self,
+            _: &'a desired::Document,
+        ) -> zenkey::call::BoxFuture<'a, desired::Ended> {
+            Box::pin(async { desired::Ended::Done })
+        }
+        fn revert<'a>(&'a self, _: &'a Version) -> zenkey::call::BoxFuture<'a, desired::Ended> {
+            Box::pin(async { desired::Ended::Done })
+        }
+    }
+    let load = |text: &str| {
+        let l = zenkey::model::contract::load_str(text, std::path::Path::new("."), None);
+        Implementation::new(l.contract.unwrap_or_else(|| panic!("{text}\n{}", l.report)))
+    };
+    let desired_resource = |template: &str| {
+        format!(
+            "[resources.\"{template}\"]\nkind = \"state\"\n\
+             type = {{ raw = \"application/octet-stream\" }}\n\
+             params = {{ system = \"string\", service = \"string\" }}\ncardinality = 16\n\
+             annotations = {{ \"desired.target_param\" = [\"system\", \"service\"] }}\n"
+        )
+    };
+    let author = load(&format!(
+        "[interface]\nname = \"tasking_two\"\nmajor = 1\nminor = 0\nuses = [\"desired.v1\"]\n{}{}",
+        desired_resource("plans/{system}/{service}"),
+        desired_resource("tasks/{system}/{service}")
+    ));
+    let worker = load(
+        "[interface]\nname = \"worker_two\"\nmajor = 1\nminor = 0\n\
+         [resources.running]\nkind = \"state\"\ntype = { raw = \"application/octet-stream\" }\n\
+         [requires.task]\ninterface = \"tasking_two.v1\"\n\
+         resources = [\"plans/{system}/{service}\", \"tasks/{system}/{service}\"]\noptional = true\n",
+    );
+    let wi = worker.iface().clone();
+    let bus = one_router().await;
+    let session = client(&bus.ep1).await;
+    let mut cfg = config(WORKER).bind(ROLE, &[AUTHOR]);
+    cfg.bindings.get_mut(ROLE).unwrap().params = [
+        ("system".to_owned(), "self.system".to_owned()),
+        ("service".to_owned(), "self.service".to_owned()),
+    ]
+    .into();
+    let mut b = ServiceBuilder::new(&session, cfg);
+    b.implement(worker).unwrap();
+    let refused = b
+        .desired_target(
+            ROLE,
+            &author,
+            "state/tasks/{system}/{service}",
+            ReportAt::new(wi, "state/running"),
+            Arc::new(Never) as Arc<dyn desired::Handler>,
+            TargetStartup::default(),
+        )
+        .await;
+    match refused {
+        Err(zenkey::Error::Contract(why)) => {
+            assert!(why.contains("two_documents"), "{why}");
+        }
+        Err(other) => panic!("not a contract's refusal: {other}"),
+        Ok(_) => panic!("a role on two documents is refused"),
+    }
+    let g = client(&bus.ep1).await;
+    assert!(
+        get(&g, "zk2/lab/worker/worker_two.v1/state/running")
+            .await
+            .is_empty(),
+        "nothing declared: no report put"
+    );
+}

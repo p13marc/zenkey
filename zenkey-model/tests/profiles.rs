@@ -2343,7 +2343,10 @@ fn desired_slices() {
         );
         let found = e["report"]["found"].as_str().expect("found");
         assert!(
-            matches!(found, "one" | "unreadable" | "none" | "no_slice"),
+            matches!(
+                found,
+                "one" | "unreadable" | "none" | "no_slice" | "not_a_target"
+            ),
             "{what}"
         );
         let slice: Vec<&str> = e["slice"]
@@ -2352,7 +2355,11 @@ fn desired_slices() {
             .iter()
             .map(|s| s.as_str().expect("a key"))
             .collect();
-        assert_eq!(found == "no_slice", slice.is_empty(), "{what}");
+        assert_eq!(
+            matches!(found, "no_slice" | "not_a_target"),
+            slice.is_empty(),
+            "{what}"
+        );
         if found == "one" {
             assert!(
                 slice.contains(&e["report"]["claims"].as_str().expect("claims")),
@@ -2377,28 +2384,49 @@ fn desired_slices() {
         let names: Option<Vec<&str>> = r["requirement"]["resources"]
             .as_array()
             .map(|a| a.iter().map(|t| t.as_str().expect("a template")).collect());
-        let desired_of = |resources: &Value| -> Option<Value> {
+        let desired_of = |resources: &Value| -> Vec<Value> {
             resources
                 .as_array()
                 .expect("resources")
                 .iter()
-                .find(|x| {
+                .filter(|x| {
                     x["annotations"].get(desired::TARGET_PARAM).is_some()
                         && names
                             .as_ref()
                             .is_none_or(|n| n.contains(&x["template"].as_str().unwrap_or("")))
                 })
                 .cloned()
+                .collect()
         };
-        let resource = if named.is_null() {
-            held.iter().find_map(|h| desired_of(&h["resources"]))
+        // The revision the slice is read by: the named one, else the first
+        // held one declaring a desired resource the requirement names; a
+        // revision in hand declaring none is no target's (0.6, F-217).
+        let documents = if named.is_null() {
+            held.iter()
+                .map(|h| desired_of(&h["resources"]))
+                .find(|d| !d.is_empty())
+                .unwrap_or_default()
         } else {
             desired_of(&named["resources"])
         };
-        let Some(resource) = resource else {
-            assert!(matches!(from, None | Some("requirement")), "{what}");
+        let in_hand = !named.is_null() || !held.is_empty();
+        let Some(resource) = documents.first().cloned() else {
+            if in_hand {
+                assert_eq!(
+                    e["report"]["found"], "not_a_target",
+                    "{what}: a revision in hand declares no desired resource"
+                );
+            } else {
+                assert!(matches!(from, None | Some("requirement")), "{what}");
+            }
             continue;
         };
+        if documents.len() > 1 && !r["requirement"]["bindings"].as_array().is_none_or(Vec::is_empty) {
+            // One role per document type (0.6, F-218).
+            assert_eq!(e["binding"], json!(["two_documents"]), "{what}");
+            assert!(slice.is_empty(), "{what}");
+            continue;
+        }
         let (kind, template, params, ann) = desired_resource(&resource);
         let decl = desired::declaration(kind, &template, &params, &ann);
         let Some(targets) = decl.targets() else {
@@ -2449,6 +2477,7 @@ fn desired_slices() {
                 bindings: &bindings,
                 params: &params,
                 optional: req["optional"] == json!(true),
+                documents: documents.len(),
             },
             &own,
         );
@@ -2517,10 +2546,22 @@ fn desired_bindings() {
             template: &template,
             targets,
         };
+        // The other desired resources of the author's declaration the
+        // requirement names (text 0.6, F-218).
+        let also = case["also"].as_array().map_or(0, |a| {
+            a.iter()
+                .filter(|r| {
+                    let (kind, template, params, ann) = desired_resource(r);
+                    desired::declaration(kind, &template, &params, &ann)
+                        != desired::Declaration::NotThisProfiles
+                })
+                .count()
+        });
         let requirement = desired::Requirement {
             bindings: &bindings,
             params: &params,
             optional: req["optional"] == json!(true),
+            documents: 1 + also,
         };
         let b = desired::binding(&slice, &requirement, &own);
         let got = match &b {

@@ -1890,6 +1890,16 @@ impl ServiceBuilder {
 
     /// A role this service holds (§3.1): its interface, and whether it is
     /// optional.
+    /// The templates the requirement of `role` names, as the contract
+    /// declaring it lists them: `None` for every resource, or for a role
+    /// the component's manifest declares.
+    pub(crate) fn role_resources(&self, role: &str) -> Option<Vec<String>> {
+        let r = self.roles.iter().find(|r| r.role == role)?;
+        let by = r.declared_by.as_ref()?;
+        let s = find(&self.impls, by).ok()?;
+        s.imp.contract().requires.get(role)?.resources.clone()
+    }
+
     pub(crate) fn role_of(&self, role: &str) -> Result<(IfaceId, bool)> {
         self.roles
             .iter()

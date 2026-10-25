@@ -179,25 +179,30 @@ fn one_author(bindings: &[String]) -> Option<Addr> {
 }
 
 /// The desired resources of `author` among the requirement's `templates`
-/// (every one when the requirement names none), with each declaration
-/// (§2.2): the first in the contract's order, by its `(token, template)`.
-fn desired_resource<'c>(
+/// (every one when the requirement names none), each with its declaration
+/// (§2.2), in the contract's order. One role per document type (§2.1):
+/// more than one is `two_documents` (text 0.6, F-218), and none makes the
+/// role no target's (F-217).
+fn desired_resources<'c>(
     author: &'c Contract,
     templates: Option<&[String]>,
-) -> Option<(&'c Resource, Declaration)> {
+) -> Vec<(&'c Resource, Declaration)> {
     author
         .resources
         .iter()
         .filter(|r| templates.is_none_or(|t| t.iter().any(|t| t == r.template.as_str())))
         .map(|r| (r, dm::declaration_of(r)))
-        .find(|(_, d)| *d != Declaration::NotThisProfiles)
+        .filter(|(_, d)| *d != Declaration::NotThisProfiles)
+        .collect()
 }
 
 /// Resolves one `requires` entry of `own`'s descriptor (§2.3): its
 /// listing, its author, and its slice from `author`'s contract when one is
 /// in hand, else from the requirement's `templates` (the target's contract
-/// declaring the role). `None` when the author's contract declares no
-/// desired resource the requirement names: the role is not this profile's.
+/// declaring the role). `None` when the author's contract in hand declares
+/// no desired resource the requirement names: the role is not this
+/// profile's, not asked, `not_a_target` (text 0.6, F-217). One naming two
+/// or more is `two_documents`, no slice (F-218).
 pub fn resolve_role(
     own: &Addr,
     entry: &RequireEntry,
@@ -212,14 +217,31 @@ pub fn resolve_role(
     );
     out.interface = IfaceId::from_str(&entry.interface).ok();
     out.author = one_author(&entry.bindings);
-    let req = dm::Requirement {
+    let mut req = dm::Requirement {
         bindings: &entry.bindings,
         params: &entry.params,
         optional: entry.optional,
+        documents: 1,
     };
     if let Some((contract, from)) = author {
-        let (r, decl) = desired_resource(contract, templates)?;
+        let named = desired_resources(contract, templates);
+        let (r, decl) = named.first().cloned()?;
         out.resource = Some(format!("{}/{}", r.token, r.template.as_str()));
+        if named.len() > 1 {
+            // One role per document type (§2.1, text 0.6, F-218): the
+            // binding gives no slice, whichever resource it would bind.
+            req.documents = named.len();
+            let slice = dm::Slice {
+                iface: &contract.iface,
+                token: r.token,
+                template: &r.template,
+                targets: &[],
+            };
+            if let Binding::Invalid(why) = dm::binding(&slice, &req, own) {
+                out.binding_problems = why;
+            }
+            return Some(out);
+        }
         match decl {
             Declaration::Invalid(why) => out.declaration_invalid = why,
             Declaration::Declared(targets) => {
@@ -291,7 +313,10 @@ pub fn resolve_role(
 
 /// The revision of `iface` a role's slice is read by (§2.3): the one
 /// `author`'s descriptors name, in hand; else one held offline that
-/// declares a desired resource `templates` names. `None` when neither.
+/// declares a desired resource `templates` names; else any held offline,
+/// which shows the role is no target's (text 0.6, F-217). `None` with no
+/// revision of the interface in hand: only then is the slice the target's
+/// alone.
 pub fn author_contract<'c>(
     catalog: Option<&Catalog>,
     author: Option<&Addr>,
@@ -307,11 +332,15 @@ pub fn author_contract<'c>(
             }
         }
     }
-    offline
-        .of_iface(iface)
-        .map(|r| r.contract())
-        .find(|c| desired_resource(c, templates).is_some())
-        .map(|c| (c, SliceFrom::OfflineContract))
+    // A held revision declaring a desired resource the requirement names;
+    // else any held revision of the interface, which shows the role is no
+    // target's (text 0.6, F-217): the target alone is read only with none
+    // in hand.
+    let held: Vec<&Contract> = offline.of_iface(iface).map(|r| r.contract()).collect();
+    held.iter()
+        .find(|c| !desired_resources(c, templates).is_empty())
+        .or(held.first())
+        .map(|c| (*c, SliceFrom::OfflineContract))
 }
 
 /// The contract revision `iface` of `descriptor` names, when in hand:
@@ -1163,8 +1192,19 @@ mod tests {
                     &offline,
                 ),
             };
-            let res = resolve_role(&own, &entry, templates.as_deref(), held)
-                .unwrap_or_else(|| panic!("{}: not this profile's", case["note"]));
+            let Some(res) = resolve_role(&own, &entry, templates.as_deref(), held) else {
+                // A revision in hand declaring no desired resource the
+                // requirement names: no target's (text 0.6, F-217).
+                let got = json!({
+                    "slice": [],
+                    "from": null,
+                    "binding": [],
+                    "declaration": [],
+                    "report": {"found": "not_a_target"},
+                });
+                assert_eq!(got, case["expect"], "{}", case["note"]);
+                continue;
+            };
             let replies: Vec<ReportReply> = r["replies"]
                 .as_array()
                 .unwrap()
