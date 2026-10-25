@@ -804,7 +804,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `finish` after claim, take-over and step-down); and §5's
   `one_incumbent`, `vacancy`, `standbys`, `twin` in five states; text 0.1,
   core 0.39 marking a standby and publishing `election`; hostid.v1 text 0.6
-  counting no recognised standby).
+  counting no recognised standby; text 0.2, F-199 to F-209, #841 RB: the
+  `Elector` keeps what its watch hears while a read runs, decided in the
+  state that read leaves (F-199), retries a heal read that ends nothing
+  (`Step::Retry`), and knows its own re-mint (`Event::Reminted`, F-209);
+  core 0.40 and hostid.v1 0.7 with it).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -953,6 +957,36 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `desired put` puts the line byte for byte once it reads as strict JSON,
   `desired seeds` says what the last seed found, and `desired gets` counts
   the GETs that reached a slice (`Author::gets`, text 0.4).
+  `redundancy` (#841, RB) is `redundancy.v1`'s candidate:
+  `ServiceBuilder::redundancy(RedundancyStartup)` → `Redundancy` (also
+  `Service::redundancy()`) elects every governed interface the service
+  implements (its contract lists `redundancy.v1` in `uses`), each by
+  `zenkey_model::redundancy`'s `Elector`, the runtime deciding nothing
+  itself. The claim is `start()`'s steps 3 and 4 (the descriptor marking
+  the interface `"standby": true`, the instance token, no interface
+  token), then a liveliness watch on `@zk/**` on the watch session handed
+  in (else a poll every 500 ms) with its round trip, and a round trip on
+  the claim's session; every read goes on `RedundancyStartup::reader`, a
+  session holding neither a liveliness subscriber nor the claim (text
+  0.2, F-204: a session answers its own tokens even through a refusing
+  router). A governed interface's publishers, state, operation and
+  `unavailable` queryables and member tokens are slots of a crate-private
+  gate, declared only while it serves; a write while it stands by is
+  `Error::Standby`, nothing published, and raw `declare_publisher`/
+  `declare_queryable` are refused on it. A takeover declares the
+  resources, runs the application's `Takeover` hook, puts the descriptor
+  unmarked and declares the token last; a step-down stops its writes,
+  withdraws the tokens, undeclares the resources and forgets their state,
+  then puts the descriptor marked. `external` asks a `Lock` (`FileLock`'s
+  flock, `ManualLock`) at the start, every second and on `lock_changed()`,
+  and `refuse_without_lock` refuses to start without it; `new_epoch` tells
+  each elector first (F-209). A governed interface without
+  `redundancy()`, an invalid declaration, or a governed interface in the
+  tokenless set is refused at start, nothing declared, so `zenctl gen` and
+  `serve` refuse a governed contract until #841's RC. Its scenarios §1–§11
+  are `tests/profile_redundancy.rs`, and the owner example's `--standby`
+  drives it from stdin (`redundancy role|reads|lock|calls|hold-heal|wait|
+  new-epoch`, one JSON line each).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
@@ -992,11 +1026,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.39 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.40 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
-    `redundancy.v1`'s vocabulary, #841; changes go through
-    `spec/CHANGELOG.md`):
+    `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
+    tokens, and a peer's read covers only its routers' clients and its
+    linked peers, #841 RB; changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a
