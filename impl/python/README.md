@@ -2015,7 +2015,7 @@ against zk2py's owner:
 PYTHONPATH=impl/python ZK2PY_PROTOC=$(which protoc) \
   target/py-venv/bin/python -m zk2py.presence_scenarios [--only 1 … 10]... \
   [--owner zk2py|rust] [--reader zk2py|zenctl] [--owner-bin <owner-example>] [--zenctl <zenctl>] \
-  [--crowd 2000] [--tokenless 100]
+  [--crowd 2000] [--tokenless 100] [--reopen]
 ```
 
 `--owner` picks who holds the tokens: zk2py's owner, or the Rust owner
@@ -2319,8 +2319,10 @@ findings:
 - **F-240.** A round trip that ran out at the interests timeout is read
   "as not made", although its GET was asked.
 
-`presence_scenarios` §10 now ends with two notes for F-239. They measure
-the reopen beside the crowd, and they are not checks of a step.
+With `--reopen`, `presence_scenarios` §10 ends with two notes for F-239.
+They measure the reopen beside the crowd. They are not checks of a step,
+and a measurement that fails becomes a note. Without the flag they do not
+run.
 
 **The step 7 control at 10,000.** The control is a follower in `ns`
 without history, which should never hear the owner go. Beside 10,000

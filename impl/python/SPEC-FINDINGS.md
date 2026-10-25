@@ -12308,9 +12308,9 @@ rule.
 
 No fixture changed, and no code of zk2py's changed. 0.43 words steps 6
 and 9 as zk2py's runner already ran them. The runner now checks every
-round trip asked before step 6's first seed. It also notes two
-measurements for F-239, and its step 7 control waits until the follower
-owes no read before the owner withdraws.
+round trip asked before step 6's first seed. With `--reopen` it also
+notes two measurements for F-239. Its step 7 control waits until the
+follower owes no read before the owner withdraws.
 
 **Round 67's findings at 0.43:** F-236 and F-237 are resolved, as
 proposed. Each entry has its status line.
