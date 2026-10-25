@@ -89,10 +89,22 @@ pub fn presence_text(p: Option<&crate::presence_link::PresenceUpdate>) -> (Strin
     let counts = format!("{up} up · {down} down · {unobservable} unobservable");
     match p.presence.basis() {
         PresenceBasis::Unseeded => ("presence: not seeded yet".to_string(), false),
-        PresenceBasis::Incomplete { .. } => (
-            format!("presence: {counts} — the seed was possibly incomplete (§8.1)"),
-            false,
-        ),
+        // Why, when the seed says: a barrier that does not stand is worth a
+        // caution, since no withdrawal may be heard until it does (#851).
+        PresenceBasis::Incomplete { .. } => match &p.seed {
+            zenkey_fleet::SeedOutcome::Incomplete(why)
+                if why == zenkey_fleet::BARRIER_NOT_ESTABLISHED =>
+            {
+                (
+                    format!("presence: {counts} — the seed {why}, so it is possibly incomplete"),
+                    true,
+                )
+            }
+            _ => (
+                format!("presence: {counts} — the seed was possibly incomplete (§8.1)"),
+                false,
+            ),
+        },
         PresenceBasis::Complete => (format!("presence: {counts}"), false),
         PresenceBasis::Lost { dropped } => (
             format!(

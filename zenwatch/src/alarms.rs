@@ -1218,6 +1218,7 @@ mod tests {
                 cut_off_during: false,
                 services: 1,
                 listing: 1,
+                unsettled: false,
             })),
             seed: Some(Ok(true)),
             ..AlarmReadLog::default()

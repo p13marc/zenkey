@@ -717,3 +717,118 @@ async fn s9_a_read_beside_a_liveliness_subscriber() {
         let _ = tool.close().await;
     }
 }
+
+// ─── §10 ────────────────────────────────────────────────────────────────────
+
+/// A client of `endpoint` that retries fast after losing it, whose runtime
+/// waits `interests_ms` for its routers to finish a liveliness GET
+/// (`routing/interests/timeout`).
+async fn waiting_client(endpoint: &str, interests_ms: u64) -> zenoh::Session {
+    let mut c = zenoh::Config::default();
+    for (k, v) in [
+        ("mode", "\"client\"".to_owned()),
+        ("scouting/multicast/enabled", "false".to_owned()),
+        ("scouting/gossip/enabled", "false".to_owned()),
+        ("connect/endpoints", format!("[\"{endpoint}\"]")),
+        (
+            "connect/retry",
+            "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }".to_owned(),
+        ),
+        ("routing/interests/timeout", interests_ms.to_string()),
+    ] {
+        c.insert_json5(k, &v).unwrap();
+    }
+    zenoh::open(c).await.expect("a client")
+}
+
+/// §10 step 6 (core §8.1, 0.41; #851), the reader under test: a
+/// `PresenceFeed` whose watch session's round trip does not stand seeds
+/// possibly incomplete, saying why, reads nobody down, and makes the round
+/// trip again before its next read; once one stands its read is complete.
+/// Its watch session's link cut, it reads again at once (not made, through
+/// a session cut off), and healed, it makes the round trip again before the
+/// read that finds the owner up. Steps 1 to 5 observe zenoh and the
+/// runtime: `zenkey/tests/presence.rs`'s
+/// `s10_a_round_trip_at_a_population_and_the_interests_timeout`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
+    let (_r1, ep) = router(None).await;
+    let owners = client(&ep).await;
+    let tool = client(&ep).await;
+    let svc = owner(&owners, "p10/owner").await;
+    let key = svc.instance_key().expect("a key").to_string();
+    eventually("the tool reads the owner", || reads(&tool, &key)).await;
+    let watch_link = Link::to(&ep).await;
+    let watch = waiting_client(&watch_link.endpoint, 300).await;
+    let (up, absent) = (addr("p10/owner"), addr("p10/absent"));
+
+    // No round trip stands: the link stalls while the monitor starts.
+    watch_link.stall();
+    let monitor = Monitor::start(&watch, presence_spec())
+        .await
+        .expect("a monitor");
+    assert_eq!(monitor.settled(), Some(false), "the round trip ran out");
+    let mut live = LivePresence::new(PresenceScope::all());
+    live.track(&up, SystemTime::now());
+    live.track(&absent, SystemTime::now());
+    let (mut feed, mut seen) = PresenceFeed::open(&tool, &monitor, live, T)
+        .await
+        .expect("the feed opens");
+    assert_eq!(
+        *feed.last_seed(),
+        SeedOutcome::Incomplete(zenkey_fleet::BARRIER_NOT_ESTABLISHED.to_owned()),
+        "possibly incomplete, and why"
+    );
+    assert_eq!(feed.presence().status(&up), Up, "what the read showed");
+    assert_eq!(
+        feed.presence().status(&absent),
+        Unobservable,
+        "never down without the round trip"
+    );
+    let asked = zenkey::presence::liveliness_gets(&watch).settles;
+    assert!(asked >= 2, "the start's, and the seed's: {asked}");
+
+    // The stall ends: the next read makes the round trip first, and stands.
+    watch_link.heal();
+    until(&mut feed, &mut seen, "a complete seed", |f| {
+        *f.last_seed() == SeedOutcome::Complete
+    })
+    .await;
+    assert_eq!(monitor.settled(), Some(true));
+    assert_eq!(feed.presence().status(&absent), Down);
+    assert_eq!(feed.presence().status(&up), Up);
+
+    // Cut: read again at once, not made, nobody down.
+    let before = zenkey::presence::liveliness_gets(&watch).settles;
+    watch_link.cut();
+    until(&mut feed, &mut seen, "a read not made", |f| {
+        matches!(f.last_seed(), SeedOutcome::CutOff(_))
+    })
+    .await;
+    assert_eq!(feed.presence().status(&up), Unobservable);
+    assert_eq!(monitor.settled(), Some(false), "lost with the transport");
+
+    // Healed: the round trip again, then the owner up.
+    watch_link.heal();
+    until(&mut feed, &mut seen, "the owner up again", |f| {
+        f.presence().status(&up) == Up && *f.last_seed() == SeedOutcome::Complete
+    })
+    .await;
+    assert!(
+        zenkey::presence::liveliness_gets(&watch).settles > before,
+        "the round trip was made again"
+    );
+    assert_eq!(monitor.settled(), Some(true));
+    assert!(
+        !seen.iter().any(|t| t.address == up
+            && matches!(t.change, PresenceChange::Status { to: Down, .. })),
+        "the owner never read down: {seen:#?}"
+    );
+    eprintln!(
+        "§10 step 6: round trips on the watch session {}",
+        zenkey::presence::liveliness_gets(&watch).settles
+    );
+    drop(feed);
+    monitor.shutdown().await.expect("shutdown");
+    let _ = svc.close().await;
+}

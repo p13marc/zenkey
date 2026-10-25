@@ -318,7 +318,7 @@ impl From<crate::liveliness::TokenBasis> for Observer {
         use crate::liveliness::TokenBasis as B;
         match b {
             B::Unseeded => Observer::Unseeded,
-            B::Incomplete { cut_off_during } => Observer::Incomplete { cut_off_during },
+            B::Incomplete { cut_off_during, .. } => Observer::Incomplete { cut_off_during },
             B::Complete => Observer::Complete,
             B::Lost { dropped } => Observer::Lost { dropped },
             B::CutOff => Observer::CutOff,

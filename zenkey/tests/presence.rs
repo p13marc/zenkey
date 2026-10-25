@@ -1370,39 +1370,252 @@ async fn crowd(
     tokens
 }
 
-/// #851's measurement on one router (zenoh 1.10.1): a barrier that
-/// matches no token orders a watch session's subscriber at its router as
-/// the subscriber's own selector does, and carries nothing.
+/// A client of `endpoint` whose runtime waits `interests_ms` for its
+/// routers to finish a liveliness GET (`routing/interests/timeout`), and
+/// that retries fast after losing `endpoint`.
+async fn client_waiting(endpoint: &str, interests_ms: u64) -> zenoh::Session {
+    let mut c = zenoh::Config::default();
+    for (k, v) in [
+        ("mode", "\"client\"".to_owned()),
+        ("scouting/multicast/enabled", "false".to_owned()),
+        ("scouting/gossip/enabled", "false".to_owned()),
+        ("connect/endpoints", format!("[\"{endpoint}\"]")),
+        (
+            "connect/retry",
+            "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }".to_owned(),
+        ),
+        ("routing/interests/timeout", interests_ms.to_string()),
+    ] {
+        c.insert_json5(k, &v).unwrap();
+    }
+    zenoh::open(c).await.unwrap()
+}
+
+/// §10 (core §8.1, 0.41; Appendix B; #851), steps 1 to 5 and 7: a round
+/// trip whose GET matches no token orders a watch session's subscriber at
+/// its router, on one router and through R2; a subscriber without history
+/// hears an earlier token's withdrawal, except in a namespace; beside 2,000
+/// tokens the round trip is one round trip without history and waits for
+/// the history with it; and a GET that runs to its session's interests
+/// timeout ends with no error reply, which the reference reads as possibly
+/// incomplete. Step 6 observes the
+/// reader under test: `zenkey-fleet/tests/presence_scenarios.rs`'s
+/// `s10_a_round_trip_at_a_population_and_the_interests_timeout`.
 ///
-/// zenoh's code (`zenoh/src/net/routing`): a client's runtime forwards
-/// both interests to its router on one link, at one priority (the
-/// subscriber's `CurrentFuture` and the GET's `Current`,
-/// `hat/client/interests.rs`), and the router handles each in turn in
-/// `Face::interest` (`dispatcher/interests.rs`): the subscriber's current
-/// tokens (its history) are sent and its interest registered, then the
-/// GET's current tokens are sent — none — and its `DeclareFinal` at once,
-/// since a router's own hat resolves a client's interest itself
-/// (`hat/router/interests.rs`). So the final reply follows the
-/// subscriber's registration, and its history, whatever the GET's
-/// selector matches. A subscriber without history hears a token withdrawn
-/// that was declared before it too: the router sends it an undeclaration
-/// by key (`hat/broker/token.rs`).
-///
-/// - **Stalled** (the window held open, as §9 step 5): the barrier waits
-///   for the link in every run, nothing answered by the session itself,
-///   and the withdrawal is heard in every run, by a subscriber with
-///   history and by one without.
-/// - **The control**, the barrier skipped, the same stall: the withdrawal
-///   is never heard, in every run.
-/// - **Unstalled, many at once**, beside a crowd of tokens the
-///   subscriber's history carries: the misses counted with the barrier,
-///   and without it.
-/// - **The cost**: the barrier beside the crowd, and the subscriber's own
-///   selector beside it, timed.
+/// zenoh's code (`zenoh/src/net/routing`): a client's runtime forwards a
+/// subscriber's interest and a GET's to its router on one link, at one
+/// priority (`hat/client/interests.rs`), and the router handles each in
+/// turn in `Face::interest` (`dispatcher/interests.rs`): the subscriber's
+/// history is sent and its interest registered, then the GET's current
+/// tokens — none — and its final reply, since a router resolves a client's
+/// interest itself and ignores one from another router
+/// (`hat/router/interests.rs`). A subscriber without history is told an
+/// earlier token's withdrawal by key (`hat/broker/token.rs`), a key a
+/// namespaced session does not strip (`routing/namespace.rs`). A GET its
+/// routers have not finished is ended by the session's runtime at
+/// `routing/interests/timeout`, with the final reply alone
+/// (`CurrentInterestCleanup`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_barrier_that_matches_no_token_orders_the_subscriber_at_its_router() {
-    const RUNS: usize = 20;
-    const CONTROLS: usize = 5;
+async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
+    const RUNS: usize = 10;
+    const CONTROLS: usize = 3;
+    const CROWD: usize = 2_000;
+    assert_eq!(
+        presence::barrier_key(INSTANCES),
+        NO_TOKEN,
+        "the reference's"
+    );
+    let (r1, ep1) = router(None).await;
+    let (_r2, ep2) = router(Some(&ep1)).await;
+    let owner = client(&ep1).await;
+    let tool = client(&ep1).await;
+    let tool2 = client(&ep2).await;
+
+    // 1, 2: one router.
+    let link1 = common::link_to(&ep1).await;
+    let started = std::time::Instant::now();
+    let mut heard = 0;
+    for run in 0..RUNS {
+        let key = format!("zk2/s10/run{run}/@zk/instance/{run:016x}");
+        heard += usize::from(race(&owner, &[&tool], &link1, &key, true, false).await);
+    }
+    eprintln!(
+        "§10 step 1: heard {heard} of {RUNS} in {:?}",
+        started.elapsed()
+    );
+    assert_eq!(heard, RUNS, "a withdrawal after the round trip was missed");
+    let mut missed = 0;
+    for run in 0..CONTROLS {
+        let key = format!("zk2/s10/control{run}/@zk/instance/{run:016x}");
+        missed += usize::from(!race(&owner, &[&tool], &link1, &key, false, false).await);
+    }
+    eprintln!("§10 step 2: missed {missed} of {CONTROLS}");
+    assert_eq!(missed, CONTROLS, "the stall should hold the race open");
+
+    // 3: through R2, the seed read at R2 and at R1.
+    let link2 = common::link_to(&ep2).await;
+    let mut heard = 0;
+    for run in 0..RUNS {
+        let key = format!("zk2/s10/r2run{run}/@zk/instance/{run:016x}");
+        heard += usize::from(race(&owner, &[&tool2, &tool], &link2, &key, true, false).await);
+    }
+    let mut missed = 0;
+    for run in 0..CONTROLS {
+        let key = format!("zk2/s10/r2control{run}/@zk/instance/{run:016x}");
+        missed += usize::from(!race(&owner, &[&tool2, &tool], &link2, &key, false, false).await);
+    }
+    eprintln!("§10 step 3: heard {heard} of {RUNS}, missed {missed} of {CONTROLS} without");
+    assert_eq!(heard, RUNS, "a withdrawal after the round trip was missed");
+    assert_eq!(missed, CONTROLS, "the stall should hold the race open");
+
+    // 4: beside the crowd.
+    let holders = [client(&ep1).await, client(&ep1).await];
+    let started = std::time::Instant::now();
+    let _crowd = {
+        let mut held = Vec::new();
+        for (i, h) in holders.iter().enumerate() {
+            held.extend(crowd(h, &tool, &format!("crowd{i}"), CROWD / holders.len()).await);
+        }
+        held
+    };
+    eprintln!("§10 step 4: the crowd's setup {:?}", started.elapsed());
+    let watch = client(&ep1).await;
+    let (_sub, heard) = listen(&watch, false).await;
+    let (complete, tokens, took) =
+        raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(5)).await;
+    eprintln!("§10 step 4: without history, {took:?}, {tokens} tokens");
+    assert!(complete && tokens == 0, "{complete} {tokens}");
+    assert!(
+        took < std::time::Duration::from_secs(1),
+        "one round trip beside {CROWD} tokens: {took:?}"
+    );
+    assert!(heard.lock().unwrap().is_empty(), "no history");
+    let watch = client_waiting(&ep1, 60_000).await;
+    let (_sub, heard) = listen(&watch, true).await;
+    let (complete, tokens, took) =
+        raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(30)).await;
+    let by_then = heard.lock().unwrap().len();
+    eprintln!("§10 step 4: with history, {took:?}, {by_then} heard by its end");
+    assert!(complete && tokens == 0, "{complete} {tokens}");
+    assert!(
+        by_then >= CROWD,
+        "the round trip follows the history: {by_then}"
+    );
+
+    // 5: the interests timeout.
+    let link5 = common::link_to(&ep1).await;
+    let reader = client_waiting(link5.endpoint(), 300).await;
+    assert_eq!(
+        presence::interests_timeout(&reader),
+        std::time::Duration::from_millis(300)
+    );
+    // The steps' own tokens, all withdrawn: beside the crowd, a read of
+    // every instance token takes longer than 300 ms, and is possibly
+    // incomplete for that alone.
+    let narrow = "zk2/s10/*/@zk/instance/*";
+    let open = presence::liveliness_read(&reader, narrow, std::time::Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert!(open.complete && !open.at_interests_timeout, "{open:?}");
+    link5.stall();
+    let (no_error, tokens, took) =
+        raw_barrier(&reader, narrow, std::time::Duration::from_secs(2)).await;
+    eprintln!(
+        "§10 step 5: zenoh's own GET, stalled: no error reply {no_error}, {tokens} tokens, {took:?}"
+    );
+    assert!(no_error, "zenoh ends it with the final reply alone");
+    assert!(
+        took < std::time::Duration::from_secs(2),
+        "at the interests timeout: {took:?}"
+    );
+    let held = presence::liveliness_read(&reader, narrow, std::time::Duration::from_secs(2))
+        .await
+        .unwrap();
+    eprintln!("§10 step 5: the reference's read, stalled: {held:?}");
+    assert!(!held.complete, "never complete: {held:?}");
+    assert!(
+        held.errors.is_empty() && held.at_interests_timeout,
+        "{held:?}"
+    );
+    assert_eq!(
+        held.incomplete_reason(),
+        Some(presence::AT_INTERESTS_TIMEOUT)
+    );
+    let settled = presence::settle(&reader, INSTANCES, std::time::Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert!(
+        !settled,
+        "a round trip ended by the runtime establishes nothing"
+    );
+    link5.heal();
+
+    // 7: a namespace. The owner and the tool in `ns`; the watch session in
+    // `ns`, without history and with it, or in none, on the wire key.
+    let owner = common::client_ns(&ep1, Some("ns")).await;
+    let tool = common::client_ns(&ep1, Some("ns")).await;
+    let mut heard_by = Vec::new();
+    for (ns, history) in [(Some("ns"), false), (Some("ns"), true), (None, false)] {
+        let key = format!(
+            "zk2/s10/{}{history}/@zk/instance/000000000000000a",
+            ns.unwrap_or("wire")
+        );
+        let token = owner.liveliness().declare_token(&key).await.unwrap();
+        eventually("the tool reads it", || async {
+            raw_read(&tool, &key).await.1 == [key.clone()]
+        })
+        .await;
+        let watch = common::client_ns(&ep1, ns).await;
+        assert_eq!(presence::subscriber_needs_history(&watch), ns.is_some());
+        let sel = match ns {
+            Some(_) => INSTANCES.to_owned(),
+            None => format!("ns/{INSTANCES}"),
+        };
+        let heard: Heard = Arc::default();
+        let h = Arc::clone(&heard);
+        let _sub = presence::declare_subscriber(&watch, &sel)
+            .history(history)
+            .callback(move |s: Sample| {
+                h.lock().unwrap().push((
+                    s.key_expr().as_str().to_owned(),
+                    s.kind() == SampleKind::Put,
+                ));
+            })
+            .await
+            .unwrap();
+        assert!(presence::settle(&watch, &sel, T).await.unwrap());
+        token.undeclare().await.unwrap();
+        eventually("gone where the tool reads", || async {
+            raw_read(&tool, &key).await.1.is_empty()
+        })
+        .await;
+        let wire = match ns {
+            Some(_) => key.clone(),
+            None => format!("ns/{key}"),
+        };
+        let gone = heard_gone(&heard, &wire, std::time::Duration::from_secs(1)).await;
+        heard_by.push((ns, history, gone));
+    }
+    eprintln!("§10 step 7: (namespace, history, heard going) {heard_by:?}");
+    assert_eq!(
+        heard_by,
+        [
+            (Some("ns"), false, false),
+            (Some("ns"), true, true),
+            (None, false, true)
+        ],
+        "zenoh fixed the namespace's withdrawal by key: revisit core §8.1 (0.41) and \
+         `subscriber_needs_history`"
+    );
+    drop(r1);
+}
+
+/// #851, under load: the round trip, many at once beside 300 tokens a
+/// history subscriber carries, its link not stalled. With it no withdrawal
+/// is missed; without it some are, which is the race it closes, too narrow
+/// to hit every time without a stall (§10's control holds it open).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_round_trip_under_load_misses_no_withdrawal() {
     const UNSTALLED: usize = 160;
     const AT_ONCE: usize = 8;
     const CROWD: usize = 300;
@@ -1411,32 +1624,6 @@ async fn a_barrier_that_matches_no_token_orders_the_subscriber_at_its_router() {
     let tool = client(&ep).await;
     let holder = client(&ep).await;
     let _crowd = crowd(&holder, &tool, "crowd", CROWD).await;
-    let link = common::link_to(&ep).await;
-
-    for history in [true, false] {
-        let started = std::time::Instant::now();
-        let mut heard = 0;
-        for run in 0..RUNS {
-            let key = format!("zk2/wb/run{history}{run}/@zk/instance/{run:016x}");
-            heard += usize::from(race(&owner, &[&tool], &link, &key, true, history).await);
-        }
-        eprintln!(
-            "one router, stalled, the barrier, history {history}: heard {heard} of {RUNS} in {:?}",
-            started.elapsed()
-        );
-        assert_eq!(heard, RUNS, "a withdrawal after the barrier was missed");
-    }
-    let missed = {
-        let mut missed = 0;
-        for run in 0..CONTROLS {
-            let key = format!("zk2/wb/control{run}/@zk/instance/{run:016x}");
-            missed += usize::from(!race(&owner, &[&tool], &link, &key, false, true).await);
-        }
-        missed
-    };
-    eprintln!("one router, stalled, no barrier: missed {missed} of {CONTROLS}");
-    assert_eq!(missed, CONTROLS, "the stall should hold the race open");
-
     let ep = Arc::new(ep);
     let (owner, tool) = (Arc::new(owner), Arc::new(tool));
     for settle in [true, false] {
@@ -1459,74 +1646,14 @@ async fn a_barrier_that_matches_no_token_orders_the_subscriber_at_its_router() {
             }
         }
         eprintln!(
-            "one router, unstalled, {AT_ONCE} at once beside {CROWD} tokens, barrier {settle}: \
-             missed {missed} of {UNSTALLED} in {:?}",
+            "{AT_ONCE} at once beside {CROWD} tokens, round trip {settle}: missed {missed} of \
+             {UNSTALLED} in {:?}",
             started.elapsed()
         );
         if settle {
-            assert_eq!(missed, 0, "a withdrawal after the barrier was missed");
+            assert_eq!(missed, 0, "a withdrawal after the round trip was missed");
         }
     }
-
-    // The cost, beside the crowd: the barrier, then the subscriber's own
-    // selector, on a watch session.
-    let watch = client(&ep).await;
-    let (_sub, _heard) = listen(&watch, true).await;
-    let first = raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(10)).await;
-    let again = raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(10)).await;
-    let own = raw_barrier(&watch, INSTANCES, std::time::Duration::from_secs(10)).await;
-    assert!(
-        first.0 && first.1 == 0 && again.0 && again.1 == 0,
-        "{first:?} {again:?}"
-    );
-    eprintln!(
-        "beside {CROWD} tokens (complete, tokens, time): the barrier after the subscriber \
-         {first:?}, again {again:?}; the subscriber's own selector {own:?}"
-    );
-}
-
-/// #851's measurement on a router chain (zenoh 1.10.1): the watch session a
-/// client of router A, A linked to router B, the token's holder a client of
-/// B, and the seed read at A and at B. A does not forward a client's
-/// liveliness interest to B: a router's hat resolves it itself
-/// (`hat/router/interests.rs`), and a router ignores an interest from
-/// another router (`dispatcher/interests.rs`); every router holds every
-/// token, propagated router to router. What orders the withdrawal is A's
-/// registration of the subscriber, where B's withdrawal arrives and is
-/// forwarded from, and the barrier's final reply follows it, as on one
-/// router, with history and without. The control, the barrier skipped
-/// behind the same stall, misses it in every run.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_barrier_that_matches_no_token_orders_the_subscriber_across_a_router_chain() {
-    const RUNS: usize = 20;
-    const CONTROLS: usize = 5;
-    let (_rb, ep_b) = router(None).await;
-    let (_ra, ep_a) = router(Some(&ep_b)).await;
-    let owner = client(&ep_b).await;
-    let tool_a = client(&ep_a).await;
-    let tool_b = client(&ep_b).await;
-    let link = common::link_to(&ep_a).await;
-    for history in [true, false] {
-        let started = std::time::Instant::now();
-        let mut heard = 0;
-        for run in 0..RUNS {
-            let key = format!("zk2/wbc/run{history}{run}/@zk/instance/{run:016x}");
-            let tools = [&tool_a, &tool_b];
-            heard += usize::from(race(&owner, &tools, &link, &key, true, history).await);
-        }
-        eprintln!(
-            "a chain, stalled, the barrier, history {history}: heard {heard} of {RUNS} in {:?}",
-            started.elapsed()
-        );
-        assert_eq!(heard, RUNS, "a withdrawal after the barrier was missed");
-    }
-    let mut missed = 0;
-    for run in 0..CONTROLS {
-        let key = format!("zk2/wbc/control{run}/@zk/instance/{run:016x}");
-        missed += usize::from(!race(&owner, &[&tool_a, &tool_b], &link, &key, false, true).await);
-    }
-    eprintln!("a chain, stalled, no barrier: missed {missed} of {CONTROLS}");
-    assert_eq!(missed, CONTROLS, "the stall should hold the race open");
 }
 
 /// #851: a barrier the router's access control refuses is still ordered

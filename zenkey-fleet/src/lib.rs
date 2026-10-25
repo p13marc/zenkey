@@ -337,9 +337,9 @@ pub use model::structural::{OBSERVE_LIMIT, structural, structural_value};
 // alone would read as the crate's.
 pub use bus::contracts::{BundleStore, DEFAULT_MAX_CONTRACTS, UNAVAILABLE_TTL};
 pub use bus::presence::{
-    CUT_OFF_DURING, DESCRIBE_CONCURRENCY, NAMESPACE_SELECTOR, Scope as PresenceScope, cut_off,
-    describe as describe_instances, liveliness_read, namespace_listing,
-    observe as observe_presence, read_tokens, refuse_beside, service_listing,
+    BARRIER_NOT_ESTABLISHED, CUT_OFF_DURING, DESCRIBE_CONCURRENCY, NAMESPACE_SELECTOR,
+    Scope as PresenceScope, cut_off, describe as describe_instances, liveliness_read,
+    namespace_listing, observe as observe_presence, read_tokens, refuse_beside, service_listing,
 };
 // Live presence, per address (#614, FL1): the session-free projection, and
 // the feed that seeds it and keeps it current from a monitor.

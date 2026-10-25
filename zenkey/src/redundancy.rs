@@ -670,6 +670,12 @@ impl Redundancy {
                     let tx = tx.clone();
                     let iface_c = iface.clone();
                     let addr_c = addr.clone();
+                    // With history (#851): the watch's first state is the
+                    // instances it has heard put (`heard`), which a
+                    // withdrawal is judged against, and the address's
+                    // tokens are a handful, so the round trip below waits
+                    // for a history of a few tokens, bounded by the
+                    // timeout and the session's interests timeout.
                     let sub = presence::declare_subscriber(w, selector.clone())
                         .history(true)
                         .callback(move |s: Sample| {
@@ -679,13 +685,19 @@ impl Redundancy {
                         })
                         .await
                         .map_err(zenoh)?;
-                    let _ = presence::settle(w, &selector, st.timeout).await;
+                    if !presence::settle(w, &selector, st.timeout)
+                        .await
+                        .unwrap_or(false)
+                    {
+                        tracing::warn!(%iface, "redundancy.v1: the watch's round trip did not come back: a withdrawal right after the first read may not be heard (core §8.1)");
+                    }
                     Some(sub)
                 }
                 None => None,
             };
             // F-204: the claim at the router before the read on another
-            // session; its own instance key, the cheapest selector.
+            // session; scoped by its own instance key, whose barrier key
+            // (`…/@zk/settle`) carries nothing (#851).
             let own_key = instance_key(&addr, &own)?.to_string();
             let _ = presence::settle(svc.session(), &own_key, st.timeout).await;
             if election == Election::External

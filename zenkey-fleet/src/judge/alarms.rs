@@ -451,6 +451,7 @@ mod tests {
                     cut_off_during: false,
                     services: usize::from(present),
                     listing: usize::from(present),
+                    unsettled: false,
                 })),
                 seed: Some(Ok(true)),
                 archives: Some(Ok(vec!["lab/archive".into()])),

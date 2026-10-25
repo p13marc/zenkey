@@ -78,9 +78,14 @@
 //!
 //! **Watching the author** (core §8.1, 0.37). With a watch session
 //! ([`TargetStartup::watch`]), the target holds its liveliness subscriber on
-//! the author's instance tokens there, settles it before its first seed, and
+//! the author's instance tokens there, without history unless the session
+//! is in a namespace (its first seed reads what is held; core §8.1, 0.41),
+//! settles it before its first seed, and
 //! seeds whenever one appears or one is withdrawn; its presence reads go on
-//! its own session, which holds none. Without one, it reads the author's
+//! its own session, which holds none. While the watch session's barrier
+//! does not stand, a presence read is possibly incomplete
+//! ([`AuthorSeen::Incomplete`]), and the barrier is asked again before the
+//! next one. Without one, it reads the author's
 //! instance tokens every [`TargetStartup::poll`] (500 ms by default) and
 //! seeds when the set it reads changes: an absence shorter than the period,
 //! whose author comes back as the same instance, is missed, and so is any
@@ -1293,6 +1298,8 @@ pub enum AuthorSeen {
     /// None, in a read possibly incomplete: unobservable. A read cut off
     /// while it ran ([`crate::presence::PresenceRead::cut_off_during`],
     /// core §8.1, 0.38) is one: what it shows absent establishes nothing.
+    /// So is one that ran to its session's interests timeout, or one made
+    /// while the watch session's barrier did not stand (0.41).
     Incomplete,
     /// Not made, and why: its session is cut off from every other zenoh
     /// node, or holds a liveliness subscriber. Unobservable.
@@ -1390,6 +1397,10 @@ struct TargetInner {
     seeds: AtomicU64,
     acts: AtomicU64,
     last_seed: Mutex<Option<Seeded>>,
+    /// The watch session's barrier, once its subscriber is declared (core
+    /// §8.1, 0.41; #851): a presence read made while it does not stand is
+    /// possibly incomplete.
+    barrier: Mutex<Option<crate::presence::Barrier>>,
 }
 
 struct Core {
@@ -1525,6 +1536,7 @@ impl Target {
                 seeds: AtomicU64::new(0),
                 acts: AtomicU64::new(0),
                 last_seed: Mutex::new(None),
+                barrier: Mutex::new(None),
             }),
         };
         b.desired_targets.push(t.clone());
@@ -1636,8 +1648,14 @@ impl TargetInner {
         match (&self.startup.watch, &selector) {
             (Some(w), Some(sel)) => {
                 let tx = self.tx.clone();
+                // Without history unless the watch session is in a
+                // namespace (core §8.1, 0.41; #851): the seed below reads
+                // what is held, and the round trip after a history would
+                // wait for all of it. A token held before the subscriber and
+                // withdrawn after the round trip is heard, except through a
+                // namespace, where zenoh 1.10.1 drops that withdrawal.
                 let sub = crate::presence::declare_subscriber(w, sel.clone())
-                    .history(true)
+                    .history(crate::presence::subscriber_needs_history(w))
                     .callback(move |s: Sample| {
                         let why = if s.kind() == SampleKind::Put {
                             Why::Appeared
@@ -1654,8 +1672,19 @@ impl TargetInner {
                     }
                 }
                 // Core §8.1: one round trip on the watch session before the
-                // seed on the other.
-                let _ = crate::presence::settle(w, sel, self.startup.timeout).await;
+                // seed on the other, kept and asked again before a read
+                // while it does not stand.
+                match crate::presence::Barrier::new(w, sel, self.startup.timeout).await {
+                    Ok(b) => {
+                        if !b.establish().await {
+                            tracing::warn!(role = %self.role, "desired.v1: the watch session's barrier was not established: presence reads are possibly incomplete until it is");
+                        }
+                        *self.barrier.lock().expect("not poisoned") = Some(b);
+                    }
+                    Err(e) => {
+                        tracing::warn!(role = %self.role, "desired.v1: the watch session's barrier could not be kept: {e}")
+                    }
+                }
             }
             (None, Some(sel)) => {
                 poll = Some(tokio::spawn(Arc::clone(&self).poll(sel.clone())));
@@ -1665,10 +1694,18 @@ impl TargetInner {
         let _ = self.tx.send(Event::Seed(Why::Start));
         let mut reread = self.reread.subscribe();
         let mut next = (*reread.borrow()).map(|p| tokio::time::Instant::now() + p);
+        let barrier = self.barrier.lock().expect("not poisoned").clone();
+        let mut moves_seen = barrier.as_ref().map_or(0, crate::presence::Barrier::moves);
         loop {
             let tick = async move {
                 match next {
                     Some(t) => tokio::time::sleep_until(t).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            let moved = async {
+                match &barrier {
+                    Some(b) => b.moved_since(moves_seen).await,
                     None => std::future::pending::<()>().await,
                 }
             };
@@ -1677,6 +1714,15 @@ impl TargetInner {
                     Some(ev) => self.handle(ev).await,
                     None => break,
                 },
+                // The watch session's transport moved (core §8.1, 0.41;
+                // #851): a subscriber without history hears no withdrawal
+                // of what it was never told, and the author may have come
+                // or gone meanwhile, so the seed reads it, as after an
+                // appearance.
+                () = moved => {
+                    moves_seen = barrier.as_ref().map_or(moves_seen, crate::presence::Barrier::moves);
+                    self.seed_soon(Why::Appeared);
+                }
                 () = tick => {
                     self.seed_soon(Why::Reread);
                     next = (*reread.borrow()).map(|p| tokio::time::Instant::now() + p);
@@ -1786,9 +1832,16 @@ impl TargetInner {
         let Some(sel) = self.author_selector() else {
             return AuthorSeen::NotRead;
         };
+        // A watch whose barrier does not stand may miss the author's next
+        // move, so the read cannot stand either (core §8.1, 0.41).
+        let barrier = self.barrier.lock().expect("not poisoned").clone();
+        let settled = match barrier {
+            Some(b) => b.establish().await,
+            None => true,
+        };
         match crate::presence::liveliness_read(&self.session, &sel, self.startup.timeout).await {
             Ok(r) if !r.keys.is_empty() => AuthorSeen::Present,
-            Ok(r) if r.complete => AuthorSeen::Absent,
+            Ok(r) if r.complete && settled => AuthorSeen::Absent,
             Ok(_) => AuthorSeen::Incomplete,
             Err(e) => AuthorSeen::NotMade(e.to_string()),
         }

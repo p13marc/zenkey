@@ -256,3 +256,125 @@ async fn the_token_ledger_reads_beside_a_monitor_of_its_own() {
     assert!(feed.withdrawn().is_empty());
     monitor.shutdown().await.expect("shutdown");
 }
+
+/// A watch session reaching `endpoint` through a TCP proxy the test can
+/// stall (both ways, closing nothing), whose runtime ends a liveliness GET
+/// its router has not finished at 300 ms (`routing/interests/timeout`): its
+/// round trip cannot stand while the proxy is stalled (#851).
+async fn stallable_watch(
+    endpoint: &str,
+) -> (
+    zenoh::Session,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let target = endpoint.trim_start_matches("tcp/").to_owned();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxied = format!("tcp/{}", listener.local_addr().unwrap());
+    let stalled = Arc::new(AtomicBool::new(false));
+    let st = Arc::clone(&stalled);
+    tokio::spawn(async move {
+        while let Ok((down, _)) = listener.accept().await {
+            let Ok(up) = tokio::net::TcpStream::connect(&target).await else {
+                continue;
+            };
+            let (dr, dw) = down.into_split();
+            let (ur, uw) = up.into_split();
+            for (mut from, mut to) in [(dr, uw), (ur, dw)] {
+                let st = Arc::clone(&st);
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 64 * 1024];
+                    loop {
+                        while st.load(Ordering::SeqCst) {
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                        let n = match from.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => n,
+                        };
+                        while st.load(Ordering::SeqCst) {
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                        if to.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        }
+    });
+    let mut c = zenoh::Config::default();
+    for (k, v) in [
+        ("mode", "\"client\"".to_owned()),
+        ("scouting/multicast/enabled", "false".to_owned()),
+        ("scouting/gossip/enabled", "false".to_owned()),
+        ("connect/endpoints", format!("[\"{proxied}\"]")),
+        ("routing/interests/timeout", "300".to_owned()),
+    ] {
+        c.insert_json5(k, &v).unwrap();
+    }
+    (zenoh::open(c).await.expect("a watch session"), stalled)
+}
+
+/// The token ledger while its monitor's round trip does not stand (#851,
+/// core §8.1, 0.41): its read is possibly incomplete, saying the barrier is
+/// not established, so the rule's observer is unobservable, never ok; it
+/// reads again, making the round trip first, and once one stands its basis
+/// is complete.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_token_ledger_is_incomplete_while_its_round_trip_does_not_stand() {
+    use std::sync::atomic::Ordering;
+    use zenwatch::liveliness::{TokenBasis, TokenFeed};
+    let (_router, ep) = zk2::router().await;
+    let raw = zk2::client(&ep).await;
+    let other_app = zk2::client(&ep).await;
+    let _token = other_app
+        .liveliness()
+        .declare_token(FOREIGN)
+        .await
+        .expect("a foreign token");
+    zk2::tokens(&raw, FOREIGN, 1).await;
+    let (watch, stalled) = stallable_watch(&ep).await;
+    let spec = zenkey_fleet::MonitorSpec {
+        liveliness: vec![FOREIGN.to_owned()],
+        stats_tick: Duration::from_secs(3600),
+        ..zenkey_fleet::MonitorSpec::default()
+    };
+    stalled.store(true, Ordering::SeqCst);
+    let monitor = zenkey_fleet::Monitor::start(&watch, spec)
+        .await
+        .expect("a monitor");
+    assert_eq!(monitor.settled(), Some(false));
+    let mut feed = TokenFeed::open(&raw, &monitor, vec![FOREIGN.to_owned()], zk2::T)
+        .await
+        .expect("the raw session reads");
+    assert_eq!(
+        feed.basis(),
+        TokenBasis::Incomplete {
+            cut_off_during: false,
+            unsettled: true
+        }
+    );
+    assert!(feed.held().contains(FOREIGN), "what the read showed");
+    assert!(
+        matches!(
+            zenwatch::publish::Observer::from(feed.basis()),
+            zenwatch::publish::Observer::Incomplete { .. }
+        ),
+        "the observer is possibly incomplete, never complete"
+    );
+
+    stalled.store(false, Ordering::SeqCst);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while feed.basis() != TokenBasis::Complete {
+        tokio::time::timeout_at(deadline, feed.next())
+            .await
+            .expect("a complete read in time")
+            .expect("the monitor runs");
+    }
+    assert_eq!(monitor.settled(), Some(true));
+    assert!(feed.held().contains(FOREIGN));
+    monitor.shutdown().await.expect("shutdown");
+}

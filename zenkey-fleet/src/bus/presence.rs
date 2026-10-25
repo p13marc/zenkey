@@ -114,6 +114,11 @@ pub async fn cut_off(session: &Session) -> Option<String> {
 /// the runtime's own words.
 pub const CUT_OFF_DURING: &str = zenkey::presence::CUT_OFF_DURING;
 
+/// Why a read is possibly incomplete when it was made while its watch
+/// session's barrier did not stand (#851, core §8.1, 0.41), as a phrase
+/// after "the presence read …": the runtime's own words.
+pub const BARRIER_NOT_ESTABLISHED: &str = zenkey::presence::BARRIER_NOT_ESTABLISHED;
+
 /// How many descriptor GETs [`describe`] keeps in flight at once.
 pub const DESCRIBE_CONCURRENCY: usize = 64;
 
@@ -336,9 +341,12 @@ pub enum SeedOutcome {
     /// Complete: the basis stands (§8.1).
     Complete,
     /// Ended at its timeout, or with an error reply, or with its session cut
-    /// off while it ran (core §8.1, 0.38): possibly incomplete, and why, as
-    /// a phrase after "the read …". What it read was folded; what it did not
-    /// is unobservable, and the feed reads again.
+    /// off while it ran (core §8.1, 0.38), or at its session's interests
+    /// timeout, or made while the watch session's barrier did not stand
+    /// ([`zenkey::presence::BARRIER_NOT_ESTABLISHED`], 0.41): possibly
+    /// incomplete, and why, as a phrase after "the read …". What it read was
+    /// folded; what it did not is unobservable, and the feed reads again,
+    /// asking the barrier again first.
     Incomplete(String),
     /// The subscription lost events while the seed was read, so the seed
     /// could not stand and the feed reads again.
@@ -384,6 +392,14 @@ pub enum SeedOutcome {
 /// possibly incomplete is retried with backoff too ([`RESEED_BACKOFF`]),
 /// while the feed goes on folding live events.
 ///
+/// **The barrier before each seed** (#851, core §8.1, 0.41). The monitor's
+/// barrier ([`crate::Monitor::barrier`]) is asked before every read, and
+/// made again when it does not stand: it did not come back at the start, or
+/// the watch session's transport moved since. A read made without it is
+/// possibly incomplete ([`zenkey::presence::BARRIER_NOT_ESTABLISHED`]): an
+/// address it shows is up, one it does not is unobservable, never down,
+/// and the feed reads again with backoff.
+///
 /// **Cancel-safe** (#614, FL2). [`PresenceFeed::next`] may be dropped at
 /// any await — a notifier's `select!` loop drops it whenever another branch
 /// wins — and nothing is lost: every transition folded is held in the feed
@@ -403,6 +419,13 @@ pub struct PresenceFeed {
     /// The monitor's session: a watch session, read only for whether it is
     /// cut off (#830, core §8.1).
     watch: Session,
+    /// The watch session's barrier (#851, core §8.1, 0.41): asked before
+    /// each seed, and a seed made while it does not stand is possibly
+    /// incomplete. `None` when the monitor watches no liveliness.
+    barrier: Option<zenkey::presence::Barrier>,
+    /// The watch session's transport events the feed has answered with a
+    /// read ([`zenkey::presence::Barrier::moves`]).
+    moves_seen: u64,
     timeout: Duration,
     events: EventStream,
     presence: LivePresence,
@@ -440,6 +463,17 @@ enum NotRead {
 enum Wake {
     Item(Option<StreamItem>),
     Retry,
+    /// The watch session's transport moved, and its barrier with it (#851).
+    Moved,
+}
+
+/// Resolves once the watch session has had a transport event since the
+/// feed last read `seen`; never without a barrier.
+async fn watch_moved(barrier: Option<&zenkey::presence::Barrier>, seen: u64) {
+    match barrier {
+        Some(b) => b.moved_since(seen).await,
+        None => std::future::pending().await,
+    }
 }
 
 impl PresenceFeed {
@@ -466,6 +500,10 @@ impl PresenceFeed {
         let mut feed = PresenceFeed {
             session: session.clone(),
             watch: monitor.session().clone(),
+            barrier: monitor.barrier().cloned(),
+            moves_seen: monitor
+                .barrier()
+                .map_or(0, zenkey::presence::Barrier::moves),
             timeout,
             events,
             presence,
@@ -515,6 +553,7 @@ impl PresenceFeed {
             if !self.pending.is_empty() {
                 return Some(std::mem::take(&mut self.pending));
             }
+            let (barrier, seen) = (self.barrier.clone(), self.moves_seen);
             let wake = match self.retry {
                 // A re-seed that is due goes first: a stream that never
                 // pauses must not starve it.
@@ -522,10 +561,25 @@ impl PresenceFeed {
                     biased;
                     () = tokio::time::sleep_until(when) => Wake::Retry,
                     item = self.events.recv() => Wake::Item(item),
+                    () = watch_moved(barrier.as_ref(), seen) => Wake::Moved,
                 },
-                None => Wake::Item(self.events.recv().await),
+                None => tokio::select! {
+                    biased;
+                    item = self.events.recv() => Wake::Item(item),
+                    () = watch_moved(barrier.as_ref(), seen) => Wake::Moved,
+                },
             };
             match wake {
+                // The watch session's transport moved (#851): its
+                // subscribers are declared again at a router that has to
+                // read them, a subscriber without history hears no
+                // withdrawal of what it was never told, and a token that
+                // went meanwhile is in no history, so the barrier is made
+                // again and presence read, at once.
+                Wake::Moved => {
+                    self.moves_seen = barrier.as_ref().map_or(seen, |b| b.moves());
+                    self.owe_within(Duration::ZERO);
+                }
                 Wake::Retry => {
                     // A basis that moved with no address moving is handed
                     // out too, so a reader's sight says so: a read not made
@@ -591,6 +645,14 @@ impl PresenceFeed {
                     .await
                     .map(|why| format!("the monitor's session: {why}")),
             };
+            // The watch session's barrier, before the read (#851, core §8.1,
+            // 0.41): made again when it does not stand. A read made without
+            // it is possibly incomplete, since a token withdrawn after it
+            // may never be heard going.
+            let settled = match (&cut, &self.barrier) {
+                (None, Some(b)) => b.establish().await,
+                _ => true,
+            };
             let read = match cut {
                 Some(why) => Err(NotRead::CutOff(why)),
                 None => read_tokens(&self.session, self.presence.scope(), self.timeout)
@@ -606,7 +668,10 @@ impl PresenceFeed {
                 self.reads += 1;
             }
             let observed = match read {
-                Ok(observed) => observed,
+                Ok(mut observed) => {
+                    observed.complete &= settled;
+                    observed
+                }
                 Err(NotRead::CutOff(why)) => {
                     let moved = self.presence.cut_off(SystemTime::now());
                     self.pending.extend(moved);
@@ -654,9 +719,13 @@ impl PresenceFeed {
                     self.owe_within(WITHDRAWAL_SETTLE);
                 }
             } else {
-                let why = observed
-                    .incomplete_reason("ended at its timeout, or with an error reply")
-                    .unwrap_or_default();
+                let why = if settled {
+                    observed
+                        .incomplete_reason("ended at its timeout, or with an error reply")
+                        .unwrap_or_default()
+                } else {
+                    zenkey::presence::BARRIER_NOT_ESTABLISHED
+                };
                 self.last_seed = SeedOutcome::Incomplete(why.to_owned());
                 self.back_off();
             }
