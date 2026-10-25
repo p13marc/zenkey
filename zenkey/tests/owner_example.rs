@@ -1797,6 +1797,9 @@ fn the_help_documents_the_redundancy_surface() {
         "redundancy hold-heal on|off",
         "redundancy wait <iface> serving|standby <ms>",
         "redundancy new-epoch",
+        "redundancy zid",
+        "--wait-go",
+        "\"poll_log\"",
         "{\"redundancy\": \"role\", \"instance\": <id>, \"interfaces\": {<iface>: <standing>}}",
         "{\"redundancy\": \"lock\", \"held\": <bool>}",
         "own_claim_missing, descriptor_unread, lower_candidate,",
@@ -1805,4 +1808,98 @@ fn the_help_documents_the_redundancy_surface() {
     ] {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
+}
+
+/// F-214 (#841, RC): a contract listing `redundancy.v1` is written only
+/// once the start has checked its declaration, so a copy of `ledger.v1`
+/// whose election is `"vote"` stops the owner with the start's refusal,
+/// `not started: … invalid: value`, as `scenarios.md` §11 step 2 expects,
+/// and never with a standby's refused write.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_refuses_an_invalid_declaration_before_writing() {
+    let (_r1, ep) = router(None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let text = std::fs::read_to_string(governed("ledger.v1"))
+        .unwrap()
+        .replace(
+            "\"redundancy.election\" = \"claim\"",
+            "\"redundancy.election\" = \"vote\"",
+        );
+    let path = dir.path().join("ledger.v1.toml");
+    std::fs::write(&path, text).unwrap();
+    let path = path.display().to_string();
+    for extra in [&["--standby"][..], &[][..]] {
+        let mut args = vec!["--connect", &ep];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["lab/ledger", &path]);
+        let o = spawn_owner(&args);
+        let why = o.task.await.unwrap().unwrap_err();
+        assert!(why.starts_with("not started:"), "{why}");
+        assert!(why.contains("invalid: value"), "{why}");
+        assert!(
+            !why.contains("stands by"),
+            "never a standby's refused write: {why}"
+        );
+    }
+}
+
+/// F-216 and the round's stdin gaps (#841, RC): `--wait-go` opens every
+/// session and starts at `go`; `redundancy zid` names the claim's, the
+/// reader's and the watch's zids; without a watch session `redundancy
+/// reads` lists what each poll read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_waits_for_go_and_says_its_polls() {
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let ledger = governed("ledger.v1");
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--wait-go",
+        "--poll-ms",
+        "200",
+        "--instance-id",
+        "000000000000000a",
+        "lab/ledger",
+        &ledger,
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    assert_eq!(line(&o.lines).await, "waiting go");
+    assert!(
+        o.ask("redundancy role")
+            .await
+            .starts_with("refused redundancy role:")
+    );
+    let none = presence::liveliness_read(&tool, "zk2/lab/ledger/@zk/**", T)
+        .await
+        .unwrap();
+    assert!(
+        none.complete && none.keys.is_empty(),
+        "nothing before go: {none:?}"
+    );
+    o.send.send("go".to_owned()).unwrap();
+    assert_eq!(
+        line(&o.lines).await,
+        "ready zk2/lab/ledger/@zk/instance/000000000000000a"
+    );
+    let w = ask_json(&o, "redundancy wait ledger.v1 serving 10000").await;
+    assert_eq!(w["reached"], true, "{w}");
+    let zid = ask_json(&o, "redundancy zid").await;
+    assert!(zid["zid"].is_string() && zid["reader"].is_string(), "{zid}");
+    assert!(zid.get("watch").is_none(), "it polls: no watch session");
+    assert_ne!(zid["zid"], zid["reader"]);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let reads = ask_json(&o, "redundancy reads").await;
+    let log = reads["interfaces"]["ledger.v1"]["poll_log"]
+        .as_array()
+        .unwrap();
+    assert!(log.len() >= 2, "{reads}");
+    let last = log.last().unwrap();
+    assert_eq!(last["made"], true);
+    assert_eq!(
+        last["holders"],
+        serde_json::json!(["000000000000000a"]),
+        "{last}"
+    );
+    o.stop().await;
 }

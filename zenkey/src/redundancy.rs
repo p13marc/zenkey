@@ -372,6 +372,56 @@ pub struct Reads {
     /// The last read's reading: `complete`, `incomplete` with its reason,
     /// or `not_made` with why.
     pub last: Option<String>,
+    /// What the poll's last reads found, the latest last, at most
+    /// [`POLL_LOG`] of them.
+    pub poll_log: Vec<PollRead>,
+}
+
+/// How many of the poll's reads [`Reads::poll_log`] keeps.
+pub const POLL_LOG: usize = 32;
+
+/// One read of the poll (§2.7, 0.3), as the runtime took it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PollRead {
+    /// Whether it was made: a reader cut off makes none.
+    pub made: bool,
+    /// Whether it was complete (core §8.1).
+    pub complete: bool,
+    /// The holders of the interface's token it showed.
+    pub holders: Vec<InstanceId>,
+    /// The holders new to the poll's last: appearances.
+    pub appeared: Vec<InstanceId>,
+    /// The holders a complete read showed gone: withdrawals.
+    pub withdrawn: Vec<InstanceId>,
+}
+
+/// One poll read compared with the last's (§2.7; text 0.3, F-215): a
+/// holder it shows that is new is an appearance, and only a complete read
+/// can show one gone, so a read not complete removes no holder from the
+/// last's. Returns what it found and the holders the next read is compared
+/// with.
+#[must_use]
+pub fn poll_step(
+    last: &BTreeSet<InstanceId>,
+    complete: bool,
+    holders: &BTreeSet<InstanceId>,
+) -> (PollRead, BTreeSet<InstanceId>) {
+    let appeared: Vec<InstanceId> = holders.difference(last).cloned().collect();
+    let (withdrawn, next) = if complete {
+        (last.difference(holders).cloned().collect(), holders.clone())
+    } else {
+        (Vec::new(), last.union(holders).cloned().collect())
+    };
+    (
+        PollRead {
+            made: true,
+            complete,
+            holders: holders.iter().cloned().collect(),
+            appeared,
+            withdrawn,
+        },
+        next,
+    )
 }
 
 /// An interface's standing, for the application (never a guess).
@@ -1056,9 +1106,9 @@ impl Driver {
         let st = &self.startup;
         let Ok(read) = presence::liveliness_read(&st.reader, &self.selector, st.timeout).await
         else {
+            self.log_poll(PollRead::default());
             return;
         };
-        self.reads.lock().expect("not poisoned").polls += 1;
         let now: BTreeSet<InstanceId> = read
             .keys
             .iter()
@@ -1073,17 +1123,26 @@ impl Driver {
             })
             .collect();
         let before = polled.clone().unwrap_or_default();
-        for id in now.difference(&before) {
+        // A read not complete establishes no absence (core §8.1).
+        let (found, next) = poll_step(&before, read.complete, &now);
+        for id in &found.appeared {
             let _ = self.tx.send(Ev::Put(id.clone()));
         }
-        // A read not complete establishes no absence (core §8.1).
-        if read.complete {
-            for id in before.difference(&now) {
-                let _ = self.tx.send(Ev::Delete(id.clone()));
-            }
-            *polled = Some(now);
-        } else {
-            *polled = Some(before.union(&now).cloned().collect());
+        for id in &found.withdrawn {
+            let _ = self.tx.send(Ev::Delete(id.clone()));
+        }
+        *polled = Some(next);
+        self.log_poll(found);
+    }
+
+    fn log_poll(&self, found: PollRead) {
+        let mut r = self.reads.lock().expect("not poisoned");
+        if found.made {
+            r.polls += 1;
+        }
+        r.poll_log.push(found);
+        if r.poll_log.len() > POLL_LOG {
+            r.poll_log.remove(0);
         }
     }
 
@@ -1329,4 +1388,39 @@ pub(crate) fn elections(
         ));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set(ids: &[u64]) -> BTreeSet<InstanceId> {
+        ids.iter().map(|n| InstanceId::from_u64(*n)).collect()
+    }
+
+    /// §2.7's poll (text 0.3, F-215): a read not complete removes no holder
+    /// from the last's, and only a complete read shows one gone.
+    #[test]
+    fn a_poll_read_not_complete_removes_no_holder() {
+        let a = InstanceId::from_u64(0xa);
+        // complete {A}, then not complete {}, then complete {}: a withdrawal.
+        let (first, last) = poll_step(&set(&[]), true, &set(&[0xa]));
+        assert_eq!(first.appeared, [a.clone()]);
+        let (second, last) = poll_step(&last, false, &set(&[]));
+        assert!(second.appeared.is_empty() && second.withdrawn.is_empty());
+        assert_eq!(last, set(&[0xa]), "A kept");
+        let (third, last) = poll_step(&last, true, &set(&[]));
+        assert_eq!(
+            third.withdrawn,
+            [a.clone()],
+            "only a complete read shows it gone"
+        );
+        assert!(last.is_empty());
+        // complete {A}, then not complete {}, then complete {A}: no appearance.
+        let (_, last) = poll_step(&set(&[]), true, &set(&[0xa]));
+        let (_, last) = poll_step(&last, false, &set(&[]));
+        let (third, _) = poll_step(&last, true, &set(&[0xa]));
+        assert!(third.appeared.is_empty(), "A was never gone");
+        assert!(third.withdrawn.is_empty());
+    }
 }
