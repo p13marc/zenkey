@@ -647,9 +647,22 @@ async fn the_owner_example_implements_config() {
         .unwrap();
     assert_eq!(e.contract, format!("sha256:{}", config_v1::FINGERPRINT));
     assert!(e.unavailable.is_empty(), "persist is served");
+    // S4's GET of the view, asked again while the owner is silent: during
+    // a restart the old instance's queryable is gone before the new one's
+    // is routed, and silence is no answer.
     let view = || async {
-        let v = state(&tool, "zk2/ex/rf/config.v1/state/view").await;
-        serde_json::from_slice::<ConfigView>(&v[0]).unwrap()
+        let deadline = tokio::time::Instant::now() + SETTLE;
+        loop {
+            let v = state(&tool, "zk2/ex/rf/config.v1/state/view").await;
+            if let Some(v) = v.first() {
+                break serde_json::from_slice::<ConfigView>(v).unwrap();
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the view never answered"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     };
     let v = view().await;
     let groups: Vec<(&str, &str)> = v
