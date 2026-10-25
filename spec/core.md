@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.41** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.42** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -46,9 +46,13 @@ observe the reader, in 0.39 what `redundancy.v1` needed: a standby
 marked in the descriptor, exposing nothing and holding no interface
 token, never tokenless, and its vocabulary published, in 0.40 what
 implementing it measured: a read on a token's own session, and what a
-peer's complete read covers, and in 0.41 what a watch session's round trip
+peer's complete read covers, in 0.41 what a watch session's round trip
 at a population measured: a GET that matches no token, subscribers
-without history, and a read that runs to zenoh's interests timeout).
+without history, and a read that runs to zenoh's interests timeout, and in
+0.42 the second implementation's findings against it: a watch session in
+no namespace on the wire keys, a round trip through a watch session cut
+off, what a transport's move leaves of what a reader holds, and a read's
+time against an interests timeout it cannot read).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1870,6 +1874,19 @@ Liveliness tokens carry no payload; everything is in the key.
       interests timeout above their timeout: its long reads can then be
       complete (measured: the same read was whole, in 22 s, under a 120 s
       interests timeout).
+    - **Its time** (0.42, F-232) is counted from before the GET is asked
+      to its final reply, so it is never less than the time the runtime
+      counted. The read itself carries no sign of the interests timeout,
+      so the rule needs the session's value: a reader reads it from the
+      session's configuration (in Rust, `Session::config()`;
+      zenoh-python 1.10.1 gives an open session no accessor for it).
+    - A reader that cannot read its session's interests timeout SHOULD
+      open the session itself with a value it sets, and so knows; a
+      session it is handed and cannot read, it takes at zenoh's default,
+      10 s. That holds only of a session whose configuration states none:
+      a lower value ends a read sooner, with nothing in the read to show
+      it, so such a reader says that its reads' completeness rests on the
+      default.
 
     `[Sc: presence.md §10]`
   - **A refused read is complete, and empty** (0.8). A router whose access
@@ -1985,23 +2002,75 @@ Liveliness tokens carry no payload; everything is in the key.
       without it is one round trip (6 ms there). The seed reads what is
       held, and a token declared before the subscribers and withdrawn
       after the round trip is still heard going: the router tells its
-      withdrawal by its key. **Except in a namespace:** in zenoh 1.10.1 a
-      namespaced session does not strip its namespace from that key, and
-      never hears the withdrawal (Appendix B). A watch session in a
-      namespace keeps history, or the reader watches the wire keys from a
-      session in no namespace. `[Sc: presence.md §10]`
+      withdrawal by its key. `[Sc: presence.md §10]`
+    - **In a namespace, a watch session in no namespace, on the wire
+      keys** (0.41; 0.42, F-233). In zenoh 1.10.1 a namespaced session
+      does not strip its namespace from that key, and its subscriber
+      without history never hears the withdrawal (Appendix B). A history
+      there brings the population back into every round trip: 23 s beside
+      10,000 tokens (the reference, a debug build), 3.2–3.9 s (zk2py, a
+      release build), past the scenarios' 5 s wait and zenoh's 10 s
+      interests timeout, where the round trip is not made (above). So:
+      - A reader that follows presence in a namespace SHOULD hold its
+        watch session in **no** namespace, and declare its subscribers,
+        without history, on the **wire keys**: the namespace in front,
+        `<ns>/zk2/…`, and its round trip's key so too,
+        `<ns>/zk2/…/@zk/settle`. Its round trip is then one round trip at
+        any population (1.2 ms beside 2,000 tokens in `ns`, and 44 ms
+        beside 10,000, debug builds), and it hears the withdrawal on the
+        wire key.
+      - It strips the namespace from every key it hears. A key outside
+        the namespace is not the deployment's: it is counted, never
+        folded.
+      - The wire keys are the keys a namespaced session sends: the grants
+        §11 compiles under the namespace (§1.6) admit the subscribers and
+        the round trip unchanged.
+      - A reader that keeps a namespaced watch session with history
+        instead SHOULD run its round trip's wait and its session's
+        interests timeout above the history's time at its population.
+
+      `[Sc: presence.md §10]`
     - **A round trip stands until the watch session's transport moves**
       (0.41). A transport that closes or opens re-declares the
       subscribers at a router that reads them again, unordered with the
       other session's reads; and a subscriber without history hears no
       withdrawal, at its link's drop, of a token it was never told of. A
       reader that follows presence live SHOULD make the round trip again
-      before its next read, and read again, when its watch session's
-      transport closes or opens, as after a withdrawal. A seed made while
-      no round trip stands is possibly incomplete: an address it does not
-      show is unobservable, never down. `[Sc: presence.md §10]`
+      before its next read, and read again at once, when its watch
+      session's transport closes or opens, as after a withdrawal.
+      - **A move unconfirms what the reader holds** (0.42, F-229). From
+        the move until a complete read made after a round trip that
+        stands, every token and every absence the reader followed through
+        the watch session is **unconfirmed**: an address unobservable,
+        never up or down on what was held before the move. Its
+        subscribers may not have heard what moved while the transport was
+        down: a token withdrawn then, or one declared then, of which a
+        subscriber without history is never told.
+      - **No round trip through a watch session cut off** (0.42, F-228).
+        Through a session cut off zenoh answers a liveliness GET at once,
+        with the final reply alone (above), and a round trip is a
+        liveliness GET. So a round trip through a watch session that holds
+        no link to another node, or held none when it ended, does not
+        stand, whatever its replies say: a reader checks the watch
+        session's links before the round trip and when it ends, as it
+        checks a read's, and asks none through a session cut off. It makes
+        the round trip when the transport opens again.
+      - **A reader whose watch session is cut off follows nothing** (0.42,
+        F-227, F-228): its subscribers hear nothing. It SHOULD NOT make a
+        read it would follow from it, whatever its reading session's
+        links: it reports the read as not made, the reason its watch
+        session's, and what the read would establish is unobservable until
+        the transport opens, a round trip stands and a read after it is
+        complete.
+      - **A read made while no round trip stands**, a seed or a re-read
+        (0.42, F-229), is possibly incomplete: an address it shows is up,
+        one it does not is unobservable, never down.
+
+      `[Sc: presence.md §10]`
     - Ordinary GETs (S4's, a descriptor's, a bundle's) are not affected,
-      and may go on either session.
+      and may go on either session in the namespace. A watch session in no
+      namespace makes none of the deployment's (0.42): there its
+      base-relative keys are the bus root's.
 
     `[Sc: presence.md §9]`
   - **A read on a token's own session answers that token itself** (0.40;
@@ -3430,6 +3499,8 @@ Appendix B. These are the ones the rules above cite:
   (`hat/broker/token.rs`, `maybe_unpropagate_token`), and a session in a
   namespace does not strip its namespace from that key
   (`routing/namespace.rs`, `ENamespace`), so it hears none (0.41, §8.1).
+  A session in no namespace subscribed to the wire key, the namespace in
+  front, hears it (0.42, §8.1).
 - A liveliness GET that access control refuses is answered with the final
   reply alone: no token and no error reply. The session's own tokens are
   in it all the same, answered by the session itself (0.40, §8.1).
@@ -3523,7 +3594,10 @@ reader, clients, some under CPU load:
   - the subscribers on another session of the same process: 0 of 12,240;
     no subscriber: 0 of 10,080.
 - A GET issued right after declaring a history subscriber on the same
-  session missed every time: 720 of 720 (1.10.1), 719 of 720 (main).
+  session missed nearly every time: 720 of 720 (1.10.1) and 719 of 720
+  (main) in the reproduction; zenoh-python 1.10.1 held the token in 7 of
+  120 (zk2py, 0.42, F-235). It is the race below, which the session's own
+  answer can win.
 - **Why**, shown by traces and by a one-condition patch that took both
   races to 0 of 6,480 trials: the GET is a `Current` token interest,
   answered only by declarations carrying its id. The session's own routing
@@ -3561,7 +3635,7 @@ reader, clients, some under CPU load:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27) |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); Appendix B |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds (0.42); Appendix B |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
