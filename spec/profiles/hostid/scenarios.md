@@ -240,8 +240,8 @@ or `host-b` (§2.13). The tool's grace is 2 s, above the re-mint overlap
 core §6 recommends (under 1 s).
 
 **Steps.**
-1. The tool reads the instance tokens of `h-bbd1aa1db10b/sysinfo` twice,
-   the grace apart, and reads both descriptors.
+1. The tool reads the tokens of `h-bbd1aa1db10b/sysinfo` (its `@zk/**`,
+   v1.md §2.12, 0.7) twice, the grace apart, and reads both descriptors.
 2. **The control.** As step 1, with B's `etc/machine-id` holding M2.
 3. As step 1, with B's service stating no `meta.zid`.
 4. A third service is configured with the literal address

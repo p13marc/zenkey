@@ -515,6 +515,21 @@ impl Spy {
         (at_instance.flatten(), at_alive.flatten())
     }
 
+    /// Whether `instance`'s token of `iface` reached S before the GET at
+    /// its instance token answered: then that GET may read it unmarked
+    /// (F-202).
+    fn token_beat_the_get(&self, iface: &IfaceId, instance: &InstanceId) -> bool {
+        let log = self.snapshot();
+        let alive = log.iter().position(|r| {
+            matches!(r, Rec::Token { key: ZkKey::Alive { iface: i, instance: x, .. }, put: true, .. }
+                if i == iface && x == instance)
+        });
+        let answered = log.iter().position(|r| {
+            matches!(r, Rec::AtToken { key: ZkKey::Instance { instance: x, .. }, .. } if x == instance)
+        });
+        matches!((alive, answered), (Some(a), Some(g)) if a < g)
+    }
+
     /// Every descriptor S received of `instance`: its mark of the interface.
     fn descriptors(&self, instance: &InstanceId) -> Vec<Option<bool>> {
         self.snapshot()
@@ -647,8 +662,8 @@ async fn s1_run(silent: bool) {
     // F-202: marked at its instance token, unless its interface token beat
     // that GET; unmarked at its interface token.
     assert!(
-        at_instance.is_some(),
-        "A's descriptor at its instance token"
+        at_instance == Some(true) || s.token_beat_the_get(&ledger(), &a.id),
+        "A's descriptor marked at its instance token: {at_instance:?}"
     );
     assert_eq!(at_alive, Some(false), "A unmarked at its interface token");
 
@@ -886,11 +901,10 @@ async fn s3_a_simultaneous_start() {
                 s.at_tokens(&ledger(), &c.id).0.is_some()
             })
             .await;
-            let took = !s.alive_events(&ledger(), &c.id).is_empty();
             let (at_instance, _) = s.at_tokens(&ledger(), &c.id);
             assert!(
-                at_instance == Some(true) || took,
-                "run {run}: {} marked at its instance token",
+                at_instance == Some(true) || s.token_beat_the_get(&ledger(), &c.id),
+                "run {run}: {} marked at its instance token: {at_instance:?}",
                 c.name
             );
         }

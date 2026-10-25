@@ -4,6 +4,37 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-25: the finding's reads hold the interface tokens (#841, RB)
+
+The second implementation read 0.6 cold (zk2py round 56, PR #855), and
+filed F-208: §2.12's finding read the instance tokens of an address
+(`…/@zk/instance/*`) twice, and 0.6 asked `redundancy.v1`'s question "is
+this instance a standby, or a twin?" "from the same two reads". That
+question turns on whether the instance holds the interface's token
+(`redundancy.v1` §2.15), and a read of the instance tokens holds none, so
+the two reads could not answer it. Accepted on #841.
+
+**Changed: the finding reads the address's `@zk/**`** (§2.12). `[Sc: §6]`
+- **The rule.** A tool reads the address's tokens, its instance tokens
+  and its interface tokens together (`zk2/<system>/<service>/@zk/**`),
+  twice, a grace apart, as `redundancy.v1` §0's read does, and the
+  descriptor of each instance. Counting is unchanged: instances whose
+  system is known to be minted, and not a recognised standby.
+- **The scenario.** `scenarios.md` §6 step 1, which every other step of
+  the section repeats, reads the address's `@zk/**`.
+
+**Changed: written against core 0.40.** Its §8.1 now says what a complete
+read covers: what its routers' clients and its linked peers hold. A tool
+reading two hosts' sessions through routers reads as it did; nothing else
+this text relies on changed.
+
+**Deliberately not changed.**
+- **The doctor.** The reference's `hostid-duplicate` reads the address as
+  0.7 says in #841's RC, with the standby it recognises. This text changes
+  no verdict: a read of `@zk/**` holds every instance token a read of
+  `@zk/instance/*` holds.
+- **No fixture.** The finding is a scenario's, as in 0.6.
+
 ## 0.6 — 2026-10-24: a standby recognised, by `redundancy.v1` (#841, RA)
 
 §2.12 read a standby on a minted system as its finding "until

@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.39** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.40** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -42,9 +42,11 @@ needed: its vocabulary published without the interim `target`, in
 withdrawal heard live, and a read beside a liveliness subscriber, in
 0.38 the second implementation's findings against 0.37: a read cut off
 while it runs, a read not made in a profile's premise, and scenarios that
-observe the reader, and in 0.39 what `redundancy.v1` needed: a standby
+observe the reader, in 0.39 what `redundancy.v1` needed: a standby
 marked in the descriptor, exposing nothing and holding no interface
-token, never tokenless, and its vocabulary published).
+token, never tokenless, and its vocabulary published, and in 0.40 what
+implementing it measured: a read on a token's own session, and what a
+peer's complete read covers).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1951,6 +1953,39 @@ Liveliness tokens carry no payload; everything is in the key.
       and may go on either session.
 
     `[Sc: presence.md §9]`
+  - **A read on a token's own session answers that token itself** (0.40;
+    `redundancy.v1` text 0.2, F-204). An implementation note. In zenoh
+    1.10.1 a session's liveliness GET returns the tokens that session
+    declared from the session itself, whatever its router answers: through
+    a router whose access control refuses `liveliness_query` on ingress,
+    the holder's own read was complete and held its token, and the same
+    read on another session of the same router was complete and empty, in
+    each of five reads (measured by the reference, `zenkey/tests/presence.rs`,
+    `a_refused_read_on_a_tokens_own_session_still_returns_it`). So a read
+    on a token's own session says nothing about the bus for that token. A
+    reader that must see its own token as the bus holds it reads on a
+    session that does not hold it: `redundancy.v1`'s candidate, whose
+    check of its own claim is what tells a refused read from a lone
+    candidate's (its §2.5).
+  - **What a complete read covers** (0.40; `redundancy.v1` text 0.2,
+    F-206). A read is complete only for the tokens its routers' clients
+    and its linked peers hold. In zenoh 1.10.1 a router propagates no
+    token from one of its peers to another: the `auto` gateway, its
+    default, makes a router's peers one region, whose members it expects
+    to be linked to each other (`hat/peer/token.rs`), and
+    `routing.router.peers_failover_brokering` is deprecated, read and
+    ignored. Two peers behind one router, neither listening, one holding a
+    token: the other's read was complete and empty in every one of six
+    reads over 3 s, with gossip on and with it off, while a client of the
+    same router read the token; with both listening, and gossiping through
+    a router that gossips, they linked and the token was read (measured by
+    the reference, `a_peers_read_through_a_router_misses_an_unlinked_peers_token`).
+    - A peer that other peers cannot link to reads none of their tokens,
+      and its complete read establishes no absence of them.
+    - A reader that concludes absence of a token a peer holds SHOULD be a
+      client of a router, or a peer linked to that peer. `redundancy.v1`
+      makes it a MUST of its candidates and of the tools that read them
+      (its §2.5).
 - **Timeouts are the caller's.** How long a liveliness GET, a descriptor
   GET (§3.3) or a retrieval attempt (§8.4) waits, and how long a tool waits
   for presence after an owner starts, are the caller's choices. The
@@ -3327,7 +3362,13 @@ Appendix B. These are the ones the rules above cite:
   that reaches its timeout ends with the error reply `Timeout` (encoding
   `zenoh/string`), and one the routers finished ends with none.
 - A liveliness GET that access control refuses is answered with the final
-  reply alone: no token and no error reply.
+  reply alone: no token and no error reply. The session's own tokens are
+  in it all the same, answered by the session itself (0.40, §8.1).
+- A router propagates no liveliness token from one of its peers to
+  another: under the `auto` gateway its peers are one region, expected to
+  be linked to each other (`hat/peer/token.rs`).
+  `routing.router.peers_failover_brokering` is deprecated, and has no
+  effect (`zenoh-config`; 0.40, §8.1).
 - A session with no transport to another zenoh node has every liveliness
   GET answered at once with the final reply alone, and every GET (0.37;
   first measured by `alarms.v1` 0.4; [`scenarios/presence.md`](scenarios/presence.md)
@@ -3463,7 +3504,7 @@ reader, clients, some under CPU load:
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
 | `profiles/link/scenarios.md` §1–§6 | §8.5 a face compiled and enforced, both attachments, `@stream` downsampled, an event that must not cross; S3 a window raised to the outage; R7 liveness across a face (0.29) |
 | `profiles/desired/scenarios.md` §1, §3, §6, §7, §10 | §4.2 a late joiner seeding again when its owner's instance token appears; S3 a delete answered after an outage within the window, and lost past it; §4.3 a new instance's re-puts under a fresh zid; S5, S6 last-known from an archive, the owner absent (0.36), and an owner silent within the timeout across a cut, its own answer after the heal (§10, 0.37) |
-| `profiles/redundancy/scenarios.md` §1, §7, §8, §11, §12 | §3.3 the standby mark; §6 a standby, and a tool reading the mark; §8.1 a standby holding no interface token; §8.2 a standby exposing nothing, taking over and stepping down in the steps' order, and a governed interface refused in the tokenless set; O1, O3 a call finding no standby (0.39) |
+| `profiles/redundancy/scenarios.md` §1, §5, §7, §8, §11, §12 | §3.3 the standby mark; §6 a standby, and a tool reading the mark; §8.1 a standby holding no interface token; §8.2 a standby exposing nothing, taking over and stepping down in the steps' order, and a governed interface refused in the tokenless set; O1, O3 a call finding no standby (0.39); §8.1 a refused read on the claim's own session, and peers that link (§5, 0.40) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)
