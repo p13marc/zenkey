@@ -8719,3 +8719,65 @@ async fn redundancy_s12_a_probe_never_runs_an_operation_that_allows_fan_out() {
     b.close().await;
     a.close().await;
 }
+
+/// §12 step 9 (text 0.5, F-226): A and B run `ledger.v1`, all the
+/// address's descriptors name; T holds `ledger-appendall.v1` offline,
+/// which no instance runs. `append`'s probe is still never made, its
+/// reason naming `appendall` and the revision held offline: the guard
+/// reads every revision in hand, not the named one alone (§2.15).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_probe_guarded_by_a_revision_held_offline() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    a.until(Role::Serving).await;
+    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, None).await;
+    let _ = t_until(&bus, LEDGER, |r| {
+        r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
+    })
+    .await;
+    let offline = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/ledger-appendall.v1.toml");
+    let fp = {
+        let l = load_path(&offline);
+        zenkey::model::canonical::Fingerprint::of(
+            &l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+        )
+        .to_string()
+    };
+    let offline = offline.to_str().expect("a UTF-8 path").to_owned();
+    let mut args: Vec<&str> = vec![
+        "check",
+        "conform",
+        LEDGER,
+        "ledger.v1",
+        "--contracts",
+        &offline,
+        "--for",
+        "1",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let others: Vec<String> = zenkey_fleet::report::CaseId::ALL
+        .iter()
+        .filter(|c| **c != zenkey_fleet::report::CaseId::RedundancyStandby)
+        .flat_map(|c| ["--skip".to_owned(), c.as_str().to_owned()])
+        .collect();
+    args.extend(others.iter().map(String::as_str));
+    let run = bus.zenctl(&args).await;
+    let doc = run.json();
+    let standby = conform_case(&doc, "redundancy-standby", "service");
+    assert_eq!(standby["verdict"]["answer"], "unobservable", "{run}");
+    let said = standby["verdict"]["reason"].as_str().unwrap_or_default();
+    assert!(
+        said.contains("@op/append not probed")
+            && said.contains("@op/appendall")
+            && said.contains(&fp),
+        "named: append, appendall and the revision held offline: {run}"
+    );
+    exits(&run, 2);
+    b.close().await;
+    a.close().await;
+}

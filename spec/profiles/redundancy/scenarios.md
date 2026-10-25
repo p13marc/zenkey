@@ -409,6 +409,10 @@ writes, and declare a queryable, to build each shape.
    serves a descriptor marking `ledger.v1` standby, and declares a
    queryable on `append`'s key, and T probes again. Then, apart, A and B
    run `ledger-appendall`, T holding it, and T probes them (0.4, F-221).
+9. A serves and B stands by, both running `ledger.v1`, which is all the
+   address's descriptors name. T holds `ledger-appendall` offline (the
+   reference: `--contracts`), a revision of the same interface no
+   instance runs, and probes them (0.5, F-226).
 
 **Expected.** T answers as `conclusions.json` does for the same reading:
 1. Exactly one incumbent: yes, `one`; a vacancy: no, `held`; standbys:
@@ -432,3 +436,14 @@ writes, and declare a queryable, to build each shape.
    `ledger-appendall`, T asks neither `append$*`, which reaches
    `appendall`, nor `appendall`, and says why: its exposure is
    unobservable, and `appendall`'s handler never runs (0.4, F-221).
+9. T asks no `append$*` either: the revision it holds offline declares
+   `appendall`, fan-out allowed, which the wildcard reaches, so the call
+   could run it on an instance that runs that revision (§2.15, "Never a
+   call that would run"). T says so, naming `appendall` and the revision
+   held offline (the reference: `@op/append not probed: its probe
+   zk2/lab/ledger/ledger.v1/@op/append$* would reach
+   zk2/lab/ledger/ledger.v1/@op/appendall, an operation whose fanout is
+   "allowed" (revision sha256:…), and run it`), and the standbys'
+   exposure is unobservable: `redundancy-standby` reads unobservable,
+   exit 2. No instance at the address has an `appendall` to run (0.5,
+   F-226).

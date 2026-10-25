@@ -4,6 +4,29 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-25: the offline half of §12 step 8 (#841, RD)
+
+zk2py round 63 read 0.4 cold at PR #867's head: every check passed in
+all four pairings, F-220 to F-223 resolved, the two tools agreeing
+everywhere. It filed F-226, minor, accepted. Core stays 0.40.
+
+**Changed.**
+- **§12 gains step 9** (F-226). §2.15's "Never a call that would run"
+  guards a probe by every revision the address's descriptors name **or**
+  the tool holds offline, and cites `[Sc: §12]`. Step 8 runs only the
+  first half: `ledger-appendall` running at the address. A tool that
+  guarded by the named revision alone passed every step. Step 9 runs the
+  second: `ledger.v1` at the address, `ledger-appendall` held offline,
+  named by no descriptor. T makes no `append$*` probe, names
+  `appendall` and the revision held offline, and reads the standbys'
+  exposure unobservable. The reference runs it
+  (`redundancy_s12_a_probe_guarded_by_a_revision_held_offline`), and
+  zk2py already ran the shape. The MUST's evidence, `[Sc: §12]`, now
+  covers both halves.
+
+**Deliberately not changed.** The rule itself, its wording (0.4), and
+every fixture.
+
 ## 0.4 — 2026-10-25: round 60's answers, and the review of the tools (#841, RD)
 
 zk2py round 60 (PR #863) read 0.3 cold and ran §12 against the reference
