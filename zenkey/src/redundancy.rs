@@ -6,7 +6,7 @@
 //! the election over one read, the heal over two and the state machine
 //! that drives a candidate are `zenkey-model`'s
 //! ([`zenkey_model::redundancy`]); this module makes the claim, the reads
-//! and the acts its [`Elector`] asks for, on the service's sessions, and
+//! and the acts its [`Elector`](zenkey_model::redundancy::Elector) asks for, on the service's sessions, and
 //! never decides anything itself.
 //!
 //! ```text
@@ -31,10 +31,10 @@
 //! | §2.4 a standby holds its instance token, exposes nothing of the interface, writes none of its keys | every publisher, state, operation and `unavailable` queryable and member token of a governed interface is declared only while it serves (`gate`); a write while it stands by is [`Error::Standby`], nothing published; the descriptor marks it `"standby": true` |
 //! | §2.4 a call finds no standby | its operation queryables are declared only while it serves ([`crate::operation::OperationServer::is_declared`]) |
 //! | §2.5 step 1 claim before reading; the read on a session holding neither a liveliness subscriber nor the claim, after a round trip on the claim's (0.2, F-204) | the descriptor and instance token at start, then the watch and its round trip, then one round trip on the service's session; every read on [`RedundancyStartup::reader`], refused at [`crate::ServiceBuilder::redundancy`] when it is the service's or the watch's |
-//! | §2.5 steps 2–4 a live incumbent wins; a read not complete, or missing its own claim, or a lower descriptor unread, or a lower candidate, stands by; else take over | the [`Elector`] decides; the runtime arms the retry ([`RedundancyStartup::retry`], 2 s) on its stand-by |
+//! | §2.5 steps 2–4 a live incumbent wins; a read not complete, or missing its own claim, or a lower descriptor unread, or a lower candidate, stands by; else take over | the [`Elector`](zenkey_model::redundancy::Elector) decides; the runtime arms the retry ([`RedundancyStartup::retry`], 2 s) on its stand-by |
 //! | §2.6 take over in core §8.2's order | resources declared, [`Takeover::taking_over`] puts what it holds, the descriptor put unmarked, the interface token last |
 //! | §2.7 follow the address on a watch session | a liveliness subscriber on `@zk/**` on [`RedundancyStartup::watch`], with one round trip before the first read; without one, a read every [`RedundancyStartup::poll`] (the poll, below) |
-//! | §2.8 a withdrawal heard live is a read, never a vacancy | the watch's withdrawal, once no other holder is heard, is the [`Elector`]'s event; its read waits 0.1 s for the burst |
+//! | §2.8 a withdrawal heard live is a read, never a vacancy | the watch's withdrawal, once no other holder is heard, is the [`Elector`](zenkey_model::redundancy::Elector)'s event; its read waits 0.1 s for the burst |
 //! | §2.9 the heal: two reads a grace apart; the higher steps down in reverse order | [`RedundancyStartup::grace`], 2 s; writes stop, then the tokens, the resources, the descriptor put marked; the interface's state forgotten |
 //! | §2.9 a candidate's own re-mint is no appearance (0.2, F-209) | [`crate::Service::new_epoch`] tells every elector before the new tokens, and re-mints a serving interface's token make-before-break |
 //! | §2.10 every sample stamped with its own id; `meta.zid` | the service's session, its HLC on; `meta.zid` as every descriptor states it |
@@ -565,11 +565,7 @@ impl Redundancy {
     /// once the instance token is declared (§2.5 step 1): per governed
     /// interface, the watch and its round trip, a round trip on the claim's
     /// session, then the first read.
-    pub(crate) async fn start(
-        &self,
-        svc: &Service,
-        governed: Vec<(IfaceId, Election, Arc<Gate>, Fp16)>,
-    ) -> Result<()> {
+    pub(crate) async fn start(&self, svc: &Service, governed: Vec<Governed>) -> Result<()> {
         let st = &self.inner.startup;
         let addr = svc.address().clone();
         let own = svc.instance().clone();
@@ -847,37 +843,32 @@ impl Driver {
             }
             // Act on the step: acts run under the elector's lock, so a
             // re-mint never interleaves with one (F-209).
-            loop {
-                match &step {
-                    Step::TakeOver | Step::StepDown(_) => {
-                        let mut e = self.core.lock().await;
-                        if *stop.borrow() {
-                            return;
-                        }
-                        let acted = if step == Step::TakeOver {
-                            self.take_over(e.own()).await
-                        } else {
-                            self.step_down().await;
-                            Ok(())
-                        };
-                        if let Err(err) = acted {
-                            tracing::error!(
-                                iface = %self.iface,
-                                "redundancy.v1: the takeover failed, so this instance stands by \
-                                 and elects no more: {err}"
-                            );
-                            self.role.send_modify(|s| {
-                                s.role = Role::Standby;
-                                s.why = None;
-                            });
-                            return;
-                        }
-                        step = e.finish();
-                        self.publish(&step, &e);
-                        after_withdrawal = false;
-                    }
-                    _ => break,
+            while matches!(step, Step::TakeOver | Step::StepDown(_)) {
+                let mut e = self.core.lock().await;
+                if *stop.borrow() {
+                    return;
                 }
+                let acted = if step == Step::TakeOver {
+                    self.take_over(e.own()).await
+                } else {
+                    self.step_down().await;
+                    Ok(())
+                };
+                if let Err(err) = acted {
+                    tracing::error!(
+                        iface = %self.iface,
+                        "redundancy.v1: the takeover failed, so this instance stands by \
+                         and elects no more: {err}"
+                    );
+                    self.role.send_modify(|s| {
+                        s.role = Role::Standby;
+                        s.why = None;
+                    });
+                    return;
+                }
+                step = e.finish();
+                self.publish(&step, &e);
+                after_withdrawal = false;
             }
             match &step {
                 Step::Read => {
@@ -1189,13 +1180,17 @@ impl Driver {
     }
 }
 
+/// A governed interface as [`Redundancy::start`] elects it: its id, its
+/// election, its gate, and its token's `fp16`.
+pub(crate) type Governed = (IfaceId, Election, Arc<Gate>, Fp16);
+
 /// The governed interfaces of `impls`, their elections, refusing what
 /// §2.2 and §2.14 refuse (before step 1: nothing is declared).
 pub(crate) fn elections(
     impls: &[crate::service::ImplState],
     tokenless: &BTreeSet<IfaceId>,
     configured: bool,
-) -> Result<Vec<(IfaceId, Election, Arc<Gate>, Fp16)>> {
+) -> Result<Vec<Governed>> {
     let mut out = Vec::new();
     let mut refused = Vec::new();
     for s in impls {

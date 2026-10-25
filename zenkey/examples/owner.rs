@@ -1369,7 +1369,7 @@ pub async fn run_with(
                 c.insert_json5("transport/link/tx/lease", &ms.to_string())?;
             }
             side(&mut c, &opts, &endpoint)?;
-            Ok::<_, BoxError>(zenoh::open(c).await?)
+            zenoh::open(c).await
         };
         let reader = open().await?;
         let watch = match opts.poll_ms {

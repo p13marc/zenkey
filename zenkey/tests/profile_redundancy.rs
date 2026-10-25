@@ -758,7 +758,7 @@ async fn s1_run(silent: bool) {
     assert!(reads.made > reads_at_k.made, "B read after the withdrawal");
     assert_eq!(reads.polls, 0);
     assert!(
-        presence::liveliness_gets(b.reader()).reads >= gets_at_k.reads + 1,
+        presence::liveliness_gets(b.reader()).reads > gets_at_k.reads,
         "its reads on its reader"
     );
 
