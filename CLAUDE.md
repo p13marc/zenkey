@@ -836,7 +836,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   is not asked, `not_a_target`, the target-alone slice only with no
   revision of the interface in hand declaring one; a requirement on two
   desired resources an invalid binding, `two_documents`, which the
-  runtime's target refuses at start), and `redundancy.v1`'s
+  runtime's target refuses at start; text 0.7, F-224, #840 DF: a target
+  given a role on two or more desired resources refuses to start, nothing
+  declared and no instance token, `[Sc: §11]`; a requirement naming no
+  resource, or a manifest's role, names every one, core §3.1), and
+  `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
   from every resource, invalid `not_used`, `value`, `disagrees` or
@@ -991,8 +995,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   role, author, resource, ReportAt, Handler, TargetStartup)` → `Target`
   reads the role's binding by `model::binding` (an optional role left
   unbound is the kill switch: `{"source":"baseline"}`, nothing read; a
-  role on two desired resources refused at start, nothing declared, core
-  §8.2 step 2, #840 DF) and
+  role on two desired resources (a requirement naming none, or a
+  manifest's role, names every one) refused `not started: …`
+  (`Error::NotExposed`), and `start()` refused too, nothing declared,
+  core §8.2 step 2, #840 DF) and
   puts its baseline report before the tokens. From `start()` on it
   subscribes to the slice and seeds by S4's GET at start, at each
   appearance of the author's instance token (a watch session's subscriber,
