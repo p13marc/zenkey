@@ -2032,6 +2032,19 @@ fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
                         .join(", ")
                 ),
             )
+        } else if let Some(by) = &res.requirement_unread {
+            // The tool's sight, never the target's problem (text 0.8,
+            // F-225): what the requirement names is not known, so neither
+            // its binding nor whether an unbound role may be unbound is.
+            ConformCase::unobservable(
+                CaseId::DesiredBinding,
+                subject,
+                format!(
+                    "its requirement is unread: no revision of {by}, which its descriptor names \
+                     as declaring the role, is in hand, so what it names is not known, never \
+                     every resource (desired.v1 §2.17, text 0.8)"
+                ),
+            )
         } else if !res.bound() {
             ConformCase::passed(
                 CaseId::DesiredBinding,

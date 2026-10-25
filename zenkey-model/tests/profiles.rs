@@ -2345,7 +2345,7 @@ fn desired_slices() {
         assert!(
             matches!(
                 found,
-                "one" | "unreadable" | "none" | "no_slice" | "not_a_target"
+                "one" | "unreadable" | "none" | "no_slice" | "not_a_target" | "requirement_unread"
             ),
             "{what}"
         );
@@ -2356,7 +2356,7 @@ fn desired_slices() {
             .map(|s| s.as_str().expect("a key"))
             .collect();
         assert_eq!(
-            matches!(found, "no_slice" | "not_a_target"),
+            matches!(found, "no_slice" | "not_a_target" | "requirement_unread"),
             slice.is_empty(),
             "{what}"
         );
@@ -2410,6 +2410,34 @@ fn desired_slices() {
             desired_of(&named["resources"])
         };
         let in_hand = !named.is_null() || !held.is_empty();
+        // A requirement unread (0.8, F-225): no binding problem is read
+        // from it, and never every resource. A revision in hand declaring
+        // no desired resource at all shows the role no target's whatever it
+        // names; else it is unread.
+        if r["requirement"]["unread"] == json!(true) {
+            assert!(r["requirement"]["resources"].is_null(), "{what}");
+            let any_desired = |resources: &Value| {
+                resources
+                    .as_array()
+                    .expect("resources")
+                    .iter()
+                    .any(|x| x["annotations"].get(desired::TARGET_PARAM).is_some())
+            };
+            let none_desired = if named.is_null() {
+                !held.is_empty() && !held.iter().any(|h| any_desired(&h["resources"]))
+            } else {
+                !any_desired(&named["resources"])
+            };
+            let want = if none_desired {
+                "not_a_target"
+            } else {
+                "requirement_unread"
+            };
+            assert_eq!(found, want, "{what}");
+            assert_eq!(e["binding"], json!([]), "{what}: no binding problem read");
+            assert_eq!(e["declaration"], json!([]), "{what}");
+            continue;
+        }
         let Some(resource) = documents.first().cloned() else {
             if in_hand {
                 assert_eq!(

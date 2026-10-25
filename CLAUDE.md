@@ -148,7 +148,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   flight (#840, DE), so a reading costs about one `--timeout` a step;
   `observe_in` reads over a presence read and
   revisions a caller holds (the doctor's). `model::desired` resolves each
-  role's slice from the author's declaration and the target's binding, or,
+  role's slice from the author's declaration and the target's binding
+  (what the requirement names read by `requirement_names`: every resource
+  for a manifest's role, unread when its declaring contract is not in
+  hand, `resolve_unread`, the row's `requirement_unread`, #840 DG), or,
   with no contract of the author's in hand, from the target's requirement
   and binding (`slice_from`; two reports that claim the slice and differ
   are the row's `unreadable`, `two_differ` naming both keys, never no
@@ -839,8 +842,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   runtime's target refuses at start; text 0.7, F-224, #840 DF: a target
   given a role on two or more desired resources refuses to start, nothing
   declared and no instance token, `[Sc: §11]`; a requirement naming no
-  resource, or a manifest's role, names every one, core §3.1), and
-  `redundancy.v1`'s
+  resource, or a manifest's role, names every one, core §3.1; text 0.8,
+  F-225, #840 DG: a requirement whose declaring contract the descriptor
+  names and the tool does not hold is unread, no binding problem read,
+  unobservable `no_report` beside `requirement_unread`, never every
+  resource), and `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
   from every resource, invalid `not_used`, `value`, `disagrees` or

@@ -134,6 +134,12 @@ impl Render for DesiredReport {
                     r.binding_invalid.join(", ")
                 ));
             }
+            if let Some(by) = &r.requirement_unread {
+                detail.push(format!(
+                    "    its requirement is unread: no revision of {by}, which declares the role, \
+                     is in hand (text 0.8)"
+                ));
+            }
             if let Some(rep) = &r.report {
                 let what = match (&rep.document, &rep.unreadable) {
                     (Some(d), _) => serde_json::to_string(d).unwrap_or_default(),

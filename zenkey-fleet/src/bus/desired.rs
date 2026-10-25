@@ -54,9 +54,10 @@ use crate::bus::health::Stamped;
 use crate::bus::presence::Scope;
 use crate::model::catalog::{Catalog, ContractSet, Observed};
 use crate::model::desired::{
-    Archived, Behind, Contracts, DesiredRead, FaceWord, ReportReply, ReportsGet, RoleRead,
+    Archived, Behind, Contracts, DesiredRead, FaceWord, Named, ReportReply, ReportsGet, RoleRead,
     RoleResolution, SliceFrom, SliceGet, SliceReply, TargetRead, author_contract, descriptor_in,
-    members_selector, named_revision, report_resources, resolve_role, seen_in,
+    members_selector, named_revision, report_resources, requirement_names, resolve_role,
+    resolve_unread, seen_in,
 };
 use crate::report::DesiredReport;
 
@@ -592,10 +593,10 @@ fn resolve_roles(
         .all(|e| named_revision(d, &e.iface, contracts, offline).is_some());
     let mut out = Vec::new();
     for e in roles_of(d, spec) {
-        let templates = e.declared_by.as_deref().and_then(|by| {
-            let rev = named_revision(d, by, contracts, offline)?;
-            rev.contract().requires.get(&e.role)?.resources.clone()
-        });
+        // What the requirement names, from its declaring contract; unread
+        // when that is not in hand, never every resource (text 0.8, F-225).
+        let names = requirement_names(d, e, contracts, offline);
+        let templates = names.templates();
         let author = one_author(&e.bindings);
         let observed = author
             .as_ref()
@@ -607,13 +608,17 @@ fn resolve_roles(
                 observed.as_ref(),
                 author.as_ref(),
                 &iface,
-                templates.as_deref(),
+                templates,
                 contracts,
                 offline,
             )
         });
         let held = author_c.is_some();
-        match resolve_role(&t.addr, e, templates.as_deref(), author_c) {
+        let resolved = match &names {
+            Named::Unread(by) => resolve_unread(e, by, author_c),
+            _ => resolve_role(&t.addr, e, templates, author_c),
+        };
+        match resolved {
             Some(res) if held || reporting || !all_held => out.push(RoleRead {
                 resolution: res,
                 author_seen: None,

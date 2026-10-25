@@ -4,6 +4,70 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8 — 2026-10-25: round 62 (#840, DG; #609)
+
+zk2py read 0.7 cold in round 62 and found F-224 resolved: §11 passed live
+for its target and the owner example. It filed one finding, F-225
+(minor), which #840's coordinator accepted (issuecomment-35826). It is
+the tool-side twin of 0.7's runtime rule, "a lookup that fails is never
+every resource". 0.7 stays as the round read it.
+
+The evidence, counted from the files: `conformance/declarations.json` (43
+cases), `conformance/bindings.json` (29), `conformance/order.json` (88),
+`conformance/reports.json` (80), `conformance/conclusions.json` (35),
+`conformance/schema.json` (3) and `conformance/slices.json` (37), 315 in
+all; and `scenarios.md`'s eleven sections. No case that existed changes.
+`slices.json` gains an input, `requirement.unread`, an answer, `{found:
+requirement_unread}`, and six cases.
+
+**Answered.**
+- **F-225, a declaring contract named and not held** (§2.1, §2.17, §5).
+  When a target's descriptor named the contract declaring a role and the
+  tool could neither hold nor retrieve it, the tool could not read what
+  the requirement names, and both tools read that as every resource. On
+  an author with two desired resources, that blamed the target with
+  `two_documents` for the tool's own blind spot: zk2py measured it with a
+  target naming `zk2py_worker9.v1` at a fingerprint no one serves, where
+  zenctl answered unobservable, `no_report`, `binding_invalid:
+  [two_documents]`. Now, in zk2py's words: a requirement whose declaring
+  contract the descriptor names and the tool does not hold is unread: no
+  binding problem is read from it, and the role answers **unobservable**,
+  `no_report`, beside `requirement_unread`; never every resource.
+  `requirement_unread` sits in §2.17's "What a tool reads to answer",
+  beside the answer as §2.3's problems are, and not in §2.3's list: it is
+  the tool's sight, which no target causes and none can refuse.
+  `[F: slices.json]`: the declaring contract not in hand with the named
+  revision declaring two desired resources, one beside a plain one, a
+  held revision declaring two, and no revision of the author's in hand,
+  each `requirement_unread` with no binding problem; the named revision
+  declaring no desired resource, `not_a_target`; and the control, the
+  declaring contract in hand, its requirement read, the slice. 0.7's case
+  of a requirement naming none, on two desired resources, is the
+  manifest's control: every resource, `two_documents`.
+
+**Decided here.**
+- **One desired resource is unread too.** With the requirement unread,
+  an author whose declaration holds one desired resource gives no slice
+  either: the requirement may name a plain resource beside it, which
+  makes the role no target's (0.6, F-217), and only the requirement says.
+  A rule that counted the author's resources would also answer
+  differently as a minor revision added one.
+- **No desired resource at all is still `not_a_target`.** F-217 needs no
+  requirement to see it: whatever it names, none of it is desired.
+- **A declaring contract in hand that declares no such role** reads as
+  unread too: it says nothing of the requirement, and never every
+  resource.
+- **The reference's row** names the declaring contract,
+  `requirement_unread: "<iface>"`, absent when the requirement was read;
+  `check conform`'s `desired-binding` answers such a role unobservable,
+  since neither its binding nor whether it may be unbound can be judged.
+  A role so read and unbound is still the kill switch at §2.17 step 2:
+  its listing is the descriptor's word, not the requirement's.
+
+**Deliberately not changed.**
+- **§2.3's list and order**, every fixture that existed, and §5's
+  tokens: `no_report` is the answer, `requirement_unread` stands beside.
+
 ## 0.7 — 2026-10-25: round 61 (#840, DF; #609)
 
 zk2py read 0.6 cold in round 61, at PR #864's head, and found every
