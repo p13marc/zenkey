@@ -8506,13 +8506,13 @@ async fn redundancy_s12_a_standby_on_a_minted_system() {
     a.close().await;
 }
 
-/// `check conform`'s `redundancy-*` cases (#841, RC) against §12 step 1's
-/// pair: the declaration passes; B, marked standby with no token in both
+/// §12 step 8: `check conform`'s `redundancy-*` cases (#841, RC) against
+/// step 1's pair: the declaration passes; B, marked standby with no token in both
 /// reads, answers none of the probes over `ledger.v1`'s wildcards — the
 /// `append` probe answered by A alone, by replier zid across the router —
 /// and the case passes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn redundancy_check_conform_probes_a_standby() {
+async fn redundancy_s12_a_probe_of_a_standby_and_of_a_twin() {
     use zenkey::redundancy::Role;
     let bus = Bus::bare(None).await;
     let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;

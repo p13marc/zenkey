@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `redundancy.v1` in the tools: `redundancy`, the doctor, two conform cases, `gen` and `serve` elect (#841, RC)
+
+`redundancy.v1` (`spec/profiles/redundancy/v1.md`) lets several instances
+of one service run, one serving a governed interface and the others
+standing by; §5's four questions of an address become surfaces.
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `zenctl redundancy [SYSTEM/SERVICE] [--iface IFACE] [--grace SECS] [--across-face] [--contracts PATH]`: every governed interface's "served by exactly one incumbent?", "a vacancy?", "how many stand by?" and, of each instance, "a standby or a twin?", in the profile's tokens, from two reads of `@zk/**` a grace apart (2 s) on a session with no liveliness subscriber | exit 1 a split, a twin or a lasting vacancy; 0 one incumbent each, every instance the incumbent, a standby or no candidate; 2 no verdict (`vacant`, a takeover due, among them). `--across-face` (with an address and `--iface`): unobservable on the deployment's word |
+| `doctor`: thirty checks | thirty-one: `redundancy-vacancy` (warning: a governed interface with candidates and no incumbent in two complete reads) | |
+| `doctor`'s `split-brain`: core §6's exposure rule everywhere | on a governed interface, `redundancy.v1`'s first question: two or more holders in both reads are the finding whatever their marks, once | an interface not governed as before |
+| `doctor`'s `token-missing`: a standby's listing read as an exposed interface | a standby exposes nothing and is never found; a holder marked standby is named so (`marked_holding`) | |
+| `doctor`'s `hostid-duplicate`: every instance on a minted system counted | a recognised standby (`hostid.v1` 0.6, 0.7) not counted, named in the clean answer; one whose standby question is unobservable leaves the check unjudged | |
+| `check conform`: twenty-seven cases | twenty-nine: `redundancy-declaration` (a running instance of an invalid or tokenless declaration) and `redundancy-standby` (a GET over each fan-out-forbidden operation's and each state's wildcard, every reply attributed by replier zid: a standby's session answering is the violation) | `--skip` takes each |
+| `gen`, `serve` on a governed contract: refused at start | a candidate: a reader and a watch session of its own, serving once elected and standing by otherwise; `gen`'s report says each interface's `roles` and counts `standing_by` writes apart, never as failures | the address guard unchanged: beside a live instance, `--i-know` |
+
 ## Unreleased (`main`, zk2) — `desired` after review: reads at once, a report's own interface (#840, DE)
 
 | Before | Now | Notes |

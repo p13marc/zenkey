@@ -17,6 +17,7 @@
 //! | §2.5 the election under `claim` | [`elect`], [`Decision`], [`Why`] |
 //! | §2.6, §2.8 taking over, a vacancy | [`Elector`], [`Step::TakeOver`], [`Event::Withdrawn`] |
 //! | §2.7 following the address, what is heard while a read runs (0.2) | [`Event::Appeared`], [`Event::Withdrawn`] (the runtime's watch), kept by the [`Elector`] |
+//! | §2.7 a poll's reads compared with the last's (0.3) | [`poll`], [`Poll`] |
 //! | §2.9 healing a split, a heal read not complete (0.2) | [`heal`], [`Heal`], [`Step::StepDown`], [`Step::Retry`] |
 //! | §2.9 a candidate's own re-mint (0.2) | [`Event::Reminted`], [`Elector::is_own`] |
 //! | §2.11 `election = "external"` | [`Election::External`], [`Event::Lock`] |
@@ -670,6 +671,46 @@ pub fn heal(
     match second.into_iter().next() {
         Some(low) if lower(low, own) => Heal::StepDown(low.clone()),
         _ => Heal::Stay(Stay::Lowest),
+    }
+}
+
+// --- §2.7: a poll ----------------------------------------------------------------------
+
+/// What one read of a poll found, compared with the last's (§2.7; text
+/// 0.3, F-215).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Poll {
+    /// The holders it shows that the last's did not: appearances.
+    pub appeared: Vec<InstanceId>,
+    /// The last's holders it shows gone, a complete read only:
+    /// withdrawals.
+    pub withdrawn: Vec<InstanceId>,
+    /// What the next read is compared with: a complete read's holders, or,
+    /// from a read not complete, the last's with the new ones added, since
+    /// it removes none.
+    pub next: BTreeSet<InstanceId>,
+}
+
+/// One read of a poll compared with `last`, the holders the read before it
+/// left (§2.7; text 0.3, F-215): a holder it shows that is new is an
+/// appearance, and only a complete read can show one gone, so a read not
+/// complete removes no holder from the last's. The first read is compared
+/// with no holder.
+#[must_use]
+pub fn poll(last: &BTreeSet<InstanceId>, complete: bool, holders: &BTreeSet<InstanceId>) -> Poll {
+    let appeared = holders.difference(last).cloned().collect();
+    if complete {
+        Poll {
+            appeared,
+            withdrawn: last.difference(holders).cloned().collect(),
+            next: holders.clone(),
+        }
+    } else {
+        Poll {
+            appeared,
+            withdrawn: Vec::new(),
+            next: last.union(holders).cloned().collect(),
+        }
     }
 }
 

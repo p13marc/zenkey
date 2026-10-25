@@ -406,21 +406,17 @@ pub fn poll_step(
     complete: bool,
     holders: &BTreeSet<InstanceId>,
 ) -> (PollRead, BTreeSet<InstanceId>) {
-    let appeared: Vec<InstanceId> = holders.difference(last).cloned().collect();
-    let (withdrawn, next) = if complete {
-        (last.difference(holders).cloned().collect(), holders.clone())
-    } else {
-        (Vec::new(), last.union(holders).cloned().collect())
-    };
+    // The model's rule, the fixture's (`polls.json`).
+    let p = model::poll(last, complete, holders);
     (
         PollRead {
             made: true,
             complete,
             holders: holders.iter().cloned().collect(),
-            appeared,
-            withdrawn,
+            appeared: p.appeared,
+            withdrawn: p.withdrawn,
         },
-        next,
+        p.next,
     )
 }
 

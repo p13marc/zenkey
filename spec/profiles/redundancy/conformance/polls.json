@@ -1,0 +1,237 @@
+{
+  "description": "redundancy.v1 \u00a72.7 (text 0.3, F-215): a poll's reads of the address, in order, each its completeness and the holders of the interface's token it shows (a set) -> for each read, appeared (the holders it shows that the last's did not, lowest first) and withdrawn (the last's holders it shows gone, lowest first). The last's: the first read is compared with no holder; after a complete read, its holders; after a read not complete, the last's with the new ones added, since a read not complete removes no holder from the last's (core \u00a78.1: it can miss a token, never invent one). So a holder a read shows that is new is an appearance, whatever its completeness, and only a complete read can show one gone.",
+  "cases": [
+    {
+      "note": "F-215's first sequence: a read not complete removes no holder, so the complete read after it shows A gone, a withdrawal",
+      "reads": [
+        {
+          "complete": true,
+          "holders": [
+            "000000000000000a"
+          ]
+        },
+        {
+          "complete": false,
+          "holders": []
+        },
+        {
+          "complete": true,
+          "holders": []
+        }
+      ],
+      "expect": [
+        {
+          "appeared": [
+            "000000000000000a"
+          ],
+          "withdrawn": []
+        },
+        {
+          "appeared": [],
+          "withdrawn": []
+        },
+        {
+          "appeared": [],
+          "withdrawn": [
+            "000000000000000a"
+          ]
+        }
+      ]
+    },
+    {
+      "note": "F-215's second: A kept through the read not complete, so the complete read showing it again is no appearance",
+      "reads": [
+        {
+          "complete": true,
+          "holders": [
+            "000000000000000a"
+          ]
+        },
+        {
+          "complete": false,
+          "holders": []
+        },
+        {
+          "complete": true,
+          "holders": [
+            "000000000000000a"
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "appeared": [
+            "000000000000000a"
+          ],
+          "withdrawn": []
+        },
+        {
+          "appeared": [],
+          "withdrawn": []
+        },
+        {
+          "appeared": [],
+          "withdrawn": []
+        }
+      ]
+    },
+    {
+      "note": "a read not complete that shows a new holder: an appearance, since a read cannot invent a token",
+      "reads": [
+        {
+          "complete": true,
+          "holders": []
+        },
+        {
+          "complete": false,
+          "holders": [
+            "000000000000000b"
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "appeared": [],
+          "withdrawn": []
+        },
+        {
+          "appeared": [
+            "000000000000000b"
+          ],
+          "withdrawn": []
+        }
+      ]
+    },
+    {
+      "note": "a takeover between two complete reads: B appears, A is gone",
+      "reads": [
+        {
+          "complete": true,
+          "holders": [
+            "000000000000000a"
+          ]
+        },
+        {
+          "complete": true,
+          "holders": [
+            "000000000000000b"
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "appeared": [
+            "000000000000000a"
+          ],
+          "withdrawn": []
+        },
+        {
+          "appeared": [
+            "000000000000000b"
+          ],
+          "withdrawn": [
+            "000000000000000a"
+          ]
+        }
+      ]
+    },
+    {
+      "note": "the first read is compared with no holder: nothing gone, since nothing was",
+      "reads": [
+        {
+          "complete": false,
+          "holders": []
+        },
+        {
+          "complete": true,
+          "holders": []
+        }
+      ],
+      "expect": [
+        {
+          "appeared": [],
+          "withdrawn": []
+        },
+        {
+          "appeared": [],
+          "withdrawn": []
+        }
+      ]
+    },
+    {
+      "note": "a second holder: an appearance, A still held",
+      "reads": [
+        {
+          "complete": true,
+          "holders": [
+            "000000000000000a"
+          ]
+        },
+        {
+          "complete": true,
+          "holders": [
+            "000000000000000a",
+            "000000000000000b"
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "appeared": [
+            "000000000000000a"
+          ],
+          "withdrawn": []
+        },
+        {
+          "appeared": [
+            "000000000000000b"
+          ],
+          "withdrawn": []
+        }
+      ]
+    },
+    {
+      "note": "two reads not complete keep every holder either showed, until a complete read shows one gone",
+      "reads": [
+        {
+          "complete": false,
+          "holders": [
+            "000000000000000a"
+          ]
+        },
+        {
+          "complete": false,
+          "holders": [
+            "000000000000000b"
+          ]
+        },
+        {
+          "complete": true,
+          "holders": [
+            "000000000000000b"
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "appeared": [
+            "000000000000000a"
+          ],
+          "withdrawn": []
+        },
+        {
+          "appeared": [
+            "000000000000000b"
+          ],
+          "withdrawn": []
+        },
+        {
+          "appeared": [],
+          "withdrawn": [
+            "000000000000000a"
+          ]
+        }
+      ]
+    }
+  ]
+}

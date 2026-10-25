@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -75,6 +75,7 @@ const KNOWN: &[(&str, &str)] = &[
     ("redundancy", "descriptors.json"),
     ("redundancy", "lifecycle.json"),
     ("redundancy", "conclusions.json"),
+    ("redundancy", "polls.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -2942,6 +2943,38 @@ fn redundancy_heals() {
         };
         let what = format!("{}", case["note"]);
         expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `redundancy/conformance/polls.json`: a poll's reads in order, each
+/// compared with the last's → its appearances and withdrawals
+/// (redundancy.v1 §2.7; text 0.3, F-215).
+#[test]
+fn redundancy_polls() {
+    let path = profiles().join("redundancy/conformance/polls.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let mut last = BTreeSet::new();
+        let mut got = Vec::new();
+        for read in case["reads"].as_array().expect("reads") {
+            let holders: BTreeSet<zenkey_model::grammar::InstanceId> = read["holders"]
+                .as_array()
+                .expect("holders")
+                .iter()
+                .map(rd_id)
+                .collect();
+            let p = redundancy::poll(&last, read["complete"] == json!(true), &holders);
+            let ids = |v: &[zenkey_model::grammar::InstanceId]| -> Vec<String> {
+                v.iter().map(|i| i.as_str().to_owned()).collect()
+            };
+            got.push(json!({"appeared": ids(&p.appeared), "withdrawn": ids(&p.withdrawn)}));
+            last = p.next;
+        }
+        let what = format!("{}", case["note"]);
+        expect(case, json!(got), &what);
     }
     if bless() {
         write_json(&path, &doc);
