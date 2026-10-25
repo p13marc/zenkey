@@ -11798,6 +11798,20 @@ one link the test can stall and cut. Step 6: … the link stalled from
 before the declaration until 0.8 s later, past two round trips under the
 300 ms interests timeout and within the seed's timeout …".
 
+**Status at core 0.42:** resolved. §10's Setup now puts the reader's
+watch session through the link and its reading session straight on R1,
+as the reference runs it. Step 6 stalls the link "from before the reader
+declares its subscribers until the reader's first seed has been read".
+§8.1's new "A reader whose watch session is cut off follows nothing"
+makes Expected 6's "a read not made" hold with the watch session alone on
+the link: the reading session's links do not matter. zk2py runs the
+text's placement alone, and passes it in both zk2py-reader pairings.
+- Its stall ended once its first seed was read, 304–308 ms in.
+- Its reread at the cut was not made, with no GET on either session.
+
+The count the step states, "two round trips have run out", is the
+reference's (F-236).
+
 ### F-228 · gap · core 0.41 §8.1 "A round trip stands until the watch session's transport moves": a round trip through a watch session cut off
 
 > §8.1: "A reader that follows presence live SHOULD make the round trip
@@ -11841,6 +11855,15 @@ session cut off, or cut off while it ran, does not stand, whatever its
 replies say: a reader checks the watch session's links before it and
 when it ends, as it checks a read's, and makes none through a session
 cut off; it makes it when the transport opens."
+
+**Status at core 0.42:** resolved, as proposed. §8.1's "No round trip
+through a watch session cut off" says a round trip does not stand through
+a watch session holding no link, or holding none when it ended, "whatever
+its replies say", and that a reader asks none through a session cut off.
+§10 step 9 runs it. zk2py's `settle` already did this. In step 9 it asked
+no GET through the session cut off. A round trip cut 150 ms into its wait
+came back at 151 ms (zenoh's with the final reply alone), and zk2py's did
+not stand.
 
 ### F-229 · gap · core 0.41 §8.1 "A round trip stands …": what a move leaves of what the reader holds, and which reads are "a seed"
 
@@ -11893,6 +11916,14 @@ withdrawal (an address unobservable, never up or down from before), since
 its subscribers may not hear what moved meanwhile. A read made while no
 round trip stands, a seed or a re-read, is possibly incomplete …".
 
+**Status at core 0.42:** resolved, as proposed. §8.1's "A move unconfirms
+what the reader holds" makes every token and every absence the reader
+followed unconfirmed, from the move until a complete read after a round
+trip that stands. "A read made while no round trip stands, a seed or a
+re-read" is possibly incomplete. zk2py's `MOVED` and unordered reads
+already did both. Step 6 now observes the view at the move itself, before
+any read: the owner and an absent address both unobservable (`MOVED`).
+
 ### F-230 · ambiguity · scenarios/presence.md §10 Expected 4: "by then the subscriber has heard all 2,000 tokens", at the session or at the application
 
 > §10 Expected 4: "With history, it ends only after the history: by then
@@ -11926,6 +11957,13 @@ default-callback runs as a measurement.
 2,000 tokens to the subscriber (a binding that runs each callback on a
 thread of its own may still be handing them over)".
 
+**Status at core 0.42:** resolved, in zk2py's words: "by then zenoh has
+delivered all 2,000 tokens to the subscriber (… a binding that runs each
+callback on a thread of its own may still be handing them over)". zk2py
+checks Expected 4 with `indirect=False`, and every token was there by the
+end, beside 2,000 and 10,000 in `ns`. With the default callbacks, the end
+came first in 0–1 of 10 runs (2,000) and 1 of 3 (10,000).
+
 ### F-231 · ambiguity · scenarios/presence.md §10 step 5: the open read beside the crowd, under a 300 ms interests timeout
 
 > §10 Setup: "the crowd sessions hold 2,000 instance tokens between them."
@@ -11950,6 +11988,11 @@ passes. At a larger crowd it reports the open read as a measurement.
 
 **Wording that would remove the guess:** "step 5, after the crowd sessions
 close" or "reads `zk2/*/<owner's service>/@zk/instance/*`".
+
+**Status at core 0.42:** resolved, by the second wording. The crowd is in
+`ns`, and step 5 reads the steps' own system, `zk2/s10/*/@zk/instance/*`.
+zk2py's read was complete in 1.6 ms beside 2,000 tokens and beside 10,000,
+where 0.41's read of the crowd had run out.
 
 ### F-232 · gap · core 0.41 §8.1 "A read that runs to its session's interests timeout is not complete": an interests timeout the reader cannot read
 
@@ -11981,6 +12024,15 @@ is asked, to its final reply, so it is never less than zenoh's.
 the GET is asked to its final reply. A reader that cannot read its
 session's interests timeout takes it as zenoh's default, 10 s, or opens
 the session with one it knows."
+
+**Status at core 0.42:** resolved. A read's time "is counted from before
+the GET is asked to its final reply". A reader that cannot read the value
+"SHOULD open the session itself with a value it sets". A session it is
+handed it takes at zenoh's 10 s, and "says that its reads' completeness
+rests on the default". zk2py already counted so, took a session it did
+not open at 10 s, and opened its own with 120 s. It now says so:
+`Presence.interests_timeout_assumed` and `RoundTrip.interests_timeout_assumed`,
+and the read's `reading` names `INTERESTS_TIMEOUT_ASSUMED`.
 
 ### F-233 · ambiguity · core 0.41 §8.1 "Except in a namespace": history's cost at a population
 
@@ -12014,6 +12066,18 @@ at a population watches the wire keys from a session in no namespace, or
 runs its round trip's wait and its interests timeout above the history's
 time."
 
+**Status at core 0.42:** resolved, and firmer than proposed. §8.1's "In a
+namespace, a watch session in no namespace, on the wire keys" is a SHOULD:
+a reader holds its watch session in no namespace, its subscribers without
+history on `<ns>/zk2/…`, and its round trip on `<ns>/zk2/…/@zk/settle`. A
+reader that keeps 0.41's history SHOULD run its waits above the history's
+time. zk2py's watch session, `watch_or_beside` and follower now watch so.
+§10 step 8 measured:
+- beside 2,000 tokens in `ns`, the round trip took 0.5–0.8 ms;
+- beside 10,000, it took 2.7 ms;
+- the crowd token's withdrawal was heard on its wire key;
+- 0.41's option, history in `ns`, took 133 ms and 3.2 s.
+
 ### F-234 · ambiguity · scenarios/presence.md §10 step 7: one watch session in `ns`, or one per subscriber
 
 > step 7: "a watch session in `ns` declares a subscriber without history,
@@ -12033,6 +12097,10 @@ one subscriber per session.
 **Wording that would remove the guess:** "a fresh watch session in `ns`
 declares a subscriber without history; then another fresh one declares
 one with history …".
+
+**Status at core 0.42:** resolved, as proposed: "a fresh watch session
+for each subscriber, and a fresh token each time". zk2py already ran
+step 7 so.
 
 ### F-235 · contradiction · scenarios/presence.md §9 step 2 and Expected 2, and core Appendix B: a miss stated as certain is a race
 
@@ -12080,8 +12148,133 @@ can win the race in a few runs in a hundred) …". Appendix B: "missed in
 720 of 720 (1.10.1, the reference's reproduction), 719 of 720 (main);
 zenoh-python 1.10.1 held it in 7 of 120".
 
+**Status at core 0.42:** resolved. Step 2 now runs ten times on fresh
+sessions, and Expected 2 asks the miss "in one run of the ten at least",
+the session's own answer winning "in a few runs in a hundred". Appendix B
+gives zenoh-python's 7 of 120. zk2py now checks it so. The GET missed the
+token 10 of 10 in both zk2py-reader pairings. In 60 further trials each,
+it held the token in 0 of 60 beside zk2py's owner and 1 of 60 beside the
+Rust owner.
+
 **Counts at core 0.41:** 235 entries. Open: F-227 to F-235, against core
 0.41: four ambiguities in §10 (F-227, F-230, F-231, F-234), three gaps in
 §8.1 (F-228, F-229, F-232), one ambiguity in §8.1 (F-233), and one
 contradiction between §9 Expected 2, Appendix B and the measurement
 (F-235). Every other entry is resolved.
+
+## At core 0.42 (#609)
+
+Round 67 read core 0.42 cold, on main 0bcf1310: the CHANGELOG's 0.42
+entry, §8.1, Appendix B and C, and `scenarios/presence.md` §9 and §10.
+0.42 answers round 66's nine findings one by one, and changes four
+things:
+- in a namespace, a watch session in no namespace, on the wire keys;
+- no round trip through a watch session cut off, and no read a reader
+  would follow from it;
+- a move unconfirms what the reader holds, and a read made while no round
+  trip stands, whether a seed or a re-read, is possibly incomplete;
+- a read's time counts from before its GET is asked, and a reader that
+  cannot read its session's interests timeout says its completeness rests
+  on zenoh's 10 s.
+
+No fixture changed. zk2py implemented the rules from the text first:
+- `live.watch_session` in no namespace;
+- `wire_selector`, `strip_namespace` and `Stripped`, which `watch_or_beside`
+  and the follower use in a namespace;
+- the follower's read not made while its watch session is cut off
+  (`WATCH_CUT_OFF`);
+- the assumed interests timeout (`interests_timeout_assumed`).
+
+Its runner then ran the new steps. The README's "What a complete presence
+read is" says where zk2py already did what 0.42 says and where it did not.
+
+**Round 66's findings at 0.42:** F-227 to F-235 are all resolved. Each
+entry has its status line.
+
+**`just py-conformance`: 3023 of 3023.** `readings` gained 13 cases
+(392).
+
+**Live:** `presence_scenarios` §1 to §10, every pairing, against
+`owner-wd` and `zenctl-wd`:
+
+| Owner, reader | passed | not run |
+|---|---|---|
+| zk2py, zk2py | 83 | 1 |
+| Rust, zk2py | 77 | 2 |
+| zk2py, zenctl | 32 | 6 |
+| Rust, zenctl | 31 | 7 |
+
+Every check passes. §10 also ran whole beside 10,000 tokens, which fits on
+this VM: 34 of 34 with zk2py's reader, 8 of 8 with zenctl. The other live
+runners pass again: `live_interop` 367 (without the consume example),
+and the profile runners' counts in the README.
+
+Running step 8's follower at a population found a bug of zk2py's own, not
+the text's. Its view folded a read of 2,000 tokens in 9.7 s, grouping the
+keys holder by holder. It now groups them once (0.05 s).
+
+**Where the two implementations disagree:** on no verdict.
+- zenctl words a read ended at the interests timeout as one that "ran to
+  its timeout … raise --timeout to ask again". zk2py names the interests
+  timeout.
+- Step 6's round trips differ: zk2py asks 3, and the reference 4. One of
+  zk2py's runs out before its first seed, two of the reference's
+  (F-236).
+
+**The text, read end to end.** Every new SHOULD cites
+`[Sc: presence.md §10]`, and steps 6, 8 and 9 run each one. Two minor
+findings, both on a step's wording.
+
+### F-236 · minor · scenarios/presence.md §10 step 6: "two round trips have run out" is one reader's count
+
+> §10 step 6 (0.42): "The watch session's link is stalled from before the
+> reader declares its subscribers until the reader's first seed has been
+> read: by then two round trips have run out under the 300 ms interests
+> timeout, the start's and the seed's (0.42, F-227)."
+
+The step says how long the stall lasts by an event, "until the reader's
+first seed has been read". It then states, as fact, what that takes:
+"two round trips". That is the reference's count. Its reader makes a
+round trip at its start and another before its seed. zk2py's reader
+makes one round trip before each read, so its start's round trip is its
+seed's. When its first seed was read, one round trip had run out, at
+302 ms, and the stall lasted 304–308 ms. A runner that ends the stall
+only once two round trips have run out ends it, for zk2py's reader,
+after its retry's round trip and second seed, not its first.
+
+Expected 6 does not depend on the count: the seed is possibly incomplete
+whichever way the reader paces its round trips.
+
+**zk2py:** ends the stall when the reader's first seed has been read, the
+event the step names, and reports its round trips as a note.
+
+**Wording that would remove the guess:** "… until the reader's first seed
+has been read: by then its round trips before the seed have run out under
+the 300 ms interests timeout (the reference makes two, the start's and the
+seed's)".
+
+### F-237 · minor · scenarios/presence.md §10 step 9 and Expected 9: the round trip's wait, 5 s or 2 s
+
+> §10 Setup: "The round trip is a liveliness GET of `zk2/*/*/@zk/settle`
+> … and waits 5 s".
+
+> step 9: "Then, the link healed and stalled, a round trip is asked, and
+> the link is cut while it waits".
+
+> Expected 9: "The round trip cut while it waits comes back at the cut,
+> well before its 2 s".
+
+Step 5 states its own 2 s. Step 9 states no wait, so by the Setup its
+round trip waits 5 s. Expected 9 speaks of "its 2 s". The reference's
+note gives the time it came back, 152 ms, but not the wait. The verdict
+holds either way: the GET came back at the cut, 151 ms in, under any
+wait. But a runner cannot tell which wait the step means.
+
+**zk2py:** asks step 9's round trips with a 2 s wait, as Expected 9 says.
+It cuts the link 150 ms into each.
+
+**Wording that would remove the guess:** step 9: "… a round trip with a
+2 s timeout is asked, and the link is cut 150 ms into it …".
+
+**Counts at core 0.42:** 237 entries. Open: F-236 and F-237, both minor,
+against `scenarios/presence.md` §10. Every other entry is resolved.
