@@ -1487,11 +1487,6 @@ fn alarm_cases(obs: &ConformObservation) -> [ConformCase; 2] {
     [key, document]
 }
 
-/// The `desired.v1` cases (#840, DD), in [`CaseId::ALL`] order:
-/// `desired-report` and `desired-binding` of the service as a target, from
-/// the reading `zenctl desired` makes of it; `desired-author` of each
-/// desired resource its claimed revision declares, from the contract and
-/// the window's subscription.
 // ─── redundancy.v1 (#841, RC) ───────────────────────────────────────────────
 
 /// `redundancy-declaration` (§2.2, §2.14) and `redundancy-standby` (§2.4).
@@ -1785,6 +1780,11 @@ fn redundancy_standby(obs: &ConformObservation) -> ConformCase {
     )
 }
 
+/// The `desired.v1` cases (#840, DD), in [`CaseId::ALL`] order:
+/// `desired-report` and `desired-binding` of the service as a target, from
+/// the reading `zenctl desired` makes of it; `desired-author` of each
+/// desired resource its claimed revision declares, from the contract and
+/// the window's subscription.
 fn desired_cases(obs: &ConformObservation) -> Vec<ConformCase> {
     let mut out = desired_target_cases(obs);
     out.extend(desired_author_cases(obs));

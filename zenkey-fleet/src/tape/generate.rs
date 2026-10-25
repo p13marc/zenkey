@@ -1043,17 +1043,21 @@ pub async fn run_gen(
     })
 }
 
+/// One governed state a takeover puts: its interface, its key, its
+/// writer, and what its value is synthesized from.
+type TakeoverState = (
+    IfaceId,
+    String,
+    Arc<zenkey::state::StateWriter>,
+    Arc<Revision>,
+    Resource,
+);
+
 /// What a takeover puts (`redundancy.v1` §2.6 step 3): each governed
 /// state's value at tick 0, synthesized when it takes over.
 struct GenTakeover {
     seed: u64,
-    states: Vec<(
-        IfaceId,
-        String,
-        Arc<zenkey::state::StateWriter>,
-        Arc<Revision>,
-        Resource,
-    )>,
+    states: Vec<TakeoverState>,
 }
 
 impl zenkey::redundancy::Takeover for GenTakeover {
