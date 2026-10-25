@@ -78,7 +78,9 @@ async fn client_waiting(endpoint: &str, interests_ms: u64) -> zenoh::Session {
 /// with a selector that matches no token on a watch session at once after
 /// its subscriber, as `Monitor::start` asks it; with history and without,
 /// under zenoh's own `routing/interests/timeout` (10 s) and a longer one;
-/// then a read of every token, under each.
+/// then a read of every token, under each. Under the 10 s one the round
+/// trip and the read end at 10 s with no error reply, and the reference
+/// reads each as not standing and possibly incomplete (core §8.1, 0.41).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "a measurement: about two minutes"]
 async fn wb_a_barrier_beside_ten_thousand_tokens_measured() {
@@ -91,7 +93,9 @@ async fn wb_a_barrier_beside_ten_thousand_tokens_measured() {
         }
         v
     };
-    let reader = client(&ep).await;
+    // Waits long for its router: a read of 10,000 tokens takes longer than
+    // zenoh's own 10 s here, and would never read complete (core §8.1, 0.41).
+    let reader = client_waiting(&ep, 120_000).await;
     let started = std::time::Instant::now();
     let mut tokens = Vec::with_capacity(N);
     for i in 0..N {
