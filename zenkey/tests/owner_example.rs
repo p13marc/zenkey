@@ -1981,6 +1981,7 @@ async fn the_owner_example_starts_at_go_on_its_standard_input() {
     let args: Vec<String> = [
         "--connect",
         ep.as_str(),
+        "--standby",
         "--wait-go",
         "--instance-id",
         "000000000000000a",
