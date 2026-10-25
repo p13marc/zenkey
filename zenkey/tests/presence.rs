@@ -1144,3 +1144,431 @@ async fn a_peers_read_through_a_router_misses_an_unlinked_peers_token() {
     })
     .await;
 }
+
+// ─── a barrier that matches no token (#851, WB) ─────────────────────────────
+
+/// A selector no zk2 token can match (#851): its `@zk` chunk is followed by
+/// one chunk, where every token's is followed by its kind and at least one
+/// chunk more (§1.1: `instance/<id>`, `alive/<iface>/<id>/<fp16>`,
+/// `member/<iface>/<member>/<epoch>`).
+const NO_TOKEN: &str = "zk2/*/*/@zk/settle";
+
+/// The watch session's subscriber in these measurements: a reader's, with
+/// history, on every instance token.
+const INSTANCES: &str = "zk2/*/*/@zk/instance/*";
+
+/// How long a watch session's link is held stalled from before it declares
+/// its subscriber: longer than a seed's answer and a withdrawal take here,
+/// as `spec/scenarios/presence.md` §9 step 5's.
+const STALL: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// What a watch session heard: each (token key, put) in order.
+type Heard = Arc<Mutex<Vec<(String, bool)>>>;
+
+/// A liveliness subscriber on `watch`, with history or without, recording
+/// what it hears.
+async fn listen(watch: &zenoh::Session, history: bool) -> (zenoh::pubsub::Subscriber<()>, Heard) {
+    let heard: Heard = Arc::default();
+    let h = Arc::clone(&heard);
+    let sub = presence::declare_subscriber(watch, INSTANCES)
+        .history(history)
+        .callback(move |s: Sample| {
+            h.lock().unwrap().push((
+                s.key_expr().as_str().to_owned(),
+                s.kind() == SampleKind::Put,
+            ));
+        })
+        .await
+        .unwrap();
+    (sub, heard)
+}
+
+/// zenoh's own liveliness GET of `sel`, as a barrier is made: whether it
+/// ended at the final reply with no error reply, how many tokens it
+/// carried, and how long it took.
+async fn raw_barrier(
+    s: &zenoh::Session,
+    sel: &str,
+    timeout: std::time::Duration,
+) -> (bool, usize, std::time::Duration) {
+    let started = std::time::Instant::now();
+    let replies = s
+        .liveliness()
+        .get(sel)
+        .timeout(timeout)
+        .with(flume::unbounded())
+        .await
+        .unwrap();
+    let (mut complete, mut tokens) = (true, 0);
+    while let Ok(r) = replies.recv_async().await {
+        match r.result() {
+            Ok(_) => tokens += 1,
+            Err(_) => complete = false,
+        }
+    }
+    (complete, tokens, started.elapsed())
+}
+
+/// Whether `heard` holds `key`'s withdrawal within `within`.
+async fn heard_gone(heard: &Heard, key: &str, within: std::time::Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        if heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(k, put)| k == key && !put)
+        {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// One run of the race the barrier closes (core §8.1, 0.37; #851), its
+/// window held open by a stall: a token `key` on `owner`, read by every
+/// `tools` session first; a fresh watch session behind `link`, whose link
+/// is stalled from before it declares its subscriber until [`STALL`] later.
+/// With `settle`, the barrier ([`NO_TOKEN`]) is asked at once after the
+/// declaration, and must still be waiting when the stall ends: the
+/// session answered nothing itself. Then the seed (a GET at the token on
+/// each tool), the token withdrawn at once, and the routers the tools read
+/// shown it gone (a GET at the token). Without `settle`, the stall ends
+/// only then, and a barrier made after it says the watch session's router
+/// has read the subscriber. Returns whether the watch session heard the
+/// token go. The subscriber has history when `history`.
+async fn race(
+    owner: &zenoh::Session,
+    tools: &[&zenoh::Session],
+    link: &common::Link,
+    key: &str,
+    settle: bool,
+    history: bool,
+) -> bool {
+    let token = owner.liveliness().declare_token(key).await.unwrap();
+    for tool in tools {
+        eventually("the tool reads the token", || async {
+            raw_read(tool, key).await.1 == [key]
+        })
+        .await;
+    }
+    let watch = common::retrying_client(link.endpoint()).await;
+    link.stall();
+    let (sub, heard) = if settle {
+        let w = watch.clone();
+        let starting = tokio::spawn(async move {
+            let listening = listen(&w, history).await;
+            let barrier = raw_barrier(&w, NO_TOKEN, std::time::Duration::from_secs(5)).await;
+            (listening, barrier)
+        });
+        tokio::time::sleep(STALL).await;
+        assert!(
+            !starting.is_finished(),
+            "the barrier came back while the link was stalled: answered by the session itself"
+        );
+        link.heal();
+        let (listening, (complete, tokens, _)) = starting.await.unwrap();
+        assert!(complete, "the barrier's final reply, no error reply");
+        assert_eq!(tokens, 0, "the barrier matched no token");
+        listening
+    } else {
+        listen(&watch, history).await
+    };
+    for tool in tools {
+        assert_eq!(
+            raw_read(tool, key).await.1,
+            [key],
+            "the seed holds the token"
+        );
+    }
+    token.undeclare().await.unwrap();
+    for tool in tools {
+        eventually("the token is gone where the tool reads", || async {
+            raw_read(tool, key).await.1.is_empty()
+        })
+        .await;
+    }
+    if !settle {
+        link.heal();
+        let (complete, _, _) =
+            raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(5)).await;
+        assert!(complete, "its router has read the subscriber now");
+    }
+    let gone = heard_gone(&heard, key, std::time::Duration::from_secs(2)).await;
+    drop(sub);
+    let _ = watch.close().await;
+    gone
+}
+
+/// The race at full speed, many at once (#851): a fresh watch session
+/// straight to the router at `ep`, its subscriber, the barrier when
+/// `settle`, then the seed on `tool`, the token withdrawn at once, and the
+/// tool shown it gone. Whether the watch session heard it go.
+async fn race_unstalled(
+    ep: &str,
+    owner: &zenoh::Session,
+    tool: &zenoh::Session,
+    key: &str,
+    settle: bool,
+) -> bool {
+    let token = owner.liveliness().declare_token(key).await.unwrap();
+    eventually("the tool reads the token", || async {
+        raw_read(tool, key).await.1 == [key]
+    })
+    .await;
+    let watch = client(ep).await;
+    let (sub, heard) = listen(&watch, true).await;
+    if settle {
+        let (complete, tokens, _) =
+            raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(5)).await;
+        assert!(
+            complete && tokens == 0,
+            "a barrier, empty: {complete} {tokens}"
+        );
+    }
+    let seed = raw_read(tool, key).await.1;
+    token.undeclare().await.unwrap();
+    assert_eq!(seed, [key], "the seed holds the token");
+    eventually("the token is gone where the tool reads", || async {
+        raw_read(tool, key).await.1.is_empty()
+    })
+    .await;
+    let gone = heard_gone(&heard, key, std::time::Duration::from_secs(2)).await;
+    drop(sub);
+    let _ = watch.close().await;
+    gone
+}
+
+/// Declares `n` instance tokens on `holder` under system `system`, and
+/// waits until `reader` reads them all: the load a barrier is made beside.
+async fn crowd(
+    holder: &zenoh::Session,
+    reader: &zenoh::Session,
+    system: &str,
+    n: usize,
+) -> Vec<zenoh::liveliness::LivelinessToken> {
+    let mut tokens = Vec::with_capacity(n);
+    for i in 0..n {
+        tokens.push(
+            holder
+                .liveliness()
+                .declare_token(format!("zk2/{system}/svc{i}/@zk/instance/{i:016x}"))
+                .await
+                .unwrap(),
+        );
+    }
+    let sel = format!("zk2/{system}/*/@zk/instance/*");
+    eventually("the crowd is read", || async {
+        presence::liveliness_read(reader, &sel, std::time::Duration::from_secs(10))
+            .await
+            .is_ok_and(|r| r.complete && r.keys.len() == n)
+    })
+    .await;
+    tokens
+}
+
+/// #851's measurement on one router (zenoh 1.10.1): a barrier that
+/// matches no token orders a watch session's subscriber at its router as
+/// the subscriber's own selector does, and carries nothing.
+///
+/// zenoh's code (`zenoh/src/net/routing`): a client's runtime forwards
+/// both interests to its router on one link, at one priority (the
+/// subscriber's `CurrentFuture` and the GET's `Current`,
+/// `hat/client/interests.rs`), and the router handles each in turn in
+/// `Face::interest` (`dispatcher/interests.rs`): the subscriber's current
+/// tokens (its history) are sent and its interest registered, then the
+/// GET's current tokens are sent — none — and its `DeclareFinal` at once,
+/// since a router's own hat resolves a client's interest itself
+/// (`hat/router/interests.rs`). So the final reply follows the
+/// subscriber's registration, and its history, whatever the GET's
+/// selector matches. A subscriber without history hears a token withdrawn
+/// that was declared before it too: the router sends it an undeclaration
+/// by key (`hat/broker/token.rs`).
+///
+/// - **Stalled** (the window held open, as §9 step 5): the barrier waits
+///   for the link in every run, nothing answered by the session itself,
+///   and the withdrawal is heard in every run, by a subscriber with
+///   history and by one without.
+/// - **The control**, the barrier skipped, the same stall: the withdrawal
+///   is never heard, in every run.
+/// - **Unstalled, many at once**, beside a crowd of tokens the
+///   subscriber's history carries: the misses counted with the barrier,
+///   and without it.
+/// - **The cost**: the barrier beside the crowd, and the subscriber's own
+///   selector beside it, timed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_barrier_that_matches_no_token_orders_the_subscriber_at_its_router() {
+    const RUNS: usize = 20;
+    const CONTROLS: usize = 5;
+    const UNSTALLED: usize = 160;
+    const AT_ONCE: usize = 8;
+    const CROWD: usize = 300;
+    let (_r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let tool = client(&ep).await;
+    let holder = client(&ep).await;
+    let _crowd = crowd(&holder, &tool, "crowd", CROWD).await;
+    let link = common::link_to(&ep).await;
+
+    for history in [true, false] {
+        let started = std::time::Instant::now();
+        let mut heard = 0;
+        for run in 0..RUNS {
+            let key = format!("zk2/wb/run{history}{run}/@zk/instance/{run:016x}");
+            heard += usize::from(race(&owner, &[&tool], &link, &key, true, history).await);
+        }
+        eprintln!(
+            "one router, stalled, the barrier, history {history}: heard {heard} of {RUNS} in {:?}",
+            started.elapsed()
+        );
+        assert_eq!(heard, RUNS, "a withdrawal after the barrier was missed");
+    }
+    let missed = {
+        let mut missed = 0;
+        for run in 0..CONTROLS {
+            let key = format!("zk2/wb/control{run}/@zk/instance/{run:016x}");
+            missed += usize::from(!race(&owner, &[&tool], &link, &key, false, true).await);
+        }
+        missed
+    };
+    eprintln!("one router, stalled, no barrier: missed {missed} of {CONTROLS}");
+    assert_eq!(missed, CONTROLS, "the stall should hold the race open");
+
+    let ep = Arc::new(ep);
+    let (owner, tool) = (Arc::new(owner), Arc::new(tool));
+    for settle in [true, false] {
+        let started = std::time::Instant::now();
+        let mut missed = 0;
+        for batch in 0..UNSTALLED / AT_ONCE {
+            let runs: Vec<_> = (0..AT_ONCE)
+                .map(|i| {
+                    let (ep, owner, tool) =
+                        (Arc::clone(&ep), Arc::clone(&owner), Arc::clone(&tool));
+                    let n = batch * AT_ONCE + i;
+                    tokio::spawn(async move {
+                        let key = format!("zk2/wb/u{settle}{n}/@zk/instance/{n:016x}");
+                        race_unstalled(&ep, &owner, &tool, &key, settle).await
+                    })
+                })
+                .collect();
+            for r in runs {
+                missed += usize::from(!r.await.unwrap());
+            }
+        }
+        eprintln!(
+            "one router, unstalled, {AT_ONCE} at once beside {CROWD} tokens, barrier {settle}: \
+             missed {missed} of {UNSTALLED} in {:?}",
+            started.elapsed()
+        );
+        if settle {
+            assert_eq!(missed, 0, "a withdrawal after the barrier was missed");
+        }
+    }
+
+    // The cost, beside the crowd: the barrier, then the subscriber's own
+    // selector, on a watch session.
+    let watch = client(&ep).await;
+    let (_sub, _heard) = listen(&watch, true).await;
+    let first = raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(10)).await;
+    let again = raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(10)).await;
+    let own = raw_barrier(&watch, INSTANCES, std::time::Duration::from_secs(10)).await;
+    assert!(
+        first.0 && first.1 == 0 && again.0 && again.1 == 0,
+        "{first:?} {again:?}"
+    );
+    eprintln!(
+        "beside {CROWD} tokens (complete, tokens, time): the barrier after the subscriber \
+         {first:?}, again {again:?}; the subscriber's own selector {own:?}"
+    );
+}
+
+/// #851's measurement on a router chain (zenoh 1.10.1): the watch session a
+/// client of router A, A linked to router B, the token's holder a client of
+/// B, and the seed read at A and at B. A does not forward a client's
+/// liveliness interest to B: a router's hat resolves it itself
+/// (`hat/router/interests.rs`), and a router ignores an interest from
+/// another router (`dispatcher/interests.rs`); every router holds every
+/// token, propagated router to router. What orders the withdrawal is A's
+/// registration of the subscriber, where B's withdrawal arrives and is
+/// forwarded from, and the barrier's final reply follows it, as on one
+/// router, with history and without. The control, the barrier skipped
+/// behind the same stall, misses it in every run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_barrier_that_matches_no_token_orders_the_subscriber_across_a_router_chain() {
+    const RUNS: usize = 20;
+    const CONTROLS: usize = 5;
+    let (_rb, ep_b) = router(None).await;
+    let (_ra, ep_a) = router(Some(&ep_b)).await;
+    let owner = client(&ep_b).await;
+    let tool_a = client(&ep_a).await;
+    let tool_b = client(&ep_b).await;
+    let link = common::link_to(&ep_a).await;
+    for history in [true, false] {
+        let started = std::time::Instant::now();
+        let mut heard = 0;
+        for run in 0..RUNS {
+            let key = format!("zk2/wbc/run{history}{run}/@zk/instance/{run:016x}");
+            let tools = [&tool_a, &tool_b];
+            heard += usize::from(race(&owner, &tools, &link, &key, true, history).await);
+        }
+        eprintln!(
+            "a chain, stalled, the barrier, history {history}: heard {heard} of {RUNS} in {:?}",
+            started.elapsed()
+        );
+        assert_eq!(heard, RUNS, "a withdrawal after the barrier was missed");
+    }
+    let mut missed = 0;
+    for run in 0..CONTROLS {
+        let key = format!("zk2/wbc/control{run}/@zk/instance/{run:016x}");
+        missed += usize::from(!race(&owner, &[&tool_a, &tool_b], &link, &key, false, true).await);
+    }
+    eprintln!("a chain, stalled, no barrier: missed {missed} of {CONTROLS}");
+    assert_eq!(missed, CONTROLS, "the stall should hold the race open");
+}
+
+/// #851: a barrier the router's access control refuses is still ordered
+/// (zenoh 1.10.1). A refused interest is answered with its final reply at
+/// ingress (`net/primitives/demux.rs`), after every earlier message of the
+/// face was handled, so it orders the subscriber as a granted one does;
+/// what a grant buys is only that nothing is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_barrier_still_orders_the_subscriber() {
+    const RUNS: usize = 5;
+    let acl = r#"{
+        enabled: true,
+        default_permission: "allow",
+        rules: [{
+            id: "no-barrier",
+            messages: ["liveliness_query"],
+            flows: ["ingress"],
+            permission: "deny",
+            key_exprs: ["zk2/*/*/@zk/settle"],
+        }],
+        subjects: [{ id: "anyone" }],
+        policies: [{ rules: ["no-barrier"], subjects: ["anyone"] }],
+    }"#;
+    let (r1, ep) = common::router_with(None, &[("access_control", acl)]).await;
+    let owner = client(&ep).await;
+    let tool = client(&ep).await;
+    let link = common::link_to(&ep).await;
+    // A token the barrier would carry if it were answered: the router's
+    // own read, through no face, holds it, and every barrier below comes
+    // back empty, refused.
+    let check = "zk2/wbr/check/@zk/settle";
+    let _check = owner.liveliness().declare_token(check).await.unwrap();
+    eventually("the router holds the check token", || async {
+        keys(&r1, NO_TOKEN).await == [check]
+    })
+    .await;
+    assert!(raw_read(&tool, NO_TOKEN).await.1.is_empty(), "refused");
+    let mut heard = 0;
+    for run in 0..RUNS {
+        let key = format!("zk2/wbr/run{run}/@zk/instance/{run:016x}");
+        heard += usize::from(race(&owner, &[&tool], &link, &key, true, true).await);
+    }
+    eprintln!("one router, the barrier refused: heard {heard} of {RUNS}");
+    assert_eq!(heard, RUNS);
+}
