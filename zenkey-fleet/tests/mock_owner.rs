@@ -84,6 +84,7 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
         duration: Duration::from_secs(4),
         seed: 7,
         tool: "mock_owner test".into(),
+        elect: None,
     };
     let plan = gen_plan(&spec).unwrap();
     let (up, came_up) = tokio::sync::oneshot::channel();
@@ -183,6 +184,7 @@ async fn gen_holds_an_event_to_its_declared_rate_and_says_so() {
         duration: Duration::from_secs(3),
         seed: 7,
         tool: "mock_owner test".into(),
+        elect: None,
     };
     let plan = gen_plan(&spec).unwrap();
     let applied = plan
@@ -231,6 +233,7 @@ async fn serve_answers_logs_and_leaves_no_operation_silent() {
             },
             bindings: BTreeMap::new(),
             tool: "mock_owner test".into(),
+            elect: None,
         },
     )
     .await
@@ -341,6 +344,7 @@ async fn a_bench_attributes_replies_by_key_and_keeps_refusals_apart() {
                     answer,
                     bindings: BTreeMap::new(),
                     tool: "mock_owner test".into(),
+                    elect: None,
                 },
             )
             .await
@@ -449,4 +453,234 @@ async fn a_bench_attributes_replies_by_key_and_keeps_refusals_apart() {
     for m in mocks {
         m.close().await.unwrap();
     }
+}
+
+/// `redundancy.v1` (#841, RC): `gen` of a governed contract
+/// (`zs.catalog.v1`, ZenSight's singleton) is a candidate. Alone it is
+/// elected and serves; a second beside it stands by, holding no token and
+/// putting nothing, and the address reads as one incumbent and a standby.
+/// When the first's run ends, the standby takes over and serves (§2.8).
+/// Each run's report says its role, the standby's writes held back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_of_a_governed_contract_elects_and_a_second_stands_by() {
+    let (_router, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let catalog = revision("zensight/zs.catalog.v1");
+    let address = addr("lab/catalog");
+    let candidate = |seed: u64, secs: u64| {
+        let ep = ep.clone();
+        let catalog = Arc::clone(&catalog);
+        let address = address.clone();
+        async move {
+            let owner = client(&ep).await;
+            let startup = zenkey::redundancy::RedundancyStartup::new(client(&ep).await)
+                .with_watch(client(&ep).await);
+            let spec = GenSpec {
+                address,
+                revisions: vec![catalog],
+                members: vec![],
+                bindings: BTreeMap::new(),
+                rate_hz: Some(10.0),
+                pattern: GenPattern::Steady,
+                duration: Duration::from_secs(secs),
+                seed,
+                tool: "mock_owner test".into(),
+                elect: Some(startup),
+            };
+            let plan = gen_plan(&spec).unwrap();
+            let (up, came_up) = tokio::sync::oneshot::channel();
+            let run = tokio::spawn(async move {
+                run_gen(&owner, &spec, &plan, |i| {
+                    let _ = up.send(i.to_owned());
+                })
+                .await
+            });
+            (came_up.await.expect("the mock came up"), run)
+        }
+    };
+    let offline = zenkey_fleet::model::catalog::ContractSet::new();
+    let read = || async {
+        zenkey_fleet::run_redundancy(
+            &tool,
+            "",
+            Some(address.clone()),
+            zenkey_fleet::RedundancySpec::new(T),
+            &zenkey_fleet::bus::contracts::BundleStore::new(T),
+            &offline,
+        )
+        .await
+    };
+    let eventually = |what: &'static str, ok: fn(&zenkey_fleet::report::RedundancyRow) -> bool| {
+        let read = &read;
+        async move {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+            loop {
+                let r = read().await;
+                if let Some(row) = r.interfaces.first()
+                    && ok(row)
+                {
+                    return r;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "never {what}: {r:#?}"
+                );
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    };
+    let (first, run_a) = candidate(1, 6).await;
+    let r = eventually("one incumbent", |row| {
+        row.one_incumbent.reason == "one" && row.holders.len() == 1
+    })
+    .await;
+    assert_eq!(r.interfaces[0].holders, vec![first.clone()], "{r:#?}");
+    let (second, run_b) = candidate(2, 14).await;
+    let r = eventually("a standby beside it", |row| {
+        row.standbys.count == 1 && row.one_incumbent.reason == "one"
+    })
+    .await;
+    let row = &r.interfaces[0];
+    assert_eq!(row.holders, vec![first.clone()], "{r:#?}");
+    let roles: BTreeMap<&str, zenkey_fleet::report::RedundancyRole> = row
+        .instances
+        .iter()
+        .map(|i| (i.instance.as_str(), i.role))
+        .collect();
+    assert_eq!(
+        roles,
+        BTreeMap::from([
+            (
+                first.as_str(),
+                zenkey_fleet::report::RedundancyRole::Incumbent
+            ),
+            (
+                second.as_str(),
+                zenkey_fleet::report::RedundancyRole::Standby
+            ),
+        ])
+    );
+    assert_eq!(
+        zenkey_fleet::judgement_exit_code(&r.judgement()),
+        0,
+        "{r:#?}"
+    );
+    let a = run_a.await.unwrap().expect("the incumbent's run");
+    assert_eq!(a.roles["zs.catalog.v1"], "serving", "{a:?}");
+    assert!(a.sent > 0 && a.failed == 0 && a.standing_by == 0, "{a:?}");
+    // Its clean stop withdraws its tokens at once: the standby takes over.
+    let r = eventually("the standby taking over", |row| {
+        row.one_incumbent.reason == "one" && row.standbys.count == 0
+    })
+    .await;
+    assert_eq!(r.interfaces[0].holders, vec![second.clone()], "{r:#?}");
+    let b = run_b.await.unwrap().expect("the standby's run");
+    assert_eq!(b.roles["zs.catalog.v1"], "serving", "{b:?}");
+    assert!(
+        b.sent > 0 && b.failed == 0 && b.standing_by > 0,
+        "held back while it stood by, then sent: {b:?}"
+    );
+}
+
+/// `redundancy.v1` (#841, RC): `serve` of a governed contract elects too. A
+/// second beside a serving one stands by: a call finds it nowhere (§2.4),
+/// and it serves once the first is gone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
+    async fn until(
+        s: &zenkey_fleet::Served,
+        iface: &zenkey_model::grammar::IfaceId,
+        role: zenkey::redundancy::Role,
+    ) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        while s.role(iface) != Some(role) {
+            assert!(tokio::time::Instant::now() < deadline, "never {role:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    let (_router, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/ledger.v1.toml");
+    let l = zenkey_model::contract::load_path(&path);
+    let ledger = Arc::new(Revision::from_contract(
+        l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+        ContractSource::File,
+    ));
+    let iface = ledger.iface().clone();
+    let up = |answer: &'static str| {
+        let ep = ep.clone();
+        let ledger = Arc::clone(&ledger);
+        async move {
+            let owner = client(&ep).await;
+            let startup = zenkey::redundancy::RedundancyStartup::new(client(&ep).await)
+                .with_watch(client(&ep).await);
+            serve_operation(
+                &owner,
+                ServeSpec {
+                    address: addr("lab/ledger"),
+                    revision: ledger,
+                    operation: "@op/append".into(),
+                    answer: MockAnswer::Reply {
+                        bytes: answer.as_bytes().to_vec(),
+                        summary: None,
+                    },
+                    bindings: BTreeMap::new(),
+                    tool: "mock_owner test".into(),
+                    elect: Some(startup),
+                },
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let first = up("first").await;
+    until(&first, &iface, zenkey::redundancy::Role::Serving).await;
+    let second = up("second").await;
+    // A live incumbent wins (§2.5 step 2): it stands by once it has read.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(second.role(&iface), Some(zenkey::redundancy::Role::Standby));
+    let call = zenkey::Client::new(&tool, ledger.shared_contract(), &["lab/ledger"])
+        .unwrap()
+        .with_timeout(Duration::from_secs(5));
+    let answered = |o: &zenkey::Outcome| -> Vec<u8> {
+        o.answer()
+            .unwrap_or_else(|| panic!("a value: {o:?}"))
+            .payload()
+            .to_bytes()
+            .to_vec()
+    };
+    for _ in 0..3 {
+        let o = call
+            .call(
+                &addr("lab/ledger"),
+                "@op/append",
+                &Bindings::new(),
+                b"x".to_vec(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(answered(&o), b"first", "a call finds no standby (§2.4)");
+    }
+    assert_eq!(second.calls(), 0);
+    first.close().await.unwrap();
+    until(&second, &iface, zenkey::redundancy::Role::Serving).await;
+    // Its queryable is declared before its token (§2.6), so a call made
+    // once it serves finds it.
+    let o = call
+        .call(
+            &addr("lab/ledger"),
+            "@op/append",
+            &Bindings::new(),
+            b"x".to_vec(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(answered(&o), b"second");
+    // A standby's close undeclares what it never declared, cleanly.
+    let third = up("third").await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(third.role(&iface), Some(zenkey::redundancy::Role::Standby));
+    third.close().await.expect("a standby closes");
+    second.close().await.unwrap();
 }

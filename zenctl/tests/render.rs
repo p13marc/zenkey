@@ -687,7 +687,9 @@ desired.v1 in namespace "acme" — 5 role(s), 1 reading(s)
 #[test]
 fn a_redundancy_reading_spells_every_answer_apart_in_every_medium() {
     let report = fx::redundancy_report();
-    assert_data_eq!(table(&report), str![[r#"
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
 redundancy.v1 in namespace "acme" — 4 interface(s), two reads 2.0s apart
 ✓  lab/ledger ledger.v1  exactly one incumbent: yes (one) — one holder of its token, the read complete
     governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
@@ -714,7 +716,8 @@ redundancy.v1 in namespace "acme" — 4 interface(s), two reads 2.0s apart
     3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) a standby: no (standby) — marked standby, no token, the read complete
     3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a standby: no (standby) — marked standby, no token, the read complete
 
-"#]]);
+"#]]
+    );
     let lines: Vec<serde_json::Value> = ndjson(&report)
         .lines()
         .map(|l| serde_json::from_str(l).expect("one object per line"))
@@ -2085,6 +2088,8 @@ plan: a mock owner at host-a/tc implementing tc.netif.v1@sha256:4f4f4f4f4f4f4f4f
         calls: 3,
         failed: 2,
         refused: 0,
+        standing_by: 0,
+        roles: Default::default(),
         first_errors: vec!["zk2/host-a/tc/tc.netif.v1/state/namespaces: clock ahead".into()],
     };
     assert_data_eq!(
@@ -2104,6 +2109,8 @@ host-a/tc as instance 0123456789abcdef: sent 240 sample(s) over 5.0s across 12 e
     let refused = zenkey_fleet::report::GenReport {
         failed: 0,
         refused: 1,
+        standing_by: 0,
+        roles: Default::default(),
         first_errors: vec!["zk2/host-a/tc/tc.netem.v1/events/applied: refused (core §2.7)".into()],
         ..report
     };
@@ -2121,6 +2128,30 @@ host-a/tc as instance 0123456789abcdef: sent 240 sample(s) over 5.0s across 12 e
         "{n}"
     );
     assert!(!n.contains("not sent —"), "{n}");
+    // redundancy.v1 (#841, RC): a candidate says its role, and what it held
+    // back while it stood by, never as a failure.
+    let standby = zenkey_fleet::report::GenReport {
+        address: "lab/catalog".into(),
+        failed: 0,
+        refused: 0,
+        sent: 0,
+        calls: 0,
+        standing_by: 120,
+        roles: [("zs.catalog.v1".to_owned(), "standby".to_owned())].into(),
+        first_errors: vec![],
+        ..refused
+    };
+    assert_data_eq!(
+        table(&standby),
+        str![[r#"
+lab/catalog as instance 0123456789abcdef: sent 0 sample(s) over 5.0s across 12 entr(y|ies), answered 0 call(s); 0 not sent
+  redundancy.v1: zs.catalog.v1 standby; 120 write(s) held back while it stood by
+
+"#]]
+    );
+    let v = serde_json::to_value(&standby).unwrap();
+    assert_eq!(v["roles"]["zs.catalog.v1"], "standby");
+    assert_eq!(v["standing_by"], 120);
 }
 
 /// Every `Render` impl is drawn somewhere in this file — the mechanical floor

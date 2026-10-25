@@ -93,6 +93,7 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         duration: run_for,
         seed,
         tool: "zenctl gen".into(),
+        elect: None,
     };
     let plan: GenPlan = zenkey_fleet::gen_plan(&spec)?;
 
@@ -110,6 +111,8 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
     }
     let session = dep.owner_session().await?;
     super::serve::guard_address(&session, &spec.address, &dep, i_know).await?;
+    let mut spec = spec;
+    spec.elect = super::serve::elect(&dep, &spec.revisions).await?;
     let report = zenkey_fleet::run_gen(&session, &spec, &plan, |instance| {
         eprintln!(
             "up: {} as instance {instance}, in {}, for {}s",

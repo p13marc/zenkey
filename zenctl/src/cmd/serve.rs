@@ -59,6 +59,38 @@ pub(crate) async fn guard_address(
     Ok(())
 }
 
+/// How a mock owner of a governed interface elects (`redundancy.v1`,
+/// #841, RC), when one of `revisions` lists the profile in `uses`: a
+/// reader that holds no liveliness subscriber and no claim, and a watch
+/// session, both of their own in the namespace (§2.5 step 1, §2.7; text
+/// 0.2, F-204). `None` when nothing is governed, and no session opens.
+pub(crate) async fn elect(
+    dep: &Deployment,
+    revisions: &[std::sync::Arc<zenkey_fleet::model::catalog::Revision>],
+) -> Result<Option<zenkey::redundancy::RedundancyStartup>> {
+    let governed: Vec<String> = revisions
+        .iter()
+        .filter(|r| {
+            zenkey_model::redundancy::declaration_of(r.contract(), false)
+                != zenkey_model::redundancy::Declaration::NotGoverned
+        })
+        .map(|r| r.iface().to_string())
+        .collect();
+    if governed.is_empty() {
+        return Ok(None);
+    }
+    let reader = dep.session().await?;
+    let watch = dep.watch_session().await?;
+    eprintln!(
+        "redundancy.v1 governs {}: this mock is a candidate, serving once elected and standing by \
+         otherwise, on a reader and a watch session of its own",
+        governed.join(", ")
+    );
+    let mut startup = zenkey::redundancy::RedundancyStartup::new(reader).with_watch(watch);
+    startup.timeout = dep.timeout();
+    Ok(Some(startup))
+}
+
 /// The refusal `--refuse` names (§5.2), in the engine's vocabulary:
 /// `unavailable` with its cause, and a cause on no other code.
 fn refusal(
@@ -163,6 +195,7 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
     }
     let session = dep.owner_session().await?;
     guard_address(&session, &address, &dep, i_know).await?;
+    let elect = elect(&dep, std::slice::from_ref(&revision)).await?;
     let mut served = zenkey_fleet::serve_operation(
         &session,
         ServeSpec {
@@ -172,6 +205,7 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
             answer,
             bindings,
             tool: "zenctl serve".into(),
+            elect,
         },
     )
     .await?;
