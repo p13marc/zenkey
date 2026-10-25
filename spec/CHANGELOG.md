@@ -3,6 +3,40 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.43 — 2026-10-25: two of §10's steps worded for any reader (round 67's F-236 and F-237)
+
+zk2py round 67 (PR #879) read 0.42 cold, resolved F-227 to F-235, and
+filed two minor findings, both on `scenarios/presence.md` §10's wording.
+No rule changes.
+
+**Changed: step 6's stall, by its event alone** (F-236).
+- **The gap.** Step 6 ends the stall "until the reader's first seed has
+  been read", then states what that takes, "two round trips have run out,
+  the start's and the seed's". That is the reference's count: its reader
+  makes a round trip at its start and another before its seed. zk2py's
+  makes one before each read, so its start's round trip is its seed's,
+  and when its first seed was read one had run out (302 ms; the stall
+  304–308 ms). A runner ending the stall at two would end it, for such a
+  reader, after its retry's seed, not its first.
+- **Now.** The stall ends at the event; by then every round trip the
+  reader asked before that seed has run out, how many being the reader's
+  own (two for the reference, one for zk2py). Expected 6 is unchanged:
+  it never counted them. The reference's measurement (four in all, two
+  before the first seed) stands as a measurement.
+
+**Changed: step 9's round trip waits 2 s and is cut 150 ms in** (F-237).
+- **The gap.** The Setup's round trip waits 5 s, step 9 stated no wait,
+  and Expected 9 says "well before its 2 s". The verdict holds under any
+  wait (both implementations' came back at the cut, 151–152 ms in), but a
+  runner could not tell which the step meant.
+- **Now.** Step 9 says it: a 2 s wait, the link cut 150 ms into it, as
+  the reference and zk2py both ran it.
+
+**Deliberately not changed.**
+- **§8.1** and every rule: both findings are a step's wording, and no
+  verdict differed between the implementations.
+- **The profiles' "Written against" lines** stay at 0.40.
+
 ## 0.42 — 2026-10-25: a watch session on the wire keys, and round 66's findings (#875, WD)
 
 zk2py round 66 (PR #876) read 0.41 cold and filed F-227 to F-235, all on

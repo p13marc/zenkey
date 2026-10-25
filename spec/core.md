@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.42** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.43** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -52,7 +52,8 @@ without history, and a read that runs to zenoh's interests timeout, and in
 0.42 the second implementation's findings against it: a watch session in
 no namespace on the wire keys, a round trip through a watch session cut
 off, what a transport's move leaves of what a reader holds, and a read's
-time against an interests timeout it cannot read).
+time against an interests timeout it cannot read, and in 0.43 two of
+`scenarios/presence.md` §10's steps worded for any reader).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
