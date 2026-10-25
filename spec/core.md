@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.40** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.41** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -44,9 +44,11 @@ withdrawal heard live, and a read beside a liveliness subscriber, in
 while it runs, a read not made in a profile's premise, and scenarios that
 observe the reader, in 0.39 what `redundancy.v1` needed: a standby
 marked in the descriptor, exposing nothing and holding no interface
-token, never tokenless, and its vocabulary published, and in 0.40 what
+token, never tokenless, and its vocabulary published, in 0.40 what
 implementing it measured: a read on a token's own session, and what a
-peer's complete read covers).
+peer's complete read covers, and in 0.41 what a watch session's round trip
+at a population measured: a GET that matches no token, subscribers
+without history, and a read that runs to zenoh's interests timeout).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1853,6 +1855,23 @@ Liveliness tokens carry no payload; everything is in the key.
     reached its timeout ends with an error reply, `Timeout`, and one the
     routers finished ends with none (Appendix B). A read that received any
     error reply is possibly incomplete. `[Sc: presence.md §6]`
+  - **A read that runs to its session's interests timeout is not
+    complete** (0.41, #851). In zenoh 1.10.1 a client's or a peer's
+    runtime ends a liveliness GET its routers have not finished at
+    `routing/interests/timeout` (10 s by default), with the final reply
+    alone and no error reply, whatever the GET's own timeout: measured by
+    the reference, a read with a 110 s timeout beside 10,000 tokens came
+    back at 10 s, with no error reply, holding 6,121 of them.
+    - A reader MUST read a read whose time reached its session's
+      interests timeout as possibly incomplete, as it reads one that
+      received an error reply, and a round trip (below) that ended there
+      as not made.
+    - A reader whose GETs may wait longer SHOULD run its session with an
+      interests timeout above their timeout: its long reads can then be
+      complete (measured: the same read was whole, in 22 s, under a 120 s
+      interests timeout).
+
+    `[Sc: presence.md §10]`
   - **A refused read is complete, and empty** (0.8). A router whose access
     control refuses a liveliness GET answers it the way it answers a
     selector no token matches: a final reply, no token, no error reply.
@@ -1949,6 +1968,38 @@ Liveliness tokens carry no payload; everything is in the key.
       final reply follows the declarations. Otherwise a token withdrawn
       between the seed's answer and the router's reading of the
       subscriber is never heard going.
+    - **The round trip's GET need not match the subscribers' selectors**
+      (0.41, #851). In zenoh 1.10.1 a router handles one session's
+      interests in turn: it answers the GET after it registered the
+      subscribers declared before it and sent their history, whatever the
+      GET matches. Through a chain of routers too: the watch session's
+      router resolves its client's interest itself, and every withdrawal
+      reaches the watch session from it. A GET of a key no token holds
+      carries nothing: under a key `…/@zk/settle`, inside the presence
+      subtree the subscribers read, so a grant that admits them admits it
+      (§11.1). `[Sc: presence.md §10]`
+    - **The watch session's subscribers SHOULD have no history** (0.41)
+      when their reader seeds by a read on its other session: the round
+      trip's final reply follows their history, so with history it waits
+      for the population (23 s beside 10,000 tokens, a debug build), and
+      without it is one round trip (6 ms there). The seed reads what is
+      held, and a token declared before the subscribers and withdrawn
+      after the round trip is still heard going: the router tells its
+      withdrawal by its key. **Except in a namespace:** in zenoh 1.10.1 a
+      namespaced session does not strip its namespace from that key, and
+      never hears the withdrawal (Appendix B). A watch session in a
+      namespace keeps history, or the reader watches the wire keys from a
+      session in no namespace. `[Sc: presence.md §10]`
+    - **A round trip stands until the watch session's transport moves**
+      (0.41). A transport that closes or opens re-declares the
+      subscribers at a router that reads them again, unordered with the
+      other session's reads; and a subscriber without history hears no
+      withdrawal, at its link's drop, of a token it was never told of. A
+      reader that follows presence live SHOULD make the round trip again
+      before its next read, and read again, when its watch session's
+      transport closes or opens, as after a withdrawal. A seed made while
+      no round trip stands is possibly incomplete: an address it does not
+      show is unobservable, never down. `[Sc: presence.md §10]`
     - Ordinary GETs (S4's, a descriptor's, a bundle's) are not affected,
       and may go on either session.
 
@@ -3361,6 +3412,24 @@ Appendix B. These are the ones the rules above cite:
 - A query timeout arrives as a reply error. A liveliness GET's too: one
   that reaches its timeout ends with the error reply `Timeout` (encoding
   `zenoh/string`), and one the routers finished ends with none.
+- A client's or a peer's runtime ends a liveliness GET its routers have
+  not finished at `routing/interests/timeout` (10 s by default) with the
+  final reply alone and no error reply, before the GET's own timeout when
+  that is longer (`dispatcher/interests.rs`, `CurrentInterestCleanup`;
+  0.41, §8.1).
+- A router handles one session's interests in turn: a liveliness GET's
+  final reply follows the registration, and the history, of every
+  subscriber's interest the session sent before it, whatever the GET
+  matches. A router resolves a client's interest itself and ignores one
+  from another router (`dispatcher/interests.rs`,
+  `hat/router/interests.rs`); one access control refuses is answered with
+  its final reply at ingress, in turn (`net/primitives/demux.rs`; 0.41,
+  §8.1).
+- A liveliness subscriber without history is told a token's withdrawal
+  by the token's key though it was never told the token
+  (`hat/broker/token.rs`, `maybe_unpropagate_token`), and a session in a
+  namespace does not strip its namespace from that key
+  (`routing/namespace.rs`, `ENamespace`), so it hears none (0.41, §8.1).
 - A liveliness GET that access control refuses is answered with the final
   reply alone: no token and no error reply. The session's own tokens are
   in it all the same, answered by the session itself (0.40, §8.1).
@@ -3492,7 +3561,7 @@ reader, clients, some under CPU load:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27) |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); Appendix B |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip (0.38); §7–§9 what a complete presence read is (0.37): a session cut off, before a read or while it runs (0.38), a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict (0.38); §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout (0.41); Appendix B |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |

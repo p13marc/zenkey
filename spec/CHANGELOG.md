@@ -3,6 +3,90 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.41 — 2026-10-25: a watch session's round trip at a population (#851, WB)
+
+#849 (PU) found that a reader's round trip on its watch session, a
+liveliness GET of the subscribers' own selector, outlasted the fleet's 5 s
+cap beside 10,000 tokens, so the seed went without it: the race 0.37's
+round trip exists to close. Measuring it (zenoh 1.10.1, the reference, a
+debug build) showed that the cost is not the GET's own tokens. Its final
+reply follows the subscribers' history, which took 23 s beside 10,000
+tokens; the "about 10 s" was zenoh's own interests timeout ending the GET
+with no error reply. Three facts went into §8.1 and Appendix B, each run by
+the new [`scenarios/presence.md`](scenarios/presence.md) §10.
+
+**Changed: the round trip's GET need not match the subscribers'
+selectors** (§8.1, Appendix B).
+- **Measured.** A GET of `zk2/*/*/@zk/settle`, a key no token holds, made
+  at once after a subscriber on a link held stalled 150 ms, was still
+  waiting when the stall ended, and the withdrawal after it was heard in
+  10 of 10 runs; without it, missed in 3 of 3. The same through R2, its
+  client's interest resolved there: 10 of 10, and 3 of 3. Under load, no
+  stall, 8 at once beside 300 tokens: 0 of 160 missed with it, 13 of 160
+  without. zenoh's code agrees (`dispatcher/interests.rs`: a session's
+  interests are handled in turn, the subscriber's registered and its
+  history sent before the GET's final reply; `hat/router/interests.rs`: a
+  router resolves a client's interest itself).
+- **The key** is `…/@zk/settle` under the subscribers' presence subtree,
+  so a grant that admits them admits it; one access control refuses is
+  still ordered (5 of 5: zenoh answers it at ingress, in turn).
+
+**Changed: the watch session's subscribers SHOULD have no history, except
+in a namespace** (§8.1, Appendix B).
+- **Measured.** Beside 2,000 tokens the round trip after a subscriber
+  without history took 1.4 ms and carried nothing; with history, 615 ms,
+  every token heard by its end. Beside 10,000: 6 ms, and 23 s. A token
+  declared before a subscriber without history, withdrawn after the round
+  trip, is heard: the router tells the withdrawal by key
+  (`hat/broker/token.rs`).
+- **The namespace.** A session in a namespace does not strip it from that
+  key (`routing/namespace.rs`), so its subscriber without history never
+  hears the withdrawal; with history it does, and so does a session in no
+  namespace on the wire key (§10 step 7). A watch session in a namespace
+  keeps history, or the reader watches from no namespace.
+- **A round trip stands until the watch session's transport moves**: a
+  reconnection re-declares the subscribers unordered with the other
+  session's reads, and a subscriber without history hears no withdrawal
+  at a link's drop of a token it was never told of. A reader makes the
+  round trip again and reads again when the transport closes or opens,
+  and reads a seed made while none stands as possibly incomplete (§10
+  step 6).
+
+**Changed: a read that runs to its session's interests timeout is not
+complete** (§8.1, Appendix B).
+- **Measured.** zenoh 1.10.1's runtime ends a liveliness GET its routers
+  have not finished at `routing/interests/timeout` (10 s by default),
+  with the final reply alone and no error reply. A read with a 110 s
+  timeout beside 10,000 tokens came back at 10 s holding 6,121 of them;
+  under a 120 s interests timeout the same read was whole, in 22 s. A
+  stalled read under a 300 ms interests timeout ended at 300 ms (§10 step
+  5).
+- **The rule.** A reader MUST read a read whose time reached its
+  session's interests timeout as possibly incomplete, and a round trip
+  ended there as not made; one whose GETs may wait longer SHOULD raise
+  it. The reference's tools run with 120 s.
+- `docs/zk2/upstream/liveliness-get-ends-at-interests-timeout.md` drafts
+  the upstream report, not filed.
+
+**Deliberately not changed.**
+- **The round trip stays a SHOULD**, with what serves it unchanged in
+  substance: "a liveliness GET there whose answer it discards" already
+  allowed any key. The new bullet says one that matches no token serves,
+  and what that costs.
+- **"Complete" keeps its other conditions** (0.37, 0.38, 0.40): how the
+  read ended, its session never having held a liveliness subscriber, its
+  links held. The interests timeout is one more way a read ends without
+  its routers' final reply, read as the timeout's error reply is read.
+- **No key is reserved** in §1.1: `…/@zk/settle` is not a token form, and
+  nothing is declared or answered on it. A reader may ask any key no token
+  holds.
+- **Appendix B's "a GET the routers finished ends with no error reply"
+  stays**: true of every GET that ended before the interests timeout,
+  which the new fact bounds.
+- **The profiles' "Written against" lines stay at 0.40**: none names the
+  round trip's key or a watch's history. `desired.v1` and `redundancy.v1`
+  cite the round trip as core §8.1's, which it still is.
+
 ## 0.40 — 2026-10-25: what `redundancy.v1`'s runtime measured (#841, RB)
 
 The second implementation read `redundancy.v1` 0.1 and core 0.39 cold
