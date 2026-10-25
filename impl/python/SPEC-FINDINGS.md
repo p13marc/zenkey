@@ -11538,6 +11538,14 @@ contract the descriptor names and the tool does not hold is unread: no
 binding problem is read from it, and the role answers unobservable,
 `no_report`, beside `requirement_unread`; never every resource".
 
+**Status at desired.v1 0.8:** resolved, in zk2py's words: a requirement
+whose declaring contract the descriptor names and the tool does not hold
+is unread. No binding problem is read from it, and it answers
+unobservable, `no_report`, beside `requirement_unread`, never every
+resource. It sits in §2.17, not §2.3's list. `slices.json`'s six cases
+pass. Live, both tools answer F-225's measured shape and the four
+decided shapes alike, their rows naming the declaring contract.
+
 **Counts at desired.v1 0.7:** 225 entries. Open:
 - F-220 to F-223, against redundancy.v1 0.3 and its tools, F-222 and
   F-223 minor;
@@ -11608,5 +11616,44 @@ intersects, and says why".
 **Counts at redundancy.v1 0.4:** 226 entries. Open:
 - F-225, against desired.v1 0.7, minor;
 - F-226, minor.
+
+Every other entry is resolved.
+
+## At desired.v1 0.8 (#609)
+
+Round 64 read `desired.v1` text 0.8 cold, on main 20df71cb, end to end.
+zk2py implemented the unread requirement from §2.17 before running the
+fixture:
+- `take_slice`'s `requirement.unread`: no slice and no binding problem,
+  unless a revision in hand declares no desired resource at all
+  (`not_a_target`), the binding's absence read first;
+- `find_report`'s `requirement_unread`;
+- the tool's row naming the declaring contract, beside a kill switch too.
+
+**Round 62's finding at 0.8:** F-225 is resolved. Its entry has its
+status line.
+
+**`just py-conformance`: 2978 of 2978.** `desired` passes 408:
+`slices.json`'s six new cases passed the first time they ran.
+
+**Live:** every check passes, against `owner-dgg` and `zenctl-dgg`.
+- **§9:** 29 of 29 in each of the eight runs.
+- **§11:** 2 of 2 for each target.
+- **The shapes:** 90 of 90, thirty, each asked of both tools with the
+  rows compared. Five are new: F-225's measured shape, and the four the
+  changelog decided.
+
+**Where the two tools disagree:** nowhere. Before zk2py's row named the
+declaring contract beside a kill switch, it was the one row member that
+differed. The changelog's "absent when the requirement was read" names
+it there, so zk2py now does too.
+
+**The text, read end to end.** It holds. Every MUST names evidence that
+tests it, and no case the tools met is left unstated.
+
+None open.
+
+**Counts at desired.v1 0.8:** 225 entries. Open:
+- F-226, against redundancy.v1 0.4, minor.
 
 Every other entry is resolved.

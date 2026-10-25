@@ -108,18 +108,21 @@ config        330 passed     0 failed
 link          172 passed     0 failed
 alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
-desired       402 passed     0 failed
+desired       408 passed     0 failed
 redundancy    180 passed     0 failed
-total        2972 passed     0 failed
+total        2978 passed     0 failed
 ```
 
 The figures are against `core.md` 0.40, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
-`telemetry.v1` 0.5, `desired.v1` 0.7 and `redundancy.v1` 0.4.
+`telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.4.
 `redundancy.v1` 0.3 added `polls.json`, 7 cases (180), which zk2py's
 `poll_read` passed the first time they ran. Its round 58 reading, a first
 poll as a baseline and a withdrawal only with no holder left, would have
 failed five of them. The seven readings of that reading went with it.
+`desired.v1` 0.8 added six `slices.json` cases, with the input
+`requirement.unread` and the answer `requirement_unread` (408), which
+`take_slice`, changed from §2.17 first, passed the first time they ran.
 `desired.v1` 0.7 added two `slices.json` cases, a requirement naming no
 resource (402), which zk2py passed unchanged: it read none as every
 resource already.
@@ -327,8 +330,9 @@ fixtures:
 - `desired.v1` 0.7 resolved it: the start is refused, and scenarios §11
   observes it (`SPEC-FINDINGS.md`, "At desired.v1 0.7").
 - F-225 was found reading 0.7 in round 62: a declaring contract named and
-  not held is read by both tools as naming every resource. It is open,
-  and minor.
+  not held is read by both tools as naming every resource. It is minor.
+- `desired.v1` 0.8 resolved it: such a requirement is unread
+  (`SPEC-FINDINGS.md`, "At desired.v1 0.8"). Round 64 found nothing new.
 - F-199 to F-209 were found against `redundancy.v1` 0.1, core 0.39 and
   `hostid.v1` 0.6, read cold and run live, zk2py against itself, in round
   56 (`SPEC-FINDINGS.md`, "At redundancy.v1 0.1 and core 0.39"). Five
@@ -1400,7 +1404,7 @@ confirmed the tool after TG and TH.
   - **The example's raw** takes an attachment's JSON only. §7's zero-byte
     and `x` attachments therefore run against zk2py's owner alone.
 
-## desired.v1 (profile text 0.7, core 0.39)
+## desired.v1 (profile text 0.8, core 0.39)
 
 `desired.v1` is the eighth profile (`spec/profiles/desired/`), and the
 second whose first point is a standard schema, `desired.v1.json`, typing a
@@ -1510,6 +1514,14 @@ round 52's twenty findings, with `config.v1` 0.4, in round 53.
   and so does a manifest's role, which names no declaring contract
   (core §3.1, §3.3). zk2py read both so already; its tool now says
   `requirement_unread` only when a declaring contract is named.
+- **0.8 (round 64):** a requirement whose declaring contract the
+  descriptor names and the tool does not hold, or holds in a revision
+  declaring no such role, is unread (F-225). `take_slice` gives no slice
+  and no binding problem: `requirement_unread`, answered unobservable,
+  `no_report`. A revision in hand declaring no desired resource at all
+  still gives `not_a_target`. The tool's row names the declaring
+  contract, `requirement_unread`, beside a kill switch too, as the
+  reference's does.
 
 **The live half (round 55).**
 
@@ -1678,6 +1690,21 @@ Results at 0.7 (round 62): the owner example and zenctl built from main
 - the shapes, 75 of 75: twenty-five, two new for a manifest's role, on an
   author with two desired resources (`two_documents`) and with one (its
   slice). The rows agree member by member on all.
+
+Results at 0.8 (round 64): `owner-dgg` and `zenctl-dgg`. Every check
+passes:
+- §9, 29 of 29 in each of the eight runs;
+- §11, 2 of 2 for each target;
+- the shapes, 90 of 90: thirty, five new.
+  - F-225's measured shape, `zk2py_worker9.v1` at a fingerprint no one
+    serves, on an author with two desired resources: `no_report`,
+    `requirement_unread`, no `two_documents`.
+  - The decided shapes: one desired resource, unread too; a revision
+    with no desired resource, `not_a_target`; a declaring contract in
+    hand without the role, unread; unread and unbound, the kill switch.
+
+  The rows agree member by member on all thirty, `requirement_unread`
+  included.
 
 Asked beyond the shapes, `zenctl check conform`'s `desired-binding` finds
 a two-documents role, `two_documents`. The doctor, which holds no
