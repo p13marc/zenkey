@@ -26,6 +26,18 @@ use zenoh::Session;
 /// [`OpenFailure::Transport`] existing.
 pub const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The `routing/interests/timeout` a tool's session runs with, unless its
+/// zenoh config file states one (#851, core §8.1, 0.41): how long the
+/// session's runtime waits for its routers to finish a liveliness GET
+/// before it ends the GET itself, with the final reply alone and no error
+/// reply. zenoh's own 10 s cut a 10,000-token read short at 10 s ("complete"
+/// with 6,121 of them, measured); a tool's reply wait (`--timeout`) is the
+/// caller's, and two minutes covers any sane one with room to spare. A read
+/// that still runs to it reads possibly incomplete
+/// ([`zenkey::presence::interests_timeout`]). An application's own session
+/// keeps the application's setting: only the tools open sessions here.
+pub const TOOL_INTERESTS_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Open a session for a read-only explorer.
 ///
 /// RFC 09 §5: debug tools run *without* the session namespace and spell full
@@ -565,6 +577,15 @@ fn build_config_as(
         // say so used to inherit it (#502).
         None => set(&mut config, "scouting/multicast/enabled", "false")?,
     }
+    // A long reply wait can be complete (#851): zenoh's runtime would end
+    // a liveliness GET at 10 s otherwise. A stated choice stands.
+    if !stated.states("routing/interests/timeout") {
+        set(
+            &mut config,
+            "routing/interests/timeout",
+            &TOOL_INTERESTS_TIMEOUT.as_millis().to_string(),
+        )?;
+    }
     // An owner's session stamps what it puts (#825): a stated choice
     // stands, as every stated key does.
     if posture == Posture::Owner && !stated.states("timestamping/enabled") {
@@ -940,6 +961,31 @@ mod tests {
         assert_eq!(
             ts(Posture::Owner, Some(&off)),
             "false",
+            "the file's word stands"
+        );
+    }
+
+    /// A tool's session waits two minutes for its routers to finish a
+    /// liveliness GET (#851), in every posture, unless the file states a
+    /// wait of its own.
+    #[test]
+    fn a_tool_session_waits_long_for_its_routers_interests() {
+        let wait = |posture, file: Option<&Path>| {
+            build_config_as(file, &[], &[], None, posture)
+                .unwrap()
+                .get_json("routing/interests/timeout")
+                .unwrap()
+        };
+        for posture in [Posture::Explorer, Posture::Namespaced, Posture::Owner] {
+            assert_eq!(wait(posture, None), "120000", "{posture:?}");
+        }
+        let stated = temp_config(
+            "interests-timeout.json5",
+            "{ routing: { interests: { timeout: 3000 } } }",
+        );
+        assert_eq!(
+            wait(Posture::Explorer, Some(&stated)),
+            "3000",
             "the file's word stands"
         );
     }

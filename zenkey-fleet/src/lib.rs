@@ -239,8 +239,8 @@ pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
-    OPEN_TIMEOUT, OpenFailure, check_namespace, open, open_in_namespace, open_owner_in_namespace,
-    open_reporting, open_reporting_within, open_with_config,
+    OPEN_TIMEOUT, OpenFailure, TOOL_INTERESTS_TIMEOUT, check_namespace, open, open_in_namespace,
+    open_owner_in_namespace, open_reporting, open_reporting_within, open_with_config,
 };
 pub use bus::write::{
     MatchingEvents, Publication, WireQos, WriteAct, check_concrete, check_retire,
@@ -337,9 +337,9 @@ pub use model::structural::{OBSERVE_LIMIT, structural, structural_value};
 // alone would read as the crate's.
 pub use bus::contracts::{BundleStore, DEFAULT_MAX_CONTRACTS, UNAVAILABLE_TTL};
 pub use bus::presence::{
-    CUT_OFF_DURING, DESCRIBE_CONCURRENCY, NAMESPACE_SELECTOR, Scope as PresenceScope, cut_off,
-    describe as describe_instances, liveliness_read, namespace_listing,
-    observe as observe_presence, read_tokens, refuse_beside, service_listing,
+    BARRIER_NOT_ESTABLISHED, CUT_OFF_DURING, DESCRIBE_CONCURRENCY, NAMESPACE_SELECTOR,
+    Scope as PresenceScope, cut_off, describe as describe_instances, liveliness_read,
+    namespace_listing, observe as observe_presence, read_tokens, refuse_beside, service_listing,
 };
 // Live presence, per address (#614, FL1): the session-free projection, and
 // the feed that seeds it and keeps it current from a monitor.

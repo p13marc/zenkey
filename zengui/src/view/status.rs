@@ -89,10 +89,22 @@ pub fn presence_text(p: Option<&crate::presence_link::PresenceUpdate>) -> (Strin
     let counts = format!("{up} up · {down} down · {unobservable} unobservable");
     match p.presence.basis() {
         PresenceBasis::Unseeded => ("presence: not seeded yet".to_string(), false),
-        PresenceBasis::Incomplete { .. } => (
-            format!("presence: {counts} — the seed was possibly incomplete (§8.1)"),
-            false,
-        ),
+        // Why, when the seed says: a barrier that does not stand is worth a
+        // caution, since no withdrawal may be heard until it does (#851).
+        PresenceBasis::Incomplete { .. } => match &p.seed {
+            zenkey_fleet::SeedOutcome::Incomplete(why)
+                if why == zenkey_fleet::BARRIER_NOT_ESTABLISHED =>
+            {
+                (
+                    format!("presence: {counts} — the seed {why}, so it is possibly incomplete"),
+                    true,
+                )
+            }
+            _ => (
+                format!("presence: {counts} — the seed was possibly incomplete (§8.1)"),
+                false,
+            ),
+        },
         PresenceBasis::Complete => (format!("presence: {counts}"), false),
         PresenceBasis::Lost { dropped } => (
             format!(
@@ -656,6 +668,39 @@ mod tests {
         assert!(caution, "a loss is a caution chip");
         assert!(text.contains("3 events lost"), "{text}");
         assert!(!text.contains("down"), "a loss is never 'down': {text}");
+    }
+
+    /// The presence cell when the watch session's round trip does not stand
+    /// (#851, core §8.1, 0.41): the seed is possibly incomplete, the cell
+    /// says why, and it is a caution, since no withdrawal may be heard until
+    /// the round trip stands; another incomplete seed is said plainly.
+    #[test]
+    fn the_presence_cell_says_a_round_trip_that_does_not_stand() {
+        use std::sync::Arc;
+        use zenkey_fleet::{LivePresence, ObservedPresence, PresenceScope, SeedOutcome};
+
+        let keys = vec!["zk2/robot1/nav/@zk/instance/0123456789abcdef".to_string()];
+        let observed = ObservedPresence::from_keys("zk2/*/*/@zk/**", &keys, false);
+        let mut live = LivePresence::new(PresenceScope::all());
+        let moved = live.seed(&observed, std::time::SystemTime::now());
+        let update = |seed: SeedOutcome| crate::presence_link::PresenceUpdate {
+            presence: Arc::new(live.clone()),
+            moved: moved.clone(),
+            catalog: None,
+            generation: 0,
+            seed,
+        };
+        let (text, caution) = presence_text(Some(&update(SeedOutcome::Incomplete(
+            zenkey_fleet::BARRIER_NOT_ESTABLISHED.to_owned(),
+        ))));
+        assert!(caution, "{text}");
+        assert!(text.contains("barrier was not established"), "{text}");
+        assert!(text.contains("1 up · 0 down"), "{text}");
+        let (text, caution) = presence_text(Some(&update(SeedOutcome::Incomplete(
+            "ended at its timeout".into(),
+        ))));
+        assert!(!caution, "{text}");
+        assert!(text.contains("possibly incomplete"), "{text}");
     }
 
     /// #217: the budget is visible in the resting state — an operator should

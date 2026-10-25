@@ -232,12 +232,22 @@ pub struct MonitorSpec {
     /// monitor's session: each token's put and delete arrives as
     /// [`FleetEvent::NodeUp`] and [`FleetEvent::NodeDown`], with its full key.
     ///
-    /// **History is not a seed.** Each subscriber is declared with history,
-    /// so the tokens held now arrive on join, but liveliness history has no
-    /// end-of-history mark: a token not heard yet is not absent (spec §8.1,
-    /// O5). A consumer that needs absence to mean something seeds from a
-    /// liveliness read and folds these events after it, as
-    /// [`crate::bus::presence::PresenceFeed`] does.
+    /// **The seed is a read, and history only in a namespace** (#851, core
+    /// §8.1, 0.41). What is held is read, on another session, and these
+    /// events are folded after it, as
+    /// [`crate::bus::presence::PresenceFeed`] and zenwatch's token ledger
+    /// do; liveliness history has no end-of-history mark anyway (spec
+    /// §8.1, O5). So each subscriber is declared without history, and the
+    /// barrier's final reply, which follows the history, is one round trip
+    /// at any population (6 ms beside 10,000 tokens, debug build, where a
+    /// history took 23 s). A token held before the subscriber and
+    /// withdrawn after the barrier is still told: the router sends its
+    /// withdrawal by key. **In a namespace** zenoh 1.10.1 does not strip
+    /// the namespace from that key, and the withdrawal is never heard, so a
+    /// monitor on a namespaced session declares its subscribers with
+    /// history ([`zenkey::presence::subscriber_needs_history`]): its
+    /// barrier may then run out beside a large population, and a reader
+    /// makes it again before its next seed, when the history is in.
     ///
     /// **A list, because a zk2 presence selector names `@zk`.** `*` and
     /// `**` never cross a verbatim chunk (spec §1.3; RFC 03 §4 D2, carried
@@ -261,10 +271,14 @@ pub struct MonitorSpec {
     /// every liveliness read on it is refused from then on
     /// ([`crate::Error::NotAsked`]). Seed on another session — the
     /// deployment's — and give the reader this monitor, so it can refuse
-    /// one with the same zid ([`Monitor::zid`]). [`Monitor::start`] settles
-    /// the session before it returns ([`zenkey::presence::settle`]): its
-    /// routers have read every subscriber by then, and a token withdrawn
-    /// after a seed made on the other session is told here.
+    /// one with the same zid ([`Monitor::zid`]). [`Monitor::start`] makes
+    /// the session's barrier before it returns
+    /// ([`zenkey::presence::Barrier`]): its routers have read every
+    /// subscriber by then, and a token withdrawn after a seed made on the
+    /// other session is told here. A reader asks the barrier again before
+    /// each seed ([`Monitor::barrier`]): one that did not stand, or was lost
+    /// when the watch session's transport moved, is made again, and a seed
+    /// made without it is possibly incomplete.
     pub liveliness: Vec<String>,
     /// Snapshot cadence.
     pub stats_tick: Duration,
@@ -686,7 +700,11 @@ struct WatchEntry {
 }
 
 /// How long [`Monitor::start`] waits for its liveliness subscribers to
-/// settle at their routers (#830) before it returns anyway, saying so.
+/// settle at their routers (#830) before it returns anyway, saying so, and
+/// how long each later round trip of its barrier waits. Without history the
+/// round trip carries nothing (#851), so this bounds a stalled link, never
+/// a population; the session's interests timeout bounds it too
+/// ([`zenkey::presence::interests_timeout`]).
 pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The wired monitor: a runtime-mutable watch set + liveliness + tick task
@@ -704,9 +722,9 @@ pub struct Monitor {
     /// The session's zid: a reader that seeds beside this monitor refuses a
     /// session with the same one (#830).
     zid: zenoh::session::ZenohId,
-    /// Whether the routers' final reply to the settling read came before
-    /// its timeout, when the monitor watches liveliness (#830).
-    settled: Option<bool>,
+    /// The watch session's barrier, when the monitor watches liveliness
+    /// (#830, #851).
+    barrier: Option<zenkey::presence::Barrier>,
     watches: tokio::sync::Mutex<std::collections::HashMap<WatchId, WatchEntry>>,
     next_watch: AtomicU64,
     /// The liveliness subscribers, by selector: callbacks, so they need no
@@ -748,8 +766,10 @@ impl Monitor {
             let subscriber = crate::bus::teardown::declared(
                 "liveliness subscribe",
                 liveliness_sel,
+                // No history unless the session is in a namespace (#851,
+                // core §8.1, 0.41): see `MonitorSpec::liveliness`.
                 zenkey::presence::declare_subscriber(session, liveliness_sel)
-                    .history(true)
+                    .history(zenkey::presence::subscriber_needs_history(session))
                     .callback(move |sample| {
                         let key = sample.key_expr().as_str().to_string();
                         core.node_event(key, sample.kind() == SampleKind::Put);
@@ -758,29 +778,26 @@ impl Monitor {
             .await?;
             liveliness.push((liveliness_sel.clone(), subscriber));
         }
-        // The barrier (#830): its final reply follows every declaration
-        // above on the session's link, so a reader that seeds on another
-        // session after this returns misses no withdrawal.
-        let settled = match spec.liveliness.first() {
+        // The barrier (#830, #851): its final reply follows every
+        // declaration above on the session's link, so a reader that seeds on
+        // another session after it misses no withdrawal. Kept, and asked
+        // again by a reader before each seed.
+        let barrier = match spec.liveliness.first() {
             None => None,
-            Some(sel) => Some(
-                match zenkey::presence::settle(session, sel, SETTLE_TIMEOUT).await {
-                    Ok(true) => true,
-                    Ok(false) => {
-                        tracing::warn!(
-                            selector = sel.as_str(),
-                            "the monitor's liveliness subscribers did not settle within {:?}: a \
-                             token withdrawn right after a seed may not be told",
-                            SETTLE_TIMEOUT
-                        );
-                        false
-                    }
-                    Err(e) => {
-                        tracing::warn!(selector = sel.as_str(), "the settling read failed: {e}");
-                        false
-                    }
-                },
-            ),
+            Some(sel) => {
+                let barrier = zenkey::presence::Barrier::new(session, sel, SETTLE_TIMEOUT)
+                    .await
+                    .map_err(|e| Error::bus("liveliness barrier", sel, e))?;
+                if !barrier.establish().await {
+                    tracing::warn!(
+                        selector = sel.as_str(),
+                        "the monitor's liveliness subscribers did not settle within {:?}: a \
+                         seed is possibly incomplete until its barrier stands",
+                        SETTLE_TIMEOUT
+                    );
+                }
+                Some(barrier)
+            }
         };
 
         {
@@ -804,7 +821,7 @@ impl Monitor {
             core,
             session: session.clone(),
             zid: session.zid(),
-            settled,
+            barrier,
             watches: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             next_watch: AtomicU64::new(0),
             liveliness,
@@ -1053,11 +1070,21 @@ impl Monitor {
         !self.liveliness.is_empty()
     }
 
-    /// Whether its liveliness subscribers settled before [`Monitor::start`]
-    /// returned (#830): `None` when it watches no liveliness, `Some(false)`
-    /// when the settling read ran to its timeout or could not be made.
+    /// Whether its liveliness subscribers' barrier stands (#830, #851):
+    /// `None` when it watches no liveliness, `Some(false)` when no round
+    /// trip came back since the watch session's transport last moved.
     pub fn settled(&self) -> Option<bool> {
-        self.settled
+        self.barrier
+            .as_ref()
+            .map(zenkey::presence::Barrier::established)
+    }
+
+    /// The watch session's barrier, when it watches liveliness (#851): a
+    /// reader asks it before each seed
+    /// ([`zenkey::presence::Barrier::establish`]), and reads a seed made
+    /// while it does not stand as possibly incomplete.
+    pub fn barrier(&self) -> Option<&zenkey::presence::Barrier> {
+        self.barrier.as_ref()
     }
 
     pub fn events(&self) -> EventStream {

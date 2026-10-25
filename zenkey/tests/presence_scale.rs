@@ -56,3 +56,119 @@ async fn s4_reading_presence_at_scale() {
     }
     assert!(*count.lock().unwrap() <= N);
 }
+
+/// A client whose runtime waits `interests_ms` for its router's final reply
+/// to a current interest (`routing/interests/timeout`, zenoh's 10 s by
+/// default).
+async fn client_waiting(endpoint: &str, interests_ms: u64) -> zenoh::Session {
+    let mut c = zenoh::Config::default();
+    c.insert_json5("mode", "\"client\"").unwrap();
+    c.insert_json5("scouting/multicast/enabled", "false")
+        .unwrap();
+    c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .unwrap();
+    c.insert_json5("routing/interests/timeout", &interests_ms.to_string())
+        .unwrap();
+    zenoh::open(c).await.unwrap()
+}
+
+/// #851 (WB), measured, and slow (about two minutes in a debug build), so
+/// run by hand (`--ignored`): the barrier beside ten thousand tokens, asked
+/// with a selector that matches no token on a watch session at once after
+/// its subscriber, as `Monitor::start` asks it; with history and without,
+/// under zenoh's own `routing/interests/timeout` (10 s) and a longer one;
+/// then a read of every token, under each. Under the 10 s one the round
+/// trip and the read end at 10 s with no error reply, and the reference
+/// reads each as not standing and possibly incomplete (core §8.1, 0.41).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "a measurement: about two minutes"]
+async fn wb_a_barrier_beside_ten_thousand_tokens_measured() {
+    const N: usize = 10_000;
+    let (_r1, ep) = router(None).await;
+    let holders: Vec<zenoh::Session> = {
+        let mut v = Vec::new();
+        for _ in 0..4 {
+            v.push(client(&ep).await);
+        }
+        v
+    };
+    // Waits long for its router: a read of 10,000 tokens takes longer than
+    // zenoh's own 10 s here, and would never read complete (core §8.1, 0.41).
+    let reader = client_waiting(&ep, 120_000).await;
+    let started = std::time::Instant::now();
+    let mut tokens = Vec::with_capacity(N);
+    for i in 0..N {
+        tokens.push(
+            holders[i % holders.len()]
+                .liveliness()
+                .declare_token(format!("zk2/wb/svc{i}/@zk/instance/{i:016x}"))
+                .await
+                .unwrap(),
+        );
+    }
+    let declared = started.elapsed();
+    loop {
+        let r =
+            presence::liveliness_read(&reader, "zk2/wb/*/@zk/instance/*", Duration::from_secs(30))
+                .await
+                .unwrap();
+        if r.complete && r.keys.len() == N {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    eprintln!(
+        "setup: declared in {declared:?}, read whole after {:?}",
+        started.elapsed()
+    );
+    for (history, interests_ms) in [(true, 10_000), (true, 120_000), (false, 120_000)] {
+        let watch = client_waiting(&ep, interests_ms).await;
+        let count = Arc::new(Mutex::new((0usize, None::<std::time::Instant>)));
+        let c = Arc::clone(&count);
+        let t = std::time::Instant::now();
+        let _sub = presence::declare_subscriber(&watch, "zk2/*/*/@zk/instance/*")
+            .history(history)
+            .callback(move |_| {
+                let mut c = c.lock().unwrap();
+                c.0 += 1;
+                c.1 = Some(std::time::Instant::now());
+            })
+            .await
+            .unwrap();
+        let first = presence::settle(&watch, "zk2/*/*/@zk/settle", Duration::from_secs(110))
+            .await
+            .unwrap();
+        let first_took = t.elapsed();
+        let heard_then = count.lock().unwrap().0;
+        let t2 = std::time::Instant::now();
+        let again = presence::settle(&watch, "zk2/*/*/@zk/settle", Duration::from_secs(110))
+            .await
+            .unwrap();
+        let again_took = t2.elapsed();
+        let (heard, last) = *count.lock().unwrap();
+        eprintln!(
+            "beside {N}, history {history}, interests timeout {interests_ms} ms: the barrier \
+             {first} {first_took:?} after the subscriber, {heard_then} heard by then; again \
+             {again} in {again_took:?}; heard {heard}, the last {:?} after the subscriber",
+            last.map(|l| l - t)
+        );
+        let _ = watch.close().await;
+    }
+    for interests_ms in [120_000, 10_000] {
+        let fresh = client_waiting(&ep, interests_ms).await;
+        let t = std::time::Instant::now();
+        let read =
+            presence::liveliness_read(&fresh, "zk2/*/*/@zk/instance/*", Duration::from_secs(110))
+                .await
+                .unwrap();
+        eprintln!(
+            "a read of every token on a fresh session, interests timeout {interests_ms} ms, a \
+             110 s GET: complete {} with {} tokens, errors {:?}, in {:?}",
+            read.complete,
+            read.keys.len(),
+            read.errors,
+            t.elapsed()
+        );
+    }
+}

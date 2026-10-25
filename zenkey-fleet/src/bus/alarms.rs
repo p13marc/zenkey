@@ -8,7 +8,10 @@
 //!    its window, §2.15), on a **watch session** of its own and settled
 //!    there (#830, core §8.1, 0.37: no presence read is made beside a
 //!    liveliness subscriber, and the settle orders the subscription before
-//!    the reads on the other session), then a subscription to the scope's
+//!    the reads on the other session). Its barrier is kept and asked again
+//!    before each refresh's presence read; a read made while it does not
+//!    stand is possibly incomplete (#851, 0.41), so the scope is not read
+//!    whole and nothing reads "no alarm fires". Then a subscription to the scope's
 //!    alarm keys, then a watch of this reader's own receive path
 //!    ([`crate::bus::stall`], core §2.7, 0.27). Both subscriptions call
 //!    back into one bounded queue, and what it refuses is counted: a
@@ -170,12 +173,18 @@ pub struct PresenceSeen {
     pub cut_off_during: bool,
     pub services: usize,
     pub listing: usize,
+    /// The read was made while the watch session's barrier did not stand
+    /// (#851, core §8.1, 0.41): `complete` is false.
+    pub unsettled: bool,
 }
 
 impl PresenceSeen {
     /// Why the read is possibly incomplete, after "the presence read …";
     /// `None` when it is complete.
     pub fn incomplete_reason(&self) -> Option<&'static str> {
+        if !self.complete && self.unsettled && !self.cut_off_during {
+            return Some(zenkey::presence::BARRIER_NOT_ESTABLISHED);
+        }
         crate::model::catalog::incomplete_reason(
             self.complete,
             self.cut_off_during,
@@ -192,6 +201,8 @@ pub struct AlarmRefresh {
     session: Session,
     scope: AlarmScope,
     spec: AlarmSpec,
+    /// The watch session's barrier, when the feed listens (#851).
+    barrier: Option<zenkey::presence::Barrier>,
 }
 
 /// What a refresh read, as values.
@@ -201,6 +212,9 @@ pub struct Refreshed {
     pub started: Instant,
     /// The presence read, and when it was taken. `None` across a face.
     pub presence: Option<(Instant, Result<Observed, String>)>,
+    /// The presence read was made while the watch session's barrier did
+    /// not stand (#851, core §8.1, 0.41), so it is not complete.
+    pub unsettled: bool,
     pub seed: Result<SeedRead, String>,
     pub archived: Option<Result<ArchivesRead, String>>,
 }
@@ -223,6 +237,13 @@ impl AlarmRefresh {
         let started = Instant::now();
         let t = self.spec.timeout;
         let cut = crate::bus::presence::cut_off(&self.session).await;
+        // The watch session's barrier, before the presence read (#851, core
+        // §8.1, 0.41): made again when it does not stand, and a read made
+        // without it is not complete.
+        let unsettled = match (&self.barrier, &cut, self.spec.face) {
+            (Some(b), None, None) => !b.establish().await,
+            _ => false,
+        };
         let presence = match self.spec.face {
             Some(_) => None,
             None => Some((
@@ -235,6 +256,10 @@ impl AlarmRefresh {
                         t,
                     )
                     .await
+                    .map(|mut o| {
+                        o.complete &= !unsettled;
+                        o
+                    })
                     .map_err(|e| crate::one_line(&e)),
                 },
             )),
@@ -254,6 +279,7 @@ impl AlarmRefresh {
         Refreshed {
             started,
             presence,
+            unsettled,
             seed,
             archived,
         }
@@ -337,6 +363,8 @@ pub struct AlarmFeed {
     /// The watch session the instance tokens' subscription is held on, when
     /// the feed listens (#830).
     watch: Option<Session>,
+    /// Its barrier, once the subscription is declared (#851).
+    barrier: Option<zenkey::presence::Barrier>,
     spec: AlarmSpec,
     rx: Option<tokio::sync::mpsc::Receiver<Delivery>>,
     refused: Arc<AtomicU64>,
@@ -391,6 +419,7 @@ impl AlarmFeed {
             book: AlarmBook::new(scope, spec.book()),
             session: session.clone(),
             watch,
+            barrier: None,
             spec,
             rx: None,
             refused: Arc::default(),
@@ -439,17 +468,22 @@ impl AlarmFeed {
         )
         .await?;
         // Its routers have read the subscription before any presence read
-        // on the other session is answered (#830).
-        if !zenkey::presence::settle(watch, &scope.instance_selector(), self.spec.timeout)
-            .await
-            .unwrap_or(false)
-        {
+        // on the other session is answered (#830); kept, and asked again
+        // before each refresh's presence read (#851).
+        let barrier =
+            zenkey::presence::Barrier::new(watch, &scope.instance_selector(), self.spec.timeout)
+                .await
+                .map_err(|e| {
+                    crate::Error::bus("liveliness barrier", scope.instance_selector(), e)
+                })?;
+        if !barrier.establish().await {
             tracing::warn!(
                 selector = %scope.instance_selector(),
-                "alarms' instance tokens did not settle: a withdrawal right after the first \
-                 presence read may not be told"
+                "alarms' instance tokens did not settle: a presence read is possibly \
+                 incomplete until their barrier stands"
             );
         }
+        self.barrier = Some(barrier);
         let q = queue;
         let discarded = Arc::clone(&self.discarded);
         let data = crate::bus::teardown::declared(
@@ -512,6 +546,7 @@ impl AlarmFeed {
             session: self.session.clone(),
             scope: self.book.scope().clone(),
             spec: self.spec,
+            barrier: self.barrier.clone(),
         }
     }
 
@@ -572,6 +607,7 @@ impl AlarmFeed {
                     cut_off_during: o.cut_off_during,
                     services: present.len(),
                     listing,
+                    unsettled: r.unsettled,
                 }));
             }
             Some((_, Err(e))) => self.log.presence = Some(Err(e)),

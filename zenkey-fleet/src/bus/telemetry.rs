@@ -61,6 +61,11 @@ use crate::model::telemetry::{
 /// broadcast capacity, as alarms' reader's.
 pub const QUEUE: usize = 1024;
 
+/// How many round trips a reading asks of its watch session's barrier,
+/// all within one `--timeout`, before it says presence is unobservable
+/// (#851).
+const SETTLE_ATTEMPTS: usize = 3;
+
 /// What a reading asks.
 #[derive(Debug, Clone, Copy)]
 pub struct TelemetrySpec {
@@ -419,17 +424,32 @@ pub async fn observe(
             obs.asked.push(sel);
         }
         // Its routers have read the subscriptions before the seed on the
-        // other session is answered (#830).
+        // other session is answered (#830). A reading whose round trip never
+        // comes back may not hear an owner go after its seed, so it says
+        // nothing of presence: unobservable, asked a few times first (#851).
+        // The attempts share one `t`: a round trip that ran out is not asked
+        // again, and one cut short (a transport move) is, in what is left.
         let first = obs.asked.last().cloned().unwrap_or_default();
-        if !zenkey::presence::settle(&watch, &first, t)
-            .await
-            .unwrap_or(false)
-        {
-            tracing::warn!(
-                selector = %first,
-                "telemetry's presence tokens did not settle: a withdrawal right after the seed \
-                 may not be told"
-            );
+        let deadline = Instant::now() + t;
+        let mut settled = false;
+        for _ in 0..SETTLE_ATTEMPTS {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            settled = zenkey::presence::settle(&watch, &first, left)
+                .await
+                .unwrap_or(false);
+            if settled {
+                break;
+            }
+        }
+        if !settled {
+            obs.unobservable = Some(format!(
+                "the presence subscriptions' barrier was not established within {t:?}: a \
+                 withdrawal after the seed may not be heard (core §8.1)"
+            ));
+            return obs;
         }
     }
     for sel in &subscriptions {

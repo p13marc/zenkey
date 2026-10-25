@@ -463,12 +463,14 @@ async fn until(
 
 // ─── a reader whose link is cut ─────────────────────────────────────────────
 
-/// A TCP proxy to `upstream` that a test can cut and heal: cutting closes
-/// every forwarded connection and refuses new ones, so the sessions behind
-/// it lose their router at once, as when it restarts.
+/// A TCP proxy to `upstream` that a test can cut, stall and heal: cutting
+/// closes every forwarded connection and refuses new ones, so the sessions
+/// behind it lose their router at once, as when it restarts; stalling stops
+/// forwarding both ways and closes nothing.
 struct Link {
     endpoint: String,
     cut: Arc<AtomicBool>,
+    stalled: Arc<AtomicBool>,
     conns: Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>>,
     _accept: tokio::task::JoinHandle<()>,
 }
@@ -479,8 +481,9 @@ impl Link {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("tcp/{}", listener.local_addr().unwrap());
         let cut = Arc::new(AtomicBool::new(false));
+        let stalled = Arc::new(AtomicBool::new(false));
         let conns: Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>> = Arc::default();
-        let (c, cs) = (Arc::clone(&cut), Arc::clone(&conns));
+        let (c, st, cs) = (Arc::clone(&cut), Arc::clone(&stalled), Arc::clone(&conns));
         let accept = tokio::spawn(async move {
             while let Ok((down, _)) = listener.accept().await {
                 if c.load(Ordering::SeqCst) {
@@ -489,13 +492,11 @@ impl Link {
                 let Ok(up) = tokio::net::TcpStream::connect(&target).await else {
                     continue;
                 };
-                let (mut dr, mut dw) = down.into_split();
-                let (mut ur, mut uw) = up.into_split();
+                let (dr, dw) = down.into_split();
+                let (ur, uw) = up.into_split();
+                let (a, b) = (Arc::clone(&st), Arc::clone(&st));
                 let h = tokio::spawn(async move {
-                    let _ = tokio::join!(
-                        tokio::io::copy(&mut dr, &mut uw),
-                        tokio::io::copy(&mut ur, &mut dw)
-                    );
+                    tokio::join!(pump(dr, uw, a), pump(ur, dw, b));
                 });
                 cs.lock().unwrap().push(h.abort_handle());
             }
@@ -503,6 +504,7 @@ impl Link {
         Link {
             endpoint,
             cut,
+            stalled,
             conns,
             _accept: accept,
         }
@@ -510,14 +512,71 @@ impl Link {
 
     fn cut(&self) {
         self.cut.store(true, Ordering::SeqCst);
+        self.stalled.store(false, Ordering::SeqCst);
         for c in self.conns.lock().unwrap().drain(..) {
             c.abort();
         }
     }
 
+    fn stall(&self) {
+        self.stalled.store(true, Ordering::SeqCst);
+    }
+
     fn heal(&self) {
         self.cut.store(false, Ordering::SeqCst);
+        self.stalled.store(false, Ordering::SeqCst);
     }
+}
+
+/// Forwards `from` to `to` until either side closes, holding still while
+/// `stalled` is set.
+async fn pump(
+    mut from: tokio::net::tcp::OwnedReadHalf,
+    mut to: tokio::net::tcp::OwnedWriteHalf,
+    stalled: Arc<AtomicBool>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let hold = async || {
+        while stalled.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        hold().await;
+        let n = match from.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        hold().await;
+        if to.write_all(&buf[..n]).await.is_err() {
+            break;
+        }
+    }
+    let _ = to.shutdown().await;
+}
+
+/// A watch session behind `link` whose round trip cannot stand while the
+/// link is stalled: its runtime ends a liveliness GET its router has not
+/// finished at 300 ms (`routing/interests/timeout`), with no error reply,
+/// and the runtime reads that as a round trip that did not come back
+/// (#851).
+async fn watch_behind(link: &Link) -> zenoh::Session {
+    let mut c = zenoh::Config::default();
+    for (k, v) in [
+        ("mode", "\"client\"".to_owned()),
+        ("scouting/multicast/enabled", "false".to_owned()),
+        ("scouting/gossip/enabled", "false".to_owned()),
+        ("connect/endpoints", format!("[\"{}\"]", link.endpoint)),
+        (
+            "connect/retry",
+            "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }".to_owned(),
+        ),
+        ("routing/interests/timeout", "300".to_owned()),
+    ] {
+        c.insert_json5(k, &v).unwrap();
+    }
+    zenoh::open(c).await.expect("a watch session")
 }
 
 /// A client of `endpoint` that retries fast after losing it.
@@ -537,13 +596,15 @@ async fn retrying_client(endpoint: &str) -> zenoh::Session {
     zenoh::open(c).await.expect("a client")
 }
 
-/// **A withdrawal heard live is not absence** (core §8.1, 0.37): the
-/// reader's link to its router is cut, as a router's restart cuts it, and
-/// the reader hears its owner's token withdrawn, though the owner never
-/// left. The address is unobservable — first as heard withdrawn, then as a
-/// read not made through a session cut off — and never down; healed, the
-/// read finds the owner, and it is up again. A real departure is down, a
-/// read after its withdrawal.
+/// **A link cut is not absence** (core §8.1, 0.37, 0.41): the reader's
+/// link to its router is cut, as a router's restart cuts it, though the
+/// owner never left. Its watch session's subscribers have no history, so
+/// they were never told of the owner's token and hear no withdrawal of it
+/// (#851): the watch session's transport closing is the reader's reason to
+/// read again, and its barrier is lost with it. The read is not made
+/// through a session cut off, the address is unobservable, never down;
+/// healed, the barrier is made again and the read finds the owner, up
+/// again. A real departure is down, a read after its withdrawal.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_reader_whose_link_is_cut_reads_nobody_down() {
     let (_router, ep) = router(None).await;
@@ -583,20 +644,26 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
             .count()
     };
 
-    // Cut: withdrawn, unobservable, and the read it owes is not made.
+    // Cut: the watch session's transport closes, a read is owed and not
+    // made, and the address is unobservable.
     link.cut();
     until(&mut feed, &mut seen, "a read not made", |f| {
         matches!(f.last_seed(), SeedOutcome::CutOff(_))
     })
     .await;
     assert!(
-        seen.iter().any(|t| t.source == PresenceSource::Withdrawn
+        seen.iter().any(|t| t.source == PresenceSource::CutOff
             && t.change
                 == PresenceChange::Status {
                     from: AddressStatus::Up,
                     to: AddressStatus::Unobservable
                 }),
         "{seen:#?}"
+    );
+    assert_eq!(
+        monitor.settled(),
+        Some(false),
+        "the barrier went with the link"
     );
     assert_eq!(feed.presence().status(&h1), AddressStatus::Unobservable);
     assert_eq!(downs(&seen), 0, "nobody down: {seen:#?}");
@@ -609,6 +676,7 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
     .await;
     assert_eq!(downs(&seen), 0, "nobody down: {seen:#?}");
     assert_eq!(*feed.last_seed(), SeedOutcome::Complete);
+    assert_eq!(monitor.settled(), Some(true), "made again before the read");
 
     // A real departure is down, once the read after its withdrawal says so.
     token.undeclare().await.expect("undeclare");
@@ -620,4 +688,122 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
     assert_eq!(last.source, PresenceSource::Seed, "{seen:#?}");
     drop(feed);
     monitor.shutdown().await.expect("shutdown");
+}
+
+// ─── a round trip that does not stand (#851) ───────────────────────────────
+
+/// `instance-gone`'s presence while its watch session's round trip does
+/// not stand (#851, core §8.1, 0.41): the projection's seed is possibly
+/// incomplete, so an address with no token reads unobservable, never
+/// firing and never ok; once the round trip stands, the same rule fires.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn instance_gone_is_unobservable_while_its_round_trip_does_not_stand() {
+    use zenkey_fleet::Sipper as _;
+    use zenkey_fleet::judge::condition::{Condition, WatchdogSpec, watchdog};
+    use zenkey_fleet::report::CondState;
+
+    let (_router, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let link = Link::to(&ep).await;
+    let watch = watch_behind(&link).await;
+    let spec = WatchdogSpec {
+        rules: vec![Condition::parse("instance-gone lab/nobody").expect("rule")],
+        tick: Duration::from_millis(200),
+        ticks: Some(3),
+        timeout: T,
+        clocks_synced: false,
+    };
+    let store = zenkey_fleet::BundleStore::new(T);
+    let contracts = zenkey_fleet::ContractSet::new();
+    let bus = zenkey_fleet::DoctorBus {
+        session: tool.clone(),
+        raw: tool.clone(),
+        namespace: String::new(),
+        watch: Some(watch.clone()),
+    };
+    let run = |bus: zenkey_fleet::DoctorBus| {
+        let (store, contracts, spec) = (store.clone(), contracts.clone(), spec.clone());
+        async move {
+            let mut run = watchdog(&bus, &store, &contracts, &spec).pin();
+            let mut transitions = Vec::new();
+            while let Some(t) = run.sip().await {
+                transitions.push(t);
+            }
+            (transitions, run.await.expect("a run"))
+        }
+    };
+
+    link.stall();
+    let (transitions, summary) = run(bus.clone()).await;
+    assert!(
+        transitions.iter().all(|t| t.to == CondState::Unobservable),
+        "{transitions:#?}"
+    );
+    assert!(summary.firing.is_empty(), "{summary:?}");
+    assert_eq!(
+        summary.unobservable,
+        ["instance-gone lab/nobody"],
+        "{summary:?}"
+    );
+
+    link.heal();
+    let (transitions, summary) = run(bus).await;
+    assert_eq!(
+        summary.firing,
+        ["instance-gone lab/nobody"],
+        "{summary:?} {transitions:#?}"
+    );
+}
+
+/// An alarms reader that listens, while its watch session's round trip
+/// does not stand (#851, core §8.1, 0.41): its presence read is possibly
+/// incomplete, saying why, so the scope is not read whole and nothing
+/// reads "no alarm fires"; its next refresh makes the round trip again,
+/// and once it stands the scope is whole (here, with no owner in it).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_alarm_feed_whose_round_trip_does_not_stand_reads_the_scope_not_whole() {
+    use zenkey_model::alarms::{Answer, Reason, ScopeRead, Severity};
+
+    let (_router, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let link = Link::to(&ep).await;
+    let watch = watch_behind(&link).await;
+    let spec = AlarmSpec::new(T);
+    link.stall();
+    let (mut feed, _) = AlarmFeed::open(&tool, Some(&watch), AlarmScope::all(), spec, true)
+        .await
+        .expect("the reader opens");
+    let Some(Ok(seen)) = &feed.log().presence else {
+        panic!("a presence read: {:?}", feed.log().presence)
+    };
+    assert!(!seen.complete && seen.unsettled, "{seen:?}");
+    assert_eq!(
+        seen.incomplete_reason(),
+        Some(zenkey_fleet::BARRIER_NOT_ESTABLISHED)
+    );
+    assert_eq!(feed.book().scope_read(), ScopeRead::NotWhole);
+    let any = feed
+        .book()
+        .any_firing(Severity::Info, std::time::Instant::now(), SystemTime::now());
+    assert_eq!(
+        (any.answer, any.reason),
+        (Answer::Unobservable, Reason::ScopeIncomplete),
+        "never no"
+    );
+
+    link.heal();
+    feed.refresh().await;
+    let Some(Ok(seen)) = &feed.log().presence else {
+        panic!("a presence read: {:?}", feed.log().presence)
+    };
+    assert!(seen.complete && !seen.unsettled, "{seen:?}");
+    assert_eq!(feed.book().scope_read(), ScopeRead::Whole);
+    let any = feed
+        .book()
+        .any_firing(Severity::Info, std::time::Instant::now(), SystemTime::now());
+    assert_eq!(
+        (any.answer, any.reason),
+        (Answer::NotAsked, Reason::NoOwner),
+        "a whole scope with no owner in it"
+    );
 }

@@ -304,12 +304,14 @@ session reaches R1 through a link the test can stall (0.38).
 1. The owner starts. Wait until the tool reads its instance token.
 2. The watch session declares a liveliness subscriber with history to
    `zk2/*/*/@zk/instance/*`, and at once makes a liveliness GET of
-   `zk2/*/*/@zk/**`.
+   `zk2/*/*/@zk/**`. History is what shows the hazard every time; a
+   reader's own watch session declares its subscribers without history
+   (core §8.1, 0.41; §10).
 3. The tool, whose session holds no liveliness subscriber, makes the same
    GET.
 4. (0.38, F-189) A reader under test, as §8's, starts following presence:
-   it declares its subscribers on its watch session, then seeds through
-   the tool's session. Observe the liveliness GETs each of its sessions
+   it declares its subscribers on its watch session, without history
+   (0.41), then seeds through the tool's session. Observe the liveliness GETs each of its sessions
    makes. Then ask it for a liveliness read on its watch session.
 5. Repeat, many times: a fresh reader starts as in step 4, its watch
    session's link stalled from before the reader declares its subscribers
@@ -358,3 +360,113 @@ runs: every one heard the token go and read the owner down after its
 re-read, 3 s for the ten. The test's control, a reader that skips the
 round trip, its link stalled until the withdrawal had reached R1, missed
 the withdrawal in 3 of 3 starts in each of the 10 runs.*
+
+## §10 A round trip at a population, and the interests timeout (§8.1, 0.41; Appendix B)
+
+**Setup.** Routers R1 and R2, linked R2 → R1. An owner, a tool and two
+crowd sessions are clients of R1; the crowd sessions hold 2,000 instance
+tokens between them. A second tool is a client of R2. A reader's watch session reaches its router through
+a link the test can stall. The round trip is a liveliness GET of
+`zk2/*/*/@zk/settle`, a key no token holds (§1.1: a token's `@zk` chunk is
+followed by its kind and more), and waits 5 s.
+
+**Steps.**
+1. The owner holds a token, and the tool reads it. A fresh watch session,
+   a client of R1, declares a liveliness subscriber **without history** to
+   `zk2/*/*/@zk/instance/*`, its link stalled from before the declaration
+   until 150 ms later, and at once makes the round trip. Then the tool
+   reads the token (the seed), the owner withdraws it at once, and the tool
+   reads it gone. Repeat, ten times.
+2. As step 1, without the round trip: the stall ends only after the tool
+   reads the token gone; then a round trip says the router has read the
+   subscriber. Three times.
+3. Steps 1 and 2 with the watch session a client of R2, and the seed read
+   by both tools, at R2 and at R1.
+4. Beside the crowd, its link not stalled: a fresh watch session declares a
+   liveliness subscriber without history to `zk2/*/*/@zk/instance/*` and
+   makes the round trip at once; then another, its session's
+   `routing/interests/timeout` 60 s, declares one with history and makes
+   the round trip at once.
+5. A session whose `routing/interests/timeout` is 300 ms, a client of R1
+   through a link the test can stall, reads `zk2/*/*/@zk/instance/*`
+   (a 2 s timeout) with its link open. Then, its link stalled, it reads
+   again with a 2 s timeout, and makes the round trip with a 2 s timeout.
+   The reader under test reads each, and says whether its round trip
+   stands.
+6. (The reader under test, as §8's and §9's.) The reader follows presence,
+   the owner's token held, its watch session's link stalled as in step 1
+   while it starts, and its watch session's
+   `routing/interests/timeout` 300 ms. Then the stall ends. Then its watch
+   session's link is cut, and healed.
+7. As step 1 without the stall, the owner and the tool in a namespace
+   `ns`: a watch session in `ns` declares a subscriber without history,
+   then one with history; then a watch session in no namespace declares
+   one without history to the wire key `ns/zk2/*/*/@zk/instance/*`.
+
+**Expected.**
+1. The round trip is still waiting when the stall ends, and ends with the
+   final reply, no error reply and no token. In every run the watch
+   session hears the token withdrawn, though its subscriber has no history
+   and the token was declared before it: its router tells the withdrawal
+   by key.
+2. In every run the watch session never hears the token go: its router
+   read the subscriber after the token went.
+3. As steps 1 and 2: R2 resolves its client's interest itself and tells
+   it what R1 withdraws.
+4. Without history, the round trip carries no token and ends within one
+   round trip, under 1 s. With history, it ends only after the history: by
+   then the subscriber has heard all 2,000 tokens.
+5. With the link open, the read is complete. Stalled, zenoh ends the read
+   and the round trip at 300 ms, each with the final reply alone and no
+   error reply. The reader reads the read possibly incomplete, never
+   complete, and its round trip not standing.
+6. While no round trip stands, the reader's seed is possibly incomplete,
+   saying its round trip is not established: an address it shows is up,
+   one it does not is unobservable, never down. It reads again, making the
+   round trip first, and once one stands a read is complete again. When
+   the link is cut, the reader reads again at once (a read not made,
+   through a session cut off: the owner unobservable, never down), and
+   after the heal it makes the round trip again before the read that finds
+   the owner up.
+7. In `ns`, the subscriber without history never hears the token go: its
+   router tells the withdrawal by the token's key, and the namespaced
+   session does not strip its namespace from that key (Appendix B). With
+   history it hears it, and so does the subscriber in no namespace, on the
+   wire key. A reader whose watch session is in a namespace declares its
+   subscribers with history there, or watches from no namespace.
+
+*Measured (0.41, #851) by the reference, in a debug build, in
+`zenkey/tests/presence.rs`'s `s10_a_round_trip_at_a_population_and_the_interests_timeout`
+(steps 1 to 5 and 7) and `zenkey-fleet/tests/presence_scenarios.rs`'s
+`s10_a_round_trip_at_a_population_and_the_interests_timeout` (step 6).
+Step 1: heard 10 of 10, each round trip still waiting when its stall
+ended. Step 2: missed 3 of 3. Step 3: 10 of 10 and 3 of 3. Step 4: without
+history the round trip took 1.4 ms beside the 2,000 tokens, carrying none;
+with history 615 ms, every token heard by its end. Step 5: zenoh ended the
+stalled read at 300.5 ms, with no error reply; the reference read it
+possibly incomplete (`at_interests_timeout`) and its round trip not
+established. Step 6: the first seed possibly incomplete, the absent
+address unobservable; complete after the stall, one round trip later;
+four round trips on the watch session in all (the start's and the first
+seed's, which ran out, the retry's and the one after the heal). Step 7:
+not heard in `ns` without history; heard with it, and from no namespace.
+Under load (`a_round_trip_under_load_misses_no_withdrawal`, 8 at once
+beside 300 tokens, no stall): 0 of 160 withdrawals missed with the round
+trip, 13 of 160 without it.*
+
+*Measured (0.41, #851) with zenoh-only GETs beside 10,000 tokens, debug
+build (`zenkey/tests/presence_scale.rs`'s ignored
+`wb_a_barrier_beside_ten_thousand_tokens_measured`): the round trip after
+a subscriber with history ended 23.0 s later, 1 ms after the history's
+last token; without history, 6 ms. Under zenoh's default 10 s interests
+timeout, the round trip after a history subscriber ended at 10.0 s with no
+reply from its router, and a read with a 110 s timeout of every token came
+back at 10.0 s, with no error reply, holding 6,121 of the 10,000. With a
+120 s interests timeout the same read was whole, in 22.3 s. Through a
+tool's session (`zenkey_fleet::open_reporting`, which runs with 120 s;
+`zenkey-fleet/tests/liveliness_handler.rs`'s ignored
+`wb_a_tool_sessions_read_of_ten_thousand_tokens_is_whole`) the read was
+complete with all 10,000, and again in 2.6 s; a fresh session on zenoh's
+10 s read 6,098 at 10.0 s, which the reference read as possibly
+incomplete.*
+

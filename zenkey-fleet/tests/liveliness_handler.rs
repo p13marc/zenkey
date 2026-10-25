@@ -213,3 +213,77 @@ async fn round_trips_beside_a_subscriber() {
     monitor.shutdown().await.expect("monitor shutdown");
     drop(tokens);
 }
+
+/// #851, measured, and slow (about a minute in a debug build), so run by
+/// hand (`--ignored`): a tool's session (`zenkey_fleet::open_reporting`,
+/// which waits 120 s for its routers' interests, `TOOL_INTERESTS_TIMEOUT`)
+/// reads 10,000 tokens whole, where a session on zenoh's own 10 s comes
+/// back at 10 s, possibly incomplete (core §8.1, 0.41).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "a measurement: about a minute"]
+async fn wb_a_tool_sessions_read_of_ten_thousand_tokens_is_whole() {
+    const TOKENS: usize = 10_000;
+    let (_router, ep) = router(None).await;
+    let mut holders = Vec::new();
+    for _ in 0..4 {
+        holders.push(client(&ep).await);
+    }
+    let mut held = Vec::with_capacity(TOKENS);
+    for i in 0..TOKENS {
+        held.push(
+            holders[i % holders.len()]
+                .liveliness()
+                .declare_token(format!("zk2/wb/svc{i}/@zk/instance/{i:016x}"))
+                .await
+                .expect("a token"),
+        );
+    }
+    let tool = zenkey_fleet::open_reporting(None, std::slice::from_ref(&ep), &[], Some(false))
+        .await
+        .expect("a tool session");
+    assert_eq!(
+        zenkey::presence::interests_timeout(&tool),
+        zenkey_fleet::TOOL_INTERESTS_TIMEOUT
+    );
+    let sel = "zk2/*/*/@zk/instance/*";
+    let started = Instant::now();
+    let whole = loop {
+        let read = zenkey_fleet::liveliness_read(&tool, sel, Duration::from_secs(110))
+            .await
+            .expect("a read");
+        if read.complete && read.keys.len() == TOKENS {
+            break read;
+        }
+        eprintln!(
+            "not whole yet: complete {}, {} tokens, after {:?}",
+            read.complete,
+            read.keys.len(),
+            started.elapsed()
+        );
+        assert!(started.elapsed() < Duration::from_secs(300), "never whole");
+    };
+    let took = Instant::now();
+    let again = zenkey_fleet::liveliness_read(&tool, sel, Duration::from_secs(110))
+        .await
+        .expect("a read");
+    eprintln!(
+        "a tool session's read of {TOKENS}: whole after {:?}; again complete {} with {} in {:?}",
+        started.elapsed(),
+        again.complete,
+        again.keys.len(),
+        took.elapsed()
+    );
+    assert_eq!(whole.keys.len(), TOKENS);
+    let fresh = client(&ep).await;
+    let took = Instant::now();
+    let short = zenkey_fleet::liveliness_read(&fresh, sel, Duration::from_secs(110))
+        .await
+        .expect("a read");
+    eprintln!(
+        "zenoh's own 10 s: complete {} with {} tokens, at its interests timeout {}, in {:?}",
+        short.complete,
+        short.keys.len(),
+        short.at_interests_timeout,
+        took.elapsed()
+    );
+}

@@ -567,6 +567,10 @@ impl Archive {
                 for o in &watched {
                     let i = Arc::clone(&inner);
                     let handle = tokio::runtime::Handle::current();
+                    // With history (#851): an owner already present is
+                    // aligned with by its history's put, the archive's first
+                    // look. No presence read seeds it and no barrier waits
+                    // on it, and each owner's instance tokens are a few.
                     subs.push(
                         crate::presence::declare_subscriber(
                             w,

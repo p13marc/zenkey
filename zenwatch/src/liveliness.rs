@@ -23,7 +23,10 @@
 //! [`TokenFeed::open`] refuses one with the monitor's zid. A read through
 //! either while it reaches no other zenoh node is not made
 //! ([`TokenBasis::CutOff`]): the observer is unobservable until a complete
-//! read.
+//! read. The monitor's barrier is asked before every read and made again
+//! when it does not stand (#851, core §8.1, 0.41); a read made without it is
+//! possibly incomplete (`unsettled`), whatever stood before it, and the
+//! observer is unobservable until one made with it.
 //!
 //! **A withdrawal heard live is not a token gone** (core §8.1, 0.37). A
 //! router's restart withdraws every token at once and its owners never
@@ -67,6 +70,10 @@ pub enum TokenBasis {
     Incomplete {
         /// A read's session was cut off while it ran.
         cut_off_during: bool,
+        /// The read was made while the monitor's barrier did not stand
+        /// (#851, core §8.1, 0.41): a token withdrawn after it may not be
+        /// heard.
+        unsettled: bool,
     },
     /// A complete read stands, and nothing was lost since.
     Complete,
@@ -99,6 +106,12 @@ pub struct TokenFeed {
     /// The monitor's session: a watch session, read only for whether it is
     /// cut off (#830).
     watch: Session,
+    /// The monitor's barrier (#851): asked before each read, and a read
+    /// made while it does not stand is possibly incomplete.
+    barrier: Option<zenkey::presence::Barrier>,
+    /// The watch session's transport events the ledger has answered with a
+    /// read ([`zenkey::presence::Barrier::moves`]).
+    moves_seen: u64,
     selectors: Vec<String>,
     timeout: Duration,
     events: EventStream,
@@ -125,6 +138,17 @@ impl std::fmt::Debug for TokenFeed {
 enum Wake {
     Item(Option<StreamItem>),
     Retry,
+    /// The watch session's transport moved, and its barrier with it (#851).
+    Moved,
+}
+
+/// Resolves once the watch session has had a transport event since the
+/// ledger last read `seen`; never without a barrier.
+async fn watch_moved(barrier: Option<&zenkey::presence::Barrier>, seen: u64) {
+    match barrier {
+        Some(b) => b.moved_since(seen).await,
+        None => std::future::pending().await,
+    }
 }
 
 impl TokenFeed {
@@ -146,6 +170,10 @@ impl TokenFeed {
         let mut feed = TokenFeed {
             session: session.clone(),
             watch: monitor.session().clone(),
+            barrier: monitor.barrier().cloned(),
+            moves_seen: monitor
+                .barrier()
+                .map_or(0, zenkey::presence::Barrier::moves),
             selectors,
             timeout,
             events: monitor.events(),
@@ -182,15 +210,29 @@ impl TokenFeed {
             if !self.pending.is_empty() {
                 return Some(std::mem::take(&mut self.pending));
             }
+            let (barrier, seen) = (self.barrier.clone(), self.moves_seen);
             let wake = match self.retry {
                 Some((when, _)) => tokio::select! {
                     biased;
                     () = tokio::time::sleep_until(when) => Wake::Retry,
                     item = self.events.recv() => Wake::Item(item),
+                    () = watch_moved(barrier.as_ref(), seen) => Wake::Moved,
                 },
-                None => Wake::Item(self.events.recv().await),
+                None => tokio::select! {
+                    biased;
+                    item = self.events.recv() => Wake::Item(item),
+                    () = watch_moved(barrier.as_ref(), seen) => Wake::Moved,
+                },
             };
             match wake {
+                // The watch session's transport moved (#851): a subscriber
+                // without history hears no withdrawal of a token it was
+                // never told of, and one that went meanwhile is in no
+                // history, so the barrier is made again and the ledger read.
+                Wake::Moved => {
+                    self.moves_seen = barrier.as_ref().map_or(seen, |b| b.moves());
+                    self.owe_within(Duration::ZERO);
+                }
                 Wake::Retry => {
                     // A basis change is a move too: hand it out, so the
                     // rules' observers say so.
@@ -275,8 +317,21 @@ impl TokenFeed {
                 self.back_off();
                 return;
             }
+            // The monitor's barrier, before the reads (#851, core §8.1,
+            // 0.41): made again when it does not stand. Reads made without
+            // it are possibly incomplete, whatever came before them.
+            let settled = match &self.barrier {
+                Some(b) => b.establish().await,
+                None => true,
+            };
+            if !settled {
+                tracing::warn!(
+                    "the token ledger's barrier is not established: its read is possibly \
+                     incomplete"
+                );
+            }
             let mut keys = BTreeSet::new();
-            let mut complete = true;
+            let mut complete = settled;
             let mut cut_off_during = false;
             for sel in &self.selectors {
                 match zenkey_fleet::liveliness_read(&self.session, sel, self.timeout).await {
@@ -360,8 +415,11 @@ impl TokenFeed {
             self.withdrawn = withdrawn;
             self.basis = match (complete, self.basis) {
                 (true, _) => TokenBasis::Complete,
-                (false, b @ (TokenBasis::Lost { .. } | TokenBasis::Complete)) => b,
-                (false, _) => TokenBasis::Incomplete { cut_off_during },
+                (false, b @ (TokenBasis::Lost { .. } | TokenBasis::Complete)) if settled => b,
+                (false, _) => TokenBasis::Incomplete {
+                    cut_off_during,
+                    unsettled: !settled,
+                },
             };
             if complete {
                 self.retry = None;
@@ -615,15 +673,22 @@ impl ForeignRule {
                  return inside that span was not seen — unobservable, not ok (RFC 13 §3 O6); \
                  re-reading"
             ),
-            TokenBasis::Incomplete { cut_off_during } => format!(
+            TokenBasis::Incomplete {
+                cut_off_during,
+                unsettled,
+            } => format!(
                 "the liveliness read of {sel} {}, possibly incomplete (spec §8.1): a token it \
                  did not show is not known to be absent; re-reading",
-                zenkey_fleet::model::catalog::incomplete_reason(
-                    false,
-                    cut_off_during,
-                    "ended at its timeout"
-                )
-                .unwrap_or_default()
+                if unsettled && !cut_off_during {
+                    zenkey::presence::BARRIER_NOT_ESTABLISHED
+                } else {
+                    zenkey_fleet::model::catalog::incomplete_reason(
+                        false,
+                        cut_off_during,
+                        "ended at its timeout",
+                    )
+                    .unwrap_or_default()
+                }
             ),
             TokenBasis::Unseeded => format!("{sel} has not been read yet"),
             TokenBasis::CutOff => format!(
@@ -846,6 +911,7 @@ mod tests {
             &held,
             TokenBasis::Incomplete {
                 cut_off_during: false,
+                unsettled: false,
             },
             &announced,
             &ids(&r),
