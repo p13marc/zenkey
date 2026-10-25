@@ -34,6 +34,11 @@
 //! again there what its record keeps (`desired.v1` §2.11), and a target
 //! through [`ServiceBuilder::desired_target`] puts its baseline report
 //! there, then reads from step 4 on, after the tokens ([`crate::desired`]).
+//! One electing its governed interfaces through
+//! [`ServiceBuilder::redundancy`] claims at steps 3 and 4, each governed
+//! interface marked standby and holding no token, then elects; it takes
+//! over in steps 1 to 4's order and steps down in their reverse
+//! ([`crate::redundancy`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, RwLock};

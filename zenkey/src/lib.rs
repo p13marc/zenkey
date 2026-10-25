@@ -68,7 +68,16 @@
 //! subscribed, seeded at start and whenever its author appears, read from
 //! an archive with its author absent, and acted on once per version through
 //! the application's handler, through [`ServiceBuilder::desired_target`]
-//! (`config.v1`'s owner through [`ServiceBuilder::desired_config`]).
+//! (`config.v1`'s owner through [`ServiceBuilder::desired_config`]);
+//! `redundancy.v1` is [`redundancy`] (#841): through
+//! [`ServiceBuilder::redundancy`], every governed interface the service
+//! implements is claimed at its start (its descriptor marking it standby,
+//! the instance token), followed on a watch session, read on a reader of
+//! its own, and elected by `zenkey_model::redundancy`'s `Elector`; each of
+//! its resources is declared only while the instance serves it, a write
+//! while it stands by is refused, a takeover runs core §8.2's steps and a
+//! step-down their reverse, and `external` serves only with the
+//! application's lock.
 
 #[cfg(feature = "zenoh")]
 pub mod alarms;

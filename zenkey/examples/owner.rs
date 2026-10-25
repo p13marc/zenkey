@@ -408,7 +408,9 @@
 //!   `redundancy lock hold`. Without it, the lock is the commands':
 //!   `redundancy lock hold|lose`, not held at the start.
 //!   `--refuse-without-lock` refuses to start without the lock, exit 1,
-//!   with nothing declared, rather than stand by.
+//!   with nothing declared, rather than stand by: with the commands' lock,
+//!   which is not held at the start, always, so it goes with
+//!   `--lock-file`.
 //! - `--hold-heal` holds the heal's reads from the start (`scenarios.md`
 //!   §9's hook), until `redundancy hold-heal off`.
 //! - `--peer`, with `--connect`: every session a peer whose only endpoint
@@ -812,7 +814,8 @@ redundancy.v1 (spec/profiles/redundancy/v1.md)
                                   without it the lock is redundancy lock hold|lose's,
                                   not held at the start
   --refuse-without-lock           under external, refuse to start without the lock,
-                                  exit 1, nothing declared
+                                  exit 1, nothing declared (the commands' lock is
+                                  not held at the start: give --lock-file)
   --hold-heal                     the heal's reads held until redundancy hold-heal off
   --peer                          with --connect, every session a peer of that router,
                                   listening on loopback and gossiping
