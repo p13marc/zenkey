@@ -2339,7 +2339,129 @@ def _presence_view() -> list[tuple[str, Any, Any]]:
           live.Presence(complete=True).kind, live.Presence().kind,
           live.Presence(complete=False, cut_off_during=True).kind],
          [live.NOT_MADE, live.NOT_MADE, live.COMPLETE, live.POSSIBLY_INCOMPLETE, live.POSSIBLY_INCOMPLETE]),
-    ] + _live_guards() + _redundancy_readings() + _desired_tool_readings()
+    ] + _live_guards() + _desired_tool_readings() + _poll_readings() + _settle_readings()
+
+
+def _poll_readings() -> list[tuple[str, Any, Any]]:
+    """redundancy.v1 0.2 §2.7's poll (zk2py.redundancy.poll_step), over
+    sequences of polls, the reading F-215 asks about among them."""
+    from . import redundancy as rd
+
+    a, b = "000000000000000a", "000000000000000b"
+
+    def run(polls: list[tuple[set[str], bool]]) -> list[Any]:
+        last: set[str] | None = None
+        out: list[Any] = []
+        for others, complete in polls:
+            ev, last = rd.poll_step(last, others, complete)
+            out += ev
+        return out
+
+    label = "redundancy.v1 0.2 §2.7, a poll's events"
+    return [
+        (f"{label}: the first poll is the baseline", run([({a}, True)]), []),
+        (f"{label}: a holder new to it is an appearance", run([(set(), True), ({a}, True)]), [{"appeared": a}]),
+        (f"{label}: a complete read with no other holder, after one with some, a withdrawal",
+         run([({a}, True), (set(), True)]), [rd.WITHDRAWN]),
+        (f"{label}: a read not complete establishes no absence", run([({a}, True), (set(), False)]), []),
+        (f"{label}: a read not complete between leaves the last's whole: the next complete read without the "
+         "holder is a withdrawal (F-215)", run([({a}, True), (set(), False), (set(), True)]), [rd.WITHDRAWN]),
+        (f"{label}: … and a holder it missed is no new holder at the next read (F-215)",
+         run([({a}, True), (set(), False), ({a}, True)]), []),
+        (f"{label}: a read not complete still shows what it saw: a holder new to it appears",
+         run([({a}, True), ({a, b}, False)]), [{"appeared": b}]),
+    ]
+
+
+def _settle_readings() -> list[tuple[str, Any, Any]]:
+    """redundancy.v1 0.2's kept events (F-199), where zk2py.redundancy's
+    ``_settle`` re-enters ``step`` for the events after the first that asks
+    something. What a list decided partway can do: no kept event moves the
+    machine to taking over or stepping down, since only a read's decision, a
+    finish and the lock do, and none of them is kept. A decision that does
+    is an act's phase, which keeps what it keeps. So the rest is re-entered
+    in a state that keeps it, and asks nothing."""
+    import copy as _copy
+
+    from . import redundancy as rd
+
+    own, low, high, high2 = "00000000000000b2", "00000000000000a1", "00000000000000c3", "00000000000000d4"
+    S = rd.Seen
+
+    def read(complete: bool, *held: str, claims: tuple[str, ...] = ()) -> dict[str, Any]:
+        return {"read": rd.Read(complete, tuple([S(own, own in held, "standby")]
+                                                + [S(i, True, "standby") for i in held if i != own]
+                                                + [S(i, False, "standby") for i in claims]))}
+
+    def run(events: list[Any]) -> tuple[list[str], str, list[str], bool]:
+        m = rd.Machine(own)
+        steps = [m.step(e)["step"] for e in events]
+        return steps, m.state, list(m.kept_appeared), m.kept_withdrawn
+
+    serving = [rd.START, rd.FINISH, read(True), rd.FINISH]
+    heal_second = serving + [{"appeared": low}, read(True, own, low), rd.TIMER]
+
+    class Probe(rd.Machine):
+        """A machine recording each step ``_settle`` re-enters, and what it gave."""
+
+        def step(self, event: Any) -> dict[str, Any]:
+            depth = self.__dict__.get("_depth", 0)
+            self.__dict__["_depth"] = depth + 1
+            try:
+                out = super().step(event)
+            finally:
+                self.__dict__["_depth"] = depth
+            if depth:
+                self.__dict__.setdefault("_re", set()).add((self.state, out["step"]))
+            return out
+
+    def explore() -> list[tuple[str, str]]:
+        reads = [read(c, *h, claims=cl) for c in (True, False)
+                 for h, cl in (((own,), ()), ((own, low), ()), ((own, high), ()), ((), ()), ((own,), (high,)))]
+        events = [rd.START, rd.TIMER, rd.FINISH, {"appeared": low}, {"appeared": high}, {"appeared": high2},
+                  rd.WITHDRAWN, {"lock": True}, {"lock": False}] + reads
+        found: set[tuple[str, str]] = set()
+        for election in (rd.CLAIM, rd.EXTERNAL):
+            seen: set[Any] = set()
+            todo = [Probe(own, election)]
+            while todo:
+                m = todo.pop()
+                k = (m.state, m.lock, m.retry, tuple(m.kept_appeared), m.kept_withdrawn, tuple(sorted(m.first)),
+                     m.again)
+                if k in seen:
+                    continue
+                seen.add(k)
+                for e in events:
+                    m2 = _copy.deepcopy(m)
+                    m2.__dict__["_re"] = set()
+                    m2.step(e)
+                    found |= m2.__dict__["_re"]
+                    if len(m2.kept_appeared) <= 3:
+                        todo.append(m2)
+        return sorted(found)
+
+    label = "redundancy.v1 0.2, kept events decided partway (F-199, zk2py's _settle)"
+    return [
+        (f"{label}: a campaign's read decides take_over: the appearance kept through the act, the withdrawal "
+         "nothing while taking over; at the finish the appearance asks a heal read",
+         run([rd.START, rd.FINISH, {"appeared": high}, rd.WITHDRAWN, read(True), rd.FINISH]),
+         (["claim", "read", "nothing", "nothing", "take_over", "read"], rd.HEAL_FIRST, [], False)),
+        (f"{label}: … the act's phase keeps the appearance and drops the withdrawal",
+         run([rd.START, rd.FINISH, {"appeared": high}, rd.WITHDRAWN, read(True)]),
+         (["claim", "read", "nothing", "nothing", "take_over"], rd.TAKING_OVER, [high], False)),
+        (f"{label}: a heal's second read decides step_down: the withdrawal kept through the act, the appearance "
+         "nothing while stepping down; at the finish the withdrawal campaigns",
+         run(heal_second + [{"appeared": high}, rd.WITHDRAWN, read(True, own, low), rd.FINISH]),
+         (["claim", "read", "take_over", "nothing", "read", "grace", "read", "nothing", "nothing", "step_down",
+           "read"], rd.CAMPAIGNING, [], False)),
+        (f"{label}: a heal read ending the heal, three kept: the first appearance asks a heal read, and the rest "
+         "is re-entered in heal_first, which keeps it",
+         run(serving + [{"appeared": low}, {"appeared": high}, {"appeared": high2}, rd.WITHDRAWN, read(True, own)]),
+         (["claim", "read", "take_over", "nothing", "read", "nothing", "nothing", "nothing", "read"], rd.HEAL_FIRST,
+          [high2], True)),
+        (f"{label}: over every state reached under both elections, each step re-entered is in heal_first and "
+         "asks nothing", explore(), [(rd.HEAL_FIRST, "nothing")]),
+    ]
 
 
 def _desired_tool_readings() -> list[tuple[str, Any, Any]]:
@@ -2434,84 +2556,6 @@ def _desired_window_readings() -> list[tuple[str, Any, Any]]:
         (f"{label}: on a trusted clock, one reading finds a version stamped longer ago than the window",
          run([(nyt, old)], 0.0, clocks=True), {"task": (old, "clock")}),
         (f"{label}: without one, a single reading never does", run([(nyt, old)], 0.0), {}),
-    ]
-
-
-def _redundancy_readings() -> list[tuple[str, Any, Any]]:
-    """redundancy.v1 0.1's machine (``lifecycle.json``) on the two orders
-    of events a bus can hand it while a read is in flight (F-199), and the
-    events zk2py's runtime gives back from what its watch holds."""
-    from . import redundancy as rd
-
-    a, b = "000000000000000a", "000000000000000b"
-
-    def run(events: list[Any], heard: set[str] | None = None) -> tuple[list[str], str]:
-        m = rd.Machine(b)
-        steps = []
-        queue = list(events)
-        while queue:
-            st = m.step(queue.pop(0))
-            steps.append(st["step"])
-            if heard is not None:
-                queue[0:0] = [e for e in rd.given_back(st, heard) if e != rd.FINISH]
-        return steps, m.state
-
-    label = "redundancy.v1 0.1 §2.5–§2.9 (F-199)"
-    alone = {"read": {"complete": True, "instances": [{"id": b, "token": False, "descriptor": "standby"}]}}
-    held = {"read": {"complete": True, "instances": [{"id": a, "token": True, "descriptor": "serving"},
-                                                     {"id": b, "token": False, "descriptor": "standby"}]}}
-    return [
-        (f"{label}: an appearance heard while its read runs is dropped, and the read that missed it takes over: "
-         "the fixture's machine never reads for the heal", run(["start", "finish", {"appeared": a}, alone, "finish"]),
-         (["claim", "read", "nothing", "take_over", "nothing"], rd.SERVING_STATE)),
-        (f"{label}: given back from the watch, it reads for the heal once it serves",
-         run(["start", "finish", {"appeared": a}, alone, "finish"], heard={a}),
-         (["claim", "read", "nothing", "take_over", "nothing", "read"], rd.HEAL_FIRST)),
-        (f"{label}: a withdrawal heard while its read runs is dropped, and the read that predates it stands it by "
-         "on an incumbent gone, no retry armed", run(["start", "finish", rd.WITHDRAWN, held, rd.TIMER]),
-         (["claim", "read", "nothing", "stand_by", "nothing"], rd.STANDING_BY)),
-        (f"{label}: given back from a watch hearing no holder, it campaigns again",
-         run(["start", "finish", rd.WITHDRAWN, held], heard=set()),
-         (["claim", "read", "nothing", "stand_by", "read"], rd.CAMPAIGNING)),
-        (f"{label}: a watch still hearing the incumbent gives nothing back", rd.given_back(
-            {"step": "stand_by", "why": "incumbent", "retry": False, "instance": a}, {a}), []),
-        (f"{label}: a heal's first read not made shows none, and the fixture's machine goes back to serving: the "
-         "split let go", run(["start", "finish", alone, "finish", {"appeared": a},
-                              {"read": {"complete": False, "instances": []}}]),
-         (["claim", "read", "take_over", "nothing", "read", "nothing"], rd.SERVING_STATE)),
-        (f"{label}: given back after the retry interval while the watch still hears the other holder",
-         rd.given_back({"step": "nothing"}, {a}, incomplete_heal=True), [{"appeared": a}]),
-    ] + _remint_readings()
-
-
-def _remint_readings() -> list[tuple[str, Any, Any]]:
-    """F-209: an incumbent's own re-mint (core §8.1), its new id lower than
-    its old, through the fixture's machine and through zk2py's."""
-    from . import redundancy as rd
-
-    old, new = "000000000000000b", "000000000000000a"
-
-    def read(*ids: str) -> dict[str, Any]:
-        return {"read": {"complete": True, "instances": [{"id": i, "token": True, "descriptor": "serving"}
-                                                         for i in ids]}}
-
-    serve = ["start", "finish", {"read": {"complete": True, "instances": [
-        {"id": old, "token": False, "descriptor": "standby"}]}}, "finish"]
-    overlap = [{"appeared": new}, read(new, old), "timer", read(new)]
-    m = rd.Machine(old)
-    plain = [m.step(e)["step"] for e in serve + overlap]
-    m2 = rd.Machine(old)
-    for e in serve:
-        m2.step(e)
-    m2.remint(new)
-    told = [m2.step(e)["step"] for e in overlap]
-    label = "redundancy.v1 0.1, an incumbent's own re-mint (F-209)"
-    return [
-        (f"{label}: the fixture's machine hears its new id's token as another holder's, reads its overlap as a "
-         "split, and steps down to itself", (plain[4:], m.why, m.named),
-         (["read", "grace", "read", "step_down"], "lower_holder", new)),
-        (f"{label}: told of the re-mint, zk2py's machine hears nothing to heal, and serves on under its new id",
-         (told[0], m2.state, m2.own), ("nothing", rd.SERVING_STATE, new)),
     ]
 
 

@@ -10263,6 +10263,14 @@ or a withdrawal heard while a read is asked is kept, and decided after
 that read's decision", and §2.9, "a heal whose read is not complete reads
 again after the retry interval".
 
+**Status at redundancy.v1 0.2:** resolved: what is heard while a read
+is asked is kept, as through an act, and decided at that read's
+decision, and a heal read not complete showing fewer than two holders is
+made again after the retry interval (`retry`); only a complete read
+showing one holder ends a heal. zk2py's machine, rewritten from it,
+passed the nine cases the first time they ran. `given_back` and its seven
+readings are gone. The heal's retry passes live where zk2py is B.
+
 ### F-200 · contradiction · redundancy.v1 scenarios.md §10 Expected 4 against §2.11 and `elections.json`
 
 > scenarios.md §10 step 4: "V1 and V2 start with two lock files (a
@@ -10286,6 +10294,11 @@ by on V2 in every run.
 10 ms of each other", or Expected 4, "V2 serves; V1, its own lock held,
 stands by on V2's token: a lock that two hosts both hold is a split only
 when their reads miss each other".
+
+**Status at redundancy.v1 0.2:** resolved: §10 step 4 expects what
+§2.11 says, the later instance standing by on the earlier, and the new
+step 5 gives "both serve" its setting, behind a cut link. §2.11 gains
+"Two locks". Both steps pass live in every pairing.
 
 ### F-201 · contradiction · redundancy.v1 §2.8 "When a departure is seen", scenarios.md §1 step 4 and §10 step 3, against core Appendix B
 
@@ -10317,6 +10330,11 @@ kernel closes its links is seen at once; a lost host or a partition at
 zenoh's lease"; and §1 and §10, "the test makes A's link silent, then
 kills its process".
 
+**Status at redundancy.v1 0.2:** resolved: §2.8 says a crash whose
+host's kernel closes its links is seen at once, a lost host at the lease,
+and §1 and §10 step 3 run both ways, the silent run with a short lease.
+zk2py's runner already did; both ways pass in every pairing.
+
 ### F-202 · gap · redundancy.v1 scenarios.md §1 Expected 1 and §3 Expected 1: an order no subscriber sees
 
 > §1 Expected 1: "S receives A's first descriptor, marked standby, then
@@ -10344,6 +10362,11 @@ the moment S hears its instance token, answers it marked standby, and
 one made the moment S hears its interface token, unmarked (core
 presence.md §1's observation)".
 
+**Status at redundancy.v1 0.2:** resolved: the Conventions observe
+"before the token" by a GET of the descriptor the moment S hears each
+token, and judge no receipt order. That is zk2py's reading; it passes in
+every pairing, the owner example's descriptors included.
+
 ### F-203 · contradiction · redundancy.v1 scenarios.md §3 Expected 1 against §2.5 step 2
 
 > §3 Expected 1: "In every run, A serves and B stands by within 5 s of
@@ -10365,6 +10388,10 @@ B serving and A standing by on B's token, which §2.5 step 2 asks.
 **Wording that would remove the guess:** "one serves and the other stands
 by: A, unless B took over before A's read, A then standing by on B as
 §2.5 step 2 says".
+
+**Status at redundancy.v1 0.2:** resolved: §3's Expected is "A, unless
+B took over before A's read, A then standing by on B". zk2py counts the
+third outcome; it happened in every pairing but zk2py's own (README).
 
 ### F-204 · gap · redundancy.v1 §2.5 step 1 and step 3: a refused read on the claim's own session
 
@@ -10398,6 +10425,14 @@ session that holds neither a liveliness subscriber nor the claim, since
 a session answers its own tokens itself; the instance makes one round
 trip on the claim's session …".
 
+**Status at redundancy.v1 0.2:** resolved by 0.2 §2.5 step 1 and core
+0.40 §8.1: the read goes on a session holding neither a liveliness
+subscriber nor the claim, after one round trip on the claim's session,
+since a session answers its own tokens itself. zk2py already read so.
+§5 checks it live in every pairing: through R3 the read on the claim's
+own session returns the claim and one on another session nothing, and A,
+reading on its reader, stands by `own_claim_missing`.
+
 ### F-205 · minor · redundancy.v1 scenarios.md §5 Expected 2: zenoh's reconnect inside the bound
 
 > §5 Expected 2: "Within the retry interval plus 2 s of R1's start, A's
@@ -10412,6 +10447,10 @@ assumes a reconnect the text does not configure.
 
 **Wording that would remove the guess:** the Setup, "A's connect retry
 period at most 1 s", or "within the retry interval plus its reconnect".
+
+**Status at redundancy.v1 0.2:** resolved: §5's Setup holds A's
+connect retry period at 1 s at most, and Expected 2's bound adds its
+reconnect. zk2py's 0.5 s is inside it.
 
 ### F-206 · gap · core §8.1 "complete", and redundancy.v1 §0 "Read": a peer's read through a router
 
@@ -10440,6 +10479,12 @@ other peers cannot link to reads none of theirs", and redundancy.v1 §2.13
 or §2.5, "candidates are clients of a router, or peers linked to each
 other".
 
+**Status at redundancy.v1 0.2:** resolved by core 0.40 §8.1: a
+complete read covers only what its routers' clients and its linked peers
+hold, and a candidate's sessions MUST be clients of a router, or peers
+linked to every other candidate's. §5's peers listen and gossip, as
+zk2py's did.
+
 ### F-207 · ambiguity · redundancy.v1 `lifecycle.json`: a withdrawal kept while stepping down, under external without the lock
 
 > `lifecycle.json`: "finish of a step_down stands by, and campaigns when
@@ -10459,6 +10504,11 @@ one heard standing by.
 **Wording that would remove the guess:** "campaigns when a withdrawal was
 heard while stepping down and it may (under external, with the lock),
 else nothing", and a case.
+
+**Status at redundancy.v1 0.2:** resolved: a withdrawal kept through
+a step-down under `external` campaigns only with the lock, else nothing,
+and the lock's return campaigns in any case. That was zk2py's `nothing`.
+`lifecycle.json`'s case for it passes.
 
 ### F-208 · gap · hostid.v1 0.6 §2.12: the finding's reads hold no interface token
 
@@ -10481,6 +10531,10 @@ and the interface tokens at once, as `redundancy.v1` §0's read does.
 
 **Wording that would remove the guess:** §2.12, "reads the address's
 `@zk/**` (its instance and interface tokens) twice".
+
+**Status at hostid.v1 0.7:** resolved: §2.12's reads are of the
+address's `@zk/**`, instance and interface tokens together, as zk2py
+read them. `hostid_scenarios` §6 passes.
 
 ### F-209 · gap · redundancy.v1 §2.5 to §2.9 and `lifecycle.json`: an incumbent's own re-mint
 
@@ -10510,6 +10564,13 @@ B; A serving under its new id.
 **Wording that would remove the guess:** an event `{"reminted": id}`
 whose id is `own` from then on, its former ids never another holder, and
 §2.9, "a candidate's own re-mint is no appearance".
+
+**Status at redundancy.v1 0.2:** resolved: `lifecycle.json` gains
+`{"reminted": id}`, the former ids its own, told to the election before
+the new id's tokens are declared, in every state. zk2py's machine has
+the event, and its candidate tells it before the owner's re-mint. The
+three cases pass, and the re-mint, alone and during a campaign, passes
+live in every pairing.
 
 **Counts at redundancy.v1 0.1 and core 0.39:** 209 entries. F-199 to
 F-209 are open, F-205 minor. F-181 to F-184 are resolved, and F-185 to
@@ -10691,5 +10752,186 @@ whose key is not it is none".
 **Counts at desired.v1 0.4:** 213 entries. Open:
 - F-199 to F-209, against redundancy.v1 0.1 (being answered on #841);
 - F-210 to F-213, F-212 minor.
+
+Every other entry is resolved.
+
+## At redundancy.v1 0.2 and core 0.40 (#609)
+
+Round 58 read `redundancy.v1` text 0.2, core 0.40 and `hostid.v1` 0.7
+cold, from PR #858's head, and ran the profile live against the Rust
+runtime for the first time. zk2py rewrote its machine from 0.2's
+description of what is kept, gave it the `retry` step and the
+`{"reminted": id}` event, and added §2.7's poll, a standby's refused
+writes, the forgetting at a step-down, and writes stopped before the
+token goes. Its candidate process now takes the owner example's command
+line and answers its commands in its JSON, so one runner drives either
+as a black box. Every Rust count is from the owner example built from
+the merged head, `owner-rb-final`. Main's "Decided here" since PR #858's
+review, a failed takeover undone in §2.9's order and the instance then
+electing no more, zk2py now does too. It also explored its machine: no
+read is asked while one it asked is unanswered, under both elections
+(1076 states).
+
+**Round 56's findings at 0.2:** F-199 to F-209 are all resolved. Each
+entry has its status line.
+
+**`just py-conformance`: 2937 of 2937.** `redundancy` passes 173:
+`lifecycle.json`'s 13 new cases passed the first time they ran.
+`readings` passes 354: the nine readings of 0.1's dropped events and
+re-mint went with `given_back`, since `lifecycle.json` now holds them.
+Seven of §2.7's poll came, and five of kept events decided partway.
+Those five show that no kept event moves the machine to taking over or
+stepping down, so the rest of a list is always re-entered in a state
+that keeps it. Round 57's six readings of F-211 had not been
+counted in the README; they are now.
+
+**Live:** every check passes in all four pairings (README, "redundancy.v1").
+- `scenarios.md` §1 to §12: zk2py against zk2py 64, Rust against Rust
+  62, zk2py's A beside Rust's B 64, Rust's A beside zk2py's B 62.
+- zk2py's own six sections: 15, 13, 14 and 14.
+
+Where A is Rust's, §1 to §12 count two fewer. §5's is zk2py's step log,
+which the owner example has no command for. §11's is its reason, F-214,
+noted instead of checked. Of zk2py's own, the re-mint's log and the
+cut-apart reader are zk2py's alone. §3 ran 20 times per pairing. No check needed a rerun under
+the Rust gate running beside.
+
+**The mixed pairings.** The two elect the same incumbent from the same
+reads in every run: a simultaneous start, each crash both ways, a split
+and its heal, §10's locks, and a re-mint during a campaign. In §3, B kept
+serving in 0, 1, 5 and 1 runs of 20 (zk2py, Rust, zk2py A beside Rust,
+Rust A beside zk2py), and both took over then healed in 0, 1, 0 and 1.
+
+**The poll's misses.**
+- A second holder for 150 ms went unread in 2 or 3 of 6, in every
+  pairing, as §2.7 says it can.
+- Across a link paused for 6 s while the incumbent went, every poll
+  timed out, and the first complete one found no holder. Both
+  implementations took over (`poll-miss`, 3 of 3 per pairing), reading
+  "the last's" as F-215 asks.
+
+**The heal's retry.** The heal read across a paused link was not
+complete in every pairing. The owner example said "the read ended at its
+timeout", made it again after the retry interval, and stepped down
+5.1 s after the heal was let go. zk2py stepped down at 4.0 s; its
+`--hold-heal` holds the heal's timers, the owner example's its reads, so
+zk2py retried its second read and the owner example its first. With its
+reader cut apart from its watch, zk2py's steps were read, retry, read,
+retry, read, grace, read, step_down.
+
+**A re-mint during a campaign.** B re-mints while it campaigns for A's
+seat, A killed as it runs: B takes over under its new id, 3 of 3, in
+every pairing.
+
+**The scenarios, read for sufficiency.** Every section ran from its
+text, the owner example's included. §3's "within 10 ms" needs a start
+both can be held at (F-216). §9's "the test holds B's step-down" ran on
+either hook.
+
+**Where zk2py and the Rust runtime differ.** All three are in what they
+report:
+- `made` counted reads not made, in zk2py's; now as the owner example's.
+- A `why` after a step-down: zk2py's named one, which `elections.json`
+  does not have.
+- §11's reason (F-214).
+
+**What the owner example could not do from stdin:**
+- put a chosen value;
+- say its zid, read instead from its descriptor's `meta.zid`;
+- say its steps or what each poll read;
+- hold its start (F-216);
+- choose a re-mint's id;
+- cut its reader apart from its watch.
+
+### F-214 · minor · the owner example's §11 step 2: a refusal that names a standby write, not `value`
+
+> scenarios.md §11 Expected 2: "The same refusal: the declaration is
+> invalid, `value` (§2.2)."
+
+Given `ledger-vote.v1.toml` (`redundancy.election = "vote"`), the owner
+example exits 1 having declared nothing, as Expected 1 asks. Its standard
+error is not §2.2's reason, though:
+
+```
+ledger.v1 stands by: this instance does not serve it, and writes none of its keys (redundancy.v1 §2.4)
+```
+
+The same contract without its raw state gets the runtime's own refusal:
+
+```
+not started: ledger.v1's redundancy.v1 declaration is invalid: value (redundancy.election is the string claim or external) (redundancy.v1 §2.2, §2.14)
+```
+
+So the owner example writes its raw state before the runtime has checked
+the declaration. The write is refused as a standby's, which a governed
+interface's resources are at birth, and the example exits on that error.
+What can be observed holds: no instance token, nothing put. The reason
+the scenario asks for is lost, and so is the "not started:" prefix.
+
+**zk2py:** checks the reason for its own candidate, and notes the owner
+example's as a known deviation.
+
+**Wording that would remove the guess:** none in the text; the owner
+example would check the declaration, by starting, before it writes.
+
+### F-215 · ambiguity · redundancy.v1 0.2 §2.7 "A poll": the last read's holders, or the last complete read's
+
+> §2.7 (0.2): "A candidate without one reads the address every period
+> instead, on its reader (§2.5 step 1), each read's holders compared with
+> the last's: a holder new to it is an appearance, and a complete read
+> with no other holder, after one with some, a withdrawal (a read not
+> complete establishes no absence, core §8.1)."
+
+"The last's" can be the last read's, whatever it was, or the last
+complete read's. A read not complete commonly shows nothing at all,
+because it timed out. Read literally, as the last read's:
+- **A vacancy missed for good.** Complete {A}, then not complete {}, then
+  complete {}. The third comes after one with none, so it is no
+  withdrawal. A standby on its incumbent armed no retry (§2.5), so it
+  never campaigns, and the address stays vacant.
+- **An appearance that is none.** Complete {A}, not complete {}, complete
+  {A}. A is new to the third read, so an incumbent polling heals for
+  nothing.
+
+The parenthesis says a read not complete establishes no absence. It
+does not say that it leaves the comparison alone.
+
+**zk2py:** a read not complete removes nothing: what is kept as the
+last's is the last's together with what that read showed. A holder it
+shows that is new is an appearance. Seven readings pin it (`poll_step`).
+Live, both implementations took over in the first case (`poll-miss`),
+so the owner example reads the same, or makes no poll not complete
+there.
+
+**Wording that would remove the guess:** "compared with the last's,
+where a read not complete removes no holder from the last's: …".
+
+### F-216 · minor · redundancy.v1 scenarios.md §3 step 1: "within 10 ms" with nothing to hold a start at
+
+> scenarios.md §3 step 1: "A and B start within 10 ms of each other."
+
+A runner drives the owner example only by starting its process, which has
+no hold. A process's start-up is not 10 ms of anything: zk2py's
+interpreter takes hundreds of ms to start, and both vary under load. So in a mixed pairing "start together" is a spawn
+offset, calibrated from the instance tokens' arrival at S in earlier
+runs. Measured at S:
+- the two instance tokens' median skew was 1 or 2 ms in every pairing;
+- the first run of a mixed pairing, before calibration, reached 242 ms.
+
+The Expected judges only the end state, so no check failed. But the
+step's condition, which picks out the both-take-over branch, is met or
+not by the runner's luck.
+
+**zk2py:** its candidate takes `--wait-go` (it starts at a line `go` on
+standard input), and the runner calibrates the owner example's spawn
+against it. It records each run's skew at S.
+
+**Wording that would remove the guess:** "start" measured as the
+instance token reaching S, a run outside 10 ms made again and counted
+apart, and the owner example given a start hold.
+
+**Counts at redundancy.v1 0.2 and core 0.40:** 216 entries. Open:
+- F-210 to F-213, against desired.v1 0.4, F-212 minor;
+- F-214 to F-216, F-214 and F-216 minor.
 
 Every other entry is resolved.

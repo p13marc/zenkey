@@ -268,22 +268,38 @@ def heal(own: str, election: str, first: Iterable[str], second: Iterable[str]) -
 
 UNCLAIMED, CLAIMING, CAMPAIGNING, STANDING_BY, TAKING_OVER = (
     "unclaimed", "claiming", "campaigning", "standing_by", "taking_over")
-SERVING_STATE, HEAL_FIRST, HEAL_GRACE, HEAL_SECOND, STEPPING_DOWN = (
-    "serving", "heal_first", "heal_grace", "heal_second", "stepping_down")
+SERVING_STATE, HEAL_FIRST, HEAL_GRACE, HEAL_SECOND, HEAL_RETRY, STEPPING_DOWN = (
+    "serving", "heal_first", "heal_grace", "heal_second", "heal_retry", "stepping_down")
 
 #: The events a runtime hands the machine (``lifecycle.json``).
 START, FINISH, WITHDRAWN, TIMER = "start", "finish", "withdrawn", "timer"
+NOTHING: dict[str, Any] = {"step": "nothing"}
+
+#: where an appearance, or a withdrawal, heard is kept (text 0.2, F-199):
+#: "an appearance of another instance's token while campaigning, taking over
+#: or a heal read is asked, and a withdrawal while campaigning, stepping down
+#: or a heal read is asked"
+KEEPS_APPEARANCE = (CAMPAIGNING, TAKING_OVER, HEAL_FIRST, HEAL_SECOND)
+KEEPS_WITHDRAWAL = (CAMPAIGNING, STEPPING_DOWN, HEAL_FIRST, HEAL_SECOND)
 
 
 @dataclass
 class Machine:
-    """One candidate ``own`` of a governed interface (``lifecycle.json``).
-    :meth:`step` takes one event and returns the step its runtime does:
-    ``claim``, ``read``, ``grace``, ``stand_by`` (why, instance, retry),
-    ``take_over``, ``step_down`` (why, instance) or ``nothing``. The role
-    is ``unclaimed`` before the claim's finish, ``standby`` while
-    campaigning, standing by or taking over, ``serving`` while serving,
-    healing or stepping down."""
+    """One candidate ``own`` of a governed interface (``lifecycle.json``,
+    text 0.2). :meth:`step` takes one event and returns the step its runtime
+    does: ``claim``, ``read``, ``grace``, ``retry`` (serving, the retry timer
+    armed for a heal read that ended nothing), ``stand_by`` (why, instance,
+    retry), ``take_over``, ``step_down`` (why, instance) or ``nothing``.
+
+    What is heard while a read is asked or an act runs is kept, and decided
+    "at that read's decision, or that act's finish … as if heard then, in
+    the state the decision leaves (an appearance first, then a withdrawal),
+    and the first that asks something replaces a stand_by or a nothing,
+    while an act's own phase keeps what it keeps" (F-199). Its own re-mint
+    (``{"reminted": id}``, F-209) makes ``id`` its own, and every former id
+    its own too. The role is ``unclaimed`` before the claim's finish,
+    ``standby`` while campaigning, standing by or taking over, ``serving``
+    while serving, healing or stepping down."""
 
     own: str
     election: str = CLAIM
@@ -292,28 +308,18 @@ class Machine:
     lock: bool = False
     #: the stand_by in force armed the retry timer
     retry: bool = False
-    #: an appearance heard while taking over (the heal starts once it serves)
-    appeared: bool = False
-    #: a withdrawal heard while stepping down (it campaigns once it stands by)
-    withdrawn: bool = False
+    #: appearances kept (ids, in order), and a withdrawal kept
+    kept_appeared: list[str] = field(default_factory=list)
+    kept_withdrawn: bool = False
     #: the heal's first read's holders, own counted
     first: set[str] = field(default_factory=set)
+    #: which heal read a retry makes again: HEAL_FIRST or HEAL_SECOND
+    again: str = HEAL_FIRST
     #: the instance the last stand_by or step_down named
     named: str | None = None
     why: str | None = None
     #: its former ids, after a re-mint (F-209): its own, never another's
     former: set[str] = field(default_factory=set)
-
-    def remint(self, new: str) -> None:
-        """A re-mint in its own process (core §1.5, §8.1): its id is ``new``
-        from now on, and its former ids are its own. The fixture's machine
-        has no such event (F-209): without it, the new id's token is
-        another holder's appearance, and the overlap a split."""
-        self.former.add(self.own)
-        self.own = new
-
-    def _ours(self, holders: set[str]) -> set[str]:
-        return (holders - self.former) | {self.own}
 
     @property
     def role(self) -> str:
@@ -326,6 +332,30 @@ class Machine:
     @property
     def external(self) -> bool:
         return self.election == EXTERNAL
+
+    def remint(self, new: str) -> None:
+        """Its own re-mint (core §1.5, §8.1; F-209): ``new`` is its own from
+        then on, and every former id is its own too."""
+        if new != self.own:
+            self.former.add(self.own)
+            self.own = new
+
+    def mine(self, ident: str) -> bool:
+        return ident == self.own or ident in self.former
+
+    def _ours(self, r: Read) -> Read:
+        """"a read is first read with every former id of own as own"."""
+        if not self.former:
+            return r
+        out: dict[str, Seen] = {}
+        for i in r.instances:
+            ident = self.own if i.id in self.former else i.id
+            prev = out.get(ident)
+            if prev is None:
+                out[ident] = Seen(ident, i.token, i.descriptor)
+            else:
+                out[ident] = Seen(ident, prev.token or i.token, prev.descriptor if ident != self.own else i.descriptor)
+        return Read(r.complete, tuple(out.values()))
 
     def _stand_by(self, why: str, instance: str | None = None, retry: bool | None = None) -> dict[str, Any]:
         """``retry is false for incumbent and no_lock, true otherwise``."""
@@ -348,46 +378,58 @@ class Machine:
         return not self.external or self.lock
 
     def step(self, event: Any) -> dict[str, Any]:
-        nothing: dict[str, Any] = {"step": "nothing"}
         if isinstance(event, dict):
             (kind, value), = event.items()
         else:
             kind, value = event, None
-        if kind == START:
-            if self.state != UNCLAIMED:
-                return nothing
-            self.state = CLAIMING
-            return {"step": "claim"}
-        if kind == FINISH:
-            return self._finish()
+        if kind == "reminted":
+            self.remint(str(value))
+            return dict(NOTHING)
         if kind == "read":
             r = value if isinstance(value, Read) else Read.of(value)
-            return self._read(r)
+            return self._settle(self._read(self._ours(r)))
+        if kind == FINISH:
+            return self._settle(self._finish())
+        if kind == "appeared" and not self.mine(str(value)) and self.state in KEEPS_APPEARANCE:
+            if not self.external:
+                self.kept_appeared.append(str(value))
+            return dict(NOTHING)
+        if kind == WITHDRAWN and self.state in KEEPS_WITHDRAWAL:
+            self.kept_withdrawn = True
+            return dict(NOTHING)
+        return self._event(kind, value)
+
+    def _event(self, kind: str, value: Any) -> dict[str, Any]:
+        """An event in the state the machine is in, never kept."""
+        if kind == START:
+            if self.state != UNCLAIMED:
+                return dict(NOTHING)
+            self.state = CLAIMING
+            return {"step": "claim"}
         if kind == "appeared":
-            if value == self.own or value in self.former or self.external:
-                return nothing
+            if self.mine(str(value)) or self.external:
+                return dict(NOTHING)
             if self.state == SERVING_STATE:
                 self.state = HEAL_FIRST
                 return {"step": "read"}
-            if self.state == TAKING_OVER:
-                self.appeared = True
-            return nothing
+            return dict(NOTHING)
         if kind == WITHDRAWN:
             if self.state == STANDING_BY and self._may_campaign():
                 return self._campaign()
-            if self.state == STEPPING_DOWN:
-                self.withdrawn = True
-            return nothing
+            return dict(NOTHING)
         if kind == TIMER:
             if self.state == STANDING_BY and self.retry:
                 return self._campaign()
             if self.state == HEAL_GRACE:
                 self.state = HEAL_SECOND
                 return {"step": "read"}
-            return nothing
+            if self.state == HEAL_RETRY:
+                self.state = self.again
+                return {"step": "read"}
+            return dict(NOTHING)
         if kind == "lock":
             if not self.external:
-                return nothing
+                return dict(NOTHING)
             taken = bool(value) and not self.lock
             self.lock = bool(value)
             if taken and self.state == STANDING_BY:
@@ -396,30 +438,51 @@ class Machine:
                 self.state = STEPPING_DOWN
                 self.why, self.named = "lock_lost", None
                 return {"step": "step_down", "why": "lock_lost"}
-            return nothing
-        return nothing
+            return dict(NOTHING)
+        return dict(NOTHING)
+
+    def _settle(self, step: dict[str, Any]) -> dict[str, Any]:
+        """The kept events, decided at a read's decision or an act's finish,
+        in the state it left: an act's own phase keeps what it keeps
+        (appearances through a takeover, a withdrawal through a step-down);
+        otherwise each is decided as if heard now, appearances first, and the
+        first that asks something replaces a stand_by or a nothing. What
+        follows it stays kept when the state it leaves keeps it."""
+        events: list[Any] = [{"appeared": a} for a in self.kept_appeared]
+        if self.kept_withdrawn:
+            events.append(WITHDRAWN)
+        self.kept_appeared, self.kept_withdrawn = [], False
+        if not events:
+            return step
+        if self.state == TAKING_OVER:
+            self.kept_appeared = [e["appeared"] for e in events if isinstance(e, dict)]
+            return step
+        if self.state == STEPPING_DOWN:
+            self.kept_withdrawn = WITHDRAWN in events
+            return step
+        replaceable = step.get("step") in ("stand_by", "nothing")
+        for i, e in enumerate(events):
+            asked = self._event(*((next(iter(e.items()))) if isinstance(e, dict) else (e, None)))
+            if asked.get("step") != "nothing":
+                for rest in events[i + 1:]:
+                    self.step(rest)  # kept again where the new state keeps it
+                return asked if replaceable else step
+        return step
 
     def _finish(self) -> dict[str, Any]:
         if self.state == CLAIMING:
             return self._campaign()
         if self.state == TAKING_OVER:
             self.state = SERVING_STATE
-            appeared, self.appeared = self.appeared, False
             if self.external and not self.lock:
                 self.state = STEPPING_DOWN
                 self.why, self.named = "lock_lost", None
                 return {"step": "step_down", "why": "lock_lost"}
-            if not self.external and appeared:
-                self.state = HEAL_FIRST
-                return {"step": "read"}
-            return {"step": "nothing"}
+            return dict(NOTHING)
         if self.state == STEPPING_DOWN:
-            withdrawn, self.withdrawn = self.withdrawn, False
             self.state, self.retry = STANDING_BY, False
-            if withdrawn and self._may_campaign():
-                return self._campaign()
-            return {"step": "nothing"}
-        return {"step": "nothing"}
+            return dict(NOTHING)
+        return dict(NOTHING)
 
     def _read(self, r: Read) -> dict[str, Any]:
         if self.state == CAMPAIGNING:
@@ -432,45 +495,46 @@ class Machine:
             assert d.why is not None
             return self._stand_by(d.why, d.instance)
         if self.state == HEAL_FIRST:
-            holders = self._ours(r.holders())
+            holders = r.holders() | {self.own}
             if len(holders) >= 2:
                 self.first, self.state = holders, HEAL_GRACE
                 return {"step": "grace"}
-            self.state = SERVING_STATE
-            return {"step": "nothing"}
+            if r.complete:
+                self.state = SERVING_STATE
+                return dict(NOTHING)
+            # a heal read not complete showing fewer than two ends nothing
+            self.state, self.again = HEAL_RETRY, HEAL_FIRST
+            return {"step": "retry"}
         if self.state == HEAL_SECOND:
-            down, who = heal(self.own, self.election, self.first, self._ours(r.holders()))
+            down, who = heal(self.own, self.election, self.first, r.holders() | {self.own})
             if down:
                 self.state, self.why, self.named = STEPPING_DOWN, "lower_holder", who
                 return {"step": "step_down", "why": "lower_holder", "instance": who}
+            if who == "no_split" and not r.complete:
+                self.state, self.again = HEAL_RETRY, HEAL_SECOND
+                return {"step": "retry"}
             self.state = SERVING_STATE
-            return {"step": "nothing"}
-        return {"step": "nothing"}
+            return dict(NOTHING)
+        return dict(NOTHING)
 
 
-def given_back(step: dict[str, Any], others_heard: Iterable[str], incomplete_heal: bool = False) -> list[Any]:
-    """The events a runtime hands its machine again from what its watch
-    holds after a step (F-199), since ``lifecycle.json``'s machine drops
-    both while it campaigns ("Every other event in every other state is
-    nothing"):
-    - after a ``take_over``, each other holder its watch hears is an
-      ``appeared``: a holder that appeared during the read before it would
-      otherwise leave a split no heal starts, the lower one's heal keeping
-      it serving and the higher never reading;
-    - after a ``stand_by`` on an incumbent, a watch hearing no holder is a
-      ``withdrawn``: an incumbent the read showed and that went while it ran
-      would otherwise leave it standing by on nobody, no retry armed;
-    - after a heal's read that was not complete sent it back to serving
-      (``incomplete_heal``), each other holder its watch still hears is an
-      ``appeared`` again, which the runtime hands back after its retry
-      interval: "a read not made shows none" (§2.9), so a heal whose read
-      could not be made would let the split go for good."""
-    others = sorted(set(others_heard), key=id_key)
-    if step.get("step") == "take_over" or (step.get("step") == "nothing" and incomplete_heal):
-        return [{"appeared": o} for o in others]
-    if step.get("step") == "stand_by" and step.get("why") == "incumbent" and not others:
-        return [WITHDRAWN]
-    return []
+def poll_step(last: set[str] | None, others: set[str], complete: bool) -> tuple[list[Any], set[str] | None]:
+    """§2.7 (0.2), "A poll, where no watch session can be held": one poll's
+    holders other than its own, against the last's -> the events it hands
+    its machine, and what it keeps as the last's. "A holder new to it is an
+    appearance, and a complete read with no other holder, after one with
+    some, a withdrawal (a read not complete establishes no absence)". The
+    first poll is the baseline, and hands nothing. A read not complete
+    removes nothing from the last's, so a holder it missed is neither gone
+    from it nor new at the next read (F-215)."""
+    if last is None:
+        return [], set(others)
+    events: list[Any] = [{"appeared": h} for h in sorted(others - last, key=id_key)]
+    if complete:
+        if last and not others:
+            events.append(WITHDRAWN)
+        return events, set(others)
+    return events, last | others
 
 
 # -- §2.15, §5 what a tool concludes ---------------------------------------------------
