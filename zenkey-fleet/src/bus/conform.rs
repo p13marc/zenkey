@@ -65,7 +65,7 @@ use crate::judge::doctor::DoctorBus;
 use crate::model::catalog::{ContractSet, ContractState, Observed, Revision};
 use crate::model::render::Member;
 use crate::model::target::Target;
-use crate::report::{OperationReport, StateReport, WatchSample};
+use crate::report::{CaseId, OperationReport, StateReport, WatchSample};
 
 /// How many samples a resource's subscription keeps for the judge; past
 /// it they are counted, and the cases say what they judged.
@@ -124,6 +124,42 @@ pub struct ConformSpec {
     /// `zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE`, unless the
     /// deployment changes it.
     pub wait_before_close: Duration,
+    /// The cases `--skip` names. A skipped case sends nothing: an
+    /// operation is called only when `operation` is asked, its fan-out
+    /// probed only when `fanout-refused` is, and a standby probed only when
+    /// `redundancy-standby` is (text 0.4 of `redundancy.v1`, F-222). The
+    /// rows themselves are marked by [`crate::report::ConformReport::skip`].
+    pub skip: Skipped,
+}
+
+/// The cases a run skips, as a set over [`CaseId`]: `Copy`, as
+/// [`ConformSpec`] is. One bit per case, indexed by the case itself, so
+/// the lookup is total (review on PR #867).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Skipped(u64);
+
+// Every case has a bit of a `u64`: `CaseId::ALL` lists every case (its
+// pinned-shape test), so at most 64 fit, and a 65th fails the build.
+const _: () = assert!(CaseId::ALL.len() <= u64::BITS as usize);
+
+impl Skipped {
+    /// The set of `cases`.
+    #[must_use]
+    pub fn of(cases: &[CaseId]) -> Skipped {
+        Skipped(cases.iter().fold(0, |m, c| m | Self::bit(*c)))
+    }
+
+    /// The case's bit: its discriminant, which a fieldless enum numbers
+    /// from 0 in declaration order, below `ALL.len()`, so below 64.
+    fn bit(c: CaseId) -> u64 {
+        1u64 << (c as u32)
+    }
+
+    /// Whether `c` is asked: not skipped.
+    #[must_use]
+    pub fn asks(&self, c: CaseId) -> bool {
+        self.0 & Self::bit(c) == 0
+    }
 }
 
 impl ConformSpec {
@@ -537,15 +573,20 @@ pub async fn observe(
         );
     }
     // redundancy.v1 (#841, RC): a governed revision with an instance
-    // marked standby has its standbys probed, then presence read again.
+    // marked standby has its standbys probed, then presence read again,
+    // unless the case is skipped (text 0.4, F-222: a skipped case sends
+    // nothing). The probes are guarded by every revision of the interface
+    // in hand (#862's review): the one under test, and those held offline.
     if let (Ok(first), Some(rev)) = (&obs.presence, obs.revision.clone())
+        && obs.spec.skip.asks(CaseId::RedundancyStandby)
         && matches!(
             zenkey_model::redundancy::declaration_of(rev.contract(), false),
             zenkey_model::redundancy::Declaration::Governed(_)
         )
         && marks_standby(first, &obs.iface)
     {
-        obs.redundancy = Some(standby_suite(session, &obs.address, &rev, t).await);
+        let guard: Vec<&Revision> = offline.of_iface(&obs.iface).map(|r| r.as_ref()).collect();
+        obs.redundancy = Some(standby_suite(session, &obs.address, &rev, &guard, t).await);
     }
     obs
 }
@@ -883,11 +924,20 @@ async fn call(
     if !(op.idempotent || spec.call_all) {
         return OpObserved::NotCalled;
     }
+    // A skipped case sends nothing (F-222).
+    let (calling, probing) = (
+        spec.skip.asks(CaseId::Operation),
+        spec.skip.asks(CaseId::FanoutRefused),
+    );
+    if !calling && !probing {
+        return OpObserved::NotCalled;
+    }
     let name = zenkey::implementation::resource_name(r);
     let request = crate::tape::synth::Synth::new(spec.seed)
         .sample(rev, r, Member::Request, 0)
         .map(|s| s.bytes);
     let call = match &request {
+        _ if !calling => Err("not made: the operation case is skipped".to_owned()),
         Err(why) => Err(format!("no request could be synthesized: {why}")),
         Ok(bytes) => match crate::model::target::plan_call(rev, target.clone(), &name, member(r)) {
             Err(e) => Err(crate::one_line(&e)),
@@ -911,6 +961,9 @@ async fn call(
         (rev.iface().clone(), bytes)
     });
     let fanout = match fanout {
+        Some(_) if !probing => Some(Err(
+            "not made: the fanout-refused case is skipped".to_owned()
+        )),
         Some((iface, bytes)) => {
             Some(fanout_probe(session, addr, &iface, r, bytes, spec.timeout).await)
         }
@@ -1499,29 +1552,65 @@ fn wildcard_of(addr: &Addr, iface: &IfaceId, r: &Resource) -> Vec<String> {
     chunks
 }
 
-/// The probes of §2.4: every state resource of the revision, and every
-/// operation that forbids fan-out, over a key expression that is a
-/// wildcard (a concrete operation's last chunk followed by `$*`), unless
-/// it would reach an operation that allows fan-out, whose handler a call
-/// over a wildcard runs: a write. Then presence again.
-async fn standby_suite(
-    session: &Session,
-    addr: &Addr,
-    rev: &Revision,
-    timeout: Duration,
-) -> StandbyConform {
+/// One probe of [`exposure_plan`]: the resource, whether an operation,
+/// and the key expression asked.
+#[derive(Debug, Clone)]
+pub struct PlannedProbe {
+    pub resource: String,
+    pub operation: bool,
+    pub selector: zenoh::key_expr::KeyExpr<'static>,
+}
+
+/// [`exposure_plan`]'s answer: each probe to make (or why it cannot be
+/// put), and each resource not probed, with why.
+pub type ExposurePlan = (
+    Vec<std::result::Result<PlannedProbe, String>>,
+    Vec<(String, String)>,
+);
+
+/// The probes of §2.4 for `rev` at `addr` (`redundancy.v1` §2.15, text
+/// 0.4): every state resource, and every operation that forbids fan-out,
+/// over a key expression that is a wildcard — a templated operation's
+/// template with `*` for each parameter, a template-less one's name
+/// followed by `$*`. Each wildcard is asked only if it intersects the key
+/// of no operation whose fan-out is allowed in any revision of `guard`:
+/// every revision of the interface in hand (the one under test, those the
+/// address's descriptors name, those held offline; #862's review), since
+/// a call over a wildcard runs such an operation's handler, a write (text
+/// 0.4, F-221).
+///
+/// **What a probe can still reach.** `append$*` reaches every operation of
+/// the interface at the address whose name begins with `append`, so an
+/// operation a revision not in hand declares (a minor this reader never
+/// saw) whose fan-out is allowed would run. A probe reaches nothing
+/// outside the address and the interface's `@op` and `state` chunks: a
+/// state probe is a read, and a verbatim chunk is never crossed (core
+/// §1.3).
+pub fn exposure_plan(addr: &Addr, rev: &Revision, guard: &[&Revision]) -> ExposurePlan {
     use zenoh::key_expr::KeyExpr;
-    let c = rev.contract();
     let iface = rev.iface().clone();
-    let allowed: Vec<KeyExpr<'static>> = c
-        .resources
-        .iter()
-        .filter(|r| matches!(&r.body, Body::Operation(op) if op.fanout == Fanout::Allowed))
-        .filter_map(|r| KeyExpr::autocanonize(wildcard_of(addr, &iface, r).join("/")).ok())
+    // The revisions guarding, each once by fingerprint: `guard` may hold
+    // the one under test too, when it is held offline (review on PR #867).
+    let mut seen = std::collections::BTreeSet::new();
+    let allowed: Vec<(String, KeyExpr<'static>)> = std::iter::once(&rev)
+        .chain(guard.iter())
+        .filter(|g| g.iface() == &iface && seen.insert(g.fingerprint().clone()))
+        .flat_map(|g| {
+            g.contract()
+                .resources
+                .iter()
+                .filter(|r| matches!(&r.body, Body::Operation(op) if op.fanout == Fanout::Allowed))
+                .filter_map(|r| {
+                    KeyExpr::autocanonize(wildcard_of(addr, &iface, r).join("/"))
+                        .ok()
+                        .map(|k| (g.fingerprint().to_string(), k))
+                })
+                .collect::<Vec<_>>()
+        })
         .collect();
     let mut probes = Vec::new();
     let mut not_probed = Vec::new();
-    for r in &c.resources {
+    for r in &rev.contract().resources {
         let name = zenkey::implementation::resource_name(r);
         let mut chunks = wildcard_of(addr, &iface, r);
         let operation = match (&r.kind, &r.body) {
@@ -1553,17 +1642,40 @@ async fn standby_suite(
                 continue;
             }
         };
-        if operation && let Some(other) = allowed.iter().find(|a| a.intersects(&ke)) {
+        if operation && let Some((fp, other)) = allowed.iter().find(|(_, a)| a.intersects(&ke)) {
             not_probed.push((
                 name,
                 format!(
                     "its probe {selector} would reach {other}, an operation whose fanout is \
-                     \"allowed\", and run it"
+                     \"allowed\" (revision {fp}), and run it"
                 ),
             ));
             continue;
         }
-        probes.push(exposure_probe(session, name, operation, ke, timeout).await);
+        probes.push(Ok(PlannedProbe {
+            resource: name,
+            operation,
+            selector: ke,
+        }));
+    }
+    (probes, not_probed)
+}
+
+/// [`exposure_plan`]'s probes made, then presence again.
+async fn standby_suite(
+    session: &Session,
+    addr: &Addr,
+    rev: &Revision,
+    guard: &[&Revision],
+    timeout: Duration,
+) -> StandbyConform {
+    let (planned, not_probed) = exposure_plan(addr, rev, guard);
+    let mut probes = Vec::new();
+    for p in planned {
+        probes.push(match p {
+            Ok(p) => exposure_probe(session, p.resource, p.operation, p.selector, timeout).await,
+            Err(e) => Err(e),
+        });
     }
     let second = crate::bus::presence::observe(session, &Scope::service(addr), timeout)
         .await
@@ -1611,4 +1723,109 @@ async fn exposure_probe(
         }
     }
     Ok(seen)
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+
+    fn revision(name: &str) -> Revision {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts")
+            .join(format!("{name}.toml"));
+        let l = zenkey_model::contract::load_path(&path);
+        Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            crate::report::ContractSource::File,
+        )
+    }
+
+    /// The probes planned, by resource, in order.
+    fn names(planned: &[std::result::Result<PlannedProbe, String>]) -> Vec<(String, String)> {
+        let mut v: Vec<(String, String)> = planned
+            .iter()
+            .flatten()
+            .map(|p| (p.resource.clone(), p.selector.to_string()))
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// `redundancy.v1` §2.15 (text 0.4, F-221, #862's review): `ledger.v1`
+    /// alone probes `append` over `append$*`; with a second revision of the
+    /// interface in hand that adds `appendall`, fan-out allowed, the same
+    /// probe would run it, so it is never asked, and says why.
+    #[test]
+    fn a_probe_is_guarded_by_every_revision_in_hand() {
+        let addr: Addr = "lab/ledger".parse().unwrap();
+        let ledger = revision("ledger.v1");
+        let appendall = revision("ledger-appendall.v1");
+        let (planned, not_probed) = exposure_plan(&addr, &ledger, &[]);
+        assert_eq!(
+            names(&planned),
+            [
+                (
+                    "@op/append".to_owned(),
+                    "zk2/lab/ledger/ledger.v1/@op/append$*".to_owned()
+                ),
+                (
+                    "state/balance".to_owned(),
+                    "zk2/lab/ledger/ledger.v1/state/balance".to_owned()
+                ),
+            ]
+        );
+        assert!(not_probed.is_empty(), "{not_probed:?}");
+        let (planned, not_probed) = exposure_plan(&addr, &ledger, &[&appendall]);
+        assert_eq!(names(&planned).len(), 1, "the state alone: {planned:?}");
+        let (name, why) = &not_probed[0];
+        assert_eq!(name, "@op/append");
+        assert!(why.contains("@op/appendall"), "{why}");
+        assert!(why.contains(&appendall.fingerprint().to_string()), "{why}");
+        // The revision under test declaring it: `appendall` itself is never
+        // probed, and `append`'s probe is guarded by it.
+        let (planned, not_probed) = exposure_plan(&addr, &appendall, &[]);
+        assert_eq!(names(&planned).len(), 1, "{planned:?}");
+        let mut refused: Vec<&str> = not_probed.iter().map(|(n, _)| n.as_str()).collect();
+        refused.sort_unstable();
+        assert_eq!(refused, ["@op/append", "@op/appendall"]);
+    }
+
+    /// The revision under test held offline too guards once, and a reason
+    /// names it once (review on PR #867).
+    #[test]
+    fn a_revision_in_hand_twice_guards_once() {
+        let addr: Addr = "lab/ledger".parse().unwrap();
+        let appendall = revision("ledger-appendall.v1");
+        let (_, not_probed) = exposure_plan(&addr, &appendall, &[&appendall, &appendall]);
+        let why = &not_probed
+            .iter()
+            .find(|(n, _)| n == "@op/append")
+            .expect("append not probed")
+            .1;
+        assert_eq!(
+            why.matches(&appendall.fingerprint().to_string()).count(),
+            1,
+            "{why}"
+        );
+        assert_eq!(not_probed.len(), 2, "{not_probed:?}");
+    }
+
+    #[test]
+    fn a_skipped_set_asks_every_case_but_its_own() {
+        let s = Skipped::of(&[CaseId::Operation, CaseId::RedundancyStandby]);
+        assert!(!s.asks(CaseId::Operation) && !s.asks(CaseId::RedundancyStandby));
+        assert!(s.asks(CaseId::FanoutRefused) && s.asks(CaseId::ContractServed));
+        assert!(CaseId::ALL.iter().all(|c| Skipped::default().asks(*c)));
+        // One bit per case: skipping every case asks none.
+        let every = Skipped::of(&CaseId::ALL);
+        assert!(CaseId::ALL.iter().all(|c| !every.asks(*c)));
+        for c in CaseId::ALL {
+            let one = Skipped::of(&[c]);
+            assert_eq!(
+                CaseId::ALL.iter().filter(|x| !one.asks(**x)).count(),
+                1,
+                "{c}"
+            );
+        }
+    }
 }

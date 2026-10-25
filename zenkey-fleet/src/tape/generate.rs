@@ -33,9 +33,10 @@
 //! writers and servers held undeclared while it stands by. A governed
 //! state's first value is put at the takeover (§2.6 step 3), never before
 //! start; a put refused while it stands by is counted apart
-//! ([`GenReport::standing_by`]); its member tokens are declared each time
-//! it comes to serve (§2.6 step 4). Without `elect`, the runtime refuses a
-//! governed interface at start.
+//! ([`GenReport::standing_by`]); its member tokens follow its standing
+//! through the election's own watch, each declared once per incumbency
+//! (§2.6 step 4), a failed declaration made again. Without `elect`, the
+//! runtime refuses a governed interface at start.
 //!
 //! The plan ([`build_plan`]) is session-free and printed before anything
 //! is brought up, the replay dry-run precedent. It replaced v1's
@@ -945,13 +946,38 @@ pub async fn run_gen(
         });
     }
     // Joined in completion order, reported in plan order; meanwhile a
-    // governed interface's members are declared each time it comes to
-    // serve.
+    // governed interface's members follow its standing (§2.6 step 4,
+    // §2.12): each change its watch tells (`Redundancy::subscribe`, never
+    // a poll of the role) declares, while it serves, each member it does
+    // not hold, and a declaration that failed for another reason than its
+    // standing is made again after `MEMBER_RETRY`. A member held is never
+    // declared again: the runtime would cycle it, a new epoch.
     let mut done: BTreeMap<usize, Tally> = BTreeMap::new();
     let mut fatal = None;
-    let mut serving: BTreeMap<IfaceId, bool> = BTreeMap::new();
-    let mut follow = tokio::time::interval(Duration::from_millis(100));
-    let watching = red.is_some() && !governed_members.is_empty();
+    let (moved_tx, mut moved) = tokio::sync::mpsc::unbounded_channel::<IfaceId>();
+    let mut watches: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+    if let Some(red) = &red {
+        for iface in governed_members.keys() {
+            let mut rx = red.subscribe(iface);
+            let (tx, iface) = (moved_tx.clone(), iface.clone());
+            watches.spawn(async move {
+                // Its standing now, then every change.
+                if tx.send(iface.clone()).is_err() {
+                    return;
+                }
+                while rx.changed().await.is_ok() {
+                    if tx.send(iface.clone()).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    }
+    drop(moved_tx);
+    // Interfaces serving with a member not yet declared.
+    let mut owed: BTreeSet<IfaceId> = BTreeSet::new();
+    let mut retry = tokio::time::interval(MEMBER_RETRY);
+    retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             joined = tasks.join_next() => match joined {
@@ -964,32 +990,28 @@ pub async fn run_gen(
                     break;
                 }
             },
-            _ = follow.tick(), if watching => {
-                let Some(red) = &red else { continue };
-                for (iface, values) in &governed_members {
-                    let now = red.role(iface) == zenkey::redundancy::Role::Serving;
-                    let was = serving.insert(iface.clone(), now).unwrap_or(false);
-                    if !now || was {
-                        continue;
+            Some(iface) = moved.recv() => {
+                if let (Some(red), Some(values)) = (&red, governed_members.get(&iface)) {
+                    if declare_members(&mut service, red, &iface, values).await {
+                        owed.remove(&iface);
+                    } else {
+                        owed.insert(iface);
                     }
-                    for v in values {
-                        match service.declare_member(iface, v).await {
-                            Ok(_) => {}
-                            // Stepped down meanwhile: declared again at the
-                            // next takeover.
-                            Err(zenkey::Error::Standby(_)) => {
-                                serving.insert(iface.clone(), false);
-                                break;
-                            }
-                            Err(e) => {
-                                tracing::warn!("a member token of {iface} was not declared: {e}");
-                            }
-                        }
+                }
+            }
+            _ = retry.tick(), if !owed.is_empty() => {
+                let Some(red) = &red else { continue };
+                for iface in std::mem::take(&mut owed) {
+                    if let Some(values) = governed_members.get(&iface)
+                        && !declare_members(&mut service, red, &iface, values).await
+                    {
+                        owed.insert(iface);
                     }
                 }
             }
         }
     }
+    watches.shutdown().await;
     tasks.shutdown().await;
     let instance = service.instance().to_string();
     let roles: BTreeMap<String, String> = match &red {
@@ -1052,6 +1074,51 @@ type TakeoverState = (
     Arc<Revision>,
     Resource,
 );
+
+/// How long a member declaration that failed waits to be made again,
+/// while its interface serves.
+const MEMBER_RETRY: Duration = Duration::from_millis(500);
+
+/// Declares, while `iface` serves, each of `values`' member tokens the
+/// instance does not hold (`redundancy.v1` §2.6 step 4, §2.12). `true` when
+/// nothing is owed: every member held, or the interface not served (a
+/// step-down withdrew them; the next takeover's change declares them
+/// again). `false` when a declaration failed for another reason, to be
+/// made again: the members declared before it stay, never declared twice,
+/// since [`zenkey::Service::declare_member`] of a member held cycles it to
+/// a new epoch.
+///
+/// **Bounded, inside the run's `select!` arm** (review on PR #867): each
+/// `declare_member` is a local liveliness declaration (and, cycling, an
+/// undeclaration) whose `.await` returns once zenoh has queued it; no
+/// reply is awaited. At worst, its control priority's queue full, it waits
+/// for room, which the link's `wait_before_close` bounds by closing it.
+/// The run's entries go on meanwhile, on their own tasks.
+async fn declare_members(
+    service: &mut zenkey::Service,
+    red: &zenkey::redundancy::Redundancy,
+    iface: &IfaceId,
+    values: &[String],
+) -> bool {
+    for v in values {
+        if red.role(iface) != zenkey::redundancy::Role::Serving {
+            return true;
+        }
+        if service.holds_member(iface, v) {
+            continue;
+        }
+        match service.declare_member(iface, v).await {
+            Ok(_) => {}
+            // Stepped down meanwhile: the change that follows says so.
+            Err(zenkey::Error::Standby(_)) => return true,
+            Err(e) => {
+                tracing::warn!("{iface}'s member {v:?} was not declared, made again: {e}");
+                return false;
+            }
+        }
+    }
+    true
+}
 
 /// What a takeover puts (`redundancy.v1` §2.6 step 3): each governed
 /// state's value at tick 0, synthesized when it takes over.

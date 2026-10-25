@@ -178,8 +178,15 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `split-brain` asks a governed interface the first question, whatever the
   marks; `redundancy-vacancy` asks the second; `token-missing` never finds
   a standby; `hostid-duplicate` skips a recognised one. `check conform`'s
-  `redundancy-standby` probes by `replier_id`. `tape::{generate, mock}`
-  elect through `GenSpec::elect` / `ServeSpec::elect`.
+  `redundancy-standby` probes by `replier_id`, its wildcards guarded by
+  every revision of the interface in hand (`bus::conform::exposure_plan`:
+  a template-less operation's `<name>$*` is never asked where it would
+  reach an operation whose fan-out is allowed; text 0.4, F-221, #841 RD),
+  and `ConformSpec::skip` sends nothing for a skipped case (F-222).
+  `run_redundancy` takes a store its caller seeded. `tape::{generate,
+  mock}` elect through `GenSpec::elect` / `ServeSpec::elect`, and `gen`
+  follows a governed interface's standing through
+  `Redundancy::subscribe`, each member declared once per incumbency.
   `Lens::check_sample` and `sample_conformance` run the profile's `check`
   after the JSON Schema's, so a Point whose tag, unit, range or bounds
   disagree is `invalid`, its reasons named: what replaced v1's
@@ -266,7 +273,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   selection, a "clocks synced" toggle), and `redundancy.v1` read beside
   health once per selection (#841, RC: `nodes::RedundancyState`,
   `services::sweep::redundancy` over `run_redundancy`, on the namespaced
-  session and the window's store): each instance's role a chip off the
+  session and the window's store, asked 300 ms after a selection settles,
+  the latest's only, RD): each instance's role a chip off the
   fleet's judge, §5's questions under REDUNDANCY, and the descriptor's
   standby mark shown apart as the descriptor's word (shots scene
   `workbench-redundancy`); zk2's doctor, the admin pane's S4
@@ -532,6 +540,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `gen` and `serve` of a governed contract are candidates on a reader and
   a watch session of their own (`cmd/serve.rs`'s `elect`), with the
   address guard unchanged. §12 runs as `live_zk2.rs`'s `redundancy_s12_…`.
+  `--skip` sends nothing: no call for `operation`, no fan-out probe for
+  `fanout-refused`, no standby probe for `redundancy-standby` (#841, RD).
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
   `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
@@ -867,7 +877,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   (`Step::Retry`), and knows its own re-mint (`Event::Reminted`, F-209);
   core 0.40 and hostid.v1 0.7 with it; text 0.3, F-214 to F-216, #841 RC:
   `poll`, each read compared with the last's, a read not complete removing
-  no holder, `polls.json`).
+  no holder, `polls.json`; text 0.4, F-220 to F-223, #841 RD: a standby
+  probe's wildcards and the MUST never to ask one that would run an
+  operation, `[Sc: §12]`; text 0.5, F-226: §12 step 9, the MUST's
+  offline half).
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
@@ -1051,7 +1064,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   drives it from stdin (`redundancy role|reads|lock|calls|hold-heal|wait|
   new-epoch|zid`, one JSON line each; `reads` gives each poll's `poll_log`;
   `--wait-go` opens every session and starts at a `go` line, text 0.3,
-  F-216).
+  F-216, reading stdin from its start, `command_lines`, F-220).
+  `Service::holds_member` (#841, RD) says whether a member token is held,
+  so an application declaring members at each takeover never cycles one
+  by declaring it twice.
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.

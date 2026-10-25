@@ -8034,7 +8034,9 @@ struct LedgerCandidate {
     red: zenkey::redundancy::Redundancy,
     _servers: Vec<zenkey::operation::OperationServer>,
     _state: Arc<zenkey::state::StateWriter>,
-    _entries: zenkey::writer::Writer,
+    _entries: Option<zenkey::writer::Writer>,
+    /// `appendall`'s executions, on `ledger-appendall.v1` (F-221, F-222).
+    appendall: Arc<AtomicU64>,
     sessions: Vec<zenoh::Session>,
 }
 
@@ -8045,10 +8047,30 @@ impl LedgerCandidate {
         id: u64,
         minter: Option<&zenkey::hostid::HostIdMinter>,
     ) -> LedgerCandidate {
+        LedgerCandidate::up_on(ep, name, id, minter, ledger_contract()).await
+    }
+
+    /// [`LedgerCandidate::up`] on `contract`, a revision of `ledger.v1`:
+    /// `ledger-appendall.v1`'s `appendall` (F-221) is served too, its
+    /// executions counted.
+    async fn up_on(
+        ep: &str,
+        name: &'static str,
+        id: u64,
+        minter: Option<&zenkey::hostid::HostIdMinter>,
+        contract: Contract,
+    ) -> LedgerCandidate {
         let claim = candidate_session(ep).await;
         let watch = candidate_session(ep).await;
         let reader = candidate_session(ep).await;
-        let imp = Implementation::new(ledger_contract());
+        let has = |r: &str| {
+            contract
+                .resources
+                .iter()
+                .any(|x| zenkey::implementation::resource_name(x) == r)
+        };
+        let (entries_declared, appendall_served) = (has("stream/entries"), has("@op/appendall"));
+        let imp = Implementation::new(contract);
         let iface = imp.iface().clone();
         let mut b = match minter {
             Some(m) => ServiceBuilder::with_hostid(
@@ -8071,10 +8093,32 @@ impl LedgerCandidate {
                 .await
                 .expect("balance"),
         );
-        let entries = b
-            .declare_writer(&iface, "stream/entries", &none)
-            .await
-            .expect("entries");
+        let entries = if entries_declared {
+            Some(
+                b.declare_writer(&iface, "stream/entries", &none)
+                    .await
+                    .expect("entries"),
+            )
+        } else {
+            None
+        };
+        let appendall = Arc::new(AtomicU64::new(0));
+        let mut servers = Vec::new();
+        if appendall_served {
+            let n = Arc::clone(&appendall);
+            servers.push(
+                b.serve(&iface, "@op/appendall", Some(&none), move |call: Call| {
+                    n.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        call.reply(name)
+                            .await
+                            .map_err(|e| OpError::internal(e.to_string()))
+                    }
+                })
+                .await
+                .expect("appendall"),
+            );
+        }
         let server = b
             .serve(
                 &iface,
@@ -8098,12 +8142,14 @@ impl LedgerCandidate {
             }));
         let red = b.redundancy(startup).expect("redundancy.v1");
         let svc = b.start().await.expect("a candidate starts");
+        servers.push(server);
         LedgerCandidate {
             svc,
             red,
-            _servers: vec![server],
+            _servers: servers,
             _state: state,
             _entries: entries,
+            appendall,
             sessions: vec![claim, watch, reader],
         }
     }
@@ -8591,6 +8637,147 @@ async fn redundancy_s12_a_probe_of_a_standby_and_of_a_twin() {
     exits(&run, 1);
     drop(held);
     x.down().await;
+    b.close().await;
+    a.close().await;
+}
+
+/// §12 step 8's second half (text 0.4, F-221, F-222): A and B on
+/// `ledger-appendall.v1`, whose `appendall` allows fan-out and begins with
+/// `append`. `append`'s probe, `append$*`, would reach `appendall` and run
+/// it, so it is never asked: `redundancy-standby` reads unobservable,
+/// naming `appendall`, and `appendall`'s handler never runs. Every case
+/// skipped, `check conform` sends nothing at all: `appendall`, idempotent,
+/// is not called either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_probe_never_runs_an_operation_that_allows_fan_out() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/ledger-appendall.v1.toml");
+    let variant = {
+        let l = load_path(&path);
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
+    };
+    let path = path.to_str().expect("a UTF-8 path").to_owned();
+    let a = LedgerCandidate::up_on(&bus.endpoint, "A", 0xa, None, variant.clone()).await;
+    a.until(Role::Serving).await;
+    let b = LedgerCandidate::up_on(&bus.endpoint, "B", 0xb, None, variant).await;
+    let _ = t_until(&bus, LEDGER, |r| {
+        r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
+    })
+    .await;
+    let ran = || a.appendall.load(Ordering::SeqCst) + b.appendall.load(Ordering::SeqCst);
+    // Every case skipped: nothing is sent (F-222).
+    let mut every: Vec<String> = Vec::new();
+    for c in zenkey_fleet::report::CaseId::ALL {
+        every.extend(["--skip".to_owned(), c.as_str().to_owned()]);
+    }
+    let base = [
+        "check",
+        "conform",
+        LEDGER,
+        "ledger.v1",
+        "--contracts",
+        &path,
+        "--for",
+        "1",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let mut args: Vec<&str> = base.to_vec();
+    args.extend(every.iter().map(String::as_str));
+    let run = bus.zenctl(&args).await;
+    let doc = run.json();
+    assert!(
+        rows_of(&doc, "case")
+            .iter()
+            .all(|c| c["verdict"]["answer"] == "not_asked"),
+        "{run}"
+    );
+    assert_eq!(ran(), 0, "a skipped case calls nothing: {run}");
+    // Only redundancy-standby asked: append's probe is never made.
+    let mut args: Vec<&str> = base.to_vec();
+    let others: Vec<String> = zenkey_fleet::report::CaseId::ALL
+        .iter()
+        .filter(|c| **c != zenkey_fleet::report::CaseId::RedundancyStandby)
+        .flat_map(|c| ["--skip".to_owned(), c.as_str().to_owned()])
+        .collect();
+    args.extend(others.iter().map(String::as_str));
+    let run = bus.zenctl(&args).await;
+    let doc = run.json();
+    let standby = conform_case(&doc, "redundancy-standby", "service");
+    assert_eq!(standby["verdict"]["answer"], "unobservable", "{run}");
+    let said = standby["verdict"]["reason"].as_str().unwrap_or_default();
+    assert!(
+        said.contains("@op/append not probed") && said.contains("@op/appendall"),
+        "{run}"
+    );
+    exits(&run, 2);
+    assert_eq!(ran(), 0, "the probe ran no allowed operation: {run}");
+    b.close().await;
+    a.close().await;
+}
+
+/// §12 step 9 (text 0.5, F-226): A and B run `ledger.v1`, all the
+/// address's descriptors name; T holds `ledger-appendall.v1` offline,
+/// which no instance runs. `append`'s probe is still never made, its
+/// reason naming `appendall` and the revision held offline: the guard
+/// reads every revision in hand, not the named one alone (§2.15).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_probe_guarded_by_a_revision_held_offline() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    a.until(Role::Serving).await;
+    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, None).await;
+    let _ = t_until(&bus, LEDGER, |r| {
+        r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
+    })
+    .await;
+    let offline = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/ledger-appendall.v1.toml");
+    let fp = {
+        let l = load_path(&offline);
+        zenkey::model::canonical::Fingerprint::of(
+            &l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+        )
+        .to_string()
+    };
+    let offline = offline.to_str().expect("a UTF-8 path").to_owned();
+    let mut args: Vec<&str> = vec![
+        "check",
+        "conform",
+        LEDGER,
+        "ledger.v1",
+        "--contracts",
+        &offline,
+        "--for",
+        "1",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let others: Vec<String> = zenkey_fleet::report::CaseId::ALL
+        .iter()
+        .filter(|c| **c != zenkey_fleet::report::CaseId::RedundancyStandby)
+        .flat_map(|c| ["--skip".to_owned(), c.as_str().to_owned()])
+        .collect();
+    args.extend(others.iter().map(String::as_str));
+    let run = bus.zenctl(&args).await;
+    let doc = run.json();
+    let standby = conform_case(&doc, "redundancy-standby", "service");
+    assert_eq!(standby["verdict"]["answer"], "unobservable", "{run}");
+    let said = standby["verdict"]["reason"].as_str().unwrap_or_default();
+    assert!(
+        said.contains("@op/append not probed")
+            && said.contains("@op/appendall")
+            && said.contains(&fp),
+        "named: append, appendall and the revision held offline: {run}"
+    );
+    exits(&run, 2);
     b.close().await;
     a.close().await;
 }

@@ -1645,6 +1645,21 @@ impl Service {
         Ok(epoch)
     }
 
+    /// Whether this instance holds `value`'s member token of `iface` now
+    /// (§8.1). On a governed interface, only while it serves: a step-down
+    /// withdraws every member token (`redundancy.v1` §2.12), so an
+    /// application that declares its members at each takeover asks this
+    /// first, since [`Service::declare_member`] of a member held cycles it,
+    /// a new epoch (#841, RD).
+    #[must_use]
+    pub fn holds_member(&self, iface: &IfaceId, value: &str) -> bool {
+        let member = chunk_slug(value);
+        match self.gate_of(iface) {
+            Some(g) => g.holds_member(&member),
+            None => self.members.contains_key(&(iface.clone(), member)),
+        }
+    }
+
     /// Cycles a member's token when its continuity breaks (§8.1): the new
     /// epoch's token first, then the old one. Other members are untouched.
     pub async fn cycle_member(&mut self, iface: &IfaceId, value: &str) -> Result<InstanceId> {

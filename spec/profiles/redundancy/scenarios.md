@@ -106,9 +106,23 @@ reference tool runs it as a test of zenctl and of the doctor
   `zenkey/examples/owner.rs` run with `--standby`, whose help is the
   interface a black-box runner drives, as for `alarms.v1`. With
   `--wait-go` it starts only at a `go` line on stdin, so that a runner
-  holds two starts together (§3); `redundancy zid` answers its claim's,
-  reader's and watch's session zids, and `redundancy reads` what each of
-  its poll's reads found (0.3, F-216).
+  holds two starts together (§3), reading its standard input from its
+  own start (0.4, F-220); `redundancy zid` answers its claim's, reader's
+  and watch's session zids, and `redundancy reads` what each of its
+  poll's reads found (0.3, F-216).
+- **`ledger-appendall`** (0.4, F-221): `ledger.v1` with `entries` left
+  out and a second operation whose name begins with the first's, its
+  fan-out allowed, so that `append`'s probe, `append$*`, would reach it.
+  The reference keeps it as `zenkey/tests/contracts/ledger-appendall.v1.toml`:
+
+  ```toml
+  [resources.appendall]   # beside ledger.v1's balance and append
+  kind       = "operation"
+  request    = { raw = "text/plain" }
+  response   = { raw = "text/plain" }
+  fanout     = "allowed"
+  idempotent = true
+  ```
 
 ## §1 Takeover after a crash, seen at the lease (§2.4–§2.8; core §6, §8.1, §8.2)
 
@@ -125,8 +139,10 @@ reference tool runs it as a test of zenctl and of the doctor
 
 **Expected.**
 1. A claims before it reads: S's GET at A's instance token answers A's
-   descriptor marked standby, unless A's interface token beat that GET
-   (§2.5 step 1, core §8.2 step 3); its GET at A's interface token answers
+   descriptor marked standby, unless A took over before that GET was
+   answered: its interface token at S within a round trip of the answer,
+   the two riding two priorities (§2.5 step 1, core §8.2 step 3; F-202;
+   0.4, F-223); its GET at A's interface token answers
    it unmarked, the token last (§2.6, core §8.2, 0.39). A serves within 3 s
    of its start.
 2. B stands by (§2.4), and stays so: S's GET at B's instance token answers
@@ -170,7 +186,9 @@ reference tool runs it as a test of zenctl and of the doctor
    later start plus two graces: A, unless B took over before A's read, A
    then standing by on B's token, as §2.5 step 2 says (0.2, F-203). S's
    GET at each instance's instance token answers its descriptor marked
-   standby, unless its interface token beat that GET (F-202), and each
+   standby, unless it took over before that GET was answered: its
+   interface token at S within a round trip of the answer, the two riding
+   two priorities (0.4, F-223; F-202), and each
    instance's first read follows its own claim (§2.5 step 1). In a run
    where both read before either claim reached the other, both take over;
    then B, the higher, steps down as §7 expects, within two graces of
@@ -389,7 +407,12 @@ writes, and declare a queryable, to build each shape.
 8. A serves and B stands by; T probes their exposure (§2.15; the
    reference: `zenctl check conform`). Then X declares an instance token,
    serves a descriptor marking `ledger.v1` standby, and declares a
-   queryable on `append`'s key, and T probes again.
+   queryable on `append`'s key, and T probes again. Then, apart, A and B
+   run `ledger-appendall`, T holding it, and T probes them (0.4, F-221).
+9. A serves and B stands by, both running `ledger.v1`, which is all the
+   address's descriptors name. T holds `ledger-appendall` offline (the
+   reference: `--contracts`), a revision of the same interface no
+   instance runs, and probes them (0.5, F-226).
 
 **Expected.** T answers as `conclusions.json` does for the same reading:
 1. Exactly one incumbent: yes, `one`; a vacancy: no, `held`; standbys:
@@ -409,4 +432,18 @@ writes, and declare a queryable, to build each shape.
 8. The probe over `append`'s wildcard is answered by A's session alone,
    attributed by its zid: B exposes nothing. Then X's session answers it
    too: X, marked standby with no token in both reads, holds a queryable
-   of the interface, the finding (§2.4, §2.15; 0.3).
+   of the interface, the finding (§2.4, §2.15; 0.3). On
+   `ledger-appendall`, T asks neither `append$*`, which reaches
+   `appendall`, nor `appendall`, and says why: its exposure is
+   unobservable, and `appendall`'s handler never runs (0.4, F-221).
+9. T asks no `append$*` either: the revision it holds offline declares
+   `appendall`, fan-out allowed, which the wildcard reaches, so the call
+   could run it on an instance that runs that revision (§2.15, "Never a
+   call that would run"). T says so, naming `appendall` and the revision
+   held offline (the reference: `@op/append not probed: its probe
+   zk2/lab/ledger/ledger.v1/@op/append$* would reach
+   zk2/lab/ledger/ledger.v1/@op/appendall, an operation whose fanout is
+   "allowed" (revision sha256:…), and run it`), and the standbys'
+   exposure is unobservable: `redundancy-standby` reads unobservable,
+   exit 2. No instance at the address has an `appendall` to run (0.5,
+   F-226).

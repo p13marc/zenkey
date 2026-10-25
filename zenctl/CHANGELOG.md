@@ -6,6 +6,14 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `redundancy` after review, and round 60 (#841, RD)
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform --skip`: every case skipped still called each idempotent operation | a skipped case sends nothing: an operation is called only when `operation` is asked, its fan-out probed only when `fanout-refused` is, a standby probed only when `redundancy-standby` is | F-222 |
+| `check conform`'s `redundancy-standby`: a probe guarded by the revision under test | by every revision of the interface in hand, `--contracts`' among them; a template-less operation's `<name>$*` is never asked where it would reach an operation whose fan-out is allowed, and the case says so | `redundancy.v1` 0.4, F-221 |
+| `gen` on a governed contract: its members declared on a 100 ms poll of its role | on the election's own watch, each member once per incumbency, a failed declaration made again | |
+
 ## Unreleased (`main`, zk2) — `desired` on desired.v1 text 0.8: a requirement unread (#840, DG)
 
 | Before | Now | Notes |

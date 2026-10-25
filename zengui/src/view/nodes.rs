@@ -44,6 +44,9 @@ pub enum NodesMsg {
     RedundancyRead(Addr, String, Arc<RedundancyReport>),
     /// Read who serves the selected address again — one more reading.
     AskRedundancy,
+    /// The selection settled: the address, and the selection's count
+    /// ([`NodesState::due_redundancy`]). Only the latest asks the reading.
+    RedundancySettled(Addr, u64),
     /// The "clocks synced" toggle (D11): the operator's word that this
     /// host's clock and the owners' agree. Re-asks the selected address.
     ClocksSynced(bool),
@@ -424,7 +427,12 @@ fn role_chip<'a>(iface: &str, i: &RedundancyInstance) -> Option<Element<'a, Mess
 fn redundancy_section<'a>(addr: &Addr, nodes: &'a NodesState, sp: Spacing) -> Column<'a, Message> {
     let mut ask = kit::secondary(kit::caption("read again")).padding([0.0, sp.xs]);
     let mine = nodes.redundancy.address() == Some(addr);
-    if mine && !matches!(nodes.redundancy, RedundancyState::Asking(_)) {
+    if mine
+        && !matches!(
+            nodes.redundancy,
+            RedundancyState::Asking(_) | RedundancyState::Due(_)
+        )
+    {
         ask = ask.on_press(msg(NodesMsg::AskRedundancy));
     }
     let mut col = column![
@@ -439,6 +447,9 @@ fn redundancy_section<'a>(addr: &Addr, nodes: &'a NodesState, sp: Spacing) -> Co
     .spacing(sp.xs);
     let Some(report) = nodes.redundancy.report(addr) else {
         return col.push(kit::muted(match &nodes.redundancy {
+            RedundancyState::Due(a) if a == addr => {
+                "who serves it is read once the selection settles"
+            }
             RedundancyState::Asking(a) if a == addr => {
                 "reading redundancy.v1 — two presence reads of the address a grace apart"
             }

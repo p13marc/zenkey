@@ -1,0 +1,29 @@
+# redundancy.v1's scenarios §12 step 8 (#841, RD; text 0.4, F-221): ledger.v1
+# with a second operation whose name begins with the first's, its fan-out
+# allowed, so that a probe of append's wildcard (`append$*`) would reach it
+# and run it. zk2py's `ledger-appendall.v1`, the same text: governed under
+# `claim`, as ledger.v1.
+[interface]
+name  = "ledger"
+major = 1
+minor = 0
+uses  = ["redundancy.v1"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.balance]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.append]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
+
+[resources.appendall]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
+fanout   = "allowed"
+idempotent = true

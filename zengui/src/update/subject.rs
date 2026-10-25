@@ -278,8 +278,10 @@ fn select(
         Subject::Address(addr) => {
             let addr = addr.clone();
             let health = super::pane::nodes::health(&mut work.verdicts, dep, addr.clone());
-            // And who serves each governed interface of it (#841, RC).
-            let redundancy = super::pane::nodes::redundancy(&mut work.verdicts, dep, addr.clone());
+            // And who serves each governed interface of it (#841, RC),
+            // once the selection settles (#862's review).
+            let redundancy =
+                super::pane::nodes::redundancy_soon(&mut work.verdicts, dep, addr.clone());
             let config = super::pane::configure::follow(
                 &mut work.verdicts.config,
                 work.right_pane,

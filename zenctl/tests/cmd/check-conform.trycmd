@@ -218,7 +218,7 @@ Options:
           [default: 5]
 
       --skip <CASE>
-          Do not ask this case (repeatable): every row of it reads `not_asked`, which neither passes nor fails the run
+          Do not ask this case (repeatable): every row of it reads `not_asked`, which neither passes nor fails the run, and nothing it alone would send is sent: no call for `operation`, no fan-out probe for `fanout-refused`, no standby probe for `redundancy-standby`
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.

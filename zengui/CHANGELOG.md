@@ -4,6 +4,12 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the redundancy reading waits for the selection to settle (#841, RD)
+
+| Before | Now | Notes |
+|---|---|---|
+| a `redundancy.v1` reading asked at every address selection | asked 300 ms after the selection settles, the latest selection's only: "who serves it is read once the selection settles" meanwhile | "read again" asks at once; the landing's guard is unchanged |
+
 ## Unreleased (`main`, zk2) — who serves a governed address (#841, RC)
 
 | Before | Now | Notes |
