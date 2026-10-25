@@ -2339,7 +2339,38 @@ def _presence_view() -> list[tuple[str, Any, Any]]:
           live.Presence(complete=True).kind, live.Presence().kind,
           live.Presence(complete=False, cut_off_during=True).kind],
          [live.NOT_MADE, live.NOT_MADE, live.COMPLETE, live.POSSIBLY_INCOMPLETE, live.POSSIBLY_INCOMPLETE]),
-    ] + _live_guards() + _redundancy_readings() + _desired_tool_readings()
+    ] + _live_guards() + _desired_tool_readings() + _poll_readings()
+
+
+def _poll_readings() -> list[tuple[str, Any, Any]]:
+    """redundancy.v1 0.2 §2.7's poll (zk2py.redundancy.poll_step), over
+    sequences of polls, the reading F-215 asks about among them."""
+    from . import redundancy as rd
+
+    a, b = "000000000000000a", "000000000000000b"
+
+    def run(polls: list[tuple[set[str], bool]]) -> list[Any]:
+        last: set[str] | None = None
+        out: list[Any] = []
+        for others, complete in polls:
+            ev, last = rd.poll_step(last, others, complete)
+            out += ev
+        return out
+
+    label = "redundancy.v1 0.2 §2.7, a poll's events"
+    return [
+        (f"{label}: the first poll is the baseline", run([({a}, True)]), []),
+        (f"{label}: a holder new to it is an appearance", run([(set(), True), ({a}, True)]), [{"appeared": a}]),
+        (f"{label}: a complete read with no other holder, after one with some, a withdrawal",
+         run([({a}, True), (set(), True)]), [rd.WITHDRAWN]),
+        (f"{label}: a read not complete establishes no absence", run([({a}, True), (set(), False)]), []),
+        (f"{label}: a read not complete between leaves the last's whole: the next complete read without the "
+         "holder is a withdrawal (F-215)", run([({a}, True), (set(), False), (set(), True)]), [rd.WITHDRAWN]),
+        (f"{label}: … and a holder it missed is no new holder at the next read (F-215)",
+         run([({a}, True), (set(), False), ({a}, True)]), []),
+        (f"{label}: a read not complete still shows what it saw: a holder new to it appears",
+         run([({a}, True), ({a, b}, False)]), [{"appeared": b}]),
+    ]
 
 
 def _desired_tool_readings() -> list[tuple[str, Any, Any]]:
@@ -2434,84 +2465,6 @@ def _desired_window_readings() -> list[tuple[str, Any, Any]]:
         (f"{label}: on a trusted clock, one reading finds a version stamped longer ago than the window",
          run([(nyt, old)], 0.0, clocks=True), {"task": (old, "clock")}),
         (f"{label}: without one, a single reading never does", run([(nyt, old)], 0.0), {}),
-    ]
-
-
-def _redundancy_readings() -> list[tuple[str, Any, Any]]:
-    """redundancy.v1 0.1's machine (``lifecycle.json``) on the two orders
-    of events a bus can hand it while a read is in flight (F-199), and the
-    events zk2py's runtime gives back from what its watch holds."""
-    from . import redundancy as rd
-
-    a, b = "000000000000000a", "000000000000000b"
-
-    def run(events: list[Any], heard: set[str] | None = None) -> tuple[list[str], str]:
-        m = rd.Machine(b)
-        steps = []
-        queue = list(events)
-        while queue:
-            st = m.step(queue.pop(0))
-            steps.append(st["step"])
-            if heard is not None:
-                queue[0:0] = [e for e in rd.given_back(st, heard) if e != rd.FINISH]
-        return steps, m.state
-
-    label = "redundancy.v1 0.1 §2.5–§2.9 (F-199)"
-    alone = {"read": {"complete": True, "instances": [{"id": b, "token": False, "descriptor": "standby"}]}}
-    held = {"read": {"complete": True, "instances": [{"id": a, "token": True, "descriptor": "serving"},
-                                                     {"id": b, "token": False, "descriptor": "standby"}]}}
-    return [
-        (f"{label}: an appearance heard while its read runs is dropped, and the read that missed it takes over: "
-         "the fixture's machine never reads for the heal", run(["start", "finish", {"appeared": a}, alone, "finish"]),
-         (["claim", "read", "nothing", "take_over", "nothing"], rd.SERVING_STATE)),
-        (f"{label}: given back from the watch, it reads for the heal once it serves",
-         run(["start", "finish", {"appeared": a}, alone, "finish"], heard={a}),
-         (["claim", "read", "nothing", "take_over", "nothing", "read"], rd.HEAL_FIRST)),
-        (f"{label}: a withdrawal heard while its read runs is dropped, and the read that predates it stands it by "
-         "on an incumbent gone, no retry armed", run(["start", "finish", rd.WITHDRAWN, held, rd.TIMER]),
-         (["claim", "read", "nothing", "stand_by", "nothing"], rd.STANDING_BY)),
-        (f"{label}: given back from a watch hearing no holder, it campaigns again",
-         run(["start", "finish", rd.WITHDRAWN, held], heard=set()),
-         (["claim", "read", "nothing", "stand_by", "read"], rd.CAMPAIGNING)),
-        (f"{label}: a watch still hearing the incumbent gives nothing back", rd.given_back(
-            {"step": "stand_by", "why": "incumbent", "retry": False, "instance": a}, {a}), []),
-        (f"{label}: a heal's first read not made shows none, and the fixture's machine goes back to serving: the "
-         "split let go", run(["start", "finish", alone, "finish", {"appeared": a},
-                              {"read": {"complete": False, "instances": []}}]),
-         (["claim", "read", "take_over", "nothing", "read", "nothing"], rd.SERVING_STATE)),
-        (f"{label}: given back after the retry interval while the watch still hears the other holder",
-         rd.given_back({"step": "nothing"}, {a}, incomplete_heal=True), [{"appeared": a}]),
-    ] + _remint_readings()
-
-
-def _remint_readings() -> list[tuple[str, Any, Any]]:
-    """F-209: an incumbent's own re-mint (core §8.1), its new id lower than
-    its old, through the fixture's machine and through zk2py's."""
-    from . import redundancy as rd
-
-    old, new = "000000000000000b", "000000000000000a"
-
-    def read(*ids: str) -> dict[str, Any]:
-        return {"read": {"complete": True, "instances": [{"id": i, "token": True, "descriptor": "serving"}
-                                                         for i in ids]}}
-
-    serve = ["start", "finish", {"read": {"complete": True, "instances": [
-        {"id": old, "token": False, "descriptor": "standby"}]}}, "finish"]
-    overlap = [{"appeared": new}, read(new, old), "timer", read(new)]
-    m = rd.Machine(old)
-    plain = [m.step(e)["step"] for e in serve + overlap]
-    m2 = rd.Machine(old)
-    for e in serve:
-        m2.step(e)
-    m2.remint(new)
-    told = [m2.step(e)["step"] for e in overlap]
-    label = "redundancy.v1 0.1, an incumbent's own re-mint (F-209)"
-    return [
-        (f"{label}: the fixture's machine hears its new id's token as another holder's, reads its overlap as a "
-         "split, and steps down to itself", (plain[4:], m.why, m.named),
-         (["read", "grace", "read", "step_down"], "lower_holder", new)),
-        (f"{label}: told of the re-mint, zk2py's machine hears nothing to heal, and serves on under its new id",
-         (told[0], m2.state, m2.own), ("nothing", rd.SERVING_STATE, new)),
     ]
 
 

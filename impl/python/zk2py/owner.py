@@ -296,7 +296,8 @@ class Owner:
                  initial: dict[str, bytes] | None = None, hlc: bool = True,
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
                  tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
-                 params: dict[str, dict[str, str]] | None = None, standby: set[str] | None = None):
+                 params: dict[str, dict[str, str]] | None = None, standby: set[str] | None = None,
+                 lease_ms: int | None = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -361,6 +362,9 @@ class Owner:
           held at start are put, before step 3: a restart's own puts and
           deletes (``alarms.v1`` §2.9: "before it answers a GET with it, and
           SHOULD before its new instance token").
+        - ``lease_ms``: its session's lease, as its router reads it (zenoh's
+          ``transport/link/tx/lease``): a crash behind a silent link is seen
+          that long after (``redundancy.v1`` scenarios, "A crash").
         - ``standby``: the interfaces it stands by on at start (core §6,
           0.39; ``redundancy.v1`` §2.4): validated by step 2 as if exposed,
           none of their resources declared, their entries marked
@@ -464,6 +468,7 @@ class Owner:
         self._instance_entities: list[Any] = []
         #: core §6 (0.39): the interfaces it stands by on now
         self.standing_by: set[str] = set(standby or ())
+        self.lease_ms = lease_ms
         #: step 1's entities, per interface (a step-down undeclares them)
         self._iface_entities: dict[str, list[Any]] = {}
         #: the current instance's interface token, per interface
@@ -601,6 +606,8 @@ class Owner:
         # §4.3: "A session that serves state MUST enable Zenoh's HLC."
         # Only a client test rig turns it off (``hlc``).
         conf.insert_json5("timestamping/enabled", "true" if self.hlc or not self.connect else "false")
+        if self.lease_ms is not None:
+            conf.insert_json5("transport/link/tx/lease", str(int(self.lease_ms)))
         self.session = zenoh.open(conf)
         try:
             self._bring_up(plan)
@@ -781,17 +788,25 @@ class Owner:
             if iface not in self.standing_by or self.session is None or self._stop.is_set():
                 return False
             c = self._contract(iface)
-            self._iface_entities[iface] = self._declare_resources(c, self._plan_made[iface])
-            self.standing_by.discard(iface)
-            if puts is not None:
-                puts(self)
-            else:
-                self._put_held(self._plan_made, only=iface)
-            self._put_descriptor()
-            tok = self.session.liveliness().declare_token(self._alive_key(c))
-            self._iface_tokens[iface] = tok
-            self._instance_entities.append(tok)
-            self._entities.append(tok)
+            try:
+                self._iface_entities[iface] = self._declare_resources(c, self._plan_made[iface])
+                self.standing_by.discard(iface)
+                if puts is not None:
+                    puts(self)
+                else:
+                    self._put_held(self._plan_made, only=iface)
+                self._put_descriptor()
+                tok = self.session.liveliness().declare_token(self._alive_key(c))
+                self._iface_tokens[iface] = tok
+                self._instance_entities.append(tok)
+                self._entities.append(tok)
+            except Exception:
+                # A step that fails is undone at once, every step made
+                # reversed in §2.9's order ("Decided here", text 0.2: zenoh
+                # refuses one only when its session is closing or broken)
+                self.standing_by.discard(iface)
+                self.step_down(iface)
+                raise
             if self.horizons:
                 self._ensure_refresher()
             return True
@@ -819,7 +834,14 @@ class Owner:
             for k in pubs:
                 self._publishers.pop(k, None)
                 self.horizons.pop(k, None)
+            # redundancy.v1 §2.6, §2.9 (0.2): "At step 2 the reference forgets
+            # what it put of them": a later takeover holds nothing of this
+            # incumbency it does not put again
+            for k in [k for k in self._held if k.startswith(prefix)]:
+                self._held.pop(k, None)
             self.standing_by.add(iface)
+            # every step is made whatever one before it gave: the last
+            # raises, the others have been made
             self._put_descriptor()
             return True
 

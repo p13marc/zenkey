@@ -24,13 +24,15 @@ the machine its events one at a time and does each step:
 
 Its watch hands the machine ``appeared`` for another instance's interface
 token, and ``withdrawn`` 0.1 s after a withdrawal that leaves no holder
-heard, one for a burst (§2.8). Two events the fixture's machine drops are
-given back from what the watch holds (F-199): after a takeover, a holder
-the watch hears beside its own is an ``appeared``; after a stand-by on an
-incumbent, a watch hearing no holder is a ``withdrawn``.
+heard (§2.8), one for a burst. Each event reaches the machine in the order
+it was heard, and what is heard while a read or an act runs is posted
+before that read's answer or that act's finish, so the machine keeps it
+and decides it there (text 0.2, F-199). A re-mint is told the machine
+before the new id's tokens are declared (F-209).
 
-Under ``external`` (§2.11) the lock is a ``flock`` on a file, taken by a
-thread that blocks on it, and the kernel releases it at the process's end.
+Under ``external`` (§2.11) the lock is a ``flock`` on a file, tried every
+20 ms by a thread of its own until held, which the kernel releases at the
+process's end; or, with no file, the lock the commands hold and lose.
 """
 
 from __future__ import annotations
@@ -63,12 +65,22 @@ def contract_at(path: str | Path) -> Any:
     return load_contract(p, spec_dir=REPO / "spec")
 
 
-def open_session(endpoint: str, peer: bool = False) -> zenoh.Session:
+def open_session(endpoint: str, peer: bool = False, lease_ms: int | None = None) -> zenoh.Session:
     """A client of ``endpoint``, or a peer whose only endpoint it is (one
-    that opens while that router is down: scenarios.md §5)."""
-    if not peer:
+    that opens while that router is down: scenarios.md §5). ``lease_ms`` is
+    its lease, as its router reads it."""
+    if not peer and lease_ms is None:
         return live.open_client(endpoint)
     conf = zenoh.Config()
+    if lease_ms is not None:
+        conf.insert_json5("transport/link/tx/lease", str(int(lease_ms)))
+    if not peer:
+        conf.insert_json5("mode", json.dumps("client"))
+        conf.insert_json5("connect/endpoints", json.dumps([endpoint]))
+        conf.insert_json5("scouting/multicast/enabled", "false")
+        s = zenoh.open(conf)
+        live._OPENED[id(s)] = (s, endpoint, None)
+        return s
     conf.insert_json5("mode", json.dumps("peer"))
     conf.insert_json5("connect/endpoints", json.dumps([endpoint]))
     # a peer listens, so that its fellow peers, its own other sessions among
@@ -201,7 +213,9 @@ class Candidate:
     def __init__(self, address: str, endpoint: str, contract: str | Path, *, instance: str | None = None,
                  name: str = "A", retry_s: float = 2.0, grace_s: float = 2.0, lock: str | None = None,
                  refuse_without_lock: bool = False, tokenless: tuple[str, ...] = (), peer: bool = False,
-                 timeout: float = 1.0, hold_heal: bool = False, auth: tuple[str, str] | None = None) -> None:
+                 timeout: float = 1.0, hold_heal: bool = False, auth: tuple[str, str] | None = None,
+                 poll_s: float | None = None, lease_ms: int | None = None,
+                 reader_endpoint: str | None = None) -> None:
         self.address, self.endpoint, self.name = address, endpoint, name
         self.system, self.service = address.split("/")
         self.contract = contract_at(contract)
@@ -215,6 +229,17 @@ class Candidate:
         self.retry_s, self.grace_s, self.timeout = retry_s, grace_s, timeout
         self.lock_path, self.refuse_without_lock = lock, refuse_without_lock
         self.peer, self.auth = peer, auth
+        #: §2.7 (0.2): "A poll, where no watch session can be held": the
+        #: address read every period on the reader instead of a watch
+        self.poll_s, self.lease_ms = poll_s, lease_ms
+        #: a test's hook: the reader through an endpoint of its own, so that a
+        #: test can cut it apart from the watch (a reader that reconnects late)
+        self.reader_endpoint = reader_endpoint
+        #: what the owner example's "redundancy reads" counts
+        self.counts = {"made": 0, "complete": 0, "not_made": 0, "polls": 0, "polls_complete": 0, "last": None,
+                       "reader_reads": 0, "reader_settles": 0, "watch_reads": 0, "watch_settles": 0}
+        #: under external with no lock file, the lock as the commands set it
+        self.held_lock = False
         self.events: queue.Queue[Any] = queue.Queue()
         self.lock = threading.RLock()
         #: (monotonic s, event, step)
@@ -222,6 +247,8 @@ class Candidate:
         #: every read made: (monotonic s, Read, presence kind, reason)
         self.reads: list[tuple[float, rd.Read, str, str]] = []
         self.executions = 0
+        #: a failed act, after which it elects no more ("Decided here", 0.2)
+        self.fault: str | None = None
         self.owner: Owner | None = None
         self.watch: zenoh.Session | None = None
         #: the session its reads go on: neither the claim's nor the watch's
@@ -259,7 +286,8 @@ class Candidate:
                     raise Refused(f"{self.lock_path}: the lock is held, and this instance refuses (§2.11)")
         handlers = {"@op/append": self._append}
         self.owner = Owner(self.system, self.service, [self.contract], connect=self.endpoint,
-                           standby={self.iface}, handlers=handlers, tokenless=self.tokenless, auth=self.auth)
+                           standby={self.iface}, handlers=handlers, tokenless=self.tokenless, auth=self.auth,
+                           lease_ms=self.lease_ms)
         self.owner.instance = self.instance
         try:
             self.owner._plan()  # step 2's refusals (core §8.2, 0.39): nothing is opened
@@ -298,7 +326,20 @@ class Candidate:
         loses the lock"."""
         if self._fd is not None:
             fcntl.flock(self._fd, fcntl.LOCK_UN)
-            self.post({"lock": False})
+        self.held_lock = False
+        self.post({"lock": False})
+
+    def relock(self) -> bool:
+        """The lock asked again: a lock file taken when free, else the
+        commands' lock held (the owner example's ``redundancy lock hold``)."""
+        if self._fd is not None:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+        self.held_lock = True
+        self.post({"lock": True})
+        return True
 
     def post(self, event: Any) -> None:
         self.events.put(event)
@@ -313,22 +354,21 @@ class Candidate:
             if self._stop.is_set():
                 return
             with self.lock:
-                before = self.machine.state
                 step = self.machine.step(ev)
                 self.log.append((time.monotonic(), ev if not isinstance(ev, dict) or "read" not in ev
                                  else "read", step))
-            if isinstance(ev, dict) and isinstance(ev.get("read"), rd.Read) and not ev["read"].complete \
-                    and before in (rd.HEAL_FIRST, rd.HEAL_SECOND):
-                # F-199: a heal's read not complete let the split go
-                for again in rd.given_back(step, self._others_heard(), incomplete_heal=True):
-                    t = threading.Timer(self.retry_s, self.post, args=(again,))
-                    t.daemon = True
-                    t.start()
             try:
                 self._do(step)
             except Exception as e:  # noqa: BLE001 - a failed act is logged, the worker goes on
                 print(f"zk2py redundancy: {step['step']} failed: {type(e).__name__}: {e}", file=sys.stderr,
                       flush=True)
+                if step["step"] in ("take_over", "step_down"):
+                    # "Decided here" (text 0.2): undone, the instance stands
+                    # by and elects no more, its standing saying why; a retry
+                    # would ask the same session again, and flap
+                    with self.lock:
+                        self.fault = f"{step['step']} failed: {type(e).__name__}: {e}"
+                    return
 
     def _do(self, step: dict[str, Any]) -> None:
         k = step["step"]
@@ -339,19 +379,16 @@ class Candidate:
             self.post({"read": self._read()})
         elif k == "grace":
             self._arm(self.grace_s, heal=True)
+        elif k == "retry":
+            # text 0.2 (F-199): a heal read that ended nothing, made again
+            self._arm(self.retry_s, heal=True)
         elif k == "stand_by":
             if step["retry"]:
                 self._arm(self.retry_s)
-            # F-199: the incumbent the read showed went while it ran
-            for ev in rd.given_back(step, self._others_heard()):
-                self.post(ev)
         elif k == "take_over":
             assert self.owner is not None
             self.owner.take_over(self.iface, puts=self._puts)
             self.post(rd.FINISH)
-            # F-199: a holder appeared while it campaigned
-            for ev in rd.given_back(step, self._others_heard()):
-                self.post(ev)
         elif k == "step_down":
             assert self.owner is not None
             self.owner.step_down(self.iface)
@@ -378,19 +415,53 @@ class Candidate:
     def _claim(self) -> None:
         assert self.owner is not None
         if self.peer:
-            _start_peer(self.owner)
+            _start_peer(self.owner, self.lease_ms)
         else:
             self.owner.start()
-        self.watch = open_session(self.endpoint, self.peer)
-        self._entities.append(live.declare_liveliness_subscriber(
-            self.watch, f"zk2/{self.address}/@zk/**", self._heard, history=True))
-        live.settle(self.watch, self.timeout)
-        self.reader = open_session(self.endpoint, self.peer)
+        if self.poll_s is None:
+            self.watch = open_session(self.endpoint, self.peer, self.lease_ms)
+            self._entities.append(live.declare_liveliness_subscriber(
+                self.watch, f"zk2/{self.address}/@zk/**", self._heard, history=True))
+            live.settle(self.watch, self.timeout)
+            self.counts["watch_settles"] += 1
+        self.reader = open_session(self.reader_endpoint or self.endpoint, self.peer, self.lease_ms)
         # §2.5 step 1: "When that is not the session holding the claim, the
         # instance makes one round trip on the claim's session after
         # declaring it, and before the read"
         assert self.owner.session is not None
         live.settle(self.owner.session, self.timeout)
+        if self.poll_s is not None:
+            self._poll_last: set[str] | None = None
+            self._poll_once()  # the first poll, before its first read: "from before its first read"
+            threading.Thread(target=self._poll_loop, daemon=True).start()
+
+    def _poll_loop(self) -> None:
+        assert self.poll_s is not None
+        while not self._stop.wait(self.poll_s):
+            try:
+                self._poll_once()
+            except Exception:  # noqa: BLE001 - a poll that fails is the next one's to make
+                pass
+
+    def _poll_once(self) -> None:
+        """§2.7 (0.2): "each read's holders compared with the last's: a holder
+        new to it is an appearance, and a complete read with no other holder,
+        after one with some, a withdrawal (a read not complete establishes no
+        absence)". It misses what comes and goes within one period."""
+        assert self.reader is not None
+        p = live.list_presence(self.reader, f"zk2/{self.address}/@zk/**", self.timeout)
+        with self.lock:
+            self.counts["polls"] += 1
+            self.counts["polls_complete"] += p.kind == live.COMPLETE
+            self.counts["reader_reads"] += 1
+        holders = {a["instance"] for a in p.alive if a["system"] == self.system and a["service"] == self.service
+                   and a["iface"] == self.iface}
+        others = {h for h in holders if not self.machine.mine(h)}
+        with self.lock:
+            self.heard = {h: {h} for h in holders}
+        events, self._poll_last = rd.poll_step(self._poll_last, others, p.kind == live.COMPLETE)
+        for ev in events:
+            self.post(ev)
 
     def _heard(self, sample: Any) -> None:
         parsed = live.keys.parse(str(sample.key_expr))
@@ -433,6 +504,18 @@ class Candidate:
         own = (self.instance, rd.STANDBY if self.iface in self.owner.standing_by else rd.SERVING)
         r, p, _ = read_address(self.reader, self.address, self.iface, below=self.instance, own=own,
                                timeout=self.timeout)
+        with self.lock:
+            # as the owner example counts them: "made" the reads made, a read
+            # not made counted apart
+            k = {live.COMPLETE: "complete", live.NOT_MADE: "not_made"}.get(p.kind, "incomplete")
+            if k == "not_made":
+                self.counts["not_made"] += 1
+            else:
+                self.counts["made"] += 1
+                self.counts["reader_reads"] += 1
+                if k == "complete":
+                    self.counts["complete"] += 1
+            self.counts["last"] = k
         reason = p.not_made or ("; ".join(p.errors) if p.errors else "") or \
             (live.CUT_OFF_DURING if p.cut_off_during else "")
         self.reads.append((time.monotonic(), r, p.kind, reason))
@@ -463,7 +546,9 @@ class Candidate:
         assert self.owner is not None
         new = new or secrets.token_hex(8)
         with self.lock:
-            self.machine.remint(new)
+            # text 0.2 (F-209): "A runtime tells its election of the new id
+            # before it declares the new id's tokens, in every state"
+            self.log.append((time.monotonic(), "reminted", self.machine.step({"reminted": new})))
             self.instance = new
         self.owner.new_epoch(new)
         return new
@@ -503,13 +588,13 @@ class Candidate:
                 pass
 
 
-def _start_peer(owner: Owner) -> None:
+def _start_peer(owner: Owner, lease_ms: int | None = None) -> None:
     """:meth:`Owner.start` as a peer whose only endpoint is its router's
     (scenarios.md §5 step 1: it opens while that router is down)."""
     owner.resolve_system()
     owner.resolve_bindings()
     plan = owner._plan()
-    owner.session = open_session(owner.endpoint, peer=True)
+    owner.session = open_session(owner.endpoint, peer=True, lease_ms=lease_ms)
     try:
         owner._bring_up(plan)
     except Exception:
