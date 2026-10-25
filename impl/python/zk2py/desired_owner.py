@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import desired
@@ -139,20 +140,39 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--desired-reread-ms", type=int)
     ap.add_argument("--desired-hold", action="store_true")
     ap.add_argument("address")
+    ap.add_argument("contracts", nargs="*", help="a tasking.v1 or worker.v1 contract file, used in place of the "
+                                                 "scenarios' (the owner example's)")
     args = ap.parse_args(argv)
     print(f"connected {args.connect}", flush=True)
+    from .contract import load_contract
+    from .desired_live import REPO
+    from .owner import OwnerRefused
+
+    given = {}
+    for f in args.contracts:
+        c = load_contract(Path(f), spec_dir=REPO / "spec")
+        given[c.interface] = c
     author: Author | None = None
     target: Target | None = None
     instance = None
     if args.desired_author:
         author = Author(args.address, args.connect, record=args.desired_record, window_s=args.desired_window,
-                        tokenless=tuple(args.tokenless))
+                        tokenless=tuple(args.tokenless), tasking=given.get("tasking.v1"))
         instance = author.start()
     if args.desired_target or args.desired_unbound:
         target = Target(args.address, args.connect, author=args.desired_target or "lab/author",
                         unbound=args.desired_unbound, archive=args.desired_archive, watch=args.desired_watch,
-                        reread_ms=args.desired_reread_ms, hold=args.desired_hold)
-        instance = target.start()
+                        reread_ms=args.desired_reread_ms, hold=args.desired_hold, worker=given.get("worker.v1"),
+                        tasking=given.get("tasking.v1"))
+        try:
+            instance = target.start()
+        except OwnerRefused as e:
+            # §2.1 (0.6): refused at its start, nothing declared
+            print(f"not started: {e}", file=sys.stderr, flush=True)
+            if author is not None:
+                author.close()
+            sys.stdout.flush()
+            os._exit(1)
     print(f"ready {instance}", flush=True)
     for raw in sys.stdin:
         line = raw.rstrip("\n")

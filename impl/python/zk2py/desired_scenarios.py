@@ -1138,7 +1138,7 @@ def section_tool_shapes(ctx: Ctx) -> None:
     from .contract import load_contract
     from .desired_live import contract
 
-    sec, rp = "§9 beyond: the tool's 0.4 and 0.5 readings", ctx.report
+    sec, rp = "§9 beyond: the tool's 0.4 to 0.6 readings", ctx.report
     if ctx.author_impl != "zk2py" or ctx.target_impl != "zk2py":
         return  # no party runs here: once is enough
     use_z = _zenctl_ready(rp, sec, 46)
@@ -1295,18 +1295,18 @@ def section_tool_shapes(ctx: Ctx) -> None:
          doc_of(watcher, "watch", "worker.v1", {}), {}, a_worker,
          {"zk2/lab/author/worker.v1/state/running": [(doc, True)]}, not_a_target,
          ([watcher, worker], [pw, p1], "watch")),
-        ("a role on no desired resource, its author absent, its revision held: the slice from the requirement, "
-         "no report (F-217)", doc_of(watcher, "watch", "worker.v1", {}), {}, absent, {}, no_report,
+        ("a role on no desired resource, its author absent, its revision held: not a target, never the target "
+         "alone (0.6, F-217)", doc_of(watcher, "watch", "worker.v1", {}), {}, absent, {}, not_a_target,
          ([watcher, worker], [pw, p1], "watch")),
         ("a role naming two desired resources, the author absent, none held: the report's claim of tasks is the "
          "slice (F-218)", doc_of(four, "task", "zk2py_tasking2.v1", selfs),
          {four_rp: [(claim(t2_key.format("tasks")), True)]}, absent, {}, absent_answers, ([four], [p4], "task")),
-        ("a role naming two desired resources, the author absent, its revision held: the slice its first, plans, "
-         "and the report of tasks none (F-218)", doc_of(four, "task", "zk2py_tasking2.v1", selfs),
+        ("a role naming two desired resources, the author absent, its revision held: two_documents, no slice, "
+         "no report (0.6, F-218)", doc_of(four, "task", "zk2py_tasking2.v1", selfs),
          {four_rp: [(claim(t2_key.format("tasks")), True)]}, absent, {}, no_report,
          ([four, tasking2], [p4, pt2], "task")),
-        ("a role naming two desired resources, the author present: the slice plans, the report of tasks none "
-         "(F-218)", doc_of(four, "task", "zk2py_tasking2.v1", selfs),
+        ("a role naming two desired resources, the author present: two_documents, no slice, no report "
+         "(0.6, F-218)", doc_of(four, "task", "zk2py_tasking2.v1", selfs),
          {four_rp: [(claim(t2_key.format("tasks")), True)]}, a_t2,
          {t2_key.format(w): [(doc, True)] for w in ("plans", "tasks")}, no_report, ([four, tasking2], [p4, pt2], "task")),
         ("a role naming every resource, the author absent, none held: no template named, no candidate, no report",
@@ -1351,9 +1351,10 @@ def section_tool_shapes(ctx: Ctx) -> None:
                 # the whole row, beside the answers: what each tool says it read
                 mr, zr = _row_of_mine(mine[0] if mine else None), _row_of_zenctl(_z_row(zdoc, role))
                 differ = {k: (mr.get(k), zr.get(k)) for k in sorted(set(mr) | set(zr)) if mr.get(k) != zr.get(k)}
-                # Known, in the rows alone: for two reports that claim the slice
-                # and differ, zenctl's row carries no report, where §2.10 calls
-                # the two unreadable (zk2py's row); both answer report_invalid
+                # Known in round 59, in the rows alone: for two reports that
+                # claim the slice and differ, zenctl's row then carried no
+                # report, where §2.10 calls the two unreadable; since 0.6's
+                # build it says unreadable too, and this allowance is unused
                 known = bool(mine) and mine[0].report_reply == "unreadable:two_differ" and \
                     differ == {"report": ("unreadable", None)}
                 if known:
@@ -1451,9 +1452,56 @@ def section_remint(ctx: Ctx) -> None:
         bus.close()
 
 
+def section_two_documents(ctx: Ctx) -> None:
+    """zk2py's own (§2.1, 0.6, F-218): "A target MUST refuse such a role at its
+    start, with nothing of it declared, as core §8.2 step 2 refuses an
+    invalid declaration". The run's target, given ``desired-two``'s
+    worker.v1 (a role naming tasks and plans) and tasking.v1 (both desired),
+    starts with neither of its tokens; the control, the same worker.v1
+    beside the scenarios' tasking.v1 (tasks desired alone, plans no resource
+    of it), starts."""
+    from . import live
+
+    sec, rp = ctx.name("§2.1 one document type per role"), ctx.report
+    two = REPO / "impl/python/interop/desired-two"
+    exe = ([sys.executable, "-m", "zk2py.desired_owner"] if ctx.target_impl == "zk2py" else [str(ctx.target_impl)])
+    env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
+    bus = Bus()
+    try:
+        for name, files, refused in (
+                ("a role naming two desired resources of its author's declaration: refused at its start, no "
+                 "instance token, two_documents said", [two / "worker.v1.toml", two / "tasking.v1.toml"], True),
+                ("the control: the same role, the author's declaration holding one of them: it starts",
+                 [two / "worker.v1.toml"], False)):
+            t = time.monotonic()
+            p = subprocess.Popen([*exe, "--connect", bus.ep1, "--desired-target", AUTHOR, TARGET, *map(str, files)],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 env=env)
+            time.sleep(3.0)
+            code = p.poll()
+            pres = live.list_presence(bus.g1, f"zk2/{TARGET}/@zk/**")
+            mine = [i for i in pres.instances]
+            if code is None:
+                p.stdin.close()
+                try:
+                    p.wait(10)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+            err = p.stderr.read() if p.stderr else ""
+            if refused:
+                rp.check(sec, name, code not in (None, 0) and not mine and "two_documents" in err,
+                         f"exit {code}; instances {len(mine)}; {err.strip()[-300:]!r}")
+            else:
+                rp.check(sec, name, code is None and len(mine) == 1,
+                         f"exit {code}; instances {len(mine)}; {err.strip()[-200:]!r}")
+            time.sleep(0.5)
+    finally:
+        bus.close()
+
+
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
             "7": section7, "8": section8, "9": section9, "10": section10, "edges": section_edges,
-            "remint": section_remint, "tool-shapes": section_tool_shapes}
+            "remint": section_remint, "tool-shapes": section_tool_shapes, "two-documents": section_two_documents}
 
 
 def main(argv: list[str] | None = None) -> int:

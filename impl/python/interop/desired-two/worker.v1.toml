@@ -1,0 +1,25 @@
+# desired-two/worker.v1.toml: worker.v1 whose role names both of
+# desired-two/tasking.v1's desired resources: two documents for one role,
+# which a target refuses at its start (desired.v1 §2.1, 0.6, F-218).
+# zk2py's own; it must load with no finding at all.
+[interface]
+name  = "worker"
+major = 1
+minor = 0
+uses  = ["desired.v1"]
+
+[schemas]
+jsonschema = ["../../../../spec/profiles/desired/desired.v1.json", "../desired/tasking.json"]
+
+[resources.running]
+kind = "state"
+type = "json:Task"
+
+[resources."desired/task"]
+kind = "state"
+type = "json:desired.v1.Report"
+
+[requires.task]
+interface = "tasking.v1"
+resources = ["tasks/{system}/{service}", "plans/{system}/{service}"]
+optional  = true

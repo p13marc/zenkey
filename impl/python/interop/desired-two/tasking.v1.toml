@@ -1,0 +1,26 @@
+# desired-two/tasking.v1.toml: tasking.v1 as another deployment could have
+# authored it, with two desired resources, tasks and plans, so that a
+# worker's role naming both names two documents (desired.v1 §2.1, §2.3,
+# 0.6, F-218: two_documents). zk2py's own; it must load with no finding.
+[interface]
+name  = "tasking"
+major = 1
+minor = 0
+uses  = ["desired.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["../desired/tasking.json"]
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }
+
+[resources."plans/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

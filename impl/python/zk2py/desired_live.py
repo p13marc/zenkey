@@ -40,7 +40,7 @@ import zenoh
 
 from . import alarms, desired, live
 from .contract import load_contract
-from .owner import Owner
+from .owner import Owner, OwnerRefused
 
 REPO = Path(__file__).resolve().parents[3]
 CONTRACTS = REPO / "impl" / "python" / "interop" / "desired"
@@ -136,11 +136,12 @@ class Author:
     """§2.11's author of ``tasks/{system}/{service}``."""
 
     def __init__(self, address: str, endpoint: str, *, record: str | None = None, window_s: float = 60.0,
-                 tokenless: tuple[str, ...] = ()) -> None:
+                 tokenless: tuple[str, ...] = (), tasking: Any = None) -> None:
         self.address, self.endpoint = address, endpoint
         self.record_path = None if record is None else Path(record)
         self.window_s, self.tokenless = window_s, set(tokenless)
-        self.contract = contract("tasking.v1")
+        #: tasking.v1, the scenarios' or a file given in its place
+        self.contract = tasking or contract("tasking.v1")
         self.documents: dict[str, dict[str, Any]] = {}
         self.deletes: dict[str, dict[str, Any]] = {}
         #: record entries a restart or a re-mint could not write again: kept
@@ -376,12 +377,17 @@ class Target:
 
     def __init__(self, address: str, endpoint: str, *, author: str = "lab/author", unbound: bool = False,
                  archive: str | None = None, watch: bool = False, reread_ms: int | None = None,
-                 hold: bool = False, poll_ms: int = 500, timeout: float = 1.0) -> None:
+                 hold: bool = False, poll_ms: int = 500, timeout: float = 1.0, worker: Any = None,
+                 tasking: Any = None) -> None:
         self.address, self.endpoint, self.author = address, endpoint, author
         self.unbound, self.archive, self.watch_mode = unbound, archive, watch
         self.reread_s = None if reread_ms is None else reread_ms / 1000
         self.poll_s, self.timeout = poll_ms / 1000, timeout
-        self.contract = contract("worker.v1")
+        #: worker.v1 and its author's tasking.v1, the scenarios' or files
+        #: given in their place: the author's declaration, which the role's
+        #: requirement is read against at the start (§2.1, 0.6)
+        self.contract = worker or contract("worker.v1")
+        self.author_contract = tasking or contract("tasking.v1")
         self.task_schema = json.loads((CONTRACTS / "tasking.json").read_text())
         self.key = None if unbound else slice_key(author, address)
         self.role = desired.TargetRole(self.key)
@@ -416,9 +422,27 @@ class Target:
         self.run = f"zk2/{address}/worker.v1/state/running"
 
     # -- bring-up --------------------------------------------------------
+    def documents(self) -> list[dict[str, Any]]:
+        """§2.1 (0.6, F-218): the desired resources of the author's
+        declaration the role's requirement names."""
+        rr = (self.contract.canonical.get("requires") or {}).get("task") or {}
+        req = {"resources": rr.get("resources")}
+        shapes = [{"kind": r.get("kind"), "template": r.get("template"),
+                   "annotations": r.get("annotations") or {}} for r in self.author_contract.canonical["resources"]]
+        return desired.desired_named(shapes, req)
+
     def start(self) -> str:
+        """The target's start. §2.1 (0.6, F-218): "A target MUST refuse such
+        a role at its start, with nothing of it declared, as core §8.2 step 2
+        refuses an invalid declaration": a bound role naming two or more
+        desired resources raises before any session opens (the kill switch,
+        read before it, refuses nothing)."""
         system, service = self.address.split("/")
         bound = not self.unbound
+        if bound and len(self.documents()) >= 2:
+            raise OwnerRefused("role \"task\": its binding is invalid (two_documents): it names "
+                               f"{', '.join(r['template'] for r in self.documents())}, one role per document type "
+                               "(desired.v1 §2.1, §2.3)")
         self.owner = Owner(system, service, [self.contract], connect=self.endpoint,
                            bindings={"task": [self.author]} if bound else {},
                            params={"task": {"system": "self.system", "service": "self.service"}} if bound else {},

@@ -201,8 +201,8 @@ def declare(kind: str, template: str, annotations: dict[str, Any], params: dict[
 # -- §2.3: the binding ---------------------------------------------------------------------------
 
 BOUND, UNBOUND = "bound", "unbound"
-#: §2.3's findings, in their order.
-BINDING_REASONS = ("required_unbound", "not_one_author", "target_unbound", "not_self", "wrong_self")
+#: §2.3's findings, in their order; ``two_documents`` since 0.6 (F-218).
+BINDING_REASONS = ("required_unbound", "two_documents", "not_one_author", "target_unbound", "not_self", "wrong_self")
 #: zk2py's own refusal, outside §2.3's list: a target address that is not
 #: ``<system>/<service>``.
 TARGET_ADDRESS = "target_address"
@@ -234,10 +234,12 @@ def slice_key(author: str, iface: str, explicit: bool, template: str, identities
 
 
 def bind(decl: Declaration, template: str, explicit: bool, iface: str, target: str,
-         requirement: dict[str, Any]) -> Binding:
+         requirement: dict[str, Any], also: Iterable[Any] = ()) -> Binding:
     """§2.3 over a declared resource and a requirement as the target's
     descriptor lists it (core §3.3: ``bindings``, the provider addresses;
-    ``params``, the parameter bindings as configured; ``optional``)."""
+    ``params``, the parameter bindings as configured; ``optional``).
+    ``also`` (0.6, F-218) is the other desired resources of the author's
+    declaration the requirement names: any is ``two_documents``."""
     if decl.declaration != DECLARED:
         raise ValueError("§2.3 binds a declared resource only")
     # The target's own address is the premise of every check: one that is
@@ -254,6 +256,11 @@ def bind(decl: Declaration, template: str, explicit: bool, iface: str, target: s
         if requirement.get("optional"):
             return Binding(UNBOUND)
         return Binding(INVALID, ("required_unbound",))
+    # 0.6 (F-218): "after required_unbound, which reads only whether a
+    # binding exists … and before every other problem, alone: each of them
+    # binds the one slice there is not"
+    if list(also):
+        return Binding(INVALID, ("two_documents",))
     reasons: list[str] = []
     parts = providers[0].split("/")
     # "more than one binding, or one with * at either position". A provider
@@ -1236,6 +1243,9 @@ def reading_of(x: dict[str, Any]) -> Reading:
 AUTHOR_CONTRACT, OFFLINE_CONTRACT, REQUIREMENT = "author_contract", "offline_contract", "requirement"
 #: §2.10 "Which reply is the report": found one, unreadable, none, or no slice.
 FOUND_ONE, FOUND_UNREADABLE, FOUND_NONE, NO_SLICE = "one", "unreadable", "none", "no_slice"
+#: 0.6 (F-217): a revision in hand declaring no desired resource the
+#: requirement names: the role is no target's
+NOT_A_TARGET = "not_a_target"
 TWO_DIFFER, UNREADABLE_REPLY = "two_differ", "unreadable_reply"
 
 
@@ -1249,8 +1259,9 @@ class SliceTaken:
     source: str | None
     binding: tuple[str, ...] = ()
     declaration: tuple[str, ...] = ()
-    #: False when the author's contract in hand declares no desired
-    #: resource the requirement names: the role is not this profile's (§2.1)
+    #: False when a revision of the author's interface in hand, named or
+    #: held, declares no desired resource the requirement names: the role
+    #: is not this profile's (§2.1, 0.6, F-217)
     desired: bool = True
 
 
@@ -1299,25 +1310,32 @@ def _kind_of(r: dict[str, Any]) -> tuple[str, bool]:
     return ("@state" if explicit else kind), explicit
 
 
-def _desired_named(resources: Iterable[dict[str, Any]], requirement: dict[str, Any]) -> dict[str, Any] | None:
-    """The revision's first desired resource the requirement names: a
-    resource "whose resolved annotations hold desired.target_param" (§0),
-    whatever its declaration then says (§2.2)."""
-    for r in resources:
-        if KEY in (r.get("annotations") or {}) and _names_resource(requirement, str(r.get("template"))):
-            return r
-    return None
+def desired_named(resources: Iterable[dict[str, Any]], requirement: dict[str, Any]) -> list[dict[str, Any]]:
+    """A revision's desired resources the requirement names: each resource
+    "whose resolved annotations hold desired.target_param" (§0), whatever
+    its declaration then says (§2.2). §2.1 (0.6): "A requirement on desired
+    resources names exactly one of them"."""
+    return [r for r in resources
+            if KEY in (r.get("annotations") or {}) and _names_resource(requirement, str(r.get("template")))]
 
 
-def _from_contract(res: dict[str, Any], iface: str, target: str, requirement: dict[str, Any],
+def _from_contract(found: list[dict[str, Any]], iface: str, target: str, requirement: dict[str, Any],
                    source: str) -> SliceTaken:
     """§2.3 over the author's declaration: "The kind token and the target
-    parameters are the author's declaration"."""
+    parameters are the author's declaration". Two or more desired
+    resources named are ``two_documents`` (0.6, F-218), after the binding's
+    absence."""
+    res = found[0]
     kind, explicit = _kind_of(res)
     decl = declare(kind, str(res["template"]), dict(res.get("annotations") or {}), dict(res.get("params") or {}))
-    if decl.declaration != DECLARED:
+    if decl.declaration != DECLARED and len(found) == 1:
         return SliceTaken((), None, (), decl.reasons)
-    b = bind(decl, str(res["template"]), explicit, iface, target, requirement)
+    if decl.declaration != DECLARED:
+        # two documents named whatever the first's declaration says: the
+        # binding's absence first, then two_documents alone
+        decl = Declaration(DECLARED, (), tuple(Target(n, EITHER) for n in
+                                               templates.parse_template(str(res["template"])).param_names))
+    b = bind(decl, str(res["template"]), explicit, iface, target, requirement, also=found[1:])
     if b.binding != BOUND:
         return SliceTaken((), None, b.reasons)
     assert b.key is not None
@@ -1340,18 +1358,23 @@ def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict
     "A binding §2.3 finds invalid, or a declaration §2.2 does, gives no
     slice"."""
     if named is not None:
-        res = _desired_named(named.get("resources") or [], requirement)
-        if res is not None:
-            return _from_contract(res, iface, target, requirement, AUTHOR_CONTRACT)
+        found = desired_named(named.get("resources") or [], requirement)
+        if found:
+            return _from_contract(found, iface, target, requirement, AUTHOR_CONTRACT)
         # The revision its descriptor names decides, whatever held revisions
         # declare: one in hand that declares no desired resource the
         # requirement names makes the role not this profile's, not_a_target
-        # (F-217, answered on #840, issuecomment-35724, for text 0.6).
+        # (0.6, F-217).
         return SliceTaken((), None, desired=False)
+    held = list(held)
     for rev in held:
-        res = _desired_named(rev.get("resources") or [], requirement)
-        if res is not None:
-            return _from_contract(res, iface, target, requirement, OFFLINE_CONTRACT)
+        found = desired_named(rev.get("resources") or [], requirement)
+        if found:
+            return _from_contract(found, iface, target, requirement, OFFLINE_CONTRACT)
+    if held:
+        # 0.6 (F-217): "the target alone is read only with no revision of the
+        # interface in hand at all"
+        return SliceTaken((), None, desired=False)
     # From the target alone. Every parameter of a desired template is a
     # target parameter (§2.2); which identity each takes is its binding's,
     # the declaration's order unknown, so wrong_self cannot be found here.
@@ -1377,6 +1400,14 @@ def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict
     if not requirement.get("bindings"):
         return SliceTaken((), None)  # unbound: the kill switch, §2.17 step 2's
     return SliceTaken(tuple(candidates), REQUIREMENT if candidates else None)
+
+
+def find_report(taken: SliceTaken, replies: Iterable[tuple[str, bytes]]) -> ReportFound:
+    """The report of a role, from what its slice taking found: no target's
+    role (0.6, F-217), else :func:`which_report` among its candidates."""
+    if not taken.desired:
+        return ReportFound(NOT_A_TARGET)
+    return which_report(replies, taken.candidates)
 
 
 def which_report(replies: Iterable[tuple[str, bytes]], candidates: Iterable[str]) -> ReportFound:
