@@ -144,6 +144,12 @@ pub struct RoleResolution {
     /// it came from the requirement alone, the report's key choosing.
     pub slice: Vec<String>,
     pub slice_from: Option<SliceFrom>,
+    /// The contract the descriptor names as declaring the role, when this
+    /// tool holds no revision of it: what the requirement names is unread,
+    /// so no binding problem is read and there is no slice, never every
+    /// resource (text 0.8, F-225). The tool's sight, not the target's
+    /// problem.
+    pub requirement_unread: Option<String>,
 }
 
 impl RoleResolution {
@@ -160,6 +166,7 @@ impl RoleResolution {
             binding_problems: Vec::new(),
             slice: Vec::new(),
             slice_from: None,
+            requirement_unread: None,
         }
     }
 
@@ -194,6 +201,80 @@ fn desired_resources<'c>(
         .map(|r| (r, dm::declaration_of(r)))
         .filter(|(_, d)| *d != Declaration::NotThisProfiles)
         .collect()
+}
+
+/// What a role's requirement names, as a tool reads it (core §3.1, §3.3;
+/// text 0.7, 0.8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Named {
+    /// Every resource of the required interface: a requirement naming
+    /// none, or a role the component's manifest declares (its descriptor
+    /// names no declaring contract, core §3.3; text 0.7).
+    Every,
+    /// These templates, as the declaring contract lists them.
+    These(Vec<String>),
+    /// Unread (text 0.8, F-225): the descriptor names this contract as
+    /// declaring the role, and no revision of it is in hand, or the one in
+    /// hand declares no such role. Never every resource.
+    Unread(String),
+}
+
+impl Named {
+    /// The templates, as [`resolve_role`] takes them: `None` for every
+    /// resource, and for an unread requirement, which [`resolve_unread`]
+    /// reads instead.
+    pub fn templates(&self) -> Option<&[String]> {
+        match self {
+            Named::These(t) => Some(t),
+            Named::Every | Named::Unread(_) => None,
+        }
+    }
+}
+
+/// What `entry`'s requirement names: from the revision of its declaring
+/// contract that `descriptor` names, retrieved or held offline; every
+/// resource for a manifest's role; unread when that revision is not in
+/// hand (text 0.8, F-225).
+pub fn requirement_names(
+    descriptor: &Descriptor,
+    entry: &RequireEntry,
+    contracts: &Contracts,
+    offline: &ContractSet,
+) -> Named {
+    let Some(by) = entry.declared_by.as_deref() else {
+        return Named::Every;
+    };
+    match named_revision(descriptor, by, contracts, offline)
+        .and_then(|rev| rev.contract().requires.get(&entry.role))
+    {
+        Some(req) => req.resources.clone().map_or(Named::Every, Named::These),
+        None => Named::Unread(by.to_owned()),
+    }
+}
+
+/// Resolves a role whose requirement is unread (text 0.8, F-225): its
+/// listing and its author, no binding problem read and no slice, never
+/// every resource. `None` when the author's revision in hand, named or
+/// held, declares no desired resource at all: whatever the requirement
+/// names, the role is not this profile's, `not_a_target` (F-217).
+pub fn resolve_unread(
+    entry: &RequireEntry,
+    declaring: &str,
+    author: Option<(&Contract, SliceFrom)>,
+) -> Option<RoleResolution> {
+    if author.is_some_and(|(c, _)| desired_resources(c, None).is_empty()) {
+        return None;
+    }
+    let mut out = RoleResolution::bare(
+        entry.role.clone(),
+        Some(Listing::Listed {
+            bound: !entry.bindings.is_empty(),
+        }),
+    );
+    out.interface = IfaceId::from_str(&entry.interface).ok();
+    out.author = one_author(&entry.bindings);
+    out.requirement_unread = Some(declaring.to_owned());
+    Some(out)
 }
 
 /// Resolves one `requires` entry of `own`'s descriptor (§2.3): its
@@ -710,6 +791,13 @@ impl RoleRead {
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
+        } else if let Some(by) = &res.requirement_unread {
+            no_report = Some(format!(
+                "its requirement is unread: its descriptor names {by} as the contract declaring \
+                 role {}, and no revision of it in hand declares the role, so which resource the \
+                 role binds is not known, never every resource (§2.17, text 0.8)",
+                res.role
+            ));
         } else if res.slice.is_empty() {
             no_report = Some(if res.resource.is_none() {
                 "no contract in hand says which resource the role binds: the author's \
@@ -1119,6 +1207,90 @@ mod tests {
 
     /// One revision of the author's interface `iface` from `slices.json`'s
     /// resources, each as `declarations.json` gives one.
+    /// Text 0.8, F-225, the shape round 62 measured: a target whose
+    /// descriptor names its role's declaring contract at a fingerprint no
+    /// one serves, its author's revision in hand declaring two desired
+    /// resources. The requirement is unread: no binding problem, no slice,
+    /// never `two_documents`, and an author declaring no desired resource
+    /// at all still shows the role no target's. Held, the declaring
+    /// contract's requirement is read; a manifest's role names every
+    /// resource (text 0.7).
+    #[test]
+    fn a_requirement_whose_declaring_contract_is_not_in_hand_is_unread() {
+        use serde_json::json;
+        let desired = |t: &str| {
+            json!({"annotations": {"desired.target_param": ["system", "service"]},
+                   "kind": "state", "params": {"system": "string", "service": "string"},
+                   "template": t})
+        };
+        let two = revision_of(
+            "tasking.v1",
+            &json!([
+                desired("plans/{system}/{service}"),
+                desired("tasks/{system}/{service}")
+            ]),
+        );
+        let plain = revision_of(
+            "tasking.v1",
+            &json!([{"annotations": {}, "kind": "state", "params": {}, "template": "status"}]),
+        );
+        let w = worker();
+        let fp = Revision::from_contract(w.clone(), crate::report::ContractSource::File)
+            .fingerprint()
+            .to_string();
+        let d: Descriptor = serde_json::from_value(json!({
+            "format": "zk2-descriptor/0.1", "service": "lab/worker",
+            "instance": "0123456789abcdef",
+            "interfaces": [{"iface": "worker.v1", "contract": fp, "minor": 0}],
+            "requires": [{"role": "task", "interface": "tasking.v1", "declared_by": "worker.v1",
+                          "bindings": ["lab/author"],
+                          "params": {"system": "self.system", "service": "self.service"}}],
+        }))
+        .unwrap();
+        let e = &d.requires[0];
+        let own: Addr = "lab/worker".parse().unwrap();
+        let (none, empty) = (Contracts::new(), ContractSet::new());
+        let names = requirement_names(&d, e, &none, &empty);
+        assert_eq!(names, Named::Unread("worker.v1".into()));
+        assert_eq!(names.templates(), None);
+        let r = resolve_unread(e, "worker.v1", Some((&two, SliceFrom::AuthorContract))).unwrap();
+        assert!(r.bound() && r.slice.is_empty() && r.binding_problems.is_empty());
+        assert_eq!(r.requirement_unread.as_deref(), Some("worker.v1"));
+        assert_eq!(r.author, Some("lab/author".parse().unwrap()));
+        assert!(
+            resolve_unread(e, "worker.v1", Some((&plain, SliceFrom::AuthorContract))).is_none(),
+            "no desired resource at all: not a target, whatever it names"
+        );
+        let r = resolve_unread(e, "worker.v1", None).unwrap();
+        assert!(r.slice.is_empty() && r.requirement_unread.is_some());
+        // Held, the requirement is read: one of the two, the slice.
+        let mut held = ContractSet::new();
+        held.insert(Revision::from_contract(
+            w,
+            crate::report::ContractSource::File,
+        ));
+        let names = requirement_names(&d, e, &none, &held);
+        assert_eq!(
+            names,
+            Named::These(vec!["tasks/{system}/{service}".to_owned()])
+        );
+        let r = resolve_role(
+            &own,
+            e,
+            names.templates(),
+            Some((&two, SliceFrom::AuthorContract)),
+        )
+        .unwrap();
+        assert_eq!(r.slice, [D]);
+        assert_eq!(r.requirement_unread, None);
+        // A manifest's role: every resource, so two_documents (text 0.7).
+        let mut m = e.clone();
+        m.declared_by = None;
+        assert_eq!(requirement_names(&d, &m, &none, &empty), Named::Every);
+        let r = resolve_role(&own, &m, None, Some((&two, SliceFrom::AuthorContract))).unwrap();
+        assert_eq!(r.binding_problems, [BindingProblem::TwoDocuments]);
+    }
+
     fn revision_of(iface: &str, resources: &serde_json::Value) -> Contract {
         let (name, major) = iface.rsplit_once(".v").expect("<name>.v<major>");
         let q = |v: &serde_json::Value| serde_json::to_string(v).expect("JSON");
@@ -1217,7 +1389,15 @@ mod tests {
                     &offline,
                 ),
             };
-            let Some(res) = resolve_role(&own, &entry, templates.as_deref(), held) else {
+            // A requirement unread (text 0.8, F-225): its declaring
+            // contract named and not in hand.
+            let unread = req["unread"] == true;
+            let resolved = if unread {
+                resolve_unread(&entry, "worker.v1", held)
+            } else {
+                resolve_role(&own, &entry, templates.as_deref(), held)
+            };
+            let Some(res) = resolved else {
                 // A revision in hand declaring no desired resource the
                 // requirement names: no target's (text 0.6, F-217).
                 let got = json!({
@@ -1236,7 +1416,10 @@ mod tests {
                 .iter()
                 .map(|x| reply(x["key"].as_str().unwrap(), x["text"].as_str().unwrap()))
                 .collect();
-            let report = if res.slice.is_empty() {
+            let report = if res.requirement_unread.is_some() {
+                assert!(res.binding_problems.is_empty(), "{}", case["note"]);
+                json!({"found": "requirement_unread"})
+            } else if res.slice.is_empty() {
                 json!({"found": "no_slice"})
             } else {
                 match report_of(&replies, &res.slice) {

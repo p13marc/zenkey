@@ -6,6 +6,13 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `desired` on desired.v1 text 0.8: a requirement unread (#840, DG)
+
+| Before | Now | Notes |
+|---|---|---|
+| `desired`: a role whose declaring contract the descriptor names, neither retrieved nor held, read as naming every resource: on an author with two desired resources, `binding_invalid: ["two_documents"]` | its requirement is unread: no binding problem, no slice, **unobservable**, `no_report`, and the row's `requirement_unread` names the declaring contract | §2.17, text 0.8, F-225. An author's revision in hand declaring no desired resource at all still makes the role `not_a_target` |
+| `check conform`'s `desired-binding` on such a role: failed, `two_documents` | unobservable: what the requirement names is not known | |
+
 ## Unreleased (`main`, zk2) — `desired` on desired.v1 text 0.6: a role on no desired resource, two documents, two reports that differ (#840, DF)
 
 | Before | Now | Notes |

@@ -1026,25 +1026,28 @@ pub(crate) enum Command {
     /// in hand, named or held, shows on no desired resource is not the
     /// profile's: not asked, not_a_target; one whose requirement names two
     /// desired resources is an invalid binding, two_documents, with no slice
-    /// (text 0.6). Per role, §5's four questions: has the target converged on
-    /// its author's current document (yes: the same stamp, converged or
-    /// reverted; no: refused or failed; not yet: no act, an earlier time of the
-    /// same id, or another id); is its last act refused or failed; is what it
-    /// acted on last-known; is a desired document in force. An absent target,
-    /// or a role unbound (the kill switch) or not listed, is not asked; a
-    /// presence read possibly incomplete, a descriptor or a report not read, a
-    /// report unreadable, malformed or stale, its author absent, or its
-    /// author's GET silent or incomplete, answer nothing. With --for, the
-    /// reading is made again every 500 ms while an answer may move: a target
-    /// "not yet" on one version of its author's for the whole window is behind
-    /// (the finding, text 0.4: every reading over the window, the first and the
-    /// last that far apart, text 0.5), and with --clocks-synced one not yet on
-    /// a version stamped more than the window and the delta before its slice
-    /// GET was answered is at once. Exit 1 a refused or failed act, or a target
-    /// behind past --for (the findings); 0 every role asked converged on its
-    /// author's current document, none refused; 2 no verdict: not yet,
-    /// unobservable, an author absent, nothing asked, or a run that could not
-    /// start.
+    /// (text 0.6). A role whose declaring contract the descriptor names and no
+    /// revision of it in hand declares has its requirement unread: no binding
+    /// problem is read, never every resource, and it answers unobservable,
+    /// no_report, requirement_unread beside (text 0.8). Per role, §5's four
+    /// questions: has the target converged on its author's current document
+    /// (yes: the same stamp, converged or reverted; no: refused or failed; not
+    /// yet: no act, an earlier time of the same id, or another id); is its last
+    /// act refused or failed; is what it acted on last-known; is a desired
+    /// document in force. An absent target, or a role unbound (the kill switch)
+    /// or not listed, is not asked; a presence read possibly incomplete, a
+    /// descriptor or a report not read, a report unreadable, malformed or
+    /// stale, its author absent, or its author's GET silent or incomplete,
+    /// answer nothing. With --for, the reading is made again every 500 ms while
+    /// an answer may move: a target "not yet" on one version of its author's
+    /// for the whole window is behind (the finding, text 0.4: every reading
+    /// over the window, the first and the last that far apart, text 0.5), and
+    /// with --clocks-synced one not yet on a version stamped more than the
+    /// window and the delta before its slice GET was answered is at once. Exit
+    /// 1 a refused or failed act, or a target behind past --for (the findings);
+    /// 0 every role asked converged on its author's current document, none
+    /// refused; 2 no verdict: not yet, unobservable, an author absent, nothing
+    /// asked, or a run that could not start.
     ///
     /// --format json is one document: `report` ("desired"), `namespace`,
     /// `target` and `role` when asked, `presence` (`selector`, `complete`,
@@ -1054,14 +1057,15 @@ pub(crate) enum Command {
     /// `not_listed`, `unread`), `interface`, `resource`, `slice` and
     /// `slice_from` (`author_contract`, `offline_contract`, `requirement`),
     /// `declaration_invalid` and `binding_invalid` when there is something to
-    /// say, `report` (`key`, `document` as the target put it, or `unreadable`,
-    /// with `differing`, the other reports' keys, when two claim the slice and
-    /// differ; `findings`, `stamp`, `freshness`), `author` (`address`,
-    /// `presence`, `current`: `put`, `delete`, `silent`, `incomplete` or
-    /// `not_read`, its `stamp` as the profile writes one, `why`), `archived`
-    /// (an archive's last-known, never current), `answers` (`converged`,
-    /// `refused`, `last_known`, `in_force`, each an `answer` — `yes`, `no`,
-    /// `not_yet`, `unobservable`, `not_asked` — a `reason` in
+    /// say, `requirement_unread` (the declaring contract, when no revision of
+    /// it in hand declares the role), `report` (`key`, `document` as the target
+    /// put it, or `unreadable`, with `differing`, the other reports' keys, when
+    /// two claim the slice and differ; `findings`, `stamp`, `freshness`),
+    /// `author` (`address`, `presence`, `current`: `put`, `delete`, `silent`,
+    /// `incomplete` or `not_read`, its `stamp` as the profile writes one,
+    /// `why`), `archived` (an archive's last-known, never current), `answers`
+    /// (`converged`, `refused`, `last_known`, `in_force`, each an `answer` —
+    /// `yes`, `no`, `not_yet`, `unobservable`, `not_asked` — a `reason` in
     /// conclusions.json's tokens and `says` in words) and `behind` (`version`,
     /// `since_s`, `by`: `window` or `clock`) when a target was behind past
     /// --for.

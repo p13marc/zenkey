@@ -377,6 +377,7 @@ fn row(
             .iter()
             .map(|p| p.as_str().to_owned())
             .collect(),
+        requirement_unread: r.resolution.requirement_unread.clone(),
         report,
         author,
         archived: match &r.archived {
@@ -653,6 +654,32 @@ mod tests {
                 "no:unbound"
             ]
         );
+    }
+
+    /// A requirement unread (text 0.8, F-225; round 62's measured shape):
+    /// its declaring contract named and not in hand, the author's revision
+    /// declaring two desired resources. No binding problem, no slice, so
+    /// no report is read: unobservable, `no_report`, the declaring contract
+    /// beside as `requirement_unread`, never `two_documents`.
+    #[test]
+    fn a_requirement_unread_is_no_report_and_no_binding_problem() {
+        let spec = DesiredSpec::new(Duration::from_secs(1));
+        let mut ro = role(true, Seen::Present, Some((false, 100, "a1")));
+        ro.resolution.slice.clear();
+        ro.resolution.slice_from = None;
+        ro.resolution.requirement_unread = Some("zk2py_worker9.v1".into());
+        let t = target(Some(&format!(r#"{{"key":"{D}","source":"baseline"}}"#)), ro);
+        let r = judged(&t, &spec);
+        assert_eq!(tokens(&r)[0], "unobservable:no_report");
+        assert!(r.binding_invalid.is_empty(), "{r:?}");
+        assert_eq!(r.requirement_unread.as_deref(), Some("zk2py_worker9.v1"));
+        assert!(r.report.is_none(), "no report read without a slice");
+        assert!(
+            r.answers.converged.says.contains("requirement is unread"),
+            "{:?}",
+            r.answers.converged
+        );
+        assert_eq!(r.listing, DesiredListing::Bound);
     }
 
     /// Two readable reports, of two report resources, that claim the slice

@@ -231,6 +231,14 @@ pub struct DesiredRow {
     /// The binding's problems (§2.3).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub binding_invalid: Vec<String>,
+    /// `requirement_unread` (§2.17, text 0.8, F-225): the contract the
+    /// descriptor names as declaring the role, when no revision of it in
+    /// hand declares the role. What the requirement names is not known:
+    /// no binding problem is read and there is no slice, so the role
+    /// answers unobservable, `no_report`, beside this. The tool's sight,
+    /// never the target's problem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirement_unread: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report: Option<DesiredReportSeen>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -453,6 +461,7 @@ mod tests {
             slice_from: Some("author_contract".into()),
             declaration_invalid: vec![],
             binding_invalid: vec![],
+            requirement_unread: None,
             report: None,
             author: None,
             archived: vec![],
@@ -581,6 +590,43 @@ mod tests {
         ] {
             assert_eq!(serde_json::to_value(t).unwrap(), json!(t.as_str()));
         }
+    }
+
+    /// A requirement unread (§2.17, text 0.8, F-225): the declaring
+    /// contract's interface beside the row's `no_report`, no binding
+    /// problem, no slice and no `slice_from`.
+    #[test]
+    fn a_requirement_unread_pins_its_shape() {
+        let mut r = row(
+            (DesiredAnswerToken::Unobservable, "no_report"),
+            (DesiredAnswerToken::Unobservable, "no_report"),
+        );
+        r.slice = None;
+        r.slice_from = None;
+        r.resource = None;
+        r.requirement_unread = Some("worker9.v1".into());
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["requirement_unread"], "worker9.v1");
+        for absent in [
+            "slice",
+            "slice_from",
+            "resource",
+            "binding_invalid",
+            "report",
+        ] {
+            assert!(v.get(absent).is_none(), "{absent}: {v}");
+        }
+        assert_eq!(v["answers"]["converged"]["reason"], "no_report");
+        let mut r = row(
+            (DesiredAnswerToken::Yes, "converged"),
+            (DesiredAnswerToken::No, "converged"),
+        );
+        r.requirement_unread = None;
+        let v = serde_json::to_value(&r).unwrap();
+        assert!(
+            v.get("requirement_unread").is_none(),
+            "absent when read: {v}"
+        );
     }
 
     /// Two readable reports, of two report resources, that claim the slice
