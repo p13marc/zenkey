@@ -150,7 +150,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   revisions a caller holds (the doctor's). `model::desired` resolves each
   role's slice from the author's declaration and the target's binding, or,
   with no contract of the author's in hand, from the target's requirement
-  and binding (`slice_from`), projects a reading into the model's
+  and binding (`slice_from`; two reports that claim the slice and differ
+  are the row's `unreadable`, `two_differ` naming both keys, never no
+  report, #840 DF), projects a reading into the model's
   `TargetReading`, and follows how long a target is behind (`Behind`:
   readings a window apart, or a trusted clock dating a version at its
   slice GET's answer). `judge::desired` hands each
@@ -829,7 +831,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   the slice from the requirement, how long behind; text 0.5, F-210 to
   F-213, #840 DE: the report's key choosing among a requirement's
   candidate slices, every reading over a window, a held revision's kind
-  token winning over the report's, `slices.json`), and `redundancy.v1`'s
+  token winning over the report's, `slices.json`; text 0.6, F-217 to
+  F-219, #840 DF: a role a revision in hand shows on no desired resource
+  is not asked, `not_a_target`, the target-alone slice only with no
+  revision of the interface in hand declaring one; a requirement on two
+  desired resources an invalid binding, `two_documents`, which the
+  runtime's target refuses at start), and `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
   from every resource, invalid `not_used`, `value`, `disagrees` or
@@ -983,7 +990,9 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   keys; `new_epoch` re-puts them first. `ServiceBuilder::desired_target(
   role, author, resource, ReportAt, Handler, TargetStartup)` → `Target`
   reads the role's binding by `model::binding` (an optional role left
-  unbound is the kill switch: `{"source":"baseline"}`, nothing read) and
+  unbound is the kill switch: `{"source":"baseline"}`, nothing read; a
+  role on two desired resources refused at start, nothing declared, core
+  §8.2 step 2, #840 DF) and
   puts its baseline report before the tokens. From `start()` on it
   subscribes to the slice and seeds by S4's GET at start, at each
   appearance of the author's instance token (a watch session's subscriber,
