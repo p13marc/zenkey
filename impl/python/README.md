@@ -2124,8 +2124,8 @@ On review of PR #876 the follower changed in three ways:
 once beside a history subscriber held the owner's token. Measured after,
 it held it in 2 of 60 trials beside the Rust owner and 5 of 60 beside
 zk2py's. The reference's reproduction missed it in 720 of 720, and the
-step states it as certain. It is zenoh's race, not a reader's; three
-reruns passed.
+step states it as certain (F-235). It is zenoh's race, not a reader's;
+three reruns passed.
 
 Before 0.41 the runner ran §4 and §7 to §9 alone, with raw token holders
 and zk2py's reader: 31 of 31 against 0.38's steps, 26 of 26 against 0.37

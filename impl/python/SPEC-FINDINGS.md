@@ -11728,7 +11728,8 @@ it did not.
 | Rust, zenctl | 30 | 6 |
 
 Every check passes. On review of PR #876, one run of the Rust owner's
-pairing failed §9 step 2: zenoh's race, which the README measures. §10
+pairing failed §9 step 2: zenoh's race, which the step states as certain
+(F-235). §10
 ran beside 2,000 tokens, and step 4 beside 10,000 too, which fits on this
 VM. The measurements are in the README.
 
@@ -11740,7 +11741,7 @@ VM. The measurements are in the README.
   reference), which the text does not fix.
 
 **The text, read end to end.** Every new MUST and SHOULD cites
-`[Sc: presence.md §10]`, and §10 runs each one. Eight findings, all on
+`[Sc: presence.md §10]`, and §10 runs each one. Nine findings, all on
 what a second implementation has to decide for itself:
 - §10's steps 5, 6 and 7 each leave a setup choice open (F-227, F-231,
   F-234);
@@ -11749,7 +11750,8 @@ what a second implementation has to decide for itself:
   (F-230);
 - the interests-timeout MUST needs a value zenoh-python cannot read back
   (F-232);
-- the namespace exception has an unstated cost (F-233).
+- the namespace exception has an unstated cost (F-233);
+- §9 Expected 2 states a race's outcome as certain (F-235).
 
 ### F-227 · ambiguity · scenarios/presence.md §10 step 6: which of the reader's sessions the link carries, and how long it stalls
 
@@ -12032,7 +12034,54 @@ one subscriber per session.
 declares a subscriber without history; then another fresh one declares
 one with history …".
 
-**Counts at core 0.41:** 234 entries. Open: F-227 to F-234, against core
+### F-235 · contradiction · scenarios/presence.md §9 step 2 and Expected 2, and core Appendix B: a miss stated as certain is a race
+
+> §9 step 2: "The watch session declares a liveliness subscriber with
+> history to `zk2/*/*/@zk/instance/*`, and at once makes a liveliness GET
+> of `zk2/*/*/@zk/**`. History is what shows the hazard every time".
+
+> Expected 2: "The GET ends with the final reply and no error reply, and
+> without the owner's instance token (Appendix B: the same session's
+> subscriber covers it)."
+
+> Appendix B: "A GET issued right after declaring a history subscriber on
+> the same session missed every time: 720 of 720 (1.10.1), 719 of 720
+> (main)."
+
+The miss is not certain on zenoh-python 1.10.1. One run of
+`presence_scenarios --owner rust` failed Expected 2: the GET held the
+owner's instance token, and its interface token beside it.
+
+Measured after, on a fresh watch session per trial, with the owner up and
+read by the tool:
+- beside the Rust owner (`owner-wb`), the GET held the token in 2 of 60
+  trials;
+- beside zk2py's owner, in 5 of 60.
+
+Three reruns of §9 with the Rust owner then passed, 9 of 9 each. Before
+this round, every run of the step had missed.
+
+The race is the one Appendix B's "Why" names: the session's own answer
+and the router's final reply. Appendix B's "every time" is what the
+reference's reproduction saw (and main's 719 of 720 already shows it can
+be won). Expected 2 states it as certain. The hazard, a complete GET
+missing a live token, is unchanged: a GET that holds the token here
+proves nothing safe. But a runner that checks the miss as written fails
+a few runs in a hundred.
+
+**zk2py:** checks Expected 2 as written. A run that fails it is read as
+this race (the owner's token was held by the tool's GET, step 3). The
+README gives the measurement.
+
+**Wording that would remove the guess:** Expected 2: "The GET ends with
+the final reply and no error reply, and nearly always without the owner's
+instance token (Appendix B: the same session's subscriber covers it; it
+can win the race in a few runs in a hundred) …". Appendix B: "missed in
+720 of 720 (1.10.1, the reference's reproduction), 719 of 720 (main);
+zenoh-python 1.10.1 held it in 7 of 120".
+
+**Counts at core 0.41:** 235 entries. Open: F-227 to F-235, against core
 0.41: four ambiguities in §10 (F-227, F-230, F-231, F-234), three gaps in
-§8.1 (F-228, F-229, F-232), and one ambiguity in §8.1 (F-233). Every other
-entry is resolved.
+§8.1 (F-228, F-229, F-232), one ambiguity in §8.1 (F-233), and one
+contradiction between §9 Expected 2, Appendix B and the measurement
+(F-235). Every other entry is resolved.
