@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any, Callable
@@ -2598,9 +2599,12 @@ class _FakeSession:
     its info's links say before and after, or raises; its transports say
     ``transports`` throughout (core 0.38: never what the check reads)."""
 
-    def __init__(self, tokens: list[str], links: list[Any], transports: list[Any] | None = None) -> None:
+    def __init__(self, tokens: list[str], links: list[Any], transports: list[Any] | None = None,
+                 delay_s: float = 0.0, errors: int = 0) -> None:
         self.tokens, self.links, self.closed = tokens, list(links), False
         self.held_transports = [object()] if transports is None else transports
+        self.delay_s, self.errors = delay_s, errors
+        self.asked: list[str] = []
         outer = self
 
         class _Info:
@@ -2621,10 +2625,20 @@ class _FakeSession:
             def __init__(self, key: str) -> None:
                 self.ok, self.err = _Ok(key), None
 
+        class _Err:
+            def __init__(self) -> None:
+                self.ok, self.err = None, type("E", (), {"encoding": "zenoh/string",
+                                                          "payload": type("P", (), {"to_bytes": lambda s: b"Timeout"})()})()
+
         class _Liveliness:
             def get(self, selector: str, handler: Any, timeout: float = 1.0) -> None:
+                outer.asked.append(selector)
                 for k in outer.tokens:
                     handler.callback(_Reply(k))
+                for _ in range(outer.errors):
+                    handler.callback(_Err())
+                if outer.delay_s:
+                    time.sleep(outer.delay_s)
                 handler.drop()
 
         self.info, self._lv = _Info(), _Liveliness()
@@ -2701,6 +2715,124 @@ def _live_guards() -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _round_trip_readings() -> list[tuple[str, Any, Any]]:
+    """Core 0.41 §8.1 in :mod:`zk2py.live` and :mod:`zk2py.presence`, on fake
+    sessions and folds (#609, round 66): a read whose time reached its
+    session's interests timeout is possibly incomplete; a round trip of a key
+    under the subscribers' subtree, standing only when it ended at its final
+    reply, no error reply, before the interests timeout, its session holding
+    a link before and after; a read made while no round trip stands folded
+    unordered; a transport's move unconfirming what the reader held."""
+    from . import live
+    from . import presence as pr
+
+    tok = "zk2/lab/o/@zk/instance/" + "a" * 16
+    up = [object()]
+    out: list[tuple[str, Any, Any]] = []
+    label = "core 0.41 §8.1, zk2py's reads at the interests timeout"
+
+    def read(delay: float, its: float | None) -> tuple[str, bool]:
+        f = _FakeSession([tok], [up, up], delay_s=delay)
+        if its is not None:
+            live.register(f, interests_timeout_s=its)
+        p = live.list_presence(f)  # type: ignore[arg-type]
+        live.forget(f)
+        return p.kind, p.at_interests_timeout
+
+    out += [
+        (f"{label}: a read ended before its session's interests timeout is complete", read(0.0, 0.05),
+         (live.COMPLETE, False)),
+        (f"{label}: a read whose time reached it, its final reply and no error reply, is possibly incomplete",
+         read(0.06, 0.05), (live.POSSIBLY_INCOMPLETE, True)),
+        (f"{label}: a session zk2py did not record is taken at zenoh's default, 10 s",
+         [live.interests_timeout_of(_FakeSession([], [up])), live.ZENOH_INTERESTS_TIMEOUT_S], [10.0, 10.0]),
+        (f"{label}: zk2py's own sessions run with 120 s, the reference's tools' value", live.INTERESTS_TIMEOUT_S,
+         120.0),
+    ]
+    f = _FakeSession([tok], [up, up], delay_s=0.06)
+    live.register(f, interests_timeout_s=0.05)
+    p = live.list_presence(f)  # type: ignore[arg-type]
+    live.forget(f)
+    out.append((f"{label}: and says why", live.AT_INTERESTS_TIMEOUT in p.reading, True))
+    f = _FakeSession([], [up])
+    live.register(f, namespace="ns", interests_timeout_s=60.0)
+    out.append((f"{label}: what a session was opened with is recorded, since zenoh-python reads none back",
+                [live.namespace_of(f), live.interests_timeout_of(f), live.namespace_of(_FakeSession([], [up]))],
+                ["ns", 60.0, None]))
+    live.forget(f)
+    out.append((f"{label}: forget drops it", live.interests_timeout_of(f), 10.0))
+
+    label = "core 0.41 §8.1, zk2py's round trip"
+
+    def rt(links: list[Any], *, delay: float = 0.0, its: float | None = None, errors: int = 0,
+               tokens: list[str] | None = None, selector: str | None = "zk2/*/*/@zk/instance/*") -> tuple[Any, ...]:
+        f = _FakeSession(tokens or [], links, delay_s=delay, errors=errors)
+        if its is not None:
+            live.register(f, interests_timeout_s=its)
+        r = live.settle(f, selector=selector)  # type: ignore[arg-type]
+        live.forget(f)
+        return r.stands, r.made, r.why, f.asked
+
+    key = "zk2/*/*/@zk/settle"
+    out += [
+        (f"{label}: its key lies under the subscribers' presence subtree and matches no token",
+         [live.settle_key("zk2/*/*/@zk/instance/*"), live.settle_key("zk2/lab/*/@zk/**"),
+          live.settle_key("ns/zk2/*/*/@zk/instance/*"), live.settle_key(None), live.settle_key("zk2/**")],
+         [key, "zk2/lab/*/@zk/settle", "ns/zk2/*/*/@zk/settle", key, key]),
+        (f"{label}: its final reply, no error reply, links held before and after: it stands",
+         rt([up, up]), (True, True, "", [key])),
+        (f"{label}: a watch session cut off makes none: no GET, not made, cut off",
+         rt([[]]), (False, False, live.CUT_OFF, [])),
+        (f"{label}: one cut off while it ran does not stand", rt([up, []]),
+         (False, True, live.CUT_OFF_DURING, [key])),
+        (f"{label}: one that ended with an error reply (its timeout) does not stand", rt([up, up], errors=1)[:2],
+         (False, True)),
+        (f"{label}: one ended at the interests timeout is not made",
+         rt([up, up], delay=0.06, its=0.05), (False, False, live.AT_INTERESTS_TIMEOUT, [key])),
+        (f"{label}: links that cannot be read leave it not standing",
+         rt([RuntimeError("no links")])[:3], (False, True, live.LINKS_UNREADABLE)),
+    ]
+
+    label = "core 0.41 §8.1, zk2py's presence view"
+    I = "zk2/lab/o/@zk/instance/" + "a" * 16
+    K = "zk2/lab/p/@zk/instance/" + "c" * 16
+    seed = [("ask", None), ("read", ("complete", [I, K]))]
+
+    def at(ev: list[Any], addr: tuple[str, str] = ("lab", "o")) -> tuple[Any, bool]:
+        v = pr.fold(ev)
+        return v.address(*addr), v.owes_read
+
+    out += [
+        (f"{label}: a seed made while no round trip stands: what it shows is up",
+         at([("ask", None), ("read", ("complete", [I], False))]), ((pr.UP, ""), False)),
+        (f"{label}: and an address it does not show is unobservable, never down",
+         at([("ask", None), ("read", ("complete", [I], False))], ("lab", "p")), ((pr.UNOBSERVABLE, pr.NO_ROUND_TRIP), False)),
+        (f"{label}: an unordered read not showing an address a complete read had held: unobservable, never down",
+         at(seed + [("ask", None), ("read", ("complete", [I], False))], ("lab", "p")),
+         ((pr.UNOBSERVABLE, pr.NO_ROUND_TRIP), False)),
+        (f"{label}: an unordered read does not settle a withdrawal: still unconfirmed, still owed",
+         at(seed + [("delete", I), ("ask", None), ("read", ("complete", [K], False))]),
+         ((pr.UNOBSERVABLE, pr.WITHDRAWN), True)),
+        (f"{label}: once a round trip stands, the complete read establishes it down",
+         at(seed + [("delete", I), ("ask", None), ("read", ("complete", [K], False)), ("ask", None),
+                    ("read", ("complete", [K]))]), ((pr.DOWN, ""), False)),
+        (f"{label}: the watch session's transport moves: what the reader held is unobservable, a read owed (F-229)",
+         [at(seed + [("move", None)]), at(seed + [("ask", None), ("read", ("complete", [I])), ("move", None)], ("lab", "p"))],
+         [((pr.UNOBSERVABLE, pr.MOVED), True), ((pr.UNOBSERVABLE, pr.MOVED), True)]),
+        (f"{label}: after a move, a read not made leaves it unobservable, still owed",
+         at(seed + [("move", None), ("ask", None), ("read", ("not made", []))]), ((pr.UNOBSERVABLE, pr.MOVED), True)),
+        (f"{label}: after a move, an unordered read showing it: up",
+         at(seed + [("move", None), ("ask", None), ("read", ("complete", [I], False))]), ((pr.UP, ""), False)),
+        (f"{label}: after a move, a token heard put again: up",
+         at(seed + [("move", None), ("put", I)]), ((pr.UP, ""), True)),
+        (f"{label}: a withdrawal heard keeps its reason across a move",
+         at(seed + [("delete", I), ("move", None)]), ((pr.UNOBSERVABLE, pr.WITHDRAWN), True)),
+        (f"{label}: an address never heard of, under a complete read before a move: unobservable",
+         at([("ask", None), ("read", ("complete", [])), ("move", None)]), ((pr.UNOBSERVABLE, pr.MOVED), True)),
+    ]
+    return out
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -2712,7 +2844,7 @@ def family_readings(root: Path) -> list[Result]:
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
-        + _desired_readings() + _presence_view() + _desired_encoding()
+        + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
