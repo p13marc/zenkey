@@ -1058,9 +1058,12 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
         every_zid = all(_zid_value((d.get("meta") or {}).get("zid")) is not None for d in counted(rows))
         unaccounted = [d for _, d, first, sb in rows if lists(d) and not (first == "yes" and sb is not None)]
         if complete and every_read and every_zid and not unaccounted and counted(rows) and len(zids(rows)) <= 1:
-            recognised = sum(1 for _, _, first, sb in rows if first == "yes" and sb is True)
+            # redundancy.v1 §2.15 (0.3): a recognised standby "which a tool
+            # names beside its answer"
+            recognised = sorted((inst for inst, _, first, sb in rows if first == "yes" and sb is True), key=str)
             return "no", ("one complete read, every descriptor read, shows at most one meta.zid"
-                          + (f", and {recognised} recognised standby, not counted (redundancy.v1 §2.15, 0.6)"
+                          + (f", and {len(recognised)} recognised standby, not counted: "
+                             f"{', '.join(recognised)} (redundancy.v1 §2.15, 0.3; hostid.v1 §2.12)"
                              if recognised else "")), reads
     return "unobservable", ("the finding is not established, and a descriptor could not be read, a counted "
                             "instance states no meta.zid, an instance lists hostid.v1 while whether it is "

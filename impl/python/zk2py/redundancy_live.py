@@ -45,12 +45,13 @@ import secrets
 import sys
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import zenoh
 
-from . import live, redundancy as rd
+from . import live, redundancy as rd, templates
 from .contract import load_contract
 from .owner import Owner
 
@@ -157,14 +158,18 @@ def read_address(session: zenoh.Session, address: str, iface: str, *, below: str
     return rd.Read(p.kind == live.COMPLETE, tuple(seen)), p, docs
 
 
-def governance(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
-               offline: dict[str, dict[str, Any]] | None = None) -> str:
-    """§2.15's third premise: the governance "read from the contract each
-    candidate's descriptor names (§2.2)": ``claim``/``external``,
-    ``not_governed``, ``no_contract`` (one not read), or ``disagree``.
-    ``offline`` holds canonical contracts by fingerprint, a revision held
-    offline never retrieved (core §8.4); any other is retrieved."""
+def governance_of(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
+                  offline: dict[str, dict[str, Any]] | None = None) -> tuple[str, list[str]]:
+    """§2.15's third premise (0.3): the governance "read from the contract
+    each candidate's descriptor names (§2.2)": ``claim``/``external``,
+    ``not_governed``, ``no_contract`` (a contract not read, or one whose
+    declaration is invalid: "it gives no election, and a tool reports its
+    reasons beside the answer"), or ``disagree``. Returns it with those
+    reasons. ``offline`` holds canonical contracts by fingerprint: "A tool
+    that holds the contract offline reads governance from it whatever the
+    bus serves"; any other is retrieved (core §8.4)."""
     seen: set[str] = set()
+    reasons: list[str] = []
     for doc in docs:
         for e in doc.get("interfaces") or []:
             if not isinstance(e, dict) or e.get("iface") != iface:
@@ -174,30 +179,190 @@ def governance(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
             if canonical is None:
                 r = live.retrieve_bundle(session, iface, fp)
                 if not r.verified:
-                    return "no_contract"
+                    return "no_contract", []
                 canonical = r.verified.contract
             d = rd.declaration_of(canonical)
-            seen.add(d.election if d.governed else "not_governed" if d.declaration == "not_governed"
-                     else "invalid")
+            if d.declaration == "invalid":
+                seen.add("invalid")
+                reasons += [x for x in d.reasons if x not in reasons]
+            else:
+                seen.add(d.election if d.governed else "not_governed")
     if not seen:
-        return "no_contract"
-    if len(seen) > 1 or "invalid" in seen:
-        return "disagree"
-    return seen.pop()
+        return "no_contract", []
+    if "invalid" in seen:
+        return "no_contract", reasons
+    if len(seen) > 1:
+        return "disagree", []
+    return seen.pop(), []
+
+
+def governance(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
+               offline: dict[str, dict[str, Any]] | None = None) -> str:
+    return governance_of(session, iface, docs, offline)[0]
+
+
+def _probe_key(address: str, iface: str, r: dict[str, Any]) -> str:
+    """A wildcard of one operation's key, intersecting no other operation's
+    of another name: each template parameter ``*``, and with none, the last
+    chunk with ``$*`` after it."""
+    t = templates.parse_template(r["template"])
+    chunks = [x.text if x.kind == templates.LITERAL else "*" for x in t.segments]
+    if all(x.kind == templates.LITERAL for x in t.segments):
+        chunks[-1] += "$*"
+    return "/".join(["zk2", address, iface, str(r["token"]), *chunks])
+
+
+def _op_key(address: str, iface: str, r: dict[str, Any]) -> str:
+    """An operation's key over its template, each parameter ``*``."""
+    t = templates.parse_template(r["template"])
+    chunks = [x.text if x.kind == templates.LITERAL else ("**" if x.kind == templates.REST else "*")
+              for x in t.segments]
+    return "/".join(["zk2", address, iface, str(r["token"]), *chunks])
+
+
+def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str, Any],
+          timeout: float = live.GET_TIMEOUT_S) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """§2.15 (0.3), "A standby's exposure, probed" (a MAY): "a GET, target All
+    and consolidation None, over a wildcard of each of the interface's
+    operations whose fan-out is forbidden: every operation queryable at the
+    address answers it before any handler runs (core O2)". "An operation
+    whose fan-out is allowed is never probed this way, since the call would
+    run it", and so, by the same reason, is no wildcard that reaches one: a
+    template-less operation's wildcard (``append$*``) reaches every
+    operation whose name begins with its own (F-221). Returns, by the
+    probe's key, the zid of every replier zenoh attributes a reply to; and,
+    by operation, why it was not probed."""
+    ops = [r for r in canonical.get("resources") or [] if r.get("kind") == "operation"]
+    allowed = [(_op_key(address, iface, r), r) for r in ops if r.get("fanout") == "allowed"]
+    out: dict[str, list[str]] = {}
+    skipped: dict[str, str] = {}
+    for r in ops:
+        name = f"{r['token']}/{r['template']}"
+        if r.get("fanout") == "allowed":
+            skipped[name] = "fanout = \"allowed\": a call over its wildcard would run it"
+            continue
+        key = _probe_key(address, iface, r)
+        reach = [f"{a['token']}/{a['template']}" for k, a in allowed if zenoh.KeyExpr(key).intersects(zenoh.KeyExpr(k))]
+        if reach:
+            skipped[name] = f"its probe {key} would reach {', '.join(reach)}, whose fan-out is allowed, and run it"
+            continue
+        zids: list[str] = []
+        try:
+            for rep in session.get(key, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
+                                   timeout=timeout):
+                # the replier's session, by zenoh's attribution (an entity's
+                # global id: its session's zid and the entity's id)
+                rid = getattr(rep, "replier_id", None)
+                if rid is not None:
+                    zids.append(str(getattr(rid, "zid", rid)))
+        except Exception:  # noqa: BLE001 - a probe that fails proves nothing
+            pass
+        out[key] = zids
+    return out, skipped
+
+
+def probe_findings(reading: rd.Reading, docs: dict[str, dict[str, Any]],
+                   answered: dict[str, list[str]]) -> list[tuple[str, str]]:
+    """The probe's finding (§2.15, 0.3): "a reply that zenoh attributes to
+    the session of an instance marked standby, with no token, in a read
+    before the probe and one after it, is a queryable it holds, which §2.4
+    forbids: the tool's finding, beside §5's answers, never one of them".
+    Returns (instance, probe key) per such reply; zids compared by value."""
+    def marked(read: rd.Read) -> set[str]:
+        return {i.id for i in read.instances if i.descriptor == rd.STANDBY and not i.token}
+
+    standbys = marked(reading.first) & marked(reading.second)
+    by_zid = {live._zid_value((docs.get(x, {}).get("meta") or {}).get("zid")): x for x in standbys}
+    by_zid.pop(None, None)
+    found: list[tuple[str, str]] = []
+    for key, zids in answered.items():
+        for z in zids:
+            x = by_zid.get(live._zid_value(z))
+            if x is not None and (x, key) not in found:
+                found.append((x, key))
+    return found
+
+
+@dataclass
+class ToolReading:
+    """What zk2py's tool read of one address and interface (§2.15): the
+    reading §5 is concluded from, the two presence reads (their own kinds,
+    core §8.1, 0.38), the descriptors by instance, the governance's
+    reasons when a declaration is invalid (0.3), and, probed, each probe
+    key's repliers and the probe's findings."""
+
+    reading: rd.Reading
+    presence: list[live.Presence]
+    docs: dict[str, dict[str, Any]]
+    reasons: list[str] = field(default_factory=list)
+    probed: dict[str, list[str]] | None = None
+    findings: list[tuple[str, str]] = field(default_factory=list)
+    #: by operation, why the probe left it out (F-221)
+    not_probed: dict[str, str] = field(default_factory=dict)
+
+
+def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float = 2.0,
+              across_face: bool = False, contracts: Iterable[Any] = (), with_probe: bool = False) -> ToolReading:
+    """§2.15: two reads a grace apart, each its tokens, its completeness and
+    every descriptor in it; the governance from the contracts the
+    descriptors name, held offline or retrieved. With ``with_probe``, the
+    probe between the two reads, over the contract the first read's first
+    candidate names."""
+    offline = {c.fingerprint: c.canonical for c in contracts}
+    r1, p1, d1 = read_address(session, address, iface)
+    t = time.monotonic()
+    answered = None
+    skipped: dict[str, str] = {}
+    if with_probe:
+        canonical = None
+        for doc in d1.values():
+            for e in doc.get("interfaces") or []:
+                if isinstance(e, dict) and e.get("iface") == iface and canonical is None:
+                    fp = str(e.get("contract"))
+                    canonical = offline.get(fp)
+                    if canonical is None:
+                        got = live.retrieve_bundle(session, iface, fp)
+                        canonical = got.verified.contract if got.verified else None
+        answered, skipped = probe(session, address, iface, canonical) if canonical is not None else ({}, {})
+    time.sleep(max(0.0, grace_s - (time.monotonic() - t)))
+    r2, p2, d2 = read_address(session, address, iface)
+    docs = {**d1, **d2}
+    gov, reasons = governance_of(session, iface, list(docs.values()), offline)
+    reading = rd.Reading(gov, r1, r2, across_face)
+    found = probe_findings(reading, docs, answered) if answered is not None else []
+    return ToolReading(reading, [p1, p2], docs, reasons, answered, found, skipped)
+
+
+def split_findings(session: zenoh.Session, address: str, ifaces: Iterable[str], grace_s: float = 2.0,
+                   contracts: Iterable[Any] = ()) -> list[tuple[str, list[str], str]]:
+    """Core §6's split-brain with §2.15's "One split, one finding" (0.3): of a
+    governed interface, its first question's split, two or more holders in
+    both reads "whatever their marks and whatever they expose"; of one the
+    profile does not govern, core §6's own rule, two or more instances
+    holding the interface's token and listing it unmarked, in both reads.
+    One finding per interface, naming the second read's holders, and whose
+    rule it is: ``redundancy.v1`` or ``core §6``."""
+    out = []
+    contracts = list(contracts)
+    for iface in ifaces:
+        r = read_tool(session, address, iface, grace_s, contracts=contracts).reading
+        if r.governance in (rd.CLAIM, rd.EXTERNAL):
+            if rd.one_incumbent(r).reason == "split":
+                out.append((iface, sorted(r.second.holders(), key=rd.id_key), "redundancy.v1"))
+        elif r.governance == "not_governed":
+            def exposing(read: rd.Read) -> set[str]:
+                return {i.id for i in read.instances if i.token and i.descriptor == rd.SERVING}
+            if len(exposing(r.first)) >= 2 and len(exposing(r.second)) >= 2:
+                out.append((iface, sorted(exposing(r.second), key=rd.id_key), "core §6"))
+    return out
 
 
 def tool_reading(session: zenoh.Session, address: str, iface: str, grace_s: float = 2.0,
-                 across_face: bool = False, contracts: list[Any] = ()) -> tuple[rd.Reading, list[live.Presence]]:
-    """§2.15: two reads a grace apart, each its tokens, its completeness and
-    every descriptor in it; the governance from the contracts the
-    descriptors name. The presence reads ride along, so a tool reports a
+                 across_face: bool = False, contracts: Iterable[Any] = ()) -> tuple[rd.Reading, list[live.Presence]]:
+    """:func:`read_tool`'s reading and its presence reads, so a tool reports a
     read's own kind beside the profile's answer (core §8.1, 0.38)."""
-    r1, p1, d1 = read_address(session, address, iface)
-    time.sleep(grace_s)
-    r2, p2, d2 = read_address(session, address, iface)
-    gov = governance(session, iface, list({**d1, **d2}.values()),
-                     {c.fingerprint: c.canonical for c in contracts})
-    return rd.Reading(gov, r1, r2, across_face), [p1, p2]
+    t = read_tool(session, address, iface, grace_s, across_face, contracts)
+    return t.reading, t.presence
 
 
 # -- the candidate -------------------------------------------------------------------
@@ -215,7 +380,17 @@ class Candidate:
                  refuse_without_lock: bool = False, tokenless: tuple[str, ...] = (), peer: bool = False,
                  timeout: float = 1.0, hold_heal: bool = False, auth: tuple[str, str] | None = None,
                  poll_s: float | None = None, lease_ms: int | None = None,
-                 reader_endpoint: str | None = None) -> None:
+                 reader_endpoint: str | None = None, hostid_root: str | None = None) -> None:
+        #: hostid.v1 §2.7: an address of a minted system, ``@hostid.v1/<svc>``,
+        #: minted from ``hostid_root`` (a directory standing in for /) before
+        #: anything opens; its owner mints the same and lists hostid.v1
+        self.hostid = None
+        self.spelled = address
+        if address.startswith("@"):
+            from . import hostid
+
+            self.hostid = hostid.Runtime(hostid_root or "/")
+            address = f"{self.hostid.configure({'address': address}).system}/{address.split('/', 1)[1]}"
         self.address, self.endpoint, self.name = address, endpoint, name
         self.system, self.service = address.split("/")
         self.contract = contract_at(contract)
@@ -249,9 +424,11 @@ class Candidate:
         self.executions = 0
         #: a failed act, after which it elects no more ("Decided here", 0.2)
         self.fault: str | None = None
-        #: §2.7's poll: the last's holders other than its own, None before
-        #: the first poll (set before any poll can run)
+        #: §2.7's poll (0.3): the last's holders other than its own, None
+        #: before the first poll, which is compared with no holder (set
+        #: before any poll can run); and its last 32 reads
         self._poll_last: set[str] | None = None
+        self.poll_log: list[dict[str, Any]] = []
         self.owner: Owner | None = None
         self.watch: zenoh.Session | None = None
         #: the session its reads go on: neither the claim's nor the watch's
@@ -287,15 +464,7 @@ class Candidate:
                     os.close(self._fd)
                     self._fd = None
                     raise Refused(f"{self.lock_path}: the lock is held, and this instance refuses (§2.11)")
-        handlers = {"@op/append": self._append}
-        self.owner = Owner(self.system, self.service, [self.contract], connect=self.endpoint,
-                           standby={self.iface}, handlers=handlers, tokenless=self.tokenless, auth=self.auth,
-                           lease_ms=self.lease_ms)
-        self.owner.instance = self.instance
-        try:
-            self.owner._plan()  # step 2's refusals (core §8.2, 0.39): nothing is opened
-        except Exception as e:
-            raise Refused(str(e)) from e
+        self._make_owner()
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
         if self._fd is not None and self.machine_lock:
@@ -305,6 +474,40 @@ class Candidate:
             self._lock_thread.start()
         self.post(rd.START)
         return self.instance
+
+    def _make_owner(self) -> None:
+        """The owner, step 2's refusals made first (core §8.2, 0.39): a
+        refusal opens nothing."""
+        if self.owner is not None:
+            return
+        # every operation answers with its name and counts its executions,
+        # as the owner example's ``redundancy calls`` counts them
+        handlers = {f"{r['token']}/{r['template']}": self._append for r in self.contract.canonical["resources"]
+                    if r["kind"] == "operation"}
+        system = self.spelled.split("/")[0] if self.hostid is not None else self.system
+        owner = Owner(system, self.service, [self.contract], connect=self.endpoint,
+                      standby={self.iface}, handlers=handlers, tokenless=self.tokenless, auth=self.auth,
+                      lease_ms=self.lease_ms, hostid=self.hostid)
+        owner.instance = self.instance
+        try:
+            owner._plan()
+        except Exception as e:
+            raise Refused(str(e)) from e
+        self.owner = owner
+
+    def prepare(self) -> None:
+        """Every session opened, nothing declared, so that :meth:`start`
+        declares at once (scenarios.md §3's ``--wait-go``: two starts held
+        together are measured at S by their instance tokens' arrival, 0.3).
+        A peer's sessions open at its start."""
+        self._make_owner()
+        if self.peer:
+            return
+        assert self.owner is not None
+        self.owner.open_session()
+        if self.poll_s is None:
+            self.watch = open_session(self.endpoint, False, self.lease_ms)
+        self.reader = open_session(self.reader_endpoint or self.endpoint, False, self.lease_ms)
 
     def _take_lock(self) -> None:
         """§10: "each standing by while it cannot take the lock"; the kernel
@@ -440,12 +643,14 @@ class Candidate:
         else:
             self.owner.start()
         if self.poll_s is None:
-            self.watch = open_session(self.endpoint, self.peer, self.lease_ms)
+            if self.watch is None:
+                self.watch = open_session(self.endpoint, self.peer, self.lease_ms)
             self._entities.append(live.declare_liveliness_subscriber(
                 self.watch, f"zk2/{self.address}/@zk/**", self._heard, history=True))
             live.settle(self.watch, self.timeout)
             self.counts["watch_settles"] += 1
-        self.reader = open_session(self.reader_endpoint or self.endpoint, self.peer, self.lease_ms)
+        if self.reader is None:
+            self.reader = open_session(self.reader_endpoint or self.endpoint, self.peer, self.lease_ms)
         # §2.5 step 1: "When that is not the session holding the claim, the
         # instance makes one round trip on the claim's session after
         # declaring it, and before the read"
@@ -464,10 +669,11 @@ class Candidate:
                 pass
 
     def _poll_once(self) -> None:
-        """§2.7 (0.2): "each read's holders compared with the last's: a holder
-        new to it is an appearance, and a complete read with no other holder,
-        after one with some, a withdrawal (a read not complete establishes no
-        absence)". It misses what comes and goes within one period."""
+        """§2.7 (0.3, F-215): each read's holders compared with the last's,
+        where a read not complete removes no holder from the last's: a
+        holder new to it is an appearance, and only a complete read can show
+        one gone (:func:`zk2py.redundancy.poll_read`). It misses what comes
+        and goes within one period."""
         assert self.reader is not None
         p = live.list_presence(self.reader, f"zk2/{self.address}/@zk/**", self.timeout)
         with self.lock:
@@ -476,12 +682,17 @@ class Candidate:
             self.counts["reader_reads"] += 1
         holders = {a["instance"] for a in p.alive if a["system"] == self.system and a["service"] == self.service
                    and a["iface"] == self.iface}
+        complete = p.kind == live.COMPLETE
         with self.lock:
             # under the lock: the worker re-mints (machine.remint) under it
             others = {h for h in holders if not self.machine.mine(h)}
             self.heard = {h: {h} for h in holders}
-            events, self._poll_last = rd.poll_step(self._poll_last, others, p.kind == live.COMPLETE)
-        for ev in events:
+            cmp, self._poll_last = rd.poll_read(self._poll_last, others, complete)
+            # the owner example's poll_log: the poll's last 32 reads
+            self.poll_log.append({"made": p.kind != live.NOT_MADE, "complete": complete,
+                                  "holders": sorted(holders, key=rd.id_key), **cmp.as_json()})
+            del self.poll_log[:-32]
+        for ev in rd.poll_events(cmp):
             self.post(ev)
 
     def _heard(self, sample: Any) -> None:

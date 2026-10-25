@@ -1,8 +1,9 @@
-"""``redundancy.v1`` ``scenarios.md`` §1 to §12 (text 0.2), live, from
-Python (#609, rounds 56 and 58)::
+"""``redundancy.v1`` ``scenarios.md`` §1 to §12 (text 0.3), live, from
+Python (#609, rounds 56, 58 and 60)::
 
     python -m zk2py.redundancy_scenarios [--a zk2py|PATH] [--b zk2py|PATH] [--owner PATH]
-        [--only 1|2|…|12|remint]... [--runs N]
+        [--only 1|2|…|12|remint|poll|poll-miss|heal-retry|heal-retry-pause|remint-campaign]...
+        [--runs N] [--zenctl PATH] [--rust-spawn-at-go]
 
 Each candidate is a process driven as a black box through the owner
 example's command line and its ``redundancy`` commands, one JSON line each
@@ -11,8 +12,11 @@ takes the same command line since round 58) or the Rust owner example at a
 path. ``--a`` runs A (and V1, V3), the lower id, ``--b`` runs B (and V2);
 ``--owner`` both. A crash is a SIGKILL; a lost host is a SIGKILL behind
 :class:`SilentLink`, a relay that goes silent and keeps the router's side
-open, with a short lease (scenarios.md, "A crash"). §12's tool is zk2py's
-(:func:`zk2py.redundancy_live.tool_reading`).
+open, with a short lease (scenarios.md, "A crash"). §12's tools are zk2py's
+(:func:`zk2py.redundancy_live.read_tool`) and, given by ``--zenctl`` or
+``ZK2PY_ZENCTL``, zenctl's ``redundancy``, ``doctor`` and ``check conform``,
+each shape asked of both. §3 holds both candidates at ``--wait-go`` and
+measures each start at S (0.3, F-216).
 
 The bus is zk2py's: R1, and where a section cuts a link R2 behind a link
 the runner cuts and heals. S follows ``zk2/lab/*/@zk/**`` with a liveliness
@@ -24,9 +28,8 @@ R2. G reads presence on a session that has never held a liveliness
 subscriber. The retry interval and the grace are 2 s.
 
 What the owner example's standard input does not show is read from the
-bus for both: a candidate's zid from its descriptor's ``meta.zid``, its
-puts from their stamps (its ``put`` writes ``ok``, never a chosen value),
-its step-down from its tokens. zk2py's own step log adds detail where it
+bus for both: its puts from their stamps (its ``put`` writes ``ok``, never
+a chosen value), its step-down from its tokens. zk2py's own step log adds detail where it
 has it, and says so.
 
 Exit 0 when every check passes.
@@ -62,6 +65,13 @@ SHORT_LEASE_MS = 2000
 
 #: --a and --b: "zk2py", or the owner example's path
 IMPL: dict[str, Any] = {"a": "zk2py", "b": "zk2py"}
+#: the owner example's --wait-go (0.3, F-216): with it, both candidates open
+#: their sessions and wait for go. Off by --rust-spawn-at-go, which spawns
+#: the owner example at go instead, calibrated against the other (round 58's
+#: way): round 60's build never starts after its go (F-220).
+RUST_WAIT_GO = True
+#: §12's Rust tool, zenctl (``--zenctl`` or ``ZK2PY_ZENCTL``; no default)
+ZENCTL: Path | None = Path(os.environ["ZK2PY_ZENCTL"]) if os.environ.get("ZK2PY_ZENCTL") else None
 
 
 def who(impl: Any) -> str:
@@ -95,7 +105,9 @@ class Inst:
         self.g = g
         flags = list(flags or [])
         self.wait_go = "--wait-go" in flags
-        if self.rust:
+        #: spawned at go: the owner example without its own --wait-go
+        self.late = self.rust and self.wait_go and not RUST_WAIT_GO
+        if self.late:
             flags = [f for f in flags if f != "--wait-go"]
         args = ["--connect", endpoint, "--standby", "--instance-id", instance, "--name", name, "--retry-ms",
                 "2000", "--grace-ms", "2000", *flags, address, str(CONTRACT_DIR / f"{contract}.toml")]
@@ -104,12 +116,15 @@ class Inst:
         self.lines: queue.Queue[str] = queue.Queue()
         self.stderr: list[str] = []
         self.ready: str | None = None
+        self.waiting = False
         self.refused: str | None = None
         self.t_launch = 0.0
-        if not (self.rust and self.wait_go):
+        if not self.late:
             self._spawn()
             if not self.wait_go:
                 self._await_ready()
+            else:
+                self._await_ready(line="waiting go")
 
     def _spawn(self) -> None:
         env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
@@ -120,25 +135,30 @@ class Inst:
                          daemon=True).start()
         threading.Thread(target=lambda: [self.stderr.append(x) for x in self.proc.stderr], daemon=True).start()
 
-    def _await_ready(self, timeout: float = 20.0) -> None:
+    def _await_ready(self, timeout: float = 20.0, line: str = "ready") -> None:
+        """Until ``ready <key>`` (or, with ``line``, that line: ``waiting
+        go``), or the process's refusal."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline and self.proc is not None:
             try:
-                line = self.lines.get(timeout=0.2)
+                got = self.lines.get(timeout=0.2)
             except queue.Empty:
                 if self.proc.poll() is not None:
                     time.sleep(0.2)
                     self.refused = "".join(self.stderr).strip() or f"exit {self.proc.poll()}"
                     return
                 continue
-            if line.startswith("ready "):
-                self.ready = line[len("ready "):]
+            if line == "ready" and got.startswith("ready "):
+                self.ready = got[len("ready "):]
+                return
+            if line != "ready" and got == line:
+                self.waiting = True
                 return
 
     def go(self) -> None:
-        """--wait-go's start: zk2py's driver reads go; the owner example,
-        which has no such option, is spawned now."""
-        if self.rust:
+        """--wait-go's start: a go line, its sessions already open; or, with
+        the owner example spawned at go (``RUST_WAIT_GO`` off), its spawn."""
+        if self.late:
             self._spawn()
         else:
             self.send("go")
@@ -163,7 +183,7 @@ class Inst:
                 if self.proc is None or self.proc.poll() is not None:
                     return None
                 continue
-            if got.startswith(("ready ", "connected ", "listening ")) or got == "go":
+            if got.startswith(("ready ", "connected ", "listening ")) or got in ("go", "waiting go"):
                 continue
             return got
         return None
@@ -210,20 +230,13 @@ class Inst:
         return (j.get("interfaces") or {}).get(self.iface) or {}
 
     def zid(self) -> str | None:
-        """Its session's zid: zk2py's own command, or, for the owner
-        example, whose standard input says none, its descriptor's
-        ``meta.zid`` (core §3.3)."""
-        if not self.rust:
-            return (self.jcmd("redundancy zid") or {}).get("zid")
-        from . import live
+        """Its claim's session's zid, the one its descriptor states as
+        ``meta.zid`` (core §3.3): ``redundancy zid`` (0.3, F-216)."""
+        return (self.jcmd("redundancy zid") or {}).get("zid")
 
-        inst = self.current_id() or self.instance
-        got = [a for a in live.get_descriptor(self.g, f"zk2/{self.address}/@zk/instance/{inst}") if a.ok] \
-            if self.g is not None else []
-        try:
-            return (json.loads(got[0].payload).get("meta") or {}).get("zid") if got else None
-        except ValueError:
-            return None
+    def zids(self) -> dict[str, Any]:
+        """Its three sessions' zids: the claim's, the reader's and the watch's."""
+        return self.jcmd("redundancy zid") or {}
 
     def steps(self) -> list[Any] | None:
         """zk2py's own step log (the owner example shows none)."""
@@ -628,7 +641,7 @@ class X:
     descriptor it writes (scenarios.md §12, "X")."""
 
     def __init__(self, endpoint: str, instance: str, *, standby: bool | None, alive: bool,
-                 fingerprint: str) -> None:
+                 fingerprint: str, queryable: bool = False) -> None:
         import zenoh
 
         from . import live
@@ -649,6 +662,12 @@ class X:
         if alive:
             self.entities.append(lv.declare_token(
                 f"zk2/lab/ledger/@zk/alive/ledger.v1/{instance}/{fingerprint.removeprefix('sha256:')[:16]}"))
+        if queryable:
+            # §12 step 8 (0.3): a queryable on append's key, which a standby
+            # never holds (§2.4)
+            op = "zk2/lab/ledger/ledger.v1/@op/append"
+            self.entities.append(self.session.declare_queryable(op, zenoh.handlers.Callback(
+                lambda q: q.reply(op, b"x")), complete=True))
 
     def close(self) -> None:
         from . import live
@@ -777,30 +796,35 @@ def section2(rp: Report, runs: int) -> None:
 # -- §3 ------------------------------------------------------------------------------
 
 def section3(rp: Report, runs: int) -> None:
+    """§3 (0.3, F-216): "A and B start within 10 ms of each other, measured at
+    S as the arrival of each instance's instance token … a run whose two
+    instance tokens arrive more than 10 ms apart is made again, and counted
+    apart". Each holds at ``--wait-go``, its sessions open, and both are
+    sent go together; an owner example spawned at go instead
+    (``--rust-spawn-at-go``) is calibrated against the other."""
     sec = f"§3 a simultaneous start [{pairing()}]"
     bus = Bus()
-    healed, b_kept, fails, worst, skews = 0, 0, [], 0.0, []
+    healed, b_kept, fails, worst, skews, again, apart = 0, 0, [], 0.0, [], 0, []
     offset = 0.25
     try:
-        for n in range(runs):
+        n = 0
+        tries = 0
+        while n < runs and tries < runs * 6:
+            tries += 1
             ids = sorted(f"{random.getrandbits(64):016x}" for _ in range(2))
-            t_run = time.monotonic()
             a = bus.inst(IMPL["a"], "A", ids[0], flags=["--wait-go"])
             b = bus.inst(IMPL["b"], "B", ids[1], flags=["--wait-go"])
-            time.sleep(1.5)  # zk2py's drivers up and waiting; an owner example is spawned at go
             t = time.monotonic()
-            if a.rust == b.rust:
+            if a.late == b.late:
                 a.go()
                 b.go()
             else:
-                # a mixed pairing: the owner example spawned first, zk2py's
-                # go sent after its measured start-up, so that the two claims
-                # meet (calibrated run by run)
-                first, second = (a, b) if a.rust else (b, a)
+                # one spawned at go, the other waiting: the spawned one first,
+                # the other's go after its measured start-up (calibrated)
+                first, second = (a, b) if a.late else (b, a)
                 first.go()
                 time.sleep(max(0.0, offset))
                 second.go()
-            alive_a, alive_b = ALIVE + ids[0], ALIVE + ids[1]
 
             def settled() -> bool:
                 # after a heal, a step-down's stand-by names no why: its role is enough
@@ -810,14 +834,12 @@ def section3(rp: Report, runs: int) -> None:
 
             end = _wait(settled, 5.0 + 2 * 2.0 + 2.0, 0.1)
             dt = time.monotonic() - t
-            worst = max(worst, dt)
             ia = bus.s.first_token("put", f"zk2/lab/ledger/@zk/instance/{ids[0]}", t)
             ib = bus.s.first_token("put", f"zk2/lab/ledger/@zk/instance/{ids[1]}", t)
-            if ia is not None and ib is not None:
-                skews.append(abs(ia - ib))
-                if a.rust != b.rust:
-                    rust_t, py_t = (ia, ib) if a.rust else (ib, ia)
-                    offset = min(2.0, max(0.0, offset + (rust_t - py_t)))
+            skew = abs(ia - ib) if ia is not None and ib is not None else None
+            if skew is not None and a.late != b.late:
+                late_t, held_t = (ia, ib) if a.late else (ib, ia)
+                offset = min(2.0, max(0.0, offset + (late_t - held_t)))
             oa, wa = _ordered(bus, a, t - 0.1, serving=a.serving())
             ob, wb = _ordered(bus, b, t - 0.1, serving=b.serving())
             first_read = True
@@ -826,29 +848,43 @@ def section3(rp: Report, runs: int) -> None:
                 if st is not None:
                     names = [x[2]["step"] for x in st]
                     first_read = first_read and "read" in names and names.index("claim") < names.index("read")
-            if bus.s.first_token("put", alive_b, t) is not None and bus.s.first_token("delete", alive_b, t) and a.serving():
-                healed += 1
-            if b.serving():
-                b_kept += 1
-            if not (end and oa and ob and first_read):
+            ok = end and oa and ob and first_read
+            if not ok:
                 with bus.s.lock:
                     line = [(round(tt - t, 3), kk, key.rsplit("/", 2)[-2][-2:]) for tt, kk, key in bus.s.tokens
                             if tt >= t and "/@zk/alive/" in key]
                 fails.append(f"run {n}: end {end} ({dt:.2f} s; A {a.standing()}, B {b.standing()}), A {wa}, B {wb}, "
-                             f"first read after claim {first_read}; alive tokens at S {line}; A's reads "
-                             f"{a.read_counts()}, B's {b.read_counts()}")
+                             f"first read after claim {first_read}; tokens' skew {skew}; alive tokens at S {line}; "
+                             f"A's reads {a.read_counts()}, B's {b.read_counts()}")
+            if skew is None or skew > 0.010:
+                # made again, and counted apart
+                again += 1
+                if skew is not None:
+                    apart.append(skew)
+            else:
+                n += 1
+                skews.append(skew)
+                worst = max(worst, dt)
+                if bus.s.first_token("put", ALIVE + ids[1], t) is not None and \
+                        bus.s.first_token("delete", ALIVE + ids[1], t) and a.serving():
+                    healed += 1
+                if b.serving():
+                    b_kept += 1
             a.close()
             b.close()
             bus.insts.clear()
             time.sleep(0.3)
-        rp.check(sec, f"1. in every one of {runs} runs, within 5 s plus two graces of the later start, one serves "
-                      "and the other stands by: A, or B where A's read showed B's token (§2.5 step 2); each "
-                      "descriptor answers marked at its instance token (F-202); each first read follows its own "
-                      "claim (zk2py's step log, where there is one)", not fails, "; ".join(fails[:2]))
-        rp.note(sec, f"{healed} of {runs} runs healed (both took over, B stepped down); B kept serving in {b_kept}; "
-                     f"the slowest settled in {worst:.2f} s; the two instance tokens reached S at most "
-                     f"{max(skews) * 1000 if skews else 0:.0f} ms apart (median "
-                     f"{sorted(skews)[len(skews) // 2] * 1000 if skews else 0:.0f} ms)")
+        rp.check(sec, f"1. {runs} runs whose instance tokens reached S within 10 ms of each other, each within 5 s "
+                      "plus two graces of the later start: one serves and the other stands by: A, or B where A's "
+                      "read showed B's token (§2.5 step 2); each descriptor answers marked at its instance token "
+                      "(F-202); each first read follows its own claim (zk2py's step log, where there is one); and "
+                      "every run made again as well",
+                 not fails and n == runs, f"{n} of {runs} within 10 ms after {tries} tries; " + "; ".join(fails[:2]))
+        rp.note(sec, f"of the {n} runs within 10 ms: {healed} healed (both took over, B stepped down); B kept serving "
+                     f"in {b_kept}; the slowest settled in {worst:.2f} s; the tokens' skew at most "
+                     f"{max(skews) * 1000 if skews else 0:.1f} ms (median "
+                     f"{sorted(skews)[len(skews) // 2] * 1000 if skews else 0:.1f} ms). Made again, counted apart: "
+                     f"{again} (skews {sorted(round(x * 1000, 1) for x in apart)[:12]} ms)")
     finally:
         bus.close()
 
@@ -1272,34 +1308,129 @@ def section11(rp: Report, runs: int) -> None:
                      x.refused is not None and x.exit_code() not in (None, 0) and not toks and not writes,
                      f"{x.refused!r}; tokens {len(toks)}, puts {len(writes)}")
             said = x.refused is not None and why in x.refused
-            if x.rust and not said:
-                # F-214: the owner example writes its raw state before the
-                # runtime's check, and names that write's refusal instead
-                rp.note(sec, f"{step}. KNOWN DEVIATION of the owner example (F-214): its refusal names no {why} "
-                             f"(§2.2): {x.refused!r}")
-            else:
-                rp.check(sec, f"{step}. … and says why: {why} (§2.2)", said, f"{x.refused!r}")
+            rp.check(sec, f"{step}. … and says why: {why} (§2.2)", said, f"{x.refused!r}")
+            if step == "2":
+                # 0.3 (F-214): "the owner example says not started: … invalid:
+                # value, never a standby's refused write"
+                text = x.refused or ""
+                rp.check(sec, "2. the declaration checked before anything is written: not started: … invalid: "
+                              "value, never a standby's refused write (0.3, F-214)",
+                         text.startswith("not started:") and "invalid" in text and "value" in text
+                         and "stands by" not in text, f"{text!r}")
     finally:
         bus.close()
 
 
+#: check conform's cases other than this profile's, skipped in §12 step 8
+CONFORM_OTHERS = ("contract-served", "resource-served", "payload-type", "qos", "operation", "fanout-refused",
+                  "state-stamp", "state-get", "freshness", "budget", "health", "health-aggregation", "rate",
+                  "budget-window", "config-projection", "config-fresh", "config-view", "config-refusal",
+                  "config-dry-run", "alarm-key", "alarm-document", "telemetry-declaration", "telemetry-sample",
+                  "telemetry-continuity", "desired-report", "desired-binding", "desired-author")
+
+
+def zenctl(args: list[str], timeout: float = 120.0) -> tuple[int | None, Any, str]:
+    """§12's Rust tool as a black box: (exit, its JSON, stderr)."""
+    if ZENCTL is None:
+        return None, None, "no Rust tool given"
+    env = dict(os.environ, ZENKEY_EXPLORER_CONFIG_DIR=tempfile.mkdtemp(prefix="zk2py-zenctl-"))
+    try:
+        p = subprocess.run([str(ZENCTL), *args, "--format", "json"], capture_output=True, text=True, env=env,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, None, "timed out"
+    try:
+        doc = json.loads(p.stdout)
+    except ValueError:
+        doc = None
+    return p.returncode, doc, p.stderr
+
+
+def _flat_of_zenctl(doc: Any) -> dict[str, Any] | None:
+    """zenctl redundancy's interface row, as zk2py's answers are kept: each
+    question's (answer, reason), the standbys' count and exactness, and each
+    instance's twin answer."""
+    rows = [r for r in (doc or {}).get("rows") or [] if r.get("row") == "interface"]
+    if len(rows) != 1:
+        return None
+    r = rows[0]
+
+    def ar(x: Any) -> Any:
+        return (x.get("answer"), x.get("reason")) if isinstance(x, dict) else None
+
+    sb = r.get("standbys") or {}
+    out: dict[str, Any] = {"governance": r.get("governance"), "one": ar(r.get("one_incumbent")),
+                           "vacancy": ar(r.get("vacancy")),
+                           "standbys": (sb.get("answer"), sb.get("reason"), sb.get("count"), sb.get("exact"))}
+    for i in r.get("instances") or []:
+        out[str(i.get("instance"))] = ar(i.get("twin"))
+    return out
+
+
+def _flat_of_mine(reading: Any) -> dict[str, Any]:
+    from . import redundancy as rd
+
+    c = rd.conclude(reading)
+    sb = c["standbys"].as_json()
+    gov = {"disagree": "disagree"}.get(reading.governance, reading.governance)
+    out: dict[str, Any] = {"governance": gov, "one": (c["one_incumbent"].answer, c["one_incumbent"].reason),
+                           "vacancy": (c["vacancy"].answer, c["vacancy"].reason),
+                           "standbys": (sb["answer"], sb["reason"], sb.get("count"), sb.get("exact"))}
+    for k, v in c["twins"].items():
+        out[k] = (v.answer, v.reason)
+    return out
+
+
+def _doctor(checks: list[str], ep: str) -> tuple[int | None, dict[str, Any], str]:
+    """zenctl doctor, asked these checks: by check, its verdict."""
+    args = ["doctor", "-c", ep, "--timeout", "1"]
+    for c in checks:
+        args += ["--check", c]
+    rc, doc, err = zenctl(args)
+    # each asked check's verdict, with the row's other members (its findings)
+    return rc, {r.get("check"): {**(r.get("verdict") or {}), "row": r} for r in (doc or {}).get("rows") or []
+                if r.get("row") == "check" and r.get("check") in checks}, err
+
+
 def section12(rp: Report, runs: int) -> None:
-    from . import live, redundancy as rd
-    from .redundancy_live import contract_at, tool_reading
+    """§12 (0.3): T is zk2py's tool and, given (``--zenctl`` or
+    ``ZK2PY_ZENCTL``), zenctl's ``redundancy``, ``doctor`` and ``check
+    conform``, each holding ``ledger.v1`` offline, both asked of every
+    shape, their answers compared."""
+    from . import hostid_scenarios as hs, live, redundancy as rd
+    from .redundancy_live import contract_at, read_tool, split_findings
 
     sec = f"§12 a tool's questions [{pairing()}]"
-    ledger = contract_at("ledger.v1")  # the tool's offline contract (core §8.4)
+    ledger = contract_at("ledger.v1")  # T holds ledger.v1 offline (0.3)
     fp = ledger.fingerprint
+    lpath = str(CONTRACT_DIR / "ledger.v1.toml")
+    use_z = ZENCTL is not None
+    if not use_z:
+        rp.note(sec, "zk2py's tool alone: no Rust tool given (--zenctl or ZK2PY_ZENCTL)")
+    elif not ZENCTL.is_file():
+        rp.check(sec, f"the Rust tool is at {ZENCTL}", False, "not a file")
+        return
+    differ: list[str] = []
 
-    def ask(bus: Bus) -> tuple[dict[str, Any], Any]:
-        reading, ps = tool_reading(bus.g, LEDGER, "ledger.v1", grace_s=2.0, contracts=[ledger])
-        c = rd.conclude(reading)
-        flat = {"one": c["one_incumbent"].as_json(), "vacancy": c["vacancy"].as_json(),
-                "standbys": c["standbys"].as_json(), **{k: v.as_json() for k, v in c["twins"].items()}}
-        return flat, reading
-
-    def pair(a: dict[str, Any]) -> tuple[str, str]:
-        return a["answer"], a["reason"]
+    def ask(bus: Bus, step: str, want: dict[str, Any], z_exit: int | None, address: str = LEDGER,
+            probe: bool = False) -> tuple[dict[str, Any], Any]:
+        t = read_tool(bus.g, address, "ledger.v1", grace_s=2.0, contracts=[ledger], with_probe=probe)
+        mine = _flat_of_mine(t.reading)
+        ok = all(mine.get(k) == v for k, v in want.items())
+        rp.check(sec, f"{step} zk2py's tool: " + ", ".join(f"{k} {v}" for k, v in want.items()), ok, f"{mine}")
+        if use_z:
+            rc, doc, err = zenctl(["redundancy", address, "--iface", "ledger.v1", "--contracts", lpath,
+                                   "-c", bus.ep1, "--timeout", "1"])
+            z = _flat_of_zenctl(doc)
+            zok = z is not None and all(z.get(k) == v for k, v in want.items())
+            rp.check(sec, f"{step} zenctl redundancy: the same, exit {z_exit}", zok and rc == z_exit,
+                     f"{z}, exit {rc}{(' ' + err[-300:]) if z is None else ''}")
+            if z is not None:
+                keys = set(mine) | set(z)
+                d = {k: (mine.get(k), z.get(k)) for k in sorted(keys) if mine.get(k) != z.get(k)}
+                if d:
+                    differ.append(f"{step} {d}")
+        return mine, t
 
     bus = Bus()
     try:
@@ -1307,48 +1438,105 @@ def section12(rp: Report, runs: int) -> None:
         _wait(a.serving, 5.0)
         b = bus.inst(IMPL["b"], "B", B_ID)
         _wait(b.stands, 8.0)
-        got, reading = ask(bus)
-        rp.check(sec, "1. exactly one: yes, one; a vacancy: no, held; standbys: yes, 1, exact; A: no, incumbent; "
-                      "B: no, standby",
-                 pair(got["one"]) == ("yes", "one") and pair(got["vacancy"]) == ("no", "held")
-                 and got["standbys"] == {"answer": "yes", "reason": "standing_by", "count": 1, "exact": True}
-                 and pair(got[A_ID]) == ("no", "incumbent") and pair(got[B_ID]) == ("no", "standby")
-                 and reading.governance == "claim", f"{got}")
-        faults, passing = live.presence_faults(bus.g, "zk2/lab/*/@zk/**")
-        rp.check(sec, "7. on step 1's shape, zk2py's tool reports no split and no exposed interface without a token "
-                      "for B (core §6, 0.39: its listing claims nothing exposed)",
-                 not any(f[1] == "no token" for f in faults) and pair(got["one"]) != ("no", "split"),
-                 f"faults {sorted(faults)}")
+        ask(bus, "1.", {"governance": "claim", "one": ("yes", "one"), "vacancy": ("no", "held"),
+                        "standbys": ("yes", "standing_by", 1, True), A_ID: ("no", "incumbent"),
+                        B_ID: ("no", "standby")}, 0)
+        # 7. the doctor on step 1's shape
+        splits = split_findings(bus.g, LEDGER, ["ledger.v1"], contracts=[ledger])
+        faults, _ = live.presence_faults(bus.g, "zk2/lab/*/@zk/**")
+        rp.check(sec, "7. step 1's shape, zk2py's tool: no split, no exposed interface without a token for B",
+                 not splits and not any(f[1] == "no token" for f in faults), f"splits {splits}; faults {faults}")
+        if use_z:
+            rc, v, err = _doctor(["split-brain", "token-missing", "redundancy-vacancy"], bus.ep1)
+            rp.check(sec, "7. step 1's shape, zenctl doctor: no split-brain, no token-missing and no "
+                          "redundancy-vacancy finding, exit 0",
+                     rc == 0 and all((v.get(c) or {}).get("answer") == "not_established"
+                                     for c in ("split-brain", "token-missing", "redundancy-vacancy")),
+                     f"exit {rc}; {v}")
+        # 8. the probe over append's wildcard
+        _, t = ask(bus, "8.", {"one": ("yes", "one")}, 0, probe=True)
+        a_zid = live._zid_value(((t.docs.get(A_ID) or {}).get("meta") or {}).get("zid"))
+        repliers = {live._zid_value(z) for zs in (t.probed or {}).values() for z in zs}
+        rp.check(sec, "8. zk2py's probe over append's wildcard: answered by A's session alone, by its zid; B "
+                      "exposes nothing", repliers == {a_zid} and not t.findings,
+                 f"probed {t.probed}; A's zid {a_zid}; findings {t.findings}")
+        if use_z:
+            skips = [x for c in CONFORM_OTHERS for x in ("--skip", c)]
+            rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts", lpath, "-c", bus.ep1,
+                                   "--timeout", "1", "--for", "1", *skips])
+            rows = {r.get("case"): r for r in (doc or {}).get("rows") or [] if isinstance(r, dict)}
+            st = rows.get("redundancy-standby") or {}
+            rp.check(sec, "8. zenctl check conform: redundancy-standby passes, an operation probed",
+                     rc == 0 and (st.get("verdict") or {}).get("answer") in ("no", "not_established", "pass"),
+                     f"exit {rc}; {st or (doc if doc else err[-300:])}")
+        x = X(bus.ep1, C_ID, standby=True, alive=False, fingerprint=fp, queryable=True)
+        time.sleep(0.5)
+        _, t = ask(bus, "8. (X)", {"one": ("yes", "one"), C_ID: ("no", "standby")}, 0, probe=True)
+        x_zid = live._zid_value(str(x.session.zid()))
+        repliers = {live._zid_value(z) for zs in (t.probed or {}).values() for z in zs}
+        rp.check(sec, "8. then X's session answers the probe too: X, marked standby with no token in both reads, "
+                      "holds a queryable of the interface: zk2py's finding, beside §5's answers",
+                 x_zid in repliers and [f[0] for f in t.findings] == [C_ID], f"probed {t.probed}; findings {t.findings}")
+        if use_z:
+            rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts", lpath, "-c", bus.ep1,
+                                   "--timeout", "1", "--for", "1", *skips])
+            rows = {r.get("case"): r for r in (doc or {}).get("rows") or [] if isinstance(r, dict)}
+            st = rows.get("redundancy-standby") or {}
+            rp.check(sec, "8. zenctl check conform: redundancy-standby a violation naming X, exit 1",
+                     rc == 1 and C_ID in json.dumps(st), f"exit {rc}; {st or (doc if doc else err[-300:])}")
+        x.close()
         b.close()
         a.close()
         time.sleep(0.5)
         # 3. B stands by and no instance serves: X plays it, marked
         x = X(bus.ep1, B_ID, standby=True, alive=False, fingerprint=fp)
         time.sleep(0.5)
-        got, _ = ask(bus)
-        rp.check(sec, "3. exactly one: no, vacant; a vacancy: yes, lasting",
-                 pair(got["one"]) == ("no", "vacant") and pair(got["vacancy"]) == ("yes", "lasting"), f"{got}")
+        ask(bus, "3.", {"one": ("no", "vacant"), "vacancy": ("yes", "lasting")}, 1)
+        if use_z:
+            # beyond §12 (whose step 7 asks the doctor of steps 1 and 2): the
+            # doctor holds no contract offline, and X serves no bundle
+            rc, v, err = _doctor(["redundancy-vacancy"], bus.ep1)
+            rv = dict(v.get("redundancy-vacancy") or {})
+            rv.pop("row", None)
+            rp.note(sec, f"3. zenctl doctor's redundancy-vacancy, which takes no --contracts, over X's lasting "
+                         f"vacancy (no bundle served): exit {rc}, {rv}")
         x.close()
         # 4. A serves; X lists ledger.v1 unmarked with no interface token
         a = bus.inst(IMPL["a"], "A", A_ID)
         _wait(a.serving, 5.0)
         x = X(bus.ep1, B_ID, standby=False, alive=False, fingerprint=fp)
         time.sleep(0.5)
-        got, _ = ask(bus)
-        rp.check(sec, "4. X: yes, unmarked", pair(got[B_ID]) == ("yes", "unmarked"), f"{got}")
+        ask(bus, "4.", {B_ID: ("yes", "unmarked")}, 1)
         x.close()
         a.close()
         time.sleep(0.5)
         # 5. no instance; X holds an interface token, its descriptor marked
         x = X(bus.ep1, C_ID, standby=True, alive=True, fingerprint=fp)
         time.sleep(0.5)
-        got, _ = ask(bus)
-        rp.check(sec, "5. X: yes, marked_holding; exactly one incumbent: yes, one (a holder is an incumbent "
-                      "whatever its mark)",
-                 pair(got[C_ID]) == ("yes", "marked_holding") and pair(got["one"]) == ("yes", "one"), f"{got}")
-        faults, _ = live.presence_faults(bus.g, "zk2/lab/*/@zk/**")
-        rp.check(sec, "5. and core §6's shape: a token for an interface its descriptor says it exposes nothing of",
-                 any(f[1] == "standby holding" for f in faults), f"faults {sorted(faults)}")
+        ask(bus, "5.", {C_ID: ("yes", "marked_holding"), "one": ("yes", "one")}, 1)
+        x.close()
+        # beyond §12 (§2.15 premise 3, 0.3): an instance running under an
+        # invalid declaration, its contract held offline
+        vote = contract_at("ledger-vote.v1")
+        x = X(bus.ep1, C_ID, standby=True, alive=False, fingerprint=vote.fingerprint)
+        time.sleep(0.5)
+        t = read_tool(bus.g, LEDGER, "ledger.v1", grace_s=2.0, contracts=[ledger, vote])
+        mine = _flat_of_mine(t.reading)
+        rp.check(sec, "beyond: an invalid declaration on the bus, zk2py's tool: unobservable, no_contract, the "
+                      "reasons beside (0.3)",
+                 mine["one"] == ("unobservable", "no_contract") and t.reasons == ["value"],
+                 f"{mine}; reasons {t.reasons}")
+        if use_z:
+            rc, doc, err = zenctl(["redundancy", LEDGER, "--iface", "ledger.v1", "--contracts", lpath,
+                                   "--contracts", str(CONTRACT_DIR / "ledger-vote.v1.toml"), "-c", bus.ep1,
+                                   "--timeout", "1"])
+            z = _flat_of_zenctl(doc)
+            says = next((r.get("governance_says") for r in (doc or {}).get("rows") or []), None)
+            rp.check(sec, "beyond: zenctl redundancy: the same, the reasons said, exit 2",
+                     z is not None and z["one"] == ("unobservable", "no_contract") and rc == 2
+                     and "value" in str(says), f"{z}; says {says!r}; exit {rc} {err[-200:]}")
+            if z is not None and z != mine:
+                differ.append(f"beyond (invalid) {dict((k, (mine.get(k), z.get(k))) for k in mine if mine.get(k) != z.get(k))}")
         x.close()
     finally:
         bus.close()
@@ -1360,17 +1548,75 @@ def section12(rp: Report, runs: int) -> None:
         bus.link.heal()
         _wait(lambda: bus.s.first_token("put", ALIVE + B_ID, h) is not None, 20.0, 0.05)
         time.sleep(0.5)
-        got, _ = ask(bus)
-        rp.check(sec, "2. the split: exactly one: no, split; A: yes, split_lowest; B: yes, split",
-                 pair(got["one"]) == ("no", "split") and pair(got[A_ID]) == ("yes", "split_lowest")
-                 and pair(got[B_ID]) == ("yes", "split"), f"{got}")
-        rp.check(sec, "7. on step 2's shape, one split-brain finding naming A and B (§6's two reads a grace apart)",
-                 pair(got["one"]) == ("no", "split") and got[A_ID]["answer"] == got[B_ID]["answer"] == "yes",
-                 f"A {got[A_ID]}, B {got[B_ID]}")
+        ask(bus, "2.", {"one": ("no", "split"), A_ID: ("yes", "split_lowest"), B_ID: ("yes", "split")}, 1)
+        splits = split_findings(bus.g, LEDGER, ["ledger.v1"], contracts=[ledger])
+        rp.check(sec, "7. step 2's shape, zk2py's tool: one split finding, this profile's, naming A and B",
+                 splits == [("ledger.v1", [A_ID, B_ID], "redundancy.v1")], f"{splits}")
+        if use_z:
+            rc, v, err = _doctor(["split-brain"], bus.ep1)
+            sb = v.get("split-brain") or {}
+            text = json.dumps(sb)
+            rp.check(sec, "7. step 2's shape, zenctl doctor: one split-brain finding, naming A and B, as this "
+                          "profile's split, exit 1",
+                     rc == 1 and sb.get("answer") == "established" and A_ID in text and B_ID in text,
+                     f"exit {rc}; {sb}")
         b.release_heal()
     finally:
         bus.close()
-    rp.note(sec, "step 6 (hostid.v1 §2.12's recognised standby) runs as hostid_scenarios §6 step 6")
+    # 6. A serves and B stands by on a system minted by hostid.v1
+    base = tempfile.mkdtemp(prefix="zk2py-s12-")
+    root = hs.make_root(base, {hs.ETC: hs.M1 + "\n"})
+    minted = f"{hs.SYSTEM[hs.M1]}/ledger"
+    bus = Bus()
+    try:
+        a = bus.inst(IMPL["a"], "A", A_ID, flags=["--hostid-root", root], address="@hostid.v1/ledger")
+        _wait(a.serving, 5.0)
+        b = bus.inst(IMPL["b"], "B", B_ID, flags=["--hostid-root", root], address="@hostid.v1/ledger")
+        _wait(b.stands, 8.0)
+        ask(bus, "6.", {"one": ("yes", "one"), B_ID: ("no", "standby")}, 0, address=minted)
+        answer, why, _ = live.hostid_collision(bus.g, minted, grace_s=2.0)
+        rp.check(sec, "6. zk2py's tool: hostid.v1 §2.12's second process is B, a recognised standby, not counted: "
+                      "no finding, and B named beside the answer",
+                 answer == "no" and B_ID in why and "recognised standby" in why, f"{answer}: {why}")
+        if use_z:
+            rc, v, err = _doctor(["hostid-duplicate"], bus.ep1)
+            hd = v.get("hostid-duplicate") or {}
+            rp.check(sec, "6. zenctl doctor: no hostid-duplicate finding, and B named a recognised standby",
+                     rc == 0 and hd.get("answer") == "not_established" and B_ID in json.dumps(hd),
+                     f"exit {rc}; {hd}")
+    finally:
+        bus.close()
+    # beyond §12 (§2.15's probe, F-221): append's wildcard would reach
+    # appendall, whose fan-out is allowed; neither tool probes it
+    variant = contract_at("ledger-appendall.v1")
+    bus = Bus()
+    try:
+        a = bus.inst(IMPL["a"], "A", A_ID, contract="ledger-appendall.v1")
+        _wait(a.serving, 5.0)
+        b = bus.inst(IMPL["b"], "B", B_ID, contract="ledger-appendall.v1")
+        _wait(b.stands, 8.0)
+        before = a.executions()
+        t = read_tool(bus.g, LEDGER, "ledger.v1", grace_s=2.0, contracts=[variant], with_probe=True)
+        rp.check(sec, "beyond: append's probe would reach appendall, whose fan-out is allowed: zk2py's tool probes "
+                      "neither, says why, and runs nothing (F-221)",
+                 not t.probed and "@op/append" in t.not_probed and "appendall" in t.not_probed["@op/append"]
+                 and a.executions() == before, f"probed {t.probed}; not probed {t.not_probed}")
+        if use_z:
+            skips = [x for c in CONFORM_OTHERS for x in ("--skip", c)]
+            rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts",
+                                   str(CONTRACT_DIR / "ledger-appendall.v1.toml"), "-c", bus.ep1, "--timeout", "1",
+                                   "--for", "1", *skips])
+            rows = {r.get("case"): r for r in (doc or {}).get("rows") or [] if isinstance(r, dict)}
+            st = rows.get("redundancy-standby") or {}
+            rp.check(sec, "beyond: zenctl check conform's redundancy-standby: append not probed, the same why, "
+                          "unobservable, exit 2",
+                     rc == 2 and (st.get("verdict") or {}).get("answer") == "unobservable"
+                     and "appendall" in json.dumps(st), f"exit {rc}; {st}")
+    finally:
+        bus.close()
+    if use_z:
+        rp.note(sec, ("the two tools' answers differ: " + "; ".join(differ)) if differ
+                else "the two tools answer every shape alike")
 
 
 def section_remint(rp: Report, runs: int) -> None:
@@ -1621,7 +1867,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--owner", help="both candidates the owner example at this path")
     ap.add_argument("--only", action="append", choices=list(SECTIONS))
     ap.add_argument("--runs", type=int, default=20, help="§3's runs (20 by the text)")
+    ap.add_argument("--rust-spawn-at-go", action="store_true",
+                    help="spawn the owner example at go, calibrated, instead of its own --wait-go (F-220)")
+    ap.add_argument("--zenctl", help="§12's Rust tool (else $ZK2PY_ZENCTL; without either, §12 runs zk2py's tool "
+                                     "alone and says so)")
     a = ap.parse_args(argv)
+    global RUST_WAIT_GO, ZENCTL
+    RUST_WAIT_GO = not a.rust_spawn_at_go
+    if a.zenctl:
+        ZENCTL = Path(a.zenctl)
     for k in ("a", "b"):
         v = a.owner or getattr(a, k)
         if v != "zk2py" and not Path(v).is_file():

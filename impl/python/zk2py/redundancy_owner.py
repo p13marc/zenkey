@@ -10,8 +10,8 @@ so that one runner drives either::
         [--tokenless IFACE]... [--wait-go] [--user U --password P] SYSTEM/SERVICE CONTRACT.toml
 
 Standard output, first ``connected <endpoint>``, then ``ready
-zk2/<system>/<service>/@zk/instance/<instance>`` (with ``--wait-go``, once
-``go`` is read); a refusal is ``not started: <why>`` on standard error,
+zk2/<system>/<service>/@zk/instance/<instance>`` (with ``--wait-go``,
+``waiting go`` first, and ``ready`` once ``go`` is read); a refusal is ``not started: <why>`` on standard error,
 exit 1, nothing declared. Then one line per command:
 
 - ``redundancy role``: ``{"redundancy": "role", "instance", "interfaces":
@@ -23,9 +23,11 @@ exit 1, nothing declared. Then one line per command:
   ``redundancy new-epoch``, each answered as the owner example does;
 - ``put <iface> <resource>``: one write, ``ok``, of a raw state: ``put
   <key>``, or ``refused …`` while it stands by (§2.4);
+- ``redundancy zid``: the claim's session's, the reader's and the
+  watch's zids; ``redundancy reads`` carries the poll's ``poll_log`` (0.3);
 - zk2py's own: ``redundancy steps`` and ``redundancy log`` (every step,
-  every read, timed on the host's monotonic clock), ``redundancy zid``,
-  and ``put balance <value>``, a chosen value.
+  every read, timed on the host's monotonic clock), and ``put balance
+  <value>``, a chosen value.
 
 Standard input closed is a clean stop (§2.8).
 """
@@ -84,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--tokenless", action="append", default=[])
     ap.add_argument("--wait-go", action="store_true")
     ap.add_argument("--reader-connect", help="zk2py's own: the reader through this endpoint (a test cuts it apart)")
+    ap.add_argument("--hostid-root", help="hostid.v1: the directory standing in for / (the owner example's)")
     ap.add_argument("--user")
     ap.add_argument("--password")
     a = ap.parse_args(argv)
@@ -100,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
                   retry_s=a.retry_ms / 1000, grace_s=a.grace_ms / 1000, lock=a.lock_file,
                   refuse_without_lock=a.refuse_without_lock, tokenless=tuple(a.tokenless), peer=a.peer,
                   hold_heal=a.hold_heal, auth=auth, poll_s=None if a.poll_ms is None else a.poll_ms / 1000,
-                  lease_ms=a.lease_ms, reader_endpoint=a.reader_connect)
+                  lease_ms=a.lease_ms, reader_endpoint=a.reader_connect, hostid_root=a.hostid_root)
     if c.declaration.declaration == "governed" and not a.standby:
         return refuse(f"{c.iface} is governed by redundancy.v1, and this service takes part in no election "
                       "(--standby) (redundancy.v1 §2.5)")
@@ -116,11 +119,18 @@ def main(argv: list[str] | None = None) -> int:
         except Refused as e:
             refuse(str(e))
             return False
-        out(f"ready zk2/{a.address}/@zk/instance/{inst}")
+        out(f"ready zk2/{c.address}/@zk/instance/{inst}")
         return True
 
     if not a.wait_go and not begin():
         return 1
+    if a.wait_go:
+        # the owner example's --wait-go: every session open, then waiting
+        try:
+            c.prepare()
+        except Refused as e:
+            return refuse(str(e))
+        out("waiting go")
     try:
         for line in sys.stdin:
             words = line.split()
@@ -170,6 +180,9 @@ def command(c: Candidate, words: list[str], line: str, begin: Any) -> Any:
         sessions: dict[str, Any] = {"reader": {"reads": k["reader_reads"], "settles": k["reader_settles"]}}
         if c.poll_s is None:
             sessions["watch"] = {"reads": k["watch_reads"], "settles": k["watch_settles"]}
+        else:
+            with c.lock:
+                iface["poll_log"] = [dict(x) for x in c.poll_log]
         return {"redundancy": "reads", "interfaces": {c.iface: iface}, "sessions": sessions}
     if cmd == "lock" and rest in (["hold"], ["lose"]):
         if rest == ["hold"]:
@@ -207,9 +220,15 @@ def command(c: Candidate, words: list[str], line: str, begin: Any) -> Any:
             return {"redundancy": "log", "reads": [[t, kind, why, r.complete,
                                                     [[i.id, i.token, i.descriptor] for i in r.instances]]
                                                    for t, r, kind, why in c.reads]}
-    if cmd == "zid":
-        s = c.owner.session if c.owner else None
-        return {"redundancy": "zid", "zid": None if s is None else str(s.zid())}
+    if cmd == "zid" and not rest:
+        # the owner example's: the claim's session, the reader and the watch
+        def zid(x: Any) -> str | None:
+            return None if x is None else str(x.zid())
+
+        out = {"redundancy": "zid", "zid": zid(c.owner.session if c.owner else None), "reader": zid(c.reader)}
+        if c.watch is not None:
+            out["watch"] = zid(c.watch)
+        return out
     return f"refused {line}: unknown command"
 
 
