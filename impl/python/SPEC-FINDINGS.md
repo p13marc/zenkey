@@ -11613,6 +11613,13 @@ step 8, with A and B on `ledger.v1` and the tool holding
 Expected: T does not ask `append$*`, which that revision's `appendall`
 intersects, and says why".
 
+**Status at redundancy.v1 0.5:** resolved, as proposed: §12 gains step 9,
+`ledger.v1` at the address and `ledger-appendall` held offline. T makes
+no `append$*` probe, naming `appendall` and the revision held offline,
+and reads the standbys' exposure unobservable. The MUST's evidence now
+covers both halves. zk2py's reason now names the revision by its
+fingerprint, as the step asks. Both tools pass step 9 in every pairing.
+
 **Counts at redundancy.v1 0.4:** 226 entries. Open:
 - F-225, against desired.v1 0.7, minor;
 - F-226, minor.
@@ -11657,3 +11664,34 @@ None open.
 - F-226, against redundancy.v1 0.4, minor.
 
 Every other entry is resolved.
+
+## At redundancy.v1 0.5 (#609)
+
+Round 65 read `redundancy.v1` text 0.5 cold, on main 2e5f77d8, end to
+end. It ran §1 to §12 in every pairing against `owner-re` and
+`zenctl-re`. zk2py's runner asks scenarios §12 step 9 in place of round
+63's shape beyond step 8. Its tool's reason for a probe not made names
+the revision whose allowed operation the wildcard would reach. It now
+reads the standbys' exposure: unobservable when no operation was probed.
+
+**Round 63's finding at 0.5:** F-226 is resolved. Its entry has its
+status line.
+
+**`just py-conformance`: 2982 of 2982.** No fixture changed.
+
+**Live:** every check passes, with the same counts as round 63: 105,
+102, 104 and 103, §12 33 in each. Step 9, both tools:
+- no `append$*` probe;
+- `appendall` and the offline revision named;
+- the exposure unobservable, exit 2.
+
+**Where the two tools disagree:** nowhere.
+
+**The text, read end to end.** It holds. Every MUST names evidence that
+tests it, both halves of §2.15's "Never a call that would run" included,
+and nothing the tools met is left unstated.
+
+None open.
+
+**Counts at redundancy.v1 0.5:** 226 entries. None open: every entry is
+resolved.

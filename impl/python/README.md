@@ -115,7 +115,7 @@ total        2982 passed     0 failed
 
 The figures are against `core.md` 0.40, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
-`telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.4.
+`telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.5.
 `redundancy.v1` 0.3 added `polls.json`, 7 cases (180), which zk2py's
 `poll_read` passed the first time they ran. Its round 58 reading, a first
 poll as a baseline and a withdrawal only with no holder left, would have
@@ -358,7 +358,9 @@ fixtures:
   redundancy.v1 0.4").
 - F-226 was found reading 0.4 cold, end to end, in round 63. It is §12's
   evidence for half of §2.15's new MUST, a revision held offline that no
-  descriptor names. It is open, and minor.
+  descriptor names. It is minor.
+- `redundancy.v1` 0.5 resolved it with §12 step 9 (`SPEC-FINDINGS.md`,
+  "At redundancy.v1 0.5"). Round 65 found nothing new.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -1711,7 +1713,7 @@ a two-documents role, `two_documents`. The doctor, which holds no
 contract offline, reads it unobservable over the shapes' test sessions,
 which serve no bundle.
 
-## redundancy.v1 (profile text 0.4, core 0.40)
+## redundancy.v1 (profile text 0.5, core 0.40)
 
 ```bash
 PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.redundancy_scenarios \
@@ -1837,6 +1839,22 @@ from the text:
   §12 asks zk2py's tool and zenctl's `redundancy`, `doctor` and `check
   conform` of each shape, both holding `ledger.v1` offline, and compares
   their answers.
+
+**Results at 0.5 (round 65):** every check passes in all four pairings,
+against `owner-re` and `zenctl-re`, with the same counts as 0.4's: 105,
+102, 104 and 103. §12 is 33 in each, step 9 in the place of round 63's
+shape beyond step 8. In step 9, A and B run `ledger.v1`, and T also holds
+`ledger-appendall` offline:
+- neither tool asks `append$*`;
+- each names `appendall` and the revision held offline, by its
+  fingerprint;
+- each reads the standbys' exposure unobservable, `check conform`'s
+  `redundancy-standby` with exit 2.
+
+zk2py's tool now says the exposure (`ToolReading.exposure`: a finding,
+none, or unobservable when no operation was probed). §3's median skew
+was 0.6, 0.5, 0.6 and 0.9 ms, none made again. The two tools agree on
+every shape in every pairing.
 
 **Results at 0.4 (round 63):** every check passes in all four pairings.
 The Rust side is `owner-rd` and `zenctl-rd`. §3 ran 20 measured runs in
