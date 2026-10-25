@@ -43,7 +43,14 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   through a session cut off is not made (`PresenceBasis::CutOff`), and the
   monitor holds its liveliness subscribers on a watch session of its own
   while the feed reads on the deployment's, refusing the monitor's zid,
-  #830; a read cut off while it runs is a seed possibly incomplete, said
+  #830; the subscribers have no history unless the watch session is in a
+  namespace (`zenkey::presence::subscriber_needs_history`: zenoh 1.10.1's
+  namespace drops the router's by-key withdrawal of an earlier token), and
+  the monitor's `Barrier` is asked before every seed, made again when it
+  does not stand or when the watch session's transport moves, a seed made
+  without it possibly incomplete, "barrier not established", retried and
+  never ok (`Monitor::barrier`, core 0.41, #851; the same for `AlarmFeed`'s
+  refresh and zenwatch's `TokenFeed`); a read cut off while it runs is a seed possibly incomplete, said
   beside `complete` as `cut_off_during` in every presence report but the
   doctor's, which zenwatch.v1 pins, and the feed counts the reads it makes,
   `PresenceFeed::reads`, core 0.38, #849). For zengui's tree (#614, FL4):
@@ -909,7 +916,15 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `presence::declare_subscriber`, which marks its session a watch session
   for good, and `liveliness_read` refuses one (`Error::ReadBesideSubscriber`)
   and a session cut off (`Error::CutOff`), with `presence::settle` a watch
-  session's one barrier GET (#830, core 0.37; every liveliness GET goes
+  session's one barrier GET (#830, core 0.37), asking `barrier_key(scope)`,
+  the scope's chunks to its first `@zk` and then `@zk/settle`, a key no
+  token holds (#851, core 0.41), and `presence::Barrier` that GET kept,
+  lost at the session's next transport event; a GET whose time reaches the
+  session's `routing/interests/timeout` is possibly incomplete
+  (`PresenceRead::at_interests_timeout`: zenoh 1.10.1 ends it there with no
+  error reply), and the tools' sessions run with 120 s
+  (`zenkey_fleet::TOOL_INTERESTS_TIMEOUT`) unless their config states one
+  (every liveliness GET goes
   through `presence` too, counted per session by
   `presence::liveliness_gets`, and `scripts/check-liveliness-seam.sh`
   keeps the seam the only one). The
@@ -1021,7 +1036,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   puts its baseline report before the tokens. From `start()` on it
   subscribes to the slice and seeds by S4's GET at start, at each
   appearance of the author's instance token (a watch session's subscriber,
-  else a 500 ms poll; retried while the author is present and silent) and
+  without history unless the session is in a namespace, its round trip kept
+  and asked before a presence read, a read made without it possibly
+  incomplete, a transport move a reason to seed, core 0.41, #851; else a
+  500 ms poll; retried while the author is present and silent) and
   on `set_reread`. It reads the archive's last-known only after a complete
   read shows the author absent (core §8.1, 0.37), checks each act against
   the author's bundle (`undecodable`, `invalid`) and runs it on the
@@ -1107,12 +1125,14 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.40 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.41 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
     tokens, and a peer's read covers only its routers' clients and its
-    linked peers, #841 RB; changes go through `spec/CHANGELOG.md`):
+    linked peers, #841 RB; 0.41: a watch session's round trip matches no
+    token, its subscribers' history, a read at the interests timeout,
+    #851; changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a
