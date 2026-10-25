@@ -1592,24 +1592,40 @@ fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
                     }
                 }
             }
+            // A role is covered by a report of this interface's own
+            // resources, as the broken-report scan reads them: one under
+            // another interface of the service is that interface's to judge.
+            let own: Vec<&crate::model::desired::ReportReply> = g
+                .replies
+                .iter()
+                .filter(|r| r.key.starts_with(&prefix))
+                .collect();
+            let mut covered_by = Vec::new();
+            let mut owed_none = Vec::new();
             for r in &roles {
                 let res = &r.resolution;
-                let covered = if res.slice.is_empty() {
-                    !res.bound()
-                        && g.replies.iter().any(|x| {
-                            x.read.as_ref().is_ok_and(|d| {
+                let by = if res.slice.is_empty() {
+                    own.iter().find(|x| {
+                        !res.bound()
+                            && x.read.as_ref().is_ok_and(|d| {
                                 d.key.is_none()
                                     && d.source == zenkey_model::desired::Source::Baseline
                             })
-                        })
+                    })
                 } else {
-                    g.replies.iter().any(|x| {
+                    own.iter().find(|x| {
                         x.read
                             .as_ref()
                             .is_ok_and(|d| d.key.as_ref().is_some_and(|k| res.slice.contains(k)))
                     })
                 };
-                if !covered && (res.slice.len() + usize::from(!res.bound())) > 0 {
+                let owed = (res.slice.len() + usize::from(!res.bound())) > 0;
+                match by {
+                    Some(x) => covered_by.push(format!("{} by {}", res.role, x.key)),
+                    None if !owed => owed_none.push(res.role.clone()),
+                    None => {}
+                }
+                if by.is_none() && owed {
                     broken.push(if res.slice.is_empty() {
                         format!(
                             "role {}: unbound, and no keyless baseline report of it (§2.12)",
@@ -1650,14 +1666,34 @@ fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
                     SVC,
                     "its GET drew no report: an empty reply set is no verdict (core O5)",
                 )
-            } else {
+            } else if read_ok == 0 {
                 ConformCase::passed(
                     CaseId::DesiredReport,
                     SVC,
                     format!(
-                        "{read_ok} report(s) of its own resources, each strict and consistent, \
-                         and one for each of its {} role(s) (§2.10)",
-                        roles.len()
+                        "no report of its own resources was read, and none is owed: role(s) {} \
+                         have no slice to report, which desired-binding judges (§2.10)",
+                        owed_none.join(", ")
+                    ),
+                )
+            } else {
+                let mut covered = if covered_by.is_empty() {
+                    "none, as it declares no role on a desired resource".to_owned()
+                } else {
+                    covered_by.join(", ")
+                };
+                if !owed_none.is_empty() {
+                    covered.push_str(&format!(
+                        "; with no slice, so no report owed: {}",
+                        owed_none.join(", ")
+                    ));
+                }
+                ConformCase::passed(
+                    CaseId::DesiredReport,
+                    SVC,
+                    format!(
+                        "{read_ok} report(s) of its own resources, each strict and consistent; \
+                         its role(s) covered: {covered} (§2.10)"
                     ),
                 )
             }
@@ -5234,8 +5270,9 @@ mod tests {
         };
         let r = verdict(&cases, CaseId::DesiredReport);
         assert!(
-            matches!(r.verdict, Judgement::NotEstablished { .. }),
-            "{r:?}"
+            matches!(&r.verdict, Judgement::NotEstablished { reason }
+                if reason.contains("covered: task by zk2/lab/worker/worker.v1/state/desired/task")),
+            "the pass names the role and its report: {r:?}"
         );
         let b = verdict(&cases, CaseId::DesiredBinding);
         assert_eq!(b.subject, "requires.task");
@@ -5258,6 +5295,34 @@ mod tests {
         assert!(
             r.detail.unwrap().contains("role task: no report"),
             "a role with no report"
+        );
+        // A report of the slice under another interface of the service is
+        // that interface's: it covers no role of this one (review of #856).
+        let mut elsewhere = target(&ok, vec![]);
+        if let Some(Ok(g)) = &mut elsewhere.targets[0].reports {
+            g.replies[0].key = "zk2/lab/worker/other.v1/state/desired/task".into();
+        }
+        o.desired = Some(elsewhere);
+        let r = verdict(&desired_cases(&o), CaseId::DesiredReport);
+        assert_eq!(r.verdict, Judgement::Established, "{r:?}");
+        assert!(
+            r.detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("role task: no report"),
+            "{r:?}"
+        );
+        // A role with no slice owes no report, and the pass names it.
+        let mut owed = target(&ok, vec![BindingProblem::NotOneAuthor]);
+        if let Some(Ok(g)) = &mut owed.targets[0].reports {
+            g.replies.clear();
+        }
+        o.desired = Some(owed);
+        let r = verdict(&desired_cases(&o), CaseId::DesiredReport);
+        assert!(
+            matches!(&r.verdict, Judgement::NotEstablished { reason }
+                if reason.contains("none is owed: role(s) task")),
+            "{r:?}"
         );
         o.desired = Some(target(&ok, vec![BindingProblem::NotOneAuthor]));
         let b = verdict(&desired_cases(&o), CaseId::DesiredBinding);

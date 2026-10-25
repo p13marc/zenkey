@@ -25,6 +25,12 @@
 //!    archive's last-known of the slice, shown and never current (core
 //!    §4.4, S6).
 //!
+//! Each step's reads are made at once, at most [`CONCURRENCY`] in flight
+//! (review of #856): the authors' presence reads, the targets' report GETs
+//! beside the archives' presence read, then every slice's GET and every
+//! archive's last-known, so one reading costs about one `--timeout` a step,
+//! never one per target or role.
+//!
 //! Nothing is judged here. [`run_desired`] makes the reading, once, or,
 //! with a window, again every [`REREAD`] while a role's answer may still
 //! move, judging each with [`crate::judge::desired`]: a target "not yet"
@@ -35,6 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
 
+use futures_util::future::BoxFuture;
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::descriptor::{Descriptor, RequireEntry};
 use zenkey_model::desired::{self as dm, Listing, Seen};
@@ -258,7 +265,7 @@ async fn observe_with(
         fetch(session, store, &wanted, &mut contracts).await;
         // Each author the bindings name, its presence read when the
         // targets' read did not cover it.
-        let mut authors: BTreeMap<Addr, Result<Observed, String>> = BTreeMap::new();
+        let mut uncovered: BTreeSet<Addr> = BTreeSet::new();
         for d in descriptors
             .values()
             .filter_map(|d| d.as_ref().ok().cloned().flatten())
@@ -267,17 +274,32 @@ async fn observe_with(
                 let Some(x) = one_author(&e.bindings) else {
                     continue;
                 };
-                let covered = target.is_none() || target == Some(&x);
-                if covered || authors.contains_key(&x) {
-                    continue;
+                if target.is_some() && target != Some(&x) {
+                    uncovered.insert(x);
                 }
-                read.asked.push(Scope::service(&x).selector());
-                let o = crate::bus::presence::observe(session, &Scope::service(&x), t)
-                    .await
-                    .map_err(|e| crate::one_line(&e));
-                authors.insert(x, o);
             }
         }
+        read.asked
+            .extend(uncovered.iter().map(|x| Scope::service(x).selector()));
+        // Each read at once (review of #856): one reading costs about one
+        // --timeout, whatever the number of authors.
+        let reads = bounded(
+            uncovered
+                .iter()
+                .cloned()
+                .map(|x| {
+                    let s = session.clone();
+                    Box::pin(async move {
+                        crate::bus::presence::observe(&s, &Scope::service(&x), t)
+                            .await
+                            .map_err(|e| crate::one_line(&e))
+                    }) as BoxFuture<'static, _>
+                })
+                .collect(),
+        )
+        .await;
+        let authors: BTreeMap<Addr, Result<Observed, String>> =
+            uncovered.into_iter().zip(reads).collect();
         let mut more = BTreeSet::new();
         for d in descriptors
             .values()
@@ -346,49 +368,129 @@ async fn observe_with(
             }
         }
     }
-    // The reports, then each slice from its author.
-    let mut archives: Option<Result<Vec<Addr>, String>> = None;
-    for tr in &mut read.targets {
-        if !tr.roles.iter().any(|r| !r.resolution.slice.is_empty()) {
-            continue;
+    // Every target's reports at once, and the archives beside them when an
+    // author is absent; then every slice and every archive's last-known at
+    // once (review of #856): one reading costs about one --timeout per
+    // phase, not one per target or role.
+    let plans: Vec<(usize, ReportPlan)> = read
+        .targets
+        .iter()
+        .enumerate()
+        .filter(|(_, tr)| tr.roles.iter().any(|r| !r.resolution.slice.is_empty()))
+        .map(|(i, tr)| (i, report_selectors(tr, &contracts, offline)))
+        .collect();
+    for (_, p) in &plans {
+        if let Ok(sels) = p {
+            read.asked.extend(sels.iter().map(|(s, _)| s.clone()));
         }
-        let selectors = report_selectors(tr, &contracts, offline);
-        tr.reports = Some(match selectors {
-            Err(why) => Err(why),
-            Ok(sels) => {
-                read.asked.extend(sels.iter().map(|(s, _)| s.clone()));
-                Ok(reports_get(session, sels, t).await)
-            }
+    }
+    let needs_archives = spec.archives
+        && read.targets.iter().any(|tr| {
+            tr.roles.iter().any(|r| {
+                !r.resolution.slice.is_empty() && matches!(r.author_seen, Some((Seen::Absent, _)))
+            })
         });
-        for r in &mut tr.roles {
-            let res = &r.resolution;
-            if res.slice.is_empty() {
+    let reports = bounded(
+        plans
+            .into_iter()
+            .map(|(i, plan)| {
+                let s = session.clone();
+                Box::pin(async move {
+                    (
+                        i,
+                        match plan {
+                            Err(why) => Err(why),
+                            Ok(sels) => Ok(reports_get(&s, sels, t).await),
+                        },
+                    )
+                }) as BoxFuture<'static, (usize, Result<ReportsGet, String>)>
+            })
+            .collect(),
+    );
+    let providers = async {
+        if needs_archives {
+            Some(archive_providers(session, t).await)
+        } else {
+            None
+        }
+    };
+    let (reports, archives) = tokio::join!(reports, providers);
+    for (i, r) in reports {
+        read.targets[i].reports = Some(r);
+    }
+    let mut legs = Vec::new();
+    for (i, tr) in read.targets.iter().enumerate() {
+        for (j, r) in tr.roles.iter().enumerate() {
+            if r.resolution.slice.is_empty() {
                 continue;
             }
-            let slice = slice_asked(res, tr.reports.as_ref());
-            let seen = r.author_seen.as_ref().map(|(s, _)| *s);
-            match seen {
+            let slice = slice_asked(&r.resolution, tr.reports.as_ref());
+            match r.author_seen.as_ref().map(|(s, _)| *s) {
                 Some(Seen::Present | Seen::AcrossFace) => {
                     read.asked.push(slice.clone());
-                    r.current = Some(slice_get(session, &slice, t).await);
+                    legs.push((i, j, slice, true));
                 }
-                Some(Seen::Absent) if spec.archives => {
-                    if archives.is_none() {
-                        archives = Some(archive_providers(session, t).await);
-                    }
-                    r.archived = Some(match archives.as_ref().expect("just read") {
-                        Ok(at) => Ok(archived(session, at, &slice, t).await),
-                        Err(why) => Err(why.clone()),
-                    });
-                }
+                Some(Seen::Absent) if spec.archives => legs.push((i, j, slice, false)),
                 _ => {}
             }
+        }
+    }
+    let done = bounded(
+        legs.into_iter()
+            .map(|(i, j, slice, current)| {
+                let s = session.clone();
+                let at = archives.clone();
+                Box::pin(async move {
+                    let leg = if current {
+                        Leg::Current(slice_get(&s, &slice, t).await)
+                    } else {
+                        Leg::Archived(match at {
+                            Some(Ok(at)) => Ok(archived(&s, &at, &slice, t).await),
+                            Some(Err(why)) => Err(why),
+                            None => Err("the archives were not read".to_owned()),
+                        })
+                    };
+                    (i, j, leg)
+                }) as BoxFuture<'static, (usize, usize, Leg)>
+            })
+            .collect(),
+    )
+    .await;
+    for (i, j, leg) in done {
+        let r = &mut read.targets[i].roles[j];
+        match leg {
+            Leg::Current(c) => r.current = Some(c),
+            Leg::Archived(a) => r.archived = Some(a),
         }
     }
     read.at = SystemTime::now();
     let mut seen = BTreeSet::new();
     read.asked.retain(|s| seen.insert(s.clone()));
     read
+}
+
+/// How many reads of one phase a reading keeps in flight at once.
+pub const CONCURRENCY: usize = 64;
+
+/// `futs`, at most [`CONCURRENCY`] at once, their outputs in order. Each
+/// is boxed and owns what it reads, so a reading's future stays `Send`
+/// wherever it is spawned.
+async fn bounded<T>(futs: Vec<BoxFuture<'static, T>>) -> Vec<T> {
+    use futures_util::StreamExt as _;
+    futures_util::stream::iter(futs)
+        .buffered(CONCURRENCY)
+        .collect()
+        .await
+}
+
+/// A target's report selectors, or why there are none to read.
+type ReportPlan = Result<Vec<(String, zenkey_model::freshness::Horizon)>, String>;
+
+/// One read of a role's: S4's GET of its slice, or the archives'
+/// last-known of it.
+enum Leg {
+    Current(Result<SliceGet, String>),
+    Archived(Result<Vec<Archived>, String>),
 }
 
 /// A target nothing could be read of: one row, its presence as given.
@@ -663,36 +765,53 @@ async fn reports_get(
         replies: Vec::new(),
         at: SystemTime::now(),
     };
-    for (sel, horizon) in selectors {
-        let replies =
-            match crate::bus::query::state_get(session, &sel, &crate::bus::query::GetOpts::new(t))
-                .await
-            {
-                Ok(r) => r,
-                Err(_) => {
-                    out.complete = false;
-                    continue;
-                }
-            };
-        while let Ok(reply) = replies.recv_async().await {
-            let Ok(sample) = reply.result() else {
-                out.complete = false;
-                continue;
-            };
-            let key = sample.key_expr().as_str();
-            if key.contains('*') || sample.kind() == SampleKind::Delete {
-                continue;
-            }
-            out.replies.push(ReportReply {
-                key: key.to_owned(),
-                read: dm::decode(&sample.payload().to_bytes()),
-                stamp: sample.timestamp().map(|ts| Stamped {
-                    time: ts.get_time().to_system_time(),
-                    clock: ts.get_id().to_string(),
-                }),
-                horizon: horizon.clone(),
-            });
-        }
+    // Each resource's GET at once.
+    let gets = bounded(
+        selectors
+            .into_iter()
+            .map(|(sel, horizon)| {
+                let session = session.clone();
+                Box::pin(async move {
+                    let mut replies_out = Vec::new();
+                    let mut complete = true;
+                    let replies = match crate::bus::query::state_get(
+                        &session,
+                        &sel,
+                        &crate::bus::query::GetOpts::new(t),
+                    )
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(_) => return (false, replies_out),
+                    };
+                    while let Ok(reply) = replies.recv_async().await {
+                        let Ok(sample) = reply.result() else {
+                            complete = false;
+                            continue;
+                        };
+                        let key = sample.key_expr().as_str();
+                        if key.contains('*') || sample.kind() == SampleKind::Delete {
+                            continue;
+                        }
+                        replies_out.push(ReportReply {
+                            key: key.to_owned(),
+                            read: dm::decode(&sample.payload().to_bytes()),
+                            stamp: sample.timestamp().map(|ts| Stamped {
+                                time: ts.get_time().to_system_time(),
+                                clock: ts.get_id().to_string(),
+                            }),
+                            horizon: horizon.clone(),
+                        });
+                    }
+                    (complete, replies_out)
+                }) as BoxFuture<'static, _>
+            })
+            .collect(),
+    )
+    .await;
+    for (complete, replies) in gets {
+        out.complete &= complete;
+        out.replies.extend(replies);
     }
     out.at = SystemTime::now();
     out
@@ -759,17 +878,28 @@ async fn archive_providers(session: &Session, t: Duration) -> Result<Vec<Addr>, 
 /// Each archive's last-known of `slice` (core §4.4, S5): an explicit read,
 /// never current.
 async fn archived(session: &Session, at: &[Addr], slice: &str, t: Duration) -> Vec<Archived> {
-    let mut out = Vec::new();
-    for a in at {
-        if let Ok(Some(lk)) = zenkey::archive::last_known(session, a, slice, t).await {
-            out.push(Archived {
-                archive: a.clone(),
-                deleted: lk.value.is_none(),
-                stamp: lk.timestamp.as_ref().map(zenkey::desired::stamp),
-                revision: lk.value.as_deref().and_then(dm::revision_of_text),
-                confirmed: lk.confirmed,
-            });
-        }
-    }
-    out
+    // Each archive at once.
+    let read = bounded(
+        at.iter()
+            .cloned()
+            .map(|a| {
+                let s = session.clone();
+                let slice = slice.to_owned();
+                Box::pin(async move {
+                    match zenkey::archive::last_known(&s, &a, &slice, t).await {
+                        Ok(Some(lk)) => Some(Archived {
+                            deleted: lk.value.is_none(),
+                            stamp: lk.timestamp.as_ref().map(zenkey::desired::stamp),
+                            revision: lk.value.as_deref().and_then(dm::revision_of_text),
+                            confirmed: lk.confirmed,
+                            archive: a,
+                        }),
+                        _ => None,
+                    }
+                }) as BoxFuture<'static, _>
+            })
+            .collect(),
+    )
+    .await;
+    read.into_iter().flatten().collect()
 }

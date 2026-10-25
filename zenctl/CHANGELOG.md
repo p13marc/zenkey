@@ -6,6 +6,14 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `desired` after review: reads at once, a report's own interface (#840, DE)
+
+| Before | Now | Notes |
+|---|---|---|
+| `desired`, the doctor's `desired-*` and `check conform`'s `desired-*`: one reading made its reads one after another, about one `--timeout` per silent target or role | each step's reads at once, at most 64 in flight: the authors' presence, the targets' reports beside the archives' presence, then every slice and every archive | a `--for` window and the doctor's run no longer stretch with the deployment |
+| `--for` with `--clocks-synced`: a version aged against the reading's end | against the time its slice's GET was answered, never later | still conservative |
+| `check conform`'s `desired-report`: a report under another interface of the service could cover a role | only the interface's own reports cover its roles; a pass names each role and its report, or the roles that owe none | |
+
 ## Unreleased (`main`, zk2) — `desired.v1` in the tools: `desired`, three doctor checks, three conform cases (#840, DD)
 
 `desired.v1` (`spec/profiles/desired/v1.md`) lets a service say what

@@ -4,6 +4,81 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-24: round 57 (#840, DE; #609)
+
+zk2py read 0.4 cold in round 57 (PR #857) and filed four findings, F-210
+to F-213. #840's coordinator accepted all four (issuecomment-35632). Each
+is text: the reference already behaves as the answer says, so the rule is
+written in, and a new fixture pins it, which every implementation runs.
+The same chunk carried review-bot's points
+on PR #856 (issuecomment-35609), which change the reference's reading and
+none of this text's rules: the reads of one reading are made at once, a
+version's age is taken when its GET was answered, and `check conform`'s
+`desired-report` reads the interface's own reports.
+
+The evidence, counted from the files: `conformance/declarations.json` (43
+cases), `conformance/bindings.json` (25), `conformance/order.json` (88),
+`conformance/reports.json` (80), `conformance/conclusions.json` (35),
+`conformance/schema.json` (3) and the new `conformance/slices.json` (22),
+296 in all; and `scenarios.md`'s ten sections. No case that existed
+changes.
+- **`slices.json`** (new) is a tool's reading of one role before §2.17
+  answers, its input as data: the target's requirement (templates,
+  bindings, parameters), the author's contract as the tool holds it (the
+  revision its descriptor names, or revisions held offline, each its
+  resources as `declarations.json` gives them), and the replies of the
+  target's report resources (each a key and a payload's text). It expects
+  the candidate slices, where the slice came from (`author_contract`,
+  `offline_contract`, `requirement`), §2.3's binding problems and §2.2's
+  declaration reasons, and which reply is the report: one (the slice it
+  claims), unreadable (`two_differ`, `unreadable_reply`), none, or no
+  slice. Its 22 cases pin F-210, F-212, F-213 and 0.4's §2.10 and §2.17
+  rules. The reference runs it in `zenkey_fleet::model::desired`;
+  `zenkey-model`'s profile test checks every case's shape and the slice
+  of each case whose author's contract is in hand, by the model's
+  declaration and binding.
+
+**Answered.**
+- **F-210, the template a requirement names** (§2.17). 0.4 took "the
+  template its requirement names" as one. Now, with the slice from the
+  target alone, every template the requirement names, under either kind
+  token, is a candidate; the one a readable report of the target claims
+  is the slice, and with none claimed the answer is `no_report`. A
+  requirement naming one desired resource, as every example does, has one
+  candidate per kind token. `[F: slices.json]`: two templates, the
+  report's key choosing among four candidates, none claimed, and two
+  claiming two candidates and differing.
+- **F-211, how long behind** (§2.17). "In readings that long apart" read
+  as two readings. Now: in every reading over that long, the first and
+  the last that long apart, any other answer between them, an
+  unobservable one included, starting the window again. That is the
+  reference's `--for` and §9's step 6. `[Sc: §9]`
+- **F-212, two reports on one key** (§2.10, a minor). "Two readable ones,
+  of two report resources, that claim it and differ": two instances'
+  reports on one key are one reply to S4's GET, the later (core §4.1), and
+  §2.17 reads a split target's report as the later one's.
+  `[F: slices.json]`: two resources' reports that differ, two equal ones,
+  and the one reply on a key.
+- **F-213, a revision held offline** (§2.17). 0.4 named "one held
+  offline" without saying which. Now, with no revision its descriptor
+  names in hand, a revision of the author's interface held offline that
+  declares a desired resource the requirement names; one major's
+  revisions keep each resource's key (core §9.8), so any such revision
+  gives the same slice, and the slice so taken is the slice: a report
+  keyed under the other kind token is none, the contract's kind token
+  winning over the report's. `[F: slices.json]`: a held revision with no
+  descriptor, a report under the other kind token, a held revision
+  declaring the resource explicit, and the one of two held revisions that
+  declares it.
+- **The clock** (§2.17, with review-bot on #856): a version's age is taken
+  when its GET was answered, never the reading's end, which is later.
+
+**Deliberately not changed.**
+- **The fixtures that existed.** `conclusions.json` keeps its inputs: a
+  reading's outcome before §2.17, which `slices.json` now states, is one
+  of its inputs, no report or `undecodable`.
+- **§5's four questions** and their tokens, and the scenarios.
+
 ## 0.4 — 2026-10-24: round 55, and the tools (#840, DD; #609)
 
 Two sources. zk2py ran 0.3 live in round 55 (PR #853), every pairing of

@@ -144,13 +144,16 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   session (cut off: no read), each author's presence, the revisions
   retrieved or held offline, S4's GET of each target's report resources by
   type identity and of each slice from its author, and an absent author's
-  archives, shown last-known; `observe_in` reads over a presence read and
+  archives, shown last-known; each step's reads at once, at most 64 in
+  flight (#840, DE), so a reading costs about one `--timeout` a step;
+  `observe_in` reads over a presence read and
   revisions a caller holds (the doctor's). `model::desired` resolves each
   role's slice from the author's declaration and the target's binding, or,
   with no contract of the author's in hand, from the target's requirement
   and binding (`slice_from`), projects a reading into the model's
   `TargetReading`, and follows how long a target is behind (`Behind`:
-  readings a window apart, or a trusted clock). `judge::desired` hands each
+  readings a window apart, or a trusted clock dating a version at its
+  slice GET's answer). `judge::desired` hands each
   reading to the model's four judges, never re-deriving one;
   `report::desired`'s `DesiredReport` finds a refused or failed act, or a
   target behind past the window.
@@ -488,7 +491,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   never current), the doctor's `desired-refused`, `desired-behind` (under
   `--clocks-synced`, past `--desired-behind`, 60 s; one reading never
   finds a target behind) and `desired-last-known` (info), and `check
-  conform`'s `desired-report`, `desired-binding` and `desired-author` (27
+  conform`'s `desired-report` (a role covered only by its interface's own
+  reports, DE), `desired-binding` and `desired-author` (27
   cases). Scenarios §9 run live in `tests/live_zk2.rs` on the owner
   example's drive.
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
@@ -789,7 +793,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   §8.1), and with config.v1 text 0.5 `config::Owner::baseline_document`,
   what a delete reverts a config.v1 target to; text 0.4, F-192 to F-198,
   #840 DD: a run, a refusal's pointer with `order.json`'s `check` finish,
-  the slice from the requirement, how long behind), and `redundancy.v1`'s
+  the slice from the requirement, how long behind; text 0.5, F-210 to
+  F-213, #840 DE: the report's key choosing among a requirement's
+  candidate slices, every reading over a window, a held revision's kind
+  token winning over the report's, `slices.json`), and `redundancy.v1`'s
   (`redundancy`, #841 RA: the declaration, governed through `uses`, its
   `election` `claim` or `external` written once on `[defaults]` and read
   from every resource, invalid `not_used`, `value`, `disagrees` or

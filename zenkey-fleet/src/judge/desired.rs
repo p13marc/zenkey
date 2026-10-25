@@ -26,7 +26,7 @@ use zenkey_model::desired::{self as dm, Answer, Current, Judged, Listing, Reason
 use crate::bus::desired::{DesiredSpec, presence_selector};
 use crate::model::catalog::Catalog;
 use crate::model::desired::{
-    Behind, BehindBy, DesiredRead, RoleRead, RoleReading, TargetRead, current_time,
+    Behind, BehindBy, DesiredRead, RoleRead, RoleReading, TargetRead, current_dated,
 };
 use crate::model::health::Trust;
 use crate::report::{
@@ -243,8 +243,8 @@ fn listing(r: &RoleRead, t: &TargetRead) -> DesiredListing {
 }
 
 /// One role's row: the model's four answers, what was read, and the
-/// window's finding.
-#[allow(clippy::too_many_arguments)]
+/// window's finding. A version's age is taken at the time its slice's GET
+/// was answered, never the reading's end (review of #856).
 fn row(
     t: &TargetRead,
     r: &RoleRead,
@@ -252,7 +252,6 @@ fn row(
     spec: &DesiredSpec,
     behind: &mut Behind,
     began: Instant,
-    at: std::time::SystemTime,
 ) -> DesiredRow {
     let rr = r.reading(t, trust);
     let converged = dm::converged(&rr.target, &rr.author);
@@ -286,10 +285,9 @@ fn row(
             .then(|| {
                 slice
                     .as_deref()
-                    .and_then(|s| current_time(r.current.as_ref(), s))
+                    .and_then(|s| current_dated(r.current.as_ref(), s))
             })
-            .flatten()
-            .map(|v| (v, at));
+            .flatten();
         behind.behind(&target, &role, w, began, clock)
     });
     let author = r.resolution.author.as_ref().map(|a| DesiredAuthorSeen {
@@ -403,7 +401,7 @@ pub fn judge(
         .flat_map(|t| {
             t.roles
                 .iter()
-                .map(|r| row(t, r, &trust, spec, behind, read.began, read.at))
+                .map(|r| row(t, r, &trust, spec, behind, read.began))
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -908,5 +906,38 @@ mod tests {
             r.rows[0].behind.as_ref().unwrap().by,
             DesiredBehindBy::Clock
         );
+        // The age is the slice GET's, never the reading's end (review of
+        // #856): a GET answered a second after the put dates the version a
+        // second old, however late the reading ends.
+        let put = SystemTime::now() - Duration::from_secs(60);
+        let mut ro = role(true, Seen::Present, None);
+        ro.current = Some(Ok(SliceGet {
+            selector: D.into(),
+            complete: true,
+            replies: vec![SliceReply {
+                key: D.into(),
+                delete: false,
+                stamp: Some((Stamp::parse(200, "a1").unwrap(), put)),
+            }],
+            at: put + Duration::from_secs(1),
+        }));
+        let t = target(Some(&converged), ro);
+        let mut b = Behind::default();
+        let r = judge(
+            "",
+            Some(&t.addr),
+            &spec,
+            &DesiredRead {
+                began: t0,
+                at: SystemTime::now(),
+                cut_off: None,
+                presence: None,
+                targets: vec![t.clone()],
+                asked: vec![],
+            },
+            &mut b,
+            1,
+        );
+        assert!(r.rows[0].behind.is_none(), "{:?}", r.rows[0].behind);
     }
 }
