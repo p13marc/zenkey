@@ -38,6 +38,34 @@ Core 0.41 (#609, round 66) adds, for the watch session:
   (:data:`MOVED`) until a read: a subscriber without history hears no
   withdrawal at a link's drop of a token it was never told of, nor a token
   declared while its transport was down (F-229).
+
+Core 0.42 (#609, round 67):
+- "A reader that follows presence in a namespace SHOULD hold its watch
+  session in **no** namespace, and declare its subscribers, without
+  history, on the **wire keys** … It strips the namespace from every key it
+  hears. A key outside the namespace is not the deployment's: it is
+  counted, never folded." The follower reads its reading session's
+  namespace (:func:`zk2py.live.namespace_of`, or ``namespace``): with a
+  watch session in none, its subscriber has no history and is declared on
+  the wire key (:func:`zk2py.live.wire_selector`), its round trip asked on
+  ``<ns>/zk2/…/@zk/settle``, and every key it hears stripped, one outside
+  the namespace counted (:attr:`PresenceFollower.outside`). Handed a watch
+  session in the namespace, it keeps 0.41's history ("A reader that keeps a
+  namespaced watch session with history instead SHOULD run its round
+  trip's wait and its session's interests timeout above the history's
+  time": ``round_trip_timeout`` and the watch session's interests timeout
+  are the caller's).
+- "A reader whose watch session is cut off follows nothing … It SHOULD NOT
+  make a read it would follow from it, whatever its reading session's
+  links: it reports the read as not made, the reason its watch session's":
+  while its watch session holds no link the follower asks no GET on either
+  session, and folds the read as not made (:data:`zk2py.live.WATCH_CUT_OFF`);
+  a read the watch session's link went during is folded unordered.
+- "From the move until a complete read made after a round trip that
+  stands, every token and every absence the reader followed through the
+  watch session is **unconfirmed**" and "A read made while no round trip
+  stands, a seed or a re-read … is possibly incomplete": 0.41's
+  :data:`MOVED` and unordered reads, unchanged (F-229 was zk2py's reading).
 """
 
 from __future__ import annotations
@@ -235,18 +263,30 @@ class PresenceView:
         for k, kind in later:
             last[k] = kind
         withdrawn_since = {holder_of(k) for k, kind in last.items() if kind == "delete"}
-        shown = {k for k in read.keys if holder_of(k) is not None}
+        # each holder's keys, shown and put since, grouped once: a read of a
+        # population folds in time linear in it (round 67: grouping per
+        # holder took 9.7 s for a read of 2,000 tokens)
+        shown_by: dict[tuple[str, ...], set[str]] = {}
+        for k in read.keys:
+            hk = holder_of(k)
+            if hk is not None:
+                shown_by.setdefault(hk, set()).add(k)
+        put_by: dict[tuple[str, ...], set[str]] = {}
+        for k, kind in last.items():
+            hk = holder_of(k)
+            if hk is not None and kind == "put":
+                put_by.setdefault(hk, set()).add(k)
         scope = {h for h in self.holders if self._scoped(read.selector, h)}
-        scope |= {holder_of(k) for k in shown}  # type: ignore[misc]
+        scope |= set(shown_by)
         for h in scope:
             x = self._holder(h)
-            mine = {k for k in shown if holder_of(k) == h and k not in moved}
+            mine = shown_by.get(h, set()) - moved
             if whole:
-                x.held = {k for k in moved if holder_of(k) == h and last[k] == "put"} | mine
+                x.held = put_by.get(h, set()) | mine
                 if x.held or h not in withdrawn_since:
                     x.confirmed, x.why = True, ""
             elif unordered:
-                x.held = {k for k in moved if holder_of(k) == h and last[k] == "put"} | mine
+                x.held = put_by.get(h, set()) | mine
                 if x.held:
                     x.confirmed, x.why = True, ""
                 elif h in withdrawn_since or x.why == WITHDRAWN:
@@ -333,21 +373,31 @@ class PresenceFollower:
     incomplete, unordered, or one that raised) is made again after
     ``retry_s``, doubling each time up to ``max_retry_s``, and back to
     ``retry_s`` after a complete one or a move: a session that stays cut off
-    is not asked five times a second forever. While the watch session holds
-    no link, no round trip can stand: after the read its move asked, the
-    reading session is read again only for a token move heard, and
-    otherwise at the transport's opening (:meth:`_wait_for_watch`), so a
-    long watch-link outage costs a healthy reading session no reads."""
+    is not asked five times a second forever.
+
+    0.42: while the watch session holds no link the follower makes no read
+    and no round trip: "A reader whose watch session is cut off follows
+    nothing … It SHOULD NOT make a read it would follow from it, whatever
+    its reading session's links". Each attempt folds a read not made
+    (:data:`zk2py.live.WATCH_CUT_OFF`), asking no GET, once for each move
+    and token move heard; the next waits for the transport to open (its
+    event asks it), checked every ``max_retry_s`` in case that event is
+    lost. In a namespace its watch session is in none, on the wire keys."""
 
     def __init__(self, session: Any, watch: Any, selector: str = "zk2/*/*/@zk/**", *,
                  reread_delay_s: float = REREAD_DELAY_S, retry_s: float = 0.2, max_retry_s: float = 5.0,
                  timeout: float = 1.0, round_trip: bool = True, history: bool | None = None,
-                 round_trip_timeout: float | None = None, follow_moves: bool = True) -> None:
+                 round_trip_timeout: float | None = None, follow_moves: bool = True,
+                 namespace: str | None = None) -> None:
         """``round_trip`` False makes the reader core §8.1 warns of, a
         scenario's control (presence.md §9 step 5, §10 step 2): no round trip
         on the watch session, and every read taken as ordered.
         ``follow_moves`` False hears no transport event: a round trip, once
-        made, is taken to stand for good, as before 0.41 (a control)."""
+        made, is taken to stand for good, as before 0.41 (a control).
+        ``namespace`` is the deployment's, the reading session's as recorded
+        by default (0.42): with a watch session in no namespace the follower
+        watches its wire keys, without history; with one in a namespace it
+        keeps history (0.41's option). ``history`` overrides either."""
         import zenoh
 
         from . import live
@@ -358,7 +408,16 @@ class PresenceFollower:
         self.retry_min, self.retry_max = retry_s, max_retry_s
         self.backoff = retry_s
         self.round_trip = round_trip
-        self.history = (live.namespace_of(watch) is not None) if history is None else history
+        ns = live.namespace_of(session) if namespace is None else namespace
+        watch_ns = live.namespace_of(watch)
+        #: the namespace stripped from every key heard (0.42), or None
+        self.namespace = ns if ns and watch_ns is None else None
+        #: the subscribers' selector and the round trip's, as declared: the
+        #: wire key in a namespace watched from none (0.42)
+        self.wire = live.wire_selector(self.namespace, selector)
+        self.history = (watch_ns is not None) if history is None else history
+        #: keys heard outside the namespace: counted, never folded (0.42)
+        self.outside = 0
         self.view = PresenceView(selector)
         self.lock = threading.Lock()
         self._attempting = threading.Lock()
@@ -386,8 +445,14 @@ class PresenceFollower:
 
         def got(sample: Any) -> None:
             kind = "delete" if sample.kind == zenoh.SampleKind.DELETE else "put"
+            key = live.strip_namespace(self.namespace, str(sample.key_expr))
             with self.lock:
-                self.view.heard(str(sample.key_expr), kind)
+                if key is None:
+                    # 0.42: "A key outside the namespace is not the
+                    # deployment's: it is counted, never folded."
+                    self.outside += 1
+                    return
+                self.view.heard(key, kind)
                 owed = self.view.owes_read
             if owed:
                 self._schedule(self.delay)
@@ -408,7 +473,7 @@ class PresenceFollower:
         # needs no hearing: no round trip stands yet.
         self.sub: Any = None
         self.listener: Any = None
-        self.sub = live.declare_liveliness_subscriber(watch, selector, got, history=self.history)
+        self.sub = live.declare_liveliness_subscriber(watch, self.wire, got, history=self.history)
         if follow_moves:
             try:
                 self.listener = live._info(watch).declare_transport_events_listener(
@@ -467,7 +532,7 @@ class PresenceFollower:
             if not self.round_trip or (self.listener is not None and self._stands()):
                 return
             gen = self.gen
-        rt = live.settle(self.watch, self.rt_timeout, selector=self.selector)
+        rt = live.settle(self.watch, self.rt_timeout, selector=self.wire)
         with self.lock:
             self.round_trips.append(rt)
             if rt.stands and self.gen == gen:
@@ -475,11 +540,27 @@ class PresenceFollower:
 
     def _attempt(self) -> None:
         """A round trip unless one stands, one read, and the next one
-        scheduled when it settled nothing."""
+        scheduled when it settled nothing. While the watch session holds no
+        link, neither (core §8.1, 0.42): a read not made, and a wait for the
+        transport to open (:meth:`_watch_cut_off`)."""
         from . import live
 
         with self._attempting:
-            if self._wait_for_watch():
+            if self._watch_cut_off():
+                with self.lock:
+                    quiet = self._read_at == (self.gen, len(self.view.events))
+                    if quiet:
+                        self.waited += 1
+                if quiet:
+                    # nothing moved since the read not made: the transport's
+                    # opening asks the next, checked now and then
+                    self._schedule(self.retry_max)
+                    return
+                self.read()
+                with self.lock:
+                    again = self.backoff
+                    self.backoff = min(self.backoff * 2, self.retry_max)
+                self._schedule(again)
                 return
             ok = False
             try:
@@ -500,27 +581,18 @@ class PresenceFollower:
         if again is not None:
             self._schedule(again)
 
-    def _wait_for_watch(self) -> bool:
-        """Core §8.1 (0.41): the reader reads again "when its watch session's
-        transport closes or opens", and soon after a withdrawal. While the
-        watch session holds no link no round trip can stand, so every read
-        is unordered and shows no more than the last one did: once one has
-        been made since the last move and the last token heard, the next
-        waits for the transport to open (its event asks it), checked every
-        ``max_retry_s`` without a read in case that event is lost. Never
-        for a follower without transport events, or without the round trip
-        (a control): they retry as before."""
+    def _watch_cut_off(self) -> bool:
+        """Core §8.1 (0.42, F-227, F-228): "A reader whose watch session is
+        cut off follows nothing … It SHOULD NOT make a read it would follow
+        from it, whatever its reading session's links: it reports the read as
+        not made, the reason its watch session's". Read by the watch
+        session's links, as a read's are; a binding that cannot read them
+        says nothing here (its round trip cannot stand, so its reads are
+        unordered). Never for the control without a round trip, which reads
+        as a reader before 0.37 did."""
         from . import live
 
-        with self.lock:
-            quiet = (self.round_trip and self.listener is not None and self._closed is False
-                     and self._read_at == (self.gen, len(self.view.events)))
-        if not quiet or live.links_held(self.watch) is not False:
-            return False
-        with self.lock:
-            self.waited += 1
-        self._schedule(self.retry_max)
-        return True
+        return self.round_trip and live.links_held(self.watch) is False
 
     def _fire(self) -> None:
         with self.lock:
@@ -533,7 +605,9 @@ class PresenceFollower:
         """One read on the reading session, folded as of when it was asked;
         unordered (possibly incomplete, what it does not show unobservable)
         when ``unordered``, when no round trip stands, or when the watch
-        session's transport moved while it ran (core §8.1, 0.41)."""
+        session's transport moved while it ran (core §8.1, 0.41), or its
+        links were gone at its end; not made, asking no GET, while the watch
+        session holds no link (0.42: :data:`zk2py.live.WATCH_CUT_OFF`)."""
         from . import live
 
         with self.lock:
@@ -541,7 +615,21 @@ class PresenceFollower:
             gen = self.gen
             self._read_at = (gen, len(self.view.events))
             ordered = not unordered and self._stands_for_read(_after_round_trip)
-        p = live.list_presence(self.session, self.selector, self.timeout)
+        if self._watch_cut_off():
+            # 0.42: no GET on either session; what it would establish is
+            # unobservable until the transport opens and a round trip stands
+            p = live.Presence(not_made=live.WATCH_CUT_OFF)
+        else:
+            p = live.list_presence(self.session, self.selector, self.timeout)
+            # the watch session's link gone while the read ran: its
+            # subscribers may not have heard what moved meanwhile
+            if self.round_trip and live.links_held(self.watch) is not True:
+                ordered = False
+        if p.kind == live.NOT_MADE:
+            # a read not made orders nothing, whichever check found it not
+            # makeable: folded and recorded unordered (review-bot on PR #879;
+            # PresenceView.answered reads no order into a read not made)
+            ordered = False
         found = tuple(f"zk2/{x['system']}/{x['service']}/@zk/instance/{x['instance']}" for x in p.instances) + \
             tuple(f"zk2/{x['system']}/{x['service']}/@zk/alive/{x['iface']}/{x['instance']}/{x['fp16']}"
                   for x in p.alive) + \

@@ -3381,6 +3381,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--only", action="append", choices=sorted(python_runs),
                     help="run only these runs, the ones behind a router of the runner's (repeatable), "
                          "and not the owner example's own-router runs")
+    ap.add_argument("--skip", action="append", choices=sorted(python_runs), default=[],
+                    help="leave out these runs behind a router of the runner's (repeatable): `--skip owner --skip "
+                         "freshness --skip health` runs everything else without the consume example")
     args = ap.parse_args(argv)
     runs = DEFAULT_RUNS
     if args.run:
@@ -3405,7 +3408,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.run and not args.only:
             for service, files in REFUSAL_RUNS:
                 run_refusal(report, args.owner, service, [REPO / f for f in files])
-            for run in python_runs.values():
+            for name, run in python_runs.items():
+                if name in args.skip:
+                    report.info(name, "skipped (--skip)")
+                    continue
                 run(report)
     except CannotRun as e:
         print(f"error: could not run: {e}", file=sys.stderr)

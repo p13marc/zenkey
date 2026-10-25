@@ -2594,10 +2594,13 @@ def _desired_window_readings() -> list[tuple[str, Any, Any]]:
 
 
 class _FakeSession:
-    """A session for :func:`zk2py.live.list_presence` alone: its liveliness
+    """A session for :func:`zk2py.live.list_presence`, :func:`zk2py.live.settle`
+    and a :class:`zk2py.presence.PresenceFollower`'s watch: its liveliness
     GET answers ``tokens`` and its final reply at once; ``links`` is what
     its info's links say before and after, or raises; its transports say
-    ``transports`` throughout (core 0.38: never what the check reads)."""
+    ``transports`` throughout (core 0.38: never what the check reads). Its
+    liveliness subscribers and transport listeners are recorded, never
+    called (round 67)."""
 
     def __init__(self, tokens: list[str], links: list[Any], transports: list[Any] | None = None,
                  delay_s: float = 0.0, errors: int = 0) -> None:
@@ -2605,6 +2608,10 @@ class _FakeSession:
         self.held_transports = [object()] if transports is None else transports
         self.delay_s, self.errors = delay_s, errors
         self.asked: list[str] = []
+        #: (selector, handler, history) of each liveliness subscriber declared
+        self.subscribers: list[tuple[str, Any, bool]] = []
+        #: each transport events listener's handler
+        self.listeners: list[Any] = []
         outer = self
 
         class _Info:
@@ -2616,6 +2623,14 @@ class _FakeSession:
 
             def transports(self) -> list[Any]:
                 return outer.held_transports
+
+            def declare_transport_events_listener(self, handler: Any, history: bool = False) -> Any:
+                outer.listeners.append(handler)
+                return _Undeclarable()
+
+        class _Undeclarable:
+            def undeclare(self) -> None:
+                pass
 
         class _Ok:
             def __init__(self, key: str) -> None:
@@ -2640,6 +2655,10 @@ class _FakeSession:
                 if outer.delay_s:
                     time.sleep(outer.delay_s)
                 handler.drop()
+
+            def declare_subscriber(self, selector: str, handler: Any, history: bool = False) -> Any:
+                outer.subscribers.append((selector, handler, history))
+                return _Undeclarable()
 
         self.info, self._lv = _Info(), _Liveliness()
 
@@ -2842,6 +2861,146 @@ def _round_trip_readings() -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _watch_wire_readings() -> list[tuple[str, Any, Any]]:
+    """Core 0.42 §8.1 in :mod:`zk2py.live` and :mod:`zk2py.presence`, on fake
+    sessions (#609, round 67): a watch session in no namespace on the wire
+    keys, each key heard stripped and one outside the namespace counted,
+    never folded; a follower whose watch session is cut off making no read
+    and no round trip, the read not made and the reason its watch
+    session's; a read on a session zk2py cannot read the interests timeout
+    of saying its completeness rests on zenoh's default."""
+    import zenoh
+
+    from . import live
+    from . import presence as pr
+
+    tok = "zk2/lab/o/@zk/instance/" + "a" * 16
+    up = [object()]
+    out: list[tuple[str, Any, Any]] = []
+    label = "core 0.42 §8.1, zk2py's wire keys"
+    sel = "zk2/*/*/@zk/instance/*"
+    out += [
+        (f"{label}: a selector on the wire keys, the namespace in front, and its round trip's key so too",
+         [live.wire_selector("ns", sel), live.settle_key(live.wire_selector("ns", sel)), live.wire_selector(None, sel)],
+         ["ns/" + sel, "ns/zk2/*/*/@zk/settle", sel]),
+        (f"{label}: a namespace spelled with a slash at either end reads as its chunks, on the wire and stripped "
+         "alike (review-bot on PR #879)",
+         [live.wire_selector("ns/", sel), live.wire_selector("/a/b/", sel), live.strip_namespace("ns/", "ns/" + tok),
+          live.strip_namespace("/a/b/", "a/b/" + tok), live.wire_selector("/", sel)],
+         ["ns/" + sel, "a/b/" + sel, tok, tok, sel]),
+        (f"{label}: every key heard stripped of the namespace; one outside it is not the deployment's",
+         [live.strip_namespace("ns", "ns/" + tok), live.strip_namespace("ns", "other/" + tok),
+          live.strip_namespace("ns", "nsx/" + tok), live.strip_namespace("ns", "ns/"), live.strip_namespace("ns", tok),
+          live.strip_namespace("a/b", "a/b/" + tok), live.strip_namespace(None, tok)],
+         [tok, None, None, None, None, tok, tok]),
+    ]
+
+    class _Sample:
+        def __init__(self, key: str, kind: Any = None) -> None:
+            self.key_expr, self.kind = key, kind if kind is not None else zenoh.SampleKind.PUT
+
+    got: list[tuple[str, Any]] = []
+    st = live.Stripped("ns", zenoh.handlers.Callback(lambda smp: got.append((str(smp.key_expr), smp.kind))))
+    for k in ("ns/" + tok, "other/" + tok, "ns/" + tok.replace("lab", "far")):
+        st(_Sample(k, zenoh.SampleKind.DELETE))
+    out.append((f"{label}: Stripped hands on each sample with its key stripped and its kind kept, and counts one "
+                "outside the namespace, never handing it on",
+                [got, st.outside], [[(tok, zenoh.SampleKind.DELETE), (tok.replace("lab", "far"), zenoh.SampleKind.DELETE)],
+                                    1]))
+    # watch_or_beside: a namespaced reading session, its watch session in none
+    reader, watch = _FakeSession([], [up]), _FakeSession([], [up])
+    live._OPENED[id(reader)] = (reader, "tcp/127.0.0.1:1", None)
+    live._WATCHES[id(reader)] = (reader, watch)
+    live.register(reader, namespace="ns", interests_timeout_s=120.0)
+    live.register(watch, interests_timeout_s=120.0)
+    heard: list[str] = []
+    _, placed = live.watch_or_beside(reader, "zk2/lab/*/@zk/instance/*", lambda smp: heard.append(str(smp.key_expr)))
+    sel_d, handler, hist = watch.subscribers[0]
+    handler.callback(_Sample("ns/" + tok))
+    handler.callback(_Sample("elsewhere/" + tok))
+    out.append((f"{label}: watch_or_beside in a namespace: the subscriber on the wire key, without history, its round "
+                "trip on the wire key, keys handed on stripped, one outside counted; none on the reading session",
+                [sel_d, hist, watch.asked, heard, placed.outside, placed.namespace, reader.subscribers, reader.asked],
+                ["ns/zk2/lab/*/@zk/instance/*", False, ["ns/zk2/lab/*/@zk/settle"], [tok], 1, "ns", [], []]))
+    live.forget(reader)
+    live.forget(watch)
+    # a caller's Callback's drop hook and mode pass through the stripping
+    reader, watch = _FakeSession([], [up]), _FakeSession([], [up])
+    live._OPENED[id(reader)] = (reader, "tcp/127.0.0.1:1", None)
+    live._WATCHES[id(reader)] = (reader, watch)
+    live.register(reader, namespace="ns", interests_timeout_s=120.0)
+    live.register(watch, interests_timeout_s=120.0)
+    dropped: list[bool] = []
+    live.watch_or_beside(reader, sel, zenoh.handlers.Callback(lambda smp: None, lambda: dropped.append(True),
+                                                              indirect=False))
+    h2 = watch.subscribers[0][1]
+    h2.drop()
+    out.append((f"{label}: watch_or_beside in a namespace keeps the caller's drop hook and callback mode "
+                "(review-bot on PR #879)", [dropped, h2.indirect], [[True], False]))
+    live.forget(reader)
+    live.forget(watch)
+
+    label = "core 0.42 §8.1, zk2py's follower"
+
+    def follower(reading_links: list[Any], watch_links: list[Any], *, ns: str | None = None,
+                 watch_ns: str | None = None) -> tuple[Any, Any, Any]:
+        r, w = _FakeSession([tok], reading_links), _FakeSession([], watch_links)
+        live.register(r, namespace=ns, interests_timeout_s=120.0)
+        live.register(w, namespace=watch_ns, interests_timeout_s=120.0)
+        f = pr.PresenceFollower(r, w, sel, retry_s=60.0, max_retry_s=60.0)
+        f.close()
+        return f, r, w
+
+    f, r, w = follower([up], [[]])
+    out.append((f"{label}: its watch session cut off, its reading session linked: no round trip and no read asked "
+                "on either, the read not made, its reason the watch session's (F-227, F-228)",
+                [w.asked, r.asked, f.folds, f.reads[0].not_made, f.round_trips],
+                [[], [], [(live.NOT_MADE, False)], live.WATCH_CUT_OFF, []]))
+    out.append((f"{label}: and what the read would establish is unobservable, never down",
+                [f.address("lab", "o"), f.address("lab", "p")[0]],
+                [(pr.UNOBSERVABLE, pr.READ_NOT_MADE), pr.UNOBSERVABLE]))
+    f, r, w = follower([up], [up])
+    out.append((f"{label}: its watch session linked: the round trip on the watch session, then the read on the "
+                "reading session, ordered", [w.asked, r.asked, f.folds, f.address("lab", "o"), f.address("lab", "p")],
+                [["zk2/*/*/@zk/settle"], [sel], [(live.COMPLETE, True)], (pr.UP, ""), (pr.DOWN, "")]))
+    # the links read by the attempt, before and after the round trip, and at the read's start, then gone
+    f, r, w = follower([up], [up, up, up, up, []])
+    out.append((f"{label}: the watch session's links gone at the read's end: the read unordered",
+                [f.folds, f.address("lab", "p")], [[(live.COMPLETE, False)], (pr.UNOBSERVABLE, pr.NO_ROUND_TRIP)]))
+    f, r, w = follower([up], [up], ns="ns")
+    sub_sel, handler, hist = w.subscribers[0]
+    handler.callback(_Sample("ns/" + tok, zenoh.SampleKind.DELETE))
+    handler.callback(_Sample("far/" + tok.replace("lab", "far"), zenoh.SampleKind.PUT))
+    out.append((f"{label}: in a namespace, its watch session in none: without history, on the wire key, the round "
+                "trip on its wire key, each key heard stripped, one outside counted and never folded",
+                [sub_sel, hist, w.asked, r.asked, f.address("lab", "o"), f.outside, f.view.address("far", "o")[0]],
+                ["ns/" + sel, False, ["ns/zk2/*/*/@zk/settle"], [sel], (pr.UNOBSERVABLE, pr.WITHDRAWN), 1,
+                 pr.DOWN]))
+    f, r, w = follower([up], [up], ns="ns", watch_ns="ns")
+    out.append((f"{label}: handed a watch session in the namespace, it keeps 0.41's history, base-relative",
+                [w.subscribers[0][0], w.subscribers[0][2], w.asked], [sel, True, ["zk2/*/*/@zk/settle"]]))
+    for x in (r, w):
+        live.forget(x)
+
+    label = "core 0.42 §8.1, an interests timeout zk2py cannot read"
+    f = _FakeSession([tok], [up, up])
+    p = live.list_presence(f)  # type: ignore[arg-type]
+    rt = live.settle(_FakeSession([], [up, up]), selector=sel)  # type: ignore[arg-type]
+    g = _FakeSession([tok], [up, up])
+    live.register(g, interests_timeout_s=120.0)
+    q = live.list_presence(g)  # type: ignore[arg-type]
+    live.forget(g)
+    out += [
+        (f"{label}: a read on a session zk2py did not open is taken at zenoh's 10 s, and says its completeness rests "
+         "on it", [p.kind, p.interests_timeout_s, p.interests_timeout_assumed, live.INTERESTS_TIMEOUT_ASSUMED in p.reading],
+         [live.COMPLETE, 10.0, True, True]),
+        (f"{label}: so does a round trip", [rt.stands, rt.interests_timeout_assumed], [True, True]),
+        (f"{label}: a session whose value zk2py set says nothing of it",
+         [q.interests_timeout_assumed, live.INTERESTS_TIMEOUT_ASSUMED in q.reading], [False, False]),
+    ]
+    return out
+
+
 def family_readings(root: Path) -> list[Result]:
     """zk2py's own cases (:data:`READINGS`, and the window's and the
     scope's)."""
@@ -2853,7 +3012,8 @@ def family_readings(root: Path) -> list[Result]:
         + _left_out_cases() + _first_neither_cases() + _telemetry_adopters(root) + _telemetry_copies() \
         + _telemetry_state_order() + _telemetry_nulls() + _telemetry_edges() + _telemetry_deep() \
         + _telemetry_verdicts() + _telemetry_tag_chains() + _presence_fold() + _desired_adopters(root) \
-        + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings()
+        + _desired_readings() + _presence_view() + _desired_encoding() + _round_trip_readings() \
+        + _watch_wire_readings()
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
