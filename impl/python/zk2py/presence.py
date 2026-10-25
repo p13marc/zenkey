@@ -625,6 +625,11 @@ class PresenceFollower:
             # subscribers may not have heard what moved meanwhile
             if self.round_trip and live.links_held(self.watch) is not True:
                 ordered = False
+        if p.kind == live.NOT_MADE:
+            # a read not made orders nothing, whichever check found it not
+            # makeable: folded and recorded unordered (review-bot on PR #879;
+            # PresenceView.answered reads no order into a read not made)
+            ordered = False
         found = tuple(f"zk2/{x['system']}/{x['service']}/@zk/instance/{x['instance']}" for x in p.instances) + \
             tuple(f"zk2/{x['system']}/{x['service']}/@zk/alive/{x['iface']}/{x['instance']}/{x['fp16']}"
                   for x in p.alive) + \

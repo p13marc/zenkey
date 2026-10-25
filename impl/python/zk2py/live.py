@@ -278,11 +278,19 @@ INTERESTS_TIMEOUT_ASSUMED = ("its completeness rests on zenoh's default interest
                              "session zk2py did not open and cannot read (core §8.1, 0.42)")
 
 
+def _namespace_chunks(namespace: str | None) -> str:
+    """A namespace as its chunks, without a leading or trailing ``/``, the
+    one spelling :func:`wire_selector` and :func:`strip_namespace` both use
+    (review-bot on PR #879); empty for none."""
+    return (namespace or "").strip("/")
+
+
 def wire_selector(namespace: str | None, selector: str) -> str:
     """§8.1 (0.42): a base-relative selector as a session in no namespace
     declares it to watch a deployment in ``namespace``, "the namespace in
     front, ``<ns>/zk2/…``"; unchanged for no namespace."""
-    return f"{namespace}/{selector}" if namespace else selector
+    ns = _namespace_chunks(namespace)
+    return f"{ns}/{selector}" if ns else selector
 
 
 def strip_namespace(namespace: str | None, key: str) -> str | None:
@@ -290,9 +298,10 @@ def strip_namespace(namespace: str | None, key: str) -> str | None:
     outside the namespace is not the deployment's": the key without its
     ``<ns>/`` chunks, or None for one outside the namespace. A key heard
     with no namespace to strip is the key."""
-    if not namespace:
+    ns = _namespace_chunks(namespace)
+    if not ns:
         return key
-    prefix = namespace.rstrip("/") + "/"
+    prefix = ns + "/"
     return key[len(prefix):] if key.startswith(prefix) and len(key) > len(prefix) else None
 
 
@@ -461,9 +470,14 @@ def watch_or_beside(session: Any, selector: str, callback: Any, *, history: bool
     if ns and namespace_of(w) is None:
         wire = wire_selector(ns, selector)
         stripped = Stripped(ns, callback)
-        indirect = callback.indirect if isinstance(callback, zenoh.handlers.Callback) else True
-        sub = declare_liveliness_subscriber(w, wire, zenoh.handlers.Callback(stripped, indirect=indirect),
-                                            history=history)
+        # the caller's Callback's drop hook and mode pass through
+        # (review-bot on PR #879)
+        is_cb = isinstance(callback, zenoh.handlers.Callback)
+        indirect = callback.indirect if is_cb else True
+        drop = callback.drop if is_cb else None
+        handler = (zenoh.handlers.Callback(stripped, drop, indirect=indirect) if drop is not None
+                   else zenoh.handlers.Callback(stripped, indirect=indirect))
+        sub = declare_liveliness_subscriber(w, wire, handler, history=history)
         settled = any(settle(w, selector=wire) for _ in range(SETTLE_TRIES))
         return sub, Placement(True, settled, wire, ns, stripped)
     sub = declare_liveliness_subscriber(w, selector, callback, history=history)

@@ -2883,6 +2883,11 @@ def _watch_wire_readings() -> list[tuple[str, Any, Any]]:
         (f"{label}: a selector on the wire keys, the namespace in front, and its round trip's key so too",
          [live.wire_selector("ns", sel), live.settle_key(live.wire_selector("ns", sel)), live.wire_selector(None, sel)],
          ["ns/" + sel, "ns/zk2/*/*/@zk/settle", sel]),
+        (f"{label}: a namespace spelled with a slash at either end reads as its chunks, on the wire and stripped "
+         "alike (review-bot on PR #879)",
+         [live.wire_selector("ns/", sel), live.wire_selector("/a/b/", sel), live.strip_namespace("ns/", "ns/" + tok),
+          live.strip_namespace("/a/b/", "a/b/" + tok), live.wire_selector("/", sel)],
+         ["ns/" + sel, "a/b/" + sel, tok, tok, sel]),
         (f"{label}: every key heard stripped of the namespace; one outside it is not the deployment's",
          [live.strip_namespace("ns", "ns/" + tok), live.strip_namespace("ns", "other/" + tok),
           live.strip_namespace("ns", "nsx/" + tok), live.strip_namespace("ns", "ns/"), live.strip_namespace("ns", tok),
@@ -2917,6 +2922,21 @@ def _watch_wire_readings() -> list[tuple[str, Any, Any]]:
                 "trip on the wire key, keys handed on stripped, one outside counted; none on the reading session",
                 [sel_d, hist, watch.asked, heard, placed.outside, placed.namespace, reader.subscribers, reader.asked],
                 ["ns/zk2/lab/*/@zk/instance/*", False, ["ns/zk2/lab/*/@zk/settle"], [tok], 1, "ns", [], []]))
+    live.forget(reader)
+    live.forget(watch)
+    # a caller's Callback's drop hook and mode pass through the stripping
+    reader, watch = _FakeSession([], [up]), _FakeSession([], [up])
+    live._OPENED[id(reader)] = (reader, "tcp/127.0.0.1:1", None)
+    live._WATCHES[id(reader)] = (reader, watch)
+    live.register(reader, namespace="ns", interests_timeout_s=120.0)
+    live.register(watch, interests_timeout_s=120.0)
+    dropped: list[bool] = []
+    live.watch_or_beside(reader, sel, zenoh.handlers.Callback(lambda smp: None, lambda: dropped.append(True),
+                                                              indirect=False))
+    h2 = watch.subscribers[0][1]
+    h2.drop()
+    out.append((f"{label}: watch_or_beside in a namespace keeps the caller's drop hook and callback mode "
+                "(review-bot on PR #879)", [dropped, h2.indirect], [[True], False]))
     live.forget(reader)
     live.forget(watch)
 

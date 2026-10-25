@@ -12191,8 +12191,8 @@ read is" says where zk2py already did what 0.42 says and where it did not.
 **Round 66's findings at 0.42:** F-227 to F-235 are all resolved. Each
 entry has its status line.
 
-**`just py-conformance`: 3023 of 3023.** `readings` gained 13 cases
-(392).
+**`just py-conformance`: 3025 of 3025.** `readings` gained 15 cases
+(394), two of them on review of PR #879.
 
 **Live:** `presence_scenarios` §1 to §10, every pairing, against
 `owner-wd` and `zenctl-wd`:
