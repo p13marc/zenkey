@@ -1997,7 +1997,8 @@ def _section10_zenctl(report: Report, sec: str, ep1: str, held: list[Any]) -> No
             victim.undeclare()
             gone = _wait(lambda: wd.state(rule8) == "firing", 30.0, 0.1)
             report.check(sec, f"8. zenctl watchdog --namespace {NS} beside the {n}: crowd/c5 read up, then gone once its "
-                              "token is withdrawn, the withdrawal heard from its watch session in no namespace",
+                              "token is withdrawn (its watch sessions in no namespace on the wire keys since 0.42; "
+                              "which session heard it is not observable from its output)",
                          ok and gone, f"ok after {t_ok:.1f} s, firing {time.monotonic() - t1:.1f} s after the "
                                       f"withdrawal; {wd.transitions(rule8)}")
         finally:
@@ -2015,7 +2016,7 @@ def _section10_zenctl(report: Report, sec: str, ep1: str, held: list[Any]) -> No
             hn.withdraw()
             gone = _wait(lambda: wd.state("instance-gone s10/nz") == "firing", 15.0, 0.1)
             report.check(sec, f"7. zenctl watchdog --namespace {NS}: the owner in {NS} read up, then gone once it "
-                              "stops: it hears the withdrawal, from its watch session in no namespace on the wire keys",
+                              "stops (its watch sessions in no namespace on the wire keys since 0.42)",
                          ok and gone, str(wd.transitions("instance-gone s10/nz")))
         finally:
             wd.close()
