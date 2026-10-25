@@ -1486,20 +1486,32 @@ def _stop(p: subprocess.Popen) -> str:
 
 def section11(ctx: Ctx) -> None:
     """scenarios.md §11 (0.7, F-224), "A role on two documents refuses the
-    start": one router and no author; the run's target given the two
-    copies, worker.v1 naming both and tasking.v1 declaring both, then the
-    control, the scenarios' worker.v1 against tasking.v1 with two
-    documents. S watches the instance tokens by liveliness, and ``Rp``.
-    Each step waits until the process exits or S sees its instance token,
-    within the 5 s, never a fixed sleep."""
+    start": one router and no author.
+
+    1. The run's target given the two copies, ``desired-two``'s worker.v1
+       (its role naming tasks and plans) and tasking.v1 (both desired). It
+       must exit 1, its standard error saying ``not started: …`` and
+       ``two_documents``, with no instance token at S and no report on
+       ``Rp``. Another refusal at the start that exits 1 with that text
+       would pass too: the text, not the cause, is what is read.
+    2. The control: the scenarios' worker.v1 (``interop/desired``'s, its
+       requirement naming tasks alone), given explicitly, against
+       ``desired-two``'s tasking.v1. It must start, S seeing its instance
+       token and its report ``{key: D, source: baseline}`` on ``Rp``.
+
+    S watches the instance tokens by liveliness, and ``Rp``. Each step
+    waits until the process exits or S sees its instance token, within the
+    5 s, never a fixed sleep (``_wait`` returns False at its deadline,
+    never raising)."""
     sec, rp = ctx.name("§11 a role on two documents refuses the start"), ctx.report
     two = REPO / "impl/python/interop/desired-two"
     exe = ([sys.executable, "-m", "zk2py.desired_owner"] if ctx.target_impl == "zk2py" else [str(ctx.target_impl)])
     env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
     bus = Bus()
     try:
+        one = REPO / "impl/python/interop/desired/worker.v1.toml"
         for step, files in (("1", [two / "worker.v1.toml", two / "tasking.v1.toml"]),
-                            ("2", [two / "tasking.v1.toml"])):
+                            ("2", [one, two / "tasking.v1.toml"])):
             t = time.monotonic()
             p = subprocess.Popen([*exe, "--connect", bus.ep1, "--desired-target", AUTHOR, TARGET, *map(str, files)],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -1521,10 +1533,15 @@ def section11(ctx: Ctx) -> None:
                          f"exit {code}; token {token}; reports {len(reports)}; {err[-300:]!r}")
             else:
                 first = json.loads(reports[0][3]) if reports else None
+                missing = [what for what, gone in (("the process ended", code is not None),
+                                                   ("no instance token at S", token is None),
+                                                   ("no report on Rp", not reports)) if gone]
+                if reports and first != {"key": D, "source": "baseline"}:
+                    missing.append(f"a report other than {{key: D, source: baseline}}: {first}")
                 rp.check(sec, "2. the control, naming one of the author's two desired resources: S sees its "
                               "instance token, and its report on Rp is {key: D, source: baseline}",
-                         code is None and token is not None and first == {"key": D, "source": "baseline"},
-                         f"exit {code}; token {token}; report {first}; {err[-200:]!r}")
+                         not missing, (f"missing: {'; '.join(missing)}; " if missing else "")
+                         + f"exit {code}; token {token}; report {first}; {err[-200:]!r}")
             time.sleep(0.5)
     finally:
         bus.close()

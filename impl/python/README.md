@@ -1653,7 +1653,7 @@ Results at 0.6 (round 61): the owner example and zenctl built from PR
   slice, `no_report`). The two rows now agree member by member on every
   shape, the reference's row saying `unreadable` of two reports that
   differ;
-- `two-documents` (zk2py's own, §2.1), 2 of 2 in each of the four
+- `two-documents` (zk2py's own, §2.1; scenarios §11 since round 62), 2 of 2 in each of the four
   pairings. Each target, zk2py's and the owner example, given
   `desired-two`'s contracts, refuses its start: exit 1, no instance
   token, `two_documents` said. Each starts with only the worker given, its
