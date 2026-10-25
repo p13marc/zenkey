@@ -142,7 +142,11 @@ impl Render for DesiredReport {
                 };
                 detail.push(format!(
                     "    report {} {what}{}",
-                    rep.key,
+                    if rep.differing.is_empty() {
+                        rep.key.clone()
+                    } else {
+                        format!("{} and {}", rep.key, rep.differing.join(", "))
+                    },
                     if rep.findings.is_empty() {
                         String::new()
                     } else {

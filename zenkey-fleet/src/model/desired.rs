@@ -532,15 +532,18 @@ pub fn descriptor_in(o: &Observed, addr: &Addr) -> Result<Option<Descriptor>, St
 }
 
 /// The report of a slice among a target's replies (§2.10, §2.17 step 3).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ReportFound<'a> {
     /// The readable report whose `key` is the slice's.
     One(&'a ReportReply),
     /// None readable claims the slice, and one did not read: it may be the
     /// slice's (text 0.4).
     Unreadable(&'a ReportReply),
-    /// Two readable reports claim the slice, and they differ (text 0.4).
-    Two,
+    /// Two readable reports, of two report resources, claim the slice and
+    /// differ: unreadable, since the target says two things of one role
+    /// (§2.10, text 0.5, F-212). Every readable one claiming it, in reply
+    /// order, so a row can name each one's key.
+    Two(Vec<&'a ReportReply>),
     /// None.
     None,
 }
@@ -565,7 +568,7 @@ pub fn report_of<'a>(replies: &'a [ReportReply], slice: &[String]) -> ReportFoun
             {
                 ReportFound::One(first)
             } else {
-                ReportFound::Two
+                ReportFound::Two(claiming)
             }
         }
         [] => replies
@@ -668,6 +671,10 @@ pub struct RoleReading<'a> {
     pub author: AuthorReading,
     /// The report found, when one was.
     pub report: Option<&'a ReportReply>,
+    /// The readable reports, of two report resources or more, that claim
+    /// the slice and differ, when they did: unreadable together (§2.10,
+    /// text 0.5, F-212), never as if none were read. Empty otherwise.
+    pub differing: Vec<&'a ReportReply>,
     /// Why step 3 read none, when it read none.
     pub no_report: Option<String>,
     pub freshness: freshness::Judged,
@@ -684,6 +691,7 @@ impl RoleRead {
         let res = &self.resolution;
         let mut no_report = None;
         let mut found = None;
+        let mut differing = Vec::new();
         let mut report = ReportRead::NotRead;
         let mut fresh = freshness::judge_all(&Horizon::Undeclared, &[]);
         if !res.declaration_invalid.is_empty() {
@@ -732,11 +740,15 @@ impl RoleRead {
                         found = Some(r);
                         report = ReportRead::Unreadable;
                     }
-                    ReportFound::Two => {
+                    ReportFound::Two(all) => {
                         report = ReportRead::Unreadable;
-                        no_report = Some(
-                            "two reports claim the slice, and they differ (text 0.4)".to_owned(),
-                        );
+                        no_report = Some(format!(
+                            "{} readable reports, of {}, claim the slice and differ: the target \
+                             says two things of one role (§2.10)",
+                            all.len(),
+                            all.iter().map(|r| r.key.as_str()).collect::<Vec<_>>().join(", ")
+                        ));
+                        differing = all;
                     }
                     ReportFound::None => {
                         no_report = Some(if g.complete {
@@ -753,6 +765,12 @@ impl RoleRead {
             }
         }
         let (descriptor, deployment) = match (&t.word, &t.descriptor) {
+            // The deployment's word stands for the descriptor, but for a
+            // role a revision in hand shows on no desired resource
+            // (text 0.6, F-217).
+            (Some(_), _) if res.listing == Some(Listing::NotListed) => {
+                (None, Some(Listing::NotListed))
+            }
             (Some(w), _) => (None, Some(w.listing)),
             (None, Ok(Some(_))) | (None, Ok(None)) => (res.listing, None),
             (None, Err(_)) => (None, None),
@@ -781,6 +799,7 @@ impl RoleRead {
                 current,
             },
             report: found,
+            differing,
             no_report,
             freshness: fresh,
             author_why: seen_why.or(current_why),
@@ -993,7 +1012,7 @@ mod tests {
     }
 
     /// The report whose key is the slice's; an unreadable one when none
-    /// readable claims it; two that differ are none.
+    /// readable claims it; two that differ are unreadable, each named.
     #[test]
     fn the_report_of_a_slice() {
         let rp = "zk2/lab/worker/worker.v1/state/desired/task";
@@ -1013,7 +1032,13 @@ mod tests {
         ));
         let other = format!(r#"{{"key": "{D}", "source": "call"}}"#);
         let two = vec![reply(rp, &ok), reply("zk2/x/y/w.v1/state/r", &other)];
-        assert!(matches!(report_of(&two, &[D.to_owned()]), ReportFound::Two));
+        match report_of(&two, &[D.to_owned()]) {
+            ReportFound::Two(all) => assert_eq!(
+                all.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+                [rp, "zk2/x/y/w.v1/state/r"]
+            ),
+            other => panic!("two that differ: {other:?}"),
+        }
         assert!(matches!(report_of(&[], &[D.to_owned()]), ReportFound::None));
     }
 
@@ -1219,7 +1244,7 @@ mod tests {
                         "found": "one",
                         "claims": x.read.as_ref().unwrap().key,
                     }),
-                    ReportFound::Two => json!({"found": "unreadable", "why": "two_differ"}),
+                    ReportFound::Two(_) => json!({"found": "unreadable", "why": "two_differ"}),
                     ReportFound::Unreadable(_) => {
                         json!({"found": "unreadable", "why": "unreadable_reply"})
                     }

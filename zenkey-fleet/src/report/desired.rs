@@ -100,9 +100,16 @@ pub struct DesiredReportSeen {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document: Option<zenkey_model::desired::Report>,
     /// Why it does not read (§2.10): `json`, `schema`, `stamp` or
-    /// `revision_range`, then the words.
+    /// `revision_range`, or `two_differ` when readable reports of two
+    /// report resources claim the slice and differ (text 0.5, F-212), then
+    /// the words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unreadable: Option<String>,
+    /// Under `two_differ`, the keys of the other reports that claim the
+    /// slice and differ from the one on `key`, in reply order: the target
+    /// says two things of one role, so neither is the report (§2.10).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub differing: Vec<String>,
     /// Its consistency findings (§2.10), the fixture's tokens: a report
     /// that reads with one is malformed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -500,6 +507,7 @@ mod tests {
                 ))
             }),
             unreadable: None,
+            differing: vec![],
             findings: vec![],
             stamp: Some(Stamp {
                 time: "2026-10-24T00:00:00.000000000Z".into(),
@@ -573,6 +581,40 @@ mod tests {
         ] {
             assert_eq!(serde_json::to_value(t).unwrap(), json!(t.as_str()));
         }
+    }
+
+    /// Two readable reports, of two report resources, that claim the slice
+    /// and differ are unreadable (§2.10, text 0.5, F-212): the row names
+    /// both keys and says why, never as if no report were read.
+    #[test]
+    fn two_reports_that_differ_pin_their_shape() {
+        let mut r = row(
+            (DesiredAnswerToken::Unobservable, "report_invalid"),
+            (DesiredAnswerToken::Unobservable, "report_invalid"),
+        );
+        r.report = Some(DesiredReportSeen {
+            key: "zk2/lab/worker/worker.v1/state/desired/task".into(),
+            document: None,
+            unreadable: Some("two_differ: two say two things".into()),
+            differing: vec!["zk2/lab/worker/worker2.v1/state/desired/task".into()],
+            findings: vec![],
+            stamp: None,
+            freshness: DesiredFreshness {
+                verdict: FreshnessToken::NotAsked,
+                reason: "no_horizon".into(),
+                says: "s".into(),
+            },
+        });
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(
+            v["report"],
+            json!({
+                "key": "zk2/lab/worker/worker.v1/state/desired/task",
+                "unreadable": "two_differ: two say two things",
+                "differing": ["zk2/lab/worker/worker2.v1/state/desired/task"],
+                "freshness": {"verdict": "not_asked", "reason": "no_horizon", "says": "s"},
+            })
+        );
     }
 
     /// The run's judgement: a refusal, a refused current version, or a

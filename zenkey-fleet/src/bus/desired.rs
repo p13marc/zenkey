@@ -679,12 +679,18 @@ fn across_face(a: &Addr, word: &FaceWord, spec: &DesiredSpec, offline: &Contract
                 &none,
                 offline,
             );
-            resolve_role(a, &entry, req.resources.as_deref(), author_c)
-                .unwrap_or_else(|| RoleResolution::bare(role.clone(), Some(word.listing)))
+            // A revision of the author's held offline that declares no
+            // desired resource the requirement names shows the role is no
+            // target's, whatever the deployment's word (text 0.6, F-217).
+            resolve_role(a, &entry, req.resources.as_deref(), author_c).unwrap_or_else(|| {
+                RoleResolution::bare(role.clone(), Some(Listing::NotListed))
+            })
         }
         None => RoleResolution::bare(role.clone(), Some(word.listing)),
     };
-    res.listing = Some(word.listing);
+    if res.listing != Some(Listing::NotListed) {
+        res.listing = Some(word.listing);
+    }
     let author_seen = word.author.as_ref().map(|_| {
         if word.author_across {
             (Seen::AcrossFace, None)
