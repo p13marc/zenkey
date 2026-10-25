@@ -594,8 +594,15 @@ def _ordered(bus: Bus, inst: Inst, after: float = 0.0, claim: bool = True,
     # §1 and §3 Expected 1 (0.4, F-223): "unless it took over before that GET
     # was answered: its interface token at S within a round trip of the
     # answer, the two riding two priorities". The round trip is that GET's
-    # own, from S hearing the instance token to the answer
-    late = pi is not None and pi[1] is False and pa is not None and pa[0] <= pi[2] + max(0.0, pi[2] - pi[0])
+    # own, from S hearing the instance token (pi[0], taken in the token's
+    # callback before the GET's thread starts) to the GET's end (pi[2],
+    # taken once its replies are in): so pi[0] < pi[2] by construction,
+    # the window never 0, and no floor is needed. The GET's end comes after
+    # its answer, so the window is the round trip or a little more.
+    late = False
+    if pi is not None and pi[1] is False and pa is not None:
+        assert pi[0] <= pi[2], "S's probe: the GET ends after the token that asked it"
+        late = pa[0] <= pi[2] + (pi[2] - pi[0])
     ok = (pi is not None and (pi[1] is True or late)) if claim else True
     if serving or not claim:
         ok = ok and pa is not None and pa[1] is False
@@ -1584,6 +1591,7 @@ def section12(rp: Report, runs: int) -> None:
         _wait(b.stands, 8.0)
         before = (a.executions(), b.executions())
         t = read_tool(bus.g, LEDGER, "ledger.v1", grace_s=2.0, contracts=[variant], with_probe=True)
+        time.sleep(0.5)  # a call the probe made would have run by now
         after = (a.executions(), b.executions())
         rp.check(sec, "8. on ledger-appendall, zk2py's tool asks neither append$*, which reaches appendall, nor "
                       "appendall, and says why; appendall's handler never runs (0.4, F-221)",
@@ -1596,6 +1604,7 @@ def section12(rp: Report, runs: int) -> None:
             rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts",
                                    str(CONTRACT_DIR / "ledger-appendall.v1.toml"), "-c", bus.ep1, "--timeout", "1",
                                    "--for", "1", *skips])
+            time.sleep(0.5)  # a call the probe made would have run by now
             after = (a.executions(), b.executions())
             rows = {r.get("case"): r for r in (doc or {}).get("rows") or [] if isinstance(r, dict)}
             st = rows.get("redundancy-standby") or {}
@@ -1610,6 +1619,7 @@ def section12(rp: Report, runs: int) -> None:
             rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts",
                                    str(CONTRACT_DIR / "ledger-appendall.v1.toml"), "-c", bus.ep1, "--timeout", "1",
                                    "--for", "1", *every])
+            time.sleep(0.5)  # a call it made would have run by now
             after = (a.executions(), b.executions())
             asked = [r.get("case") for r in (doc or {}).get("rows") or []
                      if isinstance(r, dict) and (r.get("verdict") or {}).get("answer") != "not_asked"]

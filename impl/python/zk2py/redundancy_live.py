@@ -330,7 +330,7 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
     #: 0.4 (F-221): every revision of the interface held offline guards a
     #: probe, named by the address's descriptors or not: "a minor can add
     #: such an operation"
-    held = {c.fingerprint: c.canonical for c in contracts if getattr(c, "interface", None) == iface}
+    held = {c.fingerprint: c.canonical for c in contracts if c.interface == iface}
     r1, p1, d1 = read_address(session, address, iface)
     t = time.monotonic()
     answered = None
@@ -353,8 +353,8 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
                                              "(core §8.4); an operation it declares may still be reached")
                 continue
             revisions[fp] = canonical
+        guards = {**revisions, **held}
         for fp, canonical in revisions.items():
-            guards = {**revisions, **held}
             got_answers, got_skipped = probe(session, address, iface, canonical,
                                              others=[c for f, c in guards.items() if f != fp])
             for key, zids in got_answers.items():
