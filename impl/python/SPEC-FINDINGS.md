@@ -12253,6 +12253,18 @@ has been read: by then its round trips before the seed have run out under
 the 300 ms interests timeout (the reference makes two, the start's and the
 seed's)".
 
+**Status at core 0.43:** resolved, as proposed. Step 6 now ends the stall
+at the event alone, "until the reader's first seed has been read", and
+says that by then "every round trip the reader asked before that seed has
+run out … how many is the reader's own". It names both counts: two for a
+reader that makes a round trip at its start and another before its seed,
+and one for a reader whose start's round trip is its seed's. zk2py's
+runner already ended the stall there. It now checks every round trip
+asked before the seed. zk2py asked one, which ran out at 302 ms, and the
+stall lasted 304 ms, in each pairing with zk2py's reader. The new wording
+leaves one case open: a reader that never seeds while no round trip
+stands (F-238).
+
 ### F-237 · minor · scenarios/presence.md §10 step 9 and Expected 9: the round trip's wait, 5 s or 2 s
 
 > §10 Setup: "The round trip is a liveliness GET of `zk2/*/*/@zk/settle`
@@ -12276,5 +12288,233 @@ It cuts the link 150 ms into each.
 **Wording that would remove the guess:** step 9: "… a round trip with a
 2 s timeout is asked, and the link is cut 150 ms into it …".
 
+**Status at core 0.43:** resolved, as proposed. Step 9 now reads "a round
+trip waiting 2 s is asked, and the link is cut 150 ms into it", and
+Expected 9's "its 2 s" matches it. zk2py's runner already did this. In
+each pairing with zk2py's reader, zenoh's round trip came back at 151 ms,
+with the final reply alone, no error reply and no token. zk2py's came back
+at 150–151 ms and did not stand (`CUT_OFF_DURING`).
+
 **Counts at core 0.42:** 237 entries. Open: F-236 and F-237, both minor,
 against `scenarios/presence.md` §10. Every other entry is resolved.
+
+## At core 0.43 (#609)
+
+Round 68 read core 0.43 cold, on main 7efffad0. It read the CHANGELOG's
+0.43 entry and `scenarios/presence.md` §10. It then read the whole of
+§8.1 and of `scenarios/presence.md`, end to end, as a final cold read of
+the presence text. 0.43 changes the wording of two of §10's steps, and no
+rule.
+
+No fixture changed, and no code of zk2py's changed. 0.43 words steps 6
+and 9 as zk2py's runner already ran them. The runner now checks every
+round trip asked before step 6's first seed. With `--reopen` it also
+notes two measurements for F-239. Its step 7 control waits until the
+follower owes no read before the owner withdraws.
+
+**Round 67's findings at 0.43:** F-236 and F-237 are resolved, as
+proposed. Each entry has its status line.
+
+**`just py-conformance`: 3025 of 3025.**
+
+**Live:** `presence_scenarios` against `owner-wd` and `zenctl-wd`. §1–§8
+ran once, with zk2py's owner and reader. §9 and §10 ran in every pairing.
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 34 | 1 |
+| Rust, zk2py | – | 9 | 28 | 1 |
+| zk2py, zenctl | – | – | 8 | 2 |
+| Rust, zenctl | – | – | 7 | 3 |
+
+Every check passes. The steps not run are the ones from round 67. §10
+also ran whole beside 10,000 tokens, and the last six runs passed 34 of
+34. The two runs before them failed zk2py's own step 7 control, not a
+step's Expected (see the README).
+
+**Where the two implementations disagree:** on no verdict a step asks
+for.
+- zenctl still words a read ended at the interests timeout as one that
+  "ran to its timeout".
+- Step 6's round trips differ as 0.43 now allows: one before the first
+  seed for zk2py, and two for the reference.
+- Beyond the scenarios (F-239): beside 10,000 tokens, after a cut and a
+  heal, zk2py's follower read complete again within 5 s. zenctl's
+  watchdog over every address was still unobservable at 420 s.
+
+**The presence text, read end to end.** Three findings:
+- F-238: one gap, in the 0.43 wording itself;
+- F-239: one contradiction between §8.1 and what a reopened transport
+  does, measured;
+- F-240: one minor wording point.
+
+### F-238 · gap · scenarios/presence.md §10 step 6 (0.43): a stall that ends at the first seed, for a reader that seeds only once a round trip stands
+
+> §10 step 6 (0.43): "The watch session's link is stalled from before the
+> reader declares its subscribers until the reader's first seed has been
+> read: by then every round trip the reader asked before that seed has
+> run out under the 300 ms interests timeout (… how many is the reader's
+> own …). Then the stall ends."
+
+> core §8.1 (0.37): "A reader that seeds on one session and follows
+> withdrawals on its watch session SHOULD make one round trip on the watch
+> session after declaring its subscribers, and before the seed".
+
+> core §8.1 (0.42): "A read made while no round trip stands, a seed or a
+> re-read (0.42, F-229), is possibly incomplete".
+
+0.43 ends the stall at one event: the reader's first seed has been read.
+The count that 0.42 also gave is gone (F-236). That fits a reader that
+seeds even when its round trip did not stand. zk2py's reader does, and so
+does the reference's: each read its first seed possibly incomplete.
+
+But §8.1 does not oblige a reader to seed while no round trip stands. It
+only says how to read such a seed if the reader makes one. And for a
+watch session cut off, §8.1 says to make no read at all. A reader that
+carries this caution over to a round trip that ran out keeps asking
+round trips and makes no seed until one stands. Under step 6's stall,
+none stands, so its first seed never comes and the stall never ends. The
+step cannot reach its cut and heal.
+
+Expected 6's first sentence would hold for such a reader, since it makes
+no read at all while no round trip stands. But the runner has nothing to
+end the stall on. At 0.42, the count ("two round trips have run out")
+gave a runner a second way to end it.
+
+**zk2py:** seeds after its round trip runs out, so it runs step 6 as
+written. The runner ends the stall at that seed, and checks that every
+round trip asked before it ran out at the interests timeout.
+
+**Wording that would remove the guess:** "… until the reader's first seed
+has been read, or, for a reader that makes no read while no round trip
+stands, until its first round trip has run out under the 300 ms interests
+timeout …". In the same step, "its watch session reaches R1 through the
+link, whose `routing/interests/timeout` is 300 ms" gives the 300 ms to the
+link. It is the watch session's.
+
+### F-239 · contradiction · core §8.1 (0.42) "A move unconfirms what the reader holds" and "In a namespace, a watch session in no namespace": a transport that opens tells a subscriber without history every token
+
+> §8.1 (0.42, F-229): "Its subscribers may not have heard what moved while
+> the transport was down: a token withdrawn then, or one declared then, of
+> which a subscriber without history is never told."
+
+> §8.1 (0.42, F-233): "… declare its subscribers, without history, on the
+> **wire keys** … Its round trip is then one round trip at any population
+> (1.2 ms beside 2,000 tokens in `ns`, and 44 ms beside 10,000, debug
+> builds)".
+
+> §8.1 (0.41): "A reader that follows presence live SHOULD make the round
+> trip again before its next read, and read again at once, when its watch
+> session's transport closes or opens".
+
+Measured on zenoh-python 1.10.1 routers. The watch session is a client of
+R1 through a relay link the test cuts and heals. Its subscriber has no
+history.
+- **What it is told.** In no namespace, three tokens, 3 of 3 runs:
+  - at the cut, the subscriber heard withdrawn only the tokens it had
+    been told;
+  - when the transport opened again, it was told every token its
+    selector matched: one declared before the subscriber, never told
+    until then; one held through the cut; and one declared while the
+    link was cut;
+  - a token withdrawn while the link was cut was not told again.
+
+  So a token declared while the transport was down is told, at the
+  reopen. It is not "never told".
+- **What the round trip costs.** On the wire keys from no namespace,
+  beside the crowd in `ns`:
+  - the round trip at the session's start took 0.6–50 ms and carried no
+    token;
+  - after a cut and a heal, the subscriber was told every crowd token
+    again, all 2,000 or all 10,000;
+  - the round trip after the reopen ended only once they had been told:
+    134–145 ms beside 2,000 tokens, and 3.2–4.7 s beside 10,000;
+  - a history subscriber's round trip at its start, through the same kind
+    of link, took 125–137 ms and 2.8–3.8 s.
+
+  After a move, then, the watch session pays what a history subscriber
+  pays, and it pays again at every move. "One round trip at any
+  population" holds only until the first move. The round trip that §8.1
+  asks for after a move is the one that waits for the population.
+- **What readers do with it.**
+  - zk2py's follower, both its sessions through the link and its round
+    trip waiting 5 s (the scenarios' wait): beside 10,000 tokens, its
+    round trip after the reopen took 4.2–4.5 s, and its read was complete
+    4.3–4.6 s after the heal.
+  - `zenctl watchdog --namespace ns --rule 'instance-gone crowd/*'
+    --timeout 30` (`zenctl-wd`), every session through the link, beside
+    10,000 tokens: it was ok 19.3–19.7 s after it started. After a 3 s
+    cut and the heal it was still unobservable at 120 s and at 420 s, in
+    2 of 2 runs. Its stderr carried zenoh's `Unknown interest` errors and
+    `Didn't receive DeclareFinal for interest … Timeout(120s)!`.
+  - The same tool was ok 1.5 s after the heal beside 2,000 tokens, and
+    0.47 s after it watching one address beside 10,000.
+
+  zk2py cannot tell from outside why the tool does not recover. The
+  measurement shows that the reopen is where it stops.
+
+The rule itself still holds. While the transport is down nothing is heard,
+and the telling at the reopen is unordered with the reading session's
+reads. So a reader that unconfirms what it holds at the move is right to.
+What the text gets wrong is the reason it gives, and the cost it claims
+for the round trip after a move.
+
+**zk2py:** keeps the move rule as written. Its follower asks a round trip
+after each move, and its reads stay unordered until one stands. Its round
+trip waits as long as the caller asks, 1 s by default. Beside a large
+population, the first round trip after a reopen can run out under that
+default. The follower then retries, backing off, until one stands. A
+token told at the reopen counts as any put heard does: evidence that the
+token is held.
+
+**Wording that would remove the guess:**
+- "… a token withdrawn then, of which a subscriber without history is
+  never told; a token declared then, it is told only when the transport
+  opens again, unordered with the reader's reads (measured: a transport
+  that opens tells a subscriber without history every token it matches)."
+- "Its round trip is then one round trip at any population, until its
+  transport moves: the transport's opening tells the subscribers every
+  token they match, and the round trip after it waits for them, as
+  history's does. A reader SHOULD run that round trip's wait, and its
+  interests timeout, above that time at its population."
+- §10 step 8 could cut and heal its watch session, with Expected 8 saying
+  what the round trip after the reopen waits for.
+
+### F-240 · minor · core §8.1 (0.41) "A read that runs to its session's interests timeout is not complete": a round trip "as not made"
+
+> §8.1 (0.41): "A reader MUST read a read whose time reached its session's
+> interests timeout as possibly incomplete, as it reads one that received
+> an error reply, and a round trip (below) that ended there as not made."
+
+> §10 Expected 5: "… and its round trip not standing."
+
+> §10 Expected 9: "Through the watch session cut off, the reader makes no
+> round trip, asking no liveliness GET, and none stands."
+
+> §10 step 6 (0.43): "every round trip the reader asked before that seed
+> has run out under the 300 ms interests timeout".
+
+Elsewhere in §8.1 and §10, "making" a round trip means asking its GET.
+Expected 9 says the reader "makes no round trip, asking no liveliness
+GET". Step 6 counts the round trips "asked" that "ran out". A read "not
+made" means the same: no GET asked. But the MUST reads a round trip that
+was asked and ran out at the interests timeout "as not made". That
+contradicts the other uses, and no Expected observes it: Expected 5 calls
+the same round trip "not standing".
+
+The verdict that matters is the same either way: the round trip does not
+stand. But a reader that reports round trips (step 6's count, §9 Expected
+4's "one liveliness GET, the round trip") has to choose which word
+applies.
+
+**zk2py:** `RoundTrip.made` is False for a round trip that ran out at the
+interests timeout, following the MUST. Its runner counts such a round
+trip among those asked (step 6's note), and reads only `stands` as
+evidence.
+
+**Wording that would remove the guess:** "… and a round trip (below) that
+ended there as not standing."
+
+**Counts at core 0.43:** 240 entries. Open: F-238 to F-240, against
+§8.1 and `scenarios/presence.md` §10: one gap, one contradiction and one
+minor. Every other entry is resolved.

@@ -113,9 +113,10 @@ redundancy    180 passed     0 failed
 total        3025 passed     0 failed
 ```
 
-The figures are against `core.md` 0.42, `hostid.v1` 0.7, `freshness.v1`
+The figures are against `core.md` 0.43, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
 `telemetry.v1` 0.5, `desired.v1` 0.8 and `redundancy.v1` 0.5.
+Core 0.43 changed no fixture and no rule, and no reading (394).
 Core 0.42 changed no fixture; `readings` gained its 15 cases (394).
 Core 0.41 changed no fixture; `readings` gained its 28 cases (379).
 `redundancy.v1` 0.3 added `polls.json`, 7 cases (180), which zk2py's
@@ -2008,13 +2009,13 @@ against zk2py's owner:
 - `link_scenarios` 78, in two runs;
 - `desired_scenarios` 52, zk2py's author and target.
 
-## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42)
+## What a complete presence read is (core 0.37, 0.38, 0.41, 0.42, 0.43)
 
 ```bash
 PYTHONPATH=impl/python ZK2PY_PROTOC=$(which protoc) \
   target/py-venv/bin/python -m zk2py.presence_scenarios [--only 1 … 10]... \
   [--owner zk2py|rust] [--reader zk2py|zenctl] [--owner-bin <owner-example>] [--zenctl <zenctl>] \
-  [--crowd 2000] [--tokenless 100]
+  [--crowd 2000] [--tokenless 100] [--reopen]
 ```
 
 `--owner` picks who holds the tokens: zk2py's owner, or the Rust owner
@@ -2288,6 +2289,127 @@ again against `owner-wd` and `zenctl-wd`:
 - link 89 (in two runs, §1–§10 and §11–§13);
 - desired 85 (both parties the owner example, in two runs);
 - redundancy §1–§12 89 (A and B the owner example).
+
+**Core 0.43**, read cold in round 68, on main 7efffad0 (#880). It
+changes the wording of two of §10's steps, and no rule:
+- **Step 6's stall ends at the reader's first seed** (F-236). By then
+  every round trip the reader asked before that seed has run out, and
+  how many is the reader's own. zk2py's runner already ended the stall
+  there. It now checks every round trip asked before the seed, not only
+  the first: zk2py asks one, and it ran out at 302 ms.
+- **Step 9's round trip waits 2 s, and the link is cut 150 ms into it**
+  (F-237). zk2py's runner already did this. Both round trips came back at
+  150–151 ms: zenoh's with the final reply alone, and zk2py's not
+  standing.
+
+zk2py's code did not change: what 0.43 says of steps 6 and 9 is what its
+runner did at 0.42.
+
+Reading §8.1 and `scenarios/presence.md` end to end turned up three
+findings:
+- **F-238.** Step 6's stall ends at an event that some readers never
+  produce. A reader that makes no read while no round trip stands never
+  seeds while the link is stalled.
+- **F-239.** §8.1 says a subscriber without history is "never told" of
+  a token declared while its transport was down, and that its round trip
+  on the wire keys is "one round trip at any population". Measured: when
+  the transport opens again, the subscriber is told every token it
+  matches, and the next round trip waits for them all, as a history
+  subscriber's does.
+- **F-240.** A round trip that ran out at the interests timeout is read
+  "as not made", although its GET was asked.
+
+With `--reopen`, `presence_scenarios` §10 ends with two notes for F-239.
+They measure the reopen beside the crowd. They are not checks of a step,
+and a measurement that fails becomes a note. Without the flag they do not
+run.
+
+**The step 7 control at 10,000.** The control is a follower in `ns`
+without history, which should never hear the owner go. Beside 10,000
+tokens it read the owner down in the first 2 of 8 runs. Those runs did
+not record whether a read or a withdrawal heard had done it. The runner
+now waits until the follower owes no read before the owner withdraws,
+and its detail lists the follower's reads, the withdrawals it heard and
+its round trips. It passed in the 6 runs since, each with one read before
+the withdrawal and no withdrawal heard. This is zk2py's own control, not
+a step's Expected, and the cause of the two failures is not known.
+
+**`presence_scenarios`**, against `owner-wd` and `zenctl-wd` (main
+7efffad0). §1–§8 ran once, zk2py's owner and reader, and §9–§10 ran in
+every pairing:
+
+| Owner, reader | §1–§8 | §9 | §10 | Not run |
+|---|---|---|---|---|
+| zk2py, zk2py | 40 | 9 | 34 | 1 |
+| Rust, zk2py | – | 9 | 28 | 1 |
+| zk2py, zenctl | – | – | 8 | 2 |
+| Rust, zenctl | – | – | 7 | 3 |
+
+Every check passes. Not run:
+- §3 step 2, as before;
+- §10 step 7 with the Rust owner;
+- for zenctl, §9 and §10 step 9.
+
+§10 also ran whole beside 10,000 tokens with zk2py's reader. The last
+six runs passed 34 of 34; the two before them failed the step 7 control,
+as above.
+
+§10 at 0.43, measured on zenoh-python 1.10.1 routers, the crowd in `ns`:
+- **Step 6.** The stall lasted 304 ms until the first seed. zk2py's one
+  round trip before it ran out at 302 ms, and the seed was unordered. On
+  the retry, the round trip stood in 1 ms and the read was complete. In
+  all: 3 round trips and 4 reads, 1 of them not made at the cut.
+- **Step 9.** Through the watch session cut off, no GET was asked. Cut
+  150 ms into a 2 s wait, zenoh's round trip came back at 151 ms, and
+  zk2py's at 150–151 ms, not standing.
+
+**F-239, measured.** The watch session is in no namespace and reaches
+R1 through a relay link. Its subscriber has no history and is on
+`ns/zk2/*/*/@zk/instance/*`:
+
+| | 2,000 tokens | 10,000 tokens |
+|---|---|---|
+| Round trip at its start, tokens told | 0.6–47 ms, 0 | 41–50 ms, 0 |
+| Tokens told again after a cut and a heal | all | all |
+| Round trip after the reopen | 134–145 ms | 3.2–4.7 s |
+| Control: a history subscriber's round trip at its start | 125–137 ms | 2.8–3.8 s |
+
+- **In no namespace,** with three tokens, the same held in 3 of 3 runs.
+  After the heal the subscriber was told three tokens:
+  - one declared before the subscriber, which it never heard withdrawn
+    at the cut;
+  - one held through the cut;
+  - one declared while the link was cut.
+
+  A token withdrawn while the link was cut was not told again.
+- **zk2py's follower.** With only its watch session through the link, it
+  read complete again 0.15 s after the reopen beside 2,000 tokens, and
+  3.3–3.7 s after it beside 10,000. With both sessions through the link
+  and a 5 s round-trip wait, beside 10,000 tokens, its round trip after
+  the reopen took 4.2–4.5 s. Its read was complete 4.3–4.6 s after the
+  heal.
+- **`zenctl watchdog --namespace ns --rule 'instance-gone crowd/*'
+  --timeout 30`**, with every session through the link, beside 10,000
+  tokens:
+  - it was ok 19.3–19.7 s after it started;
+  - after a 3 s cut it was unobservable;
+  - after the heal it was still unobservable at 120 s and at 420 s, in
+    2 of 2 runs.
+
+  Its stderr carried zenoh's `Unknown interest` errors and `Didn't
+  receive DeclareFinal for interest … Timeout(120s)!`. Beside 2,000
+  tokens it was ok 1.5 s after the heal. Watching one address
+  (`crowd/c7`) beside 10,000 tokens, it was ok 0.47 s after the heal.
+
+**Where the two implementations disagree:**
+- **Wording, as at 0.42.** zenctl says a read ended at the interests
+  timeout "ran to its timeout … raise --timeout to ask again". zk2py
+  names the interests timeout.
+- **Step 6's round trips.** These differ as 0.43 now allows: one before
+  the first seed for zk2py, and two for the reference.
+- **Beyond the scenarios** (F-239): beside 10,000 tokens,
+  zk2py's follower read complete again within 5 s of a heal. zenctl's
+  watchdog over every address did not within 420 s.
 
 ## What it does not cover
 
