@@ -670,6 +670,39 @@ mod tests {
         assert!(!text.contains("down"), "a loss is never 'down': {text}");
     }
 
+    /// The presence cell when the watch session's round trip does not stand
+    /// (#851, core §8.1, 0.41): the seed is possibly incomplete, the cell
+    /// says why, and it is a caution, since no withdrawal may be heard until
+    /// the round trip stands; another incomplete seed is said plainly.
+    #[test]
+    fn the_presence_cell_says_a_round_trip_that_does_not_stand() {
+        use std::sync::Arc;
+        use zenkey_fleet::{LivePresence, ObservedPresence, PresenceScope, SeedOutcome};
+
+        let keys = vec!["zk2/robot1/nav/@zk/instance/0123456789abcdef".to_string()];
+        let observed = ObservedPresence::from_keys("zk2/*/*/@zk/**", &keys, false);
+        let mut live = LivePresence::new(PresenceScope::all());
+        let moved = live.seed(&observed, std::time::SystemTime::now());
+        let update = |seed: SeedOutcome| crate::presence_link::PresenceUpdate {
+            presence: Arc::new(live.clone()),
+            moved: moved.clone(),
+            catalog: None,
+            generation: 0,
+            seed,
+        };
+        let (text, caution) = presence_text(Some(&update(SeedOutcome::Incomplete(
+            zenkey_fleet::BARRIER_NOT_ESTABLISHED.to_owned(),
+        ))));
+        assert!(caution, "{text}");
+        assert!(text.contains("barrier was not established"), "{text}");
+        assert!(text.contains("1 up · 0 down"), "{text}");
+        let (text, caution) = presence_text(Some(&update(SeedOutcome::Incomplete(
+            "ended at its timeout".into(),
+        ))));
+        assert!(!caution, "{text}");
+        assert!(text.contains("possibly incomplete"), "{text}");
+    }
+
     /// #217: the budget is visible in the resting state — an operator should
     /// not discover the bound by hitting it — and the ring's eviction count
     /// appears as its own number, never inside the key count's (O6).

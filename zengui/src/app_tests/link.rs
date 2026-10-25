@@ -227,3 +227,167 @@ fn a_lens_move_adopts_the_catalog_and_makes_every_verdict_due() {
         "the same lens again moves nothing"
     );
 }
+
+/// A session reaching `endpoint` through a TCP proxy a test can stall (both
+/// ways, closing nothing), whose runtime ends a liveliness GET its router
+/// has not finished at 300 ms (`routing/interests/timeout`): a watch
+/// session whose round trip cannot stand while the proxy is stalled (#851).
+async fn stallable_watch(endpoint: &str) -> (zenoh::Session, Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let target = endpoint.trim_start_matches("tcp/").to_owned();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxied = format!("tcp/{}", listener.local_addr().unwrap());
+    let stalled = Arc::new(AtomicBool::new(false));
+    let st = Arc::clone(&stalled);
+    tokio::spawn(async move {
+        while let Ok((down, _)) = listener.accept().await {
+            let Ok(up) = tokio::net::TcpStream::connect(&target).await else {
+                continue;
+            };
+            let (dr, dw) = down.into_split();
+            let (ur, uw) = up.into_split();
+            for (mut from, mut to) in [(dr, uw), (ur, dw)] {
+                let st = Arc::clone(&st);
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 64 * 1024];
+                    loop {
+                        while st.load(Ordering::SeqCst) {
+                            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                        }
+                        let n = match from.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => n,
+                        };
+                        while st.load(Ordering::SeqCst) {
+                            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                        }
+                        if to.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        }
+    });
+    let mut c = zenoh::Config::default();
+    for (k, v) in [
+        ("mode", "\"client\"".to_owned()),
+        ("scouting/multicast/enabled", "false".to_owned()),
+        ("scouting/gossip/enabled", "false".to_owned()),
+        ("connect/endpoints", format!("[\"{proxied}\"]")),
+        ("routing/interests/timeout", "300".to_owned()),
+    ] {
+        c.insert_json5(k, &v).unwrap();
+    }
+    (zenoh::open(c).await.expect("a watch session"), stalled)
+}
+
+/// The presence link while its watch session's round trip does not stand
+/// (#851, core §8.1, 0.41): its first landing's seed is possibly
+/// incomplete, saying the barrier is not established, an address it does
+/// not show is unobservable, never down, and the status cell is a caution;
+/// once the round trip stands, a landing's seed is complete.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_presence_link_whose_round_trip_does_not_stand_says_so() {
+    use crate::message::BusMsg;
+    use iced::futures::StreamExt as _;
+    use std::sync::atomic::Ordering;
+    use zenkey_fleet::{AddressStatus, Monitor, MonitorSpec, PresenceScope, SeedOutcome};
+
+    let mut rc = zenoh::Config::default();
+    for (k, v) in [
+        ("mode", "\"router\""),
+        ("listen/endpoints", "[\"tcp/127.0.0.1:0\"]"),
+        ("scouting/multicast/enabled", "false"),
+        ("scouting/gossip/enabled", "false"),
+    ] {
+        rc.insert_json5(k, v).unwrap();
+    }
+    let router = zenoh::open(rc).await.expect("a router");
+    let ep = router
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("a listener");
+    let client = || async {
+        let mut c = zenoh::Config::default();
+        for (k, v) in [
+            ("mode", "\"client\"".to_owned()),
+            ("scouting/multicast/enabled", "false".to_owned()),
+            ("scouting/gossip/enabled", "false".to_owned()),
+            ("connect/endpoints", format!("[\"{ep}\"]")),
+        ] {
+            c.insert_json5(k, &v).unwrap();
+        }
+        zenoh::open(c).await.expect("a client")
+    };
+    let (owner, session) = (client().await, client().await);
+    let _token = owner
+        .liveliness()
+        .declare_token("zk2/lab/svc/@zk/instance/000000000000000a")
+        .await
+        .expect("a token");
+    let (watch, stalled) = stallable_watch(&ep).await;
+    stalled.store(true, Ordering::SeqCst);
+    let spec = MonitorSpec {
+        stats_tick: std::time::Duration::from_secs(3600),
+        ..MonitorSpec::default()
+    }
+    .with_presence("", &PresenceScope::all());
+    let monitor = Monitor::start(&watch, spec).await.expect("a monitor");
+    assert_eq!(monitor.settled(), Some(false));
+    let mut link = Box::pin(crate::presence_link::stream(
+        crate::presence_link::PresenceKey {
+            epoch: 1,
+            session,
+            monitor: Arc::new(monitor),
+            store: zenkey_fleet::BundleStore::new(std::time::Duration::from_secs(1)),
+            timeout: std::time::Duration::from_secs(1),
+        },
+    ));
+    let landing = |m: Message| match m {
+        Message::Bus(BusMsg::Presence(_, update)) => Some(update),
+        _ => None,
+    };
+    let first = loop {
+        let m = tokio::time::timeout(std::time::Duration::from_secs(10), link.next())
+            .await
+            .expect("a landing")
+            .expect("the link runs");
+        if let Some(u) = landing(m) {
+            break u;
+        }
+    };
+    assert_eq!(
+        first.seed,
+        SeedOutcome::Incomplete(zenkey_fleet::BARRIER_NOT_ESTABLISHED.to_owned())
+    );
+    let lab: zenkey_model::grammar::Addr = "lab/svc".parse().unwrap();
+    assert_eq!(
+        first.presence.status(&lab),
+        AddressStatus::Up,
+        "what it read"
+    );
+    let (text, caution) = crate::view::status::presence_text(Some(&first));
+    assert!(caution, "{text}");
+
+    stalled.store(false, Ordering::SeqCst);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let m = tokio::time::timeout_at(deadline, link.next())
+            .await
+            .expect("a complete seed in time")
+            .expect("the link runs");
+        if let Some(u) = landing(m)
+            && u.seed == SeedOutcome::Complete
+        {
+            assert_eq!(u.presence.status(&lab), AddressStatus::Up);
+            break;
+        }
+    }
+    let _ = owner.close().await;
+}
