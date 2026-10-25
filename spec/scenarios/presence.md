@@ -369,7 +369,7 @@ re-read, 3 s for the ten. The test's control, a reader that skips the
 round trip, its link stalled until the withdrawal had reached R1, missed
 the withdrawal in 3 of 3 starts in each of the 10 runs.*
 
-## §10 A round trip at a population, and the interests timeout (§8.1, 0.41, 0.42; Appendix B)
+## §10 A round trip at a population, and the interests timeout (§8.1, 0.41, 0.42, 0.43; Appendix B)
 
 **Setup.** Routers R1 and R2, linked R2 → R1. An owner, a tool and two
 crowd sessions are clients of R1; the crowd sessions, in a namespace `ns`,
@@ -412,9 +412,11 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
    whose `routing/interests/timeout` is 300 ms, and its reading session
    reaches R1 directly. The watch session's link is stalled from before
    the reader declares its subscribers until the reader's first seed has
-   been read: by then two round trips have run out under the 300 ms
-   interests timeout, the start's and the seed's (0.42, F-227). Then the
-   stall ends. Then the watch session's link is cut, and healed.
+   been read: by then every round trip the reader asked before that seed
+   has run out under the 300 ms interests timeout (0.42, F-227; 0.43,
+   F-236: how many is the reader's own, two for one that makes a round
+   trip at its start and another before its seed, one for one whose
+   start's round trip is its seed's). Then the stall ends. Then the watch session's link is cut, and healed.
 7. As step 1 without the stall, the owner and the tool in `ns`, each case
    with a fresh token, subscribed to the steps' own instance tokens
    (`zk2/s10/*/@zk/instance/*`): a fresh watch session in `ns` declares a
@@ -432,8 +434,9 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
    test can stall and cut, declares a subscriber without history to
    `zk2/*/*/@zk/instance/*`, and its round trip stands. Its link is cut, and
    the reader under test asks a round trip through it. Then, the link
-   healed and stalled, a round trip is asked, and the link is cut while it
-   waits: once zenoh's own GET, once the reader under test's.
+   healed and stalled, a round trip waiting 2 s is asked, and the link is
+   cut 150 ms into it (0.43, F-237): once zenoh's own GET, once the reader
+   under test's.
 
 **Expected.**
 1. The round trip is still waiting when the stall ends, and ends with the
