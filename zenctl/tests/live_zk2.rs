@@ -7241,6 +7241,16 @@ async fn telemetry_hears_a_decrease_put_right_after_its_listening_line() {
 /// session in no namespace (#875), and hears I1 go: 20 → 3 a reset and
 /// 3 → 8 the same epoch, both established by presence (I1 alone, then I2
 /// alone), exit 0.
+///
+/// The puts keep the scenarios' spacing (`spec/profiles/telemetry/scenarios.md`,
+/// Setup): 200 ms between two samples, and 500 ms after a token's
+/// withdrawal or appearance before the next put (#883). T hears the
+/// samples on its session in the namespace and the tokens on its watch
+/// session, and zenoh orders no two sessions, so §2.9 folds them in the
+/// one order T received them. Put at once after I2's token is held where
+/// the owners' session reads, I2's first sample was heard before I2's
+/// token, 1.3 ms ahead, in 3 of 88 runs eight at a time: nothing was
+/// present at its arrival, and both pairs read assumed, as the text says.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn telemetry_in_a_namespace_hears_an_owner_restart_between_a_pair() {
     let bus = Bus::bare(Some("ns")).await;
@@ -7277,6 +7287,9 @@ async fn telemetry_in_a_namespace_hears_an_owner_restart_between_a_pair() {
     let second = i2.svc.instance_key().expect("a key").as_str().to_owned();
     assert_ne!(second, first, "a new instance");
     until_held(&bus.owners, &second).await;
+    // The scenarios' spacing: clear of the token's appearance, on T's
+    // watch session too.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     for n in [3u64, 8] {
         i2.drops.put_value(&n).await.expect("drops");
         tokio::time::sleep(Duration::from_millis(200)).await;
