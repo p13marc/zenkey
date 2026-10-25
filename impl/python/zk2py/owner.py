@@ -298,7 +298,7 @@ class Owner:
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
                  tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
                  params: dict[str, dict[str, str]] | None = None, standby: set[str] | None = None,
-                 lease_ms: int | None = None):
+                 lease_ms: int | None = None, namespace: str | None = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -366,6 +366,8 @@ class Owner:
         - ``lease_ms``: its session's lease, as its router reads it (zenoh's
           ``transport/link/tx/lease``): a crash behind a silent link is seen
           that long after (``redundancy.v1`` scenarios, "A crash").
+        - ``namespace``: its session's zenoh namespace (core §1.6), which
+          prefixes every key on the wire (core presence.md §10 step 7).
         - ``standby``: the interfaces it stands by on at start (core §6,
           0.39; ``redundancy.v1`` §2.4): validated by step 2 as if exposed,
           none of their resources declared, their entries marked
@@ -470,6 +472,8 @@ class Owner:
         #: core §6 (0.39): the interfaces it stands by on now
         self.standing_by: set[str] = set(standby or ())
         self.lease_ms = lease_ms
+        #: zenoh's session namespace (core §1.6), added on egress
+        self.namespace = namespace
         #: step 1's entities, per interface (a step-down undeclares them)
         self._iface_entities: dict[str, list[Any]] = {}
         #: the current instance's interface token, per interface
@@ -621,6 +625,8 @@ class Owner:
         conf.insert_json5("timestamping/enabled", "true" if self.hlc or not self.connect else "false")
         if self.lease_ms is not None:
             conf.insert_json5("transport/link/tx/lease", str(int(self.lease_ms)))
+        if self.namespace is not None:
+            conf.insert_json5("namespace", json.dumps(self.namespace))
         self.session = zenoh.open(conf)
 
     def _bring_up(self, plan: dict[str, list[tuple[dict[str, Any], str]]]) -> None:

@@ -1,0 +1,16 @@
+# zk2py's contract for presence.md §3 step 3 (core §8.1): a template that
+# declares `epoch`, whose members the owner declares only as they appear, so
+# an owner that starts with none holds no member token.
+# It must load with no finding at all.
+[interface]
+name    = "zk2py_epoch"
+major   = 1
+minor   = 0
+summary = "zk2py's epoch template, for presence.md §3"
+
+[resources."tracks/{track}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { track = "string" }
+cardinality = 8
+epoch       = "track"

@@ -49,6 +49,30 @@ zenoh-python has no unbounded channel: its default handler and
   :mod:`zk2py.presence` follows tokens live and keeps a withdrawal
   unconfirmed until a read.
 
+**A watch session's round trip at a population (§8.1, 0.41).**
+- **A read that runs to its session's interests timeout is not
+  complete.** zenoh 1.10.1 ends a liveliness GET its routers have not
+  finished at ``routing/interests/timeout`` with the final reply alone and
+  no error reply. :func:`list_presence` reads a read whose time reached its
+  session's interests timeout as possibly incomplete
+  (:data:`AT_INTERESTS_TIMEOUT`), and :func:`settle` a round trip ended
+  there as not made. A session's configuration cannot be read back from
+  zenoh-python, so :func:`open_client` records the interests timeout it
+  opened a session with (:func:`interests_timeout_of`); a session zk2py did
+  not open is taken at zenoh's default, 10 s.
+- **Its sessions run with 120 s** (:data:`INTERESTS_TIMEOUT_S`), the
+  reference's tools' value: "a reader whose GETs may wait longer SHOULD run
+  its session with an interests timeout above their timeout".
+- **The round trip's key** is ``…/@zk/settle`` under the subscribers'
+  presence subtree (:func:`settle_key`): it matches no token, carries
+  nothing, and a grant that admits the subscribers admits it. Before 0.41
+  zk2py asked ``zk2/@zk/settle``, which matches no token too, but lies
+  outside every subscriber's subtree.
+- **A round trip stands** (:class:`RoundTrip`) only when it ended at its
+  routers' final reply, with no error reply, before the interests timeout,
+  through a session that held a link before it and at its end: a watch
+  session cut off answers it at once, as it answers every liveliness GET.
+
 **Timeouts are the caller's (§8.1).** The defaults here are the 1 s that
 "the scenarios, and so a conformance run, use".
 """
@@ -71,6 +95,13 @@ from . import bundle, keys
 PRESENCE_TIMEOUT_S = 1.0
 #: GET timeout for a descriptor or a bundle attempt: likewise (§3.3, §8.4).
 GET_TIMEOUT_S = 1.0
+#: zenoh 1.10.1's ``routing/interests/timeout`` when a session's configuration
+#: does not set it (core §8.1, 0.41; Appendix B).
+ZENOH_INTERESTS_TIMEOUT_S = 10.0
+#: The interests timeout zk2py opens its sessions with (core §8.1, 0.41: "A
+#: reader whose GETs may wait longer SHOULD run its session with an interests
+#: timeout above their timeout"): the reference's tools run with 120 s.
+INTERESTS_TIMEOUT_S = 120.0
 _DONE = object()
 
 
@@ -91,6 +122,12 @@ _MARKED: dict[int, Any] = {}
 #: Every lookup checks the stored session *is* the one asked about, since a
 #: pruned entry's id may belong to another session later.
 _WATCHES: dict[int, tuple[Any, Any]] = {}
+#: What each session zk2py opened was opened with beyond its endpoint: (the
+#: session, its namespace or None, its ``routing/interests/timeout`` in
+#: seconds). zenoh-python reads no configuration back from a session, and
+#: core §8.1 (0.41) needs both: a read that reached the interests timeout is
+#: possibly incomplete, and a watch session in a namespace keeps history.
+_CONF: dict[int, tuple[Any, str | None, float]] = {}
 
 
 def _is_closed(session: Any) -> bool:
@@ -117,6 +154,8 @@ def _prune() -> None:
         del _OPENED[k]
     for k in [k for k, v in _MARKED.items() if _is_closed(v)]:
         del _MARKED[k]
+    for k in [k for k, v in _CONF.items() if _is_closed(v[0])]:
+        del _CONF[k]
 
 
 def forget(session: Any) -> None:
@@ -126,6 +165,8 @@ def forget(session: Any) -> None:
         del _OPENED[id(session)]
     if _MARKED.get(id(session)) is session:
         del _MARKED[id(session)]
+    if _CONF.get(id(session), (None,))[0] is session:
+        del _CONF[id(session)]
     entry = _WATCHES.get(id(session))
     w = None
     if entry is not None and entry[0] is session:
@@ -134,6 +175,7 @@ def forget(session: Any) -> None:
     if w is not None:
         _OPENED.pop(id(w), None)
         _MARKED.pop(id(w), None)
+        _CONF.pop(id(w), None)
         try:
             w.close()
         except Exception:  # noqa: BLE001 - closing anyway
@@ -149,24 +191,58 @@ def close(session: Any) -> None:
         pass
 
 
-def open_client(endpoint: str, auth: tuple[str, str] | None = None) -> zenoh.Session:
+def open_client(endpoint: str, auth: tuple[str, str] | None = None, *, namespace: str | None = None,
+                interests_timeout_s: float = INTERESTS_TIMEOUT_S) -> zenoh.Session:
     """A *client* session to one router endpoint, multicast scouting off: a
     tool that sees exactly the router it is pointed at. ``auth`` is a
-    usrpwd (user, password), the principal's binding (§11.3)."""
+    usrpwd (user, password), the principal's binding (§11.3). ``namespace``
+    is zenoh's session namespace (§1.6), and ``interests_timeout_s`` its
+    ``routing/interests/timeout``, 120 s unless asked (§8.1, 0.41); both are
+    recorded, since zenoh-python reads neither back."""
     _prune()
-    s = _open_client(endpoint, auth)
+    s = _open_client(endpoint, auth, namespace=namespace, interests_timeout_s=interests_timeout_s)
     _OPENED[id(s)] = (s, endpoint, auth)
+    _CONF[id(s)] = (s, namespace, interests_timeout_s)
     return s
 
 
-def _open_client(endpoint: str, auth: tuple[str, str] | None = None) -> zenoh.Session:
+def _open_client(endpoint: str, auth: tuple[str, str] | None = None, *, namespace: str | None = None,
+                 interests_timeout_s: float = INTERESTS_TIMEOUT_S) -> zenoh.Session:
     conf = zenoh.Config()
     conf.insert_json5("mode", json.dumps("client"))
     conf.insert_json5("connect/endpoints", json.dumps([endpoint]))
     conf.insert_json5("scouting/multicast/enabled", "false")
+    # zenoh's value is in milliseconds (measured: 300 ends a stalled read at 0.30 s)
+    conf.insert_json5("routing/interests/timeout", json.dumps(int(round(interests_timeout_s * 1000))))
+    if namespace is not None:
+        conf.insert_json5("namespace", json.dumps(namespace))
     if auth is not None:
         conf.insert_json5("transport/auth/usrpwd", json.dumps({"user": auth[0], "password": auth[1]}))
     return zenoh.open(conf)
+
+
+def register(session: Any, *, namespace: str | None = None,
+             interests_timeout_s: float = ZENOH_INTERESTS_TIMEOUT_S) -> Any:
+    """Record what a session zk2py opened by other means was opened with
+    (:func:`open_client` records its own), for :func:`interests_timeout_of`
+    and :func:`namespace_of`."""
+    _CONF[id(session)] = (session, namespace, interests_timeout_s)
+    return session
+
+
+def interests_timeout_of(session: Any) -> float:
+    """§8.1 (0.41): the session's ``routing/interests/timeout``, in seconds,
+    as recorded when zk2py opened it; zenoh's default, 10 s, for a session
+    zk2py did not record (zenoh-python reads no configuration back)."""
+    entry = _CONF.get(id(session))
+    return entry[2] if entry is not None and entry[0] is session else ZENOH_INTERESTS_TIMEOUT_S
+
+
+def namespace_of(session: Any) -> str | None:
+    """The session's namespace, as recorded when zk2py opened it; None for
+    none, or for a session zk2py did not record."""
+    entry = _CONF.get(id(session))
+    return entry[1] if entry is not None and entry[0] is session else None
 
 
 # -- §8.1 presence -------------------------------------------------------------
@@ -183,6 +259,10 @@ BESIDE_SUBSCRIBER = ("beside a liveliness subscriber: the session holds one, and
 #: failed, so §8.1's check could not be made (never a pass).
 LINKS_UNREADABLE = ("the session's links could not be read (Session.info.links() failed), so the "
                     "read cannot be shown complete (core §8.1, 0.37, 0.38)")
+#: Why a read made is possibly incomplete, and a round trip not made, when
+#: its time reached its session's interests timeout (§8.1, 0.41).
+AT_INTERESTS_TIMEOUT = ("it ran to its session's interests timeout (routing/interests/timeout), where zenoh ends a "
+                        "liveliness GET its routers have not finished with the final reply alone (core §8.1, 0.41)")
 #: The three kinds of a read (§8.1, 0.37: "A read not made is a third kind,
 #: never folded into either").
 COMPLETE, POSSIBLY_INCOMPLETE, NOT_MADE = "complete", "possibly incomplete", "not made"
@@ -257,14 +337,15 @@ def watch_or_beside(session: Any, selector: str, callback: Any, *, history: bool
         handler = callback if isinstance(callback, zenoh.handlers.Callback) else zenoh.handlers.Callback(callback)
         return session.liveliness().declare_subscriber(selector, handler, history=history), Placement(False, None)
     sub = declare_liveliness_subscriber(w, selector, callback, history=history)
-    settled = any(settle(w) for _ in range(SETTLE_TRIES))
+    settled = any(settle(w, selector=selector) for _ in range(SETTLE_TRIES))
     return sub, Placement(True, settled)
 
 
 def watch_session(session: Any) -> Any | None:
     """§8.1 (0.37): the **watch session** of a reader whose reading session
-    :func:`open_client` opened, opened the same way on first use, else
-    None (a session zk2py cannot open again)."""
+    :func:`open_client` opened, opened the same way on first use (its
+    namespace and interests timeout too), else None (a session zk2py cannot
+    open again)."""
     _prune()
     entry = _WATCHES.get(id(session))
     if entry is not None and entry[0] is session:
@@ -273,26 +354,100 @@ def watch_session(session: Any) -> Any | None:
     if opened is None or opened[0] is not session:
         return None
     _, endpoint, auth = opened
-    w = open_client(endpoint, auth)
+    w = open_client(endpoint, auth, namespace=namespace_of(session), interests_timeout_s=interests_timeout_of(session))
     _WATCHES[id(session)] = (session, w)
     return w
 
 
-def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S) -> bool:
+#: The round trip's key when no subscriber's selector names ``@zk``.
+SETTLE_KEY = "zk2/*/*/@zk/settle"
+
+
+def settle_key(selector: str | None = None) -> str:
+    """§8.1 (0.41): the round trip's key, "a key no token holds … under a key
+    ``…/@zk/settle``, inside the presence subtree the subscribers read, so a
+    grant that admits them admits it": the subscriber's selector up to its
+    ``@zk`` chunk, then ``settle`` (``zk2/lab/*/@zk/instance/*`` →
+    ``zk2/lab/*/@zk/settle``). A token's ``@zk`` chunk is followed by its
+    kind and more (§1.1), so no token matches it. :data:`SETTLE_KEY` for a
+    selector without ``@zk``."""
+    chunks = (selector or "").split("/")
+    if "@zk" in chunks:
+        return "/".join(chunks[:chunks.index("@zk") + 1] + ["settle"])
+    return SETTLE_KEY
+
+
+@dataclass(frozen=True)
+class RoundTrip:
+    """One round trip on a watch session (§8.1, 0.37, 0.41), and whether it
+    **stands**: it ended at its routers' final reply (``finished``), with no
+    error reply, before the session's interests timeout, through a session
+    holding a link when it was asked and when it ended. ``why`` says why not;
+    ``made`` is False for one not made: no GET through a session cut off or
+    whose links cannot be read before it, or one ended at the interests
+    timeout, which the text reads "as not made". Only ``stands`` is
+    evidence of order; ``made`` follows the text's word, and no caller
+    reads it as more. Truthy when it stands."""
+
+    stands: bool
+    made: bool
+    key: str
+    why: str = ""
+    elapsed_s: float = 0.0
+    finished: bool = False
+    errors: int = 0
+    tokens: int = 0
+    asked_ns: int = 0
+
+    def __bool__(self) -> bool:
+        return self.stands
+
+
+def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | None = None) -> RoundTrip:
     """§8.1 (0.37): "one round trip on the watch session after declaring its
     subscribers, and before the seed: a liveliness GET there whose answer it
     discards serves, since its final reply follows the declarations".
-    True when its final reply came."""
+    0.41: of :func:`settle_key` (``selector`` is the subscribers'), which
+    matches no token and costs one round trip at any population. It stands
+    only when its final reply came, no error reply, before the session's
+    interests timeout ("a round trip … that ended there as not made"), and
+    the session held a link before it and at its end: a watch session cut
+    off answers it at once, as it answers every liveliness GET (§8.1, 0.37),
+    so that answer orders nothing. Its answer is discarded, so a round trip
+    that could not stand is not asked: none through a session cut off, nor
+    through one whose links cannot be read (review of PR #876)."""
+    key = settle_key(selector)
+    asked = time.monotonic_ns()
+    held = links_held(watch)
+    if held is False:
+        return RoundTrip(False, False, key, CUT_OFF, asked_ns=asked)
+    if held is None:
+        return RoundTrip(False, False, key, LINKS_UNREADABLE, asked_ns=asked)
     done = threading.Event()
     errors: list[Any] = []
+    oks: list[Any] = []
+    t0 = time.monotonic()
     try:
-        watch.liveliness().get("zk2/@zk/settle", zenoh.handlers.Callback(
-            lambda r: errors.append(r) if r.ok is None else None, done.set), timeout=timeout)
-    except Exception:  # noqa: BLE001 - a closed or broken session makes no round trip
-        return False
-    # a round trip that ended at its timeout (an error reply) did not show
-    # the declarations ordered
-    return done.wait(timeout + 5.0) and not errors
+        watch.liveliness().get(key, zenoh.handlers.Callback(
+            lambda r: (errors if r.ok is None else oks).append(r), done.set), timeout=timeout)
+    except Exception as e:  # noqa: BLE001 - a closed or broken session makes no round trip
+        return RoundTrip(False, False, key, f"the GET could not be made: {e!r}", asked_ns=asked)
+    finished = done.wait(timeout + 5.0)
+    elapsed = time.monotonic() - t0
+    after = links_held(watch)
+    rt = dict(key=key, elapsed_s=elapsed, finished=finished, errors=len(errors), tokens=len(oks), asked_ns=asked)
+    if not finished:
+        return RoundTrip(False, True, why="no final reply", **rt)
+    if errors:
+        # ended at its timeout (an error reply): the declarations not shown ordered
+        return RoundTrip(False, True, why="it ended with an error reply (its timeout)", **rt)
+    if elapsed >= interests_timeout_of(watch):
+        return RoundTrip(False, False, why=AT_INTERESTS_TIMEOUT, **rt)
+    if after is False:
+        return RoundTrip(False, True, why=CUT_OFF_DURING, **rt)
+    if after is None:
+        return RoundTrip(False, True, why=LINKS_UNREADABLE, **rt)
+    return RoundTrip(True, True, **rt)
 
 
 @dataclass
@@ -321,6 +476,12 @@ class Presence:
     #: what ``Session.info.transports()`` said at the read's end, beside the
     #: links: informative only (core §8.1, 0.38: the check reads the links)
     transports_at_end: bool | None = None
+    #: its time reached its session's interests timeout, where zenoh ends a
+    #: liveliness GET with the final reply alone: possibly incomplete (§8.1,
+    #: 0.41)
+    at_interests_timeout: bool = False
+    #: the session's interests timeout the read was judged against, in s
+    interests_timeout_s: float | None = None
 
     @property
     def kind(self) -> str:
@@ -346,6 +507,9 @@ class Presence:
             return f"possibly incomplete ({CUT_OFF_DURING}): {self.count} tokens, silence is not a verdict"
         if not self.links_checked:
             return f"possibly incomplete ({LINKS_UNREADABLE}): {self.count} tokens, silence is not a verdict"
+        if self.at_interests_timeout:
+            return (f"possibly incomplete ({AT_INTERESTS_TIMEOUT}, {self.interests_timeout_s:g} s, after "
+                    f"{self.elapsed_s:.3f} s): {self.count} tokens, silence is not a verdict")
         if not self.complete:
             why = "; ".join(self.errors) or "no final reply"
             return f"possibly incomplete ({why}): {self.count} tokens, silence is not a verdict"
@@ -375,7 +539,7 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     session.liveliness().get(selector, zenoh.handlers.Callback(replies.append, done.set),
                              timeout=timeout)
     finished = done.wait(timeout + 5.0)
-    p = Presence(elapsed_s=time.monotonic() - t0)
+    p = Presence(elapsed_s=time.monotonic() - t0, interests_timeout_s=interests_timeout_of(session))
     for r in replies:
         if r.ok is None:
             p.errors.append(f"{r.err.encoding}: {r.err.payload.to_bytes().decode('utf-8', 'replace')}")
@@ -394,6 +558,13 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     # §8.1 (0.8): ended by the routers' final reply, and no error reply. A
     # GET whose drop never came is incomplete too.
     p.complete = finished and not p.errors
+    # §8.1 (0.41): "A reader MUST read a read whose time reached its
+    # session's interests timeout as possibly incomplete": zenoh ends such a
+    # GET with the final reply alone, no error reply. Its time is counted
+    # from before the GET was asked to its final reply, so it is never less
+    # than the time zenoh's runtime counted.
+    if finished and p.elapsed_s >= p.interests_timeout_s:
+        p.at_interests_timeout, p.complete = True, False
     # §8.1 (0.37, 0.38): a session that reaches no node answers at once,
     # complete and empty; a read in flight when its last link goes is
     # answered so too. Checked again at the read's end, by the links (0.38,
