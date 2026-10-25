@@ -1084,17 +1084,18 @@ pub(crate) enum Command {
     ///
     /// --format json is one document: `report` ("redundancy"), `namespace`,
     /// `service` and `iface` when asked, `apart_s`, `across_face`, `asked`,
-    /// `reads` (each `complete`, `reason`, `instances`), `judgement`, and
-    /// `interfaces`, one row each: `address`, `iface`, `governance`
-    /// (`claim`, `external`, `not_governed`, `no_contract`, `disagree`) and
-    /// `governance_says`, `holders`, `one_incumbent`, `vacancy` and
-    /// `standbys` (each an `answer` — `yes`, `no`, `unobservable`,
-    /// `not_asked`, `not_this_profiles` — a `reason` in conclusions.json's
-    /// tokens and `says` in words; `standbys` with its `count` and `exact`),
-    /// and `instances` (each `instance`, `zid`, `first` and `second` as the
-    /// reads showed it — `token`, `listing` — its `twin` answer and its
-    /// `role`: `incumbent`, `standby`, `twin`, `not_a_candidate`,
-    /// `unknown`); `unobservable` when nothing could be read.
+    /// `reads` (each `complete`, `reason`, `instances`), `judgement`, `rows`
+    /// and `notes`, and `unobservable` when nothing could be read. An
+    /// `interface` row, one per governed interface: `address`, `iface`,
+    /// `governance` (`claim`, `external`, `not_governed`, `no_contract`,
+    /// `disagree`) and `governance_says`, `holders`, `one_incumbent`,
+    /// `vacancy` and `standbys` (each an `answer` — `yes`, `no`,
+    /// `unobservable`, `not_asked`, `not_this_profiles` — a `reason` in
+    /// conclusions.json's tokens and `says` in words; `standbys` with its
+    /// `count` and `exact`), and `instances` (each `instance`, `zid`, `first`
+    /// and `second` as the reads showed it — `token`, `listing` — its `twin`
+    /// answer and its `role`: `incumbent`, `standby`, `twin`,
+    /// `not_a_candidate`, `unknown`).
     Redundancy(RedundancyArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///

@@ -5301,6 +5301,9 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
 struct Proxy {
     endpoint: String,
     conns: Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>>,
+    /// While set, a new connection is closed at once, unforwarded: a
+    /// partition (redundancy.v1 §12's step 2, as its §7 cuts R1 from R2).
+    refused: Arc<std::sync::atomic::AtomicBool>,
     _accept: Task,
 }
 
@@ -5313,8 +5316,13 @@ impl Proxy {
         let endpoint = format!("tcp/{}", listener.local_addr().expect("its address"));
         let conns: Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>> = Arc::default();
         let held = Arc::clone(&conns);
+        let refused: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let refusing = Arc::clone(&refused);
         let accept = tokio::spawn(async move {
             while let Ok((mut down, _)) = listener.accept().await {
+                if refusing.load(Ordering::SeqCst) {
+                    continue;
+                }
                 let Ok(mut up) = tokio::net::TcpStream::connect(&target).await else {
                     continue;
                 };
@@ -5327,8 +5335,20 @@ impl Proxy {
         Proxy {
             endpoint,
             conns,
+            refused,
             _accept: Task(accept),
         }
+    }
+
+    /// Cuts, and refuses every new connection until [`Proxy::heal`].
+    fn partition(&self) {
+        self.refused.store(true, Ordering::SeqCst);
+        self.cut();
+    }
+
+    /// Forwards new connections again.
+    fn heal(&self) {
+        self.refused.store(false, Ordering::SeqCst);
     }
 
     /// Closes every connection forwarded so far.
@@ -7920,3 +7940,568 @@ async fn desired_s9_last_known_and_the_kill_switch_for_a_tool() {
 
 /// The slice of `lab/worker`'s task (`scenarios.md`, "The target").
 const DESIRED_D: &str = "zk2/lab/author/tasking.v1/state/tasks/lab/worker";
+
+// ─── redundancy.v1 (#841, RC): scenarios.md §12, a tool's questions ──────
+//
+// `lab/ledger` on `ledger.v1` (`zenkey/tests/contracts/ledger.v1.toml`),
+// governed under `claim`. A and B are candidates brought up through the
+// runtime as the scenarios' conventions say: three sessions each (the
+// claim's, its HLC on; a watch; a reader), A's id lower than B's, each
+// putting `balance` with its name at its takeover and answering `append`
+// with it. X is a test session that declares tokens under `lab/ledger` and
+// serves a descriptor it writes. T is `zenctl redundancy`, which reads
+// twice, 2 s apart, on a session that has never held a liveliness
+// subscriber; the contract is given it offline, so a shape with no live
+// candidate to serve the bundle is still read as governed.
+
+const LEDGER: &str = "lab/ledger";
+const LEDGER_A: &str = "000000000000000a";
+const LEDGER_B: &str = "000000000000000b";
+const LEDGER_X: &str = "000000000000000c";
+
+fn ledger_path() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/ledger.v1.toml")
+        .to_str()
+        .expect("a UTF-8 path")
+        .to_owned()
+}
+
+fn ledger_contract() -> Contract {
+    let l = load_path(Path::new(&ledger_path()));
+    l.contract.unwrap_or_else(|| panic!("{}", l.report))
+}
+
+/// A candidate's session: a client of `ep`, its HLC on (§2.10), retrying
+/// fast after a cut.
+async fn candidate_session(ep: &str) -> zenoh::Session {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"client\"").expect("config");
+    c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
+        .expect("config");
+    c.insert_json5(
+        "connect/retry",
+        "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
+    )
+    .expect("config");
+    c.insert_json5("timestamping/enabled", "true")
+        .expect("config");
+    zenoh::open(c).await.expect("a candidate's session")
+}
+
+/// A router linked to R1 through `proxy`, retrying fast after a cut.
+async fn router_via(proxy: &Proxy) -> (zenoh::Session, String) {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"router\"").expect("config");
+    c.insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:0"]"#)
+        .expect("config");
+    c.insert_json5("connect/endpoints", &format!("[\"{}\"]", proxy.endpoint))
+        .expect("config");
+    c.insert_json5(
+        "connect/retry",
+        "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
+    )
+    .expect("config");
+    let r = zenoh::open(c).await.expect("R2");
+    let ep = r
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("R2 listens on loopback");
+    (r, ep)
+}
+
+/// The takeover's put (§2.6 step 3): `balance`, its name.
+struct PutName {
+    state: Arc<zenkey::state::StateWriter>,
+    name: &'static str,
+}
+
+impl zenkey::redundancy::Takeover for PutName {
+    fn taking_over<'a>(&'a self, _iface: &'a IfaceId) -> zenkey::call::BoxFuture<'a, ()> {
+        Box::pin(async move {
+            let _ = self.state.put(self.name).await;
+        })
+    }
+}
+
+/// One candidate of `lab/ledger` (or of `@hostid.v1/ledger` on `minter`).
+struct LedgerCandidate {
+    svc: Service,
+    red: zenkey::redundancy::Redundancy,
+    _servers: Vec<zenkey::operation::OperationServer>,
+    _state: Arc<zenkey::state::StateWriter>,
+    _entries: zenkey::writer::Writer,
+    sessions: Vec<zenoh::Session>,
+}
+
+impl LedgerCandidate {
+    async fn up(
+        ep: &str,
+        name: &'static str,
+        id: u64,
+        minter: Option<&zenkey::hostid::HostIdMinter>,
+    ) -> LedgerCandidate {
+        let claim = candidate_session(ep).await;
+        let watch = candidate_session(ep).await;
+        let reader = candidate_session(ep).await;
+        let imp = Implementation::new(ledger_contract());
+        let iface = imp.iface().clone();
+        let mut b = match minter {
+            Some(m) => ServiceBuilder::with_hostid(
+                &claim,
+                ServiceConfig::minted_ephemeral(
+                    zenkey::model::grammar::Name::new("service", "ledger").expect("a name"),
+                ),
+                m,
+            ),
+            None => ServiceBuilder::new(
+                &claim,
+                ServiceConfig::new(LEDGER.parse().expect("an address")),
+            ),
+        };
+        b.set_instance_id(zenkey::model::grammar::InstanceId::from_u64(id));
+        b.implement(imp).expect("ledger.v1");
+        let none = Bindings::new();
+        let state = Arc::new(
+            b.declare_state_writer(&iface, "state/balance", &none)
+                .await
+                .expect("balance"),
+        );
+        let entries = b
+            .declare_writer(&iface, "stream/entries", &none)
+            .await
+            .expect("entries");
+        let server = b
+            .serve(
+                &iface,
+                "@op/append",
+                Some(&none),
+                move |call: Call| async move {
+                    call.reply(name)
+                        .await
+                        .map_err(|e| OpError::internal(e.to_string()))
+                },
+            )
+            .await
+            .expect("append");
+        let startup = zenkey::redundancy::RedundancyStartup::new(reader.clone())
+            .with_watch(watch.clone())
+            .with_retry(Duration::from_secs(2))
+            .with_grace(Duration::from_secs(2))
+            .with_takeover(Arc::new(PutName {
+                state: Arc::clone(&state),
+                name,
+            }));
+        let red = b.redundancy(startup).expect("redundancy.v1");
+        let svc = b.start().await.expect("a candidate starts");
+        LedgerCandidate {
+            svc,
+            red,
+            _servers: vec![server],
+            _state: state,
+            _entries: entries,
+            sessions: vec![claim, watch, reader],
+        }
+    }
+
+    fn role(&self) -> zenkey::redundancy::Role {
+        self.red.role(&"ledger.v1".parse().expect("an interface"))
+    }
+
+    async fn until(&self, role: zenkey::redundancy::Role) {
+        let deadline = Instant::now() + SETTLE;
+        while self.role() != role {
+            assert!(Instant::now() < deadline, "never {role:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn close(self) {
+        self.svc.close().await.expect("a clean close");
+        for s in self.sessions {
+            let _ = s.close().await;
+        }
+    }
+}
+
+/// X (§12's setup): an instance token at `lab/ledger` as instance
+/// [`LEDGER_X`], `ledger.v1`'s interface token when `holds`, and a
+/// descriptor it serves listing `ledger.v1`, marked standby or not —
+/// served before the tokens, in core §8.2's order.
+struct Shape {
+    _tokens: Vec<zenoh::liveliness::LivelinessToken>,
+    _descriptor: zenoh::query::Queryable<()>,
+    session: zenoh::Session,
+}
+
+impl Shape {
+    async fn up(ep: &str, standby: bool, holds: bool) -> Shape {
+        use zenoh::Wait;
+        let session = client(ep, None).await;
+        let fp = zenkey::model::canonical::Fingerprint::of(&ledger_contract());
+        let instance = format!("zk2/{LEDGER}/@zk/instance/{LEDGER_X}");
+        let body = serde_json::to_vec(&json!({
+            "format": "zk2-descriptor/0.1",
+            "service": LEDGER,
+            "instance": LEDGER_X,
+            "interfaces": [{"iface": "ledger.v1", "contract": fp.to_string(), "minor": 0,
+                            "standby": standby, "token": true}],
+            "meta": {"zid": session.zid().to_string()},
+        }))
+        .expect("a descriptor");
+        let descriptor = session
+            .declare_queryable(instance.clone())
+            .callback(move |q| {
+                let _ = q
+                    .reply(q.key_expr().clone(), body.clone())
+                    .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                    .wait();
+            })
+            .await
+            .expect("X's descriptor");
+        let mut tokens = vec![
+            session
+                .liveliness()
+                .declare_token(instance)
+                .await
+                .expect("X's instance token"),
+        ];
+        if holds {
+            tokens.push(
+                session
+                    .liveliness()
+                    .declare_token(format!(
+                        "zk2/{LEDGER}/@zk/alive/ledger.v1/{LEDGER_X}/{}",
+                        fp.hex().fp16()
+                    ))
+                    .await
+                    .expect("X's interface token"),
+            );
+        }
+        Shape {
+            _tokens: tokens,
+            _descriptor: descriptor,
+            session,
+        }
+    }
+
+    async fn down(self) {
+        drop(self._tokens);
+        drop(self._descriptor);
+        let _ = self.session.close().await;
+    }
+}
+
+/// T: `zenctl redundancy <address> --contracts ledger.v1 --format json`.
+fn t_args(address: &str, path: &str) -> Vec<String> {
+    [
+        "redundancy",
+        address,
+        "--contracts",
+        path,
+        "--format",
+        "json",
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect()
+}
+
+/// T's one row, and an instance's role and fourth answer in it.
+fn t_row(run: &Run) -> Value {
+    rows_of(&run.json(), "interface")
+        .first()
+        .map(|r| (*r).clone())
+        .unwrap_or(Value::Null)
+}
+
+fn t_instance(row: &Value, id: &str) -> (String, String) {
+    let i = row["instances"]
+        .as_array()
+        .and_then(|a| a.iter().find(|i| i["instance"] == id))
+        .unwrap_or_else(|| panic!("{id} in {row}"));
+    (
+        i["role"].as_str().unwrap_or("?").to_owned(),
+        format!(
+            "{}:{}",
+            i["twin"]["answer"].as_str().unwrap_or("?"),
+            i["twin"]["reason"].as_str().unwrap_or("?")
+        ),
+    )
+}
+
+fn t_answer(row: &Value, q: &str) -> String {
+    format!(
+        "{}:{}",
+        row[q]["answer"].as_str().unwrap_or("?"),
+        row[q]["reason"].as_str().unwrap_or("?")
+    )
+}
+
+async fn t_until(bus: &Bus, address: &str, done: impl Fn(&Run) -> bool) -> Run {
+    let path = ledger_path();
+    let args = t_args(address, &path);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    bus.until(&args, |r| !r.stdout.is_empty() && done(r)).await
+}
+
+fn has_row(r: &Run) -> bool {
+    serde_json::from_str::<Value>(&r.stdout)
+        .ok()
+        .is_some_and(|v| !rows_of(&v, "interface").is_empty())
+}
+
+/// §12 steps 1 and 7 (its first half): A serves and B stands by. T: one
+/// incumbent, no vacancy, one standby, exact, A the incumbent and B a
+/// standby, exit 0; the doctor finds no split-brain and no token-missing
+/// for B (core §6, 0.39), nor a lasting vacancy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_one_serves_one_stands_by() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    a.until(Role::Serving).await;
+    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, None).await;
+    let run = t_until(&bus, LEDGER, |r| {
+        r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
+    })
+    .await;
+    exits(&run, 0);
+    let row = t_row(&run);
+    assert_eq!(t_answer(&row, "one_incumbent"), "yes:one", "{run}");
+    assert_eq!(t_answer(&row, "vacancy"), "no:held", "{run}");
+    assert_eq!(
+        (
+            t_answer(&row, "standbys"),
+            &row["standbys"]["count"],
+            &row["standbys"]["exact"]
+        ),
+        ("yes:standing_by".to_owned(), &json!(1), &json!(true)),
+        "{run}"
+    );
+    assert_eq!(
+        t_instance(&row, LEDGER_A),
+        ("incumbent".into(), "no:incumbent".into()),
+        "{run}"
+    );
+    assert_eq!(
+        t_instance(&row, LEDGER_B),
+        ("standby".into(), "no:standby".into()),
+        "{run}"
+    );
+    assert_eq!(b.role(), Role::Standby);
+
+    // Step 7, step 1's shape.
+    let dr = bus
+        .zenctl(&doctor_args(&[
+            "--check",
+            "split-brain",
+            "--check",
+            "token-missing",
+            "--check",
+            "redundancy-vacancy",
+            "--format",
+            "json",
+        ]))
+        .await;
+    let doc = dr.json();
+    for id in ["split-brain", "token-missing", "redundancy-vacancy"] {
+        assert_eq!(
+            check_row(&doc, id)["verdict"]["answer"],
+            "not_established",
+            "{id}: {dr}"
+        );
+    }
+    exits(&dr, 0);
+    b.close().await;
+    a.close().await;
+}
+
+/// §12 steps 2 and 7 (its second half): the split of §7 step 2, T a client
+/// of R1 after the heal and before B's step-down, which the test holds.
+/// T: no, `split`; A yes, `split_lowest`; B yes, `split`; exit 1. The
+/// doctor: one `split-brain` finding naming A and B. Released, B steps
+/// down, and T reads one incumbent again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_split_held_after_the_heal() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    let proxy = Proxy::to(&bus.endpoint).await;
+    let (_r2, ep2) = router_via(&proxy).await;
+    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    a.until(Role::Serving).await;
+    let b = LedgerCandidate::up(&ep2, "B", 0xb, None).await;
+    // B reads A's token across the link, and stands by on it.
+    let run = t_until(&bus, LEDGER, |r| {
+        r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
+    })
+    .await;
+    exits(&run, 0);
+    assert_eq!(b.role(), Role::Standby);
+    // §7 steps 1 and 2: the link cut, B takes over behind it.
+    proxy.partition();
+    b.until(Role::Serving).await;
+    assert_eq!(a.role(), Role::Serving, "A still serves");
+    // The heal, B's step-down held (§9's hold).
+    b.red.hold_heal(true);
+    proxy.heal();
+    let run = t_until(&bus, LEDGER, |r| {
+        r.code == 1 && has_row(r) && t_answer(&t_row(r), "one_incumbent") == "no:split"
+    })
+    .await;
+    exits(&run, 1);
+    let row = t_row(&run);
+    assert_eq!(t_answer(&row, "one_incumbent"), "no:split", "{run}");
+    assert_eq!(
+        t_instance(&row, LEDGER_A),
+        ("twin".into(), "yes:split_lowest".into()),
+        "{run}"
+    );
+    assert_eq!(
+        t_instance(&row, LEDGER_B),
+        ("twin".into(), "yes:split".into()),
+        "{run}"
+    );
+    // Step 7, step 2's shape: one split-brain finding, naming A and B.
+    let dr = bus
+        .zenctl(&doctor_args(&[
+            "--check",
+            "split-brain",
+            "--format",
+            "json",
+        ]))
+        .await;
+    let doc = dr.json();
+    let sb = check_row(&doc, "split-brain");
+    assert_eq!(sb["verdict"]["answer"], "established", "{dr}");
+    let findings = sb["findings"].as_array().expect("findings");
+    assert_eq!(findings.len(), 1, "{dr}");
+    let evidence = findings[0]["evidence"].as_str().unwrap_or_default();
+    assert!(
+        evidence.contains(LEDGER_A) && evidence.contains(LEDGER_B),
+        "{dr}"
+    );
+    assert!(evidence.contains("redundancy.v1 governs it"), "{dr}");
+    exits(&dr, 1);
+    // Released: B, the higher, steps down (§2.9), and A stands alone.
+    b.red.hold_heal(false);
+    b.until(Role::Standby).await;
+    let run = t_until(&bus, LEDGER, |r| {
+        r.code == 0 && has_row(r) && t_answer(&t_row(r), "one_incumbent") == "yes:one"
+    })
+    .await;
+    exits(&run, 0);
+    assert_eq!(t_instance(&t_row(&run), LEDGER_A).0, "incumbent", "{run}");
+    b.close().await;
+    a.close().await;
+}
+
+/// §12 steps 3 to 5, X's shapes. 3: no instance serves, X marked standby:
+/// no, `vacant`; a vacancy yes, `lasting`; exit 1 (a lasting vacancy is
+/// a finding, zenctl's exit contract). 4: A serves, X listing it unmarked
+/// with no token: X yes, `unmarked`; exit 1. 5: no instance runs, X holding
+/// the token marked standby: X yes, `marked_holding`; one incumbent yes,
+/// `one`, a holder being an incumbent whatever its mark; exit 1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_the_shapes_x_builds() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    // Step 3.
+    let x = Shape::up(&bus.endpoint, true, false).await;
+    let run = t_until(&bus, LEDGER, |r| {
+        r.code == 1 && has_row(r) && t_answer(&t_row(r), "vacancy") == "yes:lasting"
+    })
+    .await;
+    exits(&run, 1);
+    let row = t_row(&run);
+    assert_eq!(t_answer(&row, "one_incumbent"), "no:vacant", "{run}");
+    assert_eq!(t_answer(&row, "vacancy"), "yes:lasting", "{run}");
+    x.down().await;
+    // Step 4.
+    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    a.until(Role::Serving).await;
+    let x = Shape::up(&bus.endpoint, false, false).await;
+    let run = t_until(&bus, LEDGER, |r| {
+        r.code == 1
+            && has_row(r)
+            && t_row(r)["instances"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|i| i["instance"] == LEDGER_X))
+            && t_instance(&t_row(r), LEDGER_X).1 == "yes:unmarked"
+    })
+    .await;
+    exits(&run, 1);
+    assert_eq!(
+        t_instance(&t_row(&run), LEDGER_X),
+        ("twin".into(), "yes:unmarked".into()),
+        "{run}"
+    );
+    assert_eq!(t_answer(&t_row(&run), "one_incumbent"), "yes:one", "{run}");
+    x.down().await;
+    a.close().await;
+    // Step 5.
+    let x = Shape::up(&bus.endpoint, true, true).await;
+    let run = t_until(&bus, LEDGER, |r| {
+        r.code == 1
+            && has_row(r)
+            && t_row(r)["instances"]
+                .as_array()
+                .is_some_and(|a| a.len() == 1)
+            && t_instance(&t_row(r), LEDGER_X).1 == "yes:marked_holding"
+    })
+    .await;
+    exits(&run, 1);
+    let row = t_row(&run);
+    assert_eq!(
+        t_instance(&row, LEDGER_X),
+        ("twin".into(), "yes:marked_holding".into()),
+        "{run}"
+    );
+    assert_eq!(t_answer(&row, "one_incumbent"), "yes:one", "{run}");
+    x.down().await;
+}
+
+/// §12 step 6: A serves and B stands by on a system `hostid.v1` minted,
+/// each descriptor listing the profile. Two session zids at one minted
+/// address, and B recognised a standby: not counted, and the doctor says
+/// so, no finding (hostid.v1 §2.12, 0.6, 0.7). T reads them as step 1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_standby_on_a_minted_system() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    let root = tempfile::tempdir().expect("a root");
+    std::fs::create_dir_all(root.path().join("var/lib")).expect("var/lib");
+    let minter = zenkey::hostid::HostIdMinter::new(zenkey::hostid::HostIdSource::at(root.path()));
+    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, Some(&minter)).await;
+    a.until(Role::Serving).await;
+    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, Some(&minter)).await;
+    let address = a.svc.address().to_string();
+    assert!(address.starts_with("h-"), "{address}");
+    let run = t_until(&bus, &address, |r| {
+        r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
+    })
+    .await;
+    exits(&run, 0);
+    let dr = bus
+        .zenctl(&doctor_args(&[
+            "--check",
+            "hostid-duplicate",
+            "--format",
+            "json",
+        ]))
+        .await;
+    let doc = dr.json();
+    let h = check_row(&doc, "hostid-duplicate");
+    assert_eq!(h["verdict"]["answer"], "not_established", "{dr}");
+    let said = h["verdict"]["reason"].as_str().unwrap_or_default();
+    assert!(said.contains("1 recognised standby"), "{dr}");
+    assert!(said.contains(LEDGER_B), "{dr}");
+    exits(&dr, 0);
+    assert_eq!(b.role(), Role::Standby);
+    b.close().await;
+    a.close().await;
+}
