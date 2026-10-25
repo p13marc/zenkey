@@ -1354,6 +1354,11 @@ def _from_contract(found: list[dict[str, Any]], iface: str, target: str, require
     return SliceTaken((b.key,), source)
 
 
+def _readable(rev: Any) -> bool:
+    """A revision as take_slice reads one: a dict whose ``resources`` is a list."""
+    return isinstance(rev, dict) and isinstance(rev.get("resources"), list)
+
+
 def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict[str, Any] | None,
                held: Iterable[dict[str, Any]] = ()) -> SliceTaken:
     """§2.17 (0.5) "What a tool reads to answer", the slice:
@@ -1378,12 +1383,18 @@ def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict
     declares any is no help, one desired resource included". The binding's
     absence is the descriptor's word, read first: unbound and optional is
     the kill switch, unbound and required ``required_unbound``."""
-    held = list(held)
+    # A revision whose resources do not read (no list) shows nothing: it is
+    # not in hand, and can prove neither a slice nor that the role is no
+    # target's. The tool's revisions come from loaded or verified contracts,
+    # whose resources are always a list; another caller may pass less.
+    if named is not None and not _readable(named):
+        named = None
+    held = [rev for rev in held if _readable(rev)]
     if requirement.get("unread"):
         if not requirement.get("bindings"):
             return SliceTaken((), None, () if requirement.get("optional") else ("required_unbound",))
         revisions = [named] if named is not None else held
-        if revisions and all(not any(KEY in (r.get("annotations") or {}) for r in rev.get("resources") or [])
+        if revisions and all(not any(KEY in (r.get("annotations") or {}) for r in rev["resources"])
                              for rev in revisions):
             return SliceTaken((), None, desired=False)
         return SliceTaken((), None, unread=True)
