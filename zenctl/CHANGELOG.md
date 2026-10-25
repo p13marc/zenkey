@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `desired` on desired.v1 text 0.6: a role on no desired resource, two documents, two reports that differ (#840, DF)
+
+| Before | Now | Notes |
+|---|---|---|
+| `desired`: a role whose author's revision in hand, named or held, declares no desired resource the requirement names could be read from the target's requirement alone, `unobservable` `no_report` | **not asked**, `not_a_target`, the row's `listing` `not_listed`, across a face too | §2.17, text 0.6, F-217: the target-alone slice is only for a role with no revision of its interface in hand |
+| a requirement naming two desired resources of the author's declaration: the slice of whichever came first | an invalid binding, `binding_invalid: ["two_documents"]`, no slice: **unobservable**, `no_report` | §2.1, §2.3, F-218. From the target alone every template stays a candidate, the report's key choosing |
+| two readable reports, of two report resources, that claim the slice and differ: no `report` in the row | `report.unreadable` `two_differ: …`, `report.key` the first's and `report.differing` the others' keys | §2.10, text 0.5, F-212; the answers were `report_invalid` already |
+| `desired --help` in text 0.4's words | 0.5's and 0.6's: every template under either kind token from the target alone, a version dated at its slice GET's answer, `not_a_target`, `two_documents` | F-219 |
+
 ## Unreleased (`main`, zk2) — `redundancy.v1` in the tools: `redundancy`, the doctor, two conform cases, `gen` and `serve` elect (#841, RC)
 
 `redundancy.v1` (`spec/profiles/redundancy/v1.md`) lets several instances

@@ -231,6 +231,9 @@ fn answer(j: Judged, r: &RoleRead, t: &TargetRead, rr: &RoleReading<'_>) -> Desi
 
 fn listing(r: &RoleRead, t: &TargetRead) -> DesiredListing {
     let l = match &t.word {
+        // A revision in hand shows the role on no desired resource,
+        // whatever the deployment's word (text 0.6, F-217).
+        Some(_) if r.resolution.listing == Some(Listing::NotListed) => Some(Listing::NotListed),
         Some(w) => Some(w.listing),
         None => r.resolution.listing.filter(|_| t.descriptor.is_ok()),
     };
@@ -307,31 +310,53 @@ fn row(
         stamp: version.map(|s| s.to_string()),
         why: rr.author_why.clone(),
     });
-    let report = rr.report.map(|x| DesiredReportSeen {
-        key: x.key.clone(),
-        document: x.read.as_ref().ok().cloned(),
-        unreadable: x
-            .read
-            .as_ref()
-            .err()
-            .map(|u| format!("{}: {u}", u.as_str())),
-        findings: x
-            .read
-            .as_ref()
-            .map(|d| d.check().iter().map(|f| f.as_str().to_owned()).collect())
-            .unwrap_or_default(),
-        stamp: x.stamp.as_ref().map(crate::bus::health::Stamped::report),
-        freshness: DesiredFreshness {
-            verdict: match rr.freshness.verdict {
-                zenkey_model::freshness::Verdict::Fresh => FreshnessToken::Fresh,
-                zenkey_model::freshness::Verdict::Stale => FreshnessToken::Stale,
-                zenkey_model::freshness::Verdict::Unobservable => FreshnessToken::Unobservable,
-                zenkey_model::freshness::Verdict::NotAsked => FreshnessToken::NotAsked,
-            },
-            reason: rr.freshness.reason.as_str().to_owned(),
-            says: rr.freshness.reason.says().to_owned(),
+    let freshness = DesiredFreshness {
+        verdict: match rr.freshness.verdict {
+            zenkey_model::freshness::Verdict::Fresh => FreshnessToken::Fresh,
+            zenkey_model::freshness::Verdict::Stale => FreshnessToken::Stale,
+            zenkey_model::freshness::Verdict::Unobservable => FreshnessToken::Unobservable,
+            zenkey_model::freshness::Verdict::NotAsked => FreshnessToken::NotAsked,
         },
-    });
+        reason: rr.freshness.reason.as_str().to_owned(),
+        says: rr.freshness.reason.says().to_owned(),
+    };
+    let report = match (rr.report, rr.differing.split_first()) {
+        (Some(x), _) => Some(DesiredReportSeen {
+            key: x.key.clone(),
+            document: x.read.as_ref().ok().cloned(),
+            unreadable: x
+                .read
+                .as_ref()
+                .err()
+                .map(|u| format!("{}: {u}", u.as_str())),
+            differing: vec![],
+            findings: x
+                .read
+                .as_ref()
+                .map(|d| d.check().iter().map(|f| f.as_str().to_owned()).collect())
+                .unwrap_or_default(),
+            stamp: x.stamp.as_ref().map(crate::bus::health::Stamped::report),
+            freshness,
+        }),
+        // Two that claim the slice and differ are unreadable, each named
+        // (§2.10, text 0.5, F-212), never as if none were read: `key` the
+        // first claimant's, `document` none, the others in `differing`.
+        (None, Some((first, rest))) => Some(DesiredReportSeen {
+            key: first.key.clone(),
+            document: None,
+            unreadable: Some(format!(
+                "two_differ: {}",
+                rr.no_report.as_deref().unwrap_or(
+                    "readable reports of two report resources claim the slice and differ (§2.10)"
+                )
+            )),
+            differing: rest.iter().map(|x| x.key.clone()).collect(),
+            findings: vec![],
+            stamp: None,
+            freshness,
+        }),
+        (None, None) => None,
+    };
     DesiredRow {
         target,
         role,
@@ -628,6 +653,39 @@ mod tests {
                 "no:unbound"
             ]
         );
+    }
+
+    /// Two readable reports, of two report resources, that claim the slice
+    /// and differ: unreadable, `report_invalid`, and the row's report says
+    /// so with both keys, never as if none were read (§2.10, text 0.5,
+    /// F-212; zk2py round 59's row comparison).
+    #[test]
+    fn two_reports_that_differ_are_unreadable_in_the_row() {
+        let spec = DesiredSpec::new(Duration::from_secs(1));
+        let mut t = target(
+            Some(&format!(r#"{{"key":"{D}","source":"baseline"}}"#)),
+            role(true, Seen::Present, Some((false, 100, "a1"))),
+        );
+        let other = "zk2/lab/worker/worker2.v1/state/desired/task";
+        if let Some(Ok(g)) = &mut t.reports {
+            g.selectors.push(other.into());
+            g.replies.push(ReportReply {
+                key: other.into(),
+                read: dm::decode(format!(r#"{{"key":"{D}","source":"call"}}"#).as_bytes()),
+                stamp: None,
+                horizon: Horizon::Undeclared,
+            });
+        }
+        let r = judged(&t, &spec);
+        assert_eq!(tokens(&r)[0], "unobservable:report_invalid");
+        let rep = r.report.expect("the row carries the two, unreadable");
+        assert_eq!(rep.key, RP);
+        assert_eq!(rep.differing, [other]);
+        assert!(rep.document.is_none());
+        let why = rep.unreadable.expect("unreadable");
+        assert!(why.starts_with("two_differ: "), "{why}");
+        assert!(why.contains(other), "{why}");
+        assert!(r.answers.converged.says.contains(other), "{:?}", r.answers);
     }
 
     /// The premises: no report, an unreadable one, the target absent, a

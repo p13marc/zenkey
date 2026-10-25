@@ -1810,6 +1810,70 @@ fn the_help_documents_the_redundancy_surface() {
     }
 }
 
+/// desired.v1 §2.1, text 0.7, F-224 (`scenarios.md` §11): given copies of
+/// `tasking.v1` with two desired resources and of `worker.v1` whose
+/// requirement names both, `--desired-target` refuses to start with the
+/// runtime's refusal, `not started: role "task": its binding is invalid
+/// (two_documents) (desired.v1 §2.3)`, before any token.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_refuses_a_role_on_two_documents() {
+    let (_r1, ep) = router(None).await;
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts");
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::copy(src.join("tasking.json"), dir.path().join("tasking.json")).unwrap();
+    std::fs::copy(
+        src.join("../../../spec/profiles/desired/desired.v1.json"),
+        dir.path().join("desired.v1.json"),
+    )
+    .unwrap();
+    let tasking = std::fs::read_to_string(src.join("tasking.v1.toml")).unwrap()
+        + "\n[resources.\"plans/{system}/{service}\"]\nkind        = \"state\"\n\
+           type        = \"json:Task\"\n\
+           params      = { system = \"string\", service = \"string\" }\n\
+           cardinality = 16\n\
+           annotations = { \"desired.target_param\" = [\"system\", \"service\"], \
+           \"freshness.ttl_s\" = 0 }\n";
+    let worker = std::fs::read_to_string(src.join("worker.v1.toml"))
+        .unwrap()
+        .replace(
+            "\"../../../spec/profiles/desired/desired.v1.json\"",
+            "\"desired.v1.json\"",
+        )
+        .replace(
+            "resources = [\"tasks/{system}/{service}\"]",
+            "resources = [\"tasks/{system}/{service}\", \"plans/{system}/{service}\"]",
+        );
+    let (t, w) = (
+        dir.path().join("tasking.v1.toml"),
+        dir.path().join("worker.v1.toml"),
+    );
+    std::fs::write(&t, tasking).unwrap();
+    std::fs::write(&w, worker).unwrap();
+    let (t, w) = (t.display().to_string(), w.display().to_string());
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--desired-target",
+        "lab/author",
+        "lab/worker",
+        &t,
+        &w,
+    ]);
+    let why = o.task.await.unwrap().unwrap_err();
+    assert_eq!(
+        why,
+        "not started: role \"task\": its binding is invalid (two_documents) (desired.v1 §2.3)"
+    );
+    let g = client(&ep).await;
+    let read = presence::liveliness_read(&g, "zk2/lab/worker/@zk/**", T)
+        .await
+        .unwrap();
+    assert!(
+        read.complete && read.keys.is_empty(),
+        "no token of lab/worker: {read:?}"
+    );
+}
+
 /// F-214 (#841, RC): a contract listing `redundancy.v1` is written only
 /// once the start has checked its declaration, so a copy of `ledger.v1`
 /// whose election is `"vote"` stops the owner with the start's refusal,

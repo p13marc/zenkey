@@ -4,6 +4,118 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.7 — 2026-10-25: round 61 (#840, DF; #609)
+
+zk2py read 0.6 cold in round 61, at PR #864's head, and found every
+earlier finding resolved. It filed one, F-224 (minor), which #840's
+coordinator accepted. It is answered here, beside review-bot's points on
+PR #864, which settle what a requirement naming no resource names. 0.6
+stays as the round read it.
+
+The evidence, counted from the files: `conformance/declarations.json` (43
+cases), `conformance/bindings.json` (29), `conformance/order.json` (88),
+`conformance/reports.json` (80), `conformance/conclusions.json` (35),
+`conformance/schema.json` (3) and `conformance/slices.json` (31), 309 in
+all; and `scenarios.md`'s eleven sections, §11 new. No case that existed
+changes. `slices.json` gains two cases.
+
+**Answered.**
+- **F-224, the target's refusal had no evidence of its own** (§2.1). 0.6's
+  "A target MUST refuse such a role at its start" cited `bindings.json`,
+  which states the reading, `two_documents`, not the act: a target that
+  reads the binding right and starts anyway passed every case, and
+  "refuse such a role" could be read as "start without it". Now, in
+  zk2py's words: a target given a role on two or more desired resources of
+  its author's declaration MUST refuse to start, as core §8.2 step 2
+  refuses an invalid declaration: nothing is declared and no instance
+  token of it appears. `[Sc: §11]`: the target given such a role shows no
+  instance token within 5 s, by liveliness at S, against a control whose
+  requirement names one of the two, which starts. The reference refuses
+  the start, not the role alone: a builder whose role was refused refuses
+  `start()` too, `not started: …`, as the owner example says on exit
+  (`zenkey/tests/profile_desired.rs`'s `s11_…`, and the owner example's
+  test).
+- **What a requirement naming no resource names** (§2.1, review of PR
+  #864). Core §3.1's default is every resource, and a role a component's
+  manifest declares has no `resources` a tool can read, its descriptor
+  naming no declaring contract (core §3.3). Both name every resource of
+  the interface, so on an author with two desired resources either is
+  `two_documents`; with one desired resource beside plain ones, the one is
+  the slice. The reference's runtime reads a manifest's role so too, and a
+  lookup that fails is an error, never every resource. `[F: slices.json]`:
+  a requirement naming none on two desired resources, and on one beside a
+  plain one.
+
+**Deliberately not changed.**
+- **§2.3's order.** `two_documents` left unbound reads as the kill switch
+  (optional) or `required_unbound` (required), as `bindings.json`'s two
+  cases of 0.6 already state.
+- **§2.17 and §5**, their tokens, and every fixture that existed.
+
+## 0.6 — 2026-10-25: round 59 (#840, DF; #609)
+
+zk2py read 0.5 cold in round 59 (PR #861): every case passed, and the two
+tools agreed everywhere, on two shapes the text did not state. It filed
+three findings, F-217 to F-219, which #840's coordinator accepted
+(issuecomment-35724). F-217 and F-218 change the reference's reading and
+its runtime; F-219 is the reference tool's help.
+
+The evidence, counted from the files: `conformance/declarations.json` (43
+cases), `conformance/bindings.json` (29), `conformance/order.json` (88),
+`conformance/reports.json` (80), `conformance/conclusions.json` (35),
+`conformance/schema.json` (3) and `conformance/slices.json` (29), 307 in
+all; and `scenarios.md`'s ten sections. No case that existed changes.
+`bindings.json` gains an input, `also`, the other desired resources of the
+author's declaration the requirement names, and four cases;
+`slices.json` gains an answer, `{found: not_a_target}`, and seven cases.
+
+**Answered.**
+- **F-217, a role on no desired resource** (§2.1, §2.17, §5). A target's
+  roles are not all on desired resources: a worker may also consume its
+  author's plain state. 0.5 said what a tool answers when the revision its
+  descriptor names declares no desired resource (both tools answered
+  `not_a_target`), and nothing when only a held revision showed it: the
+  target-alone rule then read the role as a candidate, `no_report`. Now a
+  role whose author's revision in hand, named or held, declares no desired
+  resource the requirement names is not this profile's, **not asked**,
+  `not_a_target`, and the target alone is read only with no revision of
+  the interface in hand at all. The reference's reading changes: a held
+  revision showing the resource not desired gives `not_a_target`, never
+  `no_report`. `[F: slices.json]`: the named revision and a held one each
+  declaring the resource with no `desired.target_param`, and a held one
+  declaring no resource the requirement names.
+- **F-218, a requirement naming two desired resources** (§2.1, §2.3,
+  §2.17). 0.5 let a requirement name several templates from the target
+  alone (F-210), but with the author's contract in hand took its first
+  desired resource, by an order no rule states: one report answered or
+  not as the tool held the contract or not. Now a requirement on desired
+  resources names exactly one, §2.1's "one role per document type", and
+  one naming two or more, as the author's declaration shows, is an invalid
+  binding, `two_documents`, in §2.3's list after `required_unbound`
+  (which reads only whether a binding exists, leaving the kill switch the
+  deployment's) and alone (every later problem binds the one slice there
+  is not). It gives no slice: **unobservable**, `no_report`, the problem
+  beside. From the target alone it cannot be seen, and every template
+  stays a candidate. A target MUST refuse such a role at its start,
+  nothing of it declared, as core §8.2 step 2 refuses an invalid
+  declaration: the reference does (`zenkey::desired`), and its model
+  reads `two_documents` from a requirement's count of desired resources
+  (`zenkey_model::desired::Requirement::documents`). `[F: bindings.json]`:
+  two documents, two documents beside two authors, and the order against
+  `required_unbound` and the kill switch; `[F: slices.json]`: the named
+  revision and a held one each declaring two, the order, and the same
+  requirement from the target alone.
+- **F-219, `zenctl desired --help`** (the reference tool) said 0.4's rules.
+  It now says 0.5's (every template under either kind token from the
+  target alone, the report's key choosing; a version dated at its slice
+  GET's answer) and 0.6's (`not_a_target`, `two_documents`).
+
+**Deliberately not changed.**
+- **The fixtures that existed**, and `conclusions.json`'s inputs: a role
+  no target's reaches §2.17 as a descriptor not listing it, and
+  `two_documents` as no report.
+- **§5's four questions** and their tokens, and the scenarios.
+
 ## 0.5 — 2026-10-24: round 57 (#840, DE; #609)
 
 zk2py read 0.4 cold in round 57 (PR #857) and filed four findings, F-210

@@ -36,8 +36,10 @@ pub enum Error {
     Contract(String),
     /// Bring-up refused (spec §8.2 step 2): a required resource is not
     /// exposed, an optional one is neither exposed nor accounted for, a
-    /// required role is bound to nothing, or the tokenless set names
-    /// `archive.v1` (§4.4). No token was declared.
+    /// required role is bound to nothing, the tokenless set names
+    /// `archive.v1` (§4.4), or a `desired.v1` role's binding is invalid,
+    /// `two_documents` among them (`desired.v1` §2.1, text 0.7). No token
+    /// was declared.
     #[error("not started: {0}")]
     NotExposed(String),
     /// This owner's clock is ahead of its router beyond the HLC delta: it

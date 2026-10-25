@@ -679,12 +679,29 @@ fn across_face(a: &Addr, word: &FaceWord, spec: &DesiredSpec, offline: &Contract
                 &none,
                 offline,
             );
-            resolve_role(a, &entry, req.resources.as_deref(), author_c)
-                .unwrap_or_else(|| RoleResolution::bare(role.clone(), Some(word.listing)))
+            // A revision of the author's held offline that declares no
+            // desired resource the requirement names shows the role is no
+            // target's, whatever the deployment's word (text 0.6, F-217):
+            // the one `None` of `resolve_role`, which only a revision in
+            // hand gives. With none in hand, the word's listing stands.
+            let held = author_c.is_some();
+            match resolve_role(a, &entry, req.resources.as_deref(), author_c) {
+                Some(r) => r,
+                None => RoleResolution::bare(
+                    role.clone(),
+                    Some(if held {
+                        Listing::NotListed
+                    } else {
+                        word.listing
+                    }),
+                ),
+            }
         }
         None => RoleResolution::bare(role.clone(), Some(word.listing)),
     };
-    res.listing = Some(word.listing);
+    if res.listing != Some(Listing::NotListed) {
+        res.listing = Some(word.listing);
+    }
     let author_seen = word.author.as_ref().map(|_| {
         if word.author_across {
             (Seen::AcrossFace, None)
@@ -902,4 +919,99 @@ async fn archived(session: &Session, at: &[Addr], slice: &str, t: Duration) -> V
     )
     .await;
     read.into_iter().flatten().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap as Map;
+    use zenkey_model::contract::{Contract, load_path, load_str};
+
+    fn dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts")
+    }
+
+    fn file(name: &str) -> Contract {
+        let l = load_path(&dir().join(format!("{name}.toml")));
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
+    }
+
+    fn set(contracts: Vec<Contract>) -> ContractSet {
+        let mut s = ContractSet::new();
+        for c in contracts {
+            s.insert(crate::model::catalog::Revision::from_contract(
+                c,
+                crate::report::ContractSource::File,
+            ));
+        }
+        s
+    }
+
+    fn word(bound: bool) -> FaceWord {
+        FaceWord {
+            listing: Listing::Listed { bound },
+            author: bound.then(|| "lab/author".parse().unwrap()),
+            params: Map::from([
+                ("system".to_owned(), "self.system".to_owned()),
+                ("service".to_owned(), "self.service".to_owned()),
+            ]),
+            author_across: false,
+        }
+    }
+
+    fn read(word: &FaceWord, offline: &ContractSet) -> TargetRead {
+        let mut spec = DesiredSpec::new(Duration::from_secs(1));
+        spec.role = Some("task".to_owned());
+        across_face(&"lab/worker".parse().unwrap(), word, &spec, offline)
+    }
+
+    /// Across a face (§2.14, §2.17 step 2; text 0.6, F-217): a revision of
+    /// the author's held offline that declares no desired resource the
+    /// requirement names makes the role not a target, whatever the
+    /// deployment's word; with none held, the word's listing stands,
+    /// bound or the kill switch, and the slice is the target's alone.
+    #[test]
+    fn across_a_face_only_a_held_revision_shows_a_role_no_targets() {
+        let plain = load_str(
+            &std::fs::read_to_string(dir().join("tasking.v1.toml"))
+                .unwrap()
+                .replace(
+                    "annotations = { \"desired.target_param\" = [\"system\", \"service\"], ",
+                    "annotations = { ",
+                )
+                .replace("\"desired.v1\", ", ""),
+            &dir(),
+            Some("tasking.v1.toml"),
+        );
+        let plain = plain.contract.unwrap_or_else(|| panic!("{}", plain.report));
+        let not_desired = set(vec![file("worker.v1"), plain]);
+        for bound in [true, false] {
+            let t = read(&word(bound), &not_desired);
+            assert_eq!(
+                t.roles[0].resolution.listing,
+                Some(Listing::NotListed),
+                "a held revision shows the role on no desired resource, bound {bound}"
+            );
+        }
+        let none_held = set(vec![file("worker.v1")]);
+        let t = read(&word(true), &none_held);
+        let r = &t.roles[0].resolution;
+        assert_eq!(r.listing, Some(Listing::Listed { bound: true }));
+        assert_eq!(r.slice_from, Some(SliceFrom::Requirement));
+        let t = read(&word(false), &none_held);
+        assert_eq!(
+            t.roles[0].resolution.listing,
+            Some(Listing::Listed { bound: false }),
+            "the kill switch, the word's"
+        );
+        let desired = set(vec![file("worker.v1"), file("tasking.v1")]);
+        let t = read(&word(true), &desired);
+        let r = &t.roles[0].resolution;
+        assert_eq!(r.listing, Some(Listing::Listed { bound: true }));
+        assert_eq!(r.slice_from, Some(SliceFrom::OfflineContract));
+        assert_eq!(
+            r.slice,
+            ["zk2/lab/author/tasking.v1/state/tasks/lab/worker"]
+        );
+    }
 }

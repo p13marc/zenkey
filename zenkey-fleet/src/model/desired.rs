@@ -179,25 +179,30 @@ fn one_author(bindings: &[String]) -> Option<Addr> {
 }
 
 /// The desired resources of `author` among the requirement's `templates`
-/// (every one when the requirement names none), with each declaration
-/// (§2.2): the first in the contract's order, by its `(token, template)`.
-fn desired_resource<'c>(
+/// (every one when the requirement names none), each with its declaration
+/// (§2.2), in the contract's order. One role per document type (§2.1):
+/// more than one is `two_documents` (text 0.6, F-218), and none makes the
+/// role no target's (F-217).
+fn desired_resources<'c>(
     author: &'c Contract,
     templates: Option<&[String]>,
-) -> Option<(&'c Resource, Declaration)> {
+) -> Vec<(&'c Resource, Declaration)> {
     author
         .resources
         .iter()
         .filter(|r| templates.is_none_or(|t| t.iter().any(|t| t == r.template.as_str())))
         .map(|r| (r, dm::declaration_of(r)))
-        .find(|(_, d)| *d != Declaration::NotThisProfiles)
+        .filter(|(_, d)| *d != Declaration::NotThisProfiles)
+        .collect()
 }
 
 /// Resolves one `requires` entry of `own`'s descriptor (§2.3): its
 /// listing, its author, and its slice from `author`'s contract when one is
 /// in hand, else from the requirement's `templates` (the target's contract
-/// declaring the role). `None` when the author's contract declares no
-/// desired resource the requirement names: the role is not this profile's.
+/// declaring the role). `None` when the author's contract in hand declares
+/// no desired resource the requirement names: the role is not this
+/// profile's, not asked, `not_a_target` (text 0.6, F-217). One naming two
+/// or more is `two_documents`, no slice (F-218).
 pub fn resolve_role(
     own: &Addr,
     entry: &RequireEntry,
@@ -212,14 +217,31 @@ pub fn resolve_role(
     );
     out.interface = IfaceId::from_str(&entry.interface).ok();
     out.author = one_author(&entry.bindings);
-    let req = dm::Requirement {
+    let mut req = dm::Requirement {
         bindings: &entry.bindings,
         params: &entry.params,
         optional: entry.optional,
+        documents: 1,
     };
     if let Some((contract, from)) = author {
-        let (r, decl) = desired_resource(contract, templates)?;
+        let named = desired_resources(contract, templates);
+        let (r, decl) = named.first().cloned()?;
         out.resource = Some(format!("{}/{}", r.token, r.template.as_str()));
+        if named.len() > 1 {
+            // One role per document type (§2.1, text 0.6, F-218): the
+            // binding gives no slice, whichever resource it would bind.
+            req.documents = named.len();
+            let slice = dm::Slice {
+                iface: &contract.iface,
+                token: r.token,
+                template: &r.template,
+                targets: &[],
+            };
+            if let Binding::Invalid(why) = dm::binding(&slice, &req, own) {
+                out.binding_problems = why;
+            }
+            return Some(out);
+        }
         match decl {
             Declaration::Invalid(why) => out.declaration_invalid = why,
             Declaration::Declared(targets) => {
@@ -291,7 +313,10 @@ pub fn resolve_role(
 
 /// The revision of `iface` a role's slice is read by (§2.3): the one
 /// `author`'s descriptors name, in hand; else one held offline that
-/// declares a desired resource `templates` names. `None` when neither.
+/// declares a desired resource `templates` names; else any held offline,
+/// which shows the role is no target's (text 0.6, F-217). `None` with no
+/// revision of the interface in hand: only then is the slice the target's
+/// alone.
 pub fn author_contract<'c>(
     catalog: Option<&Catalog>,
     author: Option<&Addr>,
@@ -307,11 +332,15 @@ pub fn author_contract<'c>(
             }
         }
     }
-    offline
-        .of_iface(iface)
-        .map(|r| r.contract())
-        .find(|c| desired_resource(c, templates).is_some())
-        .map(|c| (c, SliceFrom::OfflineContract))
+    // A held revision declaring a desired resource the requirement names;
+    // else any held revision of the interface, which shows the role is no
+    // target's (text 0.6, F-217): the target alone is read only with none
+    // in hand.
+    let held: Vec<&Contract> = offline.of_iface(iface).map(|r| r.contract()).collect();
+    held.iter()
+        .find(|c| !desired_resources(c, templates).is_empty())
+        .or(held.first())
+        .map(|c| (*c, SliceFrom::OfflineContract))
 }
 
 /// The contract revision `iface` of `descriptor` names, when in hand:
@@ -503,15 +532,18 @@ pub fn descriptor_in(o: &Observed, addr: &Addr) -> Result<Option<Descriptor>, St
 }
 
 /// The report of a slice among a target's replies (§2.10, §2.17 step 3).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ReportFound<'a> {
     /// The readable report whose `key` is the slice's.
     One(&'a ReportReply),
     /// None readable claims the slice, and one did not read: it may be the
     /// slice's (text 0.4).
     Unreadable(&'a ReportReply),
-    /// Two readable reports claim the slice, and they differ (text 0.4).
-    Two,
+    /// Two readable reports, of two report resources, claim the slice and
+    /// differ: unreadable, since the target says two things of one role
+    /// (§2.10, text 0.5, F-212). Every readable one claiming it, in reply
+    /// order, so a row can name each one's key.
+    Two(Vec<&'a ReportReply>),
     /// None.
     None,
 }
@@ -527,22 +559,19 @@ pub fn report_of<'a>(replies: &'a [ReportReply], slice: &[String]) -> ReportFoun
                 .is_ok_and(|d| d.key.as_ref().is_some_and(|k| slice.contains(k)))
         })
         .collect();
-    match claiming.as_slice() {
-        [one] => ReportFound::One(one),
-        [first, rest @ ..] => {
-            if rest
-                .iter()
-                .all(|r| r.read.as_ref().ok() == first.read.as_ref().ok())
-            {
-                ReportFound::One(first)
-            } else {
-                ReportFound::Two
-            }
-        }
-        [] => replies
+    let Some(&first) = claiming.first() else {
+        return replies
             .iter()
             .find(|r| r.read.is_err())
-            .map_or(ReportFound::None, ReportFound::Unreadable),
+            .map_or(ReportFound::None, ReportFound::Unreadable);
+    };
+    if claiming
+        .iter()
+        .all(|r| r.read.as_ref().ok() == first.read.as_ref().ok())
+    {
+        ReportFound::One(first)
+    } else {
+        ReportFound::Two(claiming)
     }
 }
 
@@ -639,6 +668,10 @@ pub struct RoleReading<'a> {
     pub author: AuthorReading,
     /// The report found, when one was.
     pub report: Option<&'a ReportReply>,
+    /// The readable reports, of two report resources or more, that claim
+    /// the slice and differ, when they did: unreadable together (§2.10,
+    /// text 0.5, F-212), never as if none were read. Empty otherwise.
+    pub differing: Vec<&'a ReportReply>,
     /// Why step 3 read none, when it read none.
     pub no_report: Option<String>,
     pub freshness: freshness::Judged,
@@ -655,6 +688,7 @@ impl RoleRead {
         let res = &self.resolution;
         let mut no_report = None;
         let mut found = None;
+        let mut differing = Vec::new();
         let mut report = ReportRead::NotRead;
         let mut fresh = freshness::judge_all(&Horizon::Undeclared, &[]);
         if !res.declaration_invalid.is_empty() {
@@ -703,11 +737,18 @@ impl RoleRead {
                         found = Some(r);
                         report = ReportRead::Unreadable;
                     }
-                    ReportFound::Two => {
+                    ReportFound::Two(all) => {
                         report = ReportRead::Unreadable;
-                        no_report = Some(
-                            "two reports claim the slice, and they differ (text 0.4)".to_owned(),
-                        );
+                        no_report = Some(format!(
+                            "{} readable reports, of {}, claim the slice and differ: the target \
+                             says two things of one role (§2.10)",
+                            all.len(),
+                            all.iter()
+                                .map(|r| r.key.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                        differing = all;
                     }
                     ReportFound::None => {
                         no_report = Some(if g.complete {
@@ -724,6 +765,12 @@ impl RoleRead {
             }
         }
         let (descriptor, deployment) = match (&t.word, &t.descriptor) {
+            // The deployment's word stands for the descriptor, but for a
+            // role a revision in hand shows on no desired resource
+            // (text 0.6, F-217).
+            (Some(_), _) if res.listing == Some(Listing::NotListed) => {
+                (None, Some(Listing::NotListed))
+            }
             (Some(w), _) => (None, Some(w.listing)),
             (None, Ok(Some(_))) | (None, Ok(None)) => (res.listing, None),
             (None, Err(_)) => (None, None),
@@ -752,6 +799,7 @@ impl RoleRead {
                 current,
             },
             report: found,
+            differing,
             no_report,
             freshness: fresh,
             author_why: seen_why.or(current_why),
@@ -964,7 +1012,7 @@ mod tests {
     }
 
     /// The report whose key is the slice's; an unreadable one when none
-    /// readable claims it; two that differ are none.
+    /// readable claims it; two that differ are unreadable, each named.
     #[test]
     fn the_report_of_a_slice() {
         let rp = "zk2/lab/worker/worker.v1/state/desired/task";
@@ -984,7 +1032,13 @@ mod tests {
         ));
         let other = format!(r#"{{"key": "{D}", "source": "call"}}"#);
         let two = vec![reply(rp, &ok), reply("zk2/x/y/w.v1/state/r", &other)];
-        assert!(matches!(report_of(&two, &[D.to_owned()]), ReportFound::Two));
+        match report_of(&two, &[D.to_owned()]) {
+            ReportFound::Two(all) => assert_eq!(
+                all.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+                [rp, "zk2/x/y/w.v1/state/r"]
+            ),
+            other => panic!("two that differ: {other:?}"),
+        }
         assert!(matches!(report_of(&[], &[D.to_owned()]), ReportFound::None));
     }
 
@@ -1163,8 +1217,19 @@ mod tests {
                     &offline,
                 ),
             };
-            let res = resolve_role(&own, &entry, templates.as_deref(), held)
-                .unwrap_or_else(|| panic!("{}: not this profile's", case["note"]));
+            let Some(res) = resolve_role(&own, &entry, templates.as_deref(), held) else {
+                // A revision in hand declaring no desired resource the
+                // requirement names: no target's (text 0.6, F-217).
+                let got = json!({
+                    "slice": [],
+                    "from": null,
+                    "binding": [],
+                    "declaration": [],
+                    "report": {"found": "not_a_target"},
+                });
+                assert_eq!(got, case["expect"], "{}", case["note"]);
+                continue;
+            };
             let replies: Vec<ReportReply> = r["replies"]
                 .as_array()
                 .unwrap()
@@ -1179,7 +1244,7 @@ mod tests {
                         "found": "one",
                         "claims": x.read.as_ref().unwrap().key,
                     }),
-                    ReportFound::Two => json!({"found": "unreadable", "why": "two_differ"}),
+                    ReportFound::Two(_) => json!({"found": "unreadable", "why": "two_differ"}),
                     ReportFound::Unreadable(_) => {
                         json!({"found": "unreadable", "why": "unreadable_reply"})
                     }
