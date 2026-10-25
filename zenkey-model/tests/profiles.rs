@@ -2409,13 +2409,21 @@ fn desired_slices() {
             assert!(slice.is_empty(), "{what}");
             continue;
         };
-        let iface: IfaceId = r["iface"].as_str().expect("iface").parse().expect("an iface");
+        let iface: IfaceId = r["iface"]
+            .as_str()
+            .expect("iface")
+            .parse()
+            .expect("an iface");
         let token = if resource["explicit"] == json!(true) {
             KindToken::ExplicitState
         } else {
             KindToken::State
         };
-        let own: Addr = r["target"].as_str().expect("target").parse().expect("an address");
+        let own: Addr = r["target"]
+            .as_str()
+            .expect("target")
+            .parse()
+            .expect("an address");
         let req = &r["requirement"];
         let bindings: Vec<String> = req["bindings"]
             .as_array()

@@ -1060,10 +1060,7 @@ mod tests {
             rp,
             r#"{"key": "zk2/lab/author/tasking.v1/@state/tasks/lab/worker", "source": "baseline"}"#,
         )];
-        assert!(matches!(
-            report_of(&explicit, &r.slice),
-            ReportFound::None
-        ));
+        assert!(matches!(report_of(&explicit, &r.slice), ReportFound::None));
     }
 
     /// One revision of the author's interface `iface` from `slices.json`'s
@@ -1090,15 +1087,20 @@ mod tests {
                     .join(", ")
             };
             if r["params"].as_object().is_some_and(|p| !p.is_empty()) {
-                toml.push_str(&format!("params = {{ {} }}\ncardinality = 16\n", inline(&r["params"])));
+                toml.push_str(&format!(
+                    "params = {{ {} }}\ncardinality = 16\n",
+                    inline(&r["params"])
+                ));
             }
             if r["annotations"].as_object().is_some_and(|a| !a.is_empty()) {
-                toml.push_str(&format!("annotations = {{ {} }}\n", inline(&r["annotations"])));
+                toml.push_str(&format!(
+                    "annotations = {{ {} }}\n",
+                    inline(&r["annotations"])
+                ));
             }
         }
         let l = zenkey_model::contract::load_str(&toml, std::path::Path::new("."), None);
-        l.contract
-            .unwrap_or_else(|| panic!("{toml}\n{}", l.report))
+        l.contract.unwrap_or_else(|| panic!("{toml}\n{}", l.report))
     }
 
     /// `spec/profiles/desired/conformance/slices.json` (text 0.5): every

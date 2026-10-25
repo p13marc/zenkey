@@ -41,6 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
 
+use futures_util::future::BoxFuture;
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::descriptor::{Descriptor, RequireEntry};
 use zenkey_model::desired::{self as dm, Listing, Seen};
@@ -282,11 +283,20 @@ async fn observe_with(
             .extend(uncovered.iter().map(|x| Scope::service(x).selector()));
         // Each read at once (review of #856): one reading costs about one
         // --timeout, whatever the number of authors.
-        let reads = bounded(uncovered.iter().map(|x| async move {
-            crate::bus::presence::observe(session, &Scope::service(x), t)
-                .await
-                .map_err(|e| crate::one_line(&e))
-        }))
+        let reads = bounded(
+            uncovered
+                .iter()
+                .cloned()
+                .map(|x| {
+                    let s = session.clone();
+                    Box::pin(async move {
+                        crate::bus::presence::observe(&s, &Scope::service(&x), t)
+                            .await
+                            .map_err(|e| crate::one_line(&e))
+                    }) as BoxFuture<'static, _>
+                })
+                .collect(),
+        )
         .await;
         let authors: BTreeMap<Addr, Result<Observed, String>> =
             uncovered.into_iter().zip(reads).collect();
@@ -380,15 +390,23 @@ async fn observe_with(
                 !r.resolution.slice.is_empty() && matches!(r.author_seen, Some((Seen::Absent, _)))
             })
         });
-    let reports = bounded(plans.into_iter().map(|(i, plan)| async move {
-        (
-            i,
-            match plan {
-                Err(why) => Err(why),
-                Ok(sels) => Ok(reports_get(session, sels, t).await),
-            },
-        )
-    }));
+    let reports = bounded(
+        plans
+            .into_iter()
+            .map(|(i, plan)| {
+                let s = session.clone();
+                Box::pin(async move {
+                    (
+                        i,
+                        match plan {
+                            Err(why) => Err(why),
+                            Ok(sels) => Ok(reports_get(&s, sels, t).await),
+                        },
+                    )
+                }) as BoxFuture<'static, (usize, Result<ReportsGet, String>)>
+            })
+            .collect(),
+    );
     let providers = async {
         if needs_archives {
             Some(archive_providers(session, t).await)
@@ -417,19 +435,26 @@ async fn observe_with(
             }
         }
     }
-    let at = archives.as_ref();
-    let done = bounded(legs.into_iter().map(|(i, j, slice, current)| async move {
-        let leg = if current {
-            Leg::Current(slice_get(session, &slice, t).await)
-        } else {
-            Leg::Archived(match at {
-                Some(Ok(at)) => Ok(archived(session, at, &slice, t).await),
-                Some(Err(why)) => Err(why.clone()),
-                None => Err("the archives were not read".to_owned()),
+    let done = bounded(
+        legs.into_iter()
+            .map(|(i, j, slice, current)| {
+                let s = session.clone();
+                let at = archives.clone();
+                Box::pin(async move {
+                    let leg = if current {
+                        Leg::Current(slice_get(&s, &slice, t).await)
+                    } else {
+                        Leg::Archived(match at {
+                            Some(Ok(at)) => Ok(archived(&s, &at, &slice, t).await),
+                            Some(Err(why)) => Err(why),
+                            None => Err("the archives were not read".to_owned()),
+                        })
+                    };
+                    (i, j, leg)
+                }) as BoxFuture<'static, (usize, usize, Leg)>
             })
-        };
-        (i, j, leg)
-    }))
+            .collect(),
+    )
     .await;
     for (i, j, leg) in done {
         let r = &mut read.targets[i].roles[j];
@@ -447,8 +472,10 @@ async fn observe_with(
 /// How many reads of one phase a reading keeps in flight at once.
 pub const CONCURRENCY: usize = 64;
 
-/// `futs`, at most [`CONCURRENCY`] at once, their outputs in order.
-async fn bounded<T, F: std::future::Future<Output = T>>(futs: impl IntoIterator<Item = F>) -> Vec<T> {
+/// `futs`, at most [`CONCURRENCY`] at once, their outputs in order. Each
+/// is boxed and owns what it reads, so a reading's future stays `Send`
+/// wherever it is spawned.
+async fn bounded<T>(futs: Vec<BoxFuture<'static, T>>) -> Vec<T> {
     use futures_util::StreamExt as _;
     futures_util::stream::iter(futs)
         .buffered(CONCURRENCY)
@@ -739,37 +766,48 @@ async fn reports_get(
         at: SystemTime::now(),
     };
     // Each resource's GET at once.
-    let gets = bounded(selectors.into_iter().map(|(sel, horizon)| async move {
-        let mut replies_out = Vec::new();
-        let mut complete = true;
-        let replies =
-            match crate::bus::query::state_get(session, &sel, &crate::bus::query::GetOpts::new(t))
-                .await
-            {
-                Ok(r) => r,
-                Err(_) => return (false, replies_out),
-            };
-        while let Ok(reply) = replies.recv_async().await {
-            let Ok(sample) = reply.result() else {
-                complete = false;
-                continue;
-            };
-            let key = sample.key_expr().as_str();
-            if key.contains('*') || sample.kind() == SampleKind::Delete {
-                continue;
-            }
-            replies_out.push(ReportReply {
-                key: key.to_owned(),
-                read: dm::decode(&sample.payload().to_bytes()),
-                stamp: sample.timestamp().map(|ts| Stamped {
-                    time: ts.get_time().to_system_time(),
-                    clock: ts.get_id().to_string(),
-                }),
-                horizon: horizon.clone(),
-            });
-        }
-        (complete, replies_out)
-    }))
+    let gets = bounded(
+        selectors
+            .into_iter()
+            .map(|(sel, horizon)| {
+                let session = session.clone();
+                Box::pin(async move {
+                    let mut replies_out = Vec::new();
+                    let mut complete = true;
+                    let replies = match crate::bus::query::state_get(
+                        &session,
+                        &sel,
+                        &crate::bus::query::GetOpts::new(t),
+                    )
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(_) => return (false, replies_out),
+                    };
+                    while let Ok(reply) = replies.recv_async().await {
+                        let Ok(sample) = reply.result() else {
+                            complete = false;
+                            continue;
+                        };
+                        let key = sample.key_expr().as_str();
+                        if key.contains('*') || sample.kind() == SampleKind::Delete {
+                            continue;
+                        }
+                        replies_out.push(ReportReply {
+                            key: key.to_owned(),
+                            read: dm::decode(&sample.payload().to_bytes()),
+                            stamp: sample.timestamp().map(|ts| Stamped {
+                                time: ts.get_time().to_system_time(),
+                                clock: ts.get_id().to_string(),
+                            }),
+                            horizon: horizon.clone(),
+                        });
+                    }
+                    (complete, replies_out)
+                }) as BoxFuture<'static, _>
+            })
+            .collect(),
+    )
     .await;
     for (complete, replies) in gets {
         out.complete &= complete;
@@ -841,18 +879,27 @@ async fn archive_providers(session: &Session, t: Duration) -> Result<Vec<Addr>, 
 /// never current.
 async fn archived(session: &Session, at: &[Addr], slice: &str, t: Duration) -> Vec<Archived> {
     // Each archive at once.
-    let read = bounded(at.iter().map(|a| async move {
-        match zenkey::archive::last_known(session, a, slice, t).await {
-            Ok(Some(lk)) => Some(Archived {
-                archive: a.clone(),
-                deleted: lk.value.is_none(),
-                stamp: lk.timestamp.as_ref().map(zenkey::desired::stamp),
-                revision: lk.value.as_deref().and_then(dm::revision_of_text),
-                confirmed: lk.confirmed,
-            }),
-            _ => None,
-        }
-    }))
+    let read = bounded(
+        at.iter()
+            .cloned()
+            .map(|a| {
+                let s = session.clone();
+                let slice = slice.to_owned();
+                Box::pin(async move {
+                    match zenkey::archive::last_known(&s, &a, &slice, t).await {
+                        Ok(Some(lk)) => Some(Archived {
+                            deleted: lk.value.is_none(),
+                            stamp: lk.timestamp.as_ref().map(zenkey::desired::stamp),
+                            revision: lk.value.as_deref().and_then(dm::revision_of_text),
+                            confirmed: lk.confirmed,
+                            archive: a,
+                        }),
+                        _ => None,
+                    }
+                }) as BoxFuture<'static, _>
+            })
+            .collect(),
+    )
     .await;
     read.into_iter().flatten().collect()
 }
