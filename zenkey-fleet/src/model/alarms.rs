@@ -646,6 +646,10 @@ impl AlarmBook {
     /// not absence (core §8.1, 0.37): one that leaves the owner with no
     /// instance token leaves its presence possibly incomplete until the
     /// next presence read says whether it went.
+    ///
+    /// A put of an instance already held is no move, and keeps what its
+    /// descriptor said: a subscriber with history delivers one for every
+    /// token it is told of, a reconnection's included (#872).
     pub fn instance(&mut self, addr: &Addr, instance: &InstanceId, held: bool, at: Instant) {
         if !self.scope.selects_owner(addr) {
             return;
@@ -653,7 +657,13 @@ impl AlarmBook {
         let entry = self.owner(addr);
         entry.known.insert(KnownBy::Earlier);
         let changed = if held {
-            entry.instances.insert(instance.clone(), None).is_none()
+            match entry.instances.entry(instance.clone()) {
+                std::collections::btree_map::Entry::Occupied(_) => false,
+                std::collections::btree_map::Entry::Vacant(v) => {
+                    v.insert(None);
+                    true
+                }
+            }
         } else {
             entry.instances.remove(instance).is_some()
         };
@@ -1671,6 +1681,34 @@ mod tests {
         assert_eq!(moved.len(), 1, "absent is a verdict moved with no sample");
         assert_eq!(moved[0].change, AlarmChange::Judged);
         assert_eq!(moved[0].firing.reason, "absent");
+    }
+
+    /// #872: a put of an instance already held — every token a history
+    /// subscriber is told of, at its start or a reconnection — is no move:
+    /// no gap in the owner's window, and its descriptor still read. Its
+    /// withdrawal is one, and leaves the owner possibly incomplete.
+    #[test]
+    fn a_put_of_an_instance_already_held_is_no_move() {
+        let t0 = Instant::now();
+        let mut b = book(true);
+        b.subscribed(t0);
+        b.presence_read(&presence(true, Some(ZID)), t0);
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let id: InstanceId = "000000000000000a".parse().unwrap();
+        let listed = b.presence_of(&owner);
+        assert!(
+            matches!(listed, Presence::Present(Listing::Listed { .. })),
+            "{listed:?}"
+        );
+        b.instance(&owner, &id, true, t0 + Duration::from_secs(1));
+        assert_eq!(b.presence_of(&owner), listed, "its descriptor still read");
+        let later = t0 + Duration::from_secs(30);
+        let w = b.window(&owner, later).unwrap();
+        assert!(w.present_throughout, "no gap: {w:?}");
+        assert_eq!(w.listened, Duration::from_secs(18), "from the subscription");
+        b.instance(&owner, &id, false, t0 + Duration::from_secs(2));
+        assert_eq!(b.presence_of(&owner), Presence::Incomplete, "heard going");
+        assert!(!b.window(&owner, later).unwrap().present_throughout);
     }
 
     /// Core S2: an owner that answered a complete GET holds no key it left

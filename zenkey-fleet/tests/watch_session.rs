@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 mod util;
-use util::zk2::{T, addr, client, eventually, router};
+use util::zk2::{T, addr, client, client_ns, eventually, router};
 
 use zenkey_fleet::{
     AddressStatus, AlarmFeed, AlarmScope, AlarmSpec, LivePresence, Monitor, MonitorSpec, NotAsked,
@@ -805,5 +805,229 @@ async fn an_alarm_feed_whose_round_trip_does_not_stand_reads_the_scope_not_whole
         (any.answer, any.reason),
         (Answer::NotAsked, Reason::NoOwner),
         "a whole scope with no owner in it"
+    );
+}
+
+// ─── in a namespace (#872) ──────────────────────────────────────────────────
+
+/// More instance tokens than a reader's queue holds
+/// (`zenkey_fleet::bus::alarms::QUEUE`, telemetry's alike: 1,024).
+const CROWD: usize = 1_100;
+
+/// `n` instance tokens under system `crowd`, on `holder`, read whole by
+/// `reader` before it returns.
+async fn crowd(
+    holder: &zenoh::Session,
+    reader: &zenoh::Session,
+    n: usize,
+) -> Vec<zenoh::liveliness::LivelinessToken> {
+    let mut tokens = Vec::with_capacity(n);
+    for i in 0..n {
+        tokens.push(
+            holder
+                .liveliness()
+                .declare_token(instance_token(&format!("crowd/svc{i}"), i as u64 + 1))
+                .await
+                .expect("a token"),
+        );
+    }
+    let sel = "zk2/crowd/*/@zk/instance/*";
+    eventually("the crowd is read", || async {
+        zenkey::presence::liveliness_read(reader, sel, Duration::from_secs(10))
+            .await
+            .is_ok_and(|r| r.complete && r.keys.len() == n)
+    })
+    .await;
+    tokens
+}
+
+/// #872: in a namespace an alarm feed's instance tokens have history, or a
+/// withdrawal of a token declared before them is never heard (zenoh 1.10.1,
+/// `routing/namespace.rs`). The history's puts are not queued: with more
+/// owners in scope than the queue holds, the feed opens having lost
+/// nothing, its presence read complete, and hears an owner up before it go.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_alarm_feed_in_a_namespace_loses_nothing_to_its_history() {
+    use zenkey_model::alarms::Presence;
+    let (_router, ep) = router(None).await;
+    let holder = client_ns(&ep, Some("ns")).await;
+    let (tool, watch) = (
+        client_ns(&ep, Some("ns")).await,
+        client_ns(&ep, Some("ns")).await,
+    );
+    assert!(zenkey::presence::subscriber_needs_history(&watch));
+    let mut held = crowd(&holder, &tool, CROWD).await;
+    let scope = AlarmScope::parse("zk2/crowd/**").expect("a scope");
+    let (mut feed, _) = AlarmFeed::open(
+        &tool,
+        Some(&watch),
+        scope,
+        AlarmSpec::new(Duration::from_secs(10)),
+        true,
+    )
+    .await
+    .expect("the reader opens");
+    while let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(300), feed.next()).await {}
+    let Some(Ok(seen)) = &feed.log().presence else {
+        panic!("a presence read: {:?}", feed.log().presence)
+    };
+    assert!(seen.complete && !seen.unsettled, "{seen:?}");
+    assert_eq!(seen.services, CROWD, "{seen:?}");
+    assert_eq!(feed.book().lost(), 0, "the history is no loss");
+    let first = addr("crowd/svc0");
+    assert!(
+        matches!(feed.book().presence_of(&first), Presence::Present(_)),
+        "{:?}",
+        feed.book().presence_of(&first)
+    );
+    held.remove(0).undeclare().await.expect("undeclare");
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while feed.book().presence_of(&first) != Presence::Incomplete {
+        assert!(
+            tokio::time::timeout_at(deadline, feed.next())
+                .await
+                .is_ok_and(|d| d.is_some()),
+            "never heard going: {:?}",
+            feed.book().presence_of(&first)
+        );
+    }
+    assert_eq!(feed.book().lost(), 0);
+}
+
+/// #872: a telemetry reading in a namespace, its token subscriptions with
+/// history, beside more instance tokens than its queue holds: the history's
+/// puts are not queued, so the reading loses nothing, and its seed stands.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_telemetry_reading_in_a_namespace_loses_nothing_to_its_history() {
+    let (_router, ep) = router(None).await;
+    let (owner, holder) = (
+        client_ns(&ep, Some("ns")).await,
+        client_ns(&ep, Some("ns")).await,
+    );
+    let (tool, watch) = (
+        client_ns(&ep, Some("ns")).await,
+        client_ns(&ep, Some("ns")).await,
+    );
+    let _svc = meter(&owner).await;
+    let _held = crowd(&holder, &tool, CROWD).await;
+    eventually("the tool sees the meter", || async {
+        raw_get(&tool, "zk2/lab/meter/@zk/instance/*").await.1.len() == 1
+    })
+    .await;
+    let store = zenkey_fleet::BundleStore::new(Duration::from_secs(10));
+    let offline = zenkey_fleet::ContractSet::new();
+    let spec =
+        zenkey_fleet::TelemetrySpec::new(Duration::from_secs(10), Duration::from_millis(300));
+    let obs = zenkey_fleet::observe_telemetry(
+        &tool,
+        Some(&watch),
+        "ns",
+        zenkey_fleet::TelemetryScope::all(),
+        &store,
+        &offline,
+        spec,
+        |_| {},
+    )
+    .await;
+    assert!(obs.unobservable.is_none(), "{:?}", obs.unobservable);
+    assert!(
+        matches!(&obs.seed, Some(Ok(seed)) if seed.complete && !seed.unsettled && seed.services == CROWD + 1),
+        "{:?}",
+        obs.seed
+    );
+    assert_eq!(obs.book.lost(), 0, "the history is no loss");
+}
+
+/// The meter (`zenkey/tests/contracts/meter.v1.toml`) at `lab/meter`, on
+/// `session`, every resource exposed.
+async fn meter(session: &zenoh::Session) -> zenkey::Service {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/meter.v1.toml");
+    let l = zenkey_model::contract::load_path(&path);
+    let meter = l
+        .contract
+        .unwrap_or_else(|| panic!("meter.v1 does not load:\n{}", l.report));
+    let mut b = zenkey::ServiceBuilder::new(session, util::zk2::config("lab/meter"));
+    b.implement(zenkey::Implementation::new(meter.clone()))
+        .expect("implement");
+    for r in &meter.resources {
+        let _ = b.expose(&meter.iface, &zenkey::implementation::resource_name(r));
+    }
+    b.start().await.expect("the owner")
+}
+
+/// #872 (WB's barrier, kept): a telemetry reading whose watch session's
+/// round trip does not stand seeds anyway, its seed possibly incomplete
+/// and saying so, and makes the round trip again before its next seed.
+/// Stalled throughout, every seed says so; healed once the window opens,
+/// the seed made again stands.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_telemetry_reading_whose_round_trip_does_not_stand_makes_it_again() {
+    let (_router, ep) = router(None).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let _svc = meter(&owner).await;
+    eventually("the tool sees the meter", || async {
+        raw_get(&tool, "zk2/lab/meter/@zk/instance/*").await.1.len() == 1
+    })
+    .await;
+    let link = Link::to(&ep).await;
+    let watch = watch_behind(&link).await;
+    let store = zenkey_fleet::BundleStore::new(T);
+    let offline = zenkey_fleet::ContractSet::new();
+    let read = |window: Duration, heal: bool| {
+        let (tool, watch, store, offline, link) = (&tool, &watch, &store, &offline, &link);
+        async move {
+            let spec = zenkey_fleet::TelemetrySpec::new(T, window);
+            zenkey_fleet::observe_telemetry(
+                tool,
+                Some(watch),
+                "",
+                zenkey_fleet::TelemetryScope::all(),
+                store,
+                offline,
+                spec,
+                |_| {
+                    if heal {
+                        link.heal();
+                    }
+                },
+            )
+            .await
+        }
+    };
+    link.stall();
+    let settles = zenkey::presence::liveliness_gets(&watch).settles;
+    let obs = read(Duration::from_millis(1500), false).await;
+    assert!(
+        obs.unobservable.is_none(),
+        "it reads: {:?}",
+        obs.unobservable
+    );
+    assert!(
+        matches!(&obs.seed, Some(Ok(seed)) if !seed.complete && seed.unsettled && seed.services == 1),
+        "possibly incomplete, what it read kept: {:?}",
+        obs.seed
+    );
+    let report = zenkey_fleet::judge_telemetry(&obs);
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|s| s.contains(zenkey_fleet::BARRIER_NOT_ESTABLISHED)),
+        "{:?}",
+        report.skipped
+    );
+    let made = zenkey::presence::liveliness_gets(&watch).settles - settles;
+    assert!(made >= 2, "made again within the window: {made}");
+
+    let obs = read(Duration::from_millis(2500), true).await;
+    assert!(
+        matches!(&obs.seed, Some(Ok(seed)) if seed.complete && !seed.unsettled),
+        "the seed made again stands: {:?}",
+        obs.seed
+    );
+    assert_eq!(
+        obs.book.presence_basis(),
+        Some(zenkey_fleet::PresenceBasis::Complete)
     );
 }

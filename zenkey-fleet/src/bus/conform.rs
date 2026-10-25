@@ -660,7 +660,9 @@ async fn suite(
 
     // §2.7: a window of a stream or an event is complete, and a rate window
     // clean, only with the owner present throughout. The subscriber first,
-    // so a token the read finds and that goes later is seen going.
+    // so a token the read finds and that goes later is seen going: with
+    // history in a namespace, where zenoh drops that withdrawal otherwise
+    // (#872).
     let windowed = exposed
         .iter()
         .any(|r| (r.kind == Kind::Stream && r.template.has_params()) || r.kind == Kind::Event);
@@ -788,14 +790,7 @@ async fn suite(
         tokio::time::sleep_until(deadline + tail).await;
     }
     let read_at = tokio::time::Instant::now();
-    obs.window_presence = presence_watch.map(|w| {
-        w.map(|(mut p, gone, _subscriber)| {
-            let gone = gone.lock().expect("not poisoned");
-            p.gone = p.held.intersection(&gone).cloned().collect();
-            p.tail = read_at.saturating_duration_since(deadline);
-            p
-        })
-    });
+    obs.window_presence = presence_watch.map(|w| w.and_then(|w| w.read(read_at, deadline)));
     obs.reader_stall = stall_watch.map(|w| w.map(|w| w.read()));
     obs
 }
@@ -828,18 +823,57 @@ fn clean_reachable(exposed: &[Resource], spec: &ConformSpec) -> bool {
 }
 
 /// What [`watch_instances`] hands back: the read's tokens, the deletes seen
-/// so far, and the subscriber that keeps seeing them until dropped.
-type InstanceWatch = (
-    WindowPresence,
-    Arc<std::sync::Mutex<BTreeSet<String>>>,
-    zenoh::pubsub::Subscriber<()>,
-);
+/// so far, the subscriber that keeps seeing them until dropped, and its
+/// watch session's barrier, which says whether the session's transport
+/// moved since.
+struct InstanceWatch {
+    presence: WindowPresence,
+    gone: Arc<std::sync::Mutex<BTreeSet<String>>>,
+    _subscriber: zenoh::pubsub::Subscriber<()>,
+    barrier: zenkey::presence::Barrier,
+}
+
+impl InstanceWatch {
+    /// The window's presence, read at `read_at`, `deadline` being the
+    /// window's end: the tokens the read found and those seen deleted
+    /// since. Not read when the watch session's transport moved meanwhile
+    /// (#851, #872): its subscriber is declared again at a router that has
+    /// to read it, and a token withdrawn while it was down is in no history,
+    /// so nothing shows the owner stayed.
+    fn read(
+        self,
+        read_at: tokio::time::Instant,
+        deadline: tokio::time::Instant,
+    ) -> std::result::Result<WindowPresence, String> {
+        if !self.barrier.established() {
+            return Err(format!(
+                "the watch session's transport moved while its instance tokens were watched \
+                 on `{}`: a withdrawal then may not have been heard (core §8.1)",
+                self.barrier.scope()
+            ));
+        }
+        let mut p = self.presence;
+        let gone = self.gone.lock().expect("not poisoned");
+        p.gone = p.held.intersection(&gone).cloned().collect();
+        p.tail = read_at.saturating_duration_since(deadline);
+        Ok(p)
+    }
+}
 
 /// A callback liveliness subscriber on `addr`'s instance tokens (§8.1: a
 /// subscriber beside a GET is callback-driven), on `watch`, a session of
-/// its own, and settled there; then a read of them on `session`, which
-/// holds no liveliness subscriber (#830, core §8.1, 0.37): the tokens held
-/// when the window opens, and every one deleted from then on.
+/// its own, and its barrier made there; then a read of them on `session`,
+/// which holds no liveliness subscriber (#830, core §8.1, 0.37): the tokens
+/// held when the window opens, and every one deleted from then on.
+///
+/// The subscriber has history when the watch session is in a namespace
+/// ([`zenkey::presence::subscriber_needs_history`], #872): zenoh 1.10.1
+/// tells one without history that a token declared before it went by a
+/// key the namespace is not stripped from, so the owner's going, its token
+/// declared before the run as every owner's is, was never heard, and the
+/// window read it present throughout. Only deletes are kept: the read says
+/// what is held, and the history's puts say nothing more. Its barrier then
+/// waits for that history, a handful of tokens of one address.
 async fn watch_instances(
     watch: Option<&Session>,
     session: &Session,
@@ -856,6 +890,7 @@ async fn watch_instances(
     let gone: Arc<std::sync::Mutex<BTreeSet<String>>> = Arc::default();
     let g = Arc::clone(&gone);
     let subscriber = zenkey::presence::declare_subscriber(watch, &selector)
+        .history(zenkey::presence::subscriber_needs_history(watch))
         .callback(move |sample| {
             if sample.kind() == zenoh::sample::SampleKind::Delete {
                 g.lock()
@@ -865,12 +900,12 @@ async fn watch_instances(
         })
         .await
         .map_err(|e| format!("a liveliness subscriber on `{selector}`: {e}"))?;
-    // The routers have read the subscriber before the read below, on the
-    // other session, is answered (#830).
-    if !zenkey::presence::settle(watch, &selector, timeout)
+    // The routers have read the subscriber, and sent its history, before
+    // the read below, on the other session, is answered (#830, #851).
+    let barrier = zenkey::presence::Barrier::new(watch, &selector, timeout)
         .await
-        .unwrap_or(false)
-    {
+        .map_err(|e| format!("the barrier of `{selector}`: {e}"))?;
+    if !barrier.establish().await {
         return Err(format!(
             "the liveliness subscriber on `{selector}` did not settle within the timeout"
         ));
@@ -878,8 +913,8 @@ async fn watch_instances(
     let read = zenkey::presence::liveliness_read(session, &selector, timeout)
         .await
         .map_err(|e| format!("the read of `{selector}`: {e}"))?;
-    Ok((
-        WindowPresence {
+    Ok(InstanceWatch {
+        presence: WindowPresence {
             complete: read.complete,
             cut_off_during: read.cut_off_during,
             held: read.keys.into_iter().collect(),
@@ -887,8 +922,9 @@ async fn watch_instances(
             tail: Duration::ZERO,
         },
         gone,
-        subscriber,
-    ))
+        _subscriber: subscriber,
+        barrier,
+    })
 }
 
 /// A member value per template parameter: what a concrete call to a
