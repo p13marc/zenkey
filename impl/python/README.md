@@ -2118,8 +2118,8 @@ zk2py already did what the text now says, and where it did not:
 - **In a namespace, a watch session in no namespace on the wire keys**
   (F-233). zk2py did not. `watch_session` opened the watch session in
   the reading session's namespace, and the follower kept history there:
-  0.41's first option, whose round trip waits for the population (133 ms
-  beside 2,000 tokens, 3.2 s beside 10,000). Now:
+  0.41's first option, whose round trip waits for the population (131–154
+  ms beside 2,000 tokens, 3.2 s beside 10,000). Now:
   - `watch_session` opens it in no namespace;
   - `watch_or_beside` and the follower declare the subscriber without
     history on the wire key (`wire_selector`: `ns/zk2/*/*/@zk/instance/*`)
@@ -2204,9 +2204,9 @@ in `ns`:
 - **Steps 1 to 3** as at 0.41. The round trip was still waiting at the
   stall's end (190–200 ms), and the withdrawal was heard 10 of 10. Without
   the round trip it was never heard, 3 of 3. Through R2, the same.
-- **Step 4, in `ns`.** Without history the round trip took 1.9–2.2 ms
+- **Step 4, in `ns`.** Without history the round trip took 1.6–2.2 ms
   beside 2,000 tokens and 14.8 ms beside 10,000. With history it took
-  143–224 ms beside 2,000, and 3.4–3.8 s beside 10,000. Every token was
+  128–224 ms beside 2,000, and 3.4–3.8 s beside 10,000. Every token was
   delivered by its end with `indirect=False`. With the default callbacks,
   the end came first in 0–1 of 10 runs (2,000) and 1 of 3 (10,000).
 - **Step 5.** The read of `s10`, with no token held, was complete in
@@ -2234,14 +2234,14 @@ in `ns`:
   round trip on `ns/zk2/*/*/@zk/settle` took 0.5–0.8 ms beside 2,000
   tokens and 2.7 ms beside 10,000, carrying none. The crowd token's
   withdrawal was heard on its wire key. zk2py's follower so wired:
-  - its round trip stood in 0.6 ms (2,000) and 2.9 ms (10,000);
+  - its round trip stood in 0.5–0.6 ms (2,000) and 2.9 ms (10,000);
   - its seed was complete;
   - it read a withdrawn crowd address down after its re-read.
 - **Step 9.**
   - Through the watch session cut off, `settle` asked no GET, and none
     stood.
-  - Cut 150 ms into the wait, zenoh's own round trip came back at 151 ms,
-    with the final reply alone and no error reply.
+  - Cut 150 ms into the wait, zenoh's own round trip came back at 151–154
+    ms, with the final reply alone and no error reply.
   - zk2py's came back at 151 ms and did not stand (`CUT_OFF_DURING`).
 - **10,000 tokens** (the largest asked) fit on this VM: §10 ran whole
   there, 34 of 34 with zk2py's reader and 8 of 8 with zenctl.

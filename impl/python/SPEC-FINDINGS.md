@@ -11862,8 +11862,8 @@ a watch session holding no link, or holding none when it ended, "whatever
 its replies say", and that a reader asks none through a session cut off.
 §10 step 9 runs it. zk2py's `settle` already did this. In step 9 it asked
 no GET through the session cut off. A round trip cut 150 ms into its wait
-came back at 151 ms (zenoh's with the final reply alone), and zk2py's did
-not stand.
+came back at 151–154 ms (zenoh's with the final reply alone), and
+zk2py's did not stand.
 
 ### F-229 · gap · core 0.41 §8.1 "A round trip stands …": what a move leaves of what the reader holds, and which reads are "a seed"
 
@@ -12076,7 +12076,7 @@ time. zk2py's watch session, `watch_or_beside` and follower now watch so.
 - beside 2,000 tokens in `ns`, the round trip took 0.5–0.8 ms;
 - beside 10,000, it took 2.7 ms;
 - the crowd token's withdrawal was heard on its wire key;
-- 0.41's option, history in `ns`, took 133 ms and 3.2 s.
+- 0.41's option, history in `ns`, took 131–154 ms and 3.2 s.
 
 ### F-234 · ambiguity · scenarios/presence.md §10 step 7: one watch session in `ns`, or one per subscriber
 
