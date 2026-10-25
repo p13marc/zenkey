@@ -2516,6 +2516,23 @@ def _desired_tool_readings() -> list[tuple[str, Any, Any]]:
         t = ds.take_slice("lab/worker", "tasking.v1", r, None, [])
         return list(t.candidates), t.source, list(t.binding)
 
+    label8 = "desired.v1 0.8 §2.17, a requirement unread beside a revision that does not read"
+    unread = {**req5, "resources": None, "unread": True}
+    status = {"kind": "state", "template": "status", "params": {}, "annotations": {}}
+
+    def found(r: dict[str, Any], named: Any, held: list[Any]) -> Any:
+        return ds.find_report(ds.take_slice("lab/worker", "tasking.v1", r, named, held), []).expect()
+
+    out += [
+        (f"{label8}: the named revision without resources shows nothing: unread, never not_a_target",
+         found(unread, {}, []), {"found": "requirement_unread"}),
+        (f"{label8}: a held revision whose resources are not a list shows nothing: unread",
+         found(unread, None, [{"resources": None}]), {"found": "requirement_unread"}),
+        (f"{label8}: a readable held revision declaring no desired resource beside one that does not read: "
+         "not_a_target", found(unread, None, [{}, {"resources": [status]}]), {"found": "not_a_target"}),
+        (f"{label8}: read, a held revision that does not read is not in hand: the target alone, no candidate "
+         "claimed", found(req5, None, [{}]), {"found": "none"}),
+    ]
     out += [
         (f"{label}: its requirement's template under either kind token, each parameter its binding's self",
          taken(req5), ([key, at], ds.REQUIREMENT, [])),

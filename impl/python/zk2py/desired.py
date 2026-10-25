@@ -1246,6 +1246,9 @@ FOUND_ONE, FOUND_UNREADABLE, FOUND_NONE, NO_SLICE = "one", "unreadable", "none",
 #: 0.6 (F-217): a revision in hand declaring no desired resource the
 #: requirement names: the role is no target's
 NOT_A_TARGET = "not_a_target"
+#: 0.8 (F-225): a requirement whose declaring contract the tool does not
+#: hold, or holds in a revision declaring no such role, is unread
+REQUIREMENT_UNREAD = "requirement_unread"
 TWO_DIFFER, UNREADABLE_REPLY = "two_differ", "unreadable_reply"
 
 
@@ -1263,6 +1266,9 @@ class SliceTaken:
     #: held, declares no desired resource the requirement names: the role
     #: is not this profile's (§2.1, 0.6, F-217)
     desired: bool = True
+    #: True when the requirement is unread (0.8, F-225): no slice, no
+    #: binding problem, beside requirement_unread
+    unread: bool = False
 
 
 @dataclass(frozen=True)
@@ -1348,6 +1354,11 @@ def _from_contract(found: list[dict[str, Any]], iface: str, target: str, require
     return SliceTaken((b.key,), source)
 
 
+def _readable(rev: Any) -> bool:
+    """A revision as take_slice reads one: a dict whose ``resources`` is a list."""
+    return isinstance(rev, dict) and isinstance(rev.get("resources"), list)
+
+
 def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict[str, Any] | None,
                held: Iterable[dict[str, Any]] = ()) -> SliceTaken:
     """§2.17 (0.5) "What a tool reads to answer", the slice:
@@ -1362,7 +1373,31 @@ def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict
       token, state or @state, is a candidate", each in the requirement's
       order, ``state`` first.
     "A binding §2.3 finds invalid, or a declaration §2.2 does, gives no
-    slice"."""
+    slice".
+
+    With ``requirement["unread"]`` (0.8, F-225), "a requirement whose
+    declaring contract the descriptor names and the tool does not hold …
+    is unread: no binding problem is read from it … never every resource".
+    "A revision of the author's in hand, named or held, that declares no
+    desired resource at all still shows the role no target's … one that
+    declares any is no help, one desired resource included". The binding's
+    absence is the descriptor's word, read first: unbound and optional is
+    the kill switch, unbound and required ``required_unbound``."""
+    # A revision whose resources do not read (no list) shows nothing: it is
+    # not in hand, and can prove neither a slice nor that the role is no
+    # target's. The tool's revisions come from loaded or verified contracts,
+    # whose resources are always a list; another caller may pass less.
+    if named is not None and not _readable(named):
+        named = None
+    held = [rev for rev in held if _readable(rev)]
+    if requirement.get("unread"):
+        if not requirement.get("bindings"):
+            return SliceTaken((), None, () if requirement.get("optional") else ("required_unbound",))
+        revisions = [named] if named is not None else held
+        if revisions and all(not any(KEY in (r.get("annotations") or {}) for r in rev["resources"])
+                             for rev in revisions):
+            return SliceTaken((), None, desired=False)
+        return SliceTaken((), None, unread=True)
     if named is not None:
         found = desired_named(named.get("resources") or [], requirement)
         if found:
@@ -1372,7 +1407,6 @@ def take_slice(target: str, iface: str, requirement: dict[str, Any], named: dict
         # requirement names makes the role not this profile's, not_a_target
         # (0.6, F-217).
         return SliceTaken((), None, desired=False)
-    held = list(held)
     for rev in held:
         found = desired_named(rev.get("resources") or [], requirement)
         if found:
@@ -1413,6 +1447,8 @@ def find_report(taken: SliceTaken, replies: Iterable[tuple[str, bytes]]) -> Repo
     role (0.6, F-217), else :func:`which_report` among its candidates."""
     if not taken.desired:
         return ReportFound(NOT_A_TARGET)
+    if taken.unread:
+        return ReportFound(REQUIREMENT_UNREAD)
     return which_report(replies, taken.candidates)
 
 

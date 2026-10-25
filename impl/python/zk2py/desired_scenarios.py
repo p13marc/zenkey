@@ -1071,6 +1071,7 @@ def _row_of_mine(r: Any) -> dict[str, Any]:
     return {"listing": r.listing, "slice": r.slice, "slice_from": r.slice_from, "author": r.author,
             "author_presence": r.author_presence, "author_current": r.author_current,
             "report": "unreadable" if rep and rep.startswith("unreadable:") else rep,
+            "requirement_unread": r.requirement_unread,
             "binding_invalid": [x for x in r.problems if x in ds.BINDING_REASONS],
             "declaration_invalid": [y for x in r.problems if x.startswith("declaration_invalid:")
                                     for y in x.split(":", 1)[1].split(",")]}
@@ -1085,6 +1086,7 @@ def _row_of_zenctl(z: Any) -> dict[str, Any]:
     return {"listing": z.get("listing"), "slice": z.get("slice"), "slice_from": z.get("slice_from"),
             "author": a.get("address"), "author_presence": a.get("presence"), "author_current": a.get("current"),
             "report": "unreadable" if rep.get("unreadable") else rep.get("key"),
+            "requirement_unread": z.get("requirement_unread"),
             "binding_invalid": list(z.get("binding_invalid") or []),
             "declaration_invalid": list(z.get("declaration_invalid") or [])}
 
@@ -1138,10 +1140,10 @@ def section_tool_shapes(ctx: Ctx) -> None:
     from .contract import load_contract
     from .desired_live import contract
 
-    sec, rp = "§9 beyond: the tool's 0.4 to 0.7 readings", ctx.report
+    sec, rp = "§9 beyond: the tool's 0.4 to 0.8 readings", ctx.report
     if ctx.author_impl != "zk2py" or ctx.target_impl != "zk2py":
         return  # no party runs here: once is enough
-    use_z = _zenctl_ready(rp, sec, 50)
+    use_z = _zenctl_ready(rp, sec, 60)
     worker, tasking, two = contract("worker.v1"), contract("tasking.v1"), contract("zk2py_worker2.v1")
     offline = str(REPO / "impl" / "python" / "interop" / "desired")
 
@@ -1335,6 +1337,40 @@ def section_tool_shapes(ctx: Ctx) -> None:
          "(0.7)", manifest_doc(worker, "tasking.v1"), {rp_prefix: [(conv, True)]}, a_task, {d_prefix: [(doc, True)]},
          {"converged": ("not_yet", "other_epoch"), "refused": ("no", "converged"), "last_known": ("no", "current"),
           "in_force": ("yes", "desired")}, ([worker, tasking], [p1, pt], "task")),
+    ]
+    # 0.8 (F-225): a requirement whose declaring contract the descriptor
+    # names and the tool does not hold is unread, never every resource
+    def unread_doc(iface: str, declared: str, fp: str, role: str = "task", bindings: list[str] | None = None,
+                   own: Any = None) -> dict[str, Any]:
+        entries = [{"iface": declared, "contract": fp, "minor": 0}]
+        if own is not None:
+            entries.append({"iface": own.interface, "contract": own.fingerprint, "minor": 0})
+        return {"format": "zk2-descriptor/0.1", "service": TARGET, "instance": "7" * 16, "interfaces": entries,
+                "requires": [{"role": role, "interface": iface, "declared_by": declared,
+                              "bindings": [AUTHOR] if bindings is None else bindings, "params": selfs,
+                              "optional": True}],
+                "profiles": ["desired.v1"]}
+
+    nobody = "sha256:" + "ab" * 32
+    unbound_answers = {"converged": ("not_asked", "unbound"), "refused": ("not_asked", "unbound"),
+                       "last_known": ("not_asked", "unbound"), "in_force": ("no", "unbound")}
+    unstated += [
+        ("F-225's shape: zk2py_worker9.v1 named at a fingerprint no one serves, on an author with two desired "
+         "resources: the requirement unread, no_report, no two_documents (0.8)",
+         unread_doc("zk2py_tasking2.v1", "zk2py_worker9.v1", nobody), {}, a_t2,
+         {t2_key.format(w): [(doc, True)] for w in ("plans", "tasks")}, no_report, ([tasking2], [pt2], "task")),
+        ("unread on an author with one desired resource: unread too, no slice (0.8, decided)",
+         unread_doc("tasking.v1", "zk2py_worker9.v1", nobody), {}, a_task, {d_prefix: [(doc, True)]}, no_report,
+         ([tasking], [pt], "task")),
+        ("unread on an author whose revision declares no desired resource at all: not a target (0.8; 0.6, "
+         "F-217)", unread_doc("worker.v1", "zk2py_worker9.v1", nobody, role="watch"), {}, a_worker,
+         {"zk2/lab/author/worker.v1/state/running": [(doc, True)]}, not_a_target, ([worker], [p1], "watch")),
+        ("a declaring contract in hand that declares no such role: unread (0.8, decided)",
+         unread_doc("tasking.v1", "worker.v1", worker.fingerprint, role="other"), {}, a_task,
+         {d_prefix: [(doc, True)]}, no_report, ([worker, tasking], [p1, pt], "other")),
+        ("unread and unbound: still the kill switch, the descriptor's word (0.8, decided)",
+         unread_doc("tasking.v1", "zk2py_worker9.v1", nobody, bindings=[]), {}, a_task, {d_prefix: [(doc, True)]},
+         unbound_answers, ([tasking], [pt], "task")),
     ]
     for name, tdoc, tans, adoc, aans, want, how in unstated:
         shapes.append((name, tdoc, tans, adoc, aans, want))
