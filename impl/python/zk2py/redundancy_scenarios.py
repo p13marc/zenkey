@@ -3,7 +3,7 @@ Python (#609, rounds 56, 58 and 60)::
 
     python -m zk2py.redundancy_scenarios [--a zk2py|PATH] [--b zk2py|PATH] [--owner PATH]
         [--only 1|2|…|12|remint|poll|poll-miss|heal-retry|heal-retry-pause|remint-campaign]...
-        [--runs N] [--zenctl PATH] [--rust-spawn-at-go]
+        [--runs N] [--zenctl PATH]
 
 Each candidate is a process driven as a black box through the owner
 example's command line and its ``redundancy`` commands, one JSON line each
@@ -65,11 +65,9 @@ SHORT_LEASE_MS = 2000
 
 #: --a and --b: "zk2py", or the owner example's path
 IMPL: dict[str, Any] = {"a": "zk2py", "b": "zk2py"}
-#: the owner example's --wait-go (0.3, F-216): with it, both candidates open
-#: their sessions and wait for go. Off by --rust-spawn-at-go, which spawns
-#: the owner example at go instead, calibrated against the other (round 58's
-#: way): round 60's build never starts after its go (F-220).
-RUST_WAIT_GO = True
+#: §3 holds both candidates at their own --wait-go (0.3, F-216): each opens
+#: its sessions and waits for go; the owner example reads its standard input
+#: from its own start since 0.4 (F-220), so --rust-spawn-at-go is gone.
 #: §12's Rust tool, zenctl (``--zenctl`` or ``ZK2PY_ZENCTL``; no default)
 ZENCTL: Path | None = Path(os.environ["ZK2PY_ZENCTL"]) if os.environ.get("ZK2PY_ZENCTL") else None
 
@@ -105,10 +103,6 @@ class Inst:
         self.g = g
         flags = list(flags or [])
         self.wait_go = "--wait-go" in flags
-        #: spawned at go: the owner example without its own --wait-go
-        self.late = self.rust and self.wait_go and not RUST_WAIT_GO
-        if self.late:
-            flags = [f for f in flags if f != "--wait-go"]
         args = ["--connect", endpoint, "--standby", "--instance-id", instance, "--name", name, "--retry-ms",
                 "2000", "--grace-ms", "2000", *flags, address, str(CONTRACT_DIR / f"{contract}.toml")]
         self.argv = ([str(impl)] if self.rust else [sys.executable, "-m", "zk2py.redundancy_owner"]) + args
@@ -119,12 +113,11 @@ class Inst:
         self.waiting = False
         self.refused: str | None = None
         self.t_launch = 0.0
-        if not self.late:
-            self._spawn()
-            if not self.wait_go:
-                self._await_ready()
-            else:
-                self._await_ready(line="waiting go")
+        self._spawn()
+        if not self.wait_go:
+            self._await_ready()
+        else:
+            self._await_ready(line="waiting go")
 
     def _spawn(self) -> None:
         env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
@@ -156,12 +149,8 @@ class Inst:
                 return
 
     def go(self) -> None:
-        """--wait-go's start: a go line, its sessions already open; or, with
-        the owner example spawned at go (``RUST_WAIT_GO`` off), its spawn."""
-        if self.late:
-            self._spawn()
-        else:
-            self.send("go")
+        """--wait-go's start: a go line, its sessions already open."""
+        self.send("go")
 
     def send(self, line: str) -> None:
         try:
@@ -602,12 +591,11 @@ def _ordered(bus: Bus, inst: Inst, after: float = 0.0, claim: bool = True,
     if claim:
         _wait(lambda: probe("instance") is not None, 3.0, 0.02)
     pi, pa = probe("instance"), probe("alive")
-    # an instance that took over before the probe's answer came reads
-    # unmarked by then: its interface token at S before that answer says so.
-    # The answer and the token ride two priorities (F-202), so the token
-    # may reach S just after an answer made after the takeover's step 3:
-    # within 50 ms is read as having beaten it (F-223)
-    late = pi is not None and pi[1] is False and pa is not None and pa[0] < pi[2] + 0.05
+    # §1 and §3 Expected 1 (0.4, F-223): "unless it took over before that GET
+    # was answered: its interface token at S within a round trip of the
+    # answer, the two riding two priorities". The round trip is that GET's
+    # own, from S hearing the instance token to the answer
+    late = pi is not None and pi[1] is False and pa is not None and pa[0] <= pi[2] + max(0.0, pi[2] - pi[0])
     ok = (pi is not None and (pi[1] is True or late)) if claim else True
     if serving or not claim:
         ok = ok and pa is not None and pa[1] is False
@@ -804,13 +792,11 @@ def section3(rp: Report, runs: int) -> None:
     """§3 (0.3, F-216): "A and B start within 10 ms of each other, measured at
     S as the arrival of each instance's instance token … a run whose two
     instance tokens arrive more than 10 ms apart is made again, and counted
-    apart". Each holds at ``--wait-go``, its sessions open, and both are
-    sent go together; an owner example spawned at go instead
-    (``--rust-spawn-at-go``) is calibrated against the other."""
+    apart". Each holds at its own ``--wait-go``, its sessions open, and both
+    are sent go together (0.4, F-220: the owner example's too)."""
     sec = f"§3 a simultaneous start [{pairing()}]"
     bus = Bus()
     healed, b_kept, fails, worst, skews, again, apart, unseen = 0, 0, [], 0.0, [], 0, [], 0
-    offset = 0.25
     try:
         n = 0
         tries = 0
@@ -820,16 +806,8 @@ def section3(rp: Report, runs: int) -> None:
             a = bus.inst(IMPL["a"], "A", ids[0], flags=["--wait-go"])
             b = bus.inst(IMPL["b"], "B", ids[1], flags=["--wait-go"])
             t = time.monotonic()
-            if a.late == b.late:
-                a.go()
-                b.go()
-            else:
-                # one spawned at go, the other waiting: the spawned one first,
-                # the other's go after its measured start-up (calibrated)
-                first, second = (a, b) if a.late else (b, a)
-                first.go()
-                time.sleep(max(0.0, offset))
-                second.go()
+            a.go()
+            b.go()
 
             def settled() -> bool:
                 # after a heal, a step-down's stand-by names no why: its role is enough
@@ -842,9 +820,6 @@ def section3(rp: Report, runs: int) -> None:
             ia = bus.s.first_token("put", f"zk2/lab/ledger/@zk/instance/{ids[0]}", t)
             ib = bus.s.first_token("put", f"zk2/lab/ledger/@zk/instance/{ids[1]}", t)
             skew = abs(ia - ib) if ia is not None and ib is not None else None
-            if skew is not None and a.late != b.late:
-                late_t, held_t = (ia, ib) if a.late else (ib, ia)
-                offset = min(2.0, max(0.0, offset + (late_t - held_t)))
             oa, wa = _ordered(bus, a, t - 0.1, serving=a.serving())
             ob, wb = _ordered(bus, b, t - 0.1, serving=b.serving())
             first_read = True
@@ -1596,8 +1571,10 @@ def section12(rp: Report, runs: int) -> None:
     finally:
         bus.close()
         base_dir.cleanup()
-    # beyond §12 (§2.15's probe, F-221): append's wildcard would reach
-    # appendall, whose fan-out is allowed; neither tool probes it
+    # 8, its ledger-appendall half (0.4, F-221): append's wildcard would
+    # reach appendall, whose fan-out is allowed; neither tool asks either,
+    # each says why, and appendall's handler never runs. Then F-222's shape:
+    # check conform with every case skipped sends nothing
     variant = contract_at("ledger-appendall.v1")
     bus = Bus()
     try:
@@ -1605,23 +1582,67 @@ def section12(rp: Report, runs: int) -> None:
         _wait(a.serving, 5.0)
         b = bus.inst(IMPL["b"], "B", B_ID, contract="ledger-appendall.v1")
         _wait(b.stands, 8.0)
-        before = a.executions()
+        before = (a.executions(), b.executions())
         t = read_tool(bus.g, LEDGER, "ledger.v1", grace_s=2.0, contracts=[variant], with_probe=True)
-        rp.check(sec, "beyond: append's probe would reach appendall, whose fan-out is allowed: zk2py's tool probes "
-                      "neither, says why, and runs nothing (F-221)",
+        after = (a.executions(), b.executions())
+        rp.check(sec, "8. on ledger-appendall, zk2py's tool asks neither append$*, which reaches appendall, nor "
+                      "appendall, and says why; appendall's handler never runs (0.4, F-221)",
                  not t.probed and "@op/append" in t.not_probed and "appendall" in t.not_probed["@op/append"]
-                 and a.executions() == before, f"probed {t.probed}; not probed {t.not_probed}")
+                 and "@op/appendall" in t.not_probed and after == before,
+                 f"probed {t.probed}; not probed {t.not_probed}; executions A, B {before} -> {after}")
         if use_z:
             skips = [x for c in CONFORM_OTHERS for x in ("--skip", c)]
+            before = (a.executions(), b.executions())
             rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts",
+                                   str(CONTRACT_DIR / "ledger-appendall.v1.toml"), "-c", bus.ep1, "--timeout", "1",
+                                   "--for", "1", *skips])
+            after = (a.executions(), b.executions())
+            rows = {r.get("case"): r for r in (doc or {}).get("rows") or [] if isinstance(r, dict)}
+            st = rows.get("redundancy-standby") or {}
+            rp.check(sec, "8. on ledger-appendall, zenctl check conform's redundancy-standby: neither asked, the "
+                          "same why, unobservable, exit 2; appendall's handler never runs (0.4, F-221)",
+                     rc == 2 and (st.get("verdict") or {}).get("answer") == "unobservable"
+                     and "appendall" in json.dumps(st) and after == before,
+                     f"exit {rc}; executions A, B {before} -> {after}; {st}")
+            every = [x for c in (*CONFORM_OTHERS, "redundancy-declaration", "redundancy-standby")
+                     for x in ("--skip", c)]
+            before = (a.executions(), b.executions())
+            rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts",
+                                   str(CONTRACT_DIR / "ledger-appendall.v1.toml"), "-c", bus.ep1, "--timeout", "1",
+                                   "--for", "1", *every])
+            after = (a.executions(), b.executions())
+            asked = [r.get("case") for r in (doc or {}).get("rows") or []
+                     if isinstance(r, dict) and (r.get("verdict") or {}).get("answer") != "not_asked"]
+            rp.check(sec, "beyond (F-222): zenctl check conform with every case skipped sends nothing: no case "
+                          "asked, and no handler runs",
+                     not asked and after == before, f"exit {rc}; asked {asked}; executions A, B {before} -> {after}")
+    finally:
+        bus.close()
+    # beyond step 8 (0.4, F-221's "or that it holds offline"): A and B run
+    # ledger.v1, and the tool also holds ledger-appendall, a revision no
+    # descriptor names that adds appendall: append$* is not asked
+    bus = Bus()
+    try:
+        a = bus.inst(IMPL["a"], "A", A_ID)
+        _wait(a.serving, 5.0)
+        b = bus.inst(IMPL["b"], "B", B_ID)
+        _wait(b.stands, 8.0)
+        t = read_tool(bus.g, LEDGER, "ledger.v1", grace_s=2.0, contracts=[ledger, variant], with_probe=True)
+        rp.check(sec, "beyond: ledger.v1 running, ledger-appendall held offline and named by no descriptor: "
+                      "zk2py's tool does not ask append$*, which would reach that revision's appendall (0.4, F-221)",
+                 not t.probed and "appendall" in t.not_probed.get("@op/append", ""),
+                 f"probed {t.probed}; not probed {t.not_probed}")
+        if use_z:
+            skips = [x for c in CONFORM_OTHERS for x in ("--skip", c)]
+            rc, doc, err = zenctl(["check", "conform", LEDGER, "ledger.v1", "--contracts", lpath, "--contracts",
                                    str(CONTRACT_DIR / "ledger-appendall.v1.toml"), "-c", bus.ep1, "--timeout", "1",
                                    "--for", "1", *skips])
             rows = {r.get("case"): r for r in (doc or {}).get("rows") or [] if isinstance(r, dict)}
             st = rows.get("redundancy-standby") or {}
-            rp.check(sec, "beyond: zenctl check conform's redundancy-standby: append not probed, the same why, "
+            rp.check(sec, "beyond: zenctl check conform, the same: append not probed, the held revision named, "
                           "unobservable, exit 2",
                      rc == 2 and (st.get("verdict") or {}).get("answer") == "unobservable"
-                     and "appendall" in json.dumps(st), f"exit {rc}; {st}")
+                     and variant.fingerprint in json.dumps(st), f"exit {rc}; {st}")
     finally:
         bus.close()
     if use_z:
@@ -1877,13 +1898,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--owner", help="both candidates the owner example at this path")
     ap.add_argument("--only", action="append", choices=list(SECTIONS))
     ap.add_argument("--runs", type=int, default=20, help="§3's runs (20 by the text)")
-    ap.add_argument("--rust-spawn-at-go", action="store_true",
-                    help="spawn the owner example at go, calibrated, instead of its own --wait-go (F-220)")
     ap.add_argument("--zenctl", help="§12's Rust tool (else $ZK2PY_ZENCTL; without either, §12 runs zk2py's tool "
                                      "alone and says so)")
     a = ap.parse_args(argv)
-    global RUST_WAIT_GO, ZENCTL
-    RUST_WAIT_GO = not a.rust_spawn_at_go
+    global ZENCTL
     if a.zenctl:
         ZENCTL = Path(a.zenctl)
     for k in ("a", "b"):
