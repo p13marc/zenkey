@@ -1643,7 +1643,8 @@ def section12(rp: Report, runs: int) -> None:
         rp.check(sec, "9. ledger.v1 running, ledger-appendall held offline: zk2py's tool asks no append$*, its "
                       "reason naming appendall and the revision held offline; the standbys' exposure unobservable "
                       "(0.5, F-226)",
-                 not t.probed and "appendall" in why and variant.fingerprint in why and t.exposure == "unobservable",
+                 not t.probed and "appendall" in why and variant.fingerprint in why
+                 and ledger.fingerprint not in why and t.exposure == "unobservable",
                  f"probed {t.probed}; not probed {t.not_probed}; exposure {t.exposure}")
         if use_z:
             skips = [x for c in CONFORM_OTHERS for x in ("--skip", c)]
@@ -1656,7 +1657,7 @@ def section12(rp: Report, runs: int) -> None:
             rp.check(sec, "9. zenctl check conform: no append$* probe, the reason naming appendall and the revision "
                           "held offline, redundancy-standby unobservable, exit 2",
                      rc == 2 and (st.get("verdict") or {}).get("answer") == "unobservable" and "appendall" in text
-                     and variant.fingerprint in text, f"exit {rc}; {st}")
+                     and variant.fingerprint in text and ledger.fingerprint not in text, f"exit {rc}; {st}")
     finally:
         bus.close()
     if use_z:

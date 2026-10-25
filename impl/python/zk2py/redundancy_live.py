@@ -227,7 +227,7 @@ _OP = "@op"
 
 def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str, Any],
           timeout: float = live.GET_TIMEOUT_S,
-          others: dict[str, dict[str, Any]] | Iterable[dict[str, Any]] = (),
+          others: dict[str, dict[str, Any]] | None = None,
           fingerprint: str | None = None) -> tuple[dict[str, list[str]], dict[str, str]]:
     """§2.15 (0.3), "A standby's exposure, probed" (a MAY): "a GET, target All
     and consolidation None, over a wildcard of each of the interface's
@@ -245,8 +245,12 @@ def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str,
     reply to; and, by operation, why it was not probed, a probe that failed
     included."""
     ops = [r for r in canonical.get("resources") or [] if r.get("kind") == "operation"]
-    revs = [(fingerprint, canonical)] + (list(others.items()) if isinstance(others, dict)
-                                         else [(None, c) for c in others])
+    if others is None:
+        others = {}
+    if not isinstance(others, dict):
+        raise TypeError("probe's others are revisions by fingerprint: a dict, so a reason can name one")
+    # each revision once, by its fingerprint: the probed one first
+    revs = [(fingerprint, canonical)] + [(fp, c) for fp, c in others.items() if fp != fingerprint]
     allowed = [(_op_key(address, iface, r), r, fp) for fp, c in revs
                for r in c.get("resources") or [] if r.get("kind") == "operation" and r.get("fanout") == "allowed"]
     out: dict[str, list[str]] = {}
