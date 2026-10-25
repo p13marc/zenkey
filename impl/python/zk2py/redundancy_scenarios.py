@@ -603,15 +603,20 @@ def _ordered(bus: Bus, inst: Inst, after: float = 0.0, claim: bool = True,
         _wait(lambda: probe("instance") is not None, 3.0, 0.02)
     pi, pa = probe("instance"), probe("alive")
     # an instance that took over before the probe's answer came reads
-    # unmarked by then: its interface token at S before that answer says so
-    late = pi is not None and pi[1] is False and pa is not None and pa[0] < pi[2]
+    # unmarked by then: its interface token at S before that answer says so.
+    # The answer and the token ride two priorities (F-202), so the token
+    # may reach S just after an answer made after the takeover's step 3:
+    # within 50 ms is read as having beaten it (F-223)
+    late = pi is not None and pi[1] is False and pa is not None and pa[0] < pi[2] + 0.05
     ok = (pi is not None and (pi[1] is True or late)) if claim else True
     if serving or not claim:
         ok = ok and pa is not None and pa[1] is False
     descs = bus.s.descriptors(inst.address, inst.instance, after)
     order = "; S received " + ", ".join(f"{'marked' if m else 'unmarked'} +{t - after:.4f}" for t, m in descs[:3])
+    times = (f" (instance token +{pi[0] - after:.4f}, its GET answered +{pi[2] - after:.4f}" if pi else " (") + \
+        (f", interface token +{pa[0] - after:.4f})" if pa else ")")
     return ok, (f"at its instance token the descriptor read {'marked' if pi and pi[1] else pi and 'unmarked'}, "
-                f"at its interface token {'unmarked' if pa and pa[1] is False else pa and 'marked'}{order}")
+                f"at its interface token {'unmarked' if pa and pa[1] is False else pa and 'marked'}{times}{order}")
 
 
 # -- helpers ----------------------------------------------------------
@@ -804,7 +809,7 @@ def section3(rp: Report, runs: int) -> None:
     (``--rust-spawn-at-go``) is calibrated against the other."""
     sec = f"§3 a simultaneous start [{pairing()}]"
     bus = Bus()
-    healed, b_kept, fails, worst, skews, again, apart = 0, 0, [], 0.0, [], 0, []
+    healed, b_kept, fails, worst, skews, again, apart, unseen = 0, 0, [], 0.0, [], 0, [], 0
     offset = 0.25
     try:
         n = 0
@@ -856,11 +861,13 @@ def section3(rp: Report, runs: int) -> None:
                 fails.append(f"run {n}: end {end} ({dt:.2f} s; A {a.standing()}, B {b.standing()}), A {wa}, B {wb}, "
                              f"first read after claim {first_read}; tokens' skew {skew}; alive tokens at S {line}; "
                              f"A's reads {a.read_counts()}, B's {b.read_counts()}")
-            if skew is None or skew > 0.010:
+            if skew is None:
+                # a token S never saw: no start measured, made again, counted apart
+                unseen += 1
+            elif skew > 0.010:
                 # made again, and counted apart
                 again += 1
-                if skew is not None:
-                    apart.append(skew)
+                apart.append(skew)
             else:
                 n += 1
                 skews.append(skew)
@@ -884,7 +891,8 @@ def section3(rp: Report, runs: int) -> None:
                      f"in {b_kept}; the slowest settled in {worst:.2f} s; the tokens' skew at most "
                      f"{max(skews) * 1000 if skews else 0:.1f} ms (median "
                      f"{sorted(skews)[len(skews) // 2] * 1000 if skews else 0:.1f} ms). Made again, counted apart: "
-                     f"{again} (skews {sorted(round(x * 1000, 1) for x in apart)[:12]} ms)")
+                     f"{again} more than 10 ms apart (skews {sorted(round(x * 1000, 1) for x in apart)[:12]} ms), "
+                     f"{unseen} with an instance token S never saw")
     finally:
         bus.close()
 
@@ -1333,12 +1341,13 @@ def zenctl(args: list[str], timeout: float = 120.0) -> tuple[int | None, Any, st
     """§12's Rust tool as a black box: (exit, its JSON, stderr)."""
     if ZENCTL is None:
         return None, None, "no Rust tool given"
-    env = dict(os.environ, ZENKEY_EXPLORER_CONFIG_DIR=tempfile.mkdtemp(prefix="zk2py-zenctl-"))
-    try:
-        p = subprocess.run([str(ZENCTL), *args, "--format", "json"], capture_output=True, text=True, env=env,
-                           timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return None, None, "timed out"
+    with tempfile.TemporaryDirectory(prefix="zk2py-zenctl-") as home:
+        env = dict(os.environ, ZENKEY_EXPLORER_CONFIG_DIR=home)
+        try:
+            p = subprocess.run([str(ZENCTL), *args, "--format", "json"], capture_output=True, text=True, env=env,
+                               timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None, None, "timed out"
     try:
         doc = json.loads(p.stdout)
     except ValueError:
@@ -1564,8 +1573,8 @@ def section12(rp: Report, runs: int) -> None:
     finally:
         bus.close()
     # 6. A serves and B stands by on a system minted by hostid.v1
-    base = tempfile.mkdtemp(prefix="zk2py-s12-")
-    root = hs.make_root(base, {hs.ETC: hs.M1 + "\n"})
+    base_dir = tempfile.TemporaryDirectory(prefix="zk2py-s12-")
+    root = hs.make_root(base_dir.name, {hs.ETC: hs.M1 + "\n"})
     minted = f"{hs.SYSTEM[hs.M1]}/ledger"
     bus = Bus()
     try:
@@ -1586,6 +1595,7 @@ def section12(rp: Report, runs: int) -> None:
                      f"exit {rc}; {hd}")
     finally:
         bus.close()
+        base_dir.cleanup()
     # beyond §12 (§2.15's probe, F-221): append's wildcard would reach
     # appendall, whose fan-out is allowed; neither tool probes it
     variant = contract_at("ledger-appendall.v1")

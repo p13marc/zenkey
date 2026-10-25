@@ -326,11 +326,13 @@ fixtures:
   and F-216, minor, the scenarios'.
 - `redundancy.v1` 0.3 resolved all three (`SPEC-FINDINGS.md`, "At
   redundancy.v1 0.3").
-- F-220 to F-222 were found reading 0.3 cold, end to end, and running
+- F-220 to F-223 were found reading 0.3 cold, end to end, and running
   §12 against the Rust tools in round 60. F-220 is against the owner
   example's `--wait-go`, which never starts. F-221 is §2.15's probe of a
   template-less operation. F-222, minor, is against `check conform`'s
-  `--skip`, outside this profile. All three are open.
+  `--skip`, outside this profile. F-223, minor, is §3's "unless its
+  interface token beat that GET", which S cannot read on a fast
+  takeover. All four are open.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), `health.v1` 0.2 one
@@ -1677,8 +1679,11 @@ from the text:
       `*` for each parameter, or `$*` after a template-less name. Each
       reply is attributed by zenoh's replier zid. A reply from an
       instance marked standby with no token in both reads is the
-      finding, beside §5's answers. A wildcard that would reach an
-      operation whose fan-out is allowed is not probed (F-221).
+      finding, beside §5's answers. Every revision the descriptors name
+      is probed, each key once. A wildcard that would reach an operation
+      whose fan-out is allowed, in any revision in hand, is not probed
+      (F-221). A revision not in hand, or a failed probe, goes in
+      `not_probed` with why.
   - `split_findings` is core §6's split-brain with "one split, one
     finding" (0.3): a governed interface's split by its first question,
     whatever the marks, and core §6's rule only where the profile does
@@ -1741,7 +1746,8 @@ The Rust side is the owner example and zenctl built from PR #862's head
   `not started: … invalid: value` (F-214).
 - **§3, measured at S.** The two instance tokens' median skew was 0.2 ms
   (zk2py, zk2py), 1.2 ms (Rust, Rust), 3.7 ms and 2.5 ms (the two mixed).
-  Runs made again, more than 10 ms apart: 0, 5, 1 and 1. In the 20 runs
+  Runs made again, more than 10 ms apart: 0, 5, 1 and 1. A run whose
+  token S never saw is counted apart again, and none was. In the 20 runs
   B kept serving in 2, 2, 6 and 6, and the heal ended it in 2, 1, 1 and
   0.
 - **§12, both tools, on every shape:** steps 1 to 8, with zenctl's exit

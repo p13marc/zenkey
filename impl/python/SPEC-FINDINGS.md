@@ -11210,7 +11210,12 @@ observations, neither a finding of the profile's:
 
 **The text, read end to end.** It holds together, its rules and its
 fixtures agreeing in every pairing. §2.15's probe is the one place a
-careful reader can still do harm (F-221).
+careful reader can still do harm (F-221). The review's fixes made zk2py
+probe every revision in hand, guarding each one's wildcard against every
+revision's allowed operations. They also record a probe not made, a
+failed one among them, in `not_probed`. One §3 run then failed the
+before-the-token check on a race the scenario's wording does not cover
+(F-223).
 
 ### F-220 · bug · the owner example's `--wait-go`: never starts after `go`
 
@@ -11298,9 +11303,35 @@ profile: core §5.1's tool.
 **Wording that would remove the guess:** none in the text; a skipped
 case would make no call.
 
-**Counts at redundancy.v1 0.3:** 222 entries. Open:
+### F-223 · minor · redundancy.v1 scenarios.md §1 and §3 Expected 1: "unless its interface token beat that GET"
+
+> scenarios.md §3 Expected 1: "S's GET at each instance's instance token
+> answers its descriptor marked standby, unless its interface token beat
+> that GET (F-202)"
+
+A candidate that claims and takes over within its GET's round trip puts
+its descriptor unmarked at the takeover's step 3, then declares its
+token. S's GET, made on hearing the instance token, can then be answered
+unmarked before S hears the interface token. The answer and the token
+ride two priorities, as F-202 found of a put and a token. So "beat that
+GET", read at S, misses a takeover whose step 3 lands within the round
+trip.
+
+This happened once in 60 measured mixed runs, review fixes included. A,
+zk2py's, has its sessions open before `go` since round 60, and took over
+19 ms after it. S heard A's interface token at +0.019 s, just after the
+GET's unmarked answer. Two reruns of 20 passed.
+
+**zk2py:** the runner reads an interface token reaching S within 50 ms
+after the GET's answer as having beaten it.
+
+**Wording that would remove the guess:** "unless it took over before
+that GET was answered: its interface token at S within a round trip of
+the answer, the two riding two priorities".
+
+**Counts at redundancy.v1 0.3:** 223 entries. Open:
 - F-217 to F-219, against desired.v1 0.5, F-219 minor (answered on #840,
   for its text 0.6);
-- F-220 to F-222, F-222 minor.
+- F-220 to F-223, F-222 and F-223 minor.
 
 Every other entry is resolved.

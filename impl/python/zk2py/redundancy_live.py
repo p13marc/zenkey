@@ -209,7 +209,7 @@ def _probe_key(address: str, iface: str, r: dict[str, Any]) -> str:
     chunks = [x.text if x.kind == templates.LITERAL else "*" for x in t.segments]
     if all(x.kind == templates.LITERAL for x in t.segments):
         chunks[-1] += "$*"
-    return "/".join(["zk2", address, iface, str(r["token"]), *chunks])
+    return "/".join(["zk2", address, iface, _OP, *chunks])
 
 
 def _op_key(address: str, iface: str, r: dict[str, Any]) -> str:
@@ -217,11 +217,17 @@ def _op_key(address: str, iface: str, r: dict[str, Any]) -> str:
     t = templates.parse_template(r["template"])
     chunks = [x.text if x.kind == templates.LITERAL else ("**" if x.kind == templates.REST else "*")
               for x in t.segments]
-    return "/".join(["zk2", address, iface, str(r["token"]), *chunks])
+    return "/".join(["zk2", address, iface, _OP, *chunks])
+
+
+#: an operation's kind token (core §1.3), from its kind: the probe builds
+#: its keys from the resource's kind, never from the canonical form's text
+_OP = "@op"
 
 
 def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str, Any],
-          timeout: float = live.GET_TIMEOUT_S) -> tuple[dict[str, list[str]], dict[str, str]]:
+          timeout: float = live.GET_TIMEOUT_S,
+          others: Iterable[dict[str, Any]] = ()) -> tuple[dict[str, list[str]], dict[str, str]]:
     """§2.15 (0.3), "A standby's exposure, probed" (a MAY): "a GET, target All
     and consolidation None, over a wildcard of each of the interface's
     operations whose fan-out is forbidden: every operation queryable at the
@@ -229,20 +235,24 @@ def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str,
     whose fan-out is allowed is never probed this way, since the call would
     run it", and so, by the same reason, is no wildcard that reaches one: a
     template-less operation's wildcard (``append$*``) reaches every
-    operation whose name begins with its own (F-221). Returns, by the
-    probe's key, the zid of every replier zenoh attributes a reply to; and,
-    by operation, why it was not probed."""
+    operation whose name begins with its own (F-221). ``others`` are the
+    interface's other revisions in hand, whose allowed operations other
+    candidates may serve, so a probe reaching one is not made either.
+    Returns, by the probe's key, the zid of every replier zenoh attributes a
+    reply to; and, by operation, why it was not probed, a probe that failed
+    included."""
     ops = [r for r in canonical.get("resources") or [] if r.get("kind") == "operation"]
-    allowed = [(_op_key(address, iface, r), r) for r in ops if r.get("fanout") == "allowed"]
+    allowed = [(_op_key(address, iface, r), r) for c in (canonical, *others)
+               for r in c.get("resources") or [] if r.get("kind") == "operation" and r.get("fanout") == "allowed"]
     out: dict[str, list[str]] = {}
     skipped: dict[str, str] = {}
     for r in ops:
-        name = f"{r['token']}/{r['template']}"
+        name = f"{_OP}/{r['template']}"
         if r.get("fanout") == "allowed":
             skipped[name] = "fanout = \"allowed\": a call over its wildcard would run it"
             continue
         key = _probe_key(address, iface, r)
-        reach = [f"{a['token']}/{a['template']}" for k, a in allowed if zenoh.KeyExpr(key).intersects(zenoh.KeyExpr(k))]
+        reach = [f"{_OP}/{a['template']}" for k, a in allowed if zenoh.KeyExpr(key).intersects(zenoh.KeyExpr(k))]
         if reach:
             skipped[name] = f"its probe {key} would reach {', '.join(reach)}, whose fan-out is allowed, and run it"
             continue
@@ -255,8 +265,9 @@ def probe(session: zenoh.Session, address: str, iface: str, canonical: dict[str,
                 rid = getattr(rep, "replier_id", None)
                 if rid is not None:
                     zids.append(str(getattr(rid, "zid", rid)))
-        except Exception:  # noqa: BLE001 - a probe that fails proves nothing
-            pass
+        except Exception as e:  # noqa: BLE001 - a probe that fails proves nothing, and is said
+            skipped[name] = f"its probe {key} failed: {type(e).__name__}: {e}"
+            continue
         out[key] = zids
     return out, skipped
 
@@ -306,24 +317,40 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
     """§2.15: two reads a grace apart, each its tokens, its completeness and
     every descriptor in it; the governance from the contracts the
     descriptors name, held offline or retrieved. With ``with_probe``, the
-    probe between the two reads, over the contract the first read's first
-    candidate names."""
+    probe between the two reads, over every revision of the interface the
+    first read's descriptors name: each one in hand probed, each key once,
+    and a revision not in hand, or a probe that failed, in ``not_probed``
+    with why."""
     offline = {c.fingerprint: c.canonical for c in contracts}
     r1, p1, d1 = read_address(session, address, iface)
     t = time.monotonic()
     answered = None
     skipped: dict[str, str] = {}
     if with_probe:
-        canonical = None
+        answered = {}
+        fps = []
         for doc in d1.values():
             for e in doc.get("interfaces") or []:
-                if isinstance(e, dict) and e.get("iface") == iface and canonical is None:
-                    fp = str(e.get("contract"))
-                    canonical = offline.get(fp)
-                    if canonical is None:
-                        got = live.retrieve_bundle(session, iface, fp)
-                        canonical = got.verified.contract if got.verified else None
-        answered, skipped = probe(session, address, iface, canonical) if canonical is not None else ({}, {})
+                if isinstance(e, dict) and e.get("iface") == iface and str(e.get("contract")) not in fps:
+                    fps.append(str(e.get("contract")))
+        revisions: dict[str, dict[str, Any]] = {}
+        for fp in fps:
+            canonical = offline.get(fp)
+            if canonical is None:
+                got = live.retrieve_bundle(session, iface, fp)
+                canonical = got.verified.contract if got.verified else None
+            if canonical is None:
+                skipped[f"revision {fp}"] = ("not in hand: not held offline, and no holder served it verified "
+                                             "(core §8.4)")
+                continue
+            revisions[fp] = canonical
+        for fp, canonical in revisions.items():
+            got_answers, got_skipped = probe(session, address, iface, canonical,
+                                             others=[c for f, c in revisions.items() if f != fp])
+            for key, zids in got_answers.items():
+                answered.setdefault(key, zids)
+            for name, why in got_skipped.items():
+                skipped.setdefault(name if len(fps) == 1 else f"{name} ({fp})", why)
     time.sleep(max(0.0, grace_s - (time.monotonic() - t)))
     r2, p2, d2 = read_address(session, address, iface)
     docs = {**d1, **d2}
