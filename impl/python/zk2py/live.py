@@ -73,6 +73,29 @@ zenoh-python has no unbounded channel: its default handler and
   through a session that held a link before it and at its end: a watch
   session cut off answers it at once, as it answers every liveliness GET.
 
+**A watch session on the wire keys (§8.1, 0.42).**
+- **In a namespace, a watch session in no namespace.** "A reader that
+  follows presence in a namespace SHOULD hold its watch session in **no**
+  namespace, and declare its subscribers, without history, on the **wire
+  keys** … It strips the namespace from every key it hears. A key outside
+  the namespace is not the deployment's: it is counted, never folded."
+  :func:`watch_session` opens a namespaced reading session's watch session
+  in no namespace, and :func:`watch_or_beside` declares the subscriber on
+  :func:`wire_selector` and makes the round trip on its wire key
+  (``ns/zk2/*/*/@zk/settle``), every key heard handed on through
+  :class:`Stripped`, which counts a key outside the namespace and drops it.
+  Before 0.42 the watch session was opened in the reading session's
+  namespace.
+- **No GET of the deployment's keys on it**: "A watch session in no
+  namespace makes none of the deployment's". zk2py's readers make every
+  read on the reading session; the watch session holds subscribers and
+  makes its round trip alone.
+- **An interests timeout zk2py cannot read** (F-232): "a session it is
+  handed and cannot read, it takes at zenoh's default, 10 s … such a reader
+  says that its reads' completeness rests on the default". A read or a
+  round trip on a session zk2py did not open, nor :func:`register`, says
+  so (:attr:`Presence.interests_timeout_assumed`).
+
 **Timeouts are the caller's (§8.1).** The defaults here are the 1 s that
 "the scenarios, and so a conformance run, use".
 """
@@ -238,6 +261,76 @@ def interests_timeout_of(session: Any) -> float:
     return entry[2] if entry is not None and entry[0] is session else ZENOH_INTERESTS_TIMEOUT_S
 
 
+def interests_timeout_known(session: Any) -> bool:
+    """§8.1 (0.42, F-232): whether zk2py knows the session's interests
+    timeout, having opened the session itself (:func:`open_client`) or been
+    told it (:func:`register`). When not, it is taken at zenoh's default,
+    and a read's completeness rests on that: "That holds only of a session
+    whose configuration states none … such a reader says that its reads'
+    completeness rests on the default"."""
+    entry = _CONF.get(id(session))
+    return entry is not None and entry[0] is session
+
+
+#: What a read or a round trip on a session zk2py cannot read the interests
+#: timeout of says (§8.1, 0.42, F-232).
+INTERESTS_TIMEOUT_ASSUMED = ("its completeness rests on zenoh's default interests timeout, 10 s, taken for a "
+                             "session zk2py did not open and cannot read (core §8.1, 0.42)")
+
+
+def wire_selector(namespace: str | None, selector: str) -> str:
+    """§8.1 (0.42): a base-relative selector as a session in no namespace
+    declares it to watch a deployment in ``namespace``, "the namespace in
+    front, ``<ns>/zk2/…``"; unchanged for no namespace."""
+    return f"{namespace}/{selector}" if namespace else selector
+
+
+def strip_namespace(namespace: str | None, key: str) -> str | None:
+    """§8.1 (0.42): "It strips the namespace from every key it hears. A key
+    outside the namespace is not the deployment's": the key without its
+    ``<ns>/`` chunks, or None for one outside the namespace. A key heard
+    with no namespace to strip is the key."""
+    if not namespace:
+        return key
+    prefix = namespace.rstrip("/") + "/"
+    return key[len(prefix):] if key.startswith(prefix) and len(key) > len(prefix) else None
+
+
+class _StrippedSample:
+    """A liveliness sample as a reader in a namespace hears it from its watch
+    session in no namespace: its key stripped, every other attribute the
+    sample's."""
+
+    def __init__(self, sample: Any, key: str) -> None:
+        self._sample, self.key_expr = sample, key
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sample, name)
+
+
+class Stripped:
+    """§8.1 (0.42): a subscriber's callback on a watch session in no
+    namespace watching ``namespace``'s wire keys. Each sample is handed on
+    with the namespace stripped from its key; a key outside the namespace is
+    counted (:attr:`outside`) and never handed on: "it is counted, never
+    folded"."""
+
+    def __init__(self, namespace: str, callback: Any) -> None:
+        self.namespace = namespace
+        self.inner = callback.callback if isinstance(callback, zenoh.handlers.Callback) else callback
+        self.outside = 0
+        self.outside_keys: list[str] = []
+
+    def __call__(self, sample: Any) -> None:
+        key = strip_namespace(self.namespace, str(sample.key_expr))
+        if key is None:
+            self.outside += 1
+            if len(self.outside_keys) < 16:
+                self.outside_keys.append(str(sample.key_expr))
+            return
+        self.inner(_StrippedSample(sample, key))
+
+
 def namespace_of(session: Any) -> str | None:
     """The session's namespace, as recorded when zk2py opened it; None for
     none, or for a session zk2py did not record."""
@@ -253,6 +346,12 @@ CUT_OFF = "cut off: the session holds no link to another zenoh node (core §8.1,
 #: gone at its end (§8.1, 0.38, F-185).
 CUT_OFF_DURING = ("cut off while it ran: the session's links were gone when it ended, so it came back at the cut "
                   "(core §8.1, 0.38)")
+#: Why a reader that follows presence makes no read while its watch session is
+#: cut off, whatever its reading session's links (§8.1, 0.42, F-227, F-228):
+#: "its subscribers hear nothing … it reports the read as not made, the
+#: reason its watch session's".
+WATCH_CUT_OFF = ("its watch session is cut off: it holds no link to another zenoh node, so the reader follows "
+                 "nothing and makes no read it would follow (core §8.1, 0.42)")
 BESIDE_SUBSCRIBER = ("beside a liveliness subscriber: the session holds one, and a read there can complete "
                      "without the tokens it covers (core §8.1, 0.37; Appendix B)")
 #: Why a read cannot be shown complete: this binding's links accessor
@@ -317,9 +416,22 @@ class Placement:
 
     watch: bool
     settled: bool | None
+    #: the subscriber's selector as declared: on a watch session in no
+    #: namespace watching a namespaced deployment, its wire key (§8.1, 0.42)
+    selector: str = ""
+    #: the namespace stripped from every key heard, or None
+    namespace: str | None = None
+    #: the callback's stripping wrapper, counting keys outside the namespace
+    stripped: Any = field(default=None, compare=False)
 
     def __bool__(self) -> bool:
         return self.watch
+
+    @property
+    def outside(self) -> int:
+        """Keys heard outside the namespace, counted and never handed on
+        (§8.1, 0.42)."""
+        return self.stripped.outside if self.stripped is not None else 0
 
 
 #: How many times :func:`watch_or_beside` tries the round trip.
@@ -331,21 +443,44 @@ def watch_or_beside(session: Any, selector: str, callback: Any, *, history: bool
     then the round trip there (tried :data:`SETTLE_TRIES` times), so the
     reading session holds none. For a session :func:`open_client` did not
     open, no watch session can be had: the subscriber goes beside the
-    reads, unmarked, as before 0.37, and the placement says so."""
+    reads, unmarked, as before 0.37, and the placement says so.
+
+    0.42: for a reading session in a namespace, the watch session is in
+    none (:func:`watch_session`), so the subscriber is declared on the wire
+    key (:func:`wire_selector`), the round trip asked on its wire key, and
+    every key heard handed on stripped (:class:`Stripped`); ``selector``
+    stays base-relative for the caller. ``history`` is the caller's: "its
+    subscribers without history" is the rule for a reader that seeds by a
+    read on its other session."""
     w = watch_session(session)
     if w is None:
         handler = callback if isinstance(callback, zenoh.handlers.Callback) else zenoh.handlers.Callback(callback)
-        return session.liveliness().declare_subscriber(selector, handler, history=history), Placement(False, None)
+        return session.liveliness().declare_subscriber(selector, handler, history=history), \
+            Placement(False, None, selector)
+    ns = namespace_of(session)
+    if ns and namespace_of(w) is None:
+        wire = wire_selector(ns, selector)
+        stripped = Stripped(ns, callback)
+        indirect = callback.indirect if isinstance(callback, zenoh.handlers.Callback) else True
+        sub = declare_liveliness_subscriber(w, wire, zenoh.handlers.Callback(stripped, indirect=indirect),
+                                            history=history)
+        settled = any(settle(w, selector=wire) for _ in range(SETTLE_TRIES))
+        return sub, Placement(True, settled, wire, ns, stripped)
     sub = declare_liveliness_subscriber(w, selector, callback, history=history)
     settled = any(settle(w, selector=selector) for _ in range(SETTLE_TRIES))
-    return sub, Placement(True, settled)
+    return sub, Placement(True, settled, selector, namespace_of(w))
 
 
 def watch_session(session: Any) -> Any | None:
     """§8.1 (0.37): the **watch session** of a reader whose reading session
     :func:`open_client` opened, opened the same way on first use (its
-    namespace and interests timeout too), else None (a session zk2py cannot
-    open again)."""
+    interests timeout too), else None (a session zk2py cannot open again).
+
+    0.42: in **no** namespace, whatever the reading session's: "A reader
+    that follows presence in a namespace SHOULD hold its watch session in
+    no namespace", watching the wire keys (:func:`watch_or_beside`). It
+    makes no GET of the deployment's keys: "there its base-relative keys
+    are the bus root's"."""
     _prune()
     entry = _WATCHES.get(id(session))
     if entry is not None and entry[0] is session:
@@ -354,7 +489,7 @@ def watch_session(session: Any) -> Any | None:
     if opened is None or opened[0] is not session:
         return None
     _, endpoint, auth = opened
-    w = open_client(endpoint, auth, namespace=namespace_of(session), interests_timeout_s=interests_timeout_of(session))
+    w = open_client(endpoint, auth, namespace=None, interests_timeout_s=interests_timeout_of(session))
     _WATCHES[id(session)] = (session, w)
     return w
 
@@ -398,6 +533,10 @@ class RoundTrip:
     errors: int = 0
     tokens: int = 0
     asked_ns: int = 0
+    #: the watch session's interests timeout was not known, so zenoh's
+    #: default was taken: a round trip judged "before the interests
+    #: timeout" rests on it (§8.1, 0.42, F-232)
+    interests_timeout_assumed: bool = False
 
     def __bool__(self) -> bool:
         return self.stands
@@ -435,7 +574,8 @@ def settle(watch: Any, timeout: float = PRESENCE_TIMEOUT_S, *, selector: str | N
     finished = done.wait(timeout + 5.0)
     elapsed = time.monotonic() - t0
     after = links_held(watch)
-    rt = dict(key=key, elapsed_s=elapsed, finished=finished, errors=len(errors), tokens=len(oks), asked_ns=asked)
+    rt = dict(key=key, elapsed_s=elapsed, finished=finished, errors=len(errors), tokens=len(oks), asked_ns=asked,
+              interests_timeout_assumed=not interests_timeout_known(watch))
     if not finished:
         return RoundTrip(False, True, why="no final reply", **rt)
     if errors:
@@ -482,6 +622,9 @@ class Presence:
     at_interests_timeout: bool = False
     #: the session's interests timeout the read was judged against, in s
     interests_timeout_s: float | None = None
+    #: zk2py could not read the session's interests timeout and took
+    #: zenoh's default: its completeness rests on that (§8.1, 0.42, F-232)
+    interests_timeout_assumed: bool = False
 
     @property
     def kind(self) -> str:
@@ -513,9 +656,10 @@ class Presence:
         if not self.complete:
             why = "; ".join(self.errors) or "no final reply"
             return f"possibly incomplete ({why}): {self.count} tokens, silence is not a verdict"
+        rests = f" ({INTERESTS_TIMEOUT_ASSUMED})" if self.interests_timeout_assumed else ""
         if self.count == 0:
-            return "complete and empty for this reader: absent, or refused by access control"
-        return f"complete for this reader: {self.count} tokens"
+            return f"complete and empty for this reader: absent, or refused by access control{rests}"
+        return f"complete for this reader: {self.count} tokens{rests}"
 
 
 def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
@@ -539,7 +683,8 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
     session.liveliness().get(selector, zenoh.handlers.Callback(replies.append, done.set),
                              timeout=timeout)
     finished = done.wait(timeout + 5.0)
-    p = Presence(elapsed_s=time.monotonic() - t0, interests_timeout_s=interests_timeout_of(session))
+    p = Presence(elapsed_s=time.monotonic() - t0, interests_timeout_s=interests_timeout_of(session),
+                 interests_timeout_assumed=not interests_timeout_known(session))
     for r in replies:
         if r.ok is None:
             p.errors.append(f"{r.err.encoding}: {r.err.payload.to_bytes().decode('utf-8', 'replace')}")
