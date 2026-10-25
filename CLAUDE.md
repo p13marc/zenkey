@@ -66,7 +66,17 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (`LivePresence::moved`, `PresenceBasis::Moved`, a `moved` source; the
   alarm feed's loss, the ledger's `TokenBasis::Moved`; core 0.42,
   F-229), and no round trip nor read is made through a watch session cut
-  off (F-228); a read cut off while it runs is a seed possibly incomplete, said
+  off (F-228); a re-read's round trip and read run on tasks of their own,
+  so a `next()` its caller drops (the watchdog's `select!` drops it every
+  250 ms) leaves them running and the next call takes them up, the round
+  trip waited for as long as a read, what was delivered before the read
+  folded first, and a read not made through a session cut off asked again
+  a second later, never on a doubling backoff (#882, core 0.44: the round
+  trip after a reopen waits for the population, 4 s beside 10,000 tokens
+  in a release build, and zenoh answers a GET its caller drops in full,
+  `docs/zk2/upstream/liveliness-get-dropped-is-answered-in-full.md`; the
+  same for zenwatch's `TokenFeed`; `tests/watch_reopen.rs`); a read cut
+  off while it runs is a seed possibly incomplete, said
   beside `complete` as `cut_off_during` in every presence report but the
   doctor's, which zenwatch.v1 pins, and the feed counts the reads it makes,
   `PresenceFeed::reads`, core 0.38, #849). For zengui's tree (#614, FL4):
@@ -956,7 +966,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   the scope's chunks to its first `@zk` and then `@zk/settle`, a key no
   token holds (#851, core 0.41), or a key given, on the wire
   (`settle_at`, `Barrier::at`, #875), and `presence::Barrier` that GET kept,
-  lost at the session's next transport event; a GET whose time reaches the
+  lost at the session's next transport event, its round trip one per
+  transport state on a task of its own that every waiter shares
+  (`Barrier::establish_within`: a waiter that stops waiting leaves it
+  running and the next takes it up, its GET waiting the session's
+  interests timeout; #882, core 0.44); a GET whose time reaches the
   session's `routing/interests/timeout` is possibly incomplete
   (`PresenceRead::at_interests_timeout`: zenoh 1.10.1 ends it there with no
   error reply), and the tools' sessions run with 120 s
@@ -1162,7 +1176,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.43 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.44 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
@@ -1173,8 +1187,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     trip through a watch session cut off, a move unconfirming what a reader
     holds, a read's time and an unreadable interests timeout, zk2py round
     66's F-227 to F-235, #875; 0.43: two of presence §10's steps worded
-    for any reader, round 67's F-236 and F-237; changes go through
-    `spec/CHANGELOG.md`):
+    for any reader, round 67's F-236 and F-237; 0.44: a watch session's
+    reopen tells its subscribers every token and the round trip after it
+    waits for them, one round trip and one read at a time, a round trip at
+    the interests timeout not standing, round 68's F-238 to F-240, #882;
+    changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a
