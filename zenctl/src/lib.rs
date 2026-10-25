@@ -160,6 +160,7 @@ pub async fn run() -> Result<()> {
         Command::Alarms(a) => cmd::alarms::run(a).await,
         Command::Telemetry(a) => cmd::telemetry::run(a).await,
         Command::Desired(a) => cmd::desired::run(a).await,
+        Command::Redundancy(a) => cmd::redundancy::run(a).await,
         Command::Watchdog(a) => cmd::watchdog::run(a).await,
 
         // ── Meta ─────────────────────────────────────────────────────────

@@ -1054,6 +1054,44 @@ pub(crate) enum Command {
     /// `behind` (`version`, `since_s`, `by`: `window` or `clock`) when a
     /// target was behind past --for.
     Desired(DesiredArgs),
+    /// Read redundancy.v1: does exactly one instance serve each governed interface?
+    ///
+    /// redundancy.v1's tool (spec/profiles/redundancy/v1.md §2.15, §5),
+    /// through a session in the deployment's namespace that holds no
+    /// liveliness subscriber and no claim: two reads of the address's @zk/**
+    /// a grace apart (core §6), each with the descriptor of every instance
+    /// it found, and the revisions they name (retrieved, or held by
+    /// --contracts). An interface is governed when its contract lists
+    /// redundancy.v1 in uses; every one in scope is asked, an interface not
+    /// governed only when named by --iface. Per address and interface, §5's
+    /// four questions: is it served by exactly one incumbent (no: a split,
+    /// two or more holders of its token in both reads, or a vacancy in
+    /// both); is there a vacancy (yes, lasting: no holder in either read,
+    /// a candidate present); how many stand by (informative, exact or a
+    /// lower bound); and, of each instance, is it a standby or a twin (yes:
+    /// a holder of a split, a holder marked standby, a holder not listing
+    /// it, or a listing unmarked with no token, each in both reads). A read
+    /// not complete answers nothing it decides; a session cut off makes no
+    /// read. Exit 1 a split, a vacancy in both reads, or a twin (the
+    /// findings); 0 every governed interface asked served by exactly one
+    /// incumbent, each instance the incumbent, a standby or no candidate; 2
+    /// no verdict: an answer unobservable, nothing governed in scope, an
+    /// interface not this profile's, or a run that could not start.
+    ///
+    /// --format json is one document: `report` ("redundancy"), `namespace`,
+    /// `service` and `iface` when asked, `apart_s`, `across_face`, `asked`,
+    /// `reads` (each `complete`, `reason`, `instances`), `judgement`, and
+    /// `interfaces`, one row each: `address`, `iface`, `governance`
+    /// (`claim`, `external`, `not_governed`, `no_contract`, `disagree`) and
+    /// `governance_says`, `holders`, `one_incumbent`, `vacancy` and
+    /// `standbys` (each an `answer` — `yes`, `no`, `unobservable`,
+    /// `not_asked`, `not_this_profiles` — a `reason` in conclusions.json's
+    /// tokens and `says` in words; `standbys` with its `count` and `exact`),
+    /// and `instances` (each `instance`, `zid`, `first` and `second` as the
+    /// reads showed it — `token`, `listing` — its `twin` answer and its
+    /// `role`: `incumbent`, `standby`, `twin`, `not_a_candidate`,
+    /// `unknown`); `unobservable` when nothing could be read.
+    Redundancy(RedundancyArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
     /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
@@ -3201,6 +3239,41 @@ pub(crate) struct AlarmsArgs {
     pub(crate) across_face: Option<FaceGrant>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl redundancy`'s flags (#841, RC) — one struct the dispatcher hands
+/// over whole, destructured in the verb (#354).
+#[derive(clap::Args)]
+pub(crate) struct RedundancyArgs {
+    /// One address, `<system>/<service>`. Omitted, every governed interface
+    /// in the namespace.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: Option<zenkey_model::grammar::Addr>,
+    /// Only this interface, `<name>.v<major>`: asked even when its contract
+    /// does not use redundancy.v1, which answers not this profile's.
+    #[arg(long, value_name = "IFACE", value_parser = iface_arg)]
+    pub(crate) iface: Option<zenkey_model::grammar::IfaceId>,
+    /// Seconds between the two presence reads (core §6): longer than the
+    /// deployment's longest re-mint overlap. A positive number.
+    #[arg(long, value_name = "SECS", default_value_t = 2.0)]
+    pub(crate) grace: f64,
+    /// The address sits across a constrained face (spec §8.5), where
+    /// presence and descriptors do not cross: the deployment's word names
+    /// the address and --iface, nothing is read, and every answer is
+    /// unobservable, across_face (redundancy.v1 §2.13).
+    #[arg(long, requires_all = ["address", "iface"])]
+    pub(crate) across_face: bool,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// An interface id, `<name>.v<major>` — clap's refusal, exit 2, naming the
+/// argument.
+fn iface_arg(s: &str) -> Result<zenkey_model::grammar::IfaceId, String> {
+    s.parse().map_err(|e| format!("{e} (e.g. `ledger.v1`)"))
 }
 
 /// `zenctl desired`'s flags (#840, DD) — one struct the dispatcher hands
