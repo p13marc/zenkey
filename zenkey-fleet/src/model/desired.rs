@@ -559,22 +559,19 @@ pub fn report_of<'a>(replies: &'a [ReportReply], slice: &[String]) -> ReportFoun
                 .is_ok_and(|d| d.key.as_ref().is_some_and(|k| slice.contains(k)))
         })
         .collect();
-    match claiming.as_slice() {
-        [one] => ReportFound::One(one),
-        [first, rest @ ..] => {
-            if rest
-                .iter()
-                .all(|r| r.read.as_ref().ok() == first.read.as_ref().ok())
-            {
-                ReportFound::One(first)
-            } else {
-                ReportFound::Two(claiming)
-            }
-        }
-        [] => replies
+    let Some(&first) = claiming.first() else {
+        return replies
             .iter()
             .find(|r| r.read.is_err())
-            .map_or(ReportFound::None, ReportFound::Unreadable),
+            .map_or(ReportFound::None, ReportFound::Unreadable);
+    };
+    if claiming
+        .iter()
+        .all(|r| r.read.as_ref().ok() == first.read.as_ref().ok())
+    {
+        ReportFound::One(first)
+    } else {
+        ReportFound::Two(claiming)
     }
 }
 
