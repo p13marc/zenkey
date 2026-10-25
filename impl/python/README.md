@@ -108,18 +108,21 @@ config        330 passed     0 failed
 link          172 passed     0 failed
 alarms        316 passed     0 failed
 telemetry     281 passed     0 failed
-desired       400 passed     0 failed
+desired       402 passed     0 failed
 redundancy    180 passed     0 failed
-total        2970 passed     0 failed
+total        2972 passed     0 failed
 ```
 
 The figures are against `core.md` 0.40, `hostid.v1` 0.7, `freshness.v1`
 0.3, `health.v1` 0.4, `config.v1` 0.5, `link.v1` 0.8, `alarms.v1` 0.8,
-`telemetry.v1` 0.5, `desired.v1` 0.6 and `redundancy.v1` 0.3.
+`telemetry.v1` 0.5, `desired.v1` 0.7 and `redundancy.v1` 0.3.
 `redundancy.v1` 0.3 added `polls.json`, 7 cases (180), which zk2py's
 `poll_read` passed the first time they ran. Its round 58 reading, a first
 poll as a baseline and a withdrawal only with no holder left, would have
 failed five of them. The seven readings of that reading went with it.
+`desired.v1` 0.7 added two `slices.json` cases, a requirement naming no
+resource (402), which zk2py passed unchanged: it read none as every
+resource already.
 `desired.v1` 0.6 added four `bindings.json` cases, with the input `also`,
 and seven `slices.json` cases (400). zk2py's `bind` and `take_slice`,
 changed from §2.1, §2.3 and §2.17 first, passed all eleven the first time
@@ -319,8 +322,13 @@ fixtures:
 - `desired.v1` 0.6 resolved all three (`SPEC-FINDINGS.md`, "At desired.v1
   0.6").
 - F-224 was found reading 0.6 cold, end to end, every MUST against its
-  evidence, in round 61. §2.1's refusal at a target's start has only a
-  fixture of the binding behind it. It is open, and minor.
+  evidence, in round 61. §2.1's refusal at a target's start had only a
+  fixture of the binding behind it, and minor.
+- `desired.v1` 0.7 resolved it: the start is refused, and scenarios §11
+  observes it (`SPEC-FINDINGS.md`, "At desired.v1 0.7").
+- F-225 was found reading 0.7 in round 62: a declaring contract named and
+  not held is read by both tools as naming every resource. It is open,
+  and minor.
 - F-199 to F-209 were found against `redundancy.v1` 0.1, core 0.39 and
   `hostid.v1` 0.6, read cold and run live, zk2py against itself, in round
   56 (`SPEC-FINDINGS.md`, "At redundancy.v1 0.1 and core 0.39"). Five
@@ -1387,7 +1395,7 @@ confirmed the tool after TG and TH.
   - **The example's raw** takes an attachment's JSON only. §7's zero-byte
     and `x` attachments therefore run against zk2py's owner alone.
 
-## desired.v1 (profile text 0.6, core 0.39)
+## desired.v1 (profile text 0.7, core 0.39)
 
 `desired.v1` is the eighth profile (`spec/profiles/desired/`), and the
 second whose first point is a standard schema, `desired.v1.json`, typing a
@@ -1491,6 +1499,12 @@ round 52's twenty findings, with `config.v1` 0.4, in round 53.
     nothing declared (§2.1). Its driver takes a `tasking.v1` or
     `worker.v1` file in place of the scenarios', as the owner example
     does.
+- **0.7 (round 62):** the start's refusal is scenarios §11, which the
+  runner now runs as written, S watching the instance tokens by
+  liveliness and `Rp`. A requirement naming no resource names every one,
+  and so does a manifest's role, which names no declaring contract
+  (core §3.1, §3.3). zk2py read both so already; its tool now says
+  `requirement_unread` only when a declaring contract is named.
 
 **The live half (round 55).**
 
@@ -1639,13 +1653,26 @@ Results at 0.6 (round 61): the owner example and zenctl built from PR
   slice, `no_report`). The two rows now agree member by member on every
   shape, the reference's row saying `unreadable` of two reports that
   differ;
-- `two-documents` (zk2py's own, §2.1), 2 of 2 in each of the four
+- `two-documents` (zk2py's own, §2.1; scenarios §11 since round 62), 2 of 2 in each of the four
   pairings. Each target, zk2py's and the owner example, given
   `desired-two`'s contracts, refuses its start: exit 1, no instance
   token, `two_documents` said. Each starts with only the worker given, its
   author's declaration holding one of the two;
 - §1 to §8, §10, the edges and the re-mint, zk2py's parties, 54 of 54
   after the target's change.
+
+Results at 0.7 (round 62): the owner example and zenctl built from main
+8025fd99. Every check passes:
+- §9, 29 of 29 in each of the eight runs;
+- §11, 2 of 2 for each target. Given the two copies, zk2py's target and
+  the owner example each stop with exit 1 and `not started: …
+  two_documents`. S sees no instance token within 5 s, and no report.
+  The control, naming one of the two, starts, its report `{key: D,
+  source: baseline}`. The owner example's message now carries its
+  `not started:`;
+- the shapes, 75 of 75: twenty-five, two new for a manifest's role, on an
+  author with two desired resources (`two_documents`) and with one (its
+  slice). The rows agree member by member on all.
 
 Asked beyond the shapes, `zenctl check conform`'s `desired-binding` finds
 a two-documents role, `two_documents`. The doctor, which holds no

@@ -258,10 +258,14 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
     # the requirement as the target's contract declares it (core §3.1): its
     # resources (None for every one), with the descriptor's binding
     if not isinstance(rr, dict):
-        # the target's own contract not in hand, nor served: its requirement's
-        # resources unknown, read as every resource, as the reference reads
-        # it; the target's other interfaces may still carry the report
-        problems.append("requirement_unread")
+        # 0.7: "a role a component's manifest declares, whose descriptor names
+        # no declaring contract (core §3.3)", names every resource (core §3.1).
+        # A declaring contract named and not in hand, nor served: its
+        # requirement's resources unknown, read as every resource, as the
+        # reference's tool reads it, and said; the target's other interfaces
+        # may still carry the report
+        if req.get("declared_by") is not None:
+            problems.append("requirement_unread")
         rr = {}
     resources = rr.get("resources")
     requirement = {"resources": [x for x in resources if isinstance(x, str)] if isinstance(resources, list) else None,

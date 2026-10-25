@@ -2,7 +2,7 @@
 (#609, round 55)::
 
     python -m zk2py.desired_scenarios [--author zk2py|<owner exe>] [--target zk2py|<owner exe>]
-        [--only 1|2|3|4|5|6|7|8|10]... [--poll]
+        [--only 1|2|…|11|edges|remint|tool-shapes]... [--poll] [--zenctl PATH | --no-zenctl]
 
 Each party is a process driven as a black box through the owner example's
 interface (``owner --help``: its ``--desired-*`` options and ``desired …``
@@ -1138,10 +1138,10 @@ def section_tool_shapes(ctx: Ctx) -> None:
     from .contract import load_contract
     from .desired_live import contract
 
-    sec, rp = "§9 beyond: the tool's 0.4 to 0.6 readings", ctx.report
+    sec, rp = "§9 beyond: the tool's 0.4 to 0.7 readings", ctx.report
     if ctx.author_impl != "zk2py" or ctx.target_impl != "zk2py":
         return  # no party runs here: once is enough
-    use_z = _zenctl_ready(rp, sec, 46)
+    use_z = _zenctl_ready(rp, sec, 50)
     worker, tasking, two = contract("worker.v1"), contract("tasking.v1"), contract("zk2py_worker2.v1")
     offline = str(REPO / "impl" / "python" / "interop" / "desired")
 
@@ -1316,6 +1316,26 @@ def section_tool_shapes(ctx: Ctx) -> None:
          "(F-213)", doc_of(everything, "task", "tasking.v1", selfs), {all_rp: [(conv, True)]}, absent, {},
          absent_answers, ([everything, tasking], [pall, pt], "task")),
     ]
+    # 0.7: a role a component's manifest declares, its descriptor naming no
+    # declaring contract, names every resource (core §3.1, §3.3)
+    def manifest_doc(c: Any, iface: str) -> dict[str, Any]:
+        d = doc_of(c, "task", iface, selfs)
+        d["requires"][0].pop("declared_by")
+        return d
+
+    a_task = {"format": "zk2-descriptor/0.1", "service": AUTHOR, "instance": "8" * 16,
+              "interfaces": [{"iface": "tasking.v1", "contract": tasking.fingerprint, "minor": 0}],
+              "profiles": ["desired.v1"]}
+    unstated += [
+        ("a manifest's role, no declaring contract, on an author with two desired resources: every resource, "
+         "two_documents, no slice, no report (0.7)", manifest_doc(four, "zk2py_tasking2.v1"),
+         {four_rp: [(claim(t2_key.format("tasks")), True)]}, a_t2,
+         {t2_key.format(w): [(doc, True)] for w in ("plans", "tasks")}, no_report, ([four, tasking2], [p4, pt2], "task")),
+        ("a manifest's role, no declaring contract, on an author with one desired resource: its slice, the report "
+         "(0.7)", manifest_doc(worker, "tasking.v1"), {rp_prefix: [(conv, True)]}, a_task, {d_prefix: [(doc, True)]},
+         {"converged": ("not_yet", "other_epoch"), "refused": ("no", "converged"), "last_known": ("no", "current"),
+          "in_force": ("yes", "desired")}, ([worker, tasking], [p1, pt], "task")),
+    ]
     for name, tdoc, tans, adoc, aans, want, how in unstated:
         shapes.append((name, tdoc, tans, adoc, aans, want))
         extra[name] = how
@@ -1452,23 +1472,6 @@ def section_remint(ctx: Ctx) -> None:
         bus.close()
 
 
-def _start_or_refuse(p: subprocess.Popen, g: Any, address: str, within_s: float) -> tuple[int | None, list[Any]]:
-    """Until the process exits or an instance token of ``address`` shows in
-    a presence read, at most ``within_s`` (§11: "no instance token within
-    5 s against a control"): its exit code (None while it runs) and the
-    instances read."""
-    from . import live
-
-    deadline = time.monotonic() + within_s
-    mine: list[Any] = []
-    while True:
-        code = p.poll()
-        mine = list(live.list_presence(g, f"zk2/{address}/@zk/**").instances)
-        if code is not None or mine or time.monotonic() >= deadline:
-            return code, mine
-        time.sleep(0.1)
-
-
 def _stop(p: subprocess.Popen) -> str:
     """The process ended, its standard input closed and its pipes drained:
     ``communicate`` within 10 s, else killed and waited for. Returns its
@@ -1481,39 +1484,64 @@ def _stop(p: subprocess.Popen) -> str:
     return err or ""
 
 
-def section_two_documents(ctx: Ctx) -> None:
-    """zk2py's own (§2.1, 0.6, F-218): "A target MUST refuse such a role at its
-    start, with nothing of it declared, as core §8.2 step 2 refuses an
-    invalid declaration". The run's target, given ``desired-two``'s
-    worker.v1 (a role naming tasks and plans) and tasking.v1 (both desired),
-    starts with neither of its tokens; the control, the same worker.v1
-    beside the scenarios' tasking.v1 (tasks desired alone, plans no resource
-    of it), starts."""
-    from . import live
+def section11(ctx: Ctx) -> None:
+    """scenarios.md §11 (0.7, F-224), "A role on two documents refuses the
+    start": one router and no author.
 
-    sec, rp = ctx.name("§2.1 one document type per role"), ctx.report
+    1. The run's target given the two copies, ``desired-two``'s worker.v1
+       (its role naming tasks and plans) and tasking.v1 (both desired). It
+       must exit 1, its standard error saying ``not started: …`` and
+       ``two_documents``, with no instance token at S and no report on
+       ``Rp``. Another refusal at the start that exits 1 with that text
+       would pass too: the text, not the cause, is what is read.
+    2. The control: the scenarios' worker.v1 (``interop/desired``'s, its
+       requirement naming tasks alone), given explicitly, against
+       ``desired-two``'s tasking.v1. It must start, S seeing its instance
+       token and its report ``{key: D, source: baseline}`` on ``Rp``.
+
+    S watches the instance tokens by liveliness, and ``Rp``. Each step
+    waits until the process exits or S sees its instance token, within the
+    5 s, never a fixed sleep (``_wait`` returns False at its deadline,
+    never raising)."""
+    sec, rp = ctx.name("§11 a role on two documents refuses the start"), ctx.report
     two = REPO / "impl/python/interop/desired-two"
     exe = ([sys.executable, "-m", "zk2py.desired_owner"] if ctx.target_impl == "zk2py" else [str(ctx.target_impl)])
     env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
     bus = Bus()
     try:
-        for name, files, refused in (
-                ("a role naming two desired resources of its author's declaration: refused at its start, no "
-                 "instance token, two_documents said", [two / "worker.v1.toml", two / "tasking.v1.toml"], True),
-                ("the control: the same role, the author's declaration holding one of them: it starts",
-                 [two / "worker.v1.toml"], False)):
+        one = REPO / "impl/python/interop/desired/worker.v1.toml"
+        for step, files in (("1", [two / "worker.v1.toml", two / "tasking.v1.toml"]),
+                            ("2", [one, two / "tasking.v1.toml"])):
             t = time.monotonic()
             p = subprocess.Popen([*exe, "--connect", bus.ep1, "--desired-target", AUTHOR, TARGET, *map(str, files)],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                  env=env)
-            code, mine = _start_or_refuse(p, bus.g1, TARGET, 5.0)
-            err = _stop(p)
-            if refused:
-                rp.check(sec, name, code not in (None, 0) and not mine and "two_documents" in err,
-                         f"exit {code}; instances {len(mine)}; {err.strip()[-300:]!r}")
+            _wait(lambda: p.poll() is not None or bus.token_put(TARGET, t) is not None, 5.0, 0.05)
+            if step == "2":
+                # the control's report, put before its tokens (§2.10)
+                _wait(lambda: bool(bus.since(t, RP)), 2.0, 0.05)
+            code = p.poll()
+            token = bus.token_put(TARGET, t)
+            reports = bus.since(t, RP)
+            err = _stop(p).strip()
+            if step == "1":
+                rp.check(sec, "1. the role is two_documents, and the target refuses to start: S sees no instance "
+                              "token within 5 s and no report on Rp; it stops, exit 1, saying not started: … "
+                              "two_documents",
+                         code == 1 and token is None and not reports and err.startswith("not started:")
+                         and "two_documents" in err,
+                         f"exit {code}; token {token}; reports {len(reports)}; {err[-300:]!r}")
             else:
-                rp.check(sec, name, code is None and len(mine) == 1,
-                         f"exit {code}; instances {len(mine)}; {err.strip()[-200:]!r}")
+                first = json.loads(reports[0][3]) if reports else None
+                missing = [what for what, gone in (("the process ended", code is not None),
+                                                   ("no instance token at S", token is None),
+                                                   ("no report on Rp", not reports)) if gone]
+                if reports and first != {"key": D, "source": "baseline"}:
+                    missing.append(f"a report other than {{key: D, source: baseline}}: {first}")
+                rp.check(sec, "2. the control, naming one of the author's two desired resources: S sees its "
+                              "instance token, and its report on Rp is {key: D, source: baseline}",
+                         not missing, (f"missing: {'; '.join(missing)}; " if missing else "")
+                         + f"exit {code}; token {token}; report {first}; {err[-200:]!r}")
             time.sleep(0.5)
     finally:
         bus.close()
@@ -1521,7 +1549,7 @@ def section_two_documents(ctx: Ctx) -> None:
 
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
             "7": section7, "8": section8, "9": section9, "10": section10, "edges": section_edges,
-            "remint": section_remint, "tool-shapes": section_tool_shapes, "two-documents": section_two_documents}
+            "11": section11, "remint": section_remint, "tool-shapes": section_tool_shapes}
 
 
 def main(argv: list[str] | None = None) -> int:

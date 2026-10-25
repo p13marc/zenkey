@@ -11434,9 +11434,87 @@ scenario step: the target given a role on two desired resources of its
 author's declaration, and no instance token of it within 5 s against a
 control.
 
+**Status at desired.v1 0.7:** resolved, in zk2py's words: "a target given
+a role on two or more desired resources of its author's declaration MUST
+refuse to start …: nothing is declared and no instance token of it
+appears. Starting without the role is not refusing it. `[Sc: §11]`". The
+new §11 observes it at S against a control. Both targets pass it. The
+owner example's message now carries `not started:`.
+
 **Counts at desired.v1 0.6:** 224 entries. Open:
 - F-220 to F-223, against redundancy.v1 0.3 and its tools, F-222 and
   F-223 minor;
 - F-224, minor.
+
+Every other entry is resolved.
+
+## At desired.v1 0.7 (#609)
+
+Round 62 read `desired.v1` text 0.7 cold, on main 8025fd99, end to end,
+with scenarios §11, new. zk2py's model already read a requirement naming
+no resource as every resource, so the two new `slices.json` cases passed
+unchanged. Its runner now runs §11 as written:
+- one router and no author;
+- S watching the instance tokens by liveliness, and `Rp`;
+- each step waiting until the process exits or S sees its token, within
+  5 s.
+
+**Round 61's finding at 0.7:** F-224 is resolved. Its entry has its
+status line.
+
+**`just py-conformance`: 2972 of 2972.** `desired` passes 402.
+
+**Live:** every check passes, against `owner-dg` and `zenctl-dg`.
+- **§9:** 29 of 29 in each of the eight runs.
+- **§11:** 2 of 2 for zk2py's target and for the owner example. Each
+  stops with exit 1 and `not started: … two_documents`, and S sees no
+  instance token and no report. Each control starts, its report `{key:
+  D, source: baseline}`.
+- **The shapes:** 75 of 75, twenty-five, two new for a manifest's role.
+  The rows agree member by member on every one.
+
+**Where the two tools disagree:** nowhere. Beyond the shapes they agree
+on F-225's shape too, which the text does not state.
+
+**The text, read end to end.** Every MUST now names evidence that can
+test it. One case is left unstated (F-225).
+
+### F-225 · minor · desired.v1 0.7 §2.1, §2.17: a declaring contract named and not held
+
+> §2.1 (0.7): "A requirement naming no resource names every one (core
+> §3.1), and so does a role a component's manifest declares, whose
+> descriptor names no declaring contract (core §3.3): on an author with
+> two desired resources, either is `two_documents`"
+
+A third case is not stated: the descriptor names the role's declaring
+contract, and the tool holds no revision of it and cannot retrieve one.
+Its requirement may name one resource, or several; the tool cannot read
+which. Both tools read it as naming every resource. On an author with
+two desired resources they then report the target's binding invalid,
+`two_documents`: a problem with the target that rests on the tool's own
+missing contract. zk2py says `requirement_unread` beside it. The answer
+itself, unobservable `no_report`, is right either way.
+
+Measured: a target whose descriptor names `zk2py_worker9.v1` at a
+fingerprint no one serves, and an author on `zk2py_tasking2.v1`, held.
+- zk2py: unobservable, `no_report`, problems `requirement_unread` and
+  `two_documents`.
+- zenctl: unobservable, `no_report`, `binding_invalid: [two_documents]`.
+
+The changelog's "a lookup that fails is an error, never every resource"
+is the reference's runtime reading its own manifest, not a tool reading
+another's descriptor.
+
+**zk2py:** as the reference, with `requirement_unread` beside.
+
+**Wording that would remove the guess:** "a requirement whose declaring
+contract the descriptor names and the tool does not hold is unread: no
+binding problem is read from it, and the role answers unobservable,
+`no_report`, beside `requirement_unread`; never every resource".
+
+**Counts at desired.v1 0.7:** 225 entries. Open:
+- F-220 to F-223, against redundancy.v1 0.3 and its tools, F-222 and
+  F-223 minor;
+- F-225, minor.
 
 Every other entry is resolved.
