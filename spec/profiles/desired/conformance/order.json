@@ -2475,7 +2475,7 @@
         ]
       },
       "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
-      "note": "a restart acts again on the version its previous instance acted on (§2.7)",
+      "note": "a restart acts again on the version its previous run acted on (§2.7)",
       "steps": [
         {
           "sample": {
@@ -3820,7 +3820,7 @@
         ]
       },
       "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
-      "note": "a restart acts again, though the document is the one its previous instance acted on",
+      "note": "a restart acts again, though the document is the one its previous run acted on",
       "steps": [
         {
           "sample": {
@@ -5405,7 +5405,403 @@
           "finish": "done"
         }
       ]
+    },
+    {
+      "expect": {
+        "report": {
+          "in_force": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "checked: a document its type admits is applied (§2.7, 0.4)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "check"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "invalid",
+            "pointer": ""
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "checked: a required member missing points at the object that holds it, \"\" at the top (§2.7, 0.4, F-193)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "check"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "invalid",
+            "pointer": "/rate_hz"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "checked: a member its own schema refuses points at the member (§2.7, 0.4, F-193)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": "run",
+              "rate_hz": 0,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "check"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "invalid",
+            "pointer": "/mode"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "checked: a member of the wrong type points at the member (§2.7, 0.4, F-193)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "mode": 3,
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "check"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "invalid",
+            "pointer": "/limits"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "checked: a required member missing from a member object points at that member (§2.7, 0.4, F-193)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "limits": {},
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "check"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "invalid",
+            "pointer": "/limits/max_hz"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "checked: a nested member its own schema refuses points at the nested member (§2.7, 0.4, F-193)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "limits": {
+                "max_hz": 0
+              },
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "check"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "revision": 1,
+            "stamp": "100/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "invalid",
+            "pointer": "/limits"
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "checked: a member object of the wrong type points at the member (§2.7, 0.4, F-193)",
+      "steps": [
+        {
+          "sample": {
+            "document": {
+              "limits": 5,
+              "mode": "run",
+              "rate_hz": 10,
+              "revision": 1
+            },
+            "from": "owner",
+            "kind": "put",
+            "revision": 1,
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "check"
+        }
+      ]
+    },
+    {
+      "expect": {
+        "report": {
+          "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "observed": {
+            "stamp": "100/a1"
+          },
+          "outcome": "refused",
+          "refusal": {
+            "code": "invalid",
+            "pointer": ""
+          },
+          "source": "baseline"
+        },
+        "steps": [
+          "act",
+          "done"
+        ]
+      },
+      "key": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+      "note": "checked: a document that is not the object its type is points at itself, \"\" (§2.7, 0.4, F-193)",
+      "steps": [
+        {
+          "sample": {
+            "document": [
+              1,
+              2
+            ],
+            "from": "owner",
+            "kind": "put",
+            "stamp": {
+              "id": "a1",
+              "time": 100
+            }
+          }
+        },
+        {
+          "finish": "check"
+        }
+      ]
     }
   ],
-  "description": "desired.v1 §2.6 to §2.10: one target's role, its slice's key (key; null for a role left unbound, §2.12), and the steps it takes, in order -> what each step does, and the report after the last. A step is one of: {sample: {from, kind, stamp, revision?, document? | text? | bytes?}}, a sample or a reply received from either path (§2.5), from \"owner\" (the author's own answer or put) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" or \"delete\" (a delete or a reply_del), its stamp {time, id} (time an NTP64 value, id lowercase hexadecimal without leading zeros, as core's seed/merge.json writes one) or null for an unstamped sample, revision the document type's own when it carries one (§2.4), and a put's document: a payload encoded as JSON, decoded (document), compared by JCS (RFC 8785) with every number by its exact value (0.2, F-166: 10 and 10.0 are one document, 2^53 and 2^53+1 two; a decoded float is a double); or its text (text, 0.2), read as strict JSON as reports.json reads a report, every number finite by rounding, and compared the same way, or byte for byte when it does not read; or the payload's bytes in hex (bytes), compared byte for byte (§2.7); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete reverted), refused whole, or failed partway (a refusal of a revert is read as a failure); {call: true}, the target's own operation changed what is in force; {restart: true}, a new instance of the target, holding nothing. The target starts holding nothing, its report {key, source: baseline} ({source: baseline} with no key). A sample is judged against the version last acted on or adopted (the running act's while one runs) and every id the target remembers, then, while an act runs, against the one held waiting (0.2, F-162); it is admitted when each admits it. The target remembers, per id, the latest time it acted on or adopted a version of that id in this instance, for at least the 16 most recent such ids (0.2, F-163); a case never names more than 16. expect.steps: for a sample, unstamped (no stamp), same_version (the stamp of the version last acted on or adopted, the running act's while one runs, or of the one held waiting, or a remembered id's latest time; the author's own sample of the version held, or of the one held waiting, when that version came from an archive, is confirmed instead, and the report's last_known goes; any other delivery of a version held waiting, the author's own version included, is the same version, 0.3, F-184), older (an earlier time of the held version's id, or of the one held waiting's, or of a remembered id's latest, whichever id is held), held (admitted while an act runs: it replaces any version held waiting), and, admitted otherwise (nothing held, or a later time of the held id, or another id, later than its latest if remembered): adopted, when the target has acted on or adopted a version in this instance and the last of them has the same document (two puts whose documents are equal, or two deletes), else act or revert, the act starting; for finish, done, or adopted, act or revert for a held version as it starts; called; restarted. expect.report is the Report after the last step, as §2.10 builds it: observed the last version acted on or adopted, its stamp written time/id (in decimal, then the id), and its revision for a put that has one; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline for a delete, no in_force; reverted: source baseline, no in_force; adopted: observed the adopted version, in_force too when it named the previous one, outcome, refusal and source kept; last_known true when the version acted on or adopted came from an archive and no author's sample of the same stamp confirmed it; call: source call, no in_force."
+  "description": "desired.v1 §2.6 to §2.10: one target's role, its slice's key (key; null for a role left unbound, §2.12), and the steps it takes, in order -> what each step does, and the report after the last. A step is one of: {sample: {from, kind, stamp, revision?, document? | text? | bytes?}}, a sample or a reply received from either path (§2.5), from \"owner\" (the author's own answer or put) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" or \"delete\" (a delete or a reply_del), its stamp {time, id} (time an NTP64 value, id lowercase hexadecimal without leading zeros, as core's seed/merge.json writes one) or null for an unstamped sample, revision the document type's own when it carries one (§2.4), and a put's document: a payload encoded as JSON, decoded (document), compared by JCS (RFC 8785) with every number by its exact value (0.2, F-166: 10 and 10.0 are one document, 2^53 and 2^53+1 two; a decoded float is a double); or its text (text, 0.2), read as strict JSON as reports.json reads a report, every number finite by rounding, and compared the same way, or byte for byte when it does not read; or the payload's bytes in hex (bytes), compared byte for byte (§2.7); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete reverted), refused whole, or failed partway (a refusal of a revert is read as a failure); or {finish: \"check\"} (0.4, F-193), the running act's put ends as the document type's JSON Schema judges its document, the top-level schema's $defs.Task read as core §7.3 reads a type: done when it satisfies it, else refused whole, {code: invalid, pointer}, with no detail, its pointer where §2.7 says a refusal points (a keyword of a member's own schema at the member, a required member missing at the object that holds it, a value of the wrong type at that value, \"\" the document itself); each such case breaks the schema in one place; {call: true}, the target's own operation changed what is in force; {restart: true}, a new run of the target (§0, 0.4, F-192), holding nothing. The target starts holding nothing, its report {key, source: baseline} ({source: baseline} with no key). A sample is judged against the version last acted on or adopted (the running act's while one runs) and every id the target remembers, then, while an act runs, against the one held waiting (0.2, F-162); it is admitted when each admits it. The target remembers, per id, the latest time it acted on or adopted a version of that id in this run, for at least the 16 most recent such ids (0.2, F-163); a case never names more than 16. expect.steps: for a sample, unstamped (no stamp), same_version (the stamp of the version last acted on or adopted, the running act's while one runs, or of the one held waiting, or a remembered id's latest time; the author's own sample of the version held, or of the one held waiting, when that version came from an archive, is confirmed instead, and the report's last_known goes; any other delivery of a version held waiting, the author's own version included, is the same version, 0.3, F-184), older (an earlier time of the held version's id, or of the one held waiting's, or of a remembered id's latest, whichever id is held), held (admitted while an act runs: it replaces any version held waiting), and, admitted otherwise (nothing held, or a later time of the held id, or another id, later than its latest if remembered): adopted, when the target has acted on or adopted a version in this run and the last of them has the same document (two puts whose documents are equal, or two deletes), else act or revert, the act starting; for finish, done, or adopted, act or revert for a held version as it starts; called; restarted. expect.report is the Report after the last step, as §2.10 builds it: observed the last version acted on or adopted, its stamp written time/id (in decimal, then the id), and its revision for a put that has one; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline for a delete, no in_force; reverted: source baseline, no in_force; adopted: observed the adopted version, in_force too when it named the previous one, outcome, refusal and source kept; last_known true when the version acted on or adopted came from an archive and no author's sample of the same stamp confirmed it; call: source call, no in_force.",
+  "schema": {
+    "$defs": {
+      "Task": {
+        "properties": {
+          "limits": {
+            "properties": {
+              "max_hz": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "max_hz"
+            ],
+            "type": "object"
+          },
+          "mode": {
+            "enum": [
+              "idle",
+              "run",
+              "halt"
+            ],
+            "type": "string"
+          },
+          "rate_hz": {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "mode",
+          "rate_hz"
+        ],
+        "type": "object"
+      }
+    }
+  }
 }

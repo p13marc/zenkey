@@ -308,6 +308,12 @@ pub struct ConformObservation {
     /// conformance, and each pair's continuity with presence. `None` when
     /// the presence read failed.
     pub telemetry: Option<crate::bus::telemetry::TelemetryObservation>,
+    /// The service as a `desired.v1` target (#840, DD), read as `zenctl
+    /// desired` reads it, after the suite: its roles, its reports and each
+    /// slice from its author. `None` when its claimed revision declares no
+    /// requirement and no `desired.v1.Report` resource, or the presence
+    /// read failed.
+    pub desired: Option<crate::model::desired::DesiredRead>,
 }
 
 impl ConformObservation {
@@ -507,6 +513,22 @@ pub async fn observe(
     obs.config = config;
     obs.alarms = alarms;
     obs.telemetry = telemetry;
+    // desired.v1 (#840, DD): a revision that declares a requirement or
+    // holds a report resource is a target's to judge.
+    let target = obs.revision.as_ref().is_some_and(|r| {
+        !r.contract().requires.is_empty()
+            || !crate::model::desired::report_resources(r.contract()).is_empty()
+    });
+    if obs.presence.is_ok() && target {
+        let store = BundleStore::new(t);
+        store.seed(offline);
+        let mut ds = crate::bus::desired::DesiredSpec::new(t);
+        // No case reads an archive's last-known.
+        ds.archives = false;
+        obs.desired = Some(
+            crate::bus::desired::observe(session, Some(&obs.address), &ds, &store, offline).await,
+        );
+    }
     obs
 }
 
@@ -545,6 +567,7 @@ async fn suite(
         config: None,
         alarms: None,
         telemetry: None,
+        desired: None,
     };
     let Ok(fp) = obs.claimed() else {
         return obs;

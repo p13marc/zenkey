@@ -652,6 +652,16 @@ impl Author {
         Ok(data_key(&i.addr, &i.iface, i.resource.token, &refs)?.to_string())
     }
 
+    /// How many GETs the service's state queryables answered whose
+    /// selector reaches `target`'s document key (§2.3), whether or not a
+    /// document was held: what `scenarios.md` §8 observes of an unbound
+    /// target, which makes none (text 0.4, F-197). A lower bound once the
+    /// service was asked on more than 1024 distinct selectors.
+    pub fn gets(&self, target: &str) -> Result<u64> {
+        let key = zenoh::key_expr::OwnedKeyExpr::try_from(self.key(target)?).map_err(zenoh)?;
+        Ok(self.inner.store.asked_reaching(&key))
+    }
+
     /// The documents held now, by target, each as put.
     pub async fn documents(&self) -> BTreeMap<String, Vec<u8>> {
         let slots = self.inner.slots.lock().await;

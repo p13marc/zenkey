@@ -394,6 +394,14 @@ pub(crate) struct DoctorArgs {
     /// service implementing health.v1 are unobservable.
     #[arg(long)]
     pub(crate) clocks_synced: bool,
+    /// How long a desired.v1 target may be "not yet" converged on a version
+    /// its author stamped before desired-behind finds it, seconds, by a
+    /// clock --clocks-synced trusts (desired.v1 §2.17): the doctor makes one
+    /// reading, and one reading without a trusted clock never finds a target
+    /// behind.
+    #[arg(long, value_name = "SECS",
+          default_value_t = zenkey_fleet::judge::doctor::DEFAULT_DESIRED_BEHIND.as_secs_f64())]
+    pub(crate) desired_behind: f64,
     /// Ask only this check (repeatable); every other is not asked.
     #[arg(long = "check", value_name = "CHECK-ID", value_parser = check_id,
           conflicts_with = "skip", add = ArgValueCandidates::new(completion::check_ids))]
@@ -832,7 +840,7 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Twenty-seven checks, each a question whose finding is the yes: split-brain
+    /// Thirty checks, each a question whose finding is the yes: split-brain
     /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
     /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
     /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
@@ -859,7 +867,13 @@ pub(crate) enum Command {
     /// whose declaration is invalid, so no reader reads its members) and
     /// telemetry-sample (with --deep: a state metric member's reply that does
     /// not conform; one that does not decode, or under an invalid
-    /// declaration, leaves it unobservable). The deployment is read through a
+    /// declaration, leaves it unobservable); and desired.v1's desired-refused
+    /// (a target whose last act on its author's document was refused or
+    /// failed), desired-behind (a target not yet converged on a version its
+    /// author stamped longer ago than --desired-behind, read only with
+    /// --clocks-synced: one reading never finds a target behind) and
+    /// desired-last-known (info: a target running a document read from an
+    /// archive). The deployment is read through a
     /// session in its namespace; the routers' admin space and the presence
     /// domain through one in no namespace. A check whose input could not be
     /// had is unobservable, with the reason — never clean — and so is every
@@ -991,6 +1005,55 @@ pub(crate) enum Command {
     /// not asked, never null; ndjson carries the same, the envelope first,
     /// then a line per row.
     Telemetry(TelemetryArgs),
+    /// Read desired.v1 targets: has each converged on its author's document?
+    ///
+    /// desired.v1's tool (spec/profiles/desired/v1.md §2.17, §5), through a
+    /// session in the deployment's namespace: presence and each descriptor —
+    /// a target lists a role on a desired resource, bound to one author
+    /// (§2.3) — the revisions they name (retrieved, or held by --contracts),
+    /// the target's report of each role's slice, found by type identity
+    /// (desired.v1.Report, §2.10), and S4's GET of the slice from its author;
+    /// an absent author's slice is read from every archive's last-known,
+    /// shown and never current. The slice is the author's declaration and
+    /// the target's binding; with no contract of the author's in hand, the
+    /// target's requirement and binding, the kind token its report's key
+    /// carries. Per role, §5's four questions: has the target converged on
+    /// its author's current document (yes: the same stamp, converged or
+    /// reverted; no: refused or failed; not yet: no act, an earlier time of
+    /// the same id, or another id); is its last act refused or failed; is
+    /// what it acted on last-known; is a desired document in force. An absent
+    /// target, or a role unbound (the kill switch) or not listed, is not
+    /// asked; a presence read possibly incomplete, a descriptor or a report
+    /// not read, a report unreadable, malformed or stale, its author absent,
+    /// or its author's GET silent or incomplete, answer nothing. With --for,
+    /// the reading is made again every 500 ms while an answer may move: a
+    /// target "not yet" on one version of its author's for the whole window
+    /// is behind (the finding, text 0.4), and with --clocks-synced one behind
+    /// a version stamped longer ago than the window is at once. Exit 1 a
+    /// refused or failed act, or a target behind past --for (the findings);
+    /// 0 every role asked converged on its author's current document, none
+    /// refused; 2 no verdict: not yet, unobservable, an author absent,
+    /// nothing asked, or a run that could not start.
+    ///
+    /// --format json is one document: `report` ("desired"), `namespace`,
+    /// `target` and `role` when asked, `presence` (`selector`, `complete`,
+    /// `services`), `window_s`, `readings`, `clock`, `asked`, `judgement`,
+    /// `rows` and `notes`, and `unobservable` when the reading could not be
+    /// made. A `desired` row: `target`, `role`, `listing` (`bound`,
+    /// `unbound`, `not_listed`, `unread`), `interface`, `resource`, `slice`
+    /// and `slice_from` (`author_contract`, `offline_contract`,
+    /// `requirement`), `declaration_invalid` and `binding_invalid` when there
+    /// is something to say, `report` (`key`, `document` as the target put
+    /// it, or `unreadable`; `findings`, `stamp`, `freshness`), `author`
+    /// (`address`, `presence`, `current`: `put`, `delete`, `silent`,
+    /// `incomplete` or `not_read`, its `stamp` as the profile writes one,
+    /// `why`), `archived` (an archive's last-known, never current),
+    /// `answers` (`converged`, `refused`, `last_known`, `in_force`, each an
+    /// `answer` — `yes`, `no`, `not_yet`, `unobservable`, `not_asked` — a
+    /// `reason` in conclusions.json's tokens and `says` in words) and
+    /// `behind` (`version`, `since_s`, `by`: `window` or `clock`) when a
+    /// target was behind past --for.
+    Desired(DesiredArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
     /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
@@ -1167,6 +1230,21 @@ pub(crate) enum CheckCmd {
     ///                    over the window; a member that formed no pair, or
     ///                    only pairs whose epoch was assumed, could not tell,
     ///                    and neither can the case (telemetry.v1 §2.10, §5)
+    ///   desired-report   when its contract declares a role on a desired
+    ///                    resource or a desired.v1.Report resource, every
+    ///                    report it puts reads strict and consistent, and
+    ///                    each such role has its report: of its slice, or
+    ///                    keyless for a role left unbound (desired.v1 §2.10)
+    ///   desired-binding  its descriptor lists each such role with a
+    ///                    binding §2.3 reads: one exact author, each target
+    ///                    parameter its own self, the author's declaration
+    ///                    valid; or unbound and optional, the kill switch
+    ///                    (desired.v1 §2.3, §2.12)
+    ///   desired-author   every desired resource the interface declares
+    ///                    declares itself validly, a target refusing to bind
+    ///                    one that does not; a document put again unchanged
+    ///                    in the window with no horizon passes, naming
+    ///                    §2.11's SHOULD (desired.v1 §2.2, §2.11)
     ///
     /// "Lost no delivery" is established, never assumed (§2.7, 0.25): this
     /// run lost nothing, and the resource is reliable with block, which no
@@ -3121,6 +3199,40 @@ pub(crate) struct AlarmsArgs {
     /// (alarms.v1 §2.11).
     #[arg(long, value_enum, value_name = "GRANT")]
     pub(crate) across_face: Option<FaceGrant>,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl desired`'s flags (#840, DD) — one struct the dispatcher hands
+/// over whole, destructured in the verb (#354).
+#[derive(clap::Args)]
+pub(crate) struct DesiredArgs {
+    /// The target, `<system>/<service>`. Omitted, every service in the
+    /// namespace whose descriptor lists a role on a desired resource.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) target: Option<zenkey_model::grammar::Addr>,
+    /// Only this role, as the target's descriptor lists it.
+    #[arg(long, value_name = "ROLE")]
+    pub(crate) role: Option<String>,
+    /// The longest a target may be behind its author's current version,
+    /// seconds (desired.v1 §2.17, text 0.4): the reading is made again
+    /// every 500 ms while an answer may still move, until this has passed,
+    /// and a target "not yet" on one version of its author's for all of it
+    /// is behind, the finding. Omitted, one reading, and "not yet" is never
+    /// a finding.
+    #[arg(long = "for", value_name = "SECS")]
+    pub(crate) for_secs: Option<f64>,
+    /// This host's clock and the owners' agree within the HLC delta (500
+    /// ms), as the deployment keeps them: a report's stamp is aged against
+    /// this clock (freshness.v1 §2.6), and with --for an author's version
+    /// stamped longer ago than the window and the delta is one a target "not
+    /// yet" on it is behind, at once. Without it, a report whose resource
+    /// declares a horizon has an unobservable age.
+    #[arg(long)]
+    pub(crate) clocks_synced: bool,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }

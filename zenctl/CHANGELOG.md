@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `desired.v1` in the tools: `desired`, three doctor checks, three conform cases (#840, DD)
+
+`desired.v1` (`spec/profiles/desired/v1.md`) lets a service say what
+another should be doing; §5's four questions of a target become surfaces: a
+verdict verb at the root beside `health`, `alarms` and `telemetry`, three
+doctor checks and three `check conform` cases.
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `zenctl desired [SYSTEM/SERVICE] [--role R] [--for SECS] [--clocks-synced] [--contracts PATH]`: each target's roles on desired resources with "has it converged on its author's current document?", "is its last act refused or failed?", "is what it acted on last-known?" and "is a document in force?", in the profile's tokens | exit 1 a refused or failed act, or a target "not yet" on one version of its author's for the whole `--for` window (read again every 500 ms; with `--clocks-synced`, by the version's age at once); 0 every role asked converged, none refused; 2 no verdict. An absent author's slice is read from the archives, shown last-known and never current |
+| `doctor`: twenty-seven checks | thirty: `desired-refused` (warning: a target whose last act was refused or failed), `desired-behind` (warning: a target not yet on a version its author stamped more than `--desired-behind`, 60 s, ago) and `desired-last-known` (info: a target running an archive's document) | `desired-behind` only with `--clocks-synced`, else unobservable for a target not yet converged: one reading never finds one behind |
+| `check conform`: twenty-four cases | twenty-seven: `desired-report` and `desired-binding` of a target, `desired-author` of an author | asked when the claimed revision declares a role, a report resource or a desired resource; `--skip` takes each |
+
 ## Unreleased (`main`, zk2) — presence reads where they can be complete (#830, #839, PS)
 
 A liveliness GET from a session that holds a liveliness subscriber, history

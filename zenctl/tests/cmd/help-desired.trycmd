@@ -1,0 +1,116 @@
+`desired` (#840, DD) reads `desired.v1` as the profile's tool does: each
+target's roles against their authors' documents, §5's four questions per
+role. A judgement verb: exit 1 on a refused or failed act, or a target behind
+its author's version for the whole of `--for`; 0 when every role asked
+converged on its author's current document; 2 when an answer is not yet,
+unobservable or not asked, or the run could not start.
+
+```console
+$ zenctl desired --help
+Read desired.v1 targets: has each converged on its author's document?
+
+desired.v1's tool (spec/profiles/desired/v1.md §2.17, §5), through a session in the deployment's namespace: presence and each descriptor — a target lists a role on a desired resource, bound to one author (§2.3) — the revisions they name (retrieved, or held by --contracts), the target's report of each role's slice, found by type identity (desired.v1.Report, §2.10), and S4's GET of the slice from its author; an absent author's slice is read from every archive's last-known, shown and never current. The slice is the author's declaration and the target's binding; with no contract of the author's in hand, the target's requirement and binding, the kind token its report's key carries. Per role, §5's four questions: has the target converged on its author's current document (yes: the same stamp, converged or reverted; no: refused or failed; not yet: no act, an earlier time of the same id, or another id); is its last act refused or failed; is what it acted on last-known; is a desired document in force. An absent target, or a role unbound (the kill switch) or not listed, is not asked; a presence read possibly incomplete, a descriptor or a report not read, a report unreadable, malformed or stale, its author absent, or its author's GET silent or incomplete, answer nothing. With --for, the reading is made again every 500 ms while an answer may move: a target "not yet" on one version of its author's for the whole window is behind (the finding, text 0.4), and with --clocks-synced one behind a version stamped longer ago than the window is at once. Exit 1 a refused or failed act, or a target behind past --for (the findings); 0 every role asked converged on its author's current document, none refused; 2 no verdict: not yet, unobservable, an author absent, nothing asked, or a run that could not start.
+
+--format json is one document: `report` ("desired"), `namespace`, `target` and `role` when asked, `presence` (`selector`, `complete`, `services`), `window_s`, `readings`, `clock`, `asked`, `judgement`, `rows` and `notes`, and `unobservable` when the reading could not be made. A `desired` row: `target`, `role`, `listing` (`bound`, `unbound`, `not_listed`, `unread`), `interface`, `resource`, `slice` and `slice_from` (`author_contract`, `offline_contract`, `requirement`), `declaration_invalid` and `binding_invalid` when there is something to say, `report` (`key`, `document` as the target put it, or `unreadable`; `findings`, `stamp`, `freshness`), `author` (`address`, `presence`, `current`: `put`, `delete`, `silent`, `incomplete` or `not_read`, its `stamp` as the profile writes one, `why`), `archived` (an archive's last-known, never current), `answers` (`converged`, `refused`, `last_known`, `in_force`, each an `answer` — `yes`, `no`, `not_yet`, `unobservable`, `not_asked` — a `reason` in conclusions.json's tokens and `says` in words) and `behind` (`version`, `since_s`, `by`: `window` or `clock`) when a target was behind past --for.
+
+Usage: zenctl desired [OPTIONS] [SYSTEM/SERVICE]
+
+Arguments:
+  [SYSTEM/SERVICE]
+          The target, `<system>/<service>`. Omitted, every service in the namespace whose descriptor lists a role on a desired resource
+
+Options:
+      --role <ROLE>
+          Only this role, as the target's descriptor lists it
+
+      --for <SECS>
+          The longest a target may be behind its author's current version, seconds (desired.v1 §2.17, text 0.4): the reading is made again every 500 ms while an answer may still move, until this has passed, and a target "not yet" on one version of its author's for all of it is behind, the finding. Omitted, one reading, and "not yet" is never a finding
+
+      --clocks-synced
+          This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a report's stamp is aged against this clock (freshness.v1 §2.6), and with --for an author's version stamped longer ago than the window and the delta is one a target "not yet" on it is behind, at once. Without it, a report whose resource declares a horizon has an unobservable age
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+A window is a positive number of seconds; anything else is refused before
+any session opens, exit 2, the reserved non-verdict.
+
+```console
+$ zenctl desired lab/worker --for 0 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: --for must be a positive number of seconds, got 0
+desired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A bus nothing answers fails the run before it reads, exit 2: no verdict
+was reached.
+
+```console
+$ zenctl desired lab/worker --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+desired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

@@ -1381,6 +1381,50 @@ async fn the_owner_example_implements_desired() {
     assert_eq!(t.ask("desired reread 2000").await, "desired reread 2000");
     assert_eq!(t.ask("desired reread off").await, "desired reread off");
 
+    // The line put byte for byte (text 0.4, F-194): a number past a
+    // double's precision keeps its exact value, and the target acts on it.
+    let tool = client(&ep).await;
+    let v6 = r#"{"revision": 6, "mode": "run", "rate_hz": 10, "nonce": 9007199254740993}"#;
+    let put = a.ask(&format!("desired put lab/worker {v6}")).await;
+    assert!(put.starts_with(&format!("desired put {d} ")), "{put}");
+    assert_eq!(state(&tool, d).await, [v6.as_bytes().to_vec()]);
+    until("converged on v6", &|r| {
+        r.outcome == Some(Outcome::Converged) && r.observed.is_some_and(|o| o.revision == Some(6))
+    })
+    .await;
+    assert!(
+        a.ask(r#"desired put lab/worker {"revision": 7, "revision": 8}"#)
+            .await
+            .contains("not strict JSON"),
+        "a duplicate member is not strict JSON, and nothing is put"
+    );
+    assert_eq!(state(&tool, d).await, [v6.as_bytes().to_vec()]);
+
+    // What the last seed found, and the GETs that reached the slice (text
+    // 0.4, F-197).
+    let seeds = t.ask("desired seeds").await;
+    assert!(
+        seeds.starts_with("desired seeds ")
+            && seeds.contains(" answered=")
+            && seeds.contains(" author=")
+            && seeds.contains(" archive=-"),
+        "{seeds}"
+    );
+    let gets = a.ask("desired gets lab/worker").await;
+    let n: u64 = gets
+        .strip_prefix(&format!("desired gets {d} "))
+        .unwrap_or_else(|| panic!("{gets}"))
+        .parse()
+        .unwrap();
+    assert!(
+        n >= 2,
+        "the target's seeds and the tool's GETs reach D: {gets}"
+    );
+    assert_eq!(
+        a.ask("desired gets lab/nobody").await,
+        "desired gets zk2/lab/author/tasking.v1/state/tasks/lab/nobody 0"
+    );
+
     // The delete: reverted.
     let del = a.ask("desired delete lab/worker").await;
     assert!(del.starts_with(&format!("desired deleted {d} ")), "{del}");
@@ -1453,6 +1497,7 @@ async fn the_owner_example_implements_desired() {
         u.ask("desired acts").await,
         "desired acts 0 seeds=0 held=false"
     );
+    assert_eq!(u.ask("desired seeds").await, "desired seeds 0 none");
     u.stop().await;
 
     // Without --desired-*, a desired command is refused.
@@ -1495,11 +1540,18 @@ fn the_help_documents_the_desired_surface() {
         "desired release",
         "desired reread <ms>|off",
         "desired acts",
+        "desired seeds",
+        "desired gets <target>",
+        "put byte for byte once it reads as",
         "desired put <key> <stamp>",
         "desired unchanged <key>",
         "desired deleted <key> <stamp>, or desired none <key>",
         "desired adoption found=<record|archive|nothing>",
         "desired acts <n> seeds=<n> held=<true|false>",
+        "desired gets <key> <n>",
+        "desired seeds <n> answered=<n> author=<present|absent|incomplete|not-read|not-made>",
+        "archive=<-|answered|nothing> [because <why>]",
+        "desired seeds 0 none before the first",
         "{\"revision\": 0, \"mode\": \"idle\", \"rate_hz\": 1}",
     ] {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");

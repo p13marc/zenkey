@@ -161,11 +161,30 @@ pub enum CaseId {
     /// decrease read as a reset is none. A window whose every pair had its
     /// epoch assumed answers nothing.
     TelemetryContinuity,
+    /// Every `desired.v1.Report` the service puts reads strict and is
+    /// consistent (`desired.v1` §2.10; #840), and every role its contract
+    /// declares on a desired resource has its report: of its slice, or
+    /// keyless for a role left unbound. An unreadable, malformed or missing
+    /// report is the violation. Not asked of a service whose contract
+    /// declares no such role and no report resource.
+    DesiredReport,
+    /// The descriptor lists each role its contract declares on a desired
+    /// resource with a binding §2.3 reads: one exact author, each target
+    /// parameter its own `self`, the author's declaration valid — or
+    /// unbound and optional, the kill switch (`desired.v1` §2.3, §2.12).
+    /// A binding §2.3 refuses is the violation, one subject per role.
+    DesiredBinding,
+    /// Every desired resource the service authors declares itself validly
+    /// (`desired.v1` §2.2): an invalid declaration is the violation — a
+    /// target refuses to bind it — and a document put again unchanged in
+    /// the window, without a horizon, is §2.11's SHOULD broken, named in a
+    /// pass.
+    DesiredAuthor,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 24] = [
+    pub const ALL: [CaseId; 27] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -190,6 +209,9 @@ impl CaseId {
         CaseId::TelemetryDeclaration,
         CaseId::TelemetrySample,
         CaseId::TelemetryContinuity,
+        CaseId::DesiredReport,
+        CaseId::DesiredBinding,
+        CaseId::DesiredAuthor,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -219,6 +241,9 @@ impl CaseId {
             CaseId::TelemetryDeclaration => "telemetry-declaration",
             CaseId::TelemetrySample => "telemetry-sample",
             CaseId::TelemetryContinuity => "telemetry-continuity",
+            CaseId::DesiredReport => "desired-report",
+            CaseId::DesiredBinding => "desired-binding",
+            CaseId::DesiredAuthor => "desired-author",
         }
     }
 
@@ -255,6 +280,9 @@ impl CaseId {
             CaseId::TelemetryDeclaration => "telemetry.v1 §2.2",
             CaseId::TelemetrySample => "telemetry.v1 §2.6",
             CaseId::TelemetryContinuity => "telemetry.v1 §2.10",
+            CaseId::DesiredReport => "desired.v1 §2.10",
+            CaseId::DesiredBinding => "desired.v1 §2.3",
+            CaseId::DesiredAuthor => "desired.v1 §2.2",
         }
     }
 }
@@ -457,6 +485,9 @@ mod tests {
                 "telemetry-declaration",
                 "telemetry-sample",
                 "telemetry-continuity",
+                "desired-report",
+                "desired-binding",
+                "desired-author",
             ]
         );
         for c in CaseId::ALL {

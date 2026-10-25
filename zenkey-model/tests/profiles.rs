@@ -2404,16 +2404,63 @@ fn desired_refusal(v: &Value) -> desired::Refusal {
     serde_json::from_value(v.clone()).expect("a refusal")
 }
 
+/// The fixture's document type as a bundle (desired.v1 §2.7, text 0.4,
+/// F-193): `order.json`'s top-level `schema`, its `$defs.Task` the type a
+/// `{"finish": "check"}` judges a document by (core §7.3).
+fn desired_check_bundle(schema: &Value) -> (Bundle, Value) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NTH: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "zk2-desired-check-{}-{}",
+        std::process::id(),
+        NTH.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).expect("a directory");
+    std::fs::write(dir.join("check.json"), schema.to_string()).expect("the schema");
+    let l = zenkey_model::contract::load_str(
+        "[interface]\nname = \"check\"\nmajor = 1\nminor = 0\n\
+         [schemas]\njsonschema = [\"check.json\"]\n\
+         [resources.doc]\nkind = \"state\"\ntype = \"json:Task\"\n",
+        &dir,
+        None,
+    );
+    let b = Bundle::build(&l.contract.unwrap_or_else(|| panic!("{}", l.report)));
+    let _ = std::fs::remove_dir_all(&dir);
+    let ty = zenkey_model::decode::type_of(&b, "state", "doc", "type")
+        .expect("the document's type")
+        .clone();
+    (b, ty)
+}
+
+/// `{"finish": "check"}` (text 0.4, F-193): the running act's document
+/// checked against the fixture's type, refused `invalid` at the first
+/// violation's pointer, with no detail.
+fn desired_checked(check: &(Bundle, Value), document: Option<&Value>) -> desired::Ended {
+    let document = document.expect("a check finishes a put whose document the case gives");
+    match zenkey_model::validate::validate(&check.0, &check.1, document) {
+        Ok(()) => desired::Ended::Done,
+        Err(violations) => {
+            let mut r = desired::Refusal::new(desired::INVALID);
+            r.pointer = Some(violations[0].at.clone());
+            desired::Ended::Refused(r)
+        }
+    }
+}
+
 /// `desired/conformance/order.json`: one target's steps → what each does,
 /// and its report after the last (desired.v1 §2.6 to §2.10).
 #[test]
 fn desired_order() {
     let path = profiles().join("desired/conformance/order.json");
     let mut doc = read_json(&path);
+    let check = desired_check_bundle(&doc["schema"]);
     for case in doc["cases"].as_array_mut().expect("cases") {
         let key = case["key"].as_str().map(str::to_owned);
         let mut t = desired::Target::new(key.clone());
         let mut steps = Vec::new();
+        // The documents of the running act and of the one held waiting,
+        // for a `check` finish.
+        let (mut running, mut waiting): (Option<Value>, Option<Value>) = (None, None);
         for step in case["steps"].as_array().expect("steps") {
             let token = if let Some(s) = step.get("sample") {
                 let sample = desired::Sample {
@@ -2442,10 +2489,18 @@ fn desired_order() {
                         (None, None, None) => None,
                     },
                 };
-                t.observe(sample).as_str()
+                let token = t.observe(sample).as_str();
+                match token {
+                    "act" => running = s.get("document").cloned(),
+                    "held" => waiting = s.get("document").cloned(),
+                    _ => {}
+                }
+                token
             } else if let Some(f) = step.get("finish") {
                 let ended = if f == "done" {
                     desired::Ended::Done
+                } else if f == "check" {
+                    desired_checked(&check, running.as_ref())
                 } else if let Some(r) = f.get("refused") {
                     desired::Ended::Refused(desired_refusal(r))
                 } else if let Some(r) = f.get("failed") {
@@ -2453,7 +2508,11 @@ fn desired_order() {
                 } else {
                     panic!("finish {f}")
                 };
-                t.finish(ended).as_str()
+                let token = t.finish(ended).as_str();
+                if token == "act" {
+                    running = waiting.take();
+                }
+                token
             } else if step.get("call").is_some() {
                 t.call();
                 "called"

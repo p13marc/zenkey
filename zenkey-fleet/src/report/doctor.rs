@@ -133,11 +133,25 @@ pub enum CheckId {
     /// with `--deep` from the GETs `state-stamp-foreign` makes. A stream's
     /// samples are `zenctl telemetry`'s and `check conform`'s.
     TelemetrySample,
+    /// A target whose last act on a desired document was refused or failed:
+    /// §5's *yes* to "is the target's last act refused or failed?"
+    /// (`desired.v1` §2.7, §2.17; #840), about the document or the target.
+    DesiredRefused,
+    /// A target "not yet" converged on a version its author stamped longer
+    /// ago than the doctor's bound, by a clock trusted to the HLC delta
+    /// (`desired.v1` §2.17, text 0.4; #840): never a finding from one
+    /// reading alone, so read only with `--clocks-synced`.
+    DesiredBehind,
+    /// A target running a document it read from an archive, its author not
+    /// answering for it: §5's *yes* to "is what the target acted on
+    /// last-known?" (`desired.v1` §2.9; #840). Worth knowing, never a
+    /// defect.
+    DesiredLastKnown,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 27] = [
+    pub const ALL: [CheckId; 30] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -165,6 +179,9 @@ impl CheckId {
         CheckId::AlarmStale,
         CheckId::TelemetryDeclaration,
         CheckId::TelemetrySample,
+        CheckId::DesiredRefused,
+        CheckId::DesiredBehind,
+        CheckId::DesiredLastKnown,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -197,6 +214,9 @@ impl CheckId {
             CheckId::AlarmStale => "alarm-stale",
             CheckId::TelemetryDeclaration => "telemetry-declaration",
             CheckId::TelemetrySample => "telemetry-sample",
+            CheckId::DesiredRefused => "desired-refused",
+            CheckId::DesiredBehind => "desired-behind",
+            CheckId::DesiredLastKnown => "desired-last-known",
         }
     }
 
@@ -236,6 +256,9 @@ impl CheckId {
             CheckId::AlarmStale => "alarms.v1 §2.7",
             CheckId::TelemetryDeclaration => "telemetry.v1 §2.2",
             CheckId::TelemetrySample => "telemetry.v1 §2.6",
+            CheckId::DesiredRefused => "desired.v1 §2.7",
+            CheckId::DesiredBehind => "desired.v1 §2.17",
+            CheckId::DesiredLastKnown => "desired.v1 §2.9",
         }
     }
 
@@ -332,6 +355,18 @@ impl CheckId {
             CheckId::TelemetrySample => {
                 "does an owner answer a GET of a state metric member with a sample that does not \
                  conform?"
+            }
+            CheckId::DesiredRefused => {
+                "was a desired.v1 target's last act on its author's document refused, or did it \
+                 fail partway, by its report?"
+            }
+            CheckId::DesiredBehind => {
+                "is a desired.v1 target not yet converged on a version its author stamped longer \
+                 ago than the bound, by a clock trusted to the HLC delta?"
+            }
+            CheckId::DesiredLastKnown => {
+                "does a desired.v1 target run a document it read from an archive, its author not \
+                 answering for it?"
             }
         }
     }
@@ -1027,6 +1062,9 @@ mod check_id_tests {
                 "alarm-stale",
                 "telemetry-declaration",
                 "telemetry-sample",
+                "desired-refused",
+                "desired-behind",
+                "desired-last-known",
             ]
         );
     }

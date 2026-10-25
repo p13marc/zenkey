@@ -45,6 +45,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         presence_budget,
         trust_admin_space,
         clocks_synced,
+        desired_behind,
         checks,
         skip,
         fail_on,
@@ -55,6 +56,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
     let grace = ASKING.ask(super::positive_secs("--grace", grace));
+    let desired_behind = ASKING.ask(super::positive_secs("--desired-behind", desired_behind));
     let asked: BTreeSet<CheckId> = if checks.is_empty() {
         CheckId::ALL.into_iter().collect()
     } else {
@@ -68,6 +70,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         checks: asked.into_iter().filter(|c| !skip.contains(c)).collect(),
         trust_admin: trust_admin_space,
         clocks_synced,
+        desired_behind,
     };
     if deep_without_its_check(&spec) {
         eprintln!(

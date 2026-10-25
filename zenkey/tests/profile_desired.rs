@@ -1130,9 +1130,10 @@ async fn s8_the_kill_switch() {
     a.svc.close().await.unwrap();
 }
 
-/// §10 Last-known confirmed by its author (§2.9, 0.2).
+/// §10 Last-known confirmed by its author; a present author's silence
+/// (§2.5, §2.9, 0.2; steps 3 and 4 text 0.4, F-197).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s10_last_known_confirmed_by_its_author() {
+async fn s10_last_known_confirmed_by_its_author_and_a_present_authors_silence() {
     let bus = two_routers().await;
     let s = record(&bus.ep1).await;
     let s2 = record(&bus.ep2).await;
@@ -1180,6 +1181,70 @@ async fn s10_last_known_confirmed_by_its_author() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(s2.on(RUN, mark).is_empty(), "Run receives nothing");
     assert_eq!(w.target.acts(), acts, "acted on nothing");
+
+    // 3. (text 0.4, F-197.) The cut again: the author puts v2, which
+    //    neither the target nor the archive receives. X holds an instance
+    //    token at the author's address on R2, and no queryable; the
+    //    target's process ends, and restarts, a new run.
+    bus.link().cut();
+    author_seen(&bus.ep2, false).await;
+    let sv2 = put_stamp(a.author.put(WORKER, bytes(&v(2))).await.unwrap());
+    let x = client(&bus.ep2).await;
+    let x_token = x
+        .liveliness()
+        .declare_token("zk2/lab/author/@zk/instance/00000000000000aa")
+        .await
+        .unwrap();
+    author_seen(&bus.ep2, true).await;
+    w.kill().await;
+    let mark = s2.mark();
+    let w = worker_up(&bus.ep2, true, Follow::Watch, with_archive(), false).await;
+    w.seeded().await;
+    // Its author present, its GET silent: no archive read, nothing acted
+    // on, the baseline reported.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        w.target.last_seed(),
+        Some(desired::Seeded {
+            answered: 0,
+            author: desired::AuthorSeen::Present,
+            archive: None,
+        }),
+        "the reference reads no archive while its author is present"
+    );
+    assert_eq!(w.target.acts(), 0, "acted on nothing");
+    assert_eq!(
+        s2.on(RP, mark).last().map(Rec::report),
+        Some(Report::baseline(Some(D.to_owned())))
+    );
+    assert!(
+        s2.on(RUN, mark)
+            .iter()
+            .all(|r| r.value() == drive::baseline()),
+        "Run holds the baseline"
+    );
+    let lk = zenkey::archive::last_known(&x, &addr("lab/archive"), D, T)
+        .await
+        .unwrap()
+        .expect("the archive's last-known of D");
+    assert_eq!(
+        lk.value.as_deref(),
+        Some(&bytes(&v(1))[..]),
+        "the archive holds v1, older than v2"
+    );
+
+    // 4. The heal: the author's own token appears on R2, and v2 converges;
+    //    then X withdraws its token, which moves nothing.
+    bus.link().heal();
+    s2.until("converged on v2", |r| {
+        converged_on(r, &sv2, 2) && !r.last_known
+    })
+    .await;
+    let acts = w.target.acts();
+    drop(x_token);
+    x.close().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(w.target.acts(), acts, "X's withdrawal moves nothing");
     w.svc.close().await.unwrap();
     a.svc.close().await.unwrap();
 }

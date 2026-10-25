@@ -231,10 +231,18 @@ struct Entry {
     at: Instant,
 }
 
+/// How many distinct selectors a [`Store`] counts the GETs of; a GET on a
+/// selector past them is counted apart, as reaching no key.
+const ASKED_SELECTORS: usize = 1024;
+
 /// The owner's state, as its queryables answer it (S2, S3).
 pub struct Store {
     map: Mutex<HashMap<OwnedKeyExpr, Entry>>,
     window: Duration,
+    /// The GETs answered, by their selector, at most [`ASKED_SELECTORS`]
+    /// of them: what [`Store::asked_reaching`] counts (`desired.v1`'s
+    /// scenarios §8, text 0.4).
+    asked: Mutex<HashMap<OwnedKeyExpr, u64>>,
 }
 
 impl Store {
@@ -242,7 +250,21 @@ impl Store {
         Self {
             map: Mutex::new(HashMap::new()),
             window,
+            asked: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// How many GETs this store answered whose selector reaches `key`,
+    /// whether or not it held a value for it: a lower bound once more than
+    /// [`ASKED_SELECTORS`] selectors were asked.
+    pub(crate) fn asked_reaching(&self, key: &zenoh::key_expr::keyexpr) -> u64 {
+        self.asked
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .filter(|(s, _)| s.intersects(key))
+            .map(|(_, n)| n)
+            .sum()
     }
 
     fn put(
@@ -294,6 +316,15 @@ impl Store {
     /// and a `reply_del` with the deletion's stamp for each matching key
     /// deleted within the window (S2, S3). Older tombstones are forgotten.
     pub(crate) fn answer(&self, q: &Query) {
+        {
+            let mut asked = self.asked.lock().expect("not poisoned");
+            let selector: &zenoh::key_expr::keyexpr = q.key_expr();
+            if let Some(n) = asked.get_mut(selector) {
+                *n += 1;
+            } else if asked.len() < ASKED_SELECTORS {
+                asked.insert(selector.to_owned(), 1);
+            }
+        }
         let mut map = self.map.lock().expect("not poisoned");
         map.retain(|_, e| e.value.is_some() || e.at.elapsed() <= self.window);
         for (key, e) in map.iter() {

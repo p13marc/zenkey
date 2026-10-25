@@ -35,6 +35,7 @@ pub mod config;
 pub mod conform;
 pub mod consume;
 pub mod contracts;
+pub mod desired;
 pub mod health;
 pub mod lens;
 pub mod monitor;

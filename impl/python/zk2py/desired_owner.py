@@ -39,8 +39,8 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
         return f"refused {line}: unknown command"
     cmd = words[1] if len(words) > 1 else ""
     rest = words[2] if len(words) > 2 else ""
-    a_cmds = {"put", "delete", "documents", "adoption", "queries"}
-    t_cmds = {"report", "running", "fail-next", "refuse-next", "hold", "release", "reread", "acts"}
+    a_cmds = {"put", "delete", "documents", "adoption", "queries", "gets"}
+    t_cmds = {"report", "running", "fail-next", "refuse-next", "hold", "release", "reread", "acts", "seeds"}
     if cmd in a_cmds and author is None or cmd in t_cmds and target is None:
         return f"refused {line}: this owner is no {'author' if cmd in a_cmds else 'target'}"
     if cmd == "put":
@@ -71,6 +71,25 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
         return f"refused {line}: no author or target"
     if cmd == "queries":
         return f"desired queries {author.queries}"  # type: ignore[union-attr]
+    if cmd == "gets":
+        if not rest.strip():
+            return f"refused {line}: desired gets <system>/<service>"
+        try:
+            key, n = author.gets(rest.strip())  # type: ignore[union-attr]
+        except Exception as e:  # noqa: BLE001 - a bad target is refused; main's loop refuses anything else too
+            return f"refused {line}: {e}"
+        return f"desired gets {key} {n}"
+    if cmd == "seeds":
+        # the owner example's answer (0.4): "desired seeds <n> answered=<n>
+        # author=<present|absent|incomplete|not-read|not-made>
+        # archive=<-|answered|nothing> [because <why>]", or "desired seeds 0
+        # none" before the first
+        ls = target.last_seed  # type: ignore[union-attr]
+        if ls is None:
+            return "desired seeds 0 none"
+        why = f" because {ls['why']}" if ls["author"] == "not-made" and ls["why"] else ""
+        return (f"desired seeds {target.seeds} answered={ls['answered']} author={ls['author']} "  # type: ignore[union-attr]
+                f"archive={ls['archive']}{why}")
     assert target is not None
     if cmd == "report":
         return "desired report " + json.dumps(target.report(), sort_keys=True, separators=(",", ":"))
