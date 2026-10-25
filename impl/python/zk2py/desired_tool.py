@@ -74,6 +74,9 @@ class Row:
     #: key, "unreadable" with why, or None
     candidates: list[str] = field(default_factory=list)
     report_reply: str | None = None
+    #: 0.8 (F-225): the declaring contract, named and not held, whose
+    #: requirement the tool could not read; None when it was read
+    requirement_unread: str | None = None
     #: an absent author's slice from an archive: (archive address, stamp,
     #: document), never current
     archived: list[tuple[str, str | None, Any]] = field(default_factory=list)
@@ -240,7 +243,11 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
         if not req.get("optional"):
             problems.append("required_unbound")
         r = ds.Reading(ds.PRESENT, (True, False), None, "not_asked", ds.INCOMPLETE, None)
-        return row(r)
+        # 0.8: "A role so read and unbound is still the kill switch at §2.17
+        # step 2"; the declaring contract unread is named all the same
+        named_unread = str(req.get("declared_by")) if not isinstance(rr, dict) and \
+            req.get("declared_by") is not None else None
+        return row(r, requirement_unread=named_unread)
     author = _first(req.get("bindings"))
     if not isinstance(author, str) or len(author.split("/")) != 2:
         problems.append("not_one_author")
@@ -257,20 +264,21 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
     held = [_revision(c) for c in by_iface.get(iface, [])] if named is None else []
     # the requirement as the target's contract declares it (core §3.1): its
     # resources (None for every one), with the descriptor's binding
+    unread = None
     if not isinstance(rr, dict):
         # 0.7: "a role a component's manifest declares, whose descriptor names
-        # no declaring contract (core §3.3)", names every resource (core §3.1).
-        # A declaring contract named and not in hand, nor served: its
-        # requirement's resources unknown, read as every resource, as the
-        # reference's tool reads it, and said; the target's other interfaces
-        # may still carry the report
+        # no declaring contract (core §3.3)", names every resource (core
+        # §3.1). 0.8 (F-225): one whose declaring contract the descriptor
+        # names, and the tool does not hold, or holds in a revision
+        # declaring no such role, is unread: never every resource
         if req.get("declared_by") is not None:
+            unread = str(req.get("declared_by"))
             problems.append("requirement_unread")
         rr = {}
     resources = rr.get("resources")
     requirement = {"resources": [x for x in resources if isinstance(x, str)] if isinstance(resources, list) else None,
                    "bindings": req.get("bindings"), "params": req.get("params") or {},
-                   "optional": req.get("optional")}
+                   "optional": req.get("optional"), "unread": unread is not None}
     taken = ds.take_slice(target, iface, requirement, named, held)
     if not taken.desired:
         # not this profile's role: not listed as one (F-217)
@@ -280,6 +288,12 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
     problems += list(taken.binding)
     if taken.declaration:
         problems.append("declaration_invalid:" + ",".join(taken.declaration))
+    if taken.unread:
+        # §2.17 (0.8): unobservable, no_report, beside requirement_unread;
+        # no binding problem read, no report looked for
+        r = ds.Reading(ds.PRESENT, (True, True), None, "not_asked", a_presence, None)
+        return row(r, slice=None, slice_from=None, author=author, author_presence=a_presence,
+                   author_current="not_read", requirement_unread=unread)
     # the target's reports, by type identity, among "every report resource
     # of the target" (§2.10): of every contract its descriptor lists
     replies: list[tuple[str, bytes]] = []
