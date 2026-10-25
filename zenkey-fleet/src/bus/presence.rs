@@ -50,10 +50,12 @@
 //! [`LivePresence`] from one read of its scope, then folds a
 //! [`crate::Monitor`]'s liveliness events into it, re-seeding after every
 //! `Dropped(n)`, after every withdrawal that leaves something with nothing
-//! held (core §8.1, 0.37), and after a read not made. The monitor watches
-//! [`presence_selectors`] (or [`crate::MonitorSpec::with_presence`]) on a
-//! watch session of its own; the seed reads through the session in the
-//! namespace, which holds no liveliness subscriber (#830).
+//! held (core §8.1, 0.37), after every move of the watch session's
+//! transport (0.41, 0.42), and after a read not made. The monitor watches
+//! the scope's token selectors ([`crate::MonitorSpec::with_presence`]) on
+//! a watch session of its own, in no namespace on the wire keys
+//! ([`crate::WatchSession`], #875); the seed reads through the session in
+//! the namespace, which holds no liveliness subscriber (#830).
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
@@ -303,19 +305,6 @@ pub async fn service_listing(
 
 // ─── presence kept current ──────────────────────────────────────────────────
 
-/// `scope`'s three token selectors ([`Scope::token_selectors`]) as the wire
-/// spells them in `namespace`: what a [`crate::Monitor`] watches for a
-/// [`PresenceFeed`]. The namespace is the one the monitor's session sees on
-/// keys — the deployment's for a session in no namespace, empty for one in
-/// the namespace.
-pub fn presence_selectors(namespace: &str, scope: &Scope) -> Vec<String> {
-    scope
-        .token_selectors()
-        .iter()
-        .map(|s| crate::model::namespace::join(namespace, s))
-        .collect()
-}
-
 /// How long a [`PresenceFeed`] waits before reading again after a seed that
 /// failed, ended possibly incomplete or lost events; doubled at each one in
 /// a row, up to [`RESEED_BACKOFF_MAX`].
@@ -365,13 +354,16 @@ pub enum SeedOutcome {
 /// monitor delivers, and re-seeded after every `Dropped(n)`.
 ///
 /// **Two sessions** (#830, core §8.1, 0.37). The monitor holds its
-/// liveliness subscribers on a watch session of its own; the feed reads
-/// through another, the deployment's, which holds none, and refuses one
-/// with the monitor's zid ([`PresenceFeed::open`]). A read through either
-/// session while it reaches no other zenoh node is not made
-/// ([`SeedOutcome::CutOff`]): every address is unobservable until a
-/// complete read, retried with backoff, and at once when a token is heard
-/// again.
+/// liveliness subscribers on a watch session of its own, in no namespace
+/// on the wire keys ([`crate::WatchSession`], #875), and delivers each key
+/// base-relative; the feed reads through another, the deployment's, which
+/// holds none, and refuses one with the monitor's zid
+/// ([`PresenceFeed::open`]). A read through either session while it
+/// reaches no other zenoh node is not made ([`SeedOutcome::CutOff`]):
+/// every address is unobservable until a complete read, retried with
+/// backoff, and at once when a token is heard again. Through the watch
+/// session's, since its subscribers then hear nothing, and a read it could
+/// not follow would stand on nothing (core §8.1, 0.42, F-228).
 ///
 /// **A withdrawal heard live is a reason to read again** (core §8.1, 0.37).
 /// One that leaves something with nothing held owes a read
@@ -400,6 +392,14 @@ pub enum SeedOutcome {
 /// address it shows is up, one it does not is unobservable, never down,
 /// and the feed reads again with backoff.
 ///
+/// **A move unconfirms what is held** (core §8.1, 0.42, F-229). When the
+/// watch session's transport closes or opens, its subscribers, which have
+/// no history, may not hear what moved meanwhile: a token withdrawn while
+/// the link was down, or one declared then. So every address is
+/// unobservable at once ([`LivePresence::moved`], handed out first, cause
+/// before effect), and the re-read is owed now: made after the barrier
+/// again, or not made through a watch session cut off.
+///
 /// **Cancel-safe** (#614, FL2). [`PresenceFeed::next`] may be dropped at
 /// any await — a notifier's `select!` loop drops it whenever another branch
 /// wins — and nothing is lost: every transition folded is held in the feed
@@ -409,16 +409,15 @@ pub enum SeedOutcome {
 /// the re-seed itself, and the projection stayed unobservable with nobody
 /// told.
 ///
-/// The monitor must watch the projection's scope: [`presence_selectors`]
-/// with the projection's wire namespace
-/// ([`LivePresence::wire_namespace`]). Its other events (samples, ticks,
-/// other liveliness) pass through, and a liveliness key that is not a
-/// presence token of the scope is counted ([`LivePresence::ignored`]).
+/// The monitor must watch the projection's scope: its token selectors
+/// ([`crate::MonitorSpec::with_presence`]). Its other events (samples,
+/// ticks, other liveliness) pass through, and a liveliness key that is not
+/// a presence token of the scope is counted ([`LivePresence::ignored`]).
 pub struct PresenceFeed {
     session: Session,
-    /// The monitor's session: a watch session, read only for whether it is
-    /// cut off (#830, core §8.1).
-    watch: Session,
+    /// The monitor's watch session, asked only whether it is cut off (#830,
+    /// core §8.1). `None` when the monitor watches no liveliness.
+    watch: Option<crate::WatchSession>,
     /// The watch session's barrier (#851, core §8.1, 0.41): asked before
     /// each seed, and a seed made while it does not stand is possibly
     /// incomplete. `None` when the monitor watches no liveliness.
@@ -499,7 +498,7 @@ impl PresenceFeed {
         let events = monitor.events();
         let mut feed = PresenceFeed {
             session: session.clone(),
-            watch: monitor.session().clone(),
+            watch: monitor.watch_session().cloned(),
             barrier: monitor.barrier().cloned(),
             moves_seen: monitor
                 .barrier()
@@ -574,10 +573,13 @@ impl PresenceFeed {
                 // subscribers are declared again at a router that has to
                 // read them, a subscriber without history hears no
                 // withdrawal of what it was never told, and a token that
-                // went meanwhile is in no history, so the barrier is made
-                // again and presence read, at once.
+                // went meanwhile is in no history. So what is held is
+                // unconfirmed from now (0.42, F-229), handed out first, and
+                // the barrier is made again and presence read, at once.
                 Wake::Moved => {
                     self.moves_seen = barrier.as_ref().map_or(seen, |b| b.moves());
+                    let moved = self.presence.moved(SystemTime::now());
+                    self.pending.extend(moved);
                     self.owe_within(Duration::ZERO);
                 }
                 Wake::Retry => {
@@ -641,9 +643,13 @@ impl PresenceFeed {
             // 0.37).
             let cut = match cut_off(&self.session).await {
                 Some(why) => Some(why),
-                None => cut_off(&self.watch)
-                    .await
-                    .map(|why| format!("the monitor's session: {why}")),
+                None => match &self.watch {
+                    Some(w) => w
+                        .cut_off()
+                        .await
+                        .map(|why| format!("the monitor's session: {why}")),
+                    None => None,
+                },
             };
             // The watch session's barrier, before the read (#851, core §8.1,
             // 0.41): made again when it does not stand. A read made without
@@ -796,9 +802,9 @@ mod tests {
         assert!(refused.is_unaskable(), "{refused}");
     }
 
-    /// A live watch's selectors: one per token form, `@zk` named, each as
-    /// the wire spells it in the monitor's namespace; and a scope contains
-    /// exactly the addresses it spells.
+    /// A live watch's selectors: one per token form, `@zk` named,
+    /// base-relative (the watch session spells them on the wire, #875);
+    /// and a scope contains exactly the addresses it spells.
     #[test]
     fn scopes_spell_their_token_selectors() {
         assert_eq!(
@@ -811,11 +817,11 @@ mod tests {
         );
         let addr: Addr = "host-a/tc".parse().expect("an address");
         assert_eq!(
-            presence_selectors("prod", &Scope::service(&addr)),
+            Scope::service(&addr).token_selectors(),
             [
-                "prod/zk2/host-a/tc/@zk/instance/*",
-                "prod/zk2/host-a/tc/@zk/alive/**",
-                "prod/zk2/host-a/tc/@zk/member/**",
+                "zk2/host-a/tc/@zk/instance/*",
+                "zk2/host-a/tc/@zk/alive/**",
+                "zk2/host-a/tc/@zk/member/**",
             ]
         );
         let other: Addr = "host-b/tc".parse().expect("an address");

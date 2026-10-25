@@ -63,7 +63,10 @@ pub(crate) async fn guard_address(
 /// #841, RC), when one of `revisions` lists the profile in `uses`: a
 /// reader that holds no liveliness subscriber and no claim, and a watch
 /// session, both of their own in the namespace (§2.5 step 1, §2.7; text
-/// 0.2, F-204). `None` when nothing is governed, and no session opens.
+/// 0.2, F-204). The watch is the runtime's candidate's, which spells
+/// base-relative keys and keeps its own history, so it is a session in the
+/// namespace, never a tool's watch session on the wire (#875). `None` when
+/// nothing is governed, and no session opens.
 pub(crate) async fn elect(
     dep: &Deployment,
     revisions: &[std::sync::Arc<zenkey_fleet::model::catalog::Revision>],
@@ -80,7 +83,7 @@ pub(crate) async fn elect(
         return Ok(None);
     }
     let reader = dep.session().await?;
-    let watch = dep.watch_session().await?;
+    let watch = dep.session().await?;
     eprintln!(
         "redundancy.v1 governs {}: this mock is a candidate, serving once elected and standing by \
          otherwise, on a reader and a watch session of its own",

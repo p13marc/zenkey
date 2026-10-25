@@ -240,7 +240,7 @@ impl fmt::Display for AddressStatus {
 }
 
 /// How a transition was learned: `"event"`, `"seed"`, `"dropped"`,
-/// `"withdrawn"`, `"cut_off"`.
+/// `"withdrawn"`, `"cut_off"`, `"moved"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PresenceSource {
@@ -260,6 +260,10 @@ pub enum PresenceSource {
     /// (core §8.1, 0.37). What follows is unobservable until a complete
     /// read.
     CutOff,
+    /// The reader's watch session's transport moved (core §8.1, 0.42,
+    /// F-229): its subscribers may not have heard what moved while it was
+    /// down. What follows is unobservable until a complete read.
+    Moved,
 }
 
 /// One member of an interface's `epoch` template (§8.1): the interface and
@@ -681,6 +685,7 @@ mod tests {
             (PresenceSource::Dropped, "dropped"),
             (PresenceSource::Withdrawn, "withdrawn"),
             (PresenceSource::CutOff, "cut_off"),
+            (PresenceSource::Moved, "moved"),
         ] {
             assert_eq!(serde_json::to_value(source).expect("serialize"), word);
         }

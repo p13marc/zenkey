@@ -27,7 +27,10 @@
 //! [`query`], [`admin`], [`scout`] — runs in **no** namespace, and sees the
 //! wire as it really is, full keys included: that is what lets it spot a
 //! key outside the deployment. [`lens`] is the bridge: what a raw observer
-//! resolves its keys through, read once in the namespace.
+//! resolves its keys through, read once in the namespace. A live reader's
+//! liveliness subscribers go on a [`watch::WatchSession`], in no namespace
+//! on the deployment's wire keys, which hands each key on base-relative
+//! (#875).
 
 pub mod admin;
 pub mod alarms;
@@ -50,5 +53,6 @@ pub mod session;
 pub mod stall;
 pub(crate) mod teardown;
 pub mod telemetry;
+pub mod watch;
 pub mod why;
 pub mod write;

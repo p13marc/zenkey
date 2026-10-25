@@ -26,10 +26,14 @@
 //! without a token that is live (zenoh 1.10.1 and main), so a reader that
 //! follows presence live holds its liveliness subscribers — a
 //! [`Monitor`]'s, an alarms or telemetry reader's — on a session of its own
-//! ([`DoctorBus::watch`]), and makes every read on the others. Every
-//! liveliness subscriber here is declared through
-//! `zenkey::presence::declare_subscriber`, which marks its session, and a
-//! read on a marked session is refused before anything is asked
+//! ([`DoctorBus::watch`]), and makes every read on the others. That session
+//! is in **no** namespace, and watches the deployment's wire keys without
+//! history ([`WatchSession`], [`open_watch`]; #875, core §8.1, 0.42): its
+//! round trip is one round trip at any population, and it hears an earlier
+//! token withdrawn, which a namespaced subscriber without history never
+//! does. Every liveliness subscriber here is declared through it, and so
+//! through `zenkey::presence::declare_subscriber`, which marks its session,
+//! and a read on a marked session is refused before anything is asked
 //! ([`Error::NotAsked`]); so is one through a session cut off from every
 //! other zenoh node ([`bus::presence::cut_off`]).
 //!
@@ -67,6 +71,8 @@
 //!   (the reads a silence is explained from, #702), `conform` (a
 //!   service's suite, #703), `stall` (what a window's reader sees of its
 //!   own receive path: its transports and a ticker, core §2.7 0.27),
+//!   `watch` (a tool's watch session: in no namespace on the wire keys,
+//!   the one place that knows the namespace of the tokens it hears, #875),
 //!   `health` (a `health.v1` reading, #721), `config` (a `config.v1`
 //!   reading, and one act through the runtime's client, #768) and `alarms`
 //!   (an `alarms.v1` reader: subscribed, seeded by S4's GET, its own
@@ -240,8 +246,10 @@ pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
     OPEN_TIMEOUT, OpenFailure, TOOL_INTERESTS_TIMEOUT, check_namespace, open, open_in_namespace,
-    open_owner_in_namespace, open_reporting, open_reporting_within, open_with_config,
+    open_owner_in_namespace, open_reporting, open_reporting_within, open_watch, open_with_config,
 };
+// A tool's watch session (#830, #875): in no namespace, on the wire keys.
+pub use bus::watch::{TokenHeard, WatchSession};
 pub use bus::write::{
     MatchingEvents, Publication, WireQos, WriteAct, check_concrete, check_retire,
     declare_publication,
@@ -345,7 +353,6 @@ pub use bus::presence::{
 // the feed that seeds it and keeps it current from a monitor.
 pub use bus::presence::{
     PresenceFeed, RESEED_BACKOFF, RESEED_BACKOFF_MAX, SeedOutcome, WITHDRAWAL_SETTLE,
-    presence_selectors,
 };
 pub use model::catalog::{
     Catalog, ContractSet, ContractState, Contracts, DescriptorRead, LoadProblem,

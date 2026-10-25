@@ -160,17 +160,23 @@ pub mod zk2 {
 
     /// The daemon's sessions for a deployment at `namespace` on the router
     /// at `endpoint`: one in the namespace, one in none, and a watch session
-    /// of each kind for the live readers' liveliness subscribers (#830).
+    /// of each kind for the live readers' liveliness subscribers (#830),
+    /// each in no namespace on the wire keys (#875), as
+    /// `zenwatch::bus::BusSettings::sessions` opens them.
     pub async fn daemon_bus(endpoint: &str, namespace: &str) -> zenwatch::bus::Sessions {
         let ns = (!namespace.is_empty()).then_some(namespace);
+        let watch_for = async |namespace: &str| {
+            zenkey_fleet::WatchSession::new(&client(endpoint).await, namespace)
+                .expect("a watch session")
+        };
         zenwatch::bus::Sessions {
             bus: zenkey_fleet::DoctorBus {
                 session: client_ns(endpoint, ns).await,
                 raw: client(endpoint).await,
                 namespace: namespace.to_string(),
-                watch: Some(client_ns(endpoint, ns).await),
+                watch: Some(watch_for(namespace).await),
             },
-            raw_watch: Some(client(endpoint).await),
+            raw_watch: Some(watch_for("").await),
         }
     }
 

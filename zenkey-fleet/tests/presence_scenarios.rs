@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 mod util;
-use util::zk2::{T, addr, client, config, eventually, router};
+use util::zk2::{T, addr, client, config, eventually, router, watch_of};
 
 use zenkey::presence::LivelinessGets;
 use zenkey::{Implementation, Service, ServiceBuilder};
@@ -63,7 +63,7 @@ fn presence_spec() -> MonitorSpec {
         stats_tick: Duration::from_secs(3600),
         ..MonitorSpec::default()
     }
-    .with_presence("", &PresenceScope::all())
+    .with_presence(&PresenceScope::all())
 }
 
 /// Whether `session`'s router shows it `key`, by one complete read.
@@ -265,7 +265,7 @@ async fn s7_a_read_cut_off_while_it_runs() {
             .is_ok_and(|r| r.complete && r.keys.len() == 2 && r.keys.contains(&key))
     })
     .await;
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     let p7 = addr("p7/a");
@@ -339,7 +339,7 @@ async fn s8_a_withdrawal_heard_live() {
         retrying_client(&link.endpoint).await,
         retrying_client(&link.endpoint).await,
     );
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     assert_eq!(monitor.settled(), Some(true), "the round trip");
@@ -548,7 +548,7 @@ async fn s9_a_read_beside_a_liveliness_subscriber() {
         zenkey::presence::liveliness_gets(&watch),
         LivelinessGets::default()
     );
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     assert_eq!(monitor.settled(), Some(true));
@@ -621,7 +621,7 @@ async fn s9_a_read_beside_a_liveliness_subscriber() {
         watch_link.stall();
         let starting = tokio::spawn({
             let watch = watch.clone();
-            async move { Monitor::start(&watch, presence_spec()).await }
+            async move { Monitor::start_watch(&watch_of(&watch, ""), presence_spec()).await }
         });
         tokio::time::sleep(STALL).await;
         assert!(
@@ -741,13 +741,16 @@ async fn waiting_client(endpoint: &str, interests_ms: u64) -> zenoh::Session {
     zenoh::open(c).await.expect("a client")
 }
 
-/// §10 step 6 (core §8.1, 0.41; #851), the reader under test: a
-/// `PresenceFeed` whose watch session's round trip does not stand seeds
-/// possibly incomplete, saying why, reads nobody down, and makes the round
-/// trip again before its next read; once one stands its read is complete.
-/// Its watch session's link cut, it reads again at once (not made, through
-/// a session cut off), and healed, it makes the round trip again before the
-/// read that finds the owner up. Steps 1 to 5 observe zenoh and the
+/// §10 step 6 (core §8.1, 0.41, 0.42; #851, #875), the reader under test:
+/// its watch session reaches R1 through the link, its reading session
+/// directly (0.42, F-227). A `PresenceFeed` whose watch session's round
+/// trip does not stand seeds possibly incomplete, saying why, reads nobody
+/// down, and makes the round trip again before its next read; once one
+/// stands its read is complete. Its watch session's link cut, what it held
+/// is unconfirmed at once by the move (F-229), it reads again at once (not
+/// made, through its watch session cut off, F-228) and makes no round trip
+/// there; healed, it makes the round trip again before the read that finds
+/// the owner up. Steps 1 to 5 observe zenoh and the
 /// runtime: `zenkey/tests/presence.rs`'s
 /// `s10_a_round_trip_at_a_population_and_the_interests_timeout`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -762,9 +765,11 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
     let watch = waiting_client(&watch_link.endpoint, 300).await;
     let (up, absent) = (addr("p10/owner"), addr("p10/absent"));
 
-    // No round trip stands: the link stalls while the monitor starts.
+    // No round trip stands: the link stalls while the monitor starts, and
+    // until its first seed is read (0.42, F-227).
     watch_link.stall();
-    let monitor = Monitor::start(&watch, presence_spec())
+    let stalled = std::time::Instant::now();
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     assert_eq!(monitor.settled(), Some(false), "the round trip ran out");
@@ -789,6 +794,7 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
     assert!(asked >= 2, "the start's, and the seed's: {asked}");
 
     // The stall ends: the next read makes the round trip first, and stands.
+    let stall = stalled.elapsed();
     watch_link.heal();
     until(&mut feed, &mut seen, "a complete seed", |f| {
         *f.last_seed() == SeedOutcome::Complete
@@ -798,15 +804,39 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
     assert_eq!(feed.presence().status(&absent), Down);
     assert_eq!(feed.presence().status(&up), Up);
 
-    // Cut: read again at once, not made, nobody down.
+    // Cut: what the reader held is unconfirmed at once, before any read
+    // (0.42, F-229); it reads again at once, not made through its watch
+    // session cut off, though its reading session holds its link (F-227,
+    // F-228), and makes no round trip through it. Nobody down.
     let before = zenkey::presence::liveliness_gets(&watch).settles;
+    let mark = seen.len();
     watch_link.cut();
     until(&mut feed, &mut seen, "a read not made", |f| {
         matches!(f.last_seed(), SeedOutcome::CutOff(_))
     })
     .await;
     assert_eq!(feed.presence().status(&up), Unobservable);
+    let unconfirmed = seen[mark..].iter().find(|t| {
+        t.address == up
+            && matches!(
+                t.change,
+                PresenceChange::Status {
+                    to: Unobservable,
+                    ..
+                }
+            )
+    });
+    assert_eq!(
+        unconfirmed.map(|t| t.source),
+        Some(PresenceSource::Moved),
+        "unconfirmed by the move itself: {seen:#?}"
+    );
     assert_eq!(monitor.settled(), Some(false), "lost with the transport");
+    assert_eq!(
+        zenkey::presence::liveliness_gets(&watch).settles,
+        before,
+        "no round trip through the watch session cut off"
+    );
 
     // Healed: the round trip again, then the owner up.
     watch_link.heal();
@@ -825,7 +855,7 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
         "the owner never read down: {seen:#?}"
     );
     eprintln!(
-        "§10 step 6: round trips on the watch session {}",
+        "§10 step 6: stalled {stall:?}; round trips on the watch session {}",
         zenkey::presence::liveliness_gets(&watch).settles
     );
     drop(feed);

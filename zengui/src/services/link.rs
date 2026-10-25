@@ -50,9 +50,7 @@ pub struct Sessions {
 /// An open's outcome, with the half that failed kept recognisable: a
 /// transport that would not come up is [`NeverOpened`], a config the user
 /// named is theirs (#196).
-fn spend(
-    opened: Result<zenoh::Session, zenkey_fleet::OpenFailure>,
-) -> ServiceResult<zenoh::Session> {
+fn spend<T>(opened: Result<T, zenkey_fleet::OpenFailure>) -> ServiceResult<T> {
     opened.map_err(|f| match f {
         zenkey_fleet::OpenFailure::Config(e) => ServiceError::of(e),
         zenkey_fleet::OpenFailure::Transport(e) => {
@@ -83,14 +81,28 @@ async fn namespaced(namespace: &str, t: &Transport) -> ServiceResult<zenoh::Sess
     )
 }
 
-/// A **watch session** in `namespace` (#830, core §8.1, 0.37): a session of
-/// its own over the same connection, for the presence monitor's liveliness
-/// subscribers. It makes no presence read, so the session in the namespace
-/// holds no liveliness subscriber and makes every read: a liveliness GET
-/// beside one can complete without a token that is live. One more session
-/// per window, reopened with the others on a namespace switch.
-pub async fn watch_session(namespace: &str, t: &Transport) -> ServiceResult<zenoh::Session> {
-    namespaced(namespace, t).await
+/// A **watch session** for `namespace` (#830, core §8.1, 0.37; #875): a
+/// session of its own over the same connection, in **no** namespace, for
+/// the presence monitor's liveliness subscribers on the deployment's wire
+/// keys, without history, so its round trip is one round trip at any
+/// population. It makes no read, so the session in the namespace holds no
+/// liveliness subscriber and makes every read: a liveliness GET beside one
+/// can complete without a token that is live. One more session per window,
+/// reopened with the others on a namespace switch.
+pub async fn watch_session(
+    namespace: &str,
+    t: &Transport,
+) -> ServiceResult<zenkey_fleet::WatchSession> {
+    spend(
+        zenkey_fleet::open_watch(
+            namespace,
+            t.zenoh_config.as_deref(),
+            &t.connect,
+            &t.listen,
+            t.scouting,
+        )
+        .await,
+    )
 }
 
 /// Both sessions, the raw one first: a dead transport is said once, by the

@@ -24,7 +24,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 mod util;
-use util::zk2::{T, addr, client, client_ns, config, eventually, iface, router};
+use util::zk2::{T, addr, client, client_ns, config, eventually, iface, router, watch_of};
 
 use zenkey::{Implementation, Service, ServiceBuilder};
 use zenkey_fleet::{
@@ -100,7 +100,8 @@ fn instances_and_status(seen: &[PresenceTransition], a: &str) -> Vec<PresenceCha
 /// stops (still up), the last stops (down): the feed, seeded from a
 /// complete read and fed by a real monitor, says so in that order, every
 /// live move heard as an event. The owners and the seed are in a
-/// namespace and the monitor is not, so each live key is stripped.
+/// namespace and the monitor's watch session is not, so each live key is
+/// heard on the wire and stripped (#875).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_address_goes_up_and_down_as_its_instances_come_and_go() {
     const NS: &str = "site";
@@ -113,10 +114,13 @@ async fn an_address_goes_up_and_down_as_its_instances_come_and_go() {
     let h1 = addr("h1/tc");
 
     let scope = PresenceScope::all();
-    let monitor = Monitor::start(&raw, MonitorSpec::default().with_presence(NS, &scope))
-        .await
-        .expect("monitor");
-    let mut presence = LivePresence::new(scope).wire_namespace(NS);
+    let monitor = Monitor::start_watch(
+        &watch_of(&raw, NS),
+        MonitorSpec::default().with_presence(&scope),
+    )
+    .await
+    .expect("monitor");
+    let mut presence = LivePresence::new(scope);
     presence.track(&h1, SystemTime::now());
     let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, presence, T)
         .await
@@ -272,9 +276,12 @@ async fn a_member_epoch_handover_is_no_gap_on_a_live_bus() {
     let watch = client(&ep).await;
     let nav = iface("nav.v2");
     let scope = PresenceScope::service(&addr("p3/nav"));
-    let monitor = Monitor::start(&watch, MonitorSpec::default().with_presence("", &scope))
-        .await
-        .expect("monitor");
+    let monitor = Monitor::start_watch(
+        &watch_of(&watch, ""),
+        MonitorSpec::default().with_presence(&scope),
+    )
+    .await
+    .expect("monitor");
     let mut svc = bring_up(&owner, config("p3/nav"), &scenario("nav.v2")).await;
     let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, LivePresence::new(scope), T)
         .await
@@ -380,7 +387,7 @@ async fn a_loss_is_unobservable_until_the_reseed_finds_what_it_hid() {
         ..MonitorSpec::default()
     };
     // A session of its own (#823, the module doc).
-    let monitor = Monitor::start(&watcher, spec.with_presence("", &scope))
+    let monitor = Monitor::start_watch(&watch_of(&watcher, ""), spec.with_presence(&scope))
         .await
         .expect("monitor");
     let a = bring_up(&owner, config("h1/tc"), &scenario("ping.v1")).await;
@@ -483,7 +490,7 @@ async fn a_reseed_cut_short_by_a_select_is_read_again() {
         ..MonitorSpec::default()
     };
     // A session of its own (#823, the module doc).
-    let monitor = Monitor::start(&watcher, spec.with_presence("", &scope))
+    let monitor = Monitor::start_watch(&watch_of(&watcher, ""), spec.with_presence(&scope))
         .await
         .expect("monitor");
     let a = bring_up(&owner, config("h1/tc"), &scenario("ping.v1")).await;
@@ -588,9 +595,12 @@ async fn a_lens_feed_resolves_an_appearing_instance_without_a_reread() {
     }
 
     let scope = PresenceScope::all();
-    let monitor = Monitor::start(&raw, MonitorSpec::default().with_presence("", &scope))
-        .await
-        .expect("monitor");
+    let monitor = Monitor::start_watch(
+        &watch_of(&raw, ""),
+        MonitorSpec::default().with_presence(&scope),
+    )
+    .await
+    .expect("monitor");
     let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, LivePresence::new(scope), T)
         .await
         .expect("the feed opens");

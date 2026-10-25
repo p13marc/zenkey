@@ -68,8 +68,9 @@ pub fn shutdown(monitor: Arc<Monitor>) -> Task<Message> {
     .discard()
 }
 
-/// Start the presence monitor on a watch session of its own in `namespace`
-/// (#614, FL6a; #830): zk2's three token selectors and nothing else
+/// Start the presence monitor on a watch session of its own for
+/// `namespace`, in no namespace on its wire keys (#614, FL6a; #830, #875):
+/// zk2's three token selectors and nothing else
 /// (`MonitorSpec::with_presence`), its own broadcast, and no stats ticks
 /// worth the name — zenwatch's shape. The session in the namespace makes
 /// the presence link's reads and holds no liveliness subscriber (core
@@ -88,9 +89,9 @@ pub fn start_presence(
                 stats_tick: std::time::Duration::from_secs(3600),
                 ..MonitorSpec::default()
             }
-            .with_presence("", &zenkey_fleet::PresenceScope::all());
+            .with_presence(&zenkey_fleet::PresenceScope::all());
             let r = match crate::services::link::watch_session(&namespace, &transport).await {
-                Ok(watch) => Monitor::start(&watch, spec)
+                Ok(watch) => Monitor::start_watch(&watch, spec)
                     .await
                     .map(Arc::new)
                     .map_err(ServiceError::of),

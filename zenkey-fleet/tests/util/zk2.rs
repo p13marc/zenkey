@@ -106,3 +106,10 @@ where
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
+
+/// `session`, which must be in no namespace, as a watch session for the
+/// deployment in `namespace` (#875): what `zenkey_fleet::open_watch` makes
+/// of a session it opens.
+pub fn watch_of(session: &zenoh::Session, namespace: &str) -> zenkey_fleet::WatchSession {
+    zenkey_fleet::WatchSession::new(session, namespace).expect("a watch session")
+}

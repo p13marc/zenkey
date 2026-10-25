@@ -462,6 +462,7 @@ pub fn judge(obs: &TelemetryObservation) -> TelemetryReport {
                 Some(PresenceBasis::Incomplete { .. }) => "incomplete",
                 Some(PresenceBasis::Lost { .. }) => "lost",
                 Some(PresenceBasis::CutOff) => "cut_off",
+                Some(PresenceBasis::Moved) => "moved",
                 Some(PresenceBasis::Unseeded) | None => "unseeded",
             }
             .to_owned(),

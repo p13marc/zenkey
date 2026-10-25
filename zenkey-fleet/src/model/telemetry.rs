@@ -670,8 +670,9 @@ impl TelemetryBook {
     /// address, or of its member, whatever the seed's net change: a token
     /// that came and went while the seed was read is never "alone
     /// throughout" across it. A put of a token held before the seed is no
-    /// move: a subscriber with history delivers one for every token it is
-    /// told of, a reconnection's included (#872).
+    /// move: a reconnection can deliver one again, an owner's session
+    /// declaring its tokens anew (#872). The watch session's subscribers
+    /// have no history (#875), so none comes from a history.
     pub fn seed<'k>(&mut self, seed: &Observed, then: impl IntoIterator<Item = (&'k str, bool)>) {
         let Some(p) = &mut self.presence else {
             return;
@@ -1370,9 +1371,9 @@ mod tests {
         );
     }
     /// #872: a put of a token held before a seed, delivered while it was
-    /// read — a subscriber with history is told of every token it watches,
-    /// at a reconnection too — is no move, so a pair across it is still the
-    /// one instance's alone throughout, and a decrease within it is found.
+    /// read — an owner's session declaring its tokens anew at a
+    /// reconnection — is no move, so a pair across it is still the one
+    /// instance's alone throughout, and a decrease within it is found.
     #[test]
     fn a_put_of_a_token_already_held_during_a_seed_is_no_move() {
         let t0 = Instant::now();

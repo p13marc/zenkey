@@ -65,10 +65,17 @@
 //! did leave (the old token deleted before the new one was declared) is
 //! shown as the gap it was: gone, then appeared.
 //!
-//! **What is not presence** is counted, never dropped silently: a key
-//! outside the namespace, a key that is not zk2 (the bus is shared, §1.7),
-//! a zk2 key that is not a token (a data key, a contract key), and a token
-//! of an address outside the [`Scope`] ([`PresenceIgnored`]).
+//! **What is not presence** is counted, never dropped silently: a key that
+//! is not zk2 (the bus is shared, §1.7), a zk2 key that is not a token (a
+//! data key, a contract key), and a token of an address outside the
+//! [`Scope`] ([`PresenceIgnored`]). Every key is base-relative: a watch
+//! session strips its namespace from what it hears, and refuses a key
+//! outside it ([`crate::WatchSession`], #875).
+//!
+//! **A move of the watch session's transport unconfirms what is held**
+//! (core §8.1, 0.42, F-229; [`LivePresence::moved`]): its subscribers have
+//! no history, and may not have heard what moved while the transport was
+//! down, so every address is unobservable until a complete read.
 //!
 //! **Bounded.** Held tokens are bounded by the bus itself (the presence
 //! budget, §8.3). What is not is the memory of addresses that went away:
@@ -143,15 +150,18 @@ pub enum PresenceBasis {
         /// Events lost since the last complete seed.
         dropped: u64,
     },
+    /// The watch session's transport moved since the last complete seed
+    /// (core §8.1, 0.42, F-229): its subscribers, which have no history,
+    /// may not have heard what moved while it was down, so every address
+    /// is unobservable until a complete seed. What is held is the last
+    /// known, kept for display.
+    Moved,
 }
 
 /// Keys a [`LivePresence`] was shown and did not fold, by why (O6: one
 /// counter per fact, never folded).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PresenceIgnored {
-    /// Keys outside the namespace live keys arrive under: another
-    /// deployment's, or none.
-    pub outside_namespace: u64,
     /// Keys that are not zk2 keys: another application's on the shared bus
     /// (§1.7), or a key under `@zk` that fits none of the five forms.
     pub not_zk2: u64,
@@ -164,7 +174,7 @@ pub struct PresenceIgnored {
 impl PresenceIgnored {
     /// Every key ignored, whatever the reason.
     pub fn total(&self) -> u64 {
-        self.outside_namespace + self.not_zk2 + self.not_presence + self.out_of_scope
+        self.not_zk2 + self.not_presence + self.out_of_scope
     }
 }
 
@@ -307,7 +317,6 @@ enum Token {
 #[derive(Debug, Clone)]
 pub struct LivePresence {
     scope: Scope,
-    namespace: String,
     basis: PresenceBasis,
     addresses: BTreeMap<Addr, LiveAddress>,
     /// Patterns a consumer tracks ([`LivePresence::track_pattern`]): the
@@ -325,12 +334,11 @@ pub struct LivePresence {
 
 impl LivePresence {
     /// An empty projection over `scope`: unseeded, every address
-    /// unobservable. Live keys are base-relative until
-    /// [`LivePresence::wire_namespace`] says otherwise.
+    /// unobservable. Live keys are base-relative, as a watch session hands
+    /// them on (#875).
     pub fn new(scope: Scope) -> LivePresence {
         LivePresence {
             scope,
-            namespace: String::new(),
             basis: PresenceBasis::Unseeded,
             addresses: BTreeMap::new(),
             patterns: Vec::new(),
@@ -340,15 +348,6 @@ impl LivePresence {
             unread: 0,
             reads: 0,
         }
-    }
-
-    /// The namespace live keys ([`LivePresence::token`]) arrive under: the
-    /// deployment's when the subscription runs on a session in no
-    /// namespace, empty when it runs in the namespace. A seed is always
-    /// base-relative: it is read in the namespace.
-    pub fn wire_namespace(mut self, namespace: impl Into<String>) -> LivePresence {
-        self.namespace = namespace.into();
-        self
     }
 
     /// How many records with nothing held to keep before forgetting the
@@ -547,8 +546,8 @@ impl LivePresence {
         // withdrawal that left something with nothing held.
         let mut withdrawn: BTreeSet<Addr> = BTreeSet::new();
         let mut unread = 0u64;
-        for (wire, held) in then {
-            if let Some((addr, token)) = self.classify_wire(wire) {
+        for (key, held) in then {
+            if let Some((addr, token)) = self.classify(key) {
                 let rec = entry(&mut next, &addr, at);
                 let before = Emptiness::of(rec, &token);
                 apply(rec, &token, held, at);
@@ -629,8 +628,8 @@ impl LivePresence {
         out
     }
 
-    /// Fold one token event: a put (`held`) or a delete of `key`, as the
-    /// subscription delivered it (under [`LivePresence::wire_namespace`]).
+    /// Fold one token event: a put (`held`) or a delete of `key`,
+    /// base-relative, as the watch session delivered it.
     /// A key that is not a presence token of the scope is counted and
     /// changes nothing.
     ///
@@ -641,7 +640,7 @@ impl LivePresence {
     /// that leaves anything with nothing held owes that read
     /// ([`LivePresence::awaits_read`]).
     pub fn token(&mut self, key: &str, held: bool, at: SystemTime) -> Vec<PresenceTransition> {
-        let Some((addr, token)) = self.classify_wire(key) else {
+        let Some((addr, token)) = self.classify(key) else {
             return Vec::new();
         };
         let unheard = self.unheard(self.basis, &addr);
@@ -695,6 +694,30 @@ impl LivePresence {
         out
     }
 
+    /// Fold a move of the watch session's transport (core §8.1, 0.42,
+    /// F-229): a close or an open, after which its subscribers, which have
+    /// no history, may not have heard what moved while the transport was
+    /// down — a token withdrawn then, or one declared then. Every address is
+    /// unobservable from here until a complete read, each move a
+    /// [`PresenceSource::Moved`] transition; what is held stays, as the last
+    /// known. A basis that already makes every address unobservable (a loss,
+    /// a read not made) keeps its reason; folding it again moves nothing.
+    pub fn moved(&mut self, at: SystemTime) -> Vec<PresenceTransition> {
+        if matches!(
+            self.basis,
+            PresenceBasis::Moved | PresenceBasis::Lost { .. } | PresenceBasis::CutOff
+        ) {
+            return Vec::new();
+        }
+        self.basis = PresenceBasis::Moved;
+        let mut out = Vec::new();
+        let every: Vec<Addr> = self.addresses.keys().cloned().collect();
+        for addr in every {
+            self.restatus(&addr, at, PresenceSource::Moved, &mut out);
+        }
+        out
+    }
+
     /// Fold a read not made (core §8.1, 0.37): the session reaches no other
     /// zenoh node, and zenoh would have answered it at once, complete and
     /// empty. Every address is unobservable from here until a complete
@@ -737,7 +760,7 @@ impl LivePresence {
         };
         let (now, source) = match basis {
             _ if !in_scope => (AddressStatus::Unobservable, source),
-            PresenceBasis::Lost { .. } | PresenceBasis::CutOff => {
+            PresenceBasis::Lost { .. } | PresenceBasis::CutOff | PresenceBasis::Moved => {
                 (AddressStatus::Unobservable, source)
             }
             _ if record.holds_instance_token() => (AddressStatus::Up, source),
@@ -762,13 +785,9 @@ impl LivePresence {
         }
     }
 
-    /// A wire key, stripped of the namespace and classified.
-    fn classify_wire(&mut self, wire: &str) -> Option<(Addr, Token)> {
-        let Some(relative) = crate::model::namespace::strip(&self.namespace, wire) else {
-            self.ignored.outside_namespace += 1;
-            return None;
-        };
-        match zenkey_model::grammar::parse(relative) {
+    /// A base-relative key, classified.
+    fn classify(&mut self, key: &str) -> Option<(Addr, Token)> {
+        match zenkey_model::grammar::parse(key) {
             Ok(key) => self.presence_token(key),
             Err(_) => {
                 self.ignored.not_zk2 += 1;
@@ -1381,6 +1400,49 @@ mod tests {
         assert_eq!(p.basis(), PresenceBasis::Complete);
     }
 
+    /// A move of the watch session's transport (core §8.1, 0.42, F-229)
+    /// unconfirms every address, up and down alike: its subscribers have no
+    /// history and may not have heard what moved while it was down. A token
+    /// heard after it confirms nothing; a read possibly incomplete shows
+    /// what it holds up, and nothing down; a complete one restores the
+    /// basis. A loss or a read not made keeps its own reason.
+    #[test]
+    fn a_move_of_the_watch_session_unconfirms_every_address() {
+        let mut p = LivePresence::new(Scope::all());
+        p.track(&addr("h2/tc"), at(0));
+        p.seed(&seed(&[instance("h1/tc", 1)], true), at(1));
+        let t = p.moved(at(2));
+        assert_eq!(
+            statuses(&t),
+            [
+                ("h1/tc".into(), Up, Unobservable),
+                ("h2/tc".into(), Down, Unobservable),
+            ]
+        );
+        assert!(t.iter().all(|t| t.source == PresenceSource::Moved));
+        assert_eq!(p.basis(), PresenceBasis::Moved);
+        assert!(p.moved(at(3)).is_empty(), "said once");
+        assert!(statuses(&p.token(&instance("h2/tc", 2), true, at(4))).is_empty());
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], false), at(5));
+        assert_eq!(
+            statuses(&t),
+            [
+                ("h1/tc".into(), Unobservable, Up),
+                ("h2/tc".into(), Unobservable, Up),
+            ]
+        );
+        assert!(matches!(p.basis(), PresenceBasis::Incomplete { .. }));
+        let t = p.seed(&seed(&[instance("h2/tc", 2)], true), at(6));
+        assert_eq!(statuses(&t), [("h1/tc".into(), Up, Down)]);
+        assert_eq!(p.basis(), PresenceBasis::Complete);
+        p.cut_off(at(7));
+        assert!(
+            p.moved(at(8)).is_empty(),
+            "a read not made keeps its reason"
+        );
+        assert_eq!(p.basis(), PresenceBasis::CutOff);
+    }
+
     /// A `Dropped(n)` makes every address unobservable, up and down alike,
     /// and keeps them so until a complete seed: a token heard meanwhile, or
     /// a seed possibly incomplete, cannot rule out a delete that was lost.
@@ -1606,8 +1668,7 @@ mod tests {
     /// why, and change nothing.
     #[test]
     fn keys_that_are_not_presence_are_ignored_and_counted() {
-        let mut p =
-            LivePresence::new(Scope::system("h1").expect("a system")).wire_namespace("prod");
+        let mut p = LivePresence::new(Scope::system("h1").expect("a system"));
         p.seed(&seed(&[], true), at(1));
         let data = data_key(
             &addr("h1/tc"),
@@ -1618,34 +1679,30 @@ mod tests {
         .expect("a key");
         let sha = zenkey_model::grammar::Sha256Hex::new(&"ab".repeat(32)).expect("a sha");
         let contract = contract_key(&iface("tc.v1"), &sha).expect("a key");
-        let wire = |k: &str| crate::model::namespace::join("prod", k);
         for (key, held) in [
             ("demo/held/p1/alive".to_owned(), true),
-            ("prod/demo/held/p1/alive".to_owned(), true),
-            ("prod/zk2/h1/tc/@zk/instance/not-hex".to_owned(), true),
-            (wire(data.as_str()), true),
-            (wire(contract.as_str()), false),
-            (wire(&instance("h2/tc", 1)), true),
-            (instance("h1/tc", 1), true),
+            ("zk2/h1/tc/@zk/instance/not-hex".to_owned(), true),
+            (data.as_str().to_owned(), true),
+            (contract.as_str().to_owned(), false),
+            (instance("h2/tc", 1), true),
         ] {
             assert!(p.token(&key, held, at(2)).is_empty(), "{key}");
         }
         assert_eq!(
             p.ignored(),
             PresenceIgnored {
-                outside_namespace: 2,
                 not_zk2: 2,
                 not_presence: 2,
                 out_of_scope: 1,
             }
         );
-        assert_eq!(p.ignored().total(), 7);
+        assert_eq!(p.ignored().total(), 5);
         assert_eq!(p.addresses().count(), 0);
         // Outside the scope is never established, under a complete seed too.
         assert_eq!(p.status(&addr("h2/tc")), Unobservable);
         assert_eq!(p.status(&addr("h1/tc")), Down);
-        // In the namespace and the scope, it folds.
-        let t = p.token(&wire(&instance("h1/tc", 1)), true, at(3));
+        // In the scope, it folds.
+        let t = p.token(&instance("h1/tc", 1), true, at(3));
         assert_eq!(statuses(&t), [("h1/tc".into(), Down, Up)]);
     }
 

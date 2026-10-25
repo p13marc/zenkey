@@ -8,12 +8,17 @@
 //!    its window, §2.15), on a **watch session** of its own and settled
 //!    there (#830, core §8.1, 0.37: no presence read is made beside a
 //!    liveliness subscriber, and the settle orders the subscription before
-//!    the reads on the other session), with history when that session is
-//!    in a namespace, where zenoh drops the withdrawal of a token declared
-//!    before a subscriber without it (#872). Its barrier is kept and asked again
-//!    before each refresh's presence read; a read made while it does not
-//!    stand is possibly incomplete (#851, 0.41), so the scope is not read
-//!    whole and nothing reads "no alarm fires". Then a subscription to the scope's
+//!    the reads on the other session). The watch session is in no
+//!    namespace, on the wire keys, and its subscriber has no history
+//!    ([`crate::WatchSession`], #875): a token declared before it and
+//!    withdrawn later is heard, which a namespaced subscriber without
+//!    history never hears (#872), and the round trip is one round trip at
+//!    any population. Its barrier is kept and asked again before each
+//!    refresh's presence read; a read made while it does not stand is
+//!    possibly incomplete (#851, 0.41), so the scope is not read whole and
+//!    nothing reads "no alarm fires". A move of its transport is a loss
+//!    (core §8.1, 0.42, F-229): the subscriber may not have heard an owner
+//!    leave or come while it was down. Then a subscription to the scope's
 //!    alarm keys, then a watch of this reader's own receive path
 //!    ([`crate::bus::stall`], core §2.7, 0.27). Both subscriptions call
 //!    back into one bounded queue, and what it refuses is counted: a
@@ -363,10 +368,13 @@ pub struct AlarmFeed {
     book: AlarmBook,
     session: Session,
     /// The watch session the instance tokens' subscription is held on, when
-    /// the feed listens (#830).
-    watch: Option<Session>,
+    /// the feed listens (#830, #875).
+    watch: Option<crate::WatchSession>,
     /// Its barrier, once the subscription is declared (#851).
     barrier: Option<zenkey::presence::Barrier>,
+    /// The watch session's transport events the feed has folded as a loss
+    /// ([`zenkey::presence::Barrier::moves`]; 0.42, F-229).
+    moves_seen: u64,
     spec: AlarmSpec,
     rx: Option<tokio::sync::mpsc::Receiver<Delivery>>,
     refused: Arc<AtomicU64>,
@@ -395,12 +403,12 @@ impl AlarmFeed {
     ///
     /// Its reads go through `session`, which holds no liveliness
     /// subscriber; a listening feed holds its instance tokens' subscription
-    /// on `watch`, a session of its own (#830, core §8.1, 0.37). Listening
-    /// without one, or on `session` itself, is refused, nothing declared:
-    /// [`crate::Error::NotAsked`].
+    /// on `watch`, a watch session of its own (#830, core §8.1, 0.37; #875).
+    /// Listening without one, or with one on `session` itself, is refused,
+    /// nothing declared: [`crate::Error::NotAsked`].
     pub async fn open(
         session: &Session,
-        watch: Option<&Session>,
+        watch: Option<&crate::WatchSession>,
         scope: AlarmScope,
         spec: AlarmSpec,
         listen: bool,
@@ -422,6 +430,7 @@ impl AlarmFeed {
             session: session.clone(),
             watch,
             barrier: None,
+            moves_seen: 0,
             spec,
             rx: None,
             refused: Arc::default(),
@@ -442,8 +451,8 @@ impl AlarmFeed {
     }
 
     /// The subscriptions, in core §4.2's order, the instance tokens' on
-    /// `watch` (#830), and the watch of this reader's receive path.
-    async fn listen(&mut self, watch: &Session) -> crate::Result<()> {
+    /// `watch` (#830, #875), and the watch of this reader's receive path.
+    async fn listen(&mut self, watch: &crate::WatchSession) -> crate::Result<()> {
         let (tx, rx) = tokio::sync::mpsc::channel(QUEUE);
         let queue = Queue {
             tx,
@@ -451,51 +460,30 @@ impl AlarmFeed {
         };
         let scope = self.book.scope().clone();
         let q = queue.clone();
-        // With history in a namespace (#872): zenoh 1.10.1 tells a
-        // subscriber without history that a token declared before it went
-        // by a key a namespaced session does not strip, so an owner up
-        // before this reader was never heard leaving.
-        let history = zenkey::presence::subscriber_needs_history(watch);
-        // The history's puts are not queued: they come before the barrier's
-        // final reply, and the first refresh's presence read, asked after
-        // it, holds every token they name that is still held. So a history
-        // of more owners than the queue holds is no loss. Open from the
-        // barrier on, whatever it answered; a put from then on, a history's
-        // after a reconnection included, is folded as the book folds it, a
-        // token already held no move.
-        let opened = Arc::new(std::sync::atomic::AtomicBool::new(!history));
-        let gate = Arc::clone(&opened);
-        let tokens = crate::bus::teardown::declared(
-            "alarms' instance tokens",
-            scope.instance_selector(),
-            zenkey::presence::declare_subscriber(watch, scope.instance_selector())
-                .history(history)
-                .callback(move |s: Sample| {
-                    let held = s.kind() == SampleKind::Put;
-                    if held && !gate.load(Ordering::Acquire) {
-                        return;
-                    }
-                    if let Ok(key @ ZkKey::Instance { .. }) =
-                        zenkey_model::grammar::parse(s.key_expr().as_str())
-                    {
+        // On the wire, without history (#875): each key arrives
+        // base-relative. A put of a token already held is no move (the
+        // book's): an owner whose session reconnects declares it again.
+        let tokens = watch
+            .subscribe(
+                "alarms' instance tokens",
+                &scope.instance_selector(),
+                move |h| {
+                    if let Ok(key @ ZkKey::Instance { .. }) = zenkey_model::grammar::parse(&h.key) {
                         q.send(Delivery::Instance {
                             key,
-                            held,
+                            held: h.held,
                             at: Instant::now(),
                         });
                     }
-                }),
-        )
-        .await?;
-        // Its routers have read the subscription, and sent its history,
-        // before any presence read on the other session is answered (#830);
-        // kept, and asked again before each refresh's presence read (#851).
-        let barrier =
-            zenkey::presence::Barrier::new(watch, &scope.instance_selector(), self.spec.timeout)
-                .await
-                .map_err(|e| {
-                    crate::Error::bus("liveliness barrier", scope.instance_selector(), e)
-                })?;
+                },
+            )
+            .await?;
+        // Its routers have read the subscription before any presence read
+        // on the other session is answered (#830); kept, and asked again
+        // before each refresh's presence read (#851).
+        let barrier = watch
+            .barrier(&scope.instance_selector(), self.spec.timeout)
+            .await?;
         if !barrier.establish().await {
             tracing::warn!(
                 selector = %scope.instance_selector(),
@@ -503,7 +491,7 @@ impl AlarmFeed {
                  incomplete until their barrier stands"
             );
         }
-        opened.store(true, Ordering::Release);
+        self.moves_seen = barrier.moves();
         self.barrier = Some(barrier);
         let q = queue;
         let discarded = Arc::clone(&self.discarded);
@@ -666,8 +654,32 @@ impl AlarmFeed {
     /// gone, or when the feed does not listen.
     pub async fn next(&mut self) -> Option<Vec<AlarmTransition>> {
         self.restart_watch().await;
-        let d = self.rx.as_mut()?.recv().await?;
+        let (barrier, seen) = (self.barrier.clone(), self.moves_seen);
+        let rx = self.rx.as_mut()?;
+        let d = tokio::select! {
+            biased;
+            d = rx.recv() => Some(d?),
+            () = watch_moved(barrier.as_ref(), seen) => None,
+        };
         let (now, wall) = (Instant::now(), SystemTime::now());
+        let Some(d) = d else {
+            // The watch session's transport moved (core §8.1, 0.42, F-229):
+            // its subscriber, which has no history, may not have heard an
+            // owner leave or come while it was down, so what presence moved
+            // is not known whole. A loss, healed as any loss is, by the
+            // next refresh's reads after the barrier made again.
+            self.moves_seen = barrier.as_ref().map_or(seen, |b| b.moves());
+            let mut out = self.take_refused(now, wall);
+            out.extend(self.book.lose(
+                AlarmLoss {
+                    dropped: 0,
+                    stalled: true,
+                },
+                now,
+                wall,
+            ));
+            return Some(out);
+        };
         let mut out = self.take_refused(now, wall);
         match d {
             Delivery::Sample(s) => out.extend(self.book.sample(s)),
@@ -779,11 +791,20 @@ pub struct AlarmObservation {
     pub wall: SystemTime,
 }
 
+/// Resolves once the watch session has had a transport event since the
+/// feed last folded `seen`; never without a barrier.
+async fn watch_moved(barrier: Option<&zenkey::presence::Barrier>, seen: u64) {
+    match barrier {
+        Some(b) => b.moved_since(seen).await,
+        None => std::future::pending().await,
+    }
+}
+
 /// One reading: [`observe`], then [`crate::judge::alarms::judge`], at
 /// `at_least`.
 pub async fn run_alarms(
     session: &Session,
-    watch: Option<&Session>,
+    watch: Option<&crate::WatchSession>,
     namespace: &str,
     scope: AlarmScope,
     spec: AlarmSpec,
@@ -802,7 +823,7 @@ pub async fn run_alarms(
 /// could not be opened, it never runs.
 pub async fn observe(
     session: &Session,
-    watch: Option<&Session>,
+    watch: Option<&crate::WatchSession>,
     namespace: &str,
     scope: AlarmScope,
     spec: AlarmSpec,

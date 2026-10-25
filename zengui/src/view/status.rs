@@ -119,6 +119,12 @@ pub fn presence_text(p: Option<&crate::presence_link::PresenceUpdate>) -> (Strin
                 .to_string(),
             true,
         ),
+        PresenceBasis::Moved => (
+            "presence: the watch session's link moved — every address unobservable until a \
+             complete re-read after its round trip (§8.1)"
+                .to_string(),
+            true,
+        ),
     }
 }
 

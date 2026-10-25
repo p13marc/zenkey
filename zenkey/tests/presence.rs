@@ -961,12 +961,17 @@ async fn s8_a_withdrawal_heard_live() {
     .await;
 }
 
+/// §9 step 2's runs, each on a fresh session (0.42, F-235).
+const S9_RUNS: usize = 10;
+
 /// §9 (core §8.1, 0.37; Appendix B; #830): a liveliness GET made at once
 /// beside a history liveliness subscriber of the same session completes
-/// without the owner's live token; the same GET on a session that holds no
-/// liveliness subscriber holds it. The reference refuses a read on a
-/// session that holds a subscriber it declared, and its barrier there
-/// returns.
+/// without the owner's live token, nearly always (0.42, F-235: the
+/// session's own answer can win the race, a few runs in a hundred), so
+/// step 2 runs on [`S9_RUNS`] fresh sessions and asserts a miss in one at
+/// least; the same GET on a session that holds no liveliness subscriber
+/// holds it. The reference refuses a read on a session that holds a
+/// subscriber it declared, and its barrier there returns.
 ///
 /// Steps 1 to 3. Steps 4 and 5 observe the reader under test (0.38,
 /// F-189), the fleet's `PresenceFeed`: `zenkey-fleet/tests/presence_scenarios.rs`'s
@@ -981,33 +986,42 @@ async fn s9_a_read_beside_a_liveliness_subscriber() {
     seen(&tool, &svc).await;
     let key = svc.instance_key().unwrap().to_string();
 
-    // zenoh's own API: the subscriber and the GET on one session.
-    let beside = client(&ep).await;
-    let heard = Arc::new(Mutex::new(false));
-    let h = Arc::clone(&heard);
-    let k = key.clone();
-    let _sub = beside
-        .liveliness()
-        .declare_subscriber("zk2/*/*/@zk/instance/*")
-        .history(true)
-        .callback(move |s: Sample| {
-            if s.key_expr().as_str() == k {
-                *h.lock().unwrap() = true;
-            }
+    // zenoh's own API: the subscriber and the GET on one session, each run
+    // on a fresh one. The miss is a race the session's own answer can win
+    // (0.42, F-235), so one run proves nothing either way.
+    let mut missed = 0;
+    for _ in 0..S9_RUNS {
+        let beside = client(&ep).await;
+        let heard = Arc::new(Mutex::new(false));
+        let h = Arc::clone(&heard);
+        let k = key.clone();
+        let _sub = beside
+            .liveliness()
+            .declare_subscriber("zk2/*/*/@zk/instance/*")
+            .history(true)
+            .callback(move |s: Sample| {
+                if s.key_expr().as_str() == k {
+                    *h.lock().unwrap() = true;
+                }
+            })
+            .await
+            .unwrap();
+        let (complete, found) = raw_read(&beside, "zk2/*/*/@zk/**").await;
+        assert!(complete, "the final reply, no error reply");
+        missed += usize::from(!found.contains(&key));
+        eventually("the subscriber hears it", || async {
+            *heard.lock().unwrap()
         })
-        .await
-        .unwrap();
-    let (complete, found) = raw_read(&beside, "zk2/*/*/@zk/**").await;
-    assert!(complete, "the final reply, no error reply");
+        .await;
+        let _ = beside.close().await;
+    }
+    eprintln!("§9 step 2: the GET beside the subscriber missed the token in {missed} of {S9_RUNS}");
     assert!(
-        !found.contains(&key),
+        missed > 0,
         "zenoh fixed #830's mechanism: revisit core §8.1's rule (0.37) and Appendix B — a GET \
-         right after a history subscriber on the same session held the live token"
+         right after a history subscriber on the same session held the live token in each of \
+         {S9_RUNS} runs"
     );
-    eventually("the subscriber hears it", || async {
-        *heard.lock().unwrap()
-    })
-    .await;
     assert!(raw_read(&tool, "zk2/*/*/@zk/**").await.1.contains(&key));
 
     // The reference: a session that holds a subscriber it declared makes no
@@ -1374,7 +1388,19 @@ async fn crowd(
 /// routers to finish a liveliness GET (`routing/interests/timeout`), and
 /// that retries fast after losing `endpoint`.
 async fn client_waiting(endpoint: &str, interests_ms: u64) -> zenoh::Session {
+    client_waiting_in(endpoint, interests_ms, None).await
+}
+
+/// [`client_waiting`], in `namespace` when given.
+async fn client_waiting_in(
+    endpoint: &str,
+    interests_ms: u64,
+    namespace: Option<&str>,
+) -> zenoh::Session {
     let mut c = zenoh::Config::default();
+    if let Some(ns) = namespace {
+        c.insert_json5("namespace", &format!("\"{ns}\"")).unwrap();
+    }
     for (k, v) in [
         ("mode", "\"client\"".to_owned()),
         ("scouting/multicast/enabled", "false".to_owned()),
@@ -1391,15 +1417,19 @@ async fn client_waiting(endpoint: &str, interests_ms: u64) -> zenoh::Session {
     zenoh::open(c).await.unwrap()
 }
 
-/// §10 (core §8.1, 0.41; Appendix B; #851), steps 1 to 5 and 7: a round
-/// trip whose GET matches no token orders a watch session's subscriber at
-/// its router, on one router and through R2; a subscriber without history
-/// hears an earlier token's withdrawal, except in a namespace; beside 2,000
-/// tokens the round trip is one round trip without history and waits for
-/// the history with it; and a GET that runs to its session's interests
-/// timeout ends with no error reply, which the reference reads as possibly
-/// incomplete. Step 6 observes the
-/// reader under test: `zenkey-fleet/tests/presence_scenarios.rs`'s
+/// §10 (core §8.1, 0.41, 0.42; Appendix B; #851, #875), steps 1 to 5 and 7
+/// to 9: a round trip whose GET matches no token orders a watch session's
+/// subscriber at its router, on one router and through R2; a subscriber
+/// without history hears an earlier token's withdrawal, except in a
+/// namespace; beside 2,000 tokens in `ns` the round trip is one round trip
+/// without history and waits for the history with it; a GET that runs to
+/// its session's interests timeout ends with no error reply, which the
+/// reference reads as possibly incomplete; one fresh session per
+/// subscriber in a namespace (0.42, F-234); beside the crowd in `ns`, a
+/// watch session in no namespace on the wire keys makes one round trip and
+/// hears the withdrawal (0.42, F-233); and no round trip stands through a
+/// watch session cut off, before it or while it runs (0.42, F-228). Step 6
+/// observes the reader under test: `zenkey-fleet/tests/presence_scenarios.rs`'s
 /// `s10_a_round_trip_at_a_population_and_the_interests_timeout`.
 ///
 /// zenoh's code (`zenoh/src/net/routing`): a client's runtime forwards a
@@ -1468,18 +1498,22 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
     assert_eq!(heard, RUNS, "a withdrawal after the round trip was missed");
     assert_eq!(missed, CONTROLS, "the stall should hold the race open");
 
-    // 4: beside the crowd.
-    let holders = [client(&ep1).await, client(&ep1).await];
+    // 4: beside the crowd, which is in `ns` (0.42): watch sessions in `ns`.
+    let tool_ns = common::client_ns(&ep1, Some("ns")).await;
+    let holders = [
+        common::client_ns(&ep1, Some("ns")).await,
+        common::client_ns(&ep1, Some("ns")).await,
+    ];
     let started = std::time::Instant::now();
-    let _crowd = {
+    let mut crowd_held = {
         let mut held = Vec::new();
         for (i, h) in holders.iter().enumerate() {
-            held.extend(crowd(h, &tool, &format!("crowd{i}"), CROWD / holders.len()).await);
+            held.extend(crowd(h, &tool_ns, &format!("crowd{i}"), CROWD / holders.len()).await);
         }
         held
     };
     eprintln!("§10 step 4: the crowd's setup {:?}", started.elapsed());
-    let watch = client(&ep1).await;
+    let watch = common::client_ns(&ep1, Some("ns")).await;
     let (_sub, heard) = listen(&watch, false).await;
     let (complete, tokens, took) =
         raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(5)).await;
@@ -1490,7 +1524,7 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
         "one round trip beside {CROWD} tokens: {took:?}"
     );
     assert!(heard.lock().unwrap().is_empty(), "no history");
-    let watch = client_waiting(&ep1, 60_000).await;
+    let watch = client_waiting_in(&ep1, 60_000, Some("ns")).await;
     let (_sub, heard) = listen(&watch, true).await;
     let (complete, tokens, took) =
         raw_barrier(&watch, NO_TOKEN, std::time::Duration::from_secs(30)).await;
@@ -1567,9 +1601,11 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
         .await;
         let watch = common::client_ns(&ep1, ns).await;
         assert_eq!(presence::subscriber_needs_history(&watch), ns.is_some());
+        // The steps' own instance tokens: the crowd's are in `ns` too.
+        let own = "zk2/s10/*/@zk/instance/*";
         let sel = match ns {
-            Some(_) => INSTANCES.to_owned(),
-            None => format!("ns/{INSTANCES}"),
+            Some(_) => own.to_owned(),
+            None => format!("ns/{own}"),
         };
         let heard: Heard = Arc::default();
         let h = Arc::clone(&heard);
@@ -1606,6 +1642,114 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
         ],
         "zenoh fixed the namespace's withdrawal by key: revisit core §8.1 (0.41) and \
          `subscriber_needs_history`"
+    );
+
+    // 8 (0.42, F-233): beside the crowd in `ns`, a fresh watch session in no
+    // namespace, on the wire keys, without history.
+    let watch = client(&ep1).await;
+    let heard: Heard = Arc::default();
+    let h = Arc::clone(&heard);
+    let _sub = presence::declare_subscriber(&watch, format!("ns/{INSTANCES}"))
+        .history(false)
+        .callback(move |s: Sample| {
+            h.lock().unwrap().push((
+                s.key_expr().as_str().to_owned(),
+                s.kind() == SampleKind::Put,
+            ));
+        })
+        .await
+        .unwrap();
+    let (complete, tokens, took) = raw_barrier(
+        &watch,
+        &format!("ns/{NO_TOKEN}"),
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+    assert!(complete && tokens == 0, "{complete} {tokens}");
+    assert!(
+        took < std::time::Duration::from_secs(1),
+        "one round trip beside {CROWD} tokens in ns, from no namespace: {took:?}"
+    );
+    let gone = "zk2/crowd0/svc0/@zk/instance/0000000000000000";
+    crowd_held.remove(0).undeclare().await.unwrap();
+    let wire = format!("ns/{gone}");
+    let heard_going = heard_gone(&heard, &wire, std::time::Duration::from_secs(2)).await;
+    eprintln!(
+        "§10 step 8: from no namespace on the wire keys, {took:?}, {tokens} tokens; the crowd \
+         token's withdrawal heard {heard_going}"
+    );
+    assert!(heard_going, "heard on its wire key");
+    drop(_sub);
+    let _ = watch.close().await;
+
+    // 9 (0.42, F-228): no round trip stands through a watch session cut
+    // off: none is asked before it, and one cut while it waits comes back
+    // at the cut with the final reply alone.
+    let link9 = common::link_to(&ep1).await;
+    let watch = common::retrying_client(link9.endpoint()).await;
+    let (_sub, _) = listen(&watch, false).await;
+    assert!(presence::settle(&watch, INSTANCES, T).await.unwrap());
+    link9.cut();
+    eventually("the watch session cut off", || presence::cut_off(&watch)).await;
+    let asked = presence::liveliness_gets(&watch).settles;
+    let cut = presence::settle(&watch, INSTANCES, std::time::Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert!(
+        !cut,
+        "a round trip through a session cut off does not stand"
+    );
+    assert_eq!(
+        presence::liveliness_gets(&watch).settles,
+        asked,
+        "and is not asked"
+    );
+    link9.heal();
+    eventually("the watch session reconnected", || async {
+        !presence::cut_off(&watch).await
+    })
+    .await;
+    let mut ended = Vec::new();
+    for reference in [false, true] {
+        link9.stall();
+        let w = watch.clone();
+        let asking = tokio::spawn(async move {
+            let t = std::time::Instant::now();
+            let stood = if reference {
+                presence::settle(&w, INSTANCES, std::time::Duration::from_secs(2))
+                    .await
+                    .unwrap()
+            } else {
+                let (complete, tokens, _) =
+                    raw_barrier(&w, NO_TOKEN, std::time::Duration::from_secs(2)).await;
+                assert_eq!(tokens, 0, "the final reply alone");
+                complete
+            };
+            (stood, t.elapsed())
+        });
+        tokio::time::sleep(STALL).await;
+        assert!(!asking.is_finished(), "still waiting while stalled");
+        link9.cut();
+        let (stood, took) = asking.await.unwrap();
+        assert!(
+            took < std::time::Duration::from_secs(2),
+            "answered at the cut, not at its timeout: {took:?}"
+        );
+        ended.push((reference, stood, took));
+        link9.heal();
+        eventually("the watch session reconnected", || async {
+            !presence::cut_off(&watch).await
+        })
+        .await;
+    }
+    eprintln!("§10 step 9: (the reference, no error reply / stands, took) {ended:?}");
+    assert!(
+        ended[0].1,
+        "zenoh's own GET cut while it ran: the final reply, no error reply"
+    );
+    assert!(
+        !ended[1].1,
+        "the reference's round trip cut while it ran does not stand"
     );
     drop(r1);
 }

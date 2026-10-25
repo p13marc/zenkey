@@ -43,17 +43,30 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   through a session cut off is not made (`PresenceBasis::CutOff`), and the
   monitor holds its liveliness subscribers on a watch session of its own
   while the feed reads on the deployment's, refusing the monitor's zid,
-  #830; the subscribers have no history unless the watch session is in a
-  namespace (`zenkey::presence::subscriber_needs_history`: zenoh 1.10.1's
-  namespace drops the router's by-key withdrawal of an earlier token,
-  `docs/zk2/upstream/namespace-drops-token-withdrawal-by-key.md`; since
-  #872 every liveliness subscriber of the fleet, `check conform`'s window,
-  `AlarmFeed`'s and telemetry's included), and
+  #830; that watch session is a `bus::watch::WatchSession` (#875, core
+  0.42), in **no** namespace on the deployment's wire keys: its
+  subscribers have no history, every selector and its round trip's key
+  carry the namespace in front, and every key it hears reaches the reader
+  base-relative as a `TokenHeard`, a key outside the namespace refused and
+  counted (`WatchSession::outside`); it hands out no session, so no read
+  goes through it; `open_watch(namespace, …)` opens one, and
+  `Monitor::start_watch` is the only way a monitor watches liveliness
+  (`Monitor::start` refuses a spec with any; zenoh 1.10.1's namespace
+  drops the router's by-key withdrawal of an earlier token, which a
+  session in no namespace hears on the wire key,
+  `docs/zk2/upstream/namespace-drops-token-withdrawal-by-key.md`; the
+  round trip beside 10,000 tokens in `ns` is 44 ms, where #872's history
+  took about 23 s, `tests/watch_scale.rs`), and
   the monitor's `Barrier` is asked before every seed, made again when it
   does not stand or when the watch session's transport moves, a seed made
   without it possibly incomplete, "barrier not established", retried and
   never ok (`Monitor::barrier`, core 0.41, #851; the same for `AlarmFeed`'s
-  refresh, zenwatch's `TokenFeed` and a telemetry reading's seeds, #872); a read cut off while it runs is a seed possibly incomplete, said
+  refresh, zenwatch's `TokenFeed` and a telemetry reading's seeds, #872);
+  a move of the watch session's transport unconfirms what is held at once
+  (`LivePresence::moved`, `PresenceBasis::Moved`, a `moved` source; the
+  alarm feed's loss, the ledger's `TokenBasis::Moved`; core 0.42,
+  F-229), and no round trip nor read is made through a watch session cut
+  off (F-228); a read cut off while it runs is a seed possibly incomplete, said
   beside `complete` as `cut_off_during` in every presence report but the
   doctor's, which zenwatch.v1 pins, and the feed counts the reads it makes,
   `PresenceFeed::reads`, core 0.38, #849). For zengui's tree (#614, FL4):
@@ -88,9 +101,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `alarms.v1` (#800, AC) runs through all four layers. `bus::alarms`'
   `AlarmFeed` is the live reader: a liveliness subscription to the owners'
   instance tokens on a watch session of its own (`DoctorBus::watch`, #830;
-  with history in a namespace, its puts kept out of the queue until the
-  first barrier, so a history of more owners than the queue holds is no
-  loss, and a put of an instance already held no move, #872)
+  in no namespace on the wire keys, without history, #875; a put of an
+  instance already held no move, #872; a move of its transport a loss,
+  core 0.42)
   and one to the alarm keys feed one bounded queue whose
   refusals are a counted loss, a `bus::stall` watch covers its own receive
   path, then presence with descriptors, S4's GET and, when asked, every
@@ -121,8 +134,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `telemetry.v1` (#819, TC) runs through all four layers too.
   `bus::telemetry` reads presence, the descriptors and the metric
   resources their revisions declare; one bounded queue carries the instance
-  and member token subscriptions (with history in a namespace, their puts
-  kept out of the queue until the first seed's barrier, #872) and each
+  and member token subscriptions (on the watch session in no namespace,
+  without history, #875) and each
   resource's members, so samples and token moves fold in one order;
   presence is seeded, the watch session's `Barrier` made before each seed
   (a seed made without it possibly incomplete, named in `skipped`, and made
@@ -239,8 +252,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   namespace, reads presence, descriptors and contracts and asks every
   resolved question (S4 reads, health, why, calls); and the presence
   monitor's watch session (#830), opened by `services::watch::start_presence`
-  and reopened on a namespace switch, which holds its liveliness subscribers
-  and makes no read. The namespace resolves
+  through `zenkey_fleet::open_watch` and reopened on a namespace switch, in
+  no namespace on the deployment's wire keys (#875), which holds its
+  liveliness subscribers and makes no read. The namespace resolves
   `--namespace` (alias `--base`) > the one picked last (zengui's prefs) >
   `ZENGUI_BASE` > the context's `base` > empty; the location bar's picker
   is fed by `namespace_listing`, and a switch reopens the namespaced
@@ -249,7 +263,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   overlay, remembered in zengui's prefs, never the shared context;
   `--registry` is refused by name, exit 2, and a context's stored
   `registry` rides a save untouched. **Presence** runs on a monitor of its
-  own on a namespaced watch session of its own (`presence_link.rs`, the zenwatch pattern,
+  own on a watch session of its own, in no namespace on the wire keys (`presence_link.rs`, the zenwatch pattern,
   coalesced to four snapshots a second), so the pump's `Dropped(n)` cannot
   knock it to lost, and its batches fold into the `LensFeed` in order.
   **The lens**: the feed's catalog and generation, the contract store
@@ -500,7 +514,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   FJ8b's observers and checks: the raw observers (`echo`, `rate`, `field`,
   `timeline`, `snapshot`, `watchdog`, `record --on`; `watchdog`, `record
   --on`, `alarms --for`, `telemetry` and `check conform` hold their
-  liveliness subscribers on `Deployment::watch_session()`, #830) keep a wire selector in
+  liveliness subscribers on `Deployment::watch_session()`, #830, a
+  `zenkey_fleet::WatchSession` in no namespace on the wire keys, #875;
+  `gen` and `serve`'s candidates keep a namespaced watch, the runtime's)
+  keep a wire selector in
   no namespace and resolve every key through one session-free **lens**
   (`zenkey_fleet::model::lens`, fed by `bus::lens`): presence in
   `--namespace`, the contract each descriptor names, the rung named where
@@ -567,8 +584,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   §2.7) through `zenkey_model::budget`: `check conform`'s `budget` (per
   templated state, by the owner's GET), `budget-window` (per templated
   stream or event, complete over a whole liveness span, lossless, the owner
-  present throughout: its instance tokens watched with history in a
-  namespace, their barrier standing to the window's end, #872) and `rate`
+  present throughout: its instance tokens watched from no namespace on the
+  wire keys, their barrier standing to the window's end, #872, #875) and
+  `rate`
   (per event) cases, `--skip <CASE>`, and
   the doctor's `population-over-bound` under `--deep`. Core 0.25 (#740)
   establishes "lossless" rather than assuming it: the reader lost nothing
@@ -645,9 +663,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   config > env > context > empty) for presence, descriptors, contracts and
   the doctor, one in none for wire selectors, foreign tokens and the admin
   space; plus a watch session of each kind a rule needs (`bus::Watches`,
-  #830): in the namespace for the presence projection's monitor and the
-  `alerts`/`alert-firing` readers' instance tokens, in none for the
-  foreign-token ledger's monitor — no session both holds a liveliness
+  #830), each a `zenkey_fleet::WatchSession` in no namespace (#875): on
+  the deployment's wire keys for the presence projection's monitor and the
+  `alerts`/`alert-firing` readers' instance tokens, on the bus root's for
+  the foreign-token ledger's monitor — no session both holds a liveliness
   subscriber and reads presence; contracts by `contracts` and `--contracts` (zenctl's loading),
   never a named context. **The write side since FL3**: the daemon is a zk2
   service on the namespaced session (`publish.rs`, `SelfService` over
@@ -927,11 +946,16 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   closing transport in `transports()` when it answers the read at the
   cut); every liveliness subscriber goes through
   `presence::declare_subscriber`, which marks its session a watch session
-  for good, and `liveliness_read` refuses one (`Error::ReadBesideSubscriber`)
+  for good (the tools' through `zenkey_fleet::WatchSession`, in no
+  namespace on the wire keys, and `scripts/check-liveliness-seam.sh` keeps
+  every tool-side subscriber, barrier and watch session there, #875; the
+  runtime's owner-side watches keep `subscriber_needs_history`), and
+  `liveliness_read` refuses one (`Error::ReadBesideSubscriber`)
   and a session cut off (`Error::CutOff`), with `presence::settle` a watch
   session's one barrier GET (#830, core 0.37), asking `barrier_key(scope)`,
   the scope's chunks to its first `@zk` and then `@zk/settle`, a key no
-  token holds (#851, core 0.41), and `presence::Barrier` that GET kept,
+  token holds (#851, core 0.41), or a key given, on the wire
+  (`settle_at`, `Barrier::at`, #875), and `presence::Barrier` that GET kept,
   lost at the session's next transport event; a GET whose time reaches the
   session's `routing/interests/timeout` is possibly incomplete
   (`PresenceRead::at_interests_timeout`: zenoh 1.10.1 ends it there with no
@@ -1138,14 +1162,17 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.41 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.42 is the current version
     (0.37: what a complete presence read is, #839/#830; 0.38: the second
     implementation's findings against it, #849; 0.39: the standby mark and
     `redundancy.v1`'s vocabulary, #841; 0.40: a session answers its own
     tokens, and a peer's read covers only its routers' clients and its
     linked peers, #841 RB; 0.41: a watch session's round trip matches no
     token, its subscribers' history, a read at the interests timeout,
-    #851; changes go through `spec/CHANGELOG.md`):
+    #851; 0.42: a watch session in no namespace on the wire keys, no round
+    trip through a watch session cut off, a move unconfirming what a reader
+    holds, a read's time and an unreadable interests timeout, zk2py round
+    66's F-227 to F-235, #875; changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a

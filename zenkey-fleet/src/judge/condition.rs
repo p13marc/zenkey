@@ -711,6 +711,14 @@ pub fn presence_observer(basis: PresenceBasis, pattern: &str) -> Eval {
                  (core §8.1)"
             ),
         ),
+        PresenceBasis::Moved => (
+            CondState::Unobservable,
+            format!(
+                "the watch session's transport moved, and its subscribers may not have heard \
+                 what moved meanwhile: every address under {pattern} is unobservable until a \
+                 complete re-read after its round trip (core §8.1)"
+            ),
+        ),
     };
     Eval { state, evidence }
 }
@@ -889,7 +897,7 @@ impl RuleAlarms {
     /// session, each is unobservable, saying why.
     pub(crate) async fn open(
         session: Option<&zenoh::Session>,
-        watch: Option<&zenoh::Session>,
+        watch: Option<&crate::WatchSession>,
         rules: &RuleSet,
         timeout: Duration,
         clocks_synced: bool,
@@ -991,11 +999,12 @@ pub(crate) async fn refresh_alarms(plans: Vec<(usize, AlarmRefresh)>) -> Vec<(us
 
 /// The `instance-gone` rules' presence (#747): the live projection over the
 /// scope their patterns cover ([`RuleSet::presence_scope`]), kept current
-/// by its own monitor on a watch session in the namespace — a flood of
-/// samples on the raw session must not make presence unobservable, and no
-/// presence read is made beside a liveliness subscriber (#830, core §8.1,
-/// 0.37) — seeded through the session in the namespace, and looked at once
-/// ([`RuleSet::first_look`]) before the first window.
+/// by its own monitor on a watch session — in no namespace on the wire keys
+/// (#875); a flood of samples on the raw session must not make presence
+/// unobservable, and no presence read is made beside a liveliness
+/// subscriber (#830, core §8.1, 0.37) — seeded through the session in the
+/// namespace, and looked at once ([`RuleSet::first_look`]) before the
+/// first window.
 pub(crate) struct RulePresence {
     monitor: crate::Monitor,
     pub(crate) feed: PresenceFeed,
@@ -1011,7 +1020,7 @@ impl RulePresence {
     /// declared: [`crate::Error::NotAsked`].
     pub(crate) async fn open(
         session: &zenoh::Session,
-        watch: Option<&zenoh::Session>,
+        watch: Option<&crate::WatchSession>,
         rules: &mut RuleSet,
         timeout: Duration,
     ) -> Result<Option<RulePresence>> {
@@ -1032,8 +1041,8 @@ impl RulePresence {
             stats_tick: Duration::from_secs(3600),
             ..crate::MonitorSpec::default()
         }
-        .with_presence("", &scope);
-        let monitor = crate::Monitor::start(watch, spec).await?;
+        .with_presence(&scope);
+        let monitor = crate::Monitor::start_watch(watch, spec).await?;
         let mut live = LivePresence::new(scope);
         rules.track_presence(&mut live, SystemTime::now());
         let (feed, _seeded) = match PresenceFeed::open(session, &monitor, live, timeout).await {

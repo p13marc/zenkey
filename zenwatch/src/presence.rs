@@ -570,6 +570,7 @@ impl PresenceRule {
             Some(PresenceSource::Dropped)
             | Some(PresenceSource::Withdrawn)
             | Some(PresenceSource::CutOff)
+            | Some(PresenceSource::Moved)
             | None => "",
         };
         match (self.form, holds) {
@@ -690,6 +691,11 @@ impl PresenceRule {
             PresenceBasis::CutOff => {
                 "this daemon's session reaches no router and no peer: no read is made, and \
                  everything is unobservable until a complete read"
+                    .into()
+            }
+            PresenceBasis::Moved => {
+                "the watch session's transport moved: what it held is unconfirmed until a \
+                 complete re-read"
                     .into()
             }
         };

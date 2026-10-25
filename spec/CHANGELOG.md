@@ -3,6 +3,147 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.42 — 2026-10-25: a watch session on the wire keys, and round 66's findings (#875, WD)
+
+zk2py round 66 (PR #876) read 0.41 cold and filed F-227 to F-235, all on
+§8.1, §9 and §10. F-233 is #875's own subject: in a namespace, 0.41 offered
+a watch session with history and one in no namespace on the wire keys as
+equals, and the first brings the population back into every round trip.
+The reference's tools now take the second (`zenkey_fleet::WatchSession`,
+`open_watch`), measured below. Every finding is answered here, each by a
+change or a reason it stands.
+
+**Changed: in a namespace, a watch session in no namespace on the wire
+keys** (§8.1; F-233).
+- **The gap.** 0.41's "keeps history, or watches the wire keys" did not
+  weigh the two. With history the round trip waits for the population:
+  23 s beside 10,000 tokens (the reference, debug), 3.2–3.9 s (zk2py,
+  release), past the scenarios' 5 s wait and zenoh's 10 s interests
+  timeout, where 0.41's own MUST makes it not made.
+- **Measured** by the reference: beside 2,000 tokens in `ns`, a watch
+  session in no namespace, its subscriber without history on
+  `ns/zk2/*/*/@zk/instance/*`, made its round trip on
+  `ns/zk2/*/*/@zk/settle` in 1.2 ms and heard a crowd token withdrawn
+  (§10 step 8, new); beside 10,000 in `ns`, through the tools' wiring, in
+  44 ms (`zenkey-fleet/tests/watch_scale.rs`). In `ns` with history: 634 ms
+  beside 2,000 (step 4).
+- **The rule.** A reader that follows presence in a namespace SHOULD hold
+  its watch session in no namespace, its subscribers without history and
+  its round trip on the wire keys, the namespace in front; it strips the
+  namespace from what it hears, and counts a key outside it, never folding
+  it. One that keeps history in the namespace SHOULD run its round trip's
+  wait and its interests timeout above the history's time. The grants are
+  unchanged: the wire keys are what a namespaced session sends, and what
+  §11 compiles under the namespace (a test over the walkthrough's plan,
+  `zenkey-fleet/tests/acl_plans.rs`). A watch session in no namespace makes
+  no GET of the deployment's keys: there they would be the bus root's.
+
+**Changed: no round trip through a watch session cut off** (§8.1; F-228).
+- **The gap.** A round trip is a liveliness GET whose answer is
+  discarded, and the cut-off rule was written for reads: through a session
+  cut off zenoh answers it at once, final reply alone, which read by the
+  text as written stands. zk2py measured it in 0.2–3 ms, 10 of 10.
+- **Measured** by the reference (§10 step 9, new): through a watch session
+  cut off no round trip is asked and none stands; one cut while it waits
+  comes back at the cut, 152 ms into a 2 s wait, zenoh's own with the final
+  reply alone and no error reply, the reference's not standing. The
+  reference already checked the links before and after (`zenkey::presence::settle`).
+- **The rule.** A round trip through a watch session that holds no link,
+  or held none when it ended, does not stand, whatever its replies say; a
+  reader checks the links before and after, asks none through a session
+  cut off, and makes it when the transport opens.
+- **And with it** (F-227's first point): a reader whose watch session is
+  cut off follows nothing, so it SHOULD NOT make a read it would follow
+  from it, whatever its reading session's links; it reports the read not
+  made, its reason the watch session's. The reference did so already
+  (`PresenceFeed`, the token ledger).
+
+**Changed: a move unconfirms what the reader holds, and "a seed" is every
+read** (§8.1; F-229).
+- **The gap.** Through a cut, the owner's token was never told to a
+  subscriber without history, so nothing was heard withdrawn, and the
+  re-read was not made, which removes nothing: a reader doing only what
+  0.41 said read the owner up throughout the cut (zk2py: every sample over
+  1.5 s), where §10 Expected 6 said unobservable. An address read down
+  before the move is no longer followed either.
+- **What the reference did.** Its feed owed a re-read at once at the move
+  and held what it held meanwhile: a cut was unobservable once the re-read
+  found the watch session cut off, a reconnection after one barrier and
+  one read. It now unconfirms at the move itself: `LivePresence::moved`
+  (`PresenceBasis::Moved`, a `moved` transition source), the alarm
+  reader's loss (`AlarmLoss { stalled: true }`), the token ledger's
+  `TokenBasis::Moved`; telemetry already folded the move as a loss.
+- **The rule.** From the move until a complete read made after a round
+  trip that stands, every token and absence the reader followed through
+  the watch session is unconfirmed: an address unobservable, never up or
+  down on what was held before. And "a seed made while no round trip
+  stands" is now "a read, a seed or a re-read". §10 Expected 6 says both;
+  the reference's step 6 checks the owner unconfirmed by the move itself.
+
+**Changed: an interests timeout the reader cannot read, and where a read's
+time starts** (§8.1; F-232).
+- **The gap.** The read carries no sign of the interests timeout, so the
+  MUST needs the session's value, which zenoh-python 1.10.1 cannot read
+  back from an open session; and the text did not say where the time is
+  counted from.
+- **The rule.** The time is counted from before the GET is asked to its
+  final reply. A reader that cannot read the value SHOULD open the session
+  itself with one it sets; a session it is handed and cannot read, it
+  takes at zenoh's 10 s, which holds only when the session states none,
+  and it says its reads' completeness rests on that. The reference reads
+  the value from `Session::config()`, and counts from before the GET is
+  asked (`zenkey::presence`, `get`).
+
+**Changed: §10's setup and steps** (`scenarios/presence.md` §10; F-227,
+F-230, F-231, F-234).
+- **F-227.** The reader under test's watch session reaches R1 through the
+  link and its reading session directly, as the reference runs it; the
+  stall lasts from before its subscribers until its first seed is read,
+  two round trips run out under the 300 ms interests timeout (603 ms for
+  the reference). With the watch session alone on the link, "a read not
+  made" at the cut holds by the new rule above.
+- **F-230.** Expected 4: "by then zenoh has delivered all 2,000 tokens to
+  the subscriber", a binding that runs each callback on a thread of its
+  own possibly still handing them over.
+- **F-231.** The crowd is in `ns`, and step 5 reads the steps' own system,
+  `zk2/s10/*/@zk/instance/*`, never the crowd's: a read beside the
+  population may run past 300 ms for its size alone. Step 4's watch
+  sessions are in `ns` with the crowd; step 7 subscribes to `s10`'s tokens.
+- **F-234.** Step 7: a fresh watch session for each subscriber, and a fresh
+  token each time. One session holding a history subscriber is told the
+  token and delivers its withdrawal to every subscriber it holds (zk2py,
+  5 of 5); the reference ran one session per subscriber already.
+
+**Changed: §9's miss is a race, nearly always lost** (`scenarios/presence.md`
+§9, Appendix B; F-235).
+- **The contradiction.** §9 Expected 2 and Appendix B said the GET at once
+  beside a history subscriber misses "every time"; zenoh-python 1.10.1
+  held the token in 2 of 60 trials beside the reference's owner and 5 of
+  60 beside zk2py's.
+- **Now.** Step 2 runs ten times on fresh sessions, and Expected 2 asks
+  the miss in one run at least, nearly always: the session's own answer
+  can win the race, and a GET that holds the token proves nothing safe.
+  Appendix B gives both counts. The reference's step 2 missed 10 of 10,
+  and asserts one miss at least.
+
+**Deliberately not changed.**
+- **The namespace rule stays a SHOULD**, beside the history option: a
+  reader at a small population, or one whose grants or deployment keep it
+  in the namespace, may keep history and pay for it, by the new SHOULD on
+  its waits.
+- **No key is reserved and no grant shape changes** (§1.1, §11.1): the
+  wire keys are a namespaced session's own on the wire.
+- **The runtime's owner-side watches** (an archive's owners, `desired.v1`'s
+  target, `redundancy.v1`'s candidate) are unchanged: each watches one
+  address's handful of tokens, so their history costs a few tokens, and
+  they run on a session the application hands in.
+- **"Complete" keeps its conditions** (0.37 to 0.41). A read made while
+  the watch session is cut off is not made, a reason beside the reading
+  session's own; the move's unconfirming is a reader's state, not a
+  read's.
+- **The profiles' "Written against" lines stay at 0.40**: none names the
+  watch session's namespace or a move.
+
 ## 0.41 — 2026-10-25: a watch session's round trip at a population (#851, WB)
 
 #849 (PU) found that a reader's round trip on its watch session, a

@@ -213,6 +213,9 @@ fn presence_row<'a>(
             PresenceBasis::CutOff => {
                 "no read made: this window reaches no router — not down (§8.1)".to_string()
             }
+            PresenceBasis::Moved => {
+                "the watch session's link moved, awaiting a read — not down (§8.1)".to_string()
+            }
             _ if live.withdrawn => "heard withdrawn, awaiting a read — not down (§8.1)".to_string(),
             _ => "no complete read behind it — not down (§8.1)".to_string(),
         },

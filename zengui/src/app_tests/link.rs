@@ -337,8 +337,13 @@ async fn a_presence_link_whose_round_trip_does_not_stand_says_so() {
         stats_tick: std::time::Duration::from_secs(3600),
         ..MonitorSpec::default()
     }
-    .with_presence("", &PresenceScope::all());
-    let monitor = Monitor::start(&watch, spec).await.expect("a monitor");
+    .with_presence(&PresenceScope::all());
+    let monitor = Monitor::start_watch(
+        &zenkey_fleet::WatchSession::new(&watch, "").expect("a watch session"),
+        spec,
+    )
+    .await
+    .expect("a monitor");
     assert_eq!(monitor.settled(), Some(false));
     let mut link = Box::pin(crate::presence_link::stream(
         crate::presence_link::PresenceKey {

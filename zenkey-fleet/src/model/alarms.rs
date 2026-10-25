@@ -648,8 +648,9 @@ impl AlarmBook {
     /// next presence read says whether it went.
     ///
     /// A put of an instance already held is no move, and keeps what its
-    /// descriptor said: a subscriber with history delivers one for every
-    /// token it is told of, a reconnection's included (#872).
+    /// descriptor said: a reconnection can deliver one again, an owner's
+    /// session declaring its tokens anew (#872). The watch session's
+    /// subscriber has no history (#875), so none comes from a history.
     pub fn instance(&mut self, addr: &Addr, instance: &InstanceId, held: bool, at: Instant) {
         if !self.scope.selects_owner(addr) {
             return;

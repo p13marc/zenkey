@@ -211,6 +211,36 @@ pub async fn open_owner_in_namespace(
     open_namespaced(namespace, file, connect, listen, scouting, Posture::Owner).await
 }
 
+/// Open a tool's **watch session** for the deployment in `namespace` (#830;
+/// #875, core §8.1, 0.42): a session in **no** namespace, with
+/// [`open_reporting`]'s posture, that holds a live reader's liveliness
+/// subscribers on the deployment's wire keys, without history, and makes
+/// no read ([`crate::WatchSession`]). Its round trip is then one round trip
+/// at any population, where a namespaced session's subscribers would need
+/// history to hear an earlier token withdrawn, and their round trip would
+/// wait for it. An **empty** namespace is the bus root, whose keys the wire
+/// spells as they are. A namespace that is not a concrete key-expression
+/// prefix is refused as the caller's input ([`OpenFailure::Config`]), and
+/// so is a config file that sets one.
+///
+/// The one way the tools open a watch session
+/// (`scripts/check-liveliness-seam.sh`): the namespace is a required
+/// argument, so a watch on the deployment's keys cannot be opened without
+/// it.
+pub async fn open_watch(
+    namespace: &str,
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<crate::WatchSession, OpenFailure> {
+    if !namespace.is_empty() {
+        check_namespace(namespace).map_err(OpenFailure::Config)?;
+    }
+    let session = open_reporting(file, connect, listen, scouting).await?;
+    crate::WatchSession::new(&session, namespace).map_err(OpenFailure::Config)
+}
+
 async fn open_namespaced(
     namespace: &str,
     file: Option<&Path>,

@@ -2,10 +2,14 @@
 
 **Status: not filed.** Drafted on 2026-10-25 for zenkey #872 (chunk WC),
 from the reference's measurements at zenoh 1.10.1. It is kept, as the
-other drafts here are, as a record of behaviour zk2 designs around. Since
-core 0.41 (§8.1, Appendix B), a watch session in a namespace gives its
-liveliness subscribers history. #872 brought the last three readers into
-line: `check conform`'s window, the alarms reader and the telemetry reader.
+other drafts here are, as a record of behaviour zk2 designs around. Core
+0.41 (§8.1, Appendix B) gave a watch session in a namespace history on its
+liveliness subscribers, and #872 brought the last three readers into line:
+`check conform`'s window, the alarms reader and the telemetry reader. That
+history made every round trip wait for the population, so since core 0.42
+(#875) the tools' watch sessions run in no namespace and subscribe, without
+history, to the wire keys (`zenkey_fleet::WatchSession`): the third shape
+below.
 
 The measurements:
 - `zenkey/tests/presence.rs`, `s10_a_round_trip_at_a_population_and_the_interests_timeout`,

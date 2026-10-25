@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 mod util;
-use util::zk2::{T, addr, client, client_ns, eventually, router};
+use util::zk2::{T, addr, client, client_ns, eventually, router, watch_of};
 
 use zenkey_fleet::{
     AddressStatus, AlarmFeed, AlarmScope, AlarmSpec, LivePresence, Monitor, MonitorSpec, NotAsked,
@@ -57,7 +57,7 @@ fn presence_spec() -> MonitorSpec {
         stats_tick: Duration::from_secs(3600),
         ..MonitorSpec::default()
     }
-    .with_presence("", &PresenceScope::all())
+    .with_presence(&PresenceScope::all())
 }
 
 /// One raw liveliness GET on zenoh's own API, as the hazard needs it:
@@ -159,7 +159,7 @@ async fn a_seed_beside_a_monitor_of_its_own_finds_the_live_token_every_time() {
     .await;
     for round in 0..ROUNDS {
         let (watch, tool) = (client(&ep).await, client(&ep).await);
-        let monitor = Monitor::start(&watch, presence_spec())
+        let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
             .await
             .expect("a monitor");
         assert_eq!(monitor.settled(), Some(true), "round {round}");
@@ -190,7 +190,7 @@ async fn a_seed_beside_a_monitor_of_its_own_finds_the_live_token_every_time() {
 async fn a_watch_session_makes_no_presence_read() {
     let (_router, ep) = router(None).await;
     let (watch, other, tool) = (client(&ep).await, client(&ep).await, client(&ep).await);
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     assert!(monitor.watches_liveliness());
@@ -223,7 +223,7 @@ async fn a_watch_session_makes_no_presence_read() {
         .expect_err("refused");
     assert!(own.not_asked().is_some(), "{own}");
     // Another watch session.
-    let second = Monitor::start(&other, presence_spec())
+    let second = Monitor::start_watch(&watch_of(&other, ""), presence_spec())
         .await
         .expect("a second monitor");
     let beside = PresenceFeed::open(&other, &monitor, LivePresence::new(PresenceScope::all()), T)
@@ -264,7 +264,7 @@ async fn instance_gone_is_refused_without_a_watch_session_of_its_own() {
     };
     let store = zenkey_fleet::BundleStore::new(T);
     let contracts = zenkey_fleet::ContractSet::new();
-    for watch in [None, Some(tool.clone())] {
+    for watch in [None, Some(watch_of(&tool, ""))] {
         let bus = zenkey_fleet::DoctorBus {
             session: tool.clone(),
             raw: tool.clone(),
@@ -294,16 +294,23 @@ async fn an_alarm_feed_that_listens_needs_a_watch_session_of_its_own() {
     let (_router, ep) = router(None).await;
     let (tool, watch) = (client(&ep).await, client(&ep).await);
     let spec = AlarmSpec::new(T);
-    for refused in [None, Some(&tool)] {
+    let beside = watch_of(&tool, "");
+    for refused in [None, Some(&beside)] {
         let e = AlarmFeed::open(&tool, refused, AlarmScope::all(), spec, true)
             .await
             .expect_err("refused");
         assert!(e.not_asked().is_some(), "{e}");
     }
     assert!(!zenkey::presence::watching(&tool));
-    let (feed, _) = AlarmFeed::open(&tool, Some(&watch), AlarmScope::all(), spec, true)
-        .await
-        .expect("the reader opens");
+    let (feed, _) = AlarmFeed::open(
+        &tool,
+        Some(&watch_of(&watch, "")),
+        AlarmScope::all(),
+        spec,
+        true,
+    )
+    .await
+    .expect("the reader opens");
     assert!(zenkey::presence::watching(&watch), "its subscription");
     assert!(!zenkey::presence::watching(&tool), "its reads");
     let log = feed.log();
@@ -352,7 +359,7 @@ async fn a_telemetry_reading_needs_a_watch_session_of_its_own() {
     let offline = zenkey_fleet::ContractSet::new();
     let mut spec = zenkey_fleet::TelemetrySpec::new(T, Duration::from_millis(200));
     spec.lease = Duration::from_millis(200);
-    let read = |watch: Option<zenoh::Session>| {
+    let read = |watch: Option<zenkey_fleet::WatchSession>| {
         let (tool, store, offline) = (tool.clone(), store.clone(), offline.clone());
         async move {
             zenkey_fleet::observe_telemetry(
@@ -368,7 +375,7 @@ async fn a_telemetry_reading_needs_a_watch_session_of_its_own() {
             .await
         }
     };
-    for refused in [None, Some(tool.clone())] {
+    for refused in [None, Some(watch_of(&tool, ""))] {
         let obs = read(refused).await;
         assert!(
             !obs.resources.is_empty(),
@@ -383,7 +390,7 @@ async fn a_telemetry_reading_needs_a_watch_session_of_its_own() {
         );
     }
     assert!(!zenkey::presence::watching(&tool));
-    let obs = read(Some(watch.clone())).await;
+    let obs = read(Some(watch_of(&watch, ""))).await;
     assert!(obs.unobservable.is_none(), "{:?}", obs.unobservable);
     assert!(
         matches!(&obs.seed, Some(Ok(seed)) if seed.complete),
@@ -409,7 +416,7 @@ async fn a_cut_off_session_makes_no_presence_read() {
         .expect_err("not made");
     assert_eq!(e.not_asked(), Some(&NotAsked::CutOff), "{e}");
 
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     let mut live = LivePresence::new(PresenceScope::all());
@@ -601,8 +608,9 @@ async fn retrying_client(endpoint: &str) -> zenoh::Session {
 /// owner never left. Its watch session's subscribers have no history, so
 /// they were never told of the owner's token and hear no withdrawal of it
 /// (#851): the watch session's transport closing is the reader's reason to
-/// read again, and its barrier is lost with it. The read is not made
-/// through a session cut off, the address is unobservable, never down;
+/// read again, and its barrier is lost with it; what it held is unconfirmed
+/// from the move (0.42, F-229). The read is not made through a session cut
+/// off, the address is unobservable, never down;
 /// healed, the barrier is made again and the read finds the owner, up
 /// again. A real departure is down, a read after its withdrawal.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -621,7 +629,7 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
         retrying_client(&link.endpoint).await,
     );
     let h1 = addr("h1/tc");
-    let monitor = Monitor::start(&watch, presence_spec())
+    let monitor = Monitor::start_watch(&watch_of(&watch, ""), presence_spec())
         .await
         .expect("a monitor");
     let (mut feed, mut seen) =
@@ -644,15 +652,16 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
             .count()
     };
 
-    // Cut: the watch session's transport closes, a read is owed and not
-    // made, and the address is unobservable.
+    // Cut: the watch session's transport closes, which unconfirms what is
+    // held at once (core §8.1, 0.42, F-229); the read it owes is not made,
+    // and the address stays unobservable.
     link.cut();
     until(&mut feed, &mut seen, "a read not made", |f| {
         matches!(f.last_seed(), SeedOutcome::CutOff(_))
     })
     .await;
     assert!(
-        seen.iter().any(|t| t.source == PresenceSource::CutOff
+        seen.iter().any(|t| t.source == PresenceSource::Moved
             && t.change
                 == PresenceChange::Status {
                     from: AddressStatus::Up,
@@ -660,6 +669,7 @@ async fn a_reader_whose_link_is_cut_reads_nobody_down() {
                 }),
         "{seen:#?}"
     );
+    assert_eq!(feed.presence().basis(), zenkey_fleet::PresenceBasis::CutOff);
     assert_eq!(
         monitor.settled(),
         Some(false),
@@ -719,7 +729,7 @@ async fn instance_gone_is_unobservable_while_its_round_trip_does_not_stand() {
         session: tool.clone(),
         raw: tool.clone(),
         namespace: String::new(),
-        watch: Some(watch.clone()),
+        watch: Some(watch_of(&watch, "")),
     };
     let run = |bus: zenkey_fleet::DoctorBus| {
         let (store, contracts, spec) = (store.clone(), contracts.clone(), spec.clone());
@@ -770,9 +780,15 @@ async fn an_alarm_feed_whose_round_trip_does_not_stand_reads_the_scope_not_whole
     let watch = watch_behind(&link).await;
     let spec = AlarmSpec::new(T);
     link.stall();
-    let (mut feed, _) = AlarmFeed::open(&tool, Some(&watch), AlarmScope::all(), spec, true)
-        .await
-        .expect("the reader opens");
+    let (mut feed, _) = AlarmFeed::open(
+        &tool,
+        Some(&watch_of(&watch, "")),
+        AlarmScope::all(),
+        spec,
+        true,
+    )
+    .await
+    .expect("the reader opens");
     let Some(Ok(seen)) = &feed.log().presence else {
         panic!("a presence read: {:?}", feed.log().presence)
     };
@@ -808,7 +824,51 @@ async fn an_alarm_feed_whose_round_trip_does_not_stand_reads_the_scope_not_whole
     );
 }
 
-// ─── in a namespace (#872) ──────────────────────────────────────────────────
+/// An alarms reader's watch session whose transport moves (core §8.1, 0.42,
+/// F-229): its subscriber, without history, may not have heard an owner
+/// leave or come while the link was down, so the move is a loss at once,
+/// the scope not read whole and nothing "no alarm fires"; a refresh after
+/// the link heals reads it whole again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_alarm_feed_counts_a_move_of_its_watch_session_as_a_loss() {
+    use zenkey_model::alarms::ScopeRead;
+
+    let (_router, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let link = Link::to(&ep).await;
+    let watch = retrying_client(&link.endpoint).await;
+    let (mut feed, _) = AlarmFeed::open(
+        &tool,
+        Some(&watch_of(&watch, "")),
+        AlarmScope::all(),
+        AlarmSpec::new(T),
+        true,
+    )
+    .await
+    .expect("the reader opens");
+    assert_eq!(feed.book().scope_read(), ScopeRead::Whole);
+    assert_eq!(feed.book().lost(), 0);
+    link.cut();
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while feed.book().lost() == 0 {
+        assert!(
+            tokio::time::timeout_at(deadline, feed.next())
+                .await
+                .is_ok_and(|d| d.is_some()),
+            "the move never folded"
+        );
+    }
+    assert_eq!(feed.book().scope_read(), ScopeRead::NotWhole, "a loss");
+    link.heal();
+    eventually("the watch session back", || async {
+        zenkey_fleet::cut_off(&watch).await.is_none()
+    })
+    .await;
+    feed.refresh().await;
+    assert_eq!(feed.book().scope_read(), ScopeRead::Whole, "healed");
+}
+
+// ─── in a namespace (#872, #875) ────────────────────────────────────────────
 
 /// More instance tokens than a reader's queue holds
 /// (`zenkey_fleet::bus::alarms::QUEUE`, telemetry's alike: 1,024).
@@ -841,21 +901,77 @@ async fn crowd(
     tokens
 }
 
-/// #872: in a namespace an alarm feed's instance tokens have history, or a
-/// withdrawal of a token declared before them is never heard (zenoh 1.10.1,
-/// `routing/namespace.rs`). The history's puts are not queued: with more
-/// owners in scope than the queue holds, the feed opens having lost
-/// nothing, its presence read complete, and hears an owner up before it go.
+/// #875: in a namespace, a presence feed's monitor watches the wire keys
+/// from a watch session in no namespace, its subscribers without history.
+/// Beside more owners than a queue holds, its round trip stands at once,
+/// every key reaches the feed base-relative (none refused), and an owner
+/// up before the monitor is heard going: what #872 needed history for.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_alarm_feed_in_a_namespace_loses_nothing_to_its_history() {
+async fn a_presence_feed_in_a_namespace_watches_the_wire_keys() {
+    let (_router, ep) = router(None).await;
+    let holder = client_ns(&ep, Some("ns")).await;
+    let tool = client_ns(&ep, Some("ns")).await;
+    let raw = client(&ep).await;
+    let mut held = crowd(&holder, &tool, CROWD).await;
+    let watch = watch_of(&raw, "ns");
+    assert!(!zenkey::presence::subscriber_needs_history(&raw));
+    let monitor = Monitor::start_watch(&watch, presence_spec())
+        .await
+        .expect("a monitor");
+    assert_eq!(monitor.settled(), Some(true), "one round trip");
+    assert_eq!(
+        monitor.barrier().map(zenkey::presence::Barrier::key),
+        Some("ns/zk2/*/*/@zk/settle"),
+        "the barrier asks the wire key"
+    );
+    let first = addr("crowd/svc0");
+    let mut live = LivePresence::new(PresenceScope::all());
+    live.track(&first, SystemTime::now());
+    let (mut feed, _) = PresenceFeed::open(&tool, &monitor, live, Duration::from_secs(10))
+        .await
+        .expect("the feed opens");
+    assert_eq!(*feed.last_seed(), SeedOutcome::Complete);
+    assert_eq!(feed.presence().status(&first), AddressStatus::Up);
+    held.remove(0).undeclare().await.expect("undeclare");
+    let mut seen = Vec::new();
+    until(&mut feed, &mut seen, "the owner read down", |f| {
+        f.presence().status(&first) == AddressStatus::Down
+    })
+    .await;
+    assert!(
+        seen.iter().any(|t| t.address == first
+            && t.source == PresenceSource::Withdrawn
+            && matches!(
+                t.change,
+                PresenceChange::Status {
+                    to: AddressStatus::Unobservable,
+                    ..
+                }
+            )),
+        "heard withdrawn first, then read down: {seen:#?}"
+    );
+    assert_eq!(
+        feed.presence().ignored().total(),
+        0,
+        "every key base-relative"
+    );
+    assert_eq!(watch.outside(), 0, "none outside the namespace");
+    drop(feed);
+    monitor.shutdown().await.expect("shutdown");
+}
+
+/// #872, #875: in a namespace, an alarm feed's instance tokens are watched
+/// on the wire keys from a watch session in no namespace, without history:
+/// with more owners in scope than the queue holds, the feed opens having
+/// lost nothing, its presence read complete, and hears an owner up before
+/// it go.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_alarm_feed_in_a_namespace_watches_the_wire_keys() {
     use zenkey_model::alarms::Presence;
     let (_router, ep) = router(None).await;
     let holder = client_ns(&ep, Some("ns")).await;
-    let (tool, watch) = (
-        client_ns(&ep, Some("ns")).await,
-        client_ns(&ep, Some("ns")).await,
-    );
-    assert!(zenkey::presence::subscriber_needs_history(&watch));
+    let tool = client_ns(&ep, Some("ns")).await;
+    let watch = watch_of(&client(&ep).await, "ns");
     let mut held = crowd(&holder, &tool, CROWD).await;
     let scope = AlarmScope::parse("zk2/crowd/**").expect("a scope");
     let (mut feed, _) = AlarmFeed::open(
@@ -873,7 +989,7 @@ async fn an_alarm_feed_in_a_namespace_loses_nothing_to_its_history() {
     };
     assert!(seen.complete && !seen.unsettled, "{seen:?}");
     assert_eq!(seen.services, CROWD, "{seen:?}");
-    assert_eq!(feed.book().lost(), 0, "the history is no loss");
+    assert_eq!(feed.book().lost(), 0, "nothing lost");
     let first = addr("crowd/svc0");
     assert!(
         matches!(feed.book().presence_of(&first), Presence::Present(_)),
@@ -892,22 +1008,22 @@ async fn an_alarm_feed_in_a_namespace_loses_nothing_to_its_history() {
         );
     }
     assert_eq!(feed.book().lost(), 0);
+    assert_eq!(watch.outside(), 0, "none outside the namespace");
 }
 
-/// #872: a telemetry reading in a namespace, its token subscriptions with
-/// history, beside more instance tokens than its queue holds: the history's
-/// puts are not queued, so the reading loses nothing, and its seed stands.
+/// #872, #875: a telemetry reading in a namespace, its token subscriptions
+/// on the wire keys from a watch session in no namespace, without history,
+/// beside more instance tokens than its queue holds: the reading loses
+/// nothing, and its seed stands.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_telemetry_reading_in_a_namespace_loses_nothing_to_its_history() {
+async fn a_telemetry_reading_in_a_namespace_watches_the_wire_keys() {
     let (_router, ep) = router(None).await;
     let (owner, holder) = (
         client_ns(&ep, Some("ns")).await,
         client_ns(&ep, Some("ns")).await,
     );
-    let (tool, watch) = (
-        client_ns(&ep, Some("ns")).await,
-        client_ns(&ep, Some("ns")).await,
-    );
+    let tool = client_ns(&ep, Some("ns")).await;
+    let watch = watch_of(&client(&ep).await, "ns");
     let _svc = meter(&owner).await;
     let _held = crowd(&holder, &tool, CROWD).await;
     eventually("the tool sees the meter", || async {
@@ -935,7 +1051,8 @@ async fn a_telemetry_reading_in_a_namespace_loses_nothing_to_its_history() {
         "{:?}",
         obs.seed
     );
-    assert_eq!(obs.book.lost(), 0, "the history is no loss");
+    assert_eq!(obs.book.lost(), 0, "nothing lost");
+    assert_eq!(watch.outside(), 0, "none outside the namespace");
 }
 
 /// The meter (`zenkey/tests/contracts/meter.v1.toml`) at `lab/meter`, on
@@ -974,8 +1091,9 @@ async fn a_telemetry_reading_whose_round_trip_does_not_stand_makes_it_again() {
     let watch = watch_behind(&link).await;
     let store = zenkey_fleet::BundleStore::new(T);
     let offline = zenkey_fleet::ContractSet::new();
+    let watching = watch_of(&watch, "");
     let read = |window: Duration, heal: bool| {
-        let (tool, watch, store, offline, link) = (&tool, &watch, &store, &offline, &link);
+        let (tool, watch, store, offline, link) = (&tool, &watching, &store, &offline, &link);
         async move {
             let spec = zenkey_fleet::TelemetrySpec::new(T, window);
             zenkey_fleet::observe_telemetry(
