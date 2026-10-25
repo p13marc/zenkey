@@ -11695,3 +11695,341 @@ None open.
 
 **Counts at redundancy.v1 0.5:** 226 entries. None open: every entry is
 resolved.
+
+## At core 0.41 (#609)
+
+Round 66 read core 0.41 cold, on main 2451a01d: the CHANGELOG's 0.41
+entry, §8.1, Appendix B and C, and the new `scenarios/presence.md` §10.
+0.41 changes four things:
+- the round trip's GET need not match the subscribers' selectors;
+- a watch session's subscribers SHOULD have no history, except in a
+  namespace;
+- a round trip stands until the watch session's transport moves;
+- a read that runs to its session's interests timeout is not complete.
+
+No fixture changed. zk2py implemented the rules from the text first:
+`live.settle` and its `RoundTrip`, `settle_key`, the interests timeout
+in `list_presence` and in `open_client`, and the follower's history,
+transport events and unordered reads. The README's "What a complete
+presence read is" says where zk2py already did what 0.41 says and where
+it did not.
+
+**`just py-conformance`: 3007 of 3007.** `readings` gained 25 cases
+(376).
+
+**Live:** `presence_scenarios` now runs §1 to §10 with either owner
+(zk2py's, or `owner-wb`) and either reader (zk2py's, or `zenctl-wb`).
+
+| Owner, reader | passed | not run |
+|---|---|---|
+| zk2py, zk2py | 78 | 1 |
+| Rust, zk2py | 73 | 2 |
+| zk2py, zenctl | 31 | 5 |
+| Rust, zenctl | 30 | 6 |
+
+Every check passes. §10 ran beside 2,000 tokens, and step 4 beside
+10,000 too, which fits on this VM. The measurements are in the README.
+
+**Where the two implementations disagree:** on no verdict.
+- zenctl words a read ended at the interests timeout as one that "ran to
+  its timeout … raise --timeout to ask again". zk2py names the interests
+  timeout.
+- Step 6's round-trip count differs (3 made by zk2py, 4 by the
+  reference), which the text does not fix.
+
+**The text, read end to end.** Every new MUST and SHOULD cites
+`[Sc: presence.md §10]`, and §10 runs each one. Eight findings, all on
+what a second implementation has to decide for itself:
+- §10's steps 5, 6 and 7 each leave a setup choice open (F-227, F-231,
+  F-234);
+- the move rule leaves two behaviours unstated (F-228, F-229);
+- one Expected holds only at the session, not at the application
+  (F-230);
+- the interests-timeout MUST needs a value zenoh-python cannot read back
+  (F-232);
+- the namespace exception has an unstated cost (F-233).
+
+### F-227 · ambiguity · scenarios/presence.md §10 step 6: which of the reader's sessions the link carries, and how long it stalls
+
+> §10 Setup: "A reader's watch session reaches its router through a link
+> the test can stall."
+
+> §10 step 6: "(The reader under test, as §8's and §9's.) The reader
+> follows presence, the owner's token held, its watch session's link
+> stalled as in step 1 while it starts, and its watch session's
+> `routing/interests/timeout` 300 ms. Then the stall ends. Then its watch
+> session's link is cut, and healed."
+
+> Expected 6: "While no round trip stands, the reader's seed is possibly
+> incomplete … an address it shows is up … When the link is cut, the
+> reader reads again at once (a read not made, through a session cut off:
+> the owner unobservable, never down)"
+
+Two things are open:
+- **Which sessions the link carries.** "As §8's" puts both the reader's
+  sessions on one link. "As §9's", and "its watch session's link", put the
+  watch session there alone.
+  - With the watch session alone, Expected 6's "a read not made, through a
+    session cut off" cannot happen: the reading session holds its link,
+    so its reread is made. It is complete by its replies, unordered by the
+    rule (no round trip stands), and shows the owner up.
+  - With both on the link, the seed is stalled too, and shows the owner
+    only if the stall ends within the seed's timeout.
+- **How long the stall lasts.** "As in step 1" is 150 ms, from before the
+  declaration. Under a 300 ms interests timeout a round trip stalled
+  150 ms ends at about 190 ms (step 1 measured 191–196 ms) and stands, so
+  nothing in Expected 6's first sentence shows. "Then the stall ends" reads as a later act of the test's
+  own. The reference's measured note (two round trips "which ran out")
+  implies a stall of over 600 ms.
+
+**zk2py:** runs both placements, with a 0.8 s stall from before the
+declaration.
+- **Both sessions on the link** (as §8's): every Expected holds.
+- **The watch session alone:** every Expected holds but "a read not
+  made". The reread is made, unordered, and the owner is up, never down.
+
+**Wording that would remove the guess:** "Setup: the reader's two
+sessions, its watch session and its reading session, reach R1 through
+one link the test can stall and cut. Step 6: … the link stalled from
+before the declaration until 0.8 s later, past two round trips under the
+300 ms interests timeout and within the seed's timeout …".
+
+### F-228 · gap · core 0.41 §8.1 "A round trip stands until the watch session's transport moves": a round trip through a watch session cut off
+
+> §8.1: "A reader that follows presence live SHOULD make the round trip
+> again before its next read, and read again, when its watch session's
+> transport closes or opens, as after a withdrawal."
+
+> §8.1 (0.37): "A session that reaches no other zenoh node … has every
+> liveliness GET answered at once with the final reply alone, no token and
+> no error reply … Such a read is **not complete, whatever its replies
+> say**."
+
+When the transport closes, "make the round trip again before its next
+read" asks a liveliness GET of a session cut off. zenoh answers that GET
+at once: zk2py measured the final reply, no error reply, in 0.2–3 ms, in
+10 of 10 runs, under a 300 ms interests timeout.
+
+The rules that say when a round trip stands do not cover this. A round
+trip "ended with an error reply" fails; so does one "that ended at the
+interests timeout" ("as not made"). The cut-off rule is written for reads,
+and a round trip is a GET "whose answer it discards". So an
+implementation that takes the text as written:
+- makes the round trip at the cut;
+- sees it come back at once, clean;
+- takes it to stand, and folds its next read as ordered.
+
+The same holds for a round trip in flight when the link goes, as F-185 was
+for a read. The reference's measured note counts no round trip at the cut
+("the start's and the first seed's, … the retry's and the one after the
+heal"), so it makes none there.
+
+**zk2py:** `settle` reads the watch session's links before the round trip
+and at its end, as `list_presence` does.
+- With no link before it, it makes no GET (`made` False, `CUT_OFF`).
+- With no link at its end, the round trip does not stand
+  (`CUT_OFF_DURING`).
+- When the links cannot be read, it does not stand either.
+
+**Wording that would remove the guess:** "A round trip through a watch
+session cut off, or cut off while it ran, does not stand, whatever its
+replies say: a reader checks the watch session's links before it and
+when it ends, as it checks a read's, and makes none through a session
+cut off; it makes it when the transport opens."
+
+### F-229 · gap · core 0.41 §8.1 "A round trip stands …": what a move leaves of what the reader holds, and which reads are "a seed"
+
+> §8.1: "… and a subscriber without history hears no withdrawal, at its
+> link's drop, of a token it was never told of. A reader … SHOULD make the
+> round trip again before its next read, and read again, when its watch
+> session's transport closes or opens, as after a withdrawal. A seed made
+> while no round trip stands is possibly incomplete: an address it does
+> not show is unobservable, never down."
+
+> presence.md §10 Expected 6: "When the link is cut, the reader reads
+> again at once (a read not made, through a session cut off: the owner
+> unobservable, never down)"
+
+The owner's token was shown to the reader by its seed, never told to its
+subscriber, which has no history. So at the cut the reader hears nothing
+withdrawn: that is the text's own sentence. The reread the text asks for
+is not made, and a read not made "leaves the withdrawal unconfirmed"
+(0.37) but removes nothing. A reader that does only what the text says
+therefore reads the owner **up** throughout the cut. Expected 6 says
+unobservable.
+
+zk2py measured this before it changed anything: the owner up in every
+sample over 1.5 s of the cut (one every 20 ms), its rereads 4 of 4 not
+made.
+
+For Expected 6 to hold, the move itself must unconfirm what the reader
+holds, "as after a withdrawal" of every token. The text never says so. The
+same is true of an address read down before the move: a token declared
+while the watch session's transport was down is never told to a
+subscriber without history, so "down" is no longer followed.
+
+A smaller point in the same bullet: "a seed made while no round trip
+stands" names the seed, and the bullet beside it distinguishes "a seed, a
+re-read". Expected 6's "once one stands a read is complete again" reads it
+as every read.
+
+**zk2py:**
+- `PresenceView.moved`: a move leaves every holder the follower had
+  established, up or down, unobservable (`MOVED`), with a read owed. A
+  holder already unconfirmed keeps its reason.
+- Every read made while no round trip stands, or across a move, is folded
+  unordered, a seed or not.
+- With this, both placements of F-227 pass Expected 6's cut.
+
+**Wording that would remove the guess:** "… when its watch session's
+transport closes or opens: until that read, every token and every absence
+the reader followed through that session is unconfirmed, as after a
+withdrawal (an address unobservable, never up or down from before), since
+its subscribers may not hear what moved meanwhile. A read made while no
+round trip stands, a seed or a re-read, is possibly incomplete …".
+
+### F-230 · ambiguity · scenarios/presence.md §10 Expected 4: "by then the subscriber has heard all 2,000 tokens", at the session or at the application
+
+> §10 Expected 4: "With history, it ends only after the history: by then
+> the subscriber has heard all 2,000 tokens."
+
+> §8.1: "the round trip's final reply follows their history".
+
+The order holds where zenoh delivers. zenoh-python's default `Callback`
+runs each callback on a thread of its own (`indirect=True`), so the GET's
+final reply can reach the application before the subscriber's last
+history samples. With the scenario's stated callbacks, the subscriber had
+not heard every token by the round trip's end in:
+- 1 to 3 of 20 runs beside 2,000 tokens, in five runs of 20 (1,835 to
+  1,991 of them heard);
+- 5 and 7 of 20 beside 10,000, in two (9,949 to 9,998 heard);
+- 50 ms later every token was there, in every run.
+
+With `indirect=False` (unstable), both callbacks run on zenoh's own
+thread, and every token was heard by the end in 10 of 10, at both sizes.
+§8.1's handler rule asks for "a callback", which both modes are.
+
+No zk2py verdict rests on this order: the follower folds what it hears by
+when it heard it, so a late sample keeps its word. A reader that took the
+round trip's end to mean "the history is in" would be wrong one run in
+ten.
+
+**zk2py:** checks Expected 4 with `indirect=False`. It reports the
+default-callback runs as a measurement.
+
+**Wording that would remove the guess:** "by then zenoh has delivered all
+2,000 tokens to the subscriber (a binding that runs each callback on a
+thread of its own may still be handing them over)".
+
+### F-231 · ambiguity · scenarios/presence.md §10 step 5: the open read beside the crowd, under a 300 ms interests timeout
+
+> §10 Setup: "the crowd sessions hold 2,000 instance tokens between them."
+
+> step 5: "A session whose `routing/interests/timeout` is 300 ms … reads
+> `zk2/*/*/@zk/instance/*` (a 2 s timeout) with its link open." Expected
+> 5: "With the link open, the read is complete."
+
+The crowd's tokens lie under step 5's selector, and the steps do not say
+the crowd leaves after step 4. Whether a read of the crowd ends within
+300 ms depends on the population and the build:
+- zk2py, a release build: 123–220 ms beside 2,000, complete;
+- zk2py beside 10,000: ended at 301 ms holding none, possibly incomplete;
+- the reference's debug build took 615 ms for a history round trip
+  beside 2,000.
+
+So Expected 5's first sentence holds by margin, not by rule. A slower
+build fails it on a read the reader rightly calls possibly incomplete.
+
+**zk2py:** runs step 5 with the crowd present, as written. At 2,000 it
+passes. At a larger crowd it reports the open read as a measurement.
+
+**Wording that would remove the guess:** "step 5, after the crowd sessions
+close" or "reads `zk2/*/<owner's service>/@zk/instance/*`".
+
+### F-232 · gap · core 0.41 §8.1 "A read that runs to its session's interests timeout is not complete": an interests timeout the reader cannot read
+
+> §8.1: "A reader MUST read a read whose time reached its session's
+> interests timeout as possibly incomplete, as it reads one that received
+> an error reply, and a round trip (below) that ended there as not made."
+
+> CHANGELOG 0.41: "The interests timeout is one more way a read ends
+> without its routers' final reply, read as the timeout's error reply is
+> read."
+
+The read itself carries no sign of it: no error reply, and a final reply
+like a complete read's. So the rule can only be applied by comparing the
+read's time with the session's configured value.
+- zenoh-python 1.10.1 gives a `Session` no configuration accessor
+  (`Config.get_json` reads a `Config`, not an open session). A reader
+  handed a session it did not open cannot know the value: a library
+  reader, or `budget_scenarios.client`'s sessions here.
+- The text also does not say where "its time" is counted from. A reader
+  counting from after the GET call returns can count less than zenoh's
+  runtime did, and read a read the interests timeout ended as complete.
+
+**zk2py:** `open_client` records the value it sets (120 s), and
+`register` records a session opened by other means. Any other session is
+taken at zenoh's default, 10 s. Its time is counted from before the GET
+is asked, to its final reply, so it is never less than zenoh's.
+
+**Wording that would remove the guess:** "Its time is counted from before
+the GET is asked to its final reply. A reader that cannot read its
+session's interests timeout takes it as zenoh's default, 10 s, or opens
+the session with one it knows."
+
+### F-233 · ambiguity · core 0.41 §8.1 "Except in a namespace": history's cost at a population
+
+> §8.1: "the round trip's final reply follows their history, so with
+> history it waits for the population (23 s beside 10,000 tokens, a debug
+> build), and without it is one round trip (6 ms there) … **Except in a
+> namespace:** … A watch session in a namespace keeps history, or the
+> reader watches the wire keys from a session in no namespace."
+
+The two options are offered as equals. The first brings back the cost
+0.41 removes: in a namespace, the round trip waits for the population
+again.
+- zk2py measured 3.2–3.9 s beside 10,000 tokens (zenoh-python, a release
+  build); the reference measured 23 s in a debug build.
+- That is past the scenarios' 5 s round-trip wait, and past zenoh's 10 s
+  interests timeout. There, by 0.41's own MUST, the round trip is "not
+  made", and every seed is possibly incomplete.
+
+Only the second option (a session in no namespace on the wire keys) keeps
+the round trip at one round trip. It has a cost of its own: grants on the
+wire keys, which §11 compiles for no namespace. The text weighs neither.
+
+**zk2py:** its follower keeps history on a namespaced watch session, as
+the text's first option says. Its runner shows the second option hearing
+the withdrawal (§10 step 7). It runs no namespaced population, and no
+namespaced profile reader.
+
+**Wording that would remove the guess:** "A watch session in a namespace
+keeps history, and its round trip then waits for the population: a reader
+at a population watches the wire keys from a session in no namespace, or
+runs its round trip's wait and its interests timeout above the history's
+time."
+
+### F-234 · ambiguity · scenarios/presence.md §10 step 7: one watch session in `ns`, or one per subscriber
+
+> step 7: "a watch session in `ns` declares a subscriber without history,
+> then one with history; then a watch session in no namespace declares
+> one without history …". Expected 7: "In `ns`, the subscriber without
+> history never hears the token go … With history it hears it".
+
+"A watch session … declares a subscriber …, then one with history" reads
+as one session holding both. On one session it does not hold: the history
+subscriber tells the session the token, so the session delivers the
+withdrawal to both subscribers. zk2py measured both subscribers on one
+namespaced session hearing it, in 5 of 5 runs. Expected 7 holds only with
+one subscriber per session.
+
+**zk2py:** runs each case on a fresh watch session, with a fresh token.
+
+**Wording that would remove the guess:** "a fresh watch session in `ns`
+declares a subscriber without history; then another fresh one declares
+one with history …".
+
+**Counts at core 0.41:** 234 entries. Open: F-227 to F-234, against core
+0.41: four ambiguities in §10 (F-227, F-230, F-231, F-234), three gaps in
+§8.1 (F-228, F-229, F-232), and one ambiguity in §8.1 (F-233). Every other
+entry is resolved.
