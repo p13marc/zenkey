@@ -45,12 +45,15 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   while the feed reads on the deployment's, refusing the monitor's zid,
   #830; the subscribers have no history unless the watch session is in a
   namespace (`zenkey::presence::subscriber_needs_history`: zenoh 1.10.1's
-  namespace drops the router's by-key withdrawal of an earlier token), and
+  namespace drops the router's by-key withdrawal of an earlier token,
+  `docs/zk2/upstream/namespace-drops-token-withdrawal-by-key.md`; since
+  #872 every liveliness subscriber of the fleet, `check conform`'s window,
+  `AlarmFeed`'s and telemetry's included), and
   the monitor's `Barrier` is asked before every seed, made again when it
   does not stand or when the watch session's transport moves, a seed made
   without it possibly incomplete, "barrier not established", retried and
   never ok (`Monitor::barrier`, core 0.41, #851; the same for `AlarmFeed`'s
-  refresh and zenwatch's `TokenFeed`); a read cut off while it runs is a seed possibly incomplete, said
+  refresh, zenwatch's `TokenFeed` and a telemetry reading's seeds, #872); a read cut off while it runs is a seed possibly incomplete, said
   beside `complete` as `cut_off_during` in every presence report but the
   doctor's, which zenwatch.v1 pins, and the feed counts the reads it makes,
   `PresenceFeed::reads`, core 0.38, #849). For zengui's tree (#614, FL4):
@@ -84,7 +87,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   one path and the split can be re-cut without a call site moving.
   `alarms.v1` (#800, AC) runs through all four layers. `bus::alarms`'
   `AlarmFeed` is the live reader: a liveliness subscription to the owners'
-  instance tokens on a watch session of its own (`DoctorBus::watch`, #830)
+  instance tokens on a watch session of its own (`DoctorBus::watch`, #830;
+  with history in a namespace, its puts kept out of the queue until the
+  first barrier, so a history of more owners than the queue holds is no
+  loss, and a put of an instance already held no move, #872)
   and one to the alarm keys feed one bounded queue whose
   refusals are a counted loss, a `bus::stall` watch covers its own receive
   path, then presence with descriptors, S4's GET and, when asked, every
@@ -115,9 +121,14 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `telemetry.v1` (#819, TC) runs through all four layers too.
   `bus::telemetry` reads presence, the descriptors and the metric
   resources their revisions declare; one bounded queue carries the instance
-  and member token subscriptions and each resource's members, so samples
-  and token moves fold in one order; presence is seeded, and seeded again
-  after a loss, and each state metric resource gets S4's GET; after the
+  and member token subscriptions (with history in a namespace, their puts
+  kept out of the queue until the first seed's barrier, #872) and each
+  resource's members, so samples and token moves fold in one order;
+  presence is seeded, the watch session's `Barrier` made before each seed
+  (a seed made without it possibly incomplete, named in `skipped`, and made
+  again 1 s later; a move of the watch session's transport a loss; #872),
+  and seeded again after a loss, and each state metric resource gets S4's
+  GET; after the
   seed each owner instance in scope answers its descriptor GET, since the
   seed proves only that the router holds the subscriptions and a put is
   dropped at its source until the owner's session does too
@@ -556,7 +567,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   §2.7) through `zenkey_model::budget`: `check conform`'s `budget` (per
   templated state, by the owner's GET), `budget-window` (per templated
   stream or event, complete over a whole liveness span, lossless, the owner
-  present throughout) and `rate` (per event) cases, `--skip <CASE>`, and
+  present throughout: its instance tokens watched with history in a
+  namespace, their barrier standing to the window's end, #872) and `rate`
+  (per event) cases, `--skip <CASE>`, and
   the doctor's `population-over-bound` under `--deep`. Core 0.25 (#740)
   establishes "lossless" rather than assuming it: the reader lost nothing
   and the resource is `reliable` with `block` (`budget::lossless`), the
