@@ -54,3 +54,38 @@ pub fn health(
         },
     )
 }
+
+/// One address's `redundancy.v1` (#841, RC), on selection beside its
+/// health, never polled: read as `zenctl redundancy <address>` reads it,
+/// through the engine's `run_redundancy` on the session **in** the
+/// namespace — which holds no liveliness subscriber, the presence link's
+/// monitor being on a watch session of its own — two presence reads a
+/// grace apart, each with its descriptors, and the revisions they name
+/// from the window's own store. Every role is the fleet's judge's.
+pub fn redundancy(
+    session: zenoh::Session,
+    namespace: String,
+    addr: Addr,
+    store: zenkey_fleet::BundleStore,
+    timeout: Duration,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let report = zenkey_fleet::run_redundancy(
+                &session,
+                &namespace,
+                Some(addr.clone()),
+                zenkey_fleet::RedundancySpec::new(timeout),
+                &store,
+                // The store is the window's, seeded with the contracts held
+                // offline already.
+                &zenkey_fleet::ContractSet::new(),
+            )
+            .await;
+            (addr, namespace, Arc::new(report))
+        },
+        |(addr, ran, report)| {
+            Message::Pane(PaneMsg::Nodes(NodesMsg::RedundancyRead(addr, ran, report)))
+        },
+    )
+}

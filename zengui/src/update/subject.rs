@@ -278,13 +278,15 @@ fn select(
         Subject::Address(addr) => {
             let addr = addr.clone();
             let health = super::pane::nodes::health(&mut work.verdicts, dep, addr.clone());
+            // And who serves each governed interface of it (#841, RC).
+            let redundancy = super::pane::nodes::redundancy(&mut work.verdicts, dep, addr.clone());
             let config = super::pane::configure::follow(
                 &mut work.verdicts.config,
                 work.right_pane,
                 dep,
                 addr,
             );
-            Task::batch([health, config])
+            Task::batch([health, redundancy, config])
         }
         // A prefix is not a key, and neither is nothing.
         _ => Task::none(),

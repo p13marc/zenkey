@@ -139,6 +139,65 @@ fn a_health_reading_lands_only_on_the_selected_address_in_this_namespace() {
     ));
 }
 
+/// `redundancy.v1`'s reading (#841, RC) lands under the health reading's
+/// guard: only the selected address's, only in this namespace — and a
+/// window with no session in the namespace asks nothing, and says so.
+#[test]
+fn a_redundancy_reading_lands_only_on_the_selected_address_in_this_namespace() {
+    use crate::nodes::RedundancyState;
+    use crate::view::nodes::NodesMsg;
+    use zenkey_model::grammar::Addr;
+
+    let report = |addr: &Addr| {
+        std::sync::Arc::new(zenkey_fleet::judge_redundancy(
+            "",
+            Some(addr),
+            &zenkey_fleet::RedundancySpec::new(std::time::Duration::from_secs(1)),
+            &zenkey_fleet::RedundancyObservation {
+                cut_off: Some("no session".into()),
+                ..Default::default()
+            },
+        ))
+    };
+    let nav: Addr = "robot1/nav".parse().expect("an address");
+    let tc: Addr = "host-a/tc".parse().expect("an address");
+    let mut app = test_app();
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Address(
+        nav.clone(),
+    ))));
+    assert!(
+        matches!(
+            app.work.verdicts.nodes.redundancy,
+            RedundancyState::NotAsked
+        ),
+        "no session in the namespace: nothing was asked"
+    );
+    let land = |app: &mut crate::app::Zengui, addr: &Addr, ns: &str| {
+        let _ = app.update(Message::Pane(crate::message::PaneMsg::Nodes(
+            NodesMsg::RedundancyRead(addr.clone(), ns.to_string(), report(addr)),
+        )));
+    };
+    land(&mut app, &tc, "");
+    assert!(matches!(
+        app.work.verdicts.nodes.redundancy,
+        RedundancyState::NotAsked
+    ));
+    land(&mut app, &nav, "elsewhere");
+    assert!(matches!(
+        app.work.verdicts.nodes.redundancy,
+        RedundancyState::NotAsked
+    ));
+    land(&mut app, &nav, "");
+    let r = app
+        .work
+        .verdicts
+        .nodes
+        .redundancy
+        .report(&nav)
+        .expect("landed");
+    assert!(r.unobservable.is_some(), "{r:?}");
+}
+
 /// A symbolic skeleton path is a key by grammar and not by fact.
 ///
 /// `Subject::Key` is the fetchable variant, and `{var}` leaves are the one
