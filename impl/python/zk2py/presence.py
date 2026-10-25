@@ -263,18 +263,30 @@ class PresenceView:
         for k, kind in later:
             last[k] = kind
         withdrawn_since = {holder_of(k) for k, kind in last.items() if kind == "delete"}
-        shown = {k for k in read.keys if holder_of(k) is not None}
+        # each holder's keys, shown and put since, grouped once: a read of a
+        # population folds in time linear in it (round 67: grouping per
+        # holder took 9.7 s for a read of 2,000 tokens)
+        shown_by: dict[tuple[str, ...], set[str]] = {}
+        for k in read.keys:
+            hk = holder_of(k)
+            if hk is not None:
+                shown_by.setdefault(hk, set()).add(k)
+        put_by: dict[tuple[str, ...], set[str]] = {}
+        for k, kind in last.items():
+            hk = holder_of(k)
+            if hk is not None and kind == "put":
+                put_by.setdefault(hk, set()).add(k)
         scope = {h for h in self.holders if self._scoped(read.selector, h)}
-        scope |= {holder_of(k) for k in shown}  # type: ignore[misc]
+        scope |= set(shown_by)
         for h in scope:
             x = self._holder(h)
-            mine = {k for k in shown if holder_of(k) == h and k not in moved}
+            mine = shown_by.get(h, set()) - moved
             if whole:
-                x.held = {k for k in moved if holder_of(k) == h and last[k] == "put"} | mine
+                x.held = put_by.get(h, set()) | mine
                 if x.held or h not in withdrawn_since:
                     x.confirmed, x.why = True, ""
             elif unordered:
-                x.held = {k for k in moved if holder_of(k) == h and last[k] == "put"} | mine
+                x.held = put_by.get(h, set()) | mine
                 if x.held:
                     x.confirmed, x.why = True, ""
                 elif h in withdrawn_since or x.why == WITHDRAWN:

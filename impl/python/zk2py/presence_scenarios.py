@@ -1,4 +1,4 @@
-"""core ``scenarios/presence.md`` §1 to §10 (core 0.41), run from Python on
+"""core ``scenarios/presence.md`` §1 to §10 (core 0.42), run from Python on
 zenoh-python 1.10.1 routers in process, with an owner and a reader under
 test of either implementation::
 
@@ -28,7 +28,9 @@ the reader under test's verdict (0.38, F-188, F-189):
   §8: a withdrawal heard live; §9: a read beside a liveliness subscriber;
 - §10 (0.41): the round trip at a population, its GET matching no token,
   subscribers without history and a namespace's, a round trip lost with
-  its transport, and a read that runs to the interests timeout.
+  its transport, and a read that runs to the interests timeout; 0.42: the
+  crowd in ``ns``, a watch session in no namespace on the wire keys (step
+  8), and no round trip through a watch session cut off (step 9).
 
 Exit 0 when every check passes, 1 otherwise.
 """
@@ -1112,16 +1114,25 @@ def section9(report: Report) -> None:
     try:
         bus.start_owner()
         report.check(sec, "1. the tool reads the owner's instance token", _wait(bus.tool_reads, 5.0))
-        watch = live.open_client(bus.endpoint)
-        heard: list[str] = []
-        sub = watch.liveliness().declare_subscriber(INSTANCES,
-                                                    zenoh.handlers.Callback(lambda s: heard.append(str(s.key_expr))),
-                                                    history=True)
-        fin, oks, errs, _ = _raw_read(watch)
-        report.check(sec, "2. the watch session's GET, made at once beside its history subscriber, ends with the "
-                          "final reply and no error reply, and without the owner's instance token",
-                     fin and errs == 0 and bus.key not in oks, f"{len(oks)} tokens")
-        report.check(sec, "2. the subscriber does hear it", _wait(lambda: bus.key in heard, 5.0))
+        # 2. (0.42, F-235) ten times, a fresh watch session each time: the
+        # miss is a race the session's own answer can win
+        runs: list[tuple[bool, bool, bool]] = []
+        for _ in range(10):
+            watch = live.open_client(bus.endpoint)
+            heard: list[str] = []
+            sub = watch.liveliness().declare_subscriber(
+                INSTANCES, zenoh.handlers.Callback(lambda s, h=heard: h.append(str(s.key_expr))), history=True)
+            fin, oks, errs, _ = _raw_read(watch)
+            runs.append((fin and errs == 0, bus.key not in oks, _wait(lambda h=heard: bus.key in h, 5.0)))
+            sub.undeclare()
+            live.close(watch)
+        missed = sum(1 for _, miss, _ in runs if miss)
+        report.check(sec, "2. (0.42) ten fresh watch sessions, each GET made at once beside its history subscriber: "
+                          "each ends with the final reply and no error reply, and in one run at least without the "
+                          "owner's instance token", all(clean for clean, _, _ in runs) and missed >= 1,
+                     f"missed in {missed} of 10, clean {sum(1 for c, _, _ in runs if c)} of 10")
+        report.check(sec, "2. the subscriber does hear it, in every run", all(h for _, _, h in runs),
+                     f"{sum(1 for _, _, h in runs if h)} of 10")
         fin, oks, errs, _ = _raw_read(bus.tool)
         report.check(sec, "3. the tool's GET, on a session with no liveliness subscriber, holds it",
                      fin and errs == 0 and bus.key in oks)
@@ -1131,9 +1142,7 @@ def section9(report: Report) -> None:
         report.check(sec, "3. zk2py's reader makes no read on a session that holds a liveliness subscriber it "
                           "declared, and reports it not made",
                      p.kind == live.NOT_MADE and p.not_made == live.BESIDE_SUBSCRIBER, p.reading)
-        for x in (sub, m_sub):
-            x.undeclare()
-        live.close(watch)
+        m_sub.undeclare()
         live.close(marked)
         _section9_reader(report, sec, bus)
     finally:
@@ -1304,7 +1313,14 @@ def section4(report: Report) -> None:
         router.close()
 
 
-# -- §10 (0.41) --------------------------------------------------------------------------------------
+# -- §10 (0.41, 0.42) --------------------------------------------------------------------------------
+
+#: §10's own tokens (0.42: "The steps' own tokens are under the system ``s10``")
+S10 = "zk2/s10/*/@zk/instance/*"
+#: §10's namespace, the crowd's (0.42: "the crowd sessions, in a namespace ``ns``")
+NS = "ns"
+CROWD = "zk2/crowd/*/@zk/instance/*"
+
 
 class _Watch:
     """A fresh watch session for §10: a client of ``endpoint`` (a link's, to
@@ -1348,7 +1364,7 @@ class _Watch:
         live.close(self.session)
 
 
-def _reads_gone(session: Any, key: str, selector: str = INSTANCES, timeout: float = 5.0) -> bool:
+def _reads_gone(session: Any, key: str, selector: str = S10, timeout: float = 5.0) -> bool:
     """A tool's read, complete, without ``key``: the owner read gone."""
     from . import live
 
@@ -1359,7 +1375,7 @@ def _reads_gone(session: Any, key: str, selector: str = INSTANCES, timeout: floa
     return _wait(gone, timeout)
 
 
-def _reads_held(session: Any, key: str, selector: str = INSTANCES, timeout: float = 5.0) -> bool:
+def _reads_held(session: Any, key: str, selector: str = S10, timeout: float = 5.0) -> bool:
     from . import live
 
     return _wait(lambda: any(key.endswith(f"/@zk/instance/{i['instance']}")
@@ -1375,7 +1391,8 @@ def _s10_run(endpoint: str, tools: list[Any], address: str, *, round_trip: bool,
     declaration until ``stall_ms`` later (None: until after the tool reads
     the token gone, step 2), and at once the round trip, or none; then the
     tools read the token (the seed), the owner withdraws it at once, and the
-    tools read it gone. What the watch session heard, and the round trip."""
+    tools read it gone. The tools read the steps' own tokens (:data:`S10`).
+    What the watch session heard, and the round trip."""
     from . import live
     from .budget_scenarios import Link
 
@@ -1424,7 +1441,8 @@ def _s10_run(endpoint: str, tools: list[Any], address: str, *, round_trip: bool,
 
 
 def section10(report: Report) -> None:
-    """§10 A round trip at a population, and the interests timeout (0.41)."""
+    """§10 A round trip at a population, and the interests timeout (0.41,
+    0.42: the crowd in ``ns``, the steps' own tokens under ``s10``)."""
     from . import live
     from .live_interop import _r1
 
@@ -1433,34 +1451,50 @@ def section10(report: Report) -> None:
     r2, ep2 = _router(connect=ep1)
     tool = live.open_client(ep1)
     tool2 = live.open_client(ep2)
-    crowd = [live.open_client(ep1), live.open_client(ep1)]
+    crowd = [live.open_client(ep1, namespace=NS), live.open_client(ep1, namespace=NS)]
+    ns_tool = live.open_client(ep1, namespace=NS)
     held: list[Any] = []
     try:
         if not _wait(lambda: live.links_held(tool2) is True, 10.0):
             report.check(sec, "setup: the second tool reaches R2", False)
             return
+        _s10_crowd(report, sec, crowd, held, ns_tool)
         if P.reader == "zenctl":
-            _section10_zenctl(report, sec, ep1, crowd, held)
+            _section10_zenctl(report, sec, ep1, held)
             return
         _s10_steps_1_to_3(report, sec, ep1, ep2, tool, tool2)
-        _s10_step_4(report, sec, ep1, tool, crowd, held)
+        _s10_step_4(report, sec, ep1)
         _s10_step_5(report, sec, ep1)
-        for t in held:
-            t.undeclare()
-        held.clear()
-        _s10_step_6(report, sec, ep1, shared=True)
-        _s10_step_6(report, sec, ep1, shared=False)
+        _s10_step_6(report, sec, ep1)
         _s10_step_7(report, sec, ep1)
+        _s10_step_8(report, sec, ep1, ns_tool, held)
+        _s10_step_9(report, sec, ep1)
     finally:
         for t in held:
             try:
                 t.undeclare()
             except Exception:  # noqa: BLE001
                 pass
-        for s in (tool, tool2, *crowd):
+        for s in (tool, tool2, ns_tool, *crowd):
             live.close(s)
         r2.close()
         r1.close()
+
+
+def _s10_crowd(report: Report, sec: str, crowd: list[Any], held: list[Any], ns_tool: Any) -> None:
+    """§10's setup (0.42): the crowd, ``--crowd`` instance tokens held by two
+    sessions in ``ns``, read whole by a tool in ``ns``."""
+    from . import live
+
+    n = P.crowd
+    half = n // 2
+    t0 = time.monotonic()
+    for i in range(n):
+        held.append(crowd[i // half if i < 2 * half else 1].liveliness().declare_token(
+            f"zk2/crowd/c{i}/@zk/instance/{i:016x}"))
+    whole = _wait(lambda: len(live.list_presence(ns_tool, CROWD, 60.0).instances) == n, 180.0, 0.5)
+    report.note(sec, f"setup: the crowd, {n} instance tokens in {NS} on two sessions, read whole by a tool in {NS}: "
+                     f"{whole}, {time.monotonic() - t0:.1f} s")
 
 
 def _s10_steps_1_to_3(report: Report, sec: str, ep1: str, ep2: str, tool: Any, tool2: Any) -> None:
@@ -1476,7 +1510,7 @@ def _s10_steps_1_to_3(report: Report, sec: str, ep1: str, ep2: str, tool: Any, t
         return good, waited, notes
 
     for label, via, tools in (("1.", None, [tool]), ("3. (through R2)", ep2, [tool2, tool])):
-        runs = [_s10_run(ep1, tools, f"lab/s10a{n}", round_trip=True, via=via) for n in range(10)]
+        runs = [_s10_run(ep1, tools, f"s10/a{n}", round_trip=True, via=via) for n in range(10)]
         good, waited, notes = tally(runs, True)
         report.check(sec, f"{label} the round trip, a GET of {INSTANCES.rsplit('/', 2)[0]}/settle made at once after a "
                           "subscriber without history on a link stalled 150 ms, is still waiting when the stall ends, "
@@ -1484,7 +1518,7 @@ def _s10_steps_1_to_3(report: Report, sec: str, ep1: str, ep2: str, tool: Any, t
                      waited == 10, f"{waited} of 10; {', '.join(notes)}")
         report.check(sec, f"{label} in every run the watch session hears the token withdrawn, though its subscriber "
                           "has no history and the token was declared before it", good == 10, f"{good} of 10 runs")
-        runs = [_s10_run(ep1, tools, f"lab/s10b{n}", round_trip=False, stall_ms=None, via=via) for n in range(3)]
+        runs = [_s10_run(ep1, tools, f"s10/b{n}", round_trip=False, stall_ms=None, via=via) for n in range(3)]
         good, _, _ = tally(runs, False)
         rts = [r.get("rt_after") for r in runs]
         report.check(sec, f"{label.replace('1.', '2.')} without the round trip, the stall ended only after the tool "
@@ -1493,77 +1527,74 @@ def _s10_steps_1_to_3(report: Report, sec: str, ep1: str, ep2: str, tool: Any, t
                      f"{good} of 3 never heard it; round trips after {[bool(x) for x in rts]}")
 
 
-def _s10_step_4(report: Report, sec: str, ep1: str, tool: Any, crowd: list[Any], held: list[Any]) -> None:
+def _s10_step_4(report: Report, sec: str, ep1: str) -> None:
+    """§10 step 4 (0.42): the watch sessions in ``ns``, with the crowd."""
     from . import live
 
     n = P.crowd
-    half = n // 2
-    t0 = time.monotonic()
-    for i in range(n):
-        held.append(crowd[i // half if i < 2 * half else 1].liveliness().declare_token(
-            f"zk2/crowd/c{i}/@zk/instance/{i:016x}"))
-    whole = _wait(lambda: len(live.list_presence(tool, "zk2/crowd/*/@zk/instance/*", 30.0).instances) == n, 120.0, 0.5)
-    report.note(sec, f"4. the crowd: {n} instance tokens on two sessions, read whole by the tool: {whole}, "
-                     f"{time.monotonic() - t0:.1f} s")
-    w = _Watch(ep1)
+    w = _Watch(ep1, namespace=NS)
     try:
         w.subscribe(INSTANCES, history=False)
         fin, toks, errs, secs = _round_trip_raw(w.session, live.settle_key(INSTANCES), 5.0)
-        report.check(sec, f"4. beside the {n} tokens, a subscriber without history: the round trip carries no token "
-                          "and ends within one round trip, under 1 s",
+        report.check(sec, f"4. beside the {n} tokens in {NS}, a watch session in {NS} without history: the round trip "
+                          "carries no token and ends within one round trip, under 1 s",
                      fin and toks == 0 and errs == 0 and secs < 1.0, f"{secs * 1000:.1f} ms, {toks} tokens, {errs} errors")
     finally:
         w.close()
+
     def with_history(direct: bool) -> tuple[bool, int | None, float, int, int]:
-        w = _Watch(ep1, interests_timeout_s=60.0)
+        w = _Watch(ep1, namespace=NS, interests_timeout_s=60.0)
 
         def count() -> int:
-            return len({k for _, kind, k in list(w.heard) if kind == "put" and k.startswith("zk2/crowd/")})
+            return len({k for _, kind, k in list(w.heard) if kind == "put" and "zk2/crowd/" in k})
 
         try:
             at_end: dict[str, int] = {}
             w.subscribe(INSTANCES, history=True, direct=direct)
-            fin, toks, errs, secs = _round_trip_raw(w.session, live.settle_key(INSTANCES), 5.0, direct=direct,
-                                                    on_end=lambda: at_end.setdefault("n", count()))
+            fin, toks, errs, secs = _round_trip_raw(w.session, live.settle_key(INSTANCES), 120.0 if n > 2000 else 5.0,
+                                                    direct=direct, on_end=lambda: at_end.setdefault("n", count()))
             time.sleep(0.05)
             return fin and errs == 0, at_end.get("n"), secs, toks, count()
         finally:
             w.close()
 
-    runs = [with_history(True) for _ in range(10)]
-    report.check(sec, f"4. with history (its interests timeout 60 s): the round trip ends only after the history: "
-                      f"by then the subscriber has heard all {n} tokens (callbacks on zenoh's thread, indirect=False), "
-                      "in every run", all(ok and heard == n and toks == 0 for ok, heard, _, toks, _ in runs),
+    runs = [with_history(True) for _ in range(10 if n <= 2000 else 3)]
+    report.check(sec, f"4. a watch session in {NS} with history (its interests timeout 60 s): the round trip ends only "
+                      f"after the history: by then zenoh has delivered all {n} tokens to the subscriber (callbacks on "
+                      "zenoh's thread, indirect=False), in every run",
+                 all(ok and heard == n and toks == 0 for ok, heard, _, toks, _ in runs),
                  f"{[x[1] for x in runs]} heard by its end, {', '.join(f'{x[2] * 1000:.0f} ms' for x in runs)}")
     # The interests timeout met by a population, with no stall (core §8.1,
     # 0.41: "A reader MUST read a read whose time reached its session's
-    # interests timeout as possibly incomplete"): a session at 300 ms reads
-    # the crowd with a 5 s timeout; zk2py's own sessions run with 120 s.
+    # interests timeout as possibly incomplete"): a session in ns at 300 ms
+    # reads the crowd with a 5 s timeout; zk2py's own sessions run with 120 s.
     for its in (0.3, live.INTERESTS_TIMEOUT_S):
-        s = live.open_client(ep1, interests_timeout_s=its)
+        s = live.open_client(ep1, namespace=NS, interests_timeout_s=its)
         try:
             _wait(lambda: live.links_held(s) is True, 10.0)
-            p = live.list_presence(s, "zk2/crowd/*/@zk/instance/*", 5.0)
+            p = live.list_presence(s, CROWD, 5.0 if n <= 2000 else 30.0)
         finally:
             live.close(s)
         reached = p.elapsed_s >= its
-        report.check(sec, f"4. a read of the crowd (a 5 s timeout) on a session whose interests timeout is {its:g} s: "
-                          "the reader's verdict follows how it ended: at the interests timeout, possibly incomplete; "
+        report.check(sec, f"4. a read of the crowd on a session in {NS} whose interests timeout is {its:g} s: the "
+                          "reader's verdict follows how it ended: at the interests timeout, possibly incomplete; "
                           f"before it, complete with all {n}",
                      (p.kind == live.POSSIBLY_INCOMPLETE and p.at_interests_timeout and not p.errors) if reached
                      else (p.kind == live.COMPLETE and len(p.instances) == n),
                      f"{p.elapsed_s * 1000:.0f} ms, {len(p.instances)} of {n}, {len(p.errors)} error replies, "
                      f"{p.kind}")
-    runs = [with_history(False) for _ in range(20)]
+    runs = [with_history(False) for _ in range(10 if n <= 2000 else 3)]
     short = [x[1] for x in runs if x[1] != n]
     late = sum(1 for x in runs if x[4] == n)
     report.note(sec, f"4. the same with zenoh-python's default callbacks, each on a thread of its own (indirect): the "
                      f"round trip's end reached the application before the subscriber's last history sample in "
-                     f"{len(short)} of 20 runs ({short} heard by then); 50 ms after it, every token heard in {late} of "
-                     f"20 (F-230)")
+                     f"{len(short)} of {len(runs)} runs ({short} heard by then); 50 ms after it, every token heard in "
+                     f"{late} of {len(runs)} (0.42's F-230 wording)")
 
 
 def _s10_step_5(report: Report, sec: str, ep1: str) -> None:
+    """§10 step 5 (0.42, F-231): a session in no namespace reads the steps'
+    own tokens, never the crowd's."""
     from . import live
     from .budget_scenarios import Link
 
@@ -1571,17 +1602,13 @@ def _s10_step_5(report: Report, sec: str, ep1: str) -> None:
     s = live.open_client(link.endpoint, interests_timeout_s=0.3)
     try:
         _wait(lambda: live.links_held(s) is True, 10.0)
-        p = live.list_presence(s, INSTANCES, 2.0)
-        name = (f"5. a session whose interests timeout is 300 ms, its link open: the read of {INSTANCES}, the crowd "
-                f"of {P.crowd} under it, is complete")
-        if P.crowd == 2000:
-            report.check(sec, name, p.kind == live.COMPLETE, f"{p.elapsed_s * 1000:.1f} ms; {p.reading[:200]}")
-        else:
-            report.note(sec, f"{name}? measured beside the larger crowd (F-231): {p.kind}, "
-                             f"{p.elapsed_s * 1000:.1f} ms, {p.count} tokens")
+        p = live.list_presence(s, S10, 2.0)
+        report.check(sec, f"5. a session in no namespace, its interests timeout 300 ms, its link open: the read of {S10}, "
+                          f"none held by then (never the crowd's {P.crowd}, F-231), is complete",
+                     p.kind == live.COMPLETE and p.count == 0, f"{p.elapsed_s * 1000:.1f} ms; {p.reading[:200]}")
         link.stall()
         try:
-            q = live.list_presence(s, INSTANCES, 2.0)
+            q = live.list_presence(s, S10, 2.0)
             rt = live.settle(s, 2.0, selector=INSTANCES)
         finally:
             link.flowing.set()
@@ -1590,8 +1617,9 @@ def _s10_step_5(report: Report, sec: str, ep1: str) -> None:
                                                                                    f"{len(q.errors)} errors")
         report.check(sec, "5. zk2py's reader reads it possibly incomplete (at the interests timeout), never complete",
                      q.kind == live.POSSIBLY_INCOMPLETE and q.at_interests_timeout, q.reading)
-        report.check(sec, "5. stalled: zenoh ends the round trip at 300 ms with the final reply alone, no error reply; "
-                          "zk2py's reader says its round trip does not stand (not made, at the interests timeout)",
+        report.check(sec, f"5. stalled: zenoh ends the round trip, of {rt.key}, at 300 ms with the final reply alone, "
+                          "no error reply; zk2py's reader says its round trip does not stand (not made, at the "
+                          "interests timeout)",
                      rt.finished and rt.errors == 0 and 0.29 <= rt.elapsed_s < 1.0 and not rt.stands and not rt.made
                      and rt.why == live.AT_INTERESTS_TIMEOUT, f"{rt.elapsed_s * 1000:.1f} ms, {rt.why}")
     finally:
@@ -1599,144 +1627,163 @@ def _s10_step_5(report: Report, sec: str, ep1: str) -> None:
         link.close()
 
 
-def _s10_step_6(report: Report, sec: str, ep1: str, *, shared: bool) -> None:
-    """§10 step 6: the reader under test, zk2py's follower, its watch
-    session's interests timeout 300 ms, its link stalled while it starts,
-    then cut and healed. ``shared``: its reading session on the same link
-    (as §8's reader); otherwise straight to R1 (F-227)."""
+def _s10_step_6(report: Report, sec: str, ep1: str) -> None:
+    """§10 step 6 (0.42, F-227): the reader under test, zk2py's follower,
+    its watch session through the link, its interests timeout 300 ms, its
+    reading session straight to R1; the link stalled from before the
+    reader's subscribers until its first seed has been read, then cut and
+    healed. Every liveliness GET of either session is counted."""
     from . import live
     from . import presence as pr
     from .budget_scenarios import Link
 
-    which = "its reading session on the same link" if shared else "its reading session straight to R1"
-    h = Holder(ep1, "lab/s10f")
+    h = Holder(ep1, "s10/f")
     link = Link(ep1)
-    watch = live.open_client(link.endpoint, interests_timeout_s=0.3)
-    reading = live.open_client(link.endpoint if shared else ep1)
+    w_in = live.open_client(link.endpoint, interests_timeout_s=0.3)
+    r_in = live.open_client(ep1)
+    watch, reading = _Counted(w_in), _Counted(r_in)
+    # zenoh-python reads no configuration back: the wrappers' values are said
+    live.register(watch, interests_timeout_s=0.3)
+    live.register(reading, interests_timeout_s=live.INTERESTS_TIMEOUT_S)
     f = None
     try:
-        _wait(lambda: live.links_held(watch) is True and live.links_held(reading) is True, 10.0)
-        _reads_held(reading, h.key)
+        _wait(lambda: live.links_held(w_in) is True and live.links_held(r_in) is True, 10.0)
+        _reads_held(r_in, h.key)
         link.stall()
-        stall_ms = 800.0
-        if shared:
-            threading.Timer(stall_ms / 1000.0, link.flowing.set).start()
+        t0 = time.monotonic()
         f = pr.PresenceFollower(reading, watch, INSTANCES, timeout=2.0, round_trip_timeout=5.0)
-        if not shared:
-            time.sleep(max(0.0, stall_ms / 1000.0 - 0.35))
-            link.flowing.set()
+        # the reader's first seed has been read: the stall ends
+        link.flowing.set()
+        stall_s = time.monotonic() - t0
         first_rt = f.round_trips[0] if f.round_trips else None
         first = f.folds[0] if f.folds else None
-        st_owner = f.address("lab", "s10f")
-        st_absent = f.address("lab", "absent")
-        report.check(sec, f"6. ({which}) the watch session's link stalled 0.8 s while the reader starts: its round "
-                          "trip ends at the interests timeout, not made, and its seed is possibly incomplete, its "
-                          "round trip not established",
+        st_owner = f.address("s10", "f")
+        st_absent = f.address("s10", "absent")
+        report.check(sec, f"6. the watch session's link stalled from before the reader's subscribers until its first "
+                          f"seed was read ({stall_s * 1000:.0f} ms): its round trip ran out at the interests timeout, "
+                          "not made, and its seed is possibly incomplete, its round trip not established",
                      first_rt is not None and not first_rt.stands and first_rt.why == live.AT_INTERESTS_TIMEOUT
                      and first == (live.COMPLETE, False),
                      f"round trip {first_rt and (first_rt.why[:40], round(first_rt.elapsed_s, 3))}, first fold {first}")
-        report.check(sec, f"6. ({which}) the address it shows is up, one it does not is unobservable, never down",
+        report.check(sec, "6. the address it shows is up, one it does not is unobservable, never down",
                      st_owner[0] == pr.UP and st_absent == (pr.UNOBSERVABLE, pr.NO_ROUND_TRIP),
                      f"owner {st_owner}, absent {st_absent}")
-        ok = _wait(lambda: f.address("lab", "absent")[0] == pr.DOWN, 10.0)
+        ok = _wait(lambda: f.address("s10", "absent")[0] == pr.DOWN, 10.0)
         whole = [i for i, x in enumerate(f.folds) if x == (live.COMPLETE, True)]
         stood = [rt for rt in f.round_trips if rt.stands]
-        report.check(sec, f"6. ({which}) it reads again, making the round trip first, and once one stands a read is "
-                          "complete again", ok and bool(whole) and bool(stood)
-                     and stood[0].asked_ns < f.view.reads[whole[0]].asked_ns,
+        report.check(sec, "6. it reads again, making the round trip first, and once one stands a read is complete "
+                          "again", ok and bool(whole) and bool(stood) and stood[0].asked_ns < f.view.reads[whole[0]].asked_ns,
                      f"folds {f.folds}, round trips {[(bool(r), round(r.elapsed_s, 3)) for r in f.round_trips]}")
+        # the cut: what the view holds at the move itself, before any read
+        at_move: list[Any] = []
+        view_moved = f.view.moved
+
+        def moved(at_ns: int | None = None) -> None:
+            view_moved(at_ns)
+            at_move.append((f.view.address("s10", "f"), f.view.address("s10", "absent"), len(f.view.reads)))
+
+        f.view.moved = moved  # type: ignore[method-assign]
         n_folds, n_rt, n_moves = len(f.folds), len(f.round_trips), len(f.moves)
+        n_w, n_r = len(watch.gets), len(reading.gets)
         states: list[tuple[str, str]] = []
         link.cut()
         _wait(lambda: len(f.moves) > n_moves and len(f.folds) > n_folds, 5.0)
         t_end = time.monotonic() + 1.5
         while time.monotonic() < t_end:
-            states.append(f.address("lab", "s10f"))
+            states.append(f.address("s10", "f"))
             time.sleep(0.02)
+        first_move = at_move[0] if at_move else None
+        report.check(sec, "6. the link cut: every address the reader followed is unobservable at once, the owner's "
+                          "among them, from the move itself and before any read (F-229)",
+                     first_move is not None and first_move[0] == (pr.UNOBSERVABLE, pr.MOVED)
+                     and first_move[1] == (pr.UNOBSERVABLE, pr.MOVED) and first_move[2] == n_folds,
+                     f"at the move {first_move}, reads before it {n_folds}")
         after_cut = f.folds[n_folds:]
-        if shared:
-            report.check(sec, f"6. ({which}) the link cut: the reader reads again at once, a read not made through a "
-                              "session cut off, the owner unobservable, never down",
-                         bool(after_cut) and after_cut[0][0] == live.NOT_MADE and pr.DOWN not in {s for s, _ in states}
-                         and states[-1][0] == pr.UNOBSERVABLE,
-                         f"moves {[k for _, k in f.moves[n_moves:]]}, folds {after_cut}, states {sorted(set(states))}")
-        else:
-            report.check(sec, f"6. ({which}) the watch link cut: the reader reads again at once; its read is made, "
-                              "complete by its replies but no round trip stands, so it is possibly incomplete; the "
-                              "owner it shows is up, never down (Expected 6's \"a read not made\" needs the reading "
-                              "session cut too: F-227)",
-                         bool(after_cut) and after_cut[0] == (live.COMPLETE, False)
-                         and pr.DOWN not in {s for s, _ in states},
-                         f"moves {[k for _, k in f.moves[n_moves:]]}, folds {after_cut}, states {sorted(set(states))}")
+        why = f.reads[n_folds].not_made if len(f.reads) > n_folds else None
+        report.check(sec, "6. it reads again at once, and makes no read and no round trip through its watch session "
+                          "cut off, though its reading session holds its link: a read not made, its reason the watch "
+                          "session's (F-228), the owner unobservable, never down",
+                     bool(after_cut) and after_cut[0][0] == live.NOT_MADE and why == live.WATCH_CUT_OFF
+                     and len(watch.gets) == n_w and len(reading.gets) == n_r and live.links_held(r_in) is True
+                     and pr.DOWN not in {s for s, _ in states} and states[-1][0] == pr.UNOBSERVABLE,
+                     f"moves {[k for _, k in f.moves[n_moves:]]}, folds {after_cut}, GETs since the cut: watch "
+                     f"{len(watch.gets) - n_w}, reading {len(reading.gets) - n_r}; states {sorted(set(states))}")
         time.sleep(1.5)
-        after_cut = f.folds[n_folds:]
-        report.check(sec, f"6. ({which}) while the watch session stays cut off, 3 s in all, the reader makes no read "
-                          "beyond the one its move asked: no round trip can stand, so it waits for the transport to "
-                          "open (review of PR #876)", len(after_cut) == 1 and f.waited >= 1,
-                     f"{len(after_cut)} reads, {f.waited} attempts that waited")
+        report.check(sec, "6. while the watch session stays cut off, 3 s in all, it asks no GET of either session",
+                     len(watch.gets) == n_w and len(reading.gets) == n_r
+                     and all(k == live.NOT_MADE for k, _ in f.folds[n_folds:]),
+                     f"{len(f.folds) - n_folds} reads, all not made: {f.folds[n_folds:]}; {f.waited} attempts that "
+                     "waited")
         n_folds, n_moves = len(f.folds), len(f.moves)
         link.heal()
         opened = _wait(lambda: any(k == "open" for _, k in f.moves[n_moves:]), 20.0, 0.1)
-        up = _wait(lambda: f.address("lab", "s10f")[0] == pr.UP and f.folds[-1] == (live.COMPLETE, True), 10.0)
+        up = _wait(lambda: f.address("s10", "f")[0] == pr.UP and f.folds[-1] == (live.COMPLETE, True), 10.0)
         t_open = next((t for t, k in f.moves[n_moves:] if k == "open"), None)
         whole_after = [r for r, x in zip(f.view.reads[n_folds:], f.folds[n_folds:]) if x == (live.COMPLETE, True)]
         rt_after = [rt for rt in f.round_trips[n_rt:] if rt.stands and t_open is not None and rt.asked_ns > t_open]
-        report.check(sec, f"6. ({which}) after the heal it makes the round trip again before the read that finds the "
-                          "owner up", opened and up and bool(whole_after) and bool(rt_after)
+        report.check(sec, "6. after the heal it makes the round trip again before the read that finds the owner up",
+                     opened and up and bool(whole_after) and bool(rt_after)
                      and rt_after[0].asked_ns < whole_after[0].asked_ns,
                      f"moves {[k for _, k in f.moves]}, folds since {f.folds[n_folds:]}")
-        made = [rt for rt in f.round_trips if rt.why != live.CUT_OFF]
+        made = [rt for rt in f.round_trips if rt.made or rt.why == live.AT_INTERESTS_TIMEOUT]
 
         def how(r: Any) -> str:
             return "stood" if r else "at the interests timeout" if r.why == live.AT_INTERESTS_TIMEOUT else r.why[:30]
 
-        report.note(sec, f"6. ({which}) round trips on the watch session: {len(made)} made "
-                         f"({', '.join(how(r) for r in made)}), {len(f.round_trips) - len(made)} not made "
-                         f"(cut off); reads {len(f.folds)}")
+        report.note(sec, f"6. round trips on the watch session: {len(watch.gets)} asked ({', '.join(how(r) for r in made)}), "
+                         f"{len(f.round_trips) - len(made)} not asked (cut off); reads {len(f.folds)} "
+                         f"({sum(1 for k, _ in f.folds if k == live.NOT_MADE)} not made), {len(reading.gets)} GETs on "
+                         "the reading session")
     finally:
         if f is not None:
             f.close()
         h.close()
-        live.close(watch)
-        live.close(reading)
+        live.close(w_in)
+        live.close(r_in)
         link.close()
 
 
 def _s10_step_7(report: Report, sec: str, ep1: str) -> None:
+    """§10 step 7 (0.42, F-234): the owner and the tool in ``ns``, a fresh
+    watch session and a fresh token for each subscriber, on the steps' own
+    tokens; then zk2py's follower in ``ns``."""
     from . import live
     from . import presence as pr
 
     if P.owner == "rust":
         report.cannot(sec, "7. the owner example takes no namespace: step 7's owner is zk2py's only")
         return
-    tool = live.open_client(ep1, namespace="ns")
+    tool = live.open_client(ep1, namespace=NS)
     try:
-        cases = (("in ns, without history", "ns", INSTANCES, False, False),
-                 ("in ns, with history", "ns", INSTANCES, True, True),
-                 ("in no namespace, without history, on the wire key", None, "ns/" + INSTANCES, False, True))
+        cases = ((f"in {NS}, without history", NS, S10, False, False),
+                 (f"in {NS}, with history", NS, S10, True, True),
+                 ("in no namespace, without history, on the wire key", None, f"{NS}/{S10}", False, True))
         for n, (label, wns, sel, history, want) in enumerate(cases):
-            r = _s10_run(ep1, [tool], f"lab/s10n{n}", round_trip=True, stall=False,
-                         namespace="ns", watch_ns=wns, watch_selector=sel, history=history)
-            report.check(sec, f"7. a watch session {label}: " + ("hears the token go" if want else
-                                                                 "never hears the token go: its router tells the "
-                                                                 "withdrawal by the wire key, which it does not strip"),
+            r = _s10_run(ep1, [tool], f"s10/n{n}", round_trip=True, stall=False,
+                         namespace=NS, watch_ns=wns, watch_selector=sel, history=history)
+            report.check(sec, f"7. a fresh watch session {label}, a fresh token: " + (
+                "hears the token go" if want else "never hears the token go: its router tells the withdrawal by the "
+                                                  "wire key, which it does not strip"),
                          r.get("seed") and r.get("gone") and r.get("heard") is want,
                          f"seed {r.get('seed')}, gone {r.get('gone')}, heard {r.get('heard')}")
-        # the reader under test, its watch session in ns: history by default
-        for history, want in ((None, True), (False, False)):
-            h = Holder(ep1, "lab/s10nf", namespace="ns")
-            watch = live.open_client(ep1, namespace="ns")
-            f = pr.PresenceFollower(tool, watch, INSTANCES, history=history)
+        # the reader under test, zk2py's follower, its reading session in ns
+        for label, wns, history, want, want_history in (
+                (f"zk2py's follower in {NS}, its watch session in no namespace (0.42): its subscriber on the wire key "
+                 "without history, it hears the owner go and reads it down", None, None, True, False),
+                (f"zk2py's follower handed a watch session in {NS} keeps history (0.41's option): it hears the owner "
+                 "go and reads it down", NS, None, True, True),
+                (f"the control, a follower whose watch session is in {NS} without history: it never hears the owner "
+                 "go, and goes on reading it up", NS, False, False, False)):
+            h = Holder(ep1, "s10/nf", namespace=NS)
+            watch = live.open_client(ep1, namespace=wns)
+            f = pr.PresenceFollower(tool, watch, S10, history=history)
             try:
-                _wait(lambda: f.address("lab", "s10nf")[0] == pr.UP, 5.0)
+                _wait(lambda: f.address("s10", "nf")[0] == pr.UP, 5.0)
                 h.withdraw()
-                down = _wait(lambda: f.address("lab", "s10nf")[0] == pr.DOWN, 3.0)
-                label = ("zk2py's follower, its watch session in ns: history (0.41's exception), it hears the owner "
-                         "go and reads it down" if history is None else
-                         "the control, a follower in ns without history: it never hears the owner go, and goes on "
-                         "reading it up")
-                report.check(sec, f"7. {label}", down is want and f.history is (history is None),
-                             f"history {f.history}, {f.address('lab', 's10nf')}")
+                down = _wait(lambda: f.address("s10", "nf")[0] == pr.DOWN, 3.0)
+                wire = f.wire == (f"{NS}/{S10}" if wns is None else S10)
+                report.check(sec, f"7. {label}", down is want and f.history is want_history and wire,
+                             f"history {f.history}, subscribed {f.wire}, {f.address('s10', 'nf')}, outside {f.outside}")
             finally:
                 f.close()
                 h.close()
@@ -1745,59 +1792,174 @@ def _s10_step_7(report: Report, sec: str, ep1: str) -> None:
         live.close(tool)
 
 
-def _section10_zenctl(report: Report, sec: str, ep1: str, crowd: list[Any], held: list[Any]) -> None:
+def _s10_step_8(report: Report, sec: str, ep1: str, ns_tool: Any, held: list[Any]) -> None:
+    """§10 step 8 (0.42, F-233): beside the crowd in ``ns``, a watch session
+    in no namespace on the wire keys; then zk2py's follower so, at the
+    population."""
+    from . import live
+    from . import presence as pr
+
+    n = P.crowd
+    wire = f"{NS}/{INSTANCES}"
+    w = _Watch(ep1)
+    try:
+        w.subscribe(wire, history=False)
+        fin, toks, errs, secs = _round_trip_raw(w.session, live.settle_key(wire), 5.0)
+        report.check(sec, f"8. beside the {n} tokens in {NS}, a fresh watch session in no namespace, its subscriber "
+                          f"without history on the wire key {wire}: the round trip on {live.settle_key(wire)} carries "
+                          "no token and ends within one round trip, under 1 s",
+                     fin and toks == 0 and errs == 0 and secs < 1.0, f"{secs * 1000:.1f} ms, {toks} tokens, {errs} errors")
+        victim = held.pop(5)
+        key = f"{NS}/zk2/crowd/c5/@zk/instance/{5:016x}"
+        victim.undeclare()
+        heard = _wait(lambda: w.heard_gone(key), 5.0)
+        got = [k for _, kind, k in w.heard if kind == "delete"]
+        report.check(sec, "8. a crowd token is withdrawn: the subscriber hears it, on its wire key, though the token "
+                          "was declared before it", heard and key in got, f"heard {got[:3]}")
+    finally:
+        w.close()
+    # zk2py's follower at the population, its reading session in ns
+    watch = live.open_client(ep1)
+    f = None
+    try:
+        t0 = time.monotonic()
+        f = pr.PresenceFollower(ns_tool, watch, INSTANCES, timeout=30.0)
+        started = time.monotonic() - t0
+        rt0 = f.round_trips[0] if f.round_trips else None
+        up = f.address("crowd", "c6")
+        victim = held.pop(5)  # c6 now at index 5
+        victim.undeclare()
+        down = _wait(lambda: f.address("crowd", "c6")[0] == pr.DOWN, 30.0)
+        report.check(sec, f"8. zk2py's follower in {NS} beside the {n}, its watch session in no namespace: its round "
+                          "trip stands within one round trip, under 1 s, its seed complete; a crowd token withdrawn, "
+                          "it hears it on the wire key and reads the address down after its re-read",
+                     rt0 is not None and rt0.stands and rt0.elapsed_s < 1.0 and f.folds[0] == (live.COMPLETE, True)
+                     and up[0] == pr.UP and down and f.history is False and f.wire == wire and f.outside == 0,
+                     f"round trip {rt0 and round(rt0.elapsed_s * 1000, 1)} ms, start {started:.2f} s, first fold "
+                     f"{f.folds[:1]}, c6 {up} then {f.address('crowd', 'c6')}, {len(f.reads[0].instances)} instances")
+    finally:
+        if f is not None:
+            f.close()
+        live.close(watch)
+    # beside it, 0.41's option: a watch session in ns with history
+    watch = live.open_client(ep1, namespace=NS)
+    f = None
+    try:
+        f = pr.PresenceFollower(ns_tool, watch, INSTANCES, timeout=30.0, round_trip_timeout=60.0)
+        rt0 = f.round_trips[0] if f.round_trips else None
+        report.note(sec, f"8. beside it, zk2py's follower handed a watch session in {NS} (history {f.history}): its "
+                         f"round trip waited for the population, {rt0 and round(rt0.elapsed_s * 1000)} ms "
+                         f"(stood {bool(rt0)})")
+    finally:
+        if f is not None:
+            f.close()
+        live.close(watch)
+
+
+def _s10_step_9(report: Report, sec: str, ep1: str) -> None:
+    """§10 step 9 (0.42, F-228): no round trip through a watch session cut
+    off, and one cut while it waits."""
+    from . import live
+    from .budget_scenarios import Link
+
+    link = Link(ep1)
+    inner = live.open_client(link.endpoint)
+    w = _Counted(inner)
+    live.register(w, interests_timeout_s=live.INTERESTS_TIMEOUT_S)
+    sub = None
+    try:
+        _wait(lambda: live.links_held(inner) is True, 10.0)
+        sub = live.declare_liveliness_subscriber(w, INSTANCES, lambda s: None)
+        rt0 = live.settle(w, 2.0, selector=INSTANCES)
+        report.check(sec, "9. a fresh watch session through the link, its subscriber without history: its round trip "
+                          "stands", bool(rt0), f"{rt0.elapsed_s * 1000:.1f} ms, {rt0.why}")
+        link.cut()
+        cut = _wait(lambda: live.links_held(inner) is False, 15.0)
+        n = len(w.gets)
+        rt1 = live.settle(w, 2.0, selector=INSTANCES)
+        report.check(sec, "9. its link cut: the reader asked for a round trip through it makes none, asking no "
+                          "liveliness GET, and none stands",
+                     cut and len(w.gets) == n and not rt1.stands and not rt1.made and rt1.why == live.CUT_OFF,
+                     f"GETs {len(w.gets) - n}, {rt1.why}")
+        for who in ("zenoh's own GET", "the reader under test's"):
+            link.heal()
+            back = _wait(lambda: live.links_held(inner) is True, 20.0, 0.1)
+            time.sleep(0.3)
+            link.stall()
+            threading.Timer(0.15, link.cut).start()
+            if who.startswith("zenoh"):
+                fin, toks, errs, secs = _round_trip_raw(inner, live.settle_key(INSTANCES), 2.0)
+                report.check(sec, f"9. healed and stalled, the link cut 150 ms into a round trip, {who}: it comes back "
+                                  "at the cut, well before its 2 s, with the final reply alone, no error reply and no "
+                                  "token", back and fin and errs == 0 and toks == 0 and 0.1 <= secs < 1.0,
+                             f"{secs * 1000:.0f} ms, {toks} tokens, {errs} error replies")
+            else:
+                rt = live.settle(w, 2.0, selector=INSTANCES)
+                report.check(sec, f"9. healed and stalled, the link cut 150 ms into a round trip, {who}: it comes back "
+                                  "at the cut and does not stand (cut off while it ran)",
+                             back and rt.made and not rt.stands and rt.why == live.CUT_OFF_DURING and rt.elapsed_s < 1.0
+                             and rt.errors == 0, f"{rt.elapsed_s * 1000:.0f} ms, {rt.why[:40]}")
+            _wait(lambda: live.links_held(inner) is False, 15.0)
+    finally:
+        if sub is not None:
+            try:
+                sub.undeclare()
+            except Exception:  # noqa: BLE001
+                pass
+        live.close(inner)
+        link.close()
+
+
+def _section10_zenctl(report: Report, sec: str, ep1: str, held: list[Any]) -> None:
     """§10 with the reference's tool: what its command line lets it run.
-    Steps 1 to 3 and 7's subscribers are zenoh's, measured in the zk2py
-    reader's pairing; zenctl's own watch session is not observable from
-    outside."""
+    Steps 1 to 3 and 7's subscribers, and steps 8 and 9's watch sessions,
+    are zenoh's, measured in the zk2py reader's pairing; zenctl's own watch
+    session is not observable from outside. Since 0.42 its watch sessions
+    are in no namespace on the wire keys: ``watchdog --namespace`` beside
+    the crowd runs step 8's shape."""
     from . import live
 
     tool = live.open_client(ep1)
-    h = Holder(ep1, "lab/s10z")
+    h = Holder(ep1, "s10/z")
     try:
         n = P.crowd
-        half = n // 2
-        for i in range(n):
-            held.append(crowd[i // half if i < 2 * half else 1].liveliness().declare_token(
-                f"zk2/crowd/c{i}/@zk/instance/{i:016x}"))
-        _wait(lambda: len(live.list_presence(tool, "zk2/crowd/*/@zk/instance/*", 30.0).instances) == n, 120.0, 0.5)
         if n > 2000:
-            rc, doc, err, secs = _zenctl_list(ep1, system="crowd", timeout_s=2.0, wait=900.0)
-            report.note(sec, f"4. zenctl's read of the {n} with --timeout 2: complete {(doc or {}).get('complete')}, "
-                             f"{len(_rows(doc))} rows, {secs:.1f} s in all (its notes: "
+            rc, doc, err, secs = _zenctl_list(ep1, system="crowd", timeout_s=2.0, wait=900.0,
+                                              extra=["--namespace", NS])
+            report.note(sec, f"4. zenctl's read of the {n} in {NS} with --timeout 2: complete "
+                             f"{(doc or {}).get('complete')}, {len(_rows(doc))} rows, {secs:.1f} s in all (its notes: "
                              f"{[x.get('text', '')[:80] for x in (doc or {}).get('notes', [])]})")
         timeout = 2.0 if n <= 2000 else 30.0
-        rc, doc, err, secs = _zenctl_list(ep1, system="crowd", timeout_s=timeout, wait=900.0)
-        report.check(sec, f"4. zenctl's read beside the crowd (--timeout {timeout:g}): complete, every one of the {n} "
-                          "instance tokens", (doc or {}).get("complete") is True and len(_rows(doc)) == n,
+        rc, doc, err, secs = _zenctl_list(ep1, system="crowd", timeout_s=timeout, wait=900.0, extra=["--namespace", NS])
+        report.check(sec, f"4. zenctl's read beside the crowd, --namespace {NS} (--timeout {timeout:g}): complete, every "
+                          f"one of the {n} instance tokens", (doc or {}).get("complete") is True and len(_rows(doc)) == n,
                      f"rc {rc}, {secs:.1f} s in all, {len(_rows(doc))} rows; {err[:200]}")
-        for t in held:
-            t.undeclare()
-        held.clear()
         cfg = _zenctl_config(300)
         link = DelayLink(ep1)
         try:
-            rc, doc, err, secs = _zenctl_list(link.endpoint, system="lab", timeout_s=2.0, extra=["--zenoh-config", cfg])
+            rc, doc, err, secs = _zenctl_list(link.endpoint, system="s10", timeout_s=2.0, extra=["--zenoh-config", cfg])
             report.check(sec, "5. zenctl, its session's interests timeout 300 ms (--zenoh-config), the path short: "
-                              "complete, the owner's instance token held",
+                              "the read of the steps' own system complete, the owner's instance token held",
                          (doc or {}).get("complete") is True and h.instance in _rows(doc),
                          f"rc {rc}, {secs:.1f} s; {_brief(doc)}; {err}")
             link.delay_s = 0.5
-            rc, doc, err, secs = _zenctl_list(link.endpoint, system="lab", timeout_s=2.0, extra=["--zenoh-config", cfg])
+            rc, doc, err, secs = _zenctl_list(link.endpoint, system="s10", timeout_s=2.0, extra=["--zenoh-config", cfg])
             report.check(sec, "5. the same, the path 0.5 s each way, so the read runs past 300 ms: never complete "
                               "(service list is a listing: exit 0, \"complete\": false)",
                          (doc or {}).get("complete") is not True and not _rows(doc),
                          f"rc {rc}, {secs:.1f} s; {_brief(doc)}; {err}")
-            rc, doc, err, secs = _zenctl_list(link.endpoint, system="lab", timeout_s=5.0)
+            rc, doc, err, secs = _zenctl_list(link.endpoint, system="s10", timeout_s=5.0)
             report.check(sec, "5. (the SHOULD) zenctl on its own interests timeout, the same long path: the read is "
                               "complete, the owner's token held", (doc or {}).get("complete") is True
                          and h.instance in _rows(doc), f"rc {rc}, {secs:.1f} s; {_brief(doc)}; {err}")
         finally:
             link.close()
         # step 6: the watchdog, its sessions behind a long path while it starts
+        # (zenctl takes one endpoint for every session: its reading session
+        # cannot be put straight on R1, F-227's setup)
         link = DelayLink(ep1, 0.4)
         wd = None
-        rule = "instance-gone lab/s10z"
+        rule = "instance-gone s10/z"
         try:
             wd = Watchdog(link.endpoint, [rule], extra=["--zenoh-config", cfg])
             time.sleep(4.0)
@@ -1810,30 +1972,51 @@ def _section10_zenctl(report: Report, sec: str, ep1: str, crowd: list[Any], held
             n0 = len(wd.transitions(rule))
             link.cut()
             time.sleep(3.0)
-            during = [to for _, to, _ in wd.transitions(rule)[n0:]]
+            during = [(to, ev[:160]) for _, to, ev in wd.transitions(rule)[n0:]]
             link.heal()
             back = _wait(lambda: wd.state(rule) == "ok", 30.0, 0.1)
-            report.check(sec, "6. its link cut, then healed: never firing (the owner never left), ok again after the "
-                              "heal", "firing" not in during and back,
+            report.check(sec, "6. its link cut, then healed: unobservable at the cut, never firing (the owner never "
+                              "left), ok again after the heal",
+                         "firing" not in {to for to, _ in during} and "unobservable" in {to for to, _ in during} and back,
                          f"while cut {during}, after {wd.transitions(rule)[n0 + len(during):]}")
         finally:
             if wd is not None:
                 wd.close()
             link.close()
             os.unlink(cfg)
+        # step 8: the watchdog in ns beside the crowd, its watch session in no
+        # namespace on the wire keys (0.42)
+        rule8 = "instance-gone crowd/c5"
+        wd = Watchdog(ep1, [rule8], namespace=NS)
+        try:
+            t0 = time.monotonic()
+            ok = _wait(lambda: wd.state(rule8) == "ok", 60.0, 0.1)
+            t_ok = time.monotonic() - t0
+            victim = held.pop(5)
+            t1 = time.monotonic()
+            victim.undeclare()
+            gone = _wait(lambda: wd.state(rule8) == "firing", 30.0, 0.1)
+            report.check(sec, f"8. zenctl watchdog --namespace {NS} beside the {n}: crowd/c5 read up, then gone once its "
+                              "token is withdrawn, the withdrawal heard from its watch session in no namespace",
+                         ok and gone, f"ok after {t_ok:.1f} s, firing {time.monotonic() - t1:.1f} s after the "
+                                      f"withdrawal; {wd.transitions(rule8)}")
+        finally:
+            wd.close()
+        report.cannot(sec, "9. zenctl's round trips on its watch session are not observable from its output: asked of "
+                           "zk2py's reader")
         # step 7: a namespace
         if P.owner == "rust":
             report.cannot(sec, "7. the owner example takes no namespace")
             return
-        hn = Holder(ep1, "lab/s10nz", namespace="ns")
-        wd = Watchdog(ep1, ["instance-gone lab/s10nz"], namespace="ns")
+        hn = Holder(ep1, "s10/nz", namespace=NS)
+        wd = Watchdog(ep1, ["instance-gone s10/nz"], namespace=NS)
         try:
-            ok = _wait(lambda: wd.state("instance-gone lab/s10nz") == "ok", 15.0, 0.1)
+            ok = _wait(lambda: wd.state("instance-gone s10/nz") == "ok", 15.0, 0.1)
             hn.withdraw()
-            gone = _wait(lambda: wd.state("instance-gone lab/s10nz") == "firing", 15.0, 0.1)
-            report.check(sec, "7. zenctl watchdog --namespace ns: the owner in ns read up, then gone once it stops: it "
-                              "hears the withdrawal (history in ns, or a watch from no namespace)", ok and gone,
-                         str(wd.transitions("instance-gone lab/s10nz")))
+            gone = _wait(lambda: wd.state("instance-gone s10/nz") == "firing", 15.0, 0.1)
+            report.check(sec, f"7. zenctl watchdog --namespace {NS}: the owner in {NS} read up, then gone once it "
+                              "stops: it hears the withdrawal, from its watch session in no namespace on the wire keys",
+                         ok and gone, str(wd.transitions("instance-gone s10/nz")))
         finally:
             wd.close()
             hn.close()
@@ -1876,7 +2059,7 @@ def main(argv: list[str] | None = None) -> int:
             report.check(f"§{name}", "the section ran", False, repr(e))
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"presence scenarios §1–§10 (core 0.41), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
+    print(f"presence scenarios §1–§10 (core 0.42), {P.owner} owner, {P.reader} reader: {passed} passed, {failed} "
           f"failed, {len(report.not_run)} not run")
     for sec, name, ok, detail in report.rows:
         if not ok:
