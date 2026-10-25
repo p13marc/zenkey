@@ -369,7 +369,7 @@ re-read, 3 s for the ten. The test's control, a reader that skips the
 round trip, its link stalled until the withdrawal had reached R1, missed
 the withdrawal in 3 of 3 starts in each of the 10 runs.*
 
-## §10 A round trip at a population, and the interests timeout (§8.1, 0.41, 0.42, 0.43; Appendix B)
+## §10 A round trip at a population, and the interests timeout (§8.1, 0.41, 0.42, 0.43, 0.44; Appendix B)
 
 **Setup.** Routers R1 and R2, linked R2 → R1. An owner, a tool and two
 crowd sessions are clients of R1; the crowd sessions, in a namespace `ns`,
@@ -408,16 +408,19 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
    timeout. The reader under test reads each, and says whether its round
    trip stands.
 6. (The reader under test, as §8's and §9's.) The reader follows presence,
-   the owner's token held: its watch session reaches R1 through the link,
-   whose `routing/interests/timeout` is 300 ms, and its reading session
-   reaches R1 directly. The watch session's link is stalled from before
-   the reader declares its subscribers until the reader's first seed has
-   been read: by then every round trip the reader asked before that seed
-   has run out under the 300 ms interests timeout (0.42, F-227; 0.43,
-   F-236: how many is the reader's own, two for one that makes a round
-   trip at its start and another before its seed, one for one whose
-   start's round trip is its seed's). Then the stall ends. Then the
-   watch session's link is cut, and healed.
+   the owner's token held: its watch session, whose
+   `routing/interests/timeout` is 300 ms (0.44, F-238), reaches R1 through
+   the link, and its reading session reaches R1 directly. The watch
+   session's link is stalled from before the reader declares its
+   subscribers until the reader's first seed has been read, or, for a
+   reader that makes no read while no round trip stands, until its first
+   round trip has run out under the 300 ms interests timeout (0.44,
+   F-238). By then every round trip the reader asked before that seed has
+   run out under it (0.42, F-227; 0.43, F-236: how many is the reader's
+   own, two for one that makes a round trip at its start and another
+   before its seed, one for one whose start's round trip is its seed's).
+   Then the stall ends. Then the watch session's link is cut, and
+   healed.
 7. As step 1 without the stall, the owner and the tool in `ns`, each case
    with a fresh token, subscribed to the steps' own instance tokens
    (`zk2/s10/*/@zk/instance/*`): a fresh watch session in `ns` declares a
@@ -438,6 +441,20 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
    healed and stalled, a round trip waiting 2 s is asked, and the link is
    cut 150 ms into it (0.43, F-237): once zenoh's own GET, once the reader
    under test's.
+10. (0.44, F-239.) Beside the crowd, in `ns`: a fresh watch session in no
+    namespace, a client of R1 through a link the test can cut, its
+    `routing/interests/timeout` 60 s, declares a subscriber without history
+    to `ns/zk2/*/*/@zk/instance/*` and makes the round trip at once, on
+    `ns/zk2/*/*/@zk/settle`. Its link is cut. While it is cut, a crowd
+    token is withdrawn and a new one declared in `ns`, and the tool in
+    `ns` reads both moves. The link is healed. Once the watch session's
+    transport has opened again, the reader under test asks its round trip
+    four times in a row, giving up on the first three at once and waiting
+    30 s for the fourth. Then (the reader under test, as step 6's) a reader
+    follows presence beside the crowd, its watch session and its reading
+    session both through a link the test can cut, and its caller asks it
+    for its next move from a loop that also wakes every 20 ms, which may
+    drop the call in flight. Its link is cut for 1 s, and healed.
 
 **Expected.**
 1. The round trip is still waiting when the stall ends, and ends with the
@@ -486,6 +503,22 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
    waits comes back at the cut, well before its 2 s: zenoh's own with the
    final reply alone, no error reply and no token; the reader's does not
    stand.
+10. The round trip at the start carries no token, ends within one round
+    trip, under 1 s, and the subscriber is told none; the cut tells it no
+    withdrawal, since it was told no token. When the transport opens
+    again the subscriber is told every crowd token its selector matches,
+    the one declared while the link was cut among them; the one withdrawn
+    then is never told (Appendix B: the client declares its subscriber's
+    interest again in `CurrentFuture` mode). The round trip after the
+    reopen ends only after them, as step 4's with history did: by its end
+    the subscriber has been told all of them. The reader's round trip
+    stands, and it asked one: the three it gave up on ran on, and the
+    fourth took it up (0.44). The reader under test: from the cut, every
+    address it followed is unobservable; after the heal it makes the round
+    trip again, and a read after it is complete within 30 s of the heal,
+    the crowd's addresses up. It asks one round trip after the reopen, and
+    never a read beside one in flight, however often its caller drops the
+    call (0.44).
 
 *Measured (0.41, #851) by the reference, in a debug build, in
 `zenkey/tests/presence.rs`'s `s10_a_round_trip_at_a_population_and_the_interests_timeout`
@@ -540,3 +573,25 @@ complete with all 10,000, and again in 2.6 s; a fresh session on zenoh's
 10 s read 6,098 at 10.0 s, which the reference read as possibly
 incomplete.*
 
+
+*Measured (0.44, #882) by the reference, debug builds: step 6 unchanged,
+the stall 606 ms, four round trips in all. Step 10 (`zenkey/tests/presence.rs`):
+the round trip at the start 1.9 ms, carrying none; after the reopen
+746 ms, the subscriber told 1,999 crowd tokens by its end, the one
+declared while the link was cut among them and the one withdrawn then
+not; one round trip asked for the four calls. Its reader under test
+(`zenkey-fleet/tests/watch_reopen.rs`'s
+`s10_step10_a_reader_after_a_reopen_beside_the_crowd`, a binary of its
+own, both sessions through one relay, the call dropped every 20 ms):
+complete again 1.3–4.5 s after the heal, the sessions back 0.3 ms to
+2.0 s after it, one read and one round trip asked, in 24 of 24 runs eight
+at a time. Before #882 the same reader folded no read in 30 s, asking
+1,401 round trips in one run. Beside 10,000 tokens (that file's ignored
+measurements): the round trip after the reopen took 3.9–4.1 s in a
+release build and 24 s in a debug one, against 49–66 ms at the start;
+the fleet's watchdog with `instance-gone crowd/*`, every session through
+the relay, read ok again 5–6 s after the heal in a release build (1 s
+ticks) and 28–29 s in a debug one, where before it never did within
+60 s and 90 s; a debug `zenctl watchdog` beside a release router, 32 s,
+where before it never did within 300 s, its stderr carrying 139
+`Didn't receive DeclareFinal` lines and 700,070 `Unknown interest`.*

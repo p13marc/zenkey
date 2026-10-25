@@ -153,7 +153,8 @@ async fn reopened(barrier: &zenkey::presence::Barrier, seen: u64, deadline: Dura
     Instant::now()
 }
 
-/// The regression (#882): a reader whose caller drops its `next()` far
+/// `spec/scenarios/presence.md` §10 step 10's reader under test (core
+/// §8.1, 0.44), and #882's regression: a reader whose caller drops its `next()` far
 /// more often than a read lasts — every 20 ms here, as zenctl's watchdog
 /// dropped it every 250 ms beside 10,000 tokens — recovers after its watch
 /// session's transport and its reading session's are cut and healed beside
@@ -166,7 +167,7 @@ async fn reopened(barrier: &zenkey::presence::Barrier, seen: u64, deadline: Dura
 /// measurement beside 10,000 is
 /// `wf_the_feed_after_a_reopen_beside_the_crowd_measured`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_feed_dropped_at_every_wake_recovers_after_a_reopen_beside_the_crowd() {
+async fn s10_step10_a_reader_after_a_reopen_beside_the_crowd() {
     use zenkey_fleet::{
         LivePresence, Monitor, MonitorSpec, PresenceFeed, PresenceScope, SeedOutcome,
     };
@@ -262,7 +263,7 @@ async fn a_feed_dropped_at_every_wake_recovers_after_a_reopen_beside_the_crowd()
     // events (at most three a re-read); one round trip per transport
     // state, a few for the moves around the heal.
     assert!(reads <= 3, "{reads} reads asked: none abandoned");
-    assert!(trips <= 3, "{trips} round trips asked: none abandoned");
+    assert_eq!(trips, 1, "one round trip after the reopen: none abandoned");
     drop(feed);
     monitor.shutdown().await.expect("shutdown");
 }
