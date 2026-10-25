@@ -68,6 +68,7 @@ const KNOWN: &[(&str, &str)] = &[
     ("desired", "order.json"),
     ("desired", "reports.json"),
     ("desired", "conclusions.json"),
+    ("desired", "slices.json"),
     ("redundancy", "declarations.json"),
     ("redundancy", "elections.json"),
     ("redundancy", "heals.json"),
@@ -2311,6 +2312,148 @@ fn desired_declarations() {
     }
     if bless() {
         write_json(&path, &doc);
+    }
+}
+
+/// `desired/conformance/slices.json` (desired.v1 text 0.5): a tool's
+/// reading of a role before §2.17 answers. Which reply is the report is
+/// the tool's (the reference runs every case in `zenkey_fleet`'s
+/// `model::desired`); here, every case's shape, and the slice of each case
+/// whose author's contract is in hand, by the model's declaration (§2.2)
+/// and binding (§2.3).
+#[test]
+fn desired_slices() {
+    use zenkey_model::grammar::{Addr, IfaceId};
+    let path = profiles().join("desired/conformance/slices.json");
+    let doc = read_json(&path);
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let what = format!("{}", case["note"]);
+        let r = &case["reading"];
+        let e = &case["expect"];
+        let from = e["from"].as_str();
+        assert!(
+            matches!(
+                from,
+                None | Some("author_contract" | "offline_contract" | "requirement")
+            ),
+            "{what}"
+        );
+        let found = e["report"]["found"].as_str().expect("found");
+        assert!(
+            matches!(found, "one" | "unreadable" | "none" | "no_slice"),
+            "{what}"
+        );
+        let slice: Vec<&str> = e["slice"]
+            .as_array()
+            .expect("slice")
+            .iter()
+            .map(|s| s.as_str().expect("a key"))
+            .collect();
+        assert_eq!(found == "no_slice", slice.is_empty(), "{what}");
+        if found == "one" {
+            assert!(
+                slice.contains(&e["report"]["claims"].as_str().expect("claims")),
+                "{what}"
+            );
+        }
+        if found == "unreadable" {
+            assert!(
+                matches!(
+                    e["report"]["why"].as_str(),
+                    Some("two_differ" | "unreadable_reply")
+                ),
+                "{what}"
+            );
+        }
+        for x in r["replies"].as_array().expect("replies") {
+            assert!(x["key"].is_string() && x["text"].is_string(), "{what}");
+        }
+        // The author's contract in hand: the slice is the model's.
+        let named = &r["author"]["named"];
+        let held = r["author"]["held"].as_array().expect("held");
+        let names: Option<Vec<&str>> = r["requirement"]["resources"]
+            .as_array()
+            .map(|a| a.iter().map(|t| t.as_str().expect("a template")).collect());
+        let desired_of = |resources: &Value| -> Option<Value> {
+            resources
+                .as_array()
+                .expect("resources")
+                .iter()
+                .find(|x| {
+                    x["annotations"].get(desired::TARGET_PARAM).is_some()
+                        && names
+                            .as_ref()
+                            .is_none_or(|n| n.contains(&x["template"].as_str().unwrap_or("")))
+                })
+                .cloned()
+        };
+        let resource = if named.is_null() {
+            held.iter().find_map(|h| desired_of(&h["resources"]))
+        } else {
+            desired_of(&named["resources"])
+        };
+        let Some(resource) = resource else {
+            assert!(matches!(from, None | Some("requirement")), "{what}");
+            continue;
+        };
+        let (kind, template, params, ann) = desired_resource(&resource);
+        let decl = desired::declaration(kind, &template, &params, &ann);
+        let Some(targets) = decl.targets() else {
+            let reasons: Vec<&str> = match &decl {
+                desired::Declaration::Invalid(r) => r.iter().map(|r| r.as_str()).collect(),
+                _ => vec![],
+            };
+            assert_eq!(e["declaration"], json!(reasons), "{what}");
+            assert!(slice.is_empty(), "{what}");
+            continue;
+        };
+        let iface: IfaceId = r["iface"].as_str().expect("iface").parse().expect("an iface");
+        let token = if resource["explicit"] == json!(true) {
+            KindToken::ExplicitState
+        } else {
+            KindToken::State
+        };
+        let own: Addr = r["target"].as_str().expect("target").parse().expect("an address");
+        let req = &r["requirement"];
+        let bindings: Vec<String> = req["bindings"]
+            .as_array()
+            .expect("bindings")
+            .iter()
+            .map(|b| b.as_str().expect("a binding").to_owned())
+            .collect();
+        let params: BTreeMap<String, String> = req["params"]
+            .as_object()
+            .expect("params")
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_str().expect("a binding").to_owned()))
+            .collect();
+        let got = desired::binding(
+            &desired::Slice {
+                iface: &iface,
+                token,
+                template: &template,
+                targets,
+            },
+            &desired::Requirement {
+                bindings: &bindings,
+                params: &params,
+                optional: req["optional"] == json!(true),
+            },
+            &own,
+        );
+        match got {
+            desired::Binding::Bound { key } => {
+                assert_eq!(slice, [key.to_string().as_str()], "{what}");
+            }
+            desired::Binding::Invalid(why) => {
+                let why: Vec<&str> = why.iter().map(|w| w.as_str()).collect();
+                assert_eq!(e["binding"], json!(why), "{what}");
+                assert!(slice.is_empty(), "{what}");
+            }
+            desired::Binding::Unbound => panic!("{what}: unbound"),
+        }
     }
 }
 

@@ -1066,6 +1066,135 @@ mod tests {
         ));
     }
 
+    /// One revision of the author's interface `iface` from `slices.json`'s
+    /// resources, each as `declarations.json` gives one.
+    fn revision_of(iface: &str, resources: &serde_json::Value) -> Contract {
+        let (name, major) = iface.rsplit_once(".v").expect("<name>.v<major>");
+        let q = |v: &serde_json::Value| serde_json::to_string(v).expect("JSON");
+        let mut toml = format!(
+            "[interface]\nname = \"{name}\"\nmajor = {major}\nminor = 0\nuses = [\"desired.v1\"]\n"
+        );
+        for r in resources.as_array().expect("resources") {
+            toml.push_str(&format!("[resources.{}]\n", q(&r["template"])));
+            toml.push_str(&format!("kind = {}\n", q(&r["kind"])));
+            if r["explicit"] == true {
+                toml.push_str("explicit = true\n");
+            }
+            toml.push_str("type = { raw = \"application/octet-stream\" }\n");
+            let inline = |m: &serde_json::Value| {
+                m.as_object()
+                    .expect("an object")
+                    .iter()
+                    .map(|(k, v)| format!("{} = {}", q(&serde_json::Value::from(k.as_str())), q(v)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            if r["params"].as_object().is_some_and(|p| !p.is_empty()) {
+                toml.push_str(&format!("params = {{ {} }}\ncardinality = 16\n", inline(&r["params"])));
+            }
+            if r["annotations"].as_object().is_some_and(|a| !a.is_empty()) {
+                toml.push_str(&format!("annotations = {{ {} }}\n", inline(&r["annotations"])));
+            }
+        }
+        let l = zenkey_model::contract::load_str(&toml, std::path::Path::new("."), None);
+        l.contract
+            .unwrap_or_else(|| panic!("{toml}\n{}", l.report))
+    }
+
+    /// `spec/profiles/desired/conformance/slices.json` (text 0.5): every
+    /// reading of a role before §2.17 answers, through the reference's
+    /// resolution and its choice of the report, as the fixture says.
+    #[test]
+    fn every_slice_reads_as_the_fixture() {
+        use serde_json::{Value, json};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/profiles/desired/conformance/slices.json");
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        assert!(cases.len() >= 20, "{} cases", cases.len());
+        for case in cases {
+            let r = &case["reading"];
+            let iface_s = r["iface"].as_str().unwrap();
+            let iface: IfaceId = iface_s.parse().unwrap();
+            let own: Addr = r["target"].as_str().unwrap().parse().unwrap();
+            let req = &r["requirement"];
+            let strings = |v: &Value| -> Vec<String> {
+                v.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.as_str().unwrap().to_owned())
+                    .collect()
+            };
+            let entry = RequireEntry {
+                role: "task".into(),
+                interface: iface_s.into(),
+                declared_by: Some("worker.v1".into()),
+                bindings: strings(&req["bindings"]),
+                params: req["params"]
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_owned()))
+                    .collect(),
+                optional: req["optional"] == true,
+            };
+            let templates = (!req["resources"].is_null()).then(|| strings(&req["resources"]));
+            let named = (!r["author"]["named"].is_null())
+                .then(|| revision_of(iface_s, &r["author"]["named"]["resources"]));
+            let mut offline = ContractSet::new();
+            for h in r["author"]["held"].as_array().unwrap() {
+                offline.insert(Revision::from_contract(
+                    revision_of(iface_s, &h["resources"]),
+                    crate::report::ContractSource::File,
+                ));
+            }
+            let none = Contracts::new();
+            let author: Option<Addr> = entry.bindings.first().and_then(|b| b.parse().ok());
+            let held = match &named {
+                Some(c) => Some((c, SliceFrom::AuthorContract)),
+                None => author_contract(
+                    None,
+                    author.as_ref(),
+                    &iface,
+                    templates.as_deref(),
+                    &none,
+                    &offline,
+                ),
+            };
+            let res = resolve_role(&own, &entry, templates.as_deref(), held)
+                .unwrap_or_else(|| panic!("{}: not this profile's", case["note"]));
+            let replies: Vec<ReportReply> = r["replies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| reply(x["key"].as_str().unwrap(), x["text"].as_str().unwrap()))
+                .collect();
+            let report = if res.slice.is_empty() {
+                json!({"found": "no_slice"})
+            } else {
+                match report_of(&replies, &res.slice) {
+                    ReportFound::One(x) => json!({
+                        "found": "one",
+                        "claims": x.read.as_ref().unwrap().key,
+                    }),
+                    ReportFound::Two => json!({"found": "unreadable", "why": "two_differ"}),
+                    ReportFound::Unreadable(_) => {
+                        json!({"found": "unreadable", "why": "unreadable_reply"})
+                    }
+                    ReportFound::None => json!({"found": "none"}),
+                }
+            };
+            let got = json!({
+                "slice": res.slice,
+                "from": res.slice_from.map(SliceFrom::as_str),
+                "binding": res.binding_problems.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
+                "declaration": res.declaration_invalid.iter().map(|i| i.as_str()).collect::<Vec<_>>(),
+                "report": report,
+            });
+            assert_eq!(got, case["expect"], "{}", case["note"]);
+        }
+    }
+
     fn st(time: u64, id: &str) -> Stamp {
         Stamp::parse(time, id).unwrap()
     }

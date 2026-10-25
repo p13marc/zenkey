@@ -1,0 +1,1233 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "the revision the author's descriptor names: its declaration and the binding give the slice (§2.3)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "found": "none"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "the contract's kind token wins: a report keyed under @state of a state resource is none (0.5, F-213)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/@state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "offline_contract",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "no descriptor naming one: a revision of the interface held offline gives the slice (0.5, F-213)",
+      "reading": {
+        "author": {
+          "held": [
+            {
+              "resources": [
+                {
+                  "annotations": {
+                    "desired.target_param": [
+                      "system",
+                      "service"
+                    ]
+                  },
+                  "kind": "state",
+                  "params": {
+                    "service": "string",
+                    "system": "string"
+                  },
+                  "template": "tasks/{system}/{service}"
+                }
+              ]
+            }
+          ],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "offline_contract",
+        "report": {
+          "found": "none"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "a held revision's slice is the slice: a report under the other kind token is none (0.5, F-213)",
+      "reading": {
+        "author": {
+          "held": [
+            {
+              "resources": [
+                {
+                  "annotations": {
+                    "desired.target_param": [
+                      "system",
+                      "service"
+                    ]
+                  },
+                  "kind": "state",
+                  "params": {
+                    "service": "string",
+                    "system": "string"
+                  },
+                  "template": "tasks/{system}/{service}"
+                }
+              ]
+            }
+          ],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/@state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "offline_contract",
+        "report": {
+          "found": "none"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/@state/tasks/lab/worker"
+        ]
+      },
+      "note": "a held revision declaring the resource explicit: its @state slice, a report under state none (0.5, F-213)",
+      "reading": {
+        "author": {
+          "held": [
+            {
+              "resources": [
+                {
+                  "annotations": {
+                    "desired.target_param": [
+                      "system",
+                      "service"
+                    ]
+                  },
+                  "explicit": true,
+                  "kind": "state",
+                  "params": {
+                    "service": "string",
+                    "system": "string"
+                  },
+                  "template": "tasks/{system}/{service}"
+                }
+              ]
+            }
+          ],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "offline_contract",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "of the held revisions, one declaring a desired resource the requirement names (0.5, F-213)",
+      "reading": {
+        "author": {
+          "held": [
+            {
+              "resources": [
+                {
+                  "annotations": {},
+                  "kind": "state",
+                  "params": {},
+                  "template": "status"
+                }
+              ]
+            },
+            {
+              "resources": [
+                {
+                  "annotations": {
+                    "desired.target_param": [
+                      "system",
+                      "service"
+                    ]
+                  },
+                  "kind": "state",
+                  "params": {
+                    "service": "string",
+                    "system": "string"
+                  },
+                  "template": "tasks/{system}/{service}"
+                }
+              ]
+            }
+          ],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "requirement",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "zk2/lab/author/tasking.v1/@state/tasks/lab/worker"
+        ]
+      },
+      "note": "no revision in hand: the requirement's template under either kind token, the report's key choosing (0.4)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "requirement",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/@state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "zk2/lab/author/tasking.v1/@state/tasks/lab/worker"
+        ]
+      },
+      "note": "from the requirement, the report's key chooses the kind token (0.4)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/@state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "requirement",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/@state/plans/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/plans/lab/worker",
+          "zk2/lab/author/tasking.v1/@state/plans/lab/worker",
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "zk2/lab/author/tasking.v1/@state/tasks/lab/worker"
+        ]
+      },
+      "note": "two templates: four candidates, the one a readable report claims is the slice (0.5, F-210)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/@state/plans/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "plans/{system}/{service}",
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "requirement",
+        "report": {
+          "found": "none"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/plans/lab/worker",
+          "zk2/lab/author/tasking.v1/@state/plans/lab/worker",
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "zk2/lab/author/tasking.v1/@state/tasks/lab/worker"
+        ]
+      },
+      "note": "two templates, no report claiming a candidate: no_report (0.5, F-210)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/other/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "plans/{system}/{service}",
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "requirement",
+        "report": {
+          "found": "unreadable",
+          "why": "two_differ"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/plans/lab/worker",
+          "zk2/lab/author/tasking.v1/@state/plans/lab/worker",
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "zk2/lab/author/tasking.v1/@state/tasks/lab/worker"
+        ]
+      },
+      "note": "two templates, two reports claiming two candidates and differing: unreadable (0.5, F-210, §2.10)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/plans/lab/worker\", \"source\": \"baseline\"}"
+          },
+          {
+            "key": "zk2/lab/worker/worker.v1/state/applied/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "plans/{system}/{service}",
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "found": "unreadable",
+          "why": "two_differ"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "two readable reports of two report resources, claiming the slice and differing: unreadable (0.5, F-212)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          },
+          {
+            "key": "zk2/lab/worker/worker.v1/state/applied/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"call\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "two readable reports claiming the slice and equal: the report (0.5, F-212)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          },
+          {
+            "key": "zk2/lab/worker/worker.v1/state/applied/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "two instances' reports on one key reach a tool as one reply, the later (core §4.1): the report (0.5, F-212)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"call\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "found": "unreadable",
+          "why": "unreadable_reply"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "none readable claims the slice, one does not read: unreadable, it may be the slice's (0.4, §2.10)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "not json"
+          },
+          {
+            "key": "zk2/lab/worker/worker.v1/state/applied/task",
+            "text": "{\"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "found": "none"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "no reply: none read (§2.17 step 3)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "claims": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
+          "found": "one"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "a malformed report claiming the slice is the report, which §2.17 then reads report_invalid",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"desired\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [],
+        "from": "author_contract",
+        "report": {
+          "found": "none"
+        },
+        "slice": [
+          "zk2/lab/author/tasking.v1/state/tasks/lab/worker"
+        ]
+      },
+      "note": "a keyless report claims no slice: none (§2.12)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [
+          "not_one_author"
+        ],
+        "declaration": [],
+        "from": null,
+        "report": {
+          "found": "no_slice"
+        },
+        "slice": []
+      },
+      "note": "a binding naming two authors gives no slice (0.4, §2.3)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author",
+            "lab/other"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [
+          "not_self"
+        ],
+        "declaration": [],
+        "from": null,
+        "report": {
+          "found": "no_slice"
+        },
+        "slice": []
+      },
+      "note": "a target parameter bound to a literal gives no slice (0.4, §2.3)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": [
+                    "system",
+                    "service"
+                  ]
+                },
+                "kind": "state",
+                "params": {
+                  "service": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{service}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "worker",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [],
+        "declaration": [
+          "param_not_target"
+        ],
+        "from": null,
+        "report": {
+          "found": "no_slice"
+        },
+        "slice": []
+      },
+      "note": "an invalid declaration gives no slice (0.4, §2.2)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": {
+            "resources": [
+              {
+                "annotations": {
+                  "desired.target_param": "system"
+                },
+                "kind": "state",
+                "params": {
+                  "extra": "string",
+                  "system": "string"
+                },
+                "template": "tasks/{system}/{extra}"
+              }
+            ]
+          }
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "lab/author"
+          ],
+          "optional": true,
+          "params": {
+            "extra": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{extra}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    },
+    {
+      "expect": {
+        "binding": [
+          "not_one_author"
+        ],
+        "declaration": [],
+        "from": null,
+        "report": {
+          "found": "no_slice"
+        },
+        "slice": []
+      },
+      "note": "from the requirement, a wildcard binding gives no slice (0.4, §2.3)",
+      "reading": {
+        "author": {
+          "held": [],
+          "named": null
+        },
+        "iface": "tasking.v1",
+        "replies": [
+          {
+            "key": "zk2/lab/worker/worker.v1/state/desired/task",
+            "text": "{\"key\": \"zk2/lab/author/tasking.v1/state/tasks/lab/worker\", \"source\": \"baseline\"}"
+          }
+        ],
+        "requirement": {
+          "bindings": [
+            "*/author"
+          ],
+          "optional": true,
+          "params": {
+            "service": "self.service",
+            "system": "self.system"
+          },
+          "resources": [
+            "tasks/{system}/{service}"
+          ]
+        },
+        "target": "lab/worker"
+      }
+    }
+  ],
+  "description": "desired.v1 §2.10, §2.17 (0.5): a tool's reading of one target's role before §2.17 answers -> the slice and which reply is the report. reading.target is the target's address; reading.iface the required interface, the author's; reading.requirement the target's requirement as its descriptor lists it and its contract declares it: resources, the templates it names (null for every resource), bindings, params and optional, as bindings.json gives them. reading.author is the author's contract as the tool holds it: named, the revision the author's descriptor names, in hand (its resources, each as declarations.json gives one, explicit true for @state), or null; held, the revisions of the interface held offline (core §8.5), each its resources. Its slice is §2.3's: with named, from named's first desired resource the requirement names, by its declaration (§2.2) and the binding (from author_contract); else from the first held revision that declares a desired resource the requirement names (offline_contract); else from the requirement alone (requirement): each template it names, in its order, each parameter bound as params say, under state then @state, every one a candidate. reading.replies are the replies of every report resource of the target to S4's GET: each its key and its payload's text, read as reports.json reads one. expect.slice is the candidates, in that order, one when from a contract, none when the binding or the declaration is invalid; expect.from the source, null with no slice; expect.binding and expect.declaration §2.3's problems and §2.2's reasons, in order, empty when none; expect.report: {found: one, claims}, the readable reply whose key is a candidate, claims that key (two such that are equal are one); {found: unreadable, why: two_differ}, two readable ones claiming candidates and differing (0.5, F-212); {found: unreadable, why: unreadable_reply}, none readable claiming one and a reply that does not read, which may be the slice's (0.4); {found: none}, none (no_report); {found: no_slice}, no slice to find one of. A report that reads with a §2.10 finding is found, and §2.17 step 3 then answers report_invalid."
+}
