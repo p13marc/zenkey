@@ -416,7 +416,8 @@ a session in no namespace watching `ns`, of `ns/zk2/*/*/@zk/settle`.
    has run out under the 300 ms interests timeout (0.42, F-227; 0.43,
    F-236: how many is the reader's own, two for one that makes a round
    trip at its start and another before its seed, one for one whose
-   start's round trip is its seed's). Then the stall ends. Then the watch session's link is cut, and healed.
+   start's round trip is its seed's). Then the stall ends. Then the
+   watch session's link is cut, and healed.
 7. As step 1 without the stall, the owner and the tool in `ns`, each case
    with a fresh token, subscribed to the steps' own instance tokens
    (`zk2/s10/*/@zk/instance/*`): a fresh watch session in `ns` declares a
