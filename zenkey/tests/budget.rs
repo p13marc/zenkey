@@ -593,8 +593,10 @@ async fn s1_a_reliable_blocking_path_loses_nothing_to_a_slow_reader() {
             lost > 0,
             "{what}: the stopped reader's router gave up on it"
         );
+        // Less a tick: the ticker's thread can take its last tick after the
+        // STOP is sent and before it takes effect (6,997 ms seen on CI).
         assert!(
-            run.worst_gap_ms >= stopped.as_millis() as u64,
+            run.worst_gap_ms >= (stopped - Ticker::PERIOD).as_millis() as u64,
             "{what}: its ticker saw the stop"
         );
     }
