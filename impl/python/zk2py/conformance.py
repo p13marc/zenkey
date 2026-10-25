@@ -998,7 +998,8 @@ def _desired_bindings(path: Path) -> list[Result]:
         if decl.declaration != ds.DECLARED:
             out.append((f"bindings #{i}: {c['note']}", False, f"the resource is not declared: {decl.expect()}"))
             continue
-        got = ds.bind(decl, r["template"], bool(r.get("explicit")), c["iface"], c["target"], c["requirement"])
+        got = ds.bind(decl, r["template"], bool(r.get("explicit")), c["iface"], c["target"], c["requirement"],
+                      also=c.get("also") or ())
         out.append(_check(f"bindings #{i}: {c['note']}", got.expect(), c["expect"]))
     return out
 
@@ -1053,7 +1054,7 @@ def _desired_slices(path: Path) -> list[Result]:
         taken = ds.take_slice(rd["target"], rd["iface"], rd["requirement"], author.get("named"),
                               author.get("held") or [])
         replies = [(x["key"], x["text"].encode("utf-8", "surrogatepass")) for x in rd.get("replies") or []]
-        found = ds.which_report(replies, taken.candidates)
+        found = ds.find_report(taken, replies)
         got = {"slice": list(taken.candidates), "from": taken.source, "binding": list(taken.binding),
                "declaration": list(taken.declaration), "report": found.expect()}
         out.append(_check(f"slices #{i}: {c['note']}", got, c["expect"]))
