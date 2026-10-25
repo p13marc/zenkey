@@ -4,6 +4,79 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-25: round 60's answers, and the review of the tools (#841, RD)
+
+zk2py round 60 (PR #863) read 0.3 cold and ran §12 against the reference
+tools in four pairings: 2959 of 2959 static checks, every live check,
+the two tools agreeing on every shape. It filed F-220 to F-223, all
+accepted on #841; the review of RC (PR #862) asked two more of the text's
+rules. Core stays 0.40 and `hostid.v1` 0.7.
+
+**Changed: round 60's answers.**
+- **The owner example's `--wait-go` starts at `go`** (scenarios'
+  conventions; F-220). It read standard input only once its service was
+  up, so `go` never arrived. It reads from its own start; a line before
+  `go` is refused. `[Sc: §3]`
+- **A probe's wildcards, and a call that would run** (§2.15; F-221). A
+  template-less operation's wildcard is its name followed by `$*`, which
+  reaches every operation whose name begins with it: `append$*` reaches
+  `appendall`. A wildcard that intersects the key of an operation whose
+  fan-out is allowed, in any revision of the interface the tool holds
+  that the address's descriptors name or that it holds offline, MUST NOT
+  be asked, since the call would run it (#862's review asked for every
+  revision: a minor can add such an operation). It is now a MUST of a
+  tool that probes, where 0.3 said only that an allowed operation is
+  never probed itself. What a probe can still reach, an operation of a
+  revision the tool does not hold, is said. `[Sc: §12]` (step 8, on
+  `ledger-appendall`, new in the conventions)
+- **A skipped case sends nothing** (F-222): a tool's, not the text's.
+  `zenctl check conform --skip` called an idempotent operation with every
+  case skipped; it now calls one only when `operation` is asked, probes a
+  fan-out only when `fanout-refused` is, and a standby only when
+  `redundancy-standby` is.
+- **"Before the token" within a round trip** (scenarios §1 and §3
+  Expected 1; F-223). A takeover whose step 3, the unmarked descriptor,
+  lands within the round trip of S's GET at the instance token is read
+  unmarked just before S hears the interface token, the answer and the
+  token riding two priorities, as F-202 found of a put. The exception now
+  reads: unless it took over before that GET was answered, its interface
+  token at S within a round trip of the answer. `profile_redundancy.rs`'s
+  §1 and §3 check exactly that. `[Sc: §1, §3]`
+
+**Changed: the review of the tools.**
+- **`gen`'s members of a governed interface** follow the election's own
+  watch (`Redundancy::subscribe`), never a poll of the role: each change
+  declares, while the interface serves, each member token the instance
+  does not hold, and a declaration that failed for another reason than
+  its standing is made again. A member held is never declared twice: the
+  runtime cycles a member declared again (core §8.1), a new epoch. The
+  runtime gains `Service::holds_member` to ask.
+- **zengui's reading on selection** waits for the selection to settle
+  (300 ms): a burst of selections asks one reading, the last's.
+
+**The fixtures.** Unchanged.
+
+**Decided here, where the record was silent.**
+- **The revisions a probe is guarded by** are the one under test, which
+  every descriptor at the address names (the reference's `check conform`
+  tests the one revision a service claims), and every revision of the
+  interface held offline: `--contracts` is where an operator puts a minor
+  the bus does not yet run.
+- **A probe that is not made is said**, each with its reason, in the
+  case's answer; a case whose only probes were not made is unobservable,
+  never a pass.
+- **`run_redundancy` seeds nothing**: its store comes seeded by its
+  caller (zenctl's `zk2::store`, zengui's window store), one path.
+- **The settle is 300 ms**, a selection's, from the selection; "read
+  again" asks at once.
+
+**Deliberately not changed.**
+- **The doctor takes no `--contracts`**, so over a test's vacancy whose
+  standbys serve no bundle, `redundancy-vacancy` is unobservable, where
+  `zenctl redundancy --contracts` answers. Real standbys serve their
+  bundle (§2.4); round 60 noted it, and it stays.
+- **Every fixture**, and §5's answers.
+
 ## 0.3 — 2026-10-25: what the tools showed, and round 58's answers (#841, RC)
 
 The reference tools are built (#841, RC): `zenkey-fleet`'s

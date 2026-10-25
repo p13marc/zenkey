@@ -1270,6 +1270,34 @@ pub async fn run(
     run_with(opts, say, none, until).await
 }
 
+/// Each line `open`'s reader gives, as commands, and a future that
+/// resolves once it ends: what `main` hands [`run_with`] for standard
+/// input. The reader runs on a thread of its own **from the call on**, so
+/// a line sent before the service is up reaches the run: `--wait-go`'s
+/// `go` among them. It used to start inside the future, which the run
+/// polls only once the service is up, so `--wait-go` heard nothing (text
+/// 0.4, F-220).
+pub fn command_lines<R, F>(open: F) -> (flume::Receiver<String>, impl Future<Output = ()> + Send)
+where
+    R: std::io::BufRead,
+    F: FnOnce() -> R + Send + 'static,
+{
+    let (lines, commands) = flume::unbounded::<String>();
+    let (ended, end) = flume::bounded::<()>(1);
+    std::thread::spawn(move || {
+        for line in open().lines() {
+            let Ok(line) = line else { break };
+            if lines.send(line).is_err() {
+                break;
+            }
+        }
+        let _ = ended.send(());
+    });
+    (commands, async move {
+        let _ = end.recv_async().await;
+    })
+}
+
 /// [`run`], answering each line of `commands` (the module doc's) through
 /// `say` while it runs. When `until` resolves, the lines already sent are
 /// answered first.
@@ -3039,18 +3067,7 @@ async fn main() {
         }
     };
     // Answer each line of standard input, and run until it closes.
-    let (lines, commands) = flume::unbounded::<String>();
-    let stdin_closed = async {
-        let _ = tokio::task::spawn_blocking(move || {
-            for line in std::io::stdin().lock().lines() {
-                let Ok(line) = line else { break };
-                if lines.send(line).is_err() {
-                    break;
-                }
-            }
-        })
-        .await;
-    };
+    let (commands, stdin_closed) = command_lines(|| std::io::stdin().lock());
     if let Err(e) = run_with(opts, |line| println!("{line}"), commands, stdin_closed).await {
         eprintln!("{e}");
         std::process::exit(1);

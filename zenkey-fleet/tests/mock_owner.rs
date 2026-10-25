@@ -498,7 +498,6 @@ async fn gen_of_a_governed_contract_elects_and_a_second_stands_by() {
             (came_up.await.expect("the mock came up"), run)
         }
     };
-    let offline = zenkey_fleet::model::catalog::ContractSet::new();
     let read = || async {
         zenkey_fleet::run_redundancy(
             &tool,
@@ -506,7 +505,6 @@ async fn gen_of_a_governed_contract_elects_and_a_second_stands_by() {
             Some(address.clone()),
             zenkey_fleet::RedundancySpec::new(T),
             &zenkey_fleet::bus::contracts::BundleStore::new(T),
-            &offline,
         )
         .await
     };
@@ -683,4 +681,81 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
     assert_eq!(third.role(&iface), Some(zenkey::redundancy::Role::Standby));
     third.close().await.expect("a standby closes");
     second.close().await.unwrap();
+}
+
+/// Review on #862 (#841, RD): `gen`'s members of a governed interface
+/// follow its standing. Under `external`, the mock's lock lost, it steps
+/// down and its member token goes (§2.12); the lock taken again, it takes
+/// over, and the member's token is held again, declared once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_declares_a_governed_member_again_after_a_step_down() {
+    use zenkey::redundancy::{Lock, ManualLock, RedundancyStartup};
+    let (_router, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let l = zenkey_model::contract::load_str(
+        "[interface]\nname = \"tank\"\nmajor = 1\nminor = 0\nuses = [\"redundancy.v1\"]\n\
+         [defaults]\nannotations = { \"redundancy.election\" = \"external\" }\n\
+         [resources.\"level/{tank}\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+         params = { tank = \"string\" }\ncardinality = 4\nepoch = \"tank\"\n",
+        std::path::Path::new("."),
+        None,
+    );
+    let tank = Arc::new(Revision::from_contract(
+        l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+        ContractSource::File,
+    ));
+    let lock = Arc::new(ManualLock::new(true));
+    let mut startup = RedundancyStartup::new(client(&ep).await)
+        .with_watch(client(&ep).await)
+        .with_lock(Arc::clone(&lock) as Arc<dyn Lock>);
+    startup.lock_period = Duration::from_millis(200);
+    let spec = GenSpec {
+        address: addr("lab/tank"),
+        revisions: vec![tank],
+        members: vec![MemberArg::parse("level/{tank}=t1").unwrap()],
+        bindings: BTreeMap::new(),
+        rate_hz: Some(5.0),
+        pattern: GenPattern::Steady,
+        duration: Duration::from_secs(15),
+        seed: 3,
+        tool: "mock_owner test".into(),
+        elect: Some(startup),
+    };
+    let plan = gen_plan(&spec).unwrap();
+    let owner = client(&ep).await;
+    let run = tokio::spawn(async move { run_gen(&owner, &spec, &plan, |_| {}).await });
+    // The member tokens of `t1` a complete read of the address shows.
+    let members = || async {
+        let r = zenkey::presence::liveliness_read(&tool, "zk2/lab/tank/@zk/**", T)
+            .await
+            .ok()?;
+        r.complete.then(|| {
+            r.keys
+                .iter()
+                .filter(|k| {
+                    matches!(
+                        zenkey_model::grammar::parse(k),
+                        Ok(zenkey_model::grammar::ZkKey::Member { member, .. }) if member == "t1"
+                    )
+                })
+                .count()
+        })
+    };
+    util::zk2::eventually("t1's member token while it serves", || async {
+        members().await == Some(1)
+    })
+    .await;
+    lock.set(false);
+    util::zk2::eventually("t1's member token gone at the step-down", || async {
+        members().await == Some(0)
+    })
+    .await;
+    lock.set(true);
+    util::zk2::eventually("t1's member token again after the takeover", || async {
+        members().await == Some(1)
+    })
+    .await;
+    let report = run.await.unwrap().expect("the mock's run");
+    assert_eq!(report.roles["tank.v1"], "serving", "{report:?}");
+    assert_eq!(report.failed, 0, "{report:?}");
 }

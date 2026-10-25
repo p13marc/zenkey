@@ -1967,3 +1967,73 @@ async fn the_owner_example_waits_for_go_and_says_its_polls() {
     );
     o.stop().await;
 }
+
+/// F-220 (#841, RD): `--wait-go` through the commands `main` reads, a pipe
+/// standing in for standard input. A line sent before `go` is refused,
+/// `go` starts the service, its instance token reaches the router, and the
+/// pipe's close stops it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_starts_at_go_on_its_standard_input() {
+    use std::io::Write;
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let ledger = governed("ledger.v1");
+    let args: Vec<String> = [
+        "--connect",
+        ep.as_str(),
+        "--wait-go",
+        "--instance-id",
+        "000000000000000a",
+        "lab/ledger",
+        ledger.as_str(),
+    ]
+    .iter()
+    .map(|a| (*a).to_owned())
+    .collect();
+    let opts = owner::Options::parse(&args).unwrap();
+    let (stdin, mut input) = std::io::pipe().unwrap();
+    let (commands, closed) = owner::command_lines(move || std::io::BufReader::new(stdin));
+    let (say, lines) = flume::unbounded::<String>();
+    let task = tokio::spawn(async move {
+        owner::run_with(
+            opts,
+            move |l| {
+                let _ = say.send(l);
+            },
+            commands,
+            closed,
+        )
+        .await
+        .map_err(|e| e.to_string())
+    });
+    assert_eq!(line(&lines).await, format!("connected {ep}"));
+    assert_eq!(line(&lines).await, "waiting go");
+    writeln!(input, "redundancy role").unwrap();
+    assert!(
+        line(&lines)
+            .await
+            .starts_with("refused redundancy role: this owner starts at go"),
+    );
+    writeln!(input, "go").unwrap();
+    assert_eq!(
+        line(&lines).await,
+        "ready zk2/lab/ledger/@zk/instance/000000000000000a"
+    );
+    eventually("its instance token at the router", || async {
+        presence::liveliness_read(&tool, "zk2/lab/ledger/@zk/instance/*", T)
+            .await
+            .is_ok_and(|r| {
+                r.keys
+                    .iter()
+                    .any(|k| k == "zk2/lab/ledger/@zk/instance/000000000000000a")
+            })
+    })
+    .await;
+    // Standard input's close ends the run.
+    drop(input);
+    tokio::time::timeout(SETTLE, task)
+        .await
+        .expect("the owner stops at its input's close")
+        .unwrap()
+        .unwrap();
+}

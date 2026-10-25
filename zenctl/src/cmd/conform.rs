@@ -68,6 +68,8 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         // past it, nor past the lease less a keep-alive. Not on the bus
         // either: zenoh's default unless `--wait-before-close` says.
         wait_before_close,
+        // F-222: a skipped case sends nothing.
+        skip: zenkey_fleet::bus::conform::Skipped::of(&skip),
     };
     // The service is read in the deployment's namespace, and the admin
     // space in none, as the doctor reads them (S1, §4.2, 0.17).

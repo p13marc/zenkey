@@ -56,8 +56,7 @@ pub async fn run(cli: RedundancyArgs) -> Result<()> {
     let session = ASKING.ask(dep.session().await);
     let store = zk2::store(&dep, &offline);
     let report =
-        zenkey_fleet::run_redundancy(&session, dep.namespace(), address, spec, &store, &offline)
-            .await;
+        zenkey_fleet::run_redundancy(&session, dep.namespace(), address, spec, &store).await;
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     let judgement = report.judgement();
     if let Judgement::Unobservable { reason } = &judgement {

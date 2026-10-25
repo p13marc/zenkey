@@ -2939,7 +2939,9 @@ pub(crate) struct CheckConformArgs {
           default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
     pub(crate) wait_before_close: f64,
     /// Do not ask this case (repeatable): every row of it reads `not_asked`,
-    /// which neither passes nor fails the run.
+    /// which neither passes nor fails the run, and nothing it alone would
+    /// send is sent: no call for `operation`, no fan-out probe for
+    /// `fanout-refused`, no standby probe for `redundancy-standby`.
     #[arg(long, value_name = "CASE", value_parser = case_id,
           add = ArgValueCandidates::new(completion::case_ids))]
     pub(crate) skip: Vec<zenkey_fleet::report::CaseId>,

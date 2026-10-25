@@ -76,10 +76,8 @@ pub fn redundancy(
                 &namespace,
                 Some(addr.clone()),
                 zenkey_fleet::RedundancySpec::new(timeout),
+                // The window's, seeded with the contracts held offline.
                 &store,
-                // The store is the window's, seeded with the contracts held
-                // offline already.
-                &zenkey_fleet::ContractSet::new(),
             )
             .await;
             (addr, namespace, Arc::new(report))

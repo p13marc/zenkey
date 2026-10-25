@@ -156,6 +156,9 @@ pub enum RedundancyState {
     /// Nothing selected yet, or the selection is not an address.
     #[default]
     NotAsked,
+    /// Selected, the reading owed once the selection settles (#862's
+    /// review): rapid selection queues no reading.
+    Due(Addr),
     /// The reading is in flight — two presence reads a grace apart.
     Asking(Addr),
     /// The engine's report, as `zenctl redundancy <address>` prints it.
@@ -167,7 +170,9 @@ impl RedundancyState {
     pub fn address(&self) -> Option<&Addr> {
         match self {
             RedundancyState::NotAsked => None,
-            RedundancyState::Asking(a) | RedundancyState::Read(a, _) => Some(a),
+            RedundancyState::Due(a) | RedundancyState::Asking(a) | RedundancyState::Read(a, _) => {
+                Some(a)
+            }
         }
     }
 
@@ -212,6 +217,9 @@ pub struct NodesState {
     pub health: HealthState,
     /// `redundancy.v1` for the address selected (#841, RC).
     pub redundancy: RedundancyState,
+    /// Counts the selections a reading was owed for: only the latest one's
+    /// settle asks (#862's review).
+    pub redundancy_due: u64,
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1). Off by default
     /// (D11): without it no reply's age can be judged, and health reads
@@ -351,6 +359,21 @@ impl NodesState {
     /// the staleness guard is the selection's, as v1's `node_info` was.
     pub fn health_read(&mut self, addr: Addr, report: Arc<HealthReport>) {
         self.health = HealthState::Read(addr, report);
+    }
+
+    /// `addr` was selected: its reading is owed once the selection
+    /// settles. Returns the selection's count, which the settle carries.
+    pub fn due_redundancy(&mut self, addr: Addr) -> u64 {
+        self.redundancy_due += 1;
+        self.redundancy = RedundancyState::Due(addr);
+        self.redundancy_due
+    }
+
+    /// Whether the settle of selection `due` of `addr` asks the reading:
+    /// only the latest selection's, while its reading is still owed.
+    pub fn settled(&self, addr: &Addr, due: u64) -> bool {
+        due == self.redundancy_due
+            && matches!(&self.redundancy, RedundancyState::Due(a) if a == addr)
     }
 
     /// A `redundancy.v1` reading was asked for `addr` (#841, RC).
@@ -544,6 +567,20 @@ mod tests {
         assert!(facts.lists_hostid());
         nodes.describe(None);
         assert!(nodes.instances(&addr("robot1/nav")).is_none());
+    }
+
+    /// #862's review: a reading is owed per selection, and only the
+    /// latest selection's settle asks it.
+    #[test]
+    fn only_the_latest_selection_settles_into_a_reading() {
+        let mut nodes = NodesState::default();
+        let first = nodes.due_redundancy(addr("robot1/nav"));
+        let second = nodes.due_redundancy(addr("host-a/tc"));
+        assert!(!nodes.settled(&addr("robot1/nav"), first), "superseded");
+        assert!(!nodes.settled(&addr("host-a/tc"), first), "an older count");
+        assert!(nodes.settled(&addr("host-a/tc"), second));
+        nodes.asking_redundancy(addr("host-a/tc"));
+        assert!(!nodes.settled(&addr("host-a/tc"), second), "already asked");
     }
 
     /// A forget drops the reading and keeps the operator's word.

@@ -42,6 +42,15 @@ pub(crate) fn update(v: &mut Verdicts, msg: NodesMsg, cx: Ctx) -> Task<Message> 
             Some(addr) => redundancy(v, cx.dep, addr),
             None => Task::none(),
         },
+        NodesMsg::RedundancySettled(addr, due) => {
+            // Still the selection, and the latest one's settle (#862's
+            // review); the landing keeps its own guard.
+            if cx.sub.follow.current.address() == Some(&addr) && v.nodes.settled(&addr, due) {
+                redundancy(v, cx.dep, addr)
+            } else {
+                Task::none()
+            }
+        }
         NodesMsg::ClocksSynced(synced) => {
             v.nodes.clocks_synced = synced;
             // The word changes what a reading can judge: the address in
@@ -70,9 +79,32 @@ fn ask(v: &mut Verdicts, cx: Ctx) -> Task<Message> {
     health(v, cx.dep, addr)
 }
 
+/// How long a selection settles before its `redundancy.v1` reading is
+/// asked: a burst of selections asks one, the last's (#862's review).
+pub(crate) const REDUNDANCY_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// `addr` selected (the subject handler's call): its `redundancy.v1`
+/// reading owed, asked [`REDUNDANCY_SETTLE`] later if the selection is
+/// still it. Nothing is owed without a session in the namespace to ask
+/// through.
+pub(crate) fn redundancy_soon(
+    v: &mut Verdicts,
+    dep: &crate::state::Deployment,
+    addr: zenkey_model::grammar::Addr,
+) -> Task<Message> {
+    if dep.session.is_none() {
+        return Task::none();
+    }
+    let due = v.nodes.due_redundancy(addr.clone());
+    Task::perform(tokio::time::sleep(REDUNDANCY_SETTLE), move |()| {
+        Message::Pane(crate::message::PaneMsg::Nodes(NodesMsg::RedundancySettled(
+            addr, due,
+        )))
+    })
+}
+
 /// One `redundancy.v1` reading of `addr` on the session in the namespace,
-/// marked as asked — the subject handler's call too, on selection (#841,
-/// RC).
+/// marked as asked — the settle's call, and "read again"'s (#841, RC).
 pub(crate) fn redundancy(
     v: &mut Verdicts,
     dep: &crate::state::Deployment,

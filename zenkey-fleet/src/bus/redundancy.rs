@@ -31,7 +31,7 @@ use zenoh::Session;
 
 use crate::bus::contracts::BundleStore;
 use crate::bus::presence::Scope;
-use crate::model::catalog::{Catalog, ContractSet, Observed};
+use crate::model::catalog::{Catalog, Observed};
 use crate::model::redundancy::Contracts;
 use crate::report::RedundancyReport;
 
@@ -82,16 +82,17 @@ pub struct RedundancyObservation {
     pub asked: Vec<String>,
 }
 
-/// One reading (the module doc), judged.
+/// One reading (the module doc), judged. `store` holds the revisions the
+/// caller has offline already, seeded once by it (#862's review: zenctl's
+/// `zk2::store`, zengui's window store), so the reading asks the bus only
+/// for the others.
 pub async fn run_redundancy(
     session: &Session,
     namespace: &str,
     target: Option<Addr>,
     spec: RedundancySpec,
     store: &BundleStore,
-    offline: &ContractSet,
 ) -> RedundancyReport {
-    store.seed(offline);
     let obs = observe(session, target.as_ref(), &spec, store).await;
     crate::judge::redundancy::judge(namespace, target.as_ref(), &spec, &obs)
 }

@@ -304,8 +304,14 @@ enum Rec {
     Token { at: Instant, key: ZkKey, put: bool },
     /// What a GET of an instance's descriptor, made the moment S heard one
     /// of its tokens declared, answered of the interface: marked standby,
-    /// unmarked, or nothing (F-202).
-    AtToken { key: ZkKey, standby: Option<bool> },
+    /// unmarked, or nothing (F-202); when it was asked and when answered
+    /// (text 0.4, F-223).
+    AtToken {
+        key: ZkKey,
+        standby: Option<bool>,
+        asked: Instant,
+        answered: Instant,
+    },
     /// A descriptor put: the interface marked or not.
     Descriptor {
         instance: InstanceId,
@@ -380,12 +386,15 @@ async fn spy(ep: &str, address: &str, iface: &IfaceId) -> Spy {
                     addr_c.clone(),
                 );
                 rt.spawn(async move {
+                    let asked = Instant::now();
                     let found = presence::descriptor(&getter, &addr, &instance, T)
                         .await
                         .unwrap_or(Found::Nothing);
                     w.lock().unwrap().push(Rec::AtToken {
                         key,
                         standby: mark_of(&found, &iface),
+                        asked,
+                        answered: Instant::now(),
                     });
                 });
             })
@@ -508,7 +517,7 @@ impl Spy {
     fn at_tokens(&self, iface: &IfaceId, instance: &InstanceId) -> (Option<bool>, Option<bool>) {
         let (mut at_instance, mut at_alive) = (None, None);
         for r in self.snapshot() {
-            if let Rec::AtToken { key, standby } = r {
+            if let Rec::AtToken { key, standby, .. } = r {
                 match key {
                     ZkKey::Instance { instance: x, .. } if x == *instance => {
                         at_instance = at_instance.or(Some(standby));
@@ -527,19 +536,38 @@ impl Spy {
         (at_instance.flatten(), at_alive.flatten())
     }
 
-    /// Whether `instance`'s token of `iface` reached S before the GET at
-    /// its instance token answered: then that GET may read it unmarked
-    /// (F-202).
+    /// Whether `instance` took over before the GET at its instance token
+    /// was answered (text 0.4, F-223): its token of `iface` at S before
+    /// that answer, or within a round trip of it, since the answer and the
+    /// token ride two priorities (F-202). Then that GET may read it
+    /// unmarked: the takeover's step 3 put the descriptor unmarked within
+    /// the GET's round trip.
     fn token_beat_the_get(&self, iface: &IfaceId, instance: &InstanceId) -> bool {
         let log = self.snapshot();
-        let alive = log.iter().position(|r| {
-            matches!(r, Rec::Token { key: ZkKey::Alive { iface: i, instance: x, .. }, put: true, .. }
-                if i == iface && x == instance)
+        let alive = log.iter().find_map(|r| match r {
+            Rec::Token {
+                at,
+                key:
+                    ZkKey::Alive {
+                        iface: i,
+                        instance: x,
+                        ..
+                    },
+                put: true,
+            } if i == iface && x == instance => Some(*at),
+            _ => None,
         });
-        let answered = log.iter().position(|r| {
-            matches!(r, Rec::AtToken { key: ZkKey::Instance { instance: x, .. }, .. } if x == instance)
+        let get = log.iter().find_map(|r| match r {
+            Rec::AtToken {
+                key: ZkKey::Instance { instance: x, .. },
+                asked,
+                answered,
+                ..
+            } if x == instance => Some((*asked, *answered)),
+            _ => None,
         });
-        matches!((alive, answered), (Some(a), Some(g)) if a < g)
+        matches!((alive, get), (Some(a), Some((asked, answered)))
+            if a <= answered + answered.saturating_duration_since(asked))
     }
 
     /// Every descriptor S received of `instance`: its mark of the interface.
@@ -671,8 +699,9 @@ async fn s1_run(silent: bool) {
     })
     .await;
     let (at_instance, at_alive) = s.at_tokens(&ledger(), &a.id);
-    // F-202: marked at its instance token, unless its interface token beat
-    // that GET; unmarked at its interface token.
+    // F-202: marked at its instance token, unless A took over before that
+    // GET was answered, its interface token at S within a round trip of the
+    // answer (text 0.4, F-223); unmarked at its interface token.
     assert!(
         at_instance == Some(true) || s.token_beat_the_get(&ledger(), &a.id),
         "A's descriptor marked at its instance token: {at_instance:?}"
@@ -924,7 +953,9 @@ async fn s3_a_simultaneous_start() {
             "run {run}: the standby is marked"
         );
         // Each claim before its token: its descriptor, marked, at its
-        // instance token, unless its interface token beat that GET (F-202).
+        // instance token, unless it took over before that GET was answered,
+        // its interface token at S within a round trip of the answer
+        // (F-202; text 0.4, F-223).
         for c in [&a, &b] {
             eventually("S's GET at the instance token answered", || async {
                 s.at_tokens(&ledger(), &c.id).0.is_some()

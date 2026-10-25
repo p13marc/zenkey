@@ -3892,6 +3892,7 @@ mod tests {
                 clocks_synced: false,
                 lease: Duration::from_secs(10),
                 wait_before_close: Duration::from_secs(5),
+                skip: crate::bus::conform::Skipped::default(),
             },
             asked_fp: None,
             presence: Ok(presence(Some(OWNER))),
