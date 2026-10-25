@@ -1905,8 +1905,18 @@ async fn s11_the_tokenless_set_and_an_invalid_declaration() {
     let a = candidate(&ep, Opts::ledger("A", 0xa)).await.unwrap();
     a.until(Role::Serving).await;
     assert!(started.elapsed() < Duration::from_secs(3) + JITTER);
+    s.holders_are(&ledger(), &[&a.id]).await;
     a.close().await;
     s.holders_are(&ledger(), &[]).await;
+    eventually("S heard A's instance token withdrawn", || async {
+        s.snapshot().iter().any(|r| {
+            matches!(r, Rec::Token { key: ZkKey::Instance { instance, .. }, put: false, .. }
+                if *instance == id(0xa))
+        })
+    })
+    .await;
+    // The GET S made at A's interface token has answered, or never will.
+    tokio::time::sleep(T + Duration::from_millis(200)).await;
     let quiet = s.snapshot().len();
 
     // 1. ledger.v1 in its tokenless set.
@@ -1943,4 +1953,71 @@ async fn s11_the_tokenless_set_and_an_invalid_declaration() {
         "nothing of lab/ledger: {:?}",
         &s.snapshot()[quiet..]
     );
+}
+
+// --- Beyond the sections: the runtime's poll, and a re-mint ------------------------
+
+/// §2.7's poll (0.2), where no watch session is held: B reads the address
+/// every 500 ms, sees A's token gone from a complete read, and takes over
+/// as §2 expects, a period later at most.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn the_poll_without_a_watch_session() {
+    let (_r1, ep) = router(None).await;
+    let a = candidate(&ep, Opts::ledger("A", 0xa)).await.unwrap();
+    a.until(Role::Serving).await;
+    let mut o = Opts::ledger("B", 0xb);
+    o.watch = false;
+    let b = candidate(&ep, o).await.unwrap();
+    eventually("B stands by on A", || async {
+        b.why() == Some(Why::Incumbent(a.id.clone()))
+    })
+    .await;
+    assert!(
+        presence::liveliness_gets(&b.sessions[1]) == presence::LivelinessGets::default(),
+        "no watch session in use"
+    );
+    let q = Instant::now();
+    a.close().await;
+    b.until(Role::Serving).await;
+    let took = q.elapsed();
+    assert!(
+        took < zenkey::redundancy::POLL + Duration::from_secs(2) + JITTER,
+        "within a poll period plus 2 s: {took:?}"
+    );
+    assert!(b.red.reads(&ledger()).polls >= 1);
+    b.close().await;
+}
+
+/// §2.9's re-mint (0.2, F-209): the incumbent re-mints make-before-break;
+/// its own new token is no appearance, so it never heals against itself,
+/// and its standby hears no vacancy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_re_mint_is_no_appearance() {
+    let (_r1, ep) = router(None).await;
+    let s = spy(&ep, LEDGER, &ledger()).await;
+    let mut a = candidate(&ep, Opts::ledger("A", 0xa)).await.unwrap();
+    a.until(Role::Serving).await;
+    let b = candidate(&ep, Opts::ledger("B", 0xb)).await.unwrap();
+    eventually("B stands by on A", || async {
+        b.why() == Some(Why::Incumbent(a.id.clone()))
+    })
+    .await;
+    let reads = a.red.reads(&ledger()).made;
+    let next = a.svc.new_epoch().await.unwrap();
+    s.holders_are(&ledger(), &[&next]).await;
+    tokio::time::sleep(2 * GRACE + Duration::from_secs(1)).await;
+    assert_eq!(a.role(), Role::Serving, "no step-down to itself");
+    assert_eq!(
+        a.red.reads(&ledger()).made,
+        reads,
+        "no heal read for its own token"
+    );
+    assert_eq!(b.role(), Role::Standby, "no vacancy");
+    assert!(s.alive_events(&ledger(), &b.id).is_empty());
+    assert_eq!(
+        call(&client(&ep).await, LEDGER, &ledger(), "append", false).await,
+        ["A"]
+    );
+    a.close().await;
+    b.close().await;
 }

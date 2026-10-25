@@ -404,7 +404,8 @@
 //!   silent link is seen that much later (§2.8).
 //! - `--lock-file <path>` is `external`'s lock, a `flock(LOCK_EX |
 //!   LOCK_NB)` taken when free, held until `redundancy lock lose` or the
-//!   process ends (§2.11). Without it, the lock is the commands':
+//!   process ends (§2.11); released, it is taken again only after
+//!   `redundancy lock hold`. Without it, the lock is the commands':
 //!   `redundancy lock hold|lose`, not held at the start.
 //!   `--refuse-without-lock` refuses to start without the lock, exit 1,
 //!   with nothing declared, rather than stand by.
@@ -2642,6 +2643,7 @@ async fn redundancy_command(line: &str, up: &mut Up, red: Option<&RedCtx>) -> St
             let held = match &ctx.file {
                 Some(f) => {
                     if hold {
+                        f.want();
                         f.hold().await
                     } else {
                         f.release();

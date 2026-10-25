@@ -165,10 +165,12 @@ impl Lock for ManualLock {
 /// A lock file, `flock(LOCK_EX | LOCK_NB)` (§2.11's reference, as
 /// zenoh-modem takes its device's): taken when free, held until
 /// [`FileLock::release`] or the process ends, when the kernel releases it.
+/// Released, it is not taken again until [`FileLock::want`].
 #[derive(Debug)]
 pub struct FileLock {
     path: std::path::PathBuf,
     file: Mutex<Option<std::fs::File>>,
+    wanted: std::sync::atomic::AtomicBool,
 }
 
 impl FileLock {
@@ -179,12 +181,20 @@ impl FileLock {
         Self {
             path: path.into(),
             file: Mutex::new(None),
+            wanted: std::sync::atomic::AtomicBool::new(true),
         }
     }
 
-    /// Releases it, if held.
+    /// Releases it, if held, and takes it no more until [`FileLock::want`].
     pub fn release(&self) {
+        self.wanted
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         self.file.lock().expect("not poisoned").take();
+    }
+
+    /// Takes it again when free, at the next [`Lock::hold`].
+    pub fn want(&self) {
+        self.wanted.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Whether this process holds it now.
@@ -198,6 +208,9 @@ impl FileLock {
         let mut f = self.file.lock().expect("not poisoned");
         if f.is_some() {
             return true;
+        }
+        if !self.wanted.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
         }
         let Ok(file) = std::fs::OpenOptions::new()
             .create(true)
@@ -746,6 +759,17 @@ fn watch_event(addr: &Addr, iface: &IfaceId, s: &Sample) -> Option<Ev> {
     }
 }
 
+/// A task aborted when its handle drops: the poll, with its election.
+struct AbortOnDrop(Option<tokio::task::JoinHandle<()>>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        if let Some(t) = self.0.take() {
+            t.abort();
+        }
+    }
+}
+
 /// One governed interface's election (the module doc).
 pub(crate) struct Driver {
     iface: IfaceId,
@@ -803,17 +827,20 @@ impl Driver {
         // for the burst (§2.8).
         let mut after_withdrawal = false;
         let mut timer: Option<tokio::time::Instant> = None;
-        let mut reading: Option<BoxFuture<'static, Read>> = None;
-        // The holders the watch heard, or the last poll read.
+        let mut reading: Option<tokio::task::JoinHandle<Read>> = None;
+        // The holders the watch heard, or the poll found.
         let mut heard: BTreeSet<InstanceId> = BTreeSet::new();
-        let mut polled: Option<BTreeSet<InstanceId>> = None;
         let mut lock_held: Option<bool> = None;
         let external = self.election == Election::External && st.lock.is_some();
         let mut lock_tick = tokio::time::interval(st.lock_period);
         lock_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let polling = st.watch.is_none();
-        let mut poll_tick = tokio::time::interval(st.poll);
-        poll_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Without a watch session, the poll (the module doc), on a task of
+        // its own that hands the loop what it finds.
+        let poller = st
+            .watch
+            .is_none()
+            .then(|| tokio::spawn(Arc::clone(&self).poll(stop.clone())));
+        let _poller = AbortOnDrop(poller);
         loop {
             if *stop.borrow() {
                 return;
@@ -859,7 +886,10 @@ impl Driver {
                     } else {
                         Duration::ZERO
                     };
-                    reading = Some(Box::pin(
+                    if let Some(r) = reading.take() {
+                        r.abort();
+                    }
+                    reading = Some(tokio::spawn(
                         Arc::clone(&self).read_after(delay, heal_hold.clone()),
                     ));
                 }
@@ -880,7 +910,7 @@ impl Driver {
             };
             let read = async {
                 match reading.as_mut() {
-                    Some(r) => r.await,
+                    Some(r) => r.await.ok(),
                     None => std::future::pending().await,
                 }
             };
@@ -907,6 +937,8 @@ impl Driver {
                 }
                 r = read => {
                     reading = None;
+                    // A read task that panicked made no read.
+                    let r = r.unwrap_or_default();
                     let mut e = self.core.lock().await;
                     let standby = e.role() == Role::Standby;
                     step = e.observe(Event::Read(r));
@@ -939,9 +971,7 @@ impl Driver {
                     }
                     lock_tick.reset_immediately();
                 }
-                _ = poll_tick.tick(), if polling => {
-                    self.poll(&mut polled).await;
-                }
+
                 changed = stop.changed() => {
                     if changed.is_err() || *stop.borrow() {
                         return;
@@ -951,10 +981,20 @@ impl Driver {
         }
     }
 
-    /// The poll (the module doc): a read of the address, its holders
-    /// compared with the last poll's, each change handed to the loop as the
-    /// watch's would be.
-    async fn poll(&self, polled: &mut Option<BTreeSet<InstanceId>>) {
+    /// The poll (the module doc): a read of the address every period, its
+    /// holders compared with the last poll's, each change handed to the
+    /// loop as the watch's would be, until the election stops.
+    async fn poll(self: Arc<Self>, stop: tokio::sync::watch::Receiver<bool>) {
+        let mut polled = None;
+        let mut tick = tokio::time::interval(self.startup.poll);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        while !*stop.borrow() {
+            tick.tick().await;
+            self.poll_once(&mut polled).await;
+        }
+    }
+
+    async fn poll_once(&self, polled: &mut Option<BTreeSet<InstanceId>>) {
         let st = &self.startup;
         let Ok(read) = presence::liveliness_read(&st.reader, &self.selector, st.timeout).await
         else {
