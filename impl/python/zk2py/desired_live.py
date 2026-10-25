@@ -439,9 +439,10 @@ class Target:
         read before it, refuses nothing)."""
         system, service = self.address.split("/")
         bound = not self.unbound
-        if bound and len(self.documents()) >= 2:
+        documents = self.documents() if bound else []
+        if len(documents) >= 2:
             raise OwnerRefused("role \"task\": its binding is invalid (two_documents): it names "
-                               f"{', '.join(r['template'] for r in self.documents())}, one role per document type "
+                               f"{', '.join(r['template'] for r in documents)}, one role per document type "
                                "(desired.v1 §2.1, §2.3)")
         self.owner = Owner(system, service, [self.contract], connect=self.endpoint,
                            bindings={"task": [self.author]} if bound else {},

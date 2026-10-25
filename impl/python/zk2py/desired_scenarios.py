@@ -1452,6 +1452,35 @@ def section_remint(ctx: Ctx) -> None:
         bus.close()
 
 
+def _start_or_refuse(p: subprocess.Popen, g: Any, address: str, within_s: float) -> tuple[int | None, list[Any]]:
+    """Until the process exits or an instance token of ``address`` shows in
+    a presence read, at most ``within_s`` (§11: "no instance token within
+    5 s against a control"): its exit code (None while it runs) and the
+    instances read."""
+    from . import live
+
+    deadline = time.monotonic() + within_s
+    mine: list[Any] = []
+    while True:
+        code = p.poll()
+        mine = list(live.list_presence(g, f"zk2/{address}/@zk/**").instances)
+        if code is not None or mine or time.monotonic() >= deadline:
+            return code, mine
+        time.sleep(0.1)
+
+
+def _stop(p: subprocess.Popen) -> str:
+    """The process ended, its standard input closed and its pipes drained:
+    ``communicate`` within 10 s, else killed and waited for. Returns its
+    standard error."""
+    try:
+        _, err = p.communicate(input="", timeout=10)
+    except (subprocess.TimeoutExpired, ValueError):
+        p.kill()
+        _, err = p.communicate()
+    return err or ""
+
+
 def section_two_documents(ctx: Ctx) -> None:
     """zk2py's own (§2.1, 0.6, F-218): "A target MUST refuse such a role at its
     start, with nothing of it declared, as core §8.2 step 2 refuses an
@@ -1477,17 +1506,8 @@ def section_two_documents(ctx: Ctx) -> None:
             p = subprocess.Popen([*exe, "--connect", bus.ep1, "--desired-target", AUTHOR, TARGET, *map(str, files)],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                  env=env)
-            time.sleep(3.0)
-            code = p.poll()
-            pres = live.list_presence(bus.g1, f"zk2/{TARGET}/@zk/**")
-            mine = [i for i in pres.instances]
-            if code is None:
-                p.stdin.close()
-                try:
-                    p.wait(10)
-                except subprocess.TimeoutExpired:
-                    p.kill()
-            err = p.stderr.read() if p.stderr else ""
+            code, mine = _start_or_refuse(p, bus.g1, TARGET, 5.0)
+            err = _stop(p)
             if refused:
                 rp.check(sec, name, code not in (None, 0) and not mine and "two_documents" in err,
                          f"exit {code}; instances {len(mine)}; {err.strip()[-300:]!r}")

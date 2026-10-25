@@ -148,11 +148,22 @@ def main(argv: list[str] | None = None) -> int:
     from .desired_live import REPO
     from .owner import OwnerRefused
 
+    def refuse(why: str) -> None:
+        """A refusal at the start: said, nothing left open, exit 1."""
+        print(f"not started: {why}", file=sys.stderr, flush=True)
+        if author is not None:
+            author.close()
+        sys.stdout.flush()
+        os._exit(1)
+
+    author: Author | None = None
     given = {}
     for f in args.contracts:
-        c = load_contract(Path(f), spec_dir=REPO / "spec")
+        try:
+            c = load_contract(Path(f), spec_dir=REPO / "spec")
+        except Exception as e:  # noqa: BLE001 - a contract file that does not load refuses the start
+            refuse(f"{f}: the contract does not load: {type(e).__name__}: {e}")
         given[c.interface] = c
-    author: Author | None = None
     target: Target | None = None
     instance = None
     if args.desired_author:
@@ -160,19 +171,17 @@ def main(argv: list[str] | None = None) -> int:
                         tokenless=tuple(args.tokenless), tasking=given.get("tasking.v1"))
         instance = author.start()
     if args.desired_target or args.desired_unbound:
-        target = Target(args.address, args.connect, author=args.desired_target or "lab/author",
-                        unbound=args.desired_unbound, archive=args.desired_archive, watch=args.desired_watch,
-                        reread_ms=args.desired_reread_ms, hold=args.desired_hold, worker=given.get("worker.v1"),
-                        tasking=given.get("tasking.v1"))
         try:
+            target = Target(args.address, args.connect, author=args.desired_target or "lab/author",
+                            unbound=args.desired_unbound, archive=args.desired_archive, watch=args.desired_watch,
+                            reread_ms=args.desired_reread_ms, hold=args.desired_hold, worker=given.get("worker.v1"),
+                            tasking=given.get("tasking.v1"))
             instance = target.start()
         except OwnerRefused as e:
             # §2.1 (0.6): refused at its start, nothing declared
-            print(f"not started: {e}", file=sys.stderr, flush=True)
-            if author is not None:
-                author.close()
-            sys.stdout.flush()
-            os._exit(1)
+            refuse(str(e))
+        except Exception as e:  # noqa: BLE001 - a target that cannot be built refuses the start, said
+            refuse(f"the target: {type(e).__name__}: {e}")
     print(f"ready {instance}", flush=True)
     for raw in sys.stdin:
         line = raw.rstrip("\n")

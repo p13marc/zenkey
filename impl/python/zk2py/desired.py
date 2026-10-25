@@ -1331,10 +1331,16 @@ def _from_contract(found: list[dict[str, Any]], iface: str, target: str, require
     if decl.declaration != DECLARED and len(found) == 1:
         return SliceTaken((), None, (), decl.reasons)
     if decl.declaration != DECLARED:
-        # two documents named whatever the first's declaration says: the
-        # binding's absence first, then two_documents alone
+        # Two documents named, whatever the first's declaration says: §2.3's
+        # order reads the binding's absence first, then two_documents
+        # alone. This stand-in declaration is only for bind, which with a
+        # non-empty also returns before it reads any target parameter, so
+        # the stand-in's targets are never read (asserted below).
         decl = Declaration(DECLARED, (), tuple(Target(n, EITHER) for n in
                                                templates.parse_template(str(res["template"])).param_names))
+        b = bind(decl, str(res["template"]), explicit, iface, target, requirement, also=found[1:])
+        assert b.binding != BOUND, "two_documents never binds the stand-in's slice"
+        return SliceTaken((), None, b.reasons)
     b = bind(decl, str(res["template"]), explicit, iface, target, requirement, also=found[1:])
     if b.binding != BOUND:
         return SliceTaken((), None, b.reasons)
